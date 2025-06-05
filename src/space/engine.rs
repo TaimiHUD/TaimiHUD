@@ -85,7 +85,7 @@ pub struct Engine {
     // ECS stuff
     pub world: World,
 
-    test_pack: Pack,
+    pub test_pack: Pack,
     test_trail: usize,
     active_test_trail: ActiveTrail,
     render_list: Option<RenderList>,

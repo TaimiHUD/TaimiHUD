@@ -34,6 +34,9 @@ use {
 #[cfg(feature = "markers-edit")]
 use super::edit_marker_window::EditMarkerWindowState;
 
+#[cfg(feature = "space")]
+use super::PathingWindowState;
+
 pub enum RenderEvent {
     TimerData(Vec<Arc<TimerFile>>),
     #[cfg(feature = "markers")]
@@ -72,6 +75,8 @@ pub struct RenderState {
     pub edit_marker_window: EditMarkerWindowState,
     #[cfg(feature = "markers")]
     pub marker_window: MarkerWindowState,
+    #[cfg(feature = "space")]
+    pub pathing_window: PathingWindowState,
     timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
@@ -90,6 +95,8 @@ impl RenderState {
             edit_marker_window: EditMarkerWindowState::new(),
             #[cfg(feature = "markers")]
             marker_window: MarkerWindowState::new(),
+            #[cfg(feature = "space")]
+            pathing_window: PathingWindowState::new(),
             last_display_size: Default::default(),
             state_errors: Default::default(),
         }
@@ -182,6 +189,8 @@ impl RenderState {
         self.marker_window.draw(ui);
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
+        #[cfg(feature = "space")]
+        self.pathing_window.draw(ui);
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);

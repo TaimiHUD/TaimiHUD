@@ -468,7 +468,10 @@ impl MarkerAttributes {
     }
 }
 
-fn parse_bool(value: &str) -> Option<bool> {
+
+// TODO: move parse helpers into a separate file and make pub
+
+pub fn parse_bool(value: &str) -> Option<bool> {
     value
         .parse()
         .ok()

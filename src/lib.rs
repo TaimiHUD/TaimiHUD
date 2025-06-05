@@ -152,6 +152,7 @@ thread_local! {
 pub const WINDOW_PRIMARY: &'static str = "primary";
 pub const WINDOW_TIMERS: &'static str = "timers";
 pub const WINDOW_MARKERS: &'static str = "markers";
+pub const WINDOW_PATHING: &'static str = "pathing";
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
     let arrow = include_bytes!("../icons/markers/cmdrArrow.png");
@@ -233,6 +234,22 @@ fn load() {
     .revert_on_unload();
 
     // Handle window toggling with keybind and button
+    #[cfg(feature = "markers")]
+    let marker_window_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
+        }
+    });
+
+    #[cfg(feature = "markers")]
+    register_keybind_with_string(
+        fl!("marker-window-toggle"),
+        marker_window_keybind_handler,
+        "ALT+SHIFT+L",
+    )
+    .revert_on_unload();
+
+    // Handle window toggling with keybind and button
     let timer_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
             Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
@@ -246,9 +263,26 @@ fn load() {
     )
     .revert_on_unload();
 
+    // Handle window toggling with keybind and button
+    #[cfg(feature = "space")]
+    let pathing_window_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            Controller::try_send(ControllerEvent::WindowState(WINDOW_PATHING.into(), None));
+        }
+    });
+
+    #[cfg(feature = "space")]
+    register_keybind_with_string(
+        fl!("pathing-window-toggle"),
+        pathing_window_keybind_handler,
+        "ALT+SHIFT+N",
+    )
+    .revert_on_unload();
+
     let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
         Controller::try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
     });
+
     for i in 0..5 {
         register_keybind_with_string(
             fl!("timer-key-trigger", id = format!("{}", i)),
@@ -286,14 +320,18 @@ fn load() {
         Some(same_identifier), // maybe some day
         //None::<&str>,
         render!(|ui| {
-            if ui.button("Timers") {
+            if ui.button(fl!("timer-window")) {
                 Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
             }
+            #[cfg(feature = "space")]
+            if ui.button(fl!("pathing-window")) {
+                Controller::try_send(ControllerEvent::WindowState(WINDOW_PATHING.into(), None));
+            }
             #[cfg(feature = "markers")]
-            if ui.button("Markers") {
+            if ui.button(fl!("marker-window")) {
                 Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
             }
-            if ui.button("Primary") {
+            if ui.button(fl!("primary-window")) {
                 Controller::try_send(ControllerEvent::WindowState(WINDOW_PRIMARY.into(), None));
             }
         }),

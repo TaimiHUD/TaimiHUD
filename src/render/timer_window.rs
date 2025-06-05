@@ -33,7 +33,7 @@ impl TimerWindowState {
             self.progress_bar = settings.progress_bar.clone();
         };
         if open {
-            Window::new(fl!("timers"))
+            Window::new(fl!("timer-window"))
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {

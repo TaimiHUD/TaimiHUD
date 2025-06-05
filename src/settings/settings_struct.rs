@@ -132,6 +132,8 @@ pub struct Settings {
     #[serde(default)]
     pub timers_window_open: bool,
     #[serde(default)]
+    pub pathing_window_open: bool,
+    #[serde(default)]
     pub markers_window_open: bool,
     #[serde(default)]
     pub progress_bar: ProgressBarSettings,
@@ -210,6 +212,7 @@ impl Settings {
             crate::WINDOW_PRIMARY => &mut self.primary_window_open,
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
             crate::WINDOW_MARKERS => &mut self.markers_window_open,
+            crate::WINDOW_PATHING => &mut self.pathing_window_open,
             _ => unreachable!("unsupported window"),
         };
 
@@ -381,6 +384,7 @@ impl Settings {
             remotes: RemoteState::suggested_sources().collect(),
             progress_bar: Default::default(),
             timers_window_open: false,
+            pathing_window_open: false,
             markers_window_open: false,
             primary_window_open: false,
             enable_katrender: false,

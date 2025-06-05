@@ -1,17 +1,9 @@
 use {
-    super::resources::Texture,
-    anyhow::Context,
-    bitvec::vec::BitVec,
-    category::Category,
-    loader::PackLoaderContext,
-    std::{
-        collections::{hash_map::Entry, HashMap},
+    super::resources::Texture, anyhow::Context, bitvec::vec::BitVec, category::Category, indexmap::IndexSet, loader::PackLoaderContext, std::{
+        collections::{hash_map::Entry, HashMap, HashSet},
         io::{Cursor, Read as _},
         sync::Arc,
-    },
-    uuid::Uuid,
-    windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
-    xml::{common::Position, reader::XmlEvent},
+    }, uuid::Uuid, windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext}, xml::{common::Position, reader::XmlEvent}
 };
 
 pub mod attributes;
@@ -140,7 +132,7 @@ pub struct CategoryCollection {
     /// Map full_id -> Category
     pub all_categories: HashMap<String, Category>,
     /// List of root categories.
-    pub root_categories: Vec<String>,
+    pub root_categories: IndexSet<String>,
 }
 
 fn taco_safe_name(value: &str, is_full: bool) -> String {
@@ -279,7 +271,7 @@ fn inner_parse_pack_def(
                             Some(PartialItem::OverlayData) => {
                                 pack.categories
                                     .root_categories
-                                    .push(category.full_id.clone());
+                                    .insert(category.full_id.clone());
                             }
                             Some(PartialItem::MarkerCategory(parent)) => {
                                 let subs = Arc::make_mut(&mut parent.sub_categories);

@@ -1,7 +1,5 @@
 use {
-    super::{attributes::MarkerAttributes, taco_safe_name, Pack, PartialItem},
-    indexmap::IndexMap,
-    std::sync::Arc,
+    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, indexmap::IndexMap, nexus::imgui::{TreeNode, Ui}, std::{collections::HashMap, sync::Arc}
 };
 
 pub struct Category {
@@ -38,11 +36,11 @@ impl Category {
             } else if attr_name.eq_ignore_ascii_case("displayname") {
                 display_name = Some(attr.value);
             } else if attr_name.eq_ignore_ascii_case("isseparator") {
-                if let Ok(val) = attr.value.parse() {
+                if let Some(val) = parse_bool(&attr.value) {
                     is_separator = val;
                 }
             } else if attr_name.eq_ignore_ascii_case("ishidden") {
-                if let Ok(val) = attr.value.parse() {
+                if let Some(val) = parse_bool(&attr.value) {
                     is_hidden = val;
                 }
             } else if attr_name.eq_ignore_ascii_case("defaulttoggle") {
@@ -75,6 +73,38 @@ impl Category {
             sub_categories: Default::default(),
             marker_attributes,
         })
+    }
+
+    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>) {
+        if self.is_hidden {
+            return
+        }
+        let internal_closure = || {
+            for (_local, global) in self.sub_categories.iter() {
+                all_categories[global].draw(ui, all_categories);
+            }
+        };
+        let mut unbuilt = TreeNode::new(&self.display_name)
+            .frame_padding(true);
+        if self.is_separator {
+            unbuilt = unbuilt.leaf(true);
+        } else if self.sub_categories.is_empty() {
+            unbuilt = unbuilt.bullet(true);
+        } else {
+            unbuilt = unbuilt.framed(true);
+        }
+        let tree_token = unbuilt.push(ui);
+        ui.table_next_column();
+        if !self.is_separator {
+            let mut throw_value_away = self.default_toggle;
+            if ui.checkbox("", &mut throw_value_away) {
+            }
+        }
+        ui.table_next_column();
+        if let Some(token) = tree_token {
+            internal_closure();
+            token.pop();
+        }
     }
 
     pub fn merge(&mut self, mut new: Category) {

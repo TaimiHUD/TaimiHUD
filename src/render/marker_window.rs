@@ -31,7 +31,7 @@ impl MarkerWindowState {
             open = settings.markers_window_open;
         };
         if open {
-            Window::new(fl!("markers"))
+            Window::new(fl!("marker-window"))
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {

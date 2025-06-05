@@ -75,6 +75,8 @@ actions = Actions
 
 primary-window-toggle = Taimi Window Toggle
 timer-window-toggle = Timer Window Toggle
+marker-window-toggle = Marker Window Toggle
+pathing-window-toggle = Pathing Window Toggle
 primary-window-toggle-text = Show/hide taimi primary window
 timer-key-trigger = Timer Key Trigger { $id }
 
@@ -91,9 +93,10 @@ autoplace-warning = If you do not have RTAPI installed, we will not be able to d
 
 ## Windows
 
-primary-window = Taimi
-timer-window = Timers Window
-marker-window = Markers Window
+primary-window = TaimiHUD
+timer-window = Encounter Timers
+marker-window = Squad Markers
+pathing-window = Pathing
 
 ## Modals
 
@@ -148,7 +151,7 @@ textures = Textures: { $count }
 ## Markers tab
 
 reload-markers = Reload { markers }
-marker-tab = Squad { markers }
+marker-tab = { marker-window }
 marker = Marker
 markers = { marker }s
 markers-place = Place { markers }
@@ -199,13 +202,16 @@ trigger-explanation = A trigger for a marker set is a 15m radius sphere with its
 ## Timer tab
 
 reload-timers = Reload { timers }
-timer-tab = { timers }
+timer-tab = { timer-window }
 source-arg = Source: { $source }
 source-adhoc = Source: Ad-hoc
 select-a-timer = Please select a timer to configure!
 
 ## Timer window
 
-timer-window = { timers }
 no-phases-active = No phases currently active, no timers running.
 reset-timers = { reset } { timers }
+
+## Pathing
+
+pathing = Pathing
