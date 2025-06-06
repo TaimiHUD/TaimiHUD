@@ -97,6 +97,7 @@ impl Category {
         if display {
             let mut unbuilt = TreeNode::new(&self.display_name)
                 .frame_padding(true)
+                .tree_push_on_open(false)
                 .opened(
                     open_items.contains(&self.full_id),
                     Condition::Always,
@@ -112,13 +113,19 @@ impl Category {
             ui.table_next_column();
             if !self.is_separator {
                 if let Some(substate) = state.get_mut(&self.full_id) {
+                    //let pushy_token = ui.push_id(&self.id);
                     if ui.checkbox("", substate) {
+                        log::info!("substate: {}, id: {}", substate, &self.full_id);
                     }
+                    //pushy_token.pop();
                 }
             }
             let mut internal_closure = || {
                 if !open_items.contains(&self.full_id) {
                     open_items.insert(self.full_id.clone());
+                }
+                if !self.sub_categories.is_empty() {
+                    ui.indent();
                 }
                 for (_local, global) in self.sub_categories.iter() {
                     all_categories[global].draw(ui, all_categories, state, filter_state, open_items);

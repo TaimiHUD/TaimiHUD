@@ -75,11 +75,11 @@ impl PathingWindowState {
                                             self.filter_open = !self.filter_open;
                                         }
                                         ui.same_line();
-                                        if ui.button("Expand All") {
-                                            self.open_items.extend(all_categories.keys().cloned());
+                                        if ui.button(&fl!("expand-all")) {
+                                            self.open_items.extend(all_categories.values().map(|x| x.full_id.clone()));
                                         }
                                         ui.same_line();
-                                        if ui.button("Collapse All") {
+                                            if ui.button(&fl!("collapse-all")) {
                                             self.open_items.clear();
                                         }
                                         ui.dummy([4.0; 2]);
