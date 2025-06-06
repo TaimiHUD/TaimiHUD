@@ -121,10 +121,13 @@ impl Category {
                     open_items.insert(self.full_id.clone());
                 }
                 if !self.sub_categories.is_empty() {
-                    ui.indent();
+                    ui.indent(); //_by(1.0);
                 }
                 for (_local, global) in self.sub_categories.iter() {
                     all_categories[global].draw(ui, all_categories, state, filter_state, open_items);
+                }
+                if !self.sub_categories.is_empty() {
+                    ui.unindent(); //_by(1.0);
                 }
             };
             ui.table_next_column();
