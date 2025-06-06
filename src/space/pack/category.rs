@@ -1,5 +1,5 @@
 use {
-    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, indexmap::IndexMap, nexus::imgui::{TreeNode, Ui}, std::{collections::HashMap, sync::Arc}
+    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, indexmap::IndexMap, nexus::imgui::{TreeNode, Ui}, std::{collections::HashMap, sync::Arc}
 };
 
 pub struct Category {
@@ -82,37 +82,46 @@ impl Category {
         }
     }
 
-    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>) {
+    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>, filter_state: PathingFilterState) {
         let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
+            push_token.pop();
             return
         }
-        let mut unbuilt = TreeNode::new(&self.display_name)
-            .frame_padding(true);
-        if self.is_separator {
-            unbuilt = unbuilt.leaf(true);
-        } else if self.sub_categories.is_empty() {
-            unbuilt = unbuilt.bullet(true);
-        } else {
-            unbuilt = unbuilt.framed(true);
+        let mut display = true;
+        if let Some(substate) = state.get(&self.full_id) {
+            let enabled = *substate && filter_state.contains(PathingFilterState::Enabled);
+            let disabled = !*substate && filter_state.contains(PathingFilterState::Disabled);
+            display = enabled | disabled;
         }
-        let tree_token = unbuilt.push(ui);
-        ui.table_next_column();
-        if !self.is_separator {
-            if let Some(substate) = state.get_mut(&self.full_id) {
-                if ui.checkbox("", substate) {
+        if display {
+            let mut unbuilt = TreeNode::new(&self.display_name)
+                .frame_padding(true);
+            if self.is_separator {
+                unbuilt = unbuilt.leaf(true);
+            } else if self.sub_categories.is_empty() {
+                unbuilt = unbuilt.bullet(true);
+            } else {
+                unbuilt = unbuilt.framed(true);
+            }
+            let tree_token = unbuilt.push(ui);
+            ui.table_next_column();
+            if !self.is_separator {
+                if let Some(substate) = state.get_mut(&self.full_id) {
+                    if ui.checkbox("", substate) {
+                    }
                 }
             }
-        }
-        let mut internal_closure = || {
-            for (_local, global) in self.sub_categories.iter() {
-                all_categories[global].draw(ui, all_categories, state);
+            let mut internal_closure = || {
+                for (_local, global) in self.sub_categories.iter() {
+                    all_categories[global].draw(ui, all_categories, state, filter_state);
+                }
+            };
+            ui.table_next_column();
+            if let Some(token) = tree_token {
+                internal_closure();
+                token.pop();
             }
-        };
-        ui.table_next_column();
-        if let Some(token) = tree_token {
-            internal_closure();
-            token.pop();
         }
         push_token.pop();
     }

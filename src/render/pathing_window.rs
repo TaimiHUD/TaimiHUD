@@ -7,9 +7,8 @@ use {
 bitflags! {
     #[derive(PartialEq, Copy, Clone)]
     pub struct PathingFilterState: u8 {
-        const CurrentMap = 1;
-        const Enabled = 1 << 1;
-        const Disabled = 1 << 2;
+        const Enabled = 1;
+        const Disabled = 1 << 1;
     }
 }
 
@@ -24,7 +23,6 @@ impl PathingFilterState {
         match str {
             "Enabled" => Self::Enabled,
             "Disabled" => Self::Disabled,
-            "Current Map" => Self::CurrentMap,
             _ => unreachable!("no"),
         }
     }
@@ -66,7 +64,6 @@ impl PathingWindowState {
                                         let filter_options = vec![
                                             "Enabled",
                                             "Disabled",
-                                            "Current Map",
                                         ];
                                         let button_text = match self.filter_open {
                                             true => "Hide filter options",
@@ -118,7 +115,7 @@ impl PathingWindowState {
                                         );
                                         ui.table_next_column();
                                         for cat_name in root {
-                                            all_categories[cat_name].draw(ui, all_categories, state);
+                                            all_categories[cat_name].draw(ui, all_categories, state, self.filter_state);
                                         }
                                         if let Some(token) = table_token {
                                             token.end();
