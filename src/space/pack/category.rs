@@ -113,11 +113,7 @@ impl Category {
             ui.table_next_column();
             if !self.is_separator {
                 if let Some(substate) = state.get_mut(&self.full_id) {
-                    //let pushy_token = ui.push_id(&self.id);
-                    if ui.checkbox("", substate) {
-                        log::info!("substate: {}, id: {}", substate, &self.full_id);
-                    }
-                    //pushy_token.pop();
+                    ui.checkbox("", substate);
                 }
             }
             let mut internal_closure = || {
