@@ -1,5 +1,5 @@
 use {
-    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, indexmap::IndexMap, nexus::imgui::{TreeNode, Ui}, std::{collections::HashMap, sync::Arc}
+    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{collections::{HashMap, HashSet}, sync::Arc}
 };
 
 pub struct Category {
@@ -82,7 +82,7 @@ impl Category {
         }
     }
 
-    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>, filter_state: PathingFilterState) {
+    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>, filter_state: PathingFilterState, open_items: &mut HashSet<String>) {
         let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
             push_token.pop();
@@ -96,7 +96,11 @@ impl Category {
         }
         if display {
             let mut unbuilt = TreeNode::new(&self.display_name)
-                .frame_padding(true);
+                .frame_padding(true)
+                .opened(
+                    open_items.contains(&self.full_id),
+                    Condition::Always,
+                );
             if self.is_separator {
                 unbuilt = unbuilt.leaf(true);
             } else if self.sub_categories.is_empty() {
@@ -113,14 +117,21 @@ impl Category {
                 }
             }
             let mut internal_closure = || {
+                if !open_items.contains(&self.full_id) {
+                    open_items.insert(self.full_id.clone());
+                }
                 for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].draw(ui, all_categories, state, filter_state);
+                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items);
                 }
             };
             ui.table_next_column();
             if let Some(token) = tree_token {
                 internal_closure();
                 token.pop();
+            } else {
+                if open_items.contains(&self.full_id) {
+                    open_items.remove(&self.full_id);
+                }
             }
         }
         push_token.pop();

@@ -1,7 +1,7 @@
 use {
     crate::{
         engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS
-    }, bitflags::bitflags, nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window}, std::{collections::HashMap, sync::Arc}
+    }, bitflags::bitflags, nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window}, std::{collections::{HashMap, HashSet}, sync::Arc}
 };
 
 bitflags! {
@@ -33,6 +33,7 @@ pub struct PathingWindowState {
     pub filter_open: bool,
     pub filter_state: PathingFilterState,
     pub state: Option<HashMap<String, bool>>,
+    pub open_items: HashSet<String>,
 }
 
 impl PathingWindowState {
@@ -42,6 +43,7 @@ impl PathingWindowState {
             filter_open: false,
             filter_state: Default::default(),
             state: Default::default(),
+            open_items: Default::default(),
         }
     }
 
@@ -74,9 +76,11 @@ impl PathingWindowState {
                                         }
                                         ui.same_line();
                                         if ui.button("Expand All") {
+                                            self.open_items.extend(all_categories.keys().cloned());
                                         }
                                         ui.same_line();
                                         if ui.button("Collapse All") {
+                                            self.open_items.clear();
                                         }
                                         ui.dummy([4.0; 2]);
                                         if self.filter_open {
@@ -115,7 +119,7 @@ impl PathingWindowState {
                                         );
                                         ui.table_next_column();
                                         for cat_name in root {
-                                            all_categories[cat_name].draw(ui, all_categories, state, self.filter_state);
+                                            all_categories[cat_name].draw(ui, all_categories, state, self.filter_state, &mut self.open_items);
                                         }
                                         if let Some(token) = table_token {
                                             token.end();
