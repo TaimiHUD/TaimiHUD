@@ -75,15 +75,18 @@ impl Category {
         })
     }
 
-    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>) {
+    pub fn attain_state(&self, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>) {
+        let _ = state.entry(self.full_id.clone()).or_insert(self.default_toggle);
+        for (_local, global) in self.sub_categories.iter() {
+            all_categories[global].attain_state(all_categories, state);
+        }
+    }
+
+    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>) {
+        let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
             return
         }
-        let internal_closure = || {
-            for (_local, global) in self.sub_categories.iter() {
-                all_categories[global].draw(ui, all_categories);
-            }
-        };
         let mut unbuilt = TreeNode::new(&self.display_name)
             .frame_padding(true);
         if self.is_separator {
@@ -96,15 +99,22 @@ impl Category {
         let tree_token = unbuilt.push(ui);
         ui.table_next_column();
         if !self.is_separator {
-            let mut throw_value_away = self.default_toggle;
-            if ui.checkbox("", &mut throw_value_away) {
+            if let Some(substate) = state.get_mut(&self.full_id) {
+                if ui.checkbox("", substate) {
+                }
             }
         }
+        let mut internal_closure = || {
+            for (_local, global) in self.sub_categories.iter() {
+                all_categories[global].draw(ui, all_categories, state);
+            }
+        };
         ui.table_next_column();
         if let Some(token) = tree_token {
             internal_closure();
             token.pop();
         }
+        push_token.pop();
     }
 
     pub fn merge(&mut self, mut new: Category) {
