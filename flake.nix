@@ -21,57 +21,76 @@
     };
   };
 
-  outputs = { self, fenix, flake-utils, crane, nixpkgs, rust-overlay, ... }:
+  outputs = { self, fenix, flake-utils, crane, nixpkgs, rust-overlay, ... }@inputs:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = (import nixpkgs) {
-          inherit system;
-          crossSystem.config = "x86_64-w64-mingw32";
-        };
+        legacyPackages = self.legacyPackages.${system};
+        packages = self.packages.${system};
+        devShells = self.devShells.${system};
+        inherit (legacyPackages) pkgs callPackage fenixPackages;
 
+      in
+      {
         # TaimiHUD Package
-        packageToolchain = with fenix.packages.${system};
-          combine [
-            minimal.rustc
-            minimal.cargo
-            targets.x86_64-pc-windows-gnu.latest.rust-std
-          ];
+        packages = {
+          taimiHUD = callPackage ./package.nix {};
+          taimiHUD-debug = packages.taimiHUD.override {
+            buildType = "dev";
+          };
 
-        packageCraneLib = (crane.mkLib pkgs).overrideToolchain (p: packageToolchain);
+          packs = callPackage ./pathing/pack/taco.nix;
 
-        taimiHUD = pkgs.callPackage ./package.nix {
-          craneLib = packageCraneLib;
+          default = packages.taimiHUD;
         };
-
-        taimiHUDSpace = pkgs.callPackage ./package.nix {
-          craneLib = packageCraneLib;
-          features = [ "space" ];
-        };
-
-        packs = pkgs.callPackage ./pathing/pack/taco.nix;
 
         # TaimiHUD devShell
-        shellToolchain = with fenix.packages.${system};
-          combine [
-            complete
-            rust-analyzer
-            targets.x86_64-pc-windows-gnu.latest.rust-std
-          ];
-
-        shellCraneLib = (crane.mkLib pkgs).overrideToolchain (p: shellToolchain);
-
-        taimiShell = import ./shell.nix {
-          inherit fenix pkgs system;
+        devShells = import ./devShells.nix {
+          inherit inputs system;
+        } // {
+          default = devShells.taimiShell;
         };
-      in
-      rec {
-        defaultPackage = packages.x86_64-pc-windows-gnu;
-        inherit pkgs;
-        devShells.default = taimiShell;
 
-        packages = {
-          inherit taimiHUD taimiHUDSpace packs;
-          default = taimiHUD;
+        legacyPackages = {
+          pkgs = (import nixpkgs) {
+            inherit system;
+            crossSystem.config = "x86_64-w64-mingw32";
+          };
+          callPackage = pkgs.newScope {
+            inherit (legacyPackages)
+              craneLib
+              fenixPackages fenixToolchain fenixToolchainShell
+            ;
+            inherit (packages) taimiHUD packs;
+          };
+
+          fenixPackages = fenix.packages.${system};
+          fenixToolchain = with fenixPackages;
+            combine [
+              minimal.rustc
+              minimal.cargo
+              targets.x86_64-pc-windows-gnu.latest.rust-std
+            ];
+          fenixToolchainShell = with fenixPackages;
+            combine [
+              (complete.withComponents [
+                "cargo"
+                "rust-src"
+                "clippy"
+                "rustc"
+              ])
+              rust-analyzer
+              latest.rustfmt
+              targets.x86_64-pc-windows-gnu.latest.rust-std
+            ];
+          fenixToolchainShellBuild = with fenixPackages;
+            combine [
+              minimal.rustc
+              minimal.cargo
+            ];
+
+          craneLib = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchain);
+          craneLibBuild = (crane.mkLib pkgs.buildPackages).overrideToolchain (p: legacyPackages.fenixToolchainBuild);
+          craneLibShell = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchainShell);
         };
       });
 }

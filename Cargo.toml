@@ -15,12 +15,17 @@ build = "build.rs"
 
 [features]
 default = [
+  "built-info",
   "markers",
   "markers-edit",
   "meta-cache",
   "space",
   "extension-arcdps",
   "extension-nexus",
+]
+built-info = [
+  "built/chrono",
+  "built/git2",
 ]
 space = [
   "dep:itertools",
@@ -135,7 +140,7 @@ panic = "abort"
 lto = true
 
 [build-dependencies]
-built = { version = "0.7.7", features = [ "chrono", "git2" ] }
+built = { version = "0.7.7", default-features = false, optional = true }
 
 [dependencies]
 anyhow = "1.0.95"

@@ -33,11 +33,9 @@ in
       main = {
         tasks = {
           build-windows.inputs = singleton packages.taimiHUD;
-          build-windows-space.inputs = singleton packages.taimiHUD;
         };
         artifactPackages = {
           main = packages.taimiHUD;
-          #space = packages.taimiHUDSpace;
         };
       };
     };

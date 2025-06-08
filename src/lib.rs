@@ -118,7 +118,10 @@ pub fn localizer() -> DefaultLocalizer<'static> {
 }
 
 pub mod built_info {
+    #[cfg(feature = "built-info")]
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
+    #[cfg(not(feature = "built-info"))]
+    include!("./built.rs");
 
     pub const IS_TAGGED_VERSION: bool = check_is_release();
 
