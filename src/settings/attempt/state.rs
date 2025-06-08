@@ -2,7 +2,6 @@ use tokio::fs::{create_dir_all, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use chrono::{DateTime, Utc};
-use nexus::paths::get_addon_dir;
 use serde::{Deserialize, Serialize};
 
 use relative_path::RelativePathBuf;
@@ -10,6 +9,7 @@ use relative_path::RelativePathBuf;
 use crate::settings::{GitHubSource, Source, NeedsUpdate, RemoteSource};
 
 use crate::timer::TimerFile;
+use crate::ADDON_DIR;
 
 use super::sources::SourceKind;
 use super::RemoteState;
@@ -26,8 +26,8 @@ impl StateFile {
     }
 
     pub async fn create_stock() -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        create_dir_all(&addon_dir).await?;
+        let addon_dir = &*ADDON_DIR;
+        create_dir_all(addon_dir).await?;
         let state_path = addon_dir.join("state.toml");
         let stock_state = Self::generate_stock();
         let state = toml::to_string_pretty(&stock_state)?;
@@ -38,8 +38,7 @@ impl StateFile {
 
 
     pub async fn load() -> anyhow::Result<Self> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let state_path = addon_dir.join("state.toml");
+        let state_path = ADDON_DIR.join("state.toml");
         log::debug!("Attempting to load the state file at \"{state_path:?}\".");
         let file_data = read_to_string(&state_path).await?;
         let data: Self = toml::from_str(&file_data)?;
@@ -47,8 +46,8 @@ impl StateFile {
         Ok(data)
     }
     pub async fn save(&self) -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        create_dir_all(&addon_dir).await?;
+        let addon_dir = &*ADDON_DIR;
+        create_dir_all(addon_dir).await?;
         let state_path = addon_dir.join("state.toml");
         log::debug!("Saving state path to \"{state_path:?}\".");
         let state = toml::to_string_pretty(&self)?;

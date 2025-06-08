@@ -1,6 +1,8 @@
 use {
-    crate::settings::{GitHubSource, RemoteSource},
-    nexus::paths::get_addon_dir,
+    crate::{
+        settings::{GitHubSource, RemoteSource},
+        ADDON_DIR,
+    },
     serde::{Deserialize, Serialize},
     std::collections::HashMap,
     tokio::{
@@ -39,8 +41,8 @@ impl SourcesFile {
         Self(inner)
     }
     pub async fn create_stock() -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        create_dir_all(&addon_dir).await?;
+        let addon_dir = &*ADDON_DIR;
+        create_dir_all(addon_dir).await?;
         let sources_path = addon_dir.join("sources.toml");
         let stock_sources = Self::generate_stock();
         let sources = toml::to_string_pretty(&stock_sources)?;
@@ -56,8 +58,7 @@ impl SourcesFile {
     }
 
     pub async fn load() -> anyhow::Result<Self> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let sources_path = addon_dir.join("sources.toml");
+        let sources_path = ADDON_DIR.join("sources.toml");
         if !sources_path.exists() {
             log::info!("Sources file doesn't exist! Creating sources file at {sources_path:?}.");
             Self::create_stock().await?;

@@ -3,9 +3,10 @@ pub mod engine;
 pub mod object;
 pub mod pack;
 pub mod render_list;
-pub mod resources;
 #[cfg(feature = "goggles")]
 pub mod goggles;
+#[deprecated = "crate::resources"]
+pub(crate) use crate::resources;
 
 pub use engine::Engine;
 
