@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::RefCell, collections::BTreeMap, ffi::OsStr, num::NonZeroU64, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock}};
+use std::{borrow::Cow, cell::RefCell, collections::BTreeMap, ffi::OsStr, num::NonZeroU64, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock}, time::Duration};
 use arcdps::{exports as arc, extras::{Control, ExtrasAddonInfo, KeybindChange, UserInfoIter}, imgui, Language};
 use dpsapi::combat::{CombatArgs, CombatEvent};
 use arcloader_mumblelink::{gw2_mumble::{LinkedMem, MumbleLink, MumblePtr}, identity::MumbleIdentity};
@@ -8,7 +8,14 @@ use crate::{
 };
 
 pub const SIG: u32 = exports::SIG as u32;
-pub const GH_REPO_URL: &'static str = exports::gh_repo_url!();
+
+pub fn gh_repo_src() -> GitHubSource {
+    GitHubSource {
+        owner: "kittywitch".into(),
+        repository: "TaimiHUD".into(),
+        description: None,
+    }
+}
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 pub(crate) fn pre_init() {
@@ -164,10 +171,87 @@ pub(crate) fn cb_wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool)
     true
 }
 
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
+
 #[cfg(feature = "extension-arcdps-codegen")]
 pub(crate) fn cb_update_url() -> Option<String> {
-    log::debug!("TODO: update check");
-    None
+    use tokio::{runtime, time::timeout};
+
+    if !update_allowed() {
+        log::debug!("skipping update check");
+        return None
+    }
+
+    let src = gh_repo_src();
+    log::info!("checking for updates at {}...", src);
+
+    let runner = runtime::Builder::new_current_thread()
+        .enable_all()
+        .build();
+    let runner = match runner {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("Failed to start update check: {e}");
+            return None
+        },
+    };
+
+    let release = runner.block_on(async move {
+        let check = src.latest_release();
+        timeout(UPDATE_CHECK_TIMEOUT, check).await
+    });
+    let release = match release {
+        Ok(Ok(release)) => {
+            let built_ver = crate::built_info::GIT_HEAD_REF.and_then(|r| r.strip_prefix("refs/tags/v"));
+            match release.tag_name.strip_prefix("v") {
+                None => {
+                    log::info!("Latest version {} unrecognized", release.tag_name);
+                    return None
+                },
+                Some(remote_ver) if remote_ver == env!("CARGO_PKG_VERSION") || Some(remote_ver) == built_ver => {
+                    log::info!("{} is up-to-date!", release.name.as_ref().unwrap_or(&release.tag_name));
+                    return None
+                },
+                Some(..) => (),
+            }
+            log::info!("Latest version is {}", release.name.as_ref().unwrap_or(&release.tag_name));
+            let is_dev_build = match built_ver {
+                #[cfg(not(debug_assertions))]
+                Some(..) => false,
+                _ => true,
+            };
+            if release.prerelease {
+                log::info!("Skipping update to pre-release");
+                return None
+            } else if is_dev_build {
+                log::info!("Refusing to update development build");
+                return None
+            }
+            release
+        },
+        Ok(Err(e)) => {
+            log::warn!("Failed to check for update: {e}");
+            return None
+        },
+        Err(e) => {
+            log::warn!("{e} while checking for updates");
+            return None
+        },
+    };
+
+    let dll_asset = release.assets.into_iter()
+        .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
+
+    match dll_asset {
+        // asset.url can also work as long as Content-Type is set correctly...
+        Some(asset) => asset.browser_download_url.map(Into::into),
+        None => None,
+    }
+}
+
+pub fn update_allowed() -> bool {
+    // TODO: setting somewhere!
+    true
 }
 
 #[cfg(feature = "extension-arcdps-codegen")]

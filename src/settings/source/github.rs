@@ -9,28 +9,52 @@ use {
 };
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct GitHubReleaseAsset {
+    pub url: Url,
+    pub id: usize,
+    pub node_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    pub uploader: Value,
+    pub content_type: String,
+    pub state: String,
+    pub size: usize,
+    #[serde(default)]
+    pub digest: Option<String>,
+    pub download_count: usize,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    #[serde(default)]
+    pub browser_download_url: Option<Url>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct GitHubLatestRelease {
-    url: Url,
-    html_url: Url,
-    assets_url: Url,
-    upload_url: Url,
-    tarball_url: Option<Url>,
-    zipball_url: Option<Url>,
-    id: usize,
-    node_id: String,
-    tag_name: String,
-    target_commitish: String,
-    name: Option<String>,
-    body: Option<String>,
+    pub url: Url,
+    pub html_url: Url,
+    pub assets_url: Url,
+    pub upload_url: Url,
+    pub tarball_url: Option<Url>,
+    pub zipball_url: Option<Url>,
+    pub id: usize,
+    pub node_id: String,
+    pub tag_name: String,
+    pub target_commitish: String,
+    pub name: Option<String>,
+    pub body: Option<String>,
     #[serde(default)]
-    draft: bool,
+    pub draft: bool,
     #[serde(default)]
-    prerelease: bool,
-    created_at: DateTime<Utc>,
-    published_at: DateTime<Utc>,
+    pub prerelease: bool,
+    pub created_at: DateTime<Utc>,
+    pub published_at: DateTime<Utc>,
     // i don't really care about these ><
-    author: Value,
-    assets: Value,
+    pub author: Value,
+    #[serde(default)]
+    pub assets: Vec<GitHubReleaseAsset>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, Clone, PartialEq)]
