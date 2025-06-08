@@ -1,6 +1,5 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use magic_migrate::{MigrateError, TryMigrate};
-use nexus::paths::get_addon_dir;
 use serde::{Deserialize, Serialize};
 
 use relative_path::RelativePathBuf;
@@ -10,6 +9,7 @@ use tokio::io::AsyncWriteExt;
 use crate::settings::{GitHubSource, NeedsUpdate, RemoteSource};
 
 use crate::timer::TimerFile;
+use crate::ADDON_DIR;
 
 use super::sources::SourceKind;
 use super::state::{SourceState, StateFile};
@@ -26,8 +26,7 @@ pub struct ConfigV2 {
 
 impl ConfigV2 {
     pub async fn load() -> anyhow::Result<Self> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let config_path = addon_dir.join("config.toml");
+        let config_path = ADDON_DIR.join("config.toml");
         log::debug!("Attempting to load the config file at \"{config_path:?}\".");
         let mut file_data = read_to_string(config_path).await?;
         json_strip_comments::strip(&mut file_data)?;
@@ -35,7 +34,7 @@ impl ConfigV2 {
         Ok(data)
     }
     pub async fn save(&self) -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
+        let addon_dir = &*ADDON_DIR;
         create_dir_all(&addon_dir).await?;
         let config_path = addon_dir.join("config.toml");
         log::debug!("Saving config path to \"{config_path:?}\".");

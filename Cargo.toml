@@ -11,11 +11,12 @@ default = [
   "markers",
   "markers-edit",
   "space",
+  "extension-arcdps",
+  "extension-nexus",
 ]
 space = [
   "dep:itertools",
   "dep:tobj",
-  "dep:image",
   "dep:bevy_ecs",
   "dep:bevy_utils",
   "dep:arc-atomic",
@@ -28,7 +29,8 @@ space = [
   "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
-  "windows/Win32_System_Diagnostics_Debug"
+  "windows/Win32_System_Diagnostics_Debug",
+  "texture-loader",
 ]
 markers = [
   "dep:itertools",
@@ -37,13 +39,42 @@ markers = [
   "dep:windows-core",
   "windows/System",
   "windows/Foundation",
-  "windows/Foundation",
   "windows/Win32_UI_WindowsAndMessaging",
   "windows/Win32_UI_Input_KeyboardAndMouse",
   "windows/Win32_Graphics_Gdi",
 ]
 markers-edit = [
   "markers"
+]
+extension-arcdps = [
+  "extension-arcdps-codegen",
+  "arcdps/log",
+  "dep:arcloader-mumblelink",
+  "arcloader-mumblelink/identity",
+  "arcloader-mumblelink/gw2_mumble",
+  "arcloader-mumblelink/log",
+  "dep:arcffi",
+  "arcffi/windows-061",
+  "dep:dpsapi",
+  "dpsapi/arcdps-015",
+  "dpsapi/nexus",
+  "dpsapi/log",
+  "texture-loader",
+]
+extension-arcdps-codegen = [
+]
+extension-nexus = [
+  "nexus/log",
+  "nexus/log_filter",
+]
+image = [
+  "dep:image",
+]
+texture-loader = [
+  "image",
+  "windows/Win32_Graphics_Direct3D11",
+  "windows/Win32_Graphics_Dxgi",
+  "windows/Win32_Graphics_Dxgi_Common",
 ]
 
 [lib]
@@ -125,6 +156,10 @@ zip = "4.0.0"
 croner = "2.1.0"
 bitvec = "1.0.1"
 
+arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }
 windows-core = { optional = true, version = "0.61.0" }
@@ -132,8 +167,6 @@ windows-core = { optional = true, version = "0.61.0" }
 [dependencies.nexus]
 git = "https://github.com/zerthox/nexus-rs"
 features = [
-  "log",
-  "log_filter",
   "mumble",
   "arc",
   "rtapi",

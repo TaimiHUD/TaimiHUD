@@ -6,14 +6,11 @@ use {
         render::RenderState,
         settings::{RemoteSource, TimerSettings},
         timer::TimerFile,
-        CONTROLLER_SENDER, SETTINGS,
+        CONTROLLER_SENDER, SETTINGS, TIMERS_DIR,
     },
     glam::Vec2,
     indexmap::IndexMap,
-    nexus::{
-        imgui::{ChildWindow, Condition, Selectable, TreeNode, TreeNodeFlags, Ui, WindowFlags},
-        paths::get_addon_dir,
-    },
+    nexus::imgui::{ChildWindow, Condition, Selectable, TreeNode, TreeNodeFlags, Ui, WindowFlags},
     std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -54,14 +51,11 @@ impl TimerTabState {
     }
 
     fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let timers_dir = addon_dir.join("timers");
-        let timers_dir = timers_dir.to_string_lossy().to_string();
         RenderState::draw_open_button(
             state_errors,
             ui,
             fl!("open-button", kind = "ad-hoc folder"),
-            timers_dir,
+            TIMERS_DIR.to_string_lossy(),
         );
         ui.same_line();
         if ui.button(fl!("reload-timers")) {

@@ -4,20 +4,19 @@ use {
     crate::{
         controller::ControllerEvent,
         fl,
+        load_texture_bytes, load_texture_path,
         marker::format::MarkerType,
         marker_icon_data,
         render::{MarkerWindowState, PrimaryWindowState, TimerWindowState},
+        exports::runtime as rt,
         settings::ProgressBarSettings,
         timer::{PhaseState, TextAlert, TimerFile},
         CONTROLLER_SENDER, IMGUI_TEXTURES, RENDER_STATE,
     },
     glam::Vec2,
-    nexus::{
-        data_link::read_nexus_link,
-        imgui::{
-            internal::RawCast, Condition, Font, FontId, Image, Io, PopupModal, StyleColor, Ui,
-            Window, WindowFlags,
-        },
+    nexus::imgui::{
+        internal::RawCast, Condition, Font, Image, Io, PopupModal, StyleColor, Ui,
+        Window, WindowFlags,
     },
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
@@ -208,21 +207,17 @@ impl RenderState {
     }
     pub fn marker_icon(ui: &Ui, height: Option<f32>, marker: &MarkerType) {
         let gooey = IMGUI_TEXTURES.get().unwrap();
-        let gooey_lock = gooey.read().unwrap();
-        if let Some(icon) = gooey_lock.get(&marker.to_string()) {
+        if let Some(icon) = gooey.read().unwrap().get(&marker.to_string()) {
             let size = match height {
                 Some(height) => [height, height],
                 None => icon.size(),
             };
             Image::new(icon.id(), size).build(ui);
             ui.same_line();
-        } else if let Some(data) = marker_icon_data(marker.clone()) {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::LoadTextureIntegrated(
-                marker.to_string(),
-                data,
-            ));
-            drop(event_send);
+            return
+        }
+        if let Some(data) = marker_icon_data(marker.clone()) {
+            load_texture_bytes(marker.to_string(), data);
         }
     }
 
@@ -235,9 +230,8 @@ impl RenderState {
         if let Some(icon) = alert_icon {
             if let Some(path) = path {
                 let gooey = IMGUI_TEXTURES.get().unwrap();
-                let gooey_lock = gooey.read().unwrap();
                 let path_str = icon.as_str();
-                if let Some(icon) = gooey_lock.get(path_str) {
+                if let Some(icon) = gooey.read().unwrap().get(path_str) {
                     //if let Some(icon) = get_texture(icon.as_str()) {
                     let size = match height {
                         Some(height) => [height, height],
@@ -245,22 +239,17 @@ impl RenderState {
                     };
                     Image::new(icon.id(), size).build(ui);
                     ui.same_line();
-                } else {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::LoadTexture(
-                        icon.clone(),
-                        path.to_path_buf(),
-                    ));
-                    drop(event_send);
+                    return
                 }
+                load_texture_path(icon.clone(), path.clone());
             }
         };
     }
-    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display>(
+    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Debug>(
         state_errors: &mut HashMap<String, anyhow::Error>,
         ui: &Ui,
         text: S,
-        openable: String,
+        openable: O,
     ) {
         let openable_display = format!("{:?}", openable);
         let text_display = text.to_string();
@@ -274,7 +263,7 @@ impl RenderState {
             let sender = CONTROLLER_SENDER.get().unwrap();
             let event_send = sender.try_send(ControllerEvent::OpenOpenable(
                 entry_name.clone(),
-                openable.clone(),
+                openable.into(),
             ));
             drop(event_send);
         }
@@ -284,23 +273,15 @@ impl RenderState {
     }
 
     pub fn font_text(font: &str, ui: &Ui, text: &str) {
-        let mut font_handles = Vec::new();
-        let nexus_link = read_nexus_link().unwrap();
-        let imfont_pointer = match font {
+        let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
             "big" => Some(nexus_link.font_big),
             "ui" => Some(nexus_link.font_ui),
             "font" => Some(nexus_link.font),
             _ => None,
-        };
-        if let Some(ptr) = imfont_pointer {
-            let font = unsafe { Font::from_raw(&*ptr) };
-            let font_handle = ui.push_font(font.id());
-            font_handles.push(font_handle);
-        }
+        }).and_then(|font| unsafe { Self::font_from_raw(font) });
+        let font_handle = imfont_pointer.map(|font| ui.push_font(font.id()));
         ui.text_wrapped(text);
-        for font_handle in font_handles {
-            font_handle.pop();
-        }
+        drop(font_handle);
     }
     pub fn offset_font_text(
         font: &str,
@@ -310,19 +291,13 @@ impl RenderState {
         shadow: bool,
         text: &str,
     ) {
-        let mut font_handles = Vec::new();
-        let nexus_link = read_nexus_link().unwrap();
-        let imfont_pointer = match font {
+        let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
             "big" => Some(nexus_link.font_big),
             "ui" => Some(nexus_link.font_ui),
             "font" => Some(nexus_link.font),
             _ => None,
-        };
-        if let Some(ptr) = imfont_pointer {
-            let font = unsafe { Font::from_raw(&*ptr) };
-            let font_handle = ui.push_font(font.id());
-            font_handles.push(font_handle);
-        }
+        }).and_then(|font| unsafe { Self::font_from_raw(font) });
+        let font_handle = imfont_pointer.map(|font| ui.push_font(font.id()));
         let text_size = Vec2::from(ui.calc_text_size(text));
         let cursor_pos =
             Alignment::get_position(Alignment::CENTRE_MIDDLE, position, bounding_size, text_size);
@@ -339,29 +314,34 @@ impl RenderState {
         }
         ui.set_cursor_pos(cursor_pos.into());
         ui.text(text);
-        for font_handle in font_handles {
-            font_handle.pop();
+        drop(font_handle);
+    }
+
+    unsafe fn font_from_raw<'a>(font: *const nexus::imgui::sys::ImFont) -> Option<&'a Font> {
+        match font {
+            p if p.is_null() => None,
+            imfont_pointer => Some(Font::from_raw(&*imfont_pointer)),
         }
     }
 
     fn handle_alert(&mut self, ui: &Ui, io: &Io) {
         if let Some(alert) = &self.alert {
             let message = &alert.message;
-            let nexus_link = read_nexus_link().unwrap();
-            let imfont_pointer = nexus_link.font_big;
-            let imfont = unsafe { Font::from_raw(&*imfont_pointer) };
-            Self::render_alert(ui, io, message, imfont.id(), imfont.scale);
+            let imfont = rt::read_nexus_link().ok().and_then(|nexus_link| unsafe {
+                Self::font_from_raw(nexus_link.font_big)
+            });
+            Self::render_alert(ui, io, message, imfont);
         }
     }
     pub fn render_alert(
         ui: &Ui,
         io: &nexus::imgui::Io,
         text: &String,
-        font: FontId,
-        font_scale: f32,
+        font: Option<&Font>,
     ) {
         use WindowFlags;
-        let font_handle = ui.push_font(font);
+        let font_handle = font.map(|font| ui.push_font(font.id()));
+        let font_scale = font.map(|f| f.scale).unwrap_or(1.0);
         let fb_scale = io.display_framebuffer_scale;
         let [text_width, text_height] = ui.calc_text_size(text);
         let text_width = text_width * font_scale;
@@ -389,7 +369,7 @@ impl RenderState {
             .build(ui, || {
                 ui.text(text);
             });
-        font_handle.pop();
+        drop(font_handle);
     }
 
     pub fn lock() -> MutexGuard<'static, RenderState> {

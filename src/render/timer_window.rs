@@ -1,10 +1,11 @@
 use {
     super::RenderState,
     crate::{
+        control_window,
         fl,
         settings::ProgressBarSettings,
         timer::{PhaseState, TimerAlert, TimerFile},
-        ControllerEvent, CONTROLLER_SENDER, SETTINGS,
+        ControllerEvent, CONTROLLER_SENDER, SETTINGS, WINDOW_TIMERS,
     },
     glam::Vec2,
     nexus::imgui::{ProgressBar, StyleColor, Ui, Window},
@@ -63,12 +64,7 @@ impl TimerWindowState {
         }
 
         if open != self.open {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::WindowState(
-                "timers".to_string(),
-                Some(open),
-            ));
-            drop(event_send);
+            control_window(WINDOW_TIMERS, Some(open));
             self.open = open;
         }
     }

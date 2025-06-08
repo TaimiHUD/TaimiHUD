@@ -3,6 +3,7 @@ pub mod engine;
 pub mod object;
 pub mod pack;
 pub mod render_list;
-pub mod resources;
+#[deprecated = "crate::resources"]
+pub(crate) use crate::resources;
 
 pub use engine::Engine;
