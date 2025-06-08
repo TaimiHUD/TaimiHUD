@@ -1,7 +1,6 @@
 use {
-    crate::settings::Source,
+    crate::{settings::Source, ADDON_DIR},
     chrono::{DateTime, Utc},
-    nexus::paths::get_addon_dir,
     serde::{Deserialize, Serialize},
     serde_json::Value,
     std::fmt,
@@ -72,8 +71,7 @@ impl Source for GitHubSource {
         format!("https://github.com/{}", self.repo_string())
     }
     async fn download_latest(&self) -> anyhow::Result<String> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let install_dir = addon_dir.join(self.install_dir());
+        let install_dir = ADDON_DIR.join(self.install_dir());
         create_dir_all(&install_dir).await?;
         let latest = self.latest_release().await?;
         if let Some(tarball_url) = latest.tarball_url {

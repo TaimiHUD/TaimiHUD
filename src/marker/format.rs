@@ -2,13 +2,14 @@ use {
     crate::{
         render::RenderState,
         timer::{BlishVec3, Polytope, Position},
-        SETTINGS,
+        ADDON_DIR, SETTINGS,
     },
     anyhow::anyhow,
+    arcdps::extras::Control,
     chrono::{DateTime, Utc},
     glam::Vec3,
     glob::Paths,
-    nexus::{gamebind::GameBind, imgui::Ui, paths::get_addon_dir},
+    nexus::{gamebind::GameBind, imgui::Ui},
     ordered_float::OrderedFloat,
     serde::{Deserialize, Serialize},
     serde_repr::{Deserialize_repr, Serialize_repr},
@@ -18,7 +19,6 @@ use {
         path::{Path, PathBuf},
         sync::Arc,
     },
-    strum::IntoEnumIterator,
     strum_macros::{Display, EnumIter, FromRepr},
     tokio::{
         fs::{create_dir_all, read_to_string, File, OpenOptions},
@@ -295,9 +295,8 @@ impl RuntimeMarkers {
         format: MarkerFiletype,
         ms: MarkerSet,
     ) -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let markers_dir = addon_dir.join("markers");
-        if !exists(&markers_dir).expect("Can't check if directory exists") {
+        let markers_dir = ADDON_DIR.join("markers");
+        if !exists(&markers_dir)? {
             create_dir_all(&markers_dir).await?;
         }
         let path = markers_dir.join(format!("{}.markers", path.display()));
@@ -547,7 +546,7 @@ impl From<MarkerPosition> for Polytope {
 }
 
 #[derive(
-    Hash, Eq, PartialEq, Serialize_repr, Deserialize_repr, FromRepr, Display, Debug, Clone,
+    Hash, Eq, PartialEq, Serialize_repr, Deserialize_repr, FromRepr, Display, Debug, Copy, Clone,
 )]
 #[repr(u8)]
 pub enum MarkerType {
@@ -607,6 +606,37 @@ impl MarkerType {
             Self::Triangle => GameBind::SquadMarkerSetAgentTriangle,
             Self::Cross => GameBind::SquadMarkerSetAgentCross,
             Self::ClearMarkers => GameBind::SquadMarkerClearAllWorld,
+        }
+    }
+
+    pub const fn control_location(&self) -> Control {
+        match self {
+            Self::Blank => panic!("i can't believe you've done this"),
+            Self::Arrow => Control::Squad_Location_Arrow,
+            Self::Circle => Control::Squad_Location_Circle,
+            Self::Heart => Control::Squad_Location_Heart,
+            Self::Square => Control::Squad_Location_Square,
+            Self::Star => Control::Squad_Location_Star,
+            Self::Spiral => Control::Squad_Location_Spiral,
+            Self::Triangle => Control::Squad_Location_Triangle,
+            Self::Cross => Control::Squad_Location_X,
+            Self::ClearMarkers => Control::Squad_ClearAllLocationMarkers,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub const fn control_object(&self) -> Control {
+        match self {
+            Self::Blank => panic!("i can't believe you've done this"),
+            Self::Arrow => Control::Squad_Object_Arrow,
+            Self::Circle => Control::Squad_Object_Circle,
+            Self::Heart => Control::Squad_Object_Heart,
+            Self::Square => Control::Squad_Object_Square,
+            Self::Star => Control::Squad_Object_Star,
+            Self::Spiral => Control::Squad_Object_Spiral,
+            Self::Triangle => Control::Squad_Object_Triangle,
+            Self::Cross => Control::Squad_Object_X,
+            Self::ClearMarkers => Control::Squad_ClearAllObjectMarkers,
         }
     }
 }

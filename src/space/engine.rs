@@ -8,13 +8,14 @@ use {
     crate::{
         controller::ControllerEvent, marker::atomic::MarkerInputData, space::{
             max_depth, pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail}, resources::ObjFile
-        }, timer::{PhaseState, RotationType, TimerFile, TimerMarker}, Controller
+        }, timer::{PhaseState, RotationType, TimerFile, TimerMarker},
+        Controller, ADDON_DIR,
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::{Mat4, Vec3, Vec3Swizzles},
     itertools::Itertools,
-    nexus::{imgui::Ui, paths::get_addon_dir},
+    nexus::imgui::Ui,
     std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
@@ -89,7 +90,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
+        let addon_dir = &*ADDON_DIR;
 
         let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)
             .context("Failed to set up render backend")?;
