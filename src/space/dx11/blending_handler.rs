@@ -1,5 +1,5 @@
 use {
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     windows::Win32::Graphics::Direct3D11::{
         ID3D11BlendState, ID3D11Device, ID3D11DeviceContext, D3D11_BLEND_DESC,
         D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BLEND_SRC_ALPHA,
@@ -32,6 +32,7 @@ impl BlendingHandler {
         };
         let mut ptr: Option<ID3D11BlendState> = None;
         let blend_state = unsafe { device.CreateBlendState(&blend_desc, Some(&mut ptr)) }
+            .context("blend state creation")
             .map_err(anyhow::Error::from)
             .and_then(|()| ptr.ok_or_else(|| anyhow!("no blend state")))?;
         log::debug!("Set up blending handler",);
