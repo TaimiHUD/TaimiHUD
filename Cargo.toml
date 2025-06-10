@@ -29,6 +29,7 @@ space = [
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
   "windows/Win32_System_Diagnostics_Debug",
+  "goggles",
 ]
 markers = [
   "dep:itertools",
@@ -44,6 +45,9 @@ markers = [
 ]
 markers-edit = [
   "markers"
+]
+goggles = [
+  "dep:retour",
 ]
 
 [lib]
@@ -126,6 +130,7 @@ croner = "2.1.0"
 bitvec = "1.0.1"
 
 include_dir = { version = "0.7.4", features = ["glob"] }
+retour = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }

@@ -58,6 +58,8 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 type Revertible = Box<dyn FnOnce() + Send + 'static>;
 
@@ -551,6 +553,10 @@ fn render_space(ui: &nexus::imgui::Ui) {
         }
         ENGINE.with_borrow_mut(|ds_op| {
             if let Some(Ok(ds)) = ds_op {
+                #[cfg(feature = "goggles")]
+                if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
+                    goggles::classify_space_lens(ds);
+                }
                 if let Err(error) = ds.render(ui) {
                     log::error!("Engine error: {error}");
                 }
