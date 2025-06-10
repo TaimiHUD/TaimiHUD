@@ -64,6 +64,8 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 // https://github.com/kellpossible/cargo-i18n/blob/95634c35eb68643d4a08ff4cd17406645e428576/i18n-embed/examples/library-fluent/src/lib.rs
 #[derive(RustEmbed)]
@@ -219,6 +221,10 @@ fn load() {
                 }
                 ENGINE.with_borrow_mut(|ds_op| {
                     if let Some(Ok(ds)) = ds_op {
+                        #[cfg(feature = "goggles")]
+                        if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
+                            goggles::classify_space_lens(ds);
+                        }
                         if let Err(error) = ds.render(ui) {
                             log::error!("Engine error: {error}");
                         }

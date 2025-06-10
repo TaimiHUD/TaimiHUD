@@ -28,7 +28,8 @@ space = [
   "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
-  "windows/Win32_System_Diagnostics_Debug"
+  "windows/Win32_System_Diagnostics_Debug",
+  "goggles",
 ]
 markers = [
   "dep:itertools",
@@ -44,6 +45,9 @@ markers = [
 ]
 markers-edit = [
   "markers"
+]
+goggles = [
+  "dep:retour",
 ]
 
 [lib]
@@ -124,6 +128,8 @@ base64 = "0.22.1"
 zip = "4.0.0"
 croner = "2.1.0"
 bitvec = "1.0.1"
+
+retour = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }

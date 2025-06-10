@@ -20,6 +20,8 @@ use {
         },
     },
 };
+#[cfg(feature = "goggles")]
+use crate::space::{goggles, MAX_DEPTH};
 
 #[allow(unused)]
 pub struct DepthHandler {
@@ -39,6 +41,11 @@ impl DepthHandler {
         swap_chain: &IDXGISwapChain,
     ) -> anyhow::Result<Self> {
         let framebuffer = Self::get_framebuffer(swap_chain)?;
+        log::debug!(
+            "Setting up viewport with dimensions ({},{})",
+            display_size[0],
+            display_size[1]
+        );
         let viewport = Self::create_viewport(display_size);
         let render_target_view = vec![Self::create_render_target_view(device, &framebuffer).ok()];
         let depth_stencil_state = Self::create_depth_stencil_state(device)?;
@@ -57,29 +64,48 @@ impl DepthHandler {
     }
 
     pub fn setup(&self, device_context: &ID3D11DeviceContext) {
+        let (dsview, clear_depth) = (&self.depth_stencil_view, Some(1.0f32));
+        #[cfg(feature = "goggles")]
+        let (dsview, clear_depth) = match goggles::current_lens() {
+            Some(dsview) => (dsview, None),
+            None => (dsview.to_ref(), clear_depth),
+        };
         unsafe {
             device_context.RSSetState(&self.rasterizer_state);
-            device_context.RSSetViewports(Some(&[self.viewport]));
+            let viewport = self.viewport;
+            #[cfg(feature = "goggles")]
+            let viewport = match max_depth() {
+                d if d == MAX_DEPTH =>
+                    viewport,
+                _ => {
+                    let mut desc = Default::default();
+                    self.depth_stencil_buffer.GetDesc(&mut desc);
+                    let display_size = [
+                        desc.Width as f32,
+                        desc.Height as f32,
+                    ];
+                    Self::create_viewport(&display_size)
+                },
+            };
+            device_context.RSSetViewports(Some(&[viewport]));
             device_context.OMSetRenderTargets(
                 Some(self.render_target_view.as_slice()),
-                Some(&self.depth_stencil_view),
+                dsview,
             );
-            device_context.OMSetDepthStencilState(&self.depth_stencil_state, 1);
-            device_context.ClearDepthStencilView(
-                &self.depth_stencil_view,
-                D3D11_CLEAR_DEPTH.0 | D3D11_CLEAR_STENCIL.0,
-                1.0,
-                0,
-            );
+            let stencil_ref = 1;
+            device_context.OMSetDepthStencilState(&self.depth_stencil_state, stencil_ref);
+            if let Some(clear_depth) = clear_depth {
+                device_context.ClearDepthStencilView(
+                    dsview,
+                    D3D11_CLEAR_DEPTH.0 | D3D11_CLEAR_STENCIL.0,
+                    clear_depth,
+                    0,
+                );
+            }
         }
     }
 
     pub fn create_viewport(display_size: &[f32; 2]) -> D3D11_VIEWPORT {
-        log::debug!(
-            "Setting up viewport with dimensions ({},{})",
-            display_size[0],
-            display_size[1]
-        );
         let viewport = D3D11_VIEWPORT {
             TopLeftX: 0.0,
             TopLeftY: 0.0,
@@ -88,11 +114,6 @@ impl DepthHandler {
             MinDepth: 0.0,
             MaxDepth: max_depth(),
         };
-        log::debug!(
-            "Set up viewport with dimensions ({},{})",
-            display_size[0],
-            display_size[1]
-        );
         viewport
     }
 
@@ -139,6 +160,7 @@ impl DepthHandler {
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
             DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ALL,
+            //DepthFunc: D3D11_COMPARISON_LESS_EQUAL,
             DepthFunc: D3D11_COMPARISON_LESS,
             StencilEnable: false.into(),
             StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
