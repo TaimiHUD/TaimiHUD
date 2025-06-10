@@ -53,6 +53,8 @@ impl PerspectiveHandler {
             }
 
             self.constant_buffer_data.view = Mat4::look_to_lh(data.pos, data.front, self.up);
+            self.near = min_depth();
+            self.far = max_depth();
             self.constant_buffer_data.projection =
                 Mat4::perspective_lh(data.fov, self.aspect_ratio, self.near, self.far);
         }

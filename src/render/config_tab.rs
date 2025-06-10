@@ -38,6 +38,10 @@ impl ConfigTabState {
         if ui.checkbox("Experimental KatRender", &mut self.katrender) {
             Controller::try_send(ControllerEvent::ToggleKatRender);
         };
+        #[cfg(feature = "goggles")]
+        if self.katrender {
+            crate::render::goggles::options_ui(ui);
+        }
         let markers_window_closure = || {
             if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
                 self.marker_autoplace = settings.marker_autoplace.clone();
