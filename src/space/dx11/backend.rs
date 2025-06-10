@@ -1,7 +1,7 @@
 use {
     super::{BlendingHandler, DepthHandler, PerspectiveHandler, PerspectiveInputData},
     crate::space::resources::ShaderLoader,
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     glam::Vec4,
     nexus::AddonApi,
     std::path::Path,
@@ -62,13 +62,17 @@ impl RenderBackend {
 
         PerspectiveInputData::create();
 
-        let shaders = ShaderLoader::load(addon_dir, &device)?;
-        let perspective_handler = PerspectiveHandler::setup(&device, &display_size)?;
+        let shaders = ShaderLoader::load(addon_dir, &device)
+            .context("Shaders failed to load")?;
+        let perspective_handler = PerspectiveHandler::setup(&device, &display_size)
+            .context("Perspective handler setup failed")?;
 
-        let depth_handler = DepthHandler::create(&display_size, &device, swap_chain)?;
+        let depth_handler = DepthHandler::create(&display_size, &device, swap_chain)
+            .context("Depth setup failed")?;
         let sampler_state = vec![Self::setup_sampler(&device).ok()];
 
-        let blending_handler = BlendingHandler::setup(&device)?;
+        let blending_handler = BlendingHandler::setup(&device)
+            .context("Blending setup failed")?;
         //log::info!("Setting up device context");
         //let device_context = unsafe { device.GetImmediateContext().expect("I lost my context!") };
 

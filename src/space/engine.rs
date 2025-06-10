@@ -13,7 +13,7 @@ use {
         },
         timer::{PhaseState, RotationType, TimerFile, TimerMarker},
     },
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::{Mat4, Vec3, Vec3Swizzles},
     itertools::Itertools,
@@ -91,12 +91,15 @@ impl Engine {
     pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
         let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
 
-        let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)?;
+        let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)
+            .context("Failed to set up render backend")?;
 
         let models_dir = addon_dir.join("models");
-        let object_descs = ObjectLoader::load_desc(&models_dir)?;
+        let object_descs = ObjectLoader::load_desc(&models_dir)
+            .context("Failed to load model descriptors")?;
         log::debug!("{:?}", object_descs);
-        let model_files = ObjFile::load(&models_dir, &object_descs)?;
+        let model_files = ObjFile::load(&models_dir, &object_descs)
+            .context("Failed to load model object")?;
 
         let object_kinds = object_descs.to_backings(
             &render_backend.device,
@@ -152,7 +155,7 @@ impl Engine {
                     &self.render_backend,
                     marker,
                     base_path.clone(),
-                )?);
+                ).context("marker object creation failed")?);
                 let entity = self.world.spawn((
                     Position(marker.position),
                     Marker {
@@ -205,8 +208,10 @@ impl Engine {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
-                    MarkerFeed(phase_state) => self.new_phase(phase_state)?,
-                    MarkerReset(timer) => self.remove_phase(timer)?,
+                    MarkerFeed(phase_state) => self.new_phase(phase_state)
+                        .context("marker new phase")?,
+                    MarkerReset(timer) => self.remove_phase(timer)
+                        .context("marker remove phase")?,
                 }
             }
             Err(_error) => (),
@@ -221,12 +226,14 @@ impl Engine {
 
     pub fn render(&mut self, ui: &Ui) -> anyhow::Result<()> {
         let display_size = ui.io().display_size;
-        self.process_event()?;
+        self.process_event()
+            .context("render engine event processing failure")?;
         self.schedule.run(&mut self.world);
         let backend = &mut self.render_backend;
         backend.prepare(&display_size);
         let device_context =
-            unsafe { backend.device.GetImmediateContext() }.expect("I lost my context!");
+            unsafe { backend.device.GetImmediateContext() }
+            .context("I lost my context!")?;
         let slot = 0;
         backend.perspective_handler.set(&device_context, slot);
         backend.depth_handler.setup(&device_context);
