@@ -1,5 +1,5 @@
 use {
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     windows::Win32::Graphics::{
         Direct3D11::{
             ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext,
@@ -98,7 +98,8 @@ impl DepthHandler {
     pub fn get_framebuffer(swap_chain: &IDXGISwapChain) -> anyhow::Result<ID3D11Texture2D> {
         log::info!("Setting up framebuffer");
         let framebuffer: ID3D11Texture2D =
-            unsafe { swap_chain.GetBuffer(0) }.map_err(anyhow::Error::from)?;
+            unsafe { swap_chain.GetBuffer(0) }
+            .context("getting swap chain's framebuffer")?;
         log::info!("Set up framebuffer");
         Ok(framebuffer)
     }
@@ -112,7 +113,7 @@ impl DepthHandler {
         let render_target_view = unsafe {
             device.CreateRenderTargetView(framebuffer, None, Some(&mut render_target_view_ptr))
         }
-        .map_err(anyhow::Error::from)
+        .context("creating render target view")
         .and_then(|()| render_target_view_ptr.ok_or_else(|| anyhow!("no render target view")))?;
         log::debug!("Set up render target view");
         Ok(render_target_view)
@@ -150,8 +151,7 @@ impl DepthHandler {
                 &depth_stencil_state_desc,
                 Some(&mut depth_stencil_state_ptr),
             )
-        }
-        .map_err(anyhow::Error::from)
+        }.context("creating depth state")
         .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
         log::info!("Set up depth stencil state");
         Ok(depth_stencil_state)
@@ -186,8 +186,7 @@ impl DepthHandler {
                 None,
                 Some(&mut depth_stencil_buffer_ptr),
             )
-        }
-        .map_err(anyhow::Error::from)
+        }.context("creating depth buffer")
         .and_then(|()| {
             depth_stencil_buffer_ptr.ok_or_else(|| anyhow!("no depth stencil buffer"))
         })?;
@@ -216,8 +215,7 @@ impl DepthHandler {
                 Some(&depth_stencil_view_desc),
                 Some(&mut depth_stencil_view_ptr),
             )
-        }
-        .map_err(anyhow::Error::from)
+        }.context("creating depth view")
         .and_then(|()| depth_stencil_view_ptr.ok_or_else(|| anyhow!("no depth stencil view")))?;
         log::info!("Set up depth stencil view");
         Ok(depth_stencil_view)
@@ -241,7 +239,7 @@ impl DepthHandler {
         let rasterizer_state = unsafe {
             device.CreateRasterizerState(&rasterizer_state_desc, Some(&mut rasterizer_state_ptr))
         }
-        .map_err(anyhow::Error::from)
+        .context("creating rasterizer state")
         .and_then(|()| rasterizer_state_ptr.ok_or_else(|| anyhow!("no rasterizer state")))?;
         log::info!("Set up rasterizer state");
         Ok(rasterizer_state)

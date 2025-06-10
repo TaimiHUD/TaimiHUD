@@ -4,7 +4,7 @@ use {
         exports::runtime as rt,
         space::resources::ShaderLoader,
     },
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     glam::Vec4,
     std::path::Path,
     windows::Win32::Graphics::{
@@ -55,22 +55,26 @@ impl RenderBackend {
     pub fn setup(addon_dir: &Path, display_size: [f32; 2]) -> anyhow::Result<RenderBackend> {
         log::info!("Getting d3d11 device");
         let device = rt::d3d11_device()
-            .map_err(|e| anyhow!("{e}"))?;
+            .map_err(|e| anyhow!("D3D11 device unavailable: {e}"))?;
         log::info!("Getting d3d11 device swap chain");
         let swap_chain = rt::dxgi_swap_chain()
-            .map_err(|e| anyhow!("{e}"))?;
+            .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))?;
         let (device, swap_chain) = device.and_then(|d| swap_chain.map(|sc| (d, sc)))
             .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))?;
 
         PerspectiveInputData::create();
 
-        let shaders = ShaderLoader::load(addon_dir, &device)?;
-        let perspective_handler = PerspectiveHandler::setup(&device, &display_size)?;
+        let shaders = ShaderLoader::load(addon_dir, &device)
+            .context("Shaders failed to load")?;
+        let perspective_handler = PerspectiveHandler::setup(&device, &display_size)
+            .context("Perspective handler setup failed")?;
 
-        let depth_handler = DepthHandler::create(&display_size, &device, &swap_chain)?;
+        let depth_handler = DepthHandler::create(&display_size, &device, &swap_chain)
+            .context("Depth setup failed")?;
         let sampler_state = vec![Self::setup_sampler(&device).ok()];
 
-        let blending_handler = BlendingHandler::setup(&device)?;
+        let blending_handler = BlendingHandler::setup(&device)
+            .context("Blending setup failed")?;
         //log::info!("Setting up device context");
         //let device_context = unsafe { device.GetImmediateContext().expect("I lost my context!") };
 
