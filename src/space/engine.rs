@@ -236,10 +236,11 @@ impl Engine {
         let backend = &mut self.render_backend;
         backend.prepare(&display_size);
         let device_context =
-            unsafe { backend.device.GetImmediateContext() }.expect("I lost my context!");
+            unsafe { backend.device.GetImmediateContext() }
+            .context("I lost my context!")?;
         let slot = 0;
-        backend.perspective_handler.set(&device_context, slot);
-        backend.depth_handler.setup(&device_context);
+        let _prespective_token = backend.perspective_handler.set(&device_context, slot);
+        let _depth_token = backend.depth_handler.setup(&device_context);
         backend.blending_handler.set(&device_context);
         let pdata = PERSPECTIVEINPUTDATA.get().unwrap().load();
         // let mut query = self.world.query::<(&mut Render, &Position)>();

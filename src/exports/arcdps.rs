@@ -94,9 +94,15 @@ pub(crate) fn cb_imgui(ui: &imgui::Ui, not_charsel_loading: bool) {
     let ingame = !not_charsel_loading;
     IS_INGAME.store(ingame, Ordering::Relaxed);
 
+    /*#[cfg(feature = "goggles")]
+    if !goggles::has_classification(LensClass::Imgui) {
+        goggles::classify_current_lens(LensClass::Imgui);
+    }*/
+
     update_mumble_link();
 
-    #[cfg(feature = "space")] {
+    #[cfg(feature = "space")]
+    if ingame {
         crate::render_space(ui);
     }
 

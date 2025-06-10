@@ -3,9 +3,12 @@ use {
     anyhow::{anyhow, Context},
     crate::space::{max_depth, min_depth},
     glam::{Mat4, Vec3},
-    windows::Win32::Graphics::Direct3D11::{
-        ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
-        D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
+    windows::{
+        core::{Interface, InterfaceRef},
+        Win32::Graphics::Direct3D11::{
+            ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
+            D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
+        },
     },
 };
 
@@ -53,6 +56,8 @@ impl PerspectiveHandler {
             }
 
             self.constant_buffer_data.view = Mat4::look_to_lh(data.pos, data.front, self.up);
+            self.near = min_depth();
+            self.far = max_depth();
             self.constant_buffer_data.projection =
                 Mat4::perspective_lh(data.fov, self.aspect_ratio, self.near, self.far);
         }
@@ -98,13 +103,13 @@ impl PerspectiveHandler {
         self.far
     }
 
-    fn update_cb(&mut self, device_context: &ID3D11DeviceContext) {
+    fn update_cb(&self, device_context: &ID3D11DeviceContext) {
         unsafe {
             device_context.UpdateSubresource(
                 &self.constant_buffer,
                 0,
                 None,
-                &self.constant_buffer_data as *const _ as *const _,
+                &self.constant_buffer_data as *const PerspectiveData as *const _,
                 0,
                 0,
             );
@@ -115,8 +120,51 @@ impl PerspectiveHandler {
             device_context.VSSetConstantBuffers(slot, Some(&[Some(self.constant_buffer.clone())]));
         }
     }
-    pub fn set(&mut self, device_context: &ID3D11DeviceContext, slot: u32) {
+    pub fn set<'a>(&'a self, device_context: &'a ID3D11DeviceContext, slot: u32) -> RestoreToken<'a, 1> {
+        let restore = RestoreToken::new_snapshot(device_context.to_ref(), D3d11BufferType::Constant, slot);
         self.set_cb(device_context, slot);
         self.update_cb(device_context);
+        restore
+    }
+}
+
+pub enum D3d11BufferType {
+    Constant,
+}
+
+#[must_use]
+pub struct RestoreToken<'c, const N: usize = 1> {
+    pub context: InterfaceRef<'c, ID3D11DeviceContext>,
+    pub kind: D3d11BufferType,
+    pub slot: u32,
+    pub buffers: [Option<ID3D11Buffer>; N],
+}
+
+impl<'c, const N: usize> RestoreToken<'c, N> {
+    pub fn new_snapshot(context: InterfaceRef<'c, ID3D11DeviceContext>, kind: D3d11BufferType, slot: u32) -> Self {
+        let mut buffers = [const { None }; N];
+        unsafe {
+            match kind {
+                D3d11BufferType::Constant =>
+                    context.VSGetConstantBuffers(slot, Some(&mut buffers)),
+            }
+        }
+        Self {
+            context,
+            kind,
+            slot,
+            buffers,
+        }
+    }
+}
+
+impl<'c, const N: usize> Drop for RestoreToken<'c, N> {
+    fn drop(&mut self) {
+        unsafe {
+            match self.kind {
+                D3d11BufferType::Constant =>
+                    self.context.VSSetConstantBuffers(self.slot, Some(&self.buffers)),
+            }
+        }
     }
 }

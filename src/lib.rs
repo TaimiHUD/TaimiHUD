@@ -72,6 +72,8 @@ use nexus::{
     },
     AddonFlags, UpdateProvider,
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 // https://github.com/kellpossible/cargo-i18n/blob/95634c35eb68643d4a08ff4cd17406645e428576/i18n-embed/examples/library-fluent/src/lib.rs
 #[derive(RustEmbed)]
@@ -164,7 +166,7 @@ use std::cell::{Cell, RefCell};
 #[cfg(feature = "space")]
 thread_local! {
     static ENGINE_INITIALIZED: Cell<bool> = const { Cell::new(false) };
-    static ENGINE: RefCell<Option<Engine>> = panic!("!");
+    static ENGINE: RefCell<Option<Engine>> = RefCell::new(None);
 }
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
@@ -588,6 +590,10 @@ fn render_space(ui: &nexus::imgui::Ui) {
             }
             ENGINE.with_borrow_mut(|ds_op| {
                 if let Some(ds) = ds_op {
+                    #[cfg(feature = "goggles")]
+                    if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
+                        goggles::classify_space_lens(ds);
+                    }
                     if let Err(error) = ds.render(ui) {
                         log::error!("Engine error: {error}");
                     }

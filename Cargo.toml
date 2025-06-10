@@ -31,6 +31,7 @@ space = [
   "windows/Win32_Graphics_Hlsl",
   "windows/Win32_System_Diagnostics_Debug",
   "texture-loader",
+  "goggles",
 ]
 markers = [
   "dep:itertools",
@@ -66,6 +67,9 @@ extension-arcdps-codegen = [
 extension-nexus = [
   "nexus/log",
   "nexus/log_filter",
+]
+goggles = [
+  "dep:retour",
 ]
 image = [
   "dep:image",
@@ -159,6 +163,7 @@ bitvec = "1.0.1"
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+retour = { version = "0.3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }
