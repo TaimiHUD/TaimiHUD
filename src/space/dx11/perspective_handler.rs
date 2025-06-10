@@ -98,13 +98,13 @@ impl PerspectiveHandler {
         self.far
     }
 
-    fn update_cb(&mut self, device_context: &ID3D11DeviceContext) {
+    fn update_cb(&self, device_context: &ID3D11DeviceContext) {
         unsafe {
             device_context.UpdateSubresource(
                 &self.constant_buffer,
                 0,
                 None,
-                &self.constant_buffer_data as *const _ as *const _,
+                &self.constant_buffer_data as *const PerspectiveData as *const _,
                 0,
                 0,
             );
@@ -115,7 +115,7 @@ impl PerspectiveHandler {
             device_context.VSSetConstantBuffers(slot, Some(&[Some(self.constant_buffer.clone())]));
         }
     }
-    pub fn set(&mut self, device_context: &ID3D11DeviceContext, slot: u32) {
+    pub fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
         self.set_cb(device_context, slot);
         self.update_cb(device_context);
     }
