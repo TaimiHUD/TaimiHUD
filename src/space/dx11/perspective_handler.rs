@@ -28,11 +28,11 @@ pub struct PerspectiveHandler {
 impl PerspectiveHandler {
     pub fn setup(device: &ID3D11Device, display_size: &[f32; 2]) -> anyhow::Result<Self> {
         let aspect_ratio = display_size[0] / display_size[1];
-        let constant_buffer = Self::create_constant_buffer(device)?;
         let constant_buffer_data = PerspectiveData {
             view: Mat4::IDENTITY,
             projection: Mat4::IDENTITY,
         };
+        let constant_buffer = Self::create_constant_buffer(device, &constant_buffer_data)?;
         Ok(Self {
             up: Vec3::new(0.0, 1.0, 0.0),
             aspect_ratio,
@@ -57,9 +57,9 @@ impl PerspectiveHandler {
         }
     }
 
-    pub fn create_constant_buffer(device: &ID3D11Device) -> anyhow::Result<ID3D11Buffer> {
+    pub fn create_constant_buffer(device: &ID3D11Device, initial: &PerspectiveData) -> anyhow::Result<ID3D11Buffer> {
         let constant_buffer_desc = D3D11_BUFFER_DESC {
-            ByteWidth: size_of::<PerspectiveData>() as u32,
+            ByteWidth: size_of::<PerspectiveData>().next_multiple_of(16) as u32,
             Usage: D3D11_USAGE_DEFAULT,
             BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
             CPUAccessFlags: 0,
@@ -67,7 +67,10 @@ impl PerspectiveHandler {
             StructureByteStride: 0,
         };
 
-        let constant_subresource_data = D3D11_SUBRESOURCE_DATA::default();
+        let constant_subresource_data = D3D11_SUBRESOURCE_DATA {
+            pSysMem: initial as *const PerspectiveData as *const _,
+            .. D3D11_SUBRESOURCE_DATA::default()
+        };
 
         let mut constant_buffer_ptr: Option<ID3D11Buffer> = None;
         let constant_buffer = unsafe {
