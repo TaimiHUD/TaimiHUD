@@ -1,5 +1,6 @@
 use {
     anyhow::{anyhow, Context},
+    crate::space::max_depth,
     windows::Win32::Graphics::{
         Direct3D11::{
             ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext,
@@ -85,7 +86,7 @@ impl DepthHandler {
             Width: display_size[0],
             Height: display_size[1],
             MinDepth: 0.0,
-            MaxDepth: 1000.0,
+            MaxDepth: max_depth(),
         };
         log::debug!(
             "Set up viewport with dimensions ({},{})",

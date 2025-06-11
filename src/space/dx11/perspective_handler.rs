@@ -1,6 +1,7 @@
 use {
     super::PerspectiveInputData,
     anyhow::{anyhow, Context},
+    crate::space::{max_depth, min_depth},
     glam::{Mat4, Vec3},
     windows::Win32::Graphics::Direct3D11::{
         ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
@@ -39,8 +40,8 @@ impl PerspectiveHandler {
             last_display_size: *display_size,
             constant_buffer,
             constant_buffer_data,
-            near: 0.1,
-            far: 1000.0,
+            near: min_depth(),
+            far: max_depth(),
         })
     }
 
