@@ -503,6 +503,9 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
         Some(name) => name,
         None => account_name_ref,
     };
+    if name.is_empty() {
+        return
+    }
     match ACCOUNT_NAME_CELL.get() {
         // ignore duplicates
         Some(prev) if prev == name =>
@@ -517,10 +520,12 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
     };
     match ACCOUNT_NAME_CELL.set(name_owned) {
         Ok(_) => (),
-        Err(name) if Some(&name) != ACCOUNT_NAME_CELL.get() => {
-            log::error!("Account name inconsistent")
+        Err(name) => {
+            let prev = ACCOUNT_NAME_CELL.get();
+            if Some(&name) != prev {
+                log::error!("Account name {name:?} inconsistent with previously recorded value {:?}", prev.map(|s| &s[..]).unwrap_or(""))
+            }
         },
-        Err(..) => (),
     }
 }
 
