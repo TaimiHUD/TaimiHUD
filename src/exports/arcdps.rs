@@ -90,7 +90,8 @@ fn update_mumble_link() {
 }
 
 #[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_imgui(ui: &imgui::Ui, ingame: bool) {
+pub(crate) fn cb_imgui(ui: &imgui::Ui, not_charsel_loading: bool) {
+    let ingame = !not_charsel_loading;
     IS_INGAME.store(ingame, Ordering::Relaxed);
 
     update_mumble_link();
