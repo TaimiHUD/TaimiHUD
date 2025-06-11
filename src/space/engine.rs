@@ -10,6 +10,7 @@ use {
         space::{
             pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail},
             resources::ObjFile,
+            max_depth,
         },
         timer::{PhaseState, RotationType, TimerFile, TimerMarker},
     },
