@@ -75,6 +75,14 @@ pub struct ZipLoader {
     archive: ZipArchive<std::fs::File>,
 }
 
+impl ZipLoader {
+    pub fn new(path: &Path) -> anyhow::Result<ZipLoader> {
+        let file = std::fs::File::open(path)?;
+        let archive = ZipArchive::new(file)?;
+        Ok(ZipLoader { archive })
+    }
+}
+
 /// Hard to imagine a valid taco data file being over 64MB.
 const SIZE_LIMIT: u64 = 64 * 1024 * 1024;
 

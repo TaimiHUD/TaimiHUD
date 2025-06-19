@@ -1,7 +1,11 @@
 use {
-    crate::{
-        fl, ControllerEvent, CONTROLLER_SENDER, ENGINE, ENGINE_INITIALIZED, SETTINGS
-    }, bitflags::bitflags, nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window}, std::{collections::{HashMap, HashSet}, sync::Arc}
+    crate::{fl, ControllerEvent, CONTROLLER_SENDER, ENGINE, ENGINE_INITIALIZED, SETTINGS},
+    bitflags::bitflags,
+    nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
 };
 
 bitflags! {
@@ -60,76 +64,89 @@ impl PathingWindowState {
                     if ENGINE_INITIALIZED.get() {
                         ENGINE.with_borrow(|e| {
                             if let Some(engine) = e {
-                                let root = &engine.test_pack.categories.root_categories;
-                                let all_categories = &engine.test_pack.categories.all_categories;
+                                let root = &engine.packs.loaded_packs[0].categories.root_categories;
+                                let all_categories =
+                                    &engine.packs.loaded_packs[0].categories.all_categories;
                                 if let Some(state) = &mut self.state {
-                                        let filter_options = vec![
-                                            "Enabled",
-                                            "Disabled",
-                                        ];
-                                        let button_text = match self.filter_open {
-                                            true => "Hide filter options",
-                                            false => "Show filter options",
-                                        };
-                                        if ui.button(button_text) {
-                                            self.filter_open = !self.filter_open;
-                                        }
-                                        ui.same_line();
-                                        if ui.button(&fl!("expand-all")) {
-                                            self.open_items.extend(all_categories.values().map(|x| x.full_id.clone()));
-                                        }
-                                        ui.same_line();
-                                            if ui.button(&fl!("collapse-all")) {
-                                            self.open_items.clear();
+                                    let filter_options = vec!["Enabled", "Disabled"];
+                                    let button_text = match self.filter_open {
+                                        true => "Hide filter options",
+                                        false => "Show filter options",
+                                    };
+                                    if ui.button(button_text) {
+                                        self.filter_open = !self.filter_open;
+                                    }
+                                    ui.same_line();
+                                    if ui.button(&fl!("expand-all")) {
+                                        self.open_items.extend(
+                                            all_categories.values().map(|x| x.full_id.clone()),
+                                        );
+                                    }
+                                    ui.same_line();
+                                    if ui.button(&fl!("collapse-all")) {
+                                        self.open_items.clear();
+                                    }
+                                    ui.dummy([4.0; 2]);
+                                    if self.filter_open {
+                                        ui.separator();
+                                        ui.dummy([4.0; 2]);
+                                        ui.text("Filter Options");
+                                        for filter in filter_options {
+                                            ui.checkbox_flags(
+                                                filter,
+                                                &mut self.filter_state,
+                                                PathingFilterState::filter_string_to_flag(filter),
+                                            );
                                         }
                                         ui.dummy([4.0; 2]);
-                                        if self.filter_open {
-                                            ui.separator();
-                                            ui.dummy([4.0; 2]);
-                                            ui.text("Filter Options");
-                                            for filter in filter_options {
-                                                ui.checkbox_flags(filter, &mut self.filter_state, PathingFilterState::filter_string_to_flag(filter));
-                                            }
-                                            ui.dummy([4.0; 2]);
-                                            ui.separator();
-                                            ui.dummy([4.0; 2]);
-                                        }
+                                        ui.separator();
+                                        ui.dummy([4.0; 2]);
+                                    }
 
-
-                                        let table_flags =
-                                            TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-                                        let table_name = format!("pathing");
-                                        let table_token = ui.begin_table_header_with_flags(
-                                            &table_name,
-                                            [
-                                                TableColumnSetup {
-                                                    name: &fl!("name"),
-                                                    flags: TableColumnFlags::WIDTH_STRETCH,
-                                                    init_width_or_weight: 0.0,
-                                                    user_id: Id::Str("name"),
-                                                },
-                                                TableColumnSetup {
-                                                    name: &fl!("actions"),
-                                                    flags: TableColumnFlags::WIDTH_FIXED,
-                                                    init_width_or_weight: 0.0,
-                                                    user_id: Id::Str("actions"),
-                                                },
-                                            ],
-                                            table_flags,
+                                    let table_flags = TableFlags::RESIZABLE
+                                        | TableFlags::ROW_BG
+                                        | TableFlags::BORDERS;
+                                    let table_name = format!("pathing");
+                                    let table_token = ui.begin_table_header_with_flags(
+                                        &table_name,
+                                        [
+                                            TableColumnSetup {
+                                                name: &fl!("name"),
+                                                flags: TableColumnFlags::WIDTH_STRETCH,
+                                                init_width_or_weight: 0.0,
+                                                user_id: Id::Str("name"),
+                                            },
+                                            TableColumnSetup {
+                                                name: &fl!("actions"),
+                                                flags: TableColumnFlags::WIDTH_FIXED,
+                                                init_width_or_weight: 0.0,
+                                                user_id: Id::Str("actions"),
+                                            },
+                                        ],
+                                        table_flags,
+                                    );
+                                    ui.table_next_column();
+                                    for cat_name in root {
+                                        all_categories[cat_name].draw(
+                                            ui,
+                                            all_categories,
+                                            state,
+                                            self.filter_state,
+                                            &mut self.open_items,
                                         );
-                                        ui.table_next_column();
-                                        for cat_name in root {
-                                            all_categories[cat_name].draw(ui, all_categories, state, self.filter_state, &mut self.open_items);
-                                        }
-                                        if let Some(token) = table_token {
-                                            token.end();
-                                        }
-                                    } else {
-                                        for cat_name in root {
-                                            all_categories[cat_name].attain_state(all_categories, self.state.get_or_insert_default());
-                                        }
+                                    }
+                                    if let Some(token) = table_token {
+                                        token.end();
+                                    }
+                                } else {
+                                    for cat_name in root {
+                                        all_categories[cat_name].attain_state(
+                                            all_categories,
+                                            self.state.get_or_insert_default(),
+                                        );
                                     }
                                 }
+                            }
                         });
                     }
                 });
@@ -146,4 +163,3 @@ impl PathingWindowState {
         }
     }
 }
-

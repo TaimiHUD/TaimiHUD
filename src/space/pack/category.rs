@@ -1,5 +1,15 @@
 use {
-    super::{attributes::{parse_bool, MarkerAttributes}, taco_safe_name, Pack, PartialItem}, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{collections::{HashMap, HashSet}, sync::Arc}
+    super::{
+        attributes::{parse_bool, MarkerAttributes},
+        taco_safe_name, Pack, PartialItem,
+    },
+    crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState},
+    indexmap::IndexMap,
+    nexus::imgui::{Condition, TreeNode, Ui},
+    std::{
+        collections::{HashMap, HashSet},
+        sync::Arc,
+    },
 };
 
 pub struct Category {
@@ -75,18 +85,31 @@ impl Category {
         })
     }
 
-    pub fn attain_state(&self, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>) {
-        let _ = state.entry(self.full_id.clone()).or_insert(self.default_toggle);
+    pub fn attain_state(
+        &self,
+        all_categories: &IndexMap<String, Category>,
+        state: &mut HashMap<String, bool>,
+    ) {
+        let _ = state
+            .entry(self.full_id.clone())
+            .or_insert(self.default_toggle);
         for (_local, global) in self.sub_categories.iter() {
             all_categories[global].attain_state(all_categories, state);
         }
     }
 
-    pub fn draw(&self, ui: &Ui, all_categories: &HashMap<String, Category>, state: &mut HashMap<String, bool>, filter_state: PathingFilterState, open_items: &mut HashSet<String>) {
+    pub fn draw(
+        &self,
+        ui: &Ui,
+        all_categories: &IndexMap<String, Category>,
+        state: &mut HashMap<String, bool>,
+        filter_state: PathingFilterState,
+        open_items: &mut HashSet<String>,
+    ) {
         let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
             push_token.pop();
-            return
+            return;
         }
         let mut display = true;
         if let Some(substate) = state.get(&self.full_id) {
@@ -98,10 +121,7 @@ impl Category {
             let mut unbuilt = TreeNode::new(&self.display_name)
                 .frame_padding(true)
                 .tree_push_on_open(false)
-                .opened(
-                    open_items.contains(&self.full_id),
-                    Condition::Always,
-                );
+                .opened(open_items.contains(&self.full_id), Condition::Always);
             if self.is_separator {
                 unbuilt = unbuilt.leaf(true);
             } else if self.sub_categories.is_empty() {
@@ -124,7 +144,13 @@ impl Category {
                     ui.indent(); //_by(1.0);
                 }
                 for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items);
+                    all_categories[global].draw(
+                        ui,
+                        all_categories,
+                        state,
+                        filter_state,
+                        open_items,
+                    );
                 }
                 if !self.sub_categories.is_empty() {
                     ui.unindent(); //_by(1.0);

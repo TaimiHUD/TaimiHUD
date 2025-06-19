@@ -152,7 +152,9 @@ fn read_point(reader: &mut impl std::io::Read) -> std::io::Result<[[u8; 4]; 3]> 
 }
 
 pub struct ActiveTrail {
+    pub category_idx: usize,
     pub filtered: bool,
+    pub render_bookmark: usize,
 
     // Segment data.
     pub section_bounds: Vec<Box3<MapSpace>>,
@@ -170,8 +172,14 @@ impl ActiveTrail {
     pub fn build(
         pack: &mut Pack,
         index: usize,
+        render_bookmark: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActiveTrail> {
+        let category_idx = pack
+            .categories
+            .all_categories
+            .get_index_of(&pack.trails[index].category)
+            .unwrap_or(0);
         let texture_handle = pack.trails[index]
             .attributes
             .texture
@@ -200,7 +208,6 @@ impl ActiveTrail {
 
             // Interpolate points to be no more than RESOLUTION apart.
             let mut points = Vec::with_capacity(section.points.len());
-            let mut distance = 0.0f32;
             let mut prev_point = section.points[0];
             points.push(prev_point);
             for &point in section.points.iter().skip(1) {
@@ -211,18 +218,8 @@ impl ActiveTrail {
                     points.push(prev_point.lerp(point, s));
                 }
 
-                let s = dist / RESOLUTION;
-                let inc = 1.0 / s;
-
-                let mut v = inc;
-                while v < s - inc {
-                    points.push(prev_point.lerp(point, v / s));
-                    v += inc;
-                }
-
                 points.push(point);
                 prev_point = point;
-                distance += dist;
             }
 
             log::info!(
@@ -238,6 +235,7 @@ impl ActiveTrail {
             let normal_offset = TRAIL_WIDTH * trail_scale;
             let mut mod_distance = Vector3::ZERO;
 
+            let mut distance = 0.0f32;
             for &next_point in points.iter().skip(1) {
                 let path_direction = next_point - cur_point;
                 let offset = path_direction.cross(Vector3::Y);
@@ -267,7 +265,7 @@ impl ActiveTrail {
                     texture: glam::vec2(0.0, distance / (TRAIL_WIDTH * 2.0) - 1.0),
                 });
 
-                distance -= path_direction.length();
+                distance += path_direction.length();
                 last_offset = offset;
                 cur_point = next_point;
             }
@@ -301,13 +299,20 @@ impl ActiveTrail {
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer")?;
 
         Ok(ActiveTrail {
+            category_idx,
             filtered: false,
             section_bounds,
             texture,
             section_vbuffer,
             section_bookmarks,
             map_vbuffer: None,
+            render_bookmark,
         })
+    }
+
+    pub fn update(pack: &mut Pack, trail_idx: usize) {
+        let _ = pack;
+        let _ = trail_idx;
     }
 
     /// Draw a trail segment.
