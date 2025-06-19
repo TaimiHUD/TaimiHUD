@@ -86,6 +86,18 @@ impl PerspectiveHandler {
         Ok(constant_buffer)
     }
 
+    pub fn aspect_ratio(&self) -> f32 {
+        self.aspect_ratio
+    }
+
+    pub fn near(&self) -> f32 {
+        self.near
+    }
+
+    pub fn far(&self) -> f32 {
+        self.far
+    }
+
     fn update_cb(&self, device_context: &ID3D11DeviceContext) {
         unsafe {
             device_context.UpdateSubresource(
