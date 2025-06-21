@@ -16,7 +16,7 @@ use {
         Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
         Direct3D11::{
             ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
-            D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DYNAMIC,
+            D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
         },
     },
 };
@@ -167,15 +167,25 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 
 fn create_poi_cb(device: &ID3D11Device) -> anyhow::Result<ID3D11Buffer> {
     let constant_buffer_desc = D3D11_BUFFER_DESC {
-        ByteWidth: size_of::<PoiSpriteData>() as u32,
-        Usage: D3D11_USAGE_DYNAMIC,
+        ByteWidth: size_of::<PoiSpriteData>().next_multiple_of(16) as u32,
+        //Usage: D3D11_USAGE_DYNAMIC,
+        Usage: D3D11_USAGE_DEFAULT,
         BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+        //CPUAccessFlags: D3D11_CPU_ACCESS_WRITE,
         CPUAccessFlags: 0,
         MiscFlags: 0,
         StructureByteStride: 0,
     };
 
-    let constant_subresource_data = D3D11_SUBRESOURCE_DATA::default();
+    let initial = PoiSpriteData {
+        model: Default::default(),
+        tint: Default::default(),
+    };
+
+    let constant_subresource_data = D3D11_SUBRESOURCE_DATA {
+        pSysMem: &initial as *const PoiSpriteData as *const _,
+        .. D3D11_SUBRESOURCE_DATA::default()
+    };
 
     let mut constant_buffer_ptr: Option<ID3D11Buffer> = None;
     let constant_buffer = unsafe {
