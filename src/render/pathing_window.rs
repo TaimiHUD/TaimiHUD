@@ -1,5 +1,5 @@
 use {
-    crate::{fl, ControllerEvent, CONTROLLER_SENDER, ENGINE, ENGINE_INITIALIZED, SETTINGS},
+    crate::{engine_initialized, fl, ControllerEvent, CONTROLLER_SENDER, ENGINE, SETTINGS},
     bitflags::bitflags,
     nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::{
@@ -61,9 +61,9 @@ impl PathingWindowState {
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {
-                    if ENGINE_INITIALIZED.get() {
+                    if engine_initialized() {
                         ENGINE.with_borrow(|e| {
-                            if let Some(engine) = e {
+                            if let Some(Ok(engine)) = e {
                                 let root = &engine.packs.loaded_packs[0].categories.root_categories;
                                 let all_categories =
                                     &engine.packs.loaded_packs[0].categories.all_categories;
