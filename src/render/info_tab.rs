@@ -5,7 +5,7 @@ use {
 };
 
 #[cfg(feature = "space")]
-use crate::{ENGINE, ENGINE_INITIALIZED, TEXTURES};
+use crate::{engine_initialized, ENGINE, TEXTURES};
 
 pub struct InfoTabState {}
 
@@ -72,9 +72,9 @@ impl InfoTabState {
     pub fn space_info(&self, ui: &Ui) {
         RenderState::font_text("big", ui, &fl!("engine"));
         if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
-            if settings.enable_katrender && ENGINE_INITIALIZED.get() {
+            if settings.enable_katrender && engine_initialized() {
                 ENGINE.with_borrow(|e| {
-                    if let Some(engine) = e {
+                    if let Some(Ok(engine)) = e {
                         RenderState::font_text("ui", ui, &fl!("ecs-data"));
                         let entities = engine.world.entities();
                         let used_entities = entities.used_count();
