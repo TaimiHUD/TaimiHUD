@@ -289,8 +289,9 @@ impl Engine {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn cleanup(&self) {
-        todo!("Please clean up the engine when the program quits");
+    pub fn cleanup(&mut self) {
+        #[cfg(debug_assertions)] {
+            log::warn!("TODO: Please clean up the engine when the program quits");
+        }
     }
 }

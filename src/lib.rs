@@ -12,7 +12,10 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use space::{engine::SpaceEvent, resources::Texture, Engine};
+use {
+  space::{engine::SpaceEvent, resources::Texture, Engine},
+  std::sync::atomic::{AtomicBool, Ordering},
+};
 use {
     crate::{
         controller::{Controller, ControllerEvent},
@@ -131,9 +134,14 @@ static RENDER_STATE: OnceLock<Mutex<RenderState>> = OnceLock::new();
 static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
 #[cfg(feature = "space")]
+static ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "space")]
+pub fn engine_initialized() -> bool {
+    ENGINE_INITIALIZED.load(Ordering::SeqCst)
+}
+#[cfg(feature = "space")]
 thread_local! {
-    static ENGINE_INITIALIZED: Cell<bool> = const { Cell::new(false) };
-    static ENGINE: RefCell<Option<Engine>> = panic!("!");
+    static ENGINE: RefCell<Option<Result<Engine, ()>>> = RefCell::new(None);
 }
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
@@ -199,18 +207,18 @@ fn load() {
     let space_render = render!(|ui| {
         if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
             if settings.enable_katrender {
-                if !ENGINE_INITIALIZED.get() {
+                if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
                     let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
                     let _ = SPACE_SENDER.set(space_sender);
                     let drawstate_inner = Engine::initialise(ui, space_receiver);
                     if let Err(error) = &drawstate_inner {
                         log::error!("DrawState setup failed: {error:?}");
                     };
-                    ENGINE.set(drawstate_inner.ok());
-                    ENGINE_INITIALIZED.set(true);
+                    ENGINE.set(Some(drawstate_inner.map_err(drop)));
+                    ENGINE_INITIALIZED.store(true, Ordering::Release);
                 }
                 ENGINE.with_borrow_mut(|ds_op| {
-                    if let Some(ds) = ds_op {
+                    if let Some(Ok(ds)) = ds_op {
                         if let Err(error) = ds.render(ui) {
                             log::error!("Engine error: {error}");
                         }
@@ -490,16 +498,37 @@ fn reload_language() {
 
 fn unload() {
     log::info!("Unloading addon");
+
+    if let Some(sender) = CONTROLLER_SENDER.get() {
+        let _event_send = sender.try_send(ControllerEvent::Quit);
+    }
+
     #[cfg(feature = "space")]
-    let _ = ENGINE.set(None);
+    let is_render_thread = if engine_initialized() {
+        ENGINE.try_with(|e| match e.borrow_mut().take() {
+            None => {
+                log::warn!("unloading addon from a background thread, skipping engine cleanup");
+                false
+            },
+            Some(res) => {
+                if let Ok(mut engine) = res {
+                    engine.cleanup();
+                }
+                true
+            },
+        }).ok()
+    } else {
+        None
+    };
+
     #[cfg(feature = "space")]
-    let _ = TEXTURES.set(Default::default());
-    let _ = IMGUI_TEXTURES.set(Default::default());
-    /*ENGINE.with_borrow_mut(|e| {
-        //#[cfg(todo)]
-        //e.cleanup();
-    });*/
-    let sender = CONTROLLER_SENDER.get().unwrap();
-    let event_send = sender.try_send(ControllerEvent::Quit);
-    drop(event_send);
+    if is_render_thread == Some(true) {
+        if let Some(mut textures) = TEXTURES.get().and_then(|t| t.write().ok()) {
+            *textures = Default::default();
+        }
+    }
+
+    if let Some(mut textures) = IMGUI_TEXTURES.get().and_then(|t| t.write().ok()) {
+        *textures = Default::default();
+    }
 }
