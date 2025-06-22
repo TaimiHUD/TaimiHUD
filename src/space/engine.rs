@@ -295,7 +295,7 @@ impl Engine {
             log::error!("{e:?}");
         }
         self.packs.update();
-        if self.render_pathing {
+        if self.render_pathing && !pdata.map_open && pdata.is_gameplay {
             self.packs.draw(&pdata, &backend, &device_context);
         }
         Ok(())
