@@ -330,6 +330,12 @@ fn load() {
     let taimi_hover_icon = include_bytes!("../icons/taimi-hover.png");
     let markers_icon = include_bytes!("../icons/markers.png");
     let markers_hover_icon = include_bytes!("../icons/markers-hover.png");
+    let timers_icon = include_bytes!("../icons/timers.png");
+    let timers_hover_icon = include_bytes!("../icons/timers-hover.png");
+    let pathing_icon = include_bytes!("../icons/pathing.png");
+    let pathing_hover_icon = include_bytes!("../icons/pathing-hover.png");
+    let pathing_toggle_icon = include_bytes!("../icons/pathing-toggle.png");
+    let pathing_toggle_hover_icon = include_bytes!("../icons/pathing-toggle-hover.png");
 
     let receive_texture =
         texture_receive!(|id: &str, _texture: Option<&NexusTexture>| log::info!("texture {id} loaded"));
@@ -338,6 +344,12 @@ fn load() {
     load_texture_from_memory("TAIMI_ICON_HOVER", taimi_hover_icon, Some(receive_texture));
     load_texture_from_memory("TAIMI_MARKERS_ICON", markers_icon, Some(receive_texture));
     load_texture_from_memory("TAIMI_MARKERS_ICON_HOVER", markers_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON", timers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON_HOVER", timers_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_ICON", pathing_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_ICON_HOVER", pathing_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON", pathing_toggle_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON_HOVER", pathing_toggle_hover_icon, Some(receive_texture));
 
     let same_identifier = "TAIMI_BUTTON";
 
