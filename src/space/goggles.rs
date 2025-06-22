@@ -99,7 +99,7 @@ unsafe extern "system" fn taimi_set_targets(
                 //log::trace!("recognized as {lens:?}");
             },
             Ok(None) => {
-                log::debug!("unknown buffer, attempting classification...");
+                //log::debug!("unknown buffer, attempting classification...");
                 let mut viewports = [D3D11_VIEWPORT::default(); 4];
                 let mut count = viewports.len() as u32;
                 this.RSGetViewports(&mut count, Some(viewports.as_mut_ptr()));
@@ -116,14 +116,14 @@ unsafe extern "system" fn taimi_set_targets(
                     }
                     match &state {
                         Some(state) => {
-                            log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
-                            log::trace!("{desc_state:?}");
+                            //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
+                            //log::trace!("{desc_state:?}");
                             match desc_state.DepthEnable.0 != 0 {
                                 false if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO => {
                                     Some(LensClass::UI)
                                 },
                                 true if desc_state.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO => {
-                                    log::trace!("skipping for now (read-only bind)");
+                                    //log::trace!("skipping for now (read-only bind)");
                                     None
                                 },
                                 true if desc_state.DepthFunc == D3D11_COMPARISON_LESS => Some(match stencil_ref {
