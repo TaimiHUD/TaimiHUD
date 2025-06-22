@@ -1,7 +1,8 @@
 use std::{path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
+use anyhow::anyhow;
 use arcdps::Language;
-use nexus::{data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink}, gamebind::invoke_gamebind_async, localization::translate, paths, rtapi::RealTimeApi, texture::{load_texture_from_file, load_texture_from_memory, RawTextureReceiveCallback}};
-use crate::{exports::{self, runtime::RuntimeResult}, game_language_id as lang_id, load_nexus, marker::format::MarkerType, unload};
+use nexus::{data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink}, gamebind::invoke_gamebind_async, localization::translate, paths, rtapi::RealTimeApi, texture::{load_texture_from_file, load_texture_from_memory, Texture, RawTextureReceiveCallback}};
+use crate::{exports::{self, runtime::{textures, RuntimeResult}}, game_language_id as lang_id, load_nexus, marker::format::MarkerType, unload, TEXTURES};
 #[cfg(any(feature = "space", feature = "texture-loader"))]
 use nexus::AddonApi;
 #[cfg(feature = "space")]
@@ -133,23 +134,27 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<IDXGISwapChain>> {
     Ok(swap_chain.clone())
 }
 
-static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
-    let texture = match texture {
-        Some(t) => {
-            log::info!("Texture {id} loaded.");
-            t
-        },
-        None => {
-            log::warn!("Texture {id} failed to load");
-            return
-        },
-    };
+fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {
+    use windows::core::IUnknown;
 
-    let gooey = crate::IMGUI_TEXTURES.get().unwrap();
-    let mut gooey_lock = gooey.write().unwrap();
-    gooey_lock
-        .entry(id.into())
-        .or_insert(Arc::new(texture.clone()));
+    match texture {
+        Some(texture) => {
+            let srv = unsafe {
+                &*(ptr::addr_of!(texture.resource) as *const Option<IUnknown>)
+            };
+            match srv.is_some() {
+                true => Ok(texture.clone()),
+                false => Err(anyhow!("nexus produced an empty SRV")),
+            }
+        },
+        _ => {
+            Err(anyhow!("nexus could not load the texture"))
+        },
+    }
+}
+
+static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
+    TEXTURES.report_load(id, nexus_texture_ok(texture));
 });
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {

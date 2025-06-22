@@ -4,19 +4,18 @@ use {
     crate::{
         controller::ControllerEvent,
         fl,
-        load_texture_bytes, load_texture_path,
         marker::format::MarkerType,
         marker_icon_data,
         render::{MarkerWindowState, PrimaryWindowState, TimerWindowState},
         exports::runtime as rt,
         settings::ProgressBarSettings,
         timer::{PhaseState, TextAlert, TimerFile},
-        Controller, IMGUI_TEXTURES, RENDER_SENDER,
+        Controller, RENDER_SENDER, TEXTURES,
     },
     glam::Vec2,
     nexus::imgui::{
-        internal::RawCast, Condition, Font, Image, Io, PopupModal, StyleColor, Ui,
-        Window, WindowFlags,
+        internal::RawCast, Condition, Font, Image, Io, PopupModal, StyleColor,
+        Ui, Window, WindowFlags,
     },
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
@@ -102,6 +101,8 @@ impl RenderState {
     }
 
     pub fn draw(&mut self, ui: &Ui) {
+        IS_RENDER_THREAD.set(true);
+
         let io = ui.io();
         if let Some(last_display_size) = self.last_display_size {
             if io.display_size != last_display_size {
@@ -212,19 +213,22 @@ impl RenderState {
         }
     }
     pub fn marker_icon(ui: &Ui, height: Option<f32>, marker: &MarkerType) {
-        let gooey = IMGUI_TEXTURES.get().unwrap();
-        if let Some(icon) = gooey.read().unwrap().get(&marker.to_string()) {
-            let size = match height {
-                Some(height) => [height, height],
-                None => icon.size(),
-            };
-            Image::new(icon.id(), size).build(ui);
-            ui.same_line();
-            return
-        }
-        if let Some(data) = marker_icon_data(marker.clone()) {
-            load_texture_bytes(marker.to_string(), data);
-        }
+        let key = marker.to_string();
+        let icon = match TEXTURES.lookup_imgui(&key) {
+            Some(t) => t,
+            None => {
+                if let Some(data) = marker_icon_data(*marker) {
+                    crate::texture_schedule_bytes(key, data);
+                }
+                None
+            },
+        }.unwrap_or_default();
+        let size = match height {
+            Some(height) => [height, height],
+            None => icon.size,
+        };
+        Image::new(icon.id, size).build(ui);
+        ui.same_line();
     }
 
     pub fn icon(
@@ -233,23 +237,26 @@ impl RenderState {
         alert_icon: Option<&RelativePathBuf>,
         path: Option<&PathBuf>,
     ) {
-        if let Some(icon) = alert_icon {
-            if let Some(path) = path {
-                let gooey = IMGUI_TEXTURES.get().unwrap();
-                let path_str = icon.as_str();
-                if let Some(icon) = gooey.read().unwrap().get(path_str) {
-                    //if let Some(icon) = get_texture(icon.as_str()) {
-                    let size = match height {
-                        Some(height) => [height, height],
-                        None => icon.size(),
-                    };
-                    Image::new(icon.id(), size).build(ui);
-                    ui.same_line();
-                    return
-                }
-                load_texture_path(icon.clone(), path.clone());
-            }
+        let icon = match alert_icon {
+            Some(icon) => icon,
+            None => return,
         };
+        let key = icon.as_str();
+        let icon = match TEXTURES.lookup_imgui(&key) {
+            Some(t) => t,
+            None => {
+                if let Some(path) = path {
+                    crate::texture_schedule_path(icon, path);
+                }
+                None
+            },
+        }.unwrap_or_default();
+        let size = match height {
+            Some(height) => [height, height],
+            None => icon.size,
+        };
+        Image::new(icon.id, size).build(ui);
+        ui.same_line();
     }
     pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Debug>(
         state_errors: &mut HashMap<String, anyhow::Error>,
@@ -421,6 +428,10 @@ impl RenderState {
     pub fn render_ui(ui: &Ui) {
         IS_RENDER_THREAD.set(true);
         let is_running = Self::is_running();
+
+        if is_running {
+            crate::process_textures();
+        }
 
         let mut lock = Self::lock();
         match &mut *lock {

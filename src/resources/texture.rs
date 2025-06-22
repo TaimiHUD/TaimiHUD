@@ -1,5 +1,4 @@
 use {
-    crate::TEXTURES,
     anyhow::{anyhow, Context as _},
     std::{fmt, path::Path, sync::Arc},
     nexus::texture::Texture as NexusTexture,
@@ -13,14 +12,14 @@ use {
             D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
         },
         Dxgi::Common::{
-            DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
+            DXGI_FORMAT, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
         },
     },
 };
 #[cfg(feature = "image")]
 use image::{ImageReader, FlatSamples};
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Texture {
     pub texture: ID3D11Texture2D,
     pub dimensions: [u32; 2],
@@ -28,20 +27,27 @@ pub struct Texture {
 }
 
 impl Texture {
+    #[deprecated = "crate::texture_schedule_path"]
     pub fn load(device: &ID3D11Device, path: &Path) -> anyhow::Result<Arc<Self>> {
-        let tex_store = TEXTURES.get().unwrap();
-        let tex_lock = tex_store.read().unwrap();
-        if tex_lock.contains_key(path) {
-            log::debug!("Deduplicated {path:?}!");
-            Ok(tex_lock[path].clone())
+        use crate::TEXTURES;
+        let key = path.to_string_lossy();
+
+        if let Some(texture) = TEXTURES.lookup_resource(&key) {
+            match texture {
+                Some(texture) => {
+                    log::debug!("deprecated texture interface used for {path:?}");
+                    Ok(texture)
+                },
+                None => {
+                    Err(anyhow!("texture {path:?} isn't done loading"))
+                },
+            }
         } else {
-            log::debug!("Un-deduplicated {path:?}!");
-            drop(tex_lock);
             let texture = Self::new_path(device, path)?;
-            let tarc = Arc::new(texture);
-            let mut tex_write = tex_store.write().unwrap();
-            tex_write.insert(path.to_path_buf(), tarc.clone());
-            Ok(tarc.clone())
+            let mut textures = TEXTURES.textures.blocking_write();
+            let texture = Arc::new(texture);
+            textures.insert(key.into(), texture.clone().into());
+            Ok(texture)
         }
     }
 
@@ -153,6 +159,20 @@ impl Texture {
         dimensions: [u32; 2],
         stride: usize,
     ) -> anyhow::Result<Texture> {
+        // TODO: Is sRGB correct?
+        debug_assert!(stride >= dimensions[0] as usize * 4);
+        unsafe {
+            Self::new_raw(device, image, dimensions, stride, DXGI_FORMAT_R8G8B8A8_UNORM)
+        }
+    }
+
+    pub unsafe fn new_raw(
+        device: &ID3D11Device,
+        image: &[u8],
+        dimensions: [u32; 2],
+        stride: usize,
+        format: DXGI_FORMAT,
+    ) -> anyhow::Result<Texture> {
         let [width, height] = dimensions;
         debug_assert!(image.len() >= height as usize * stride);
         let texture = {
@@ -161,7 +181,7 @@ impl Texture {
                 Height: height,
                 MipLevels: 1,
                 ArraySize: 1,
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM, // TODO: Is sRGB correct?
+                Format: format,
                 SampleDesc: DXGI_SAMPLE_DESC {
                     Count: 1,
                     Quality: 0,
