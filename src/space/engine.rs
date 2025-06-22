@@ -6,20 +6,16 @@ use {
         render_list::{MapFrustum, RenderList},
     },
     crate::{
-        marker::atomic::MarkerInputData,
-        space::{
-            pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail},
-            resources::ObjFile,
-            max_depth,
-        },
-        timer::{PhaseState, RotationType, TimerFile, TimerMarker},
+        controller::ControllerEvent, marker::atomic::MarkerInputData, space::{
+            max_depth, pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail}, resources::ObjFile
+        }, timer::{PhaseState, RotationType, TimerFile, TimerMarker}, Controller
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::{Mat4, Vec3, Vec3Swizzles},
     itertools::Itertools,
     nexus::{imgui::Ui, paths::get_addon_dir},
-    std::{collections::HashMap, path::PathBuf, sync::Arc},
+    std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 
@@ -49,6 +45,8 @@ struct MarkerBundle {
 pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
+    PathingToggle,
+    DisabledPaths(HashSet<String>),
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -79,6 +77,7 @@ pub struct Engine {
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
+    pub render_pathing: bool,
 
     schedule: Schedule,
 
@@ -121,6 +120,7 @@ impl Engine {
             .context("Loading pathing packs")?;
 
         let mut engine = Engine {
+            render_pathing: true,
             model_files,
             receiver,
             render_backend,
@@ -131,6 +131,8 @@ impl Engine {
             phase_states: Default::default(),
             packs,
         };
+
+        Controller::try_send(ControllerEvent::RequestDisabledPaths);
 
         if let Some(backing) = engine.object_kinds.get("Cat") {
             engine.world.spawn((
@@ -211,6 +213,12 @@ impl Engine {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
+                    DisabledPaths(disabled_paths) => {
+                        self.packs.disable_paths(disabled_paths);
+                    }
+                    PathingToggle => {
+                        self.render_pathing = !self.render_pathing;
+                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
@@ -287,7 +295,9 @@ impl Engine {
             log::error!("{e:?}");
         }
         self.packs.update();
-        self.packs.draw(&pdata, &backend, &device_context);
+        if self.render_pathing {
+            self.packs.draw(&pdata, &backend, &device_context);
+        }
         Ok(())
     }
 

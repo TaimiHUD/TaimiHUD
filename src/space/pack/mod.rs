@@ -14,7 +14,7 @@ use {
     loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
     poi::{ActivePoi, PoiCommonRenderData},
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         fs::read_dir,
         io::{Cursor, Read as _},
         path::Path,
@@ -51,6 +51,12 @@ impl PackCollection {
             render_list: RenderListBuilder::default().build(),
             poi_common,
         })
+    }
+
+    pub fn disable_paths(&mut self, disabled_paths: HashSet<String>) {
+        for (_pn, pack) in &mut self.loaded_packs {
+            pack.disable_paths(&disabled_paths);
+        }
     }
 
     pub fn clear(&mut self) {
@@ -230,6 +236,17 @@ impl Pack {
         pack.loader = Some(Box::new(loader));
 
         Ok(pack)
+    }
+
+    pub fn disable_paths(&mut self, paths: &HashSet<String>) {
+        for path in paths {
+            if let Some(idx) = self.categories.all_categories.get_index_of(path) {
+                if let Some(mut state) = self.user_category_state.get_mut(idx) {
+                    *state = false;
+                }
+            }
+        }
+        self.recompute_enabled();
     }
 
     pub fn recompute_enabled(&mut self) {

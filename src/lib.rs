@@ -279,6 +279,19 @@ fn load() {
     )
     .revert_on_unload();
 
+    let pathing_render_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            Engine::try_send(SpaceEvent::PathingToggle);
+        }
+    });
+
+    register_keybind_with_string(
+        fl!("pathing-render-toggle"),
+        pathing_render_keybind_handler,
+        "ALT+SHIFT+N",
+    )
+    .revert_on_unload();
+
     let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
         Controller::try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
     });
@@ -314,6 +327,38 @@ fn load() {
         fl!("primary-window-toggle-text"),
     )
     .revert_on_unload();
+    add_quick_access(
+        "TAIMI_PATHING_BUTTON",
+        "TAIMI_PATHING_ICON",
+        "TAIMI_PATHING_ICON_HOVER",
+        fl!("pathing-window-toggle"),
+        fl!("pathing-window-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_PATHING_RENDER_BUTTON",
+        "TAIMI_PATHING_RENDER_ICON",
+        "TAIMI_PATHING_RENDER_ICON_HOVER",
+        fl!("pathing-render-toggle"),
+        fl!("pathing-render-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_TIMER_BUTTON",
+        "TAIMI_TIMERS_ICON",
+        "TAIMI_TIMERS_ICON_HOVER",
+        fl!("timer-window-toggle"),
+        fl!("timer-window-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_MARKERS_BUTTON",
+        "TAIMI_MARKERS_ICON",
+        "TAIMI_MARKERS_ICON_HOVER",
+        fl!("marker-window-toggle"),
+        fl!("marker-window-toggle"),
+    )
+    .revert_on_unload();
 
     add_quick_access_context_menu(
         "TAIMI_MENU",
@@ -322,6 +367,10 @@ fn load() {
         render!(|ui| {
             if ui.button(fl!("timer-window")) {
                 Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
+            }
+            #[cfg(feature = "space")]
+            if ui.button(fl!("pathing-render-toggle")) {
+                Engine::try_send(SpaceEvent::PathingToggle);
             }
             #[cfg(feature = "space")]
             if ui.button(fl!("pathing-window")) {

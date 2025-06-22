@@ -1191,10 +1191,33 @@ impl Controller {
         load_texture_from_memory(identifier, &data, Some(cally));
     }
 
+    #[cfg(feature = "space")]
+    async fn pathing_state_update(&mut self, path: String, state: bool) {
+        let mut settings_lock = self.settings.write().await;
+        settings_lock.pathing_state_update(path, state).await;
+        drop(settings_lock);
+
+    }
+    #[cfg(feature = "space")]
+    async fn provide_disabled_paths(&self) {
+        use crate::space::engine::{Engine, SpaceEvent};
+
+        let settings_lock = self.settings.read().await;
+        let disabled_paths = settings_lock.disabled_paths.clone();
+        drop(settings_lock);
+        if let Some(sender) = Engine::sender() {
+            let _event_send = sender.send(SpaceEvent::DisabledPaths(disabled_paths)).await;
+        }
+    }
+
     async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
         use ControllerEvent::*;
         log::debug!("Controller received event: {}", event);
         match event {
+            #[cfg(feature = "space")]
+            RequestDisabledPaths => self.provide_disabled_paths().await,
+            #[cfg(feature = "space")]
+            PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             #[cfg(feature = "markers")]
             ClearSpentAutoplace => self.clear_spent_autoplace().await,
             #[cfg(feature = "markers")]
@@ -1301,6 +1324,10 @@ pub enum SquadState {
 
 #[derive(Debug, Clone, Display)]
 pub enum ControllerEvent {
+    #[cfg(feature = "space")]
+    RequestDisabledPaths,
+    #[cfg(feature = "space")]
+    PathingStateUpdate(String, bool),
     #[cfg(feature = "markers")]
     ClearSpentAutoplace,
     #[cfg(feature = "markers")]
