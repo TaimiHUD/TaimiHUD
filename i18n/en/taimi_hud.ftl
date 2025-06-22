@@ -216,3 +216,11 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
+filter-options = Filter Options
+searchbar-clear = Clear the search bar and results.
+show-filter = Show filter options
+hide-filter = Hide filter options
+ignore-root = Ignore root state
+ignore-leaf = Ignore leaf state
+ignore-branch = Ignore branch state
+toggle = Toggle
