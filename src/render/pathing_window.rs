@@ -38,11 +38,18 @@ impl PathingFilterState {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct PathingSearchState {
+    pub buffer: String,
+    pub search_candidates: HashSet<String>,
+}
+
 pub struct PathingWindowState {
     pub open: bool,
     pub filter_open: bool,
     pub filter_state: PathingFilterState,
     pub open_items: HashSet<String>,
+    pub search_state: PathingSearchState,
 }
 
 impl PathingWindowState {
@@ -52,6 +59,7 @@ impl PathingWindowState {
             filter_open: false,
             filter_state: Default::default(),
             open_items: Default::default(),
+            search_state: Default::default(),
         }
     }
 
@@ -97,8 +105,24 @@ impl PathingWindowState {
                                     }
                                         if self.filter_open {
                                             ui.separator();
-                                            let mut throwaway = "".to_string();
-                                            ui.input_text("Search", &mut throwaway).build();
+                                            if ui.input_text("Search", &mut self.search_state.buffer).build() {
+                                                self.search_state.search_candidates.clear();
+                                                if !self.search_state.buffer.is_empty() {
+                                                    for (_s, pack) in &engine.packs.loaded_packs {
+                                                        for (full_id, category) in pack.categories.all_categories.iter() {
+                                                            if category.display_name.contains(&self.search_state.buffer) {
+                                                                self.search_state.search_candidates.insert(full_id.to_string());
+                                                                let separators: Vec<_> = full_id.rmatch_indices(".").collect();
+                                                                for (idx, _eu) in separators {
+                                                                    let sub_id = &full_id[..idx];
+                                                                    self.search_state.search_candidates.insert(sub_id.to_string());
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    log::info!("Search: {:?}", self.search_state.search_candidates);
+                                                }
+                                            }
                                             ui.dummy([4.0; 2]);
                                             ui.text("Filter Options");
                                             for filter in filter_options {
@@ -145,7 +169,8 @@ impl PathingWindowState {
                                                 self.filter_state,
                                                 &mut self.open_items,
                                                 true,
-                                                &mut recompute
+                                                &mut recompute,
+                                                &self.search_state
                                             );
                                         }
                                         if recompute {
