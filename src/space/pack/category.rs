@@ -2,14 +2,10 @@ use {
     super::{
         attributes::{parse_bool, MarkerAttributes},
         taco_safe_name, Pack, PartialItem,
-    },
-    crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState},
-    indexmap::IndexMap,
-    nexus::imgui::{Condition, TreeNode, Ui},
-    std::{
+    }, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
-    },
+    }
 };
 
 pub struct Category {
@@ -85,6 +81,20 @@ impl Category {
         })
     }
 
+    pub fn recompute_enabled(&self, all_categories: &IndexMap<String, Category>, enabled_categories: &mut BitVec, user_category_state: &BitVec, parent: bool) {
+        if let Some(idx) = all_categories.get_index_of(&self.full_id) {
+            if let Some(cur) = user_category_state.get(idx) {
+                let res = parent && *cur;
+                if let Some(mut cat) = enabled_categories.get_mut(idx) {
+                    *cat = res;
+                }
+                for (_local, global) in self.sub_categories.iter() {
+                    all_categories[global].recompute_enabled(all_categories, enabled_categories, user_category_state, res);
+                }
+            }
+        }
+    }
+
     pub fn attain_state(
         &self,
         all_categories: &IndexMap<String, Category>,
@@ -98,24 +108,24 @@ impl Category {
         }
     }
 
-    pub fn draw(
-        &self,
-        ui: &Ui,
-        all_categories: &IndexMap<String, Category>,
-        state: &mut HashMap<String, bool>,
-        filter_state: PathingFilterState,
-        open_items: &mut HashSet<String>,
-    ) {
+    pub fn draw(&self, ui: &Ui, all_categories: &IndexMap<String, Category>, state: &mut BitVec, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool) {
         let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
             push_token.pop();
             return;
         }
         let mut display = true;
-        if let Some(substate) = state.get(&self.full_id) {
-            let enabled = *substate && filter_state.contains(PathingFilterState::Enabled);
-            let disabled = !*substate && filter_state.contains(PathingFilterState::Disabled);
-            display = enabled | disabled;
+        if let Some(idx) = all_categories.get_index_of(&self.full_id) {
+            if let Some(substate) = state.get(idx) {
+                let enabled_filter = *substate && filter_state.contains(PathingFilterState::Enabled);
+                let disabled_filter = !*substate && filter_state.contains(PathingFilterState::Disabled);
+                let is_root_filter = is_root && filter_state.contains(PathingFilterState::IgnoreRoot);
+                let is_leaf = self.sub_categories.is_empty();
+                let is_branch = !is_leaf;
+                let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
+                let is_branch_filter = is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
+                display = enabled_filter | disabled_filter | is_root_filter | is_leaf_filter | is_branch_filter;
+            }
         }
         if display {
             let mut unbuilt = TreeNode::new(&self.display_name)
@@ -132,8 +142,12 @@ impl Category {
             let tree_token = unbuilt.push(ui);
             ui.table_next_column();
             if !self.is_separator {
-                if let Some(substate) = state.get_mut(&self.full_id) {
-                    ui.checkbox("", substate);
+                if let Some(idx) = all_categories.get_index_of(&self.full_id) {
+                    if let Some(mut substate) = state.get_mut(idx) {
+                        if ui.checkbox("", &mut substate) {
+                            *recompute = true;
+                        };
+                    }
                 }
             }
             let mut internal_closure = || {
@@ -144,13 +158,7 @@ impl Category {
                     ui.indent(); //_by(1.0);
                 }
                 for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].draw(
-                        ui,
-                        all_categories,
-                        state,
-                        filter_state,
-                        open_items,
-                    );
+                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items, false, recompute);
                 }
                 if !self.sub_categories.is_empty() {
                     ui.unindent(); //_by(1.0);
