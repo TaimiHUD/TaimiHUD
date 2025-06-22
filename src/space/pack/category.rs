@@ -2,7 +2,7 @@ use {
     super::{
         attributes::{parse_bool, MarkerAttributes},
         taco_safe_name, Pack, PartialItem,
-    }, crate::{controller::{ControllerEvent, Controller}, marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
+    }, crate::{controller::{ControllerEvent, Controller}, marker::atomic::MarkerInputData, render::pathing_window::{PathingFilterState, PathingSearchState}}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     }
@@ -108,7 +108,7 @@ impl Category {
         }
     }
 
-    pub fn draw(&self, ui: &Ui, all_categories: &IndexMap<String, Category>, state: &mut BitVec, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool) {
+    pub fn draw(&self, ui: &Ui, all_categories: &IndexMap<String, Category>, state: &mut BitVec, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
         let push_token = ui.push_id(&self.full_id);
         if self.is_hidden {
             push_token.pop();
@@ -124,7 +124,12 @@ impl Category {
                 let is_branch = !is_leaf;
                 let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
                 let is_branch_filter = is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
-                display = enabled_filter | disabled_filter | is_root_filter | is_leaf_filter | is_branch_filter;
+                let search_filter = if !search_state.buffer.is_empty() {
+                    search_state.search_candidates.contains(&self.full_id)
+                } else {
+                    true
+                };
+                display = search_filter && (enabled_filter || disabled_filter || is_root_filter || is_leaf_filter || is_branch_filter);
             }
         }
         if display {
@@ -159,7 +164,7 @@ impl Category {
                     ui.indent(); //_by(1.0);
                 }
                 for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items, false, recompute);
+                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items, false, recompute, search_state);
                 }
                 if !self.sub_categories.is_empty() {
                     ui.unindent(); //_by(1.0);
