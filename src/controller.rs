@@ -101,6 +101,8 @@ pub struct Controller {
     settings: SettingsLock,
     last_fov: f32,
     scaling: f32,
+    last_map_open: bool,
+    last_is_gameplay: bool,
 }
 
 impl Controller {
@@ -149,6 +151,8 @@ impl Controller {
                 current_timers: Default::default(),
                 sources_to_timers: Default::default(),
                 map_id_to_timers: Default::default(),
+                last_map_open: false,
+                last_is_gameplay: false,
                 scaling: 0.0f32,
             };
             let _ = SETTINGS.set(state.settings.clone());
@@ -367,6 +371,15 @@ impl Controller {
     }
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
+        #[cfg(feature = "space")]
+        {
+            if let Some(nexus_link) = read_nexus_link() {
+                if nexus_link.is_gameplay != self.last_is_gameplay {
+                    PerspectiveInputData::swap_is_gameplay(nexus_link.is_gameplay);
+                    self.last_is_gameplay = nexus_link.is_gameplay;
+                }
+            }
+        }
         if let Some(mumble) = self.mumble_pointer {
             let playpos = Vec3::from_array(mumble.read_avatar().position);
             #[cfg(feature = "space")]
@@ -375,6 +388,12 @@ impl Controller {
                 let front = Vec3::from_array(camera.front);
                 let pos = Vec3::from_array(camera.position);
                 PerspectiveInputData::swap_camera(front, pos, playpos);
+                let ui_state = mumble.read_ui_state();
+                let map_open = ui_state.contains(UiState::IS_MAP_OPEN);
+                if map_open != self.last_map_open {
+                    PerspectiveInputData::swap_map_open(map_open);
+                    self.last_map_open = map_open;
+                }
             }
             #[cfg(feature = "markers")]
             {
@@ -395,10 +414,10 @@ impl Controller {
                 }
                 if let Some(nexus_link) = read_nexus_link() {
                     let scaling = nexus_link.scaling;
-                    if self.scaling != scaling {
-                        MarkerInputData::from_nexus(scaling);
-                        self.scaling = scaling;
-                    }
+                        if self.scaling != scaling {
+                            MarkerInputData::from_nexus(scaling);
+                            self.scaling = scaling;
+                        }
                 }
                 let ui_state = mumble.read_ui_state();
                 let global_player_pos = Vec2::from(mumble.read_player_position());
