@@ -39,20 +39,12 @@ use {
             event_consume,
             extras::{SquadUpdate, EXTRAS_SQUAD_UPDATE},
             Event, MumbleIdentityUpdate, MUMBLE_IDENTITY_UPDATED,
-        },
-        gui::{register_render, render, RenderType},
-        keybind::{keybind_handler, register_keybind_with_string},
-        localization::translate,
-        paths::get_addon_dir,
-        quick_access::{add_quick_access, add_quick_access_context_menu},
-        rtapi::{
+        }, gui::{register_render, render, RenderType}, keybind::{keybind_handler, register_keybind_with_string}, localization::translate, paths::get_addon_dir, quick_access::{add_quick_access, add_quick_access_context_menu}, rtapi::{
             event::{
                 RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
             },
             GroupMember, GroupMemberOwned,
-        },
-        texture::Texture as NexusTexture,
-        AddonFlags, UpdateProvider,
+        }, texture::{load_texture_from_memory, Texture as NexusTexture}, texture_receive, AddonFlags, UpdateProvider
     },
     rust_embed::RustEmbed,
     settings::SourcesFile,
@@ -307,8 +299,6 @@ fn load() {
 
     // Disused currently, icon loading for quick access
     /*
-    let receive_texture =
-        texture_receive!(|id: &str, _texture: Option<&Texture>| log::info!("texture {id} loaded"));
     load_texture_from_file("Taimi_ICON", addon_dir.join("icon.png"), Some(receive_texture));
     load_texture_from_file(
         "Taimi_ICON_HOVER",
@@ -316,6 +306,19 @@ fn load() {
         Some(receive_texture),
     );
     */
+
+    let taimi_icon = include_bytes!("../icons/taimi.png");
+    let taimi_hover_icon = include_bytes!("../icons/taimi-hover.png");
+    let markers_icon = include_bytes!("../icons/markers.png");
+    let markers_hover_icon = include_bytes!("../icons/markers-hover.png");
+
+    let receive_texture =
+        texture_receive!(|id: &str, _texture: Option<&NexusTexture>| log::info!("texture {id} loaded"));
+
+    load_texture_from_memory("TAIMI_ICON", taimi_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_ICON_HOVER", taimi_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON", markers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON_HOVER", markers_hover_icon, Some(receive_texture));
 
     let same_identifier = "TAIMI_BUTTON";
 
