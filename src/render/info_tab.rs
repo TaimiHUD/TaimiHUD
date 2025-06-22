@@ -115,9 +115,9 @@ impl InfoTabState {
                         drop(table_token);
                     }
                 });
-                let tex_store = TEXTURES.get().unwrap();
-                let tex_lock = tex_store.read().unwrap();
-                ui.text(&fl!("textures", count = tex_lock.keys().len()));
+                if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
+                    ui.text(&fl!("textures", count = tex_count));
+                }
             }
         }
     }

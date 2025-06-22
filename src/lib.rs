@@ -45,13 +45,11 @@ use {
         rtapi::{
             GroupMember, GroupMemberOwned,
         },
-        texture::Texture as NexusTexture,
     },
     relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
-        collections::HashMap,
         ffi::{c_char, CStr},
         ptr,
         sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
@@ -68,7 +66,7 @@ use nexus::{
         extras::EXTRAS_SQUAD_UPDATE,
         Event, MUMBLE_IDENTITY_UPDATED,
     },
-    texture::{load_texture_from_memory, texture_receive},
+    texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
     gui::{register_render, render, RenderType},
     keybind::{keybind_handler, register_keybind_with_string},
     quick_access::{add_quick_access, add_quick_access_context_menu},
@@ -123,9 +121,7 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
-#[cfg(feature = "texture-loader")]
-static TEXTURES: OnceLock<RwLock<HashMap<PathBuf, Arc<resources::Texture>>>> = OnceLock::new();
-static IMGUI_TEXTURES: OnceLock<RwLock<HashMap<String, Arc<NexusTexture>>>> = OnceLock::new();
+static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
 static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
 #[cfg(feature = "extension-nexus")]
@@ -211,9 +207,6 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
 }
 
 fn init() -> Result<(), &'static str> {
-    let _ = IMGUI_TEXTURES.set(RwLock::new(HashMap::new()));
-    #[cfg(feature = "space")]
-    let _ = TEXTURES.set(RwLock::new(HashMap::new()));
     // Say hi to the world :o
     let name = env!("CARGO_PKG_NAME");
     let authors = env!("CARGO_PKG_AUTHORS");
@@ -223,6 +216,11 @@ fn init() -> Result<(), &'static str> {
     let addon_dir = rt::addon_dir()?;
 
     rt::reload_language()?;
+
+    #[cfg(feature = "texture-loader")] {
+        TEXTURES.setup();
+        TEXTURES.wait_for_startup();
+    }
 
     let (controller_sender, controller_receiver) = channel::<ControllerEvent>(32);
     let (render_sender, render_receiver) = channel::<RenderEvent>(32);
@@ -651,84 +649,80 @@ fn receive_squad_update<'u>(update: impl IntoIterator<Item = &'u UserInfo>) {
     Controller::try_send(event);
 }
 
-fn load_texture_bytes<K, B>(key: K, bytes: B) where
-    K: AsRef<str> + Into<String>,
-    B: AsRef<[u8]> + Into<Vec<u8>>,
-{
+fn process_textures() {
     #[cfg(feature = "texture-loader")]
-    match rt::d3d11_device() {
-        Ok(Some(d3d11)) => {
-            match resources::Texture::new_bytes(&d3d11, bytes.as_ref(), key.as_ref()) {
-                Ok(texture) => {
-                    let mut gooey_lock = IMGUI_TEXTURES.get().unwrap().write().unwrap();
-                    if let Some(texture) = texture.to_nexus() {
-                        gooey_lock.entry(key.into())
-                            .or_insert(Arc::new(texture));
-                    }
-                    return
+    let res = TEXTURES.try_responses(|mut responses| -> anyhow::Result<()> {
+        use {
+            anyhow::anyhow,
+            rt::textures::{TextureResponse, Texture},
+            tokio::sync::mpsc::error::TryRecvError,
+        };
+        let mut device = None;
+
+        loop {
+            let response = match responses.try_recv() {
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => Err(anyhow!("texture loader shut down?")),
+                Ok(response) => Ok(response),
+            }?;
+            match response {
+                TextureResponse::Decoded { key, format, pixels, stride, dimensions } => {
+                    let device = match &mut device {
+                        Some(d) => d,
+                        device => {
+                            let d3d11 = rt::d3d11_device()
+                                .map_err(|e| anyhow!("failed to get d3d11 device: {e}"))
+                                .and_then(|d| d.ok_or_else(|| anyhow!("d3d11 device required to load textures")))?;
+                            device.insert(d3d11)
+                        },
+                    };
+                    let texture = unsafe {
+                        Texture::new_raw(device, &pixels, dimensions, stride, format)
+                    };
+                    TEXTURES.report_load(key, texture);
                 },
-                Err(e) => {
-                    log::warn!(target:"texture-loader", "failed to load {}: {e}", key.as_ref());
+                TextureResponse::DecodeFailed { key, error } => {
+                    log::error!("texture {key} failed to decode: {error}");
+                    TEXTURES.report_failure(key);
+                },
+                TextureResponse::LoopExit { id } => {
+                    log::warn!("texture loader {id:?} exited?");
+                },
+                TextureResponse::LoopEnter { id } => {
+                    log::info!("texture loader {id:?} started");
                 },
             }
-        },
-        Err(e) => {
-            log::info!(target:"texture-loader", "D3D11 unavailable? {e}");
-        },
-        _ => (),
-    }
+        }
 
-    texture_schedule_bytes(key, bytes)
-}
-
-fn load_texture_path(rel: RelativePathBuf, path: PathBuf) {
-    // TODO: if load fails, mark it in hashmap to avoid repeately attempting load
-    // (regardless of load method, resources::texture or nexus or otherwise)
-
+        Ok(())
+    }).and_then(|res| res.transpose());
     #[cfg(feature = "texture-loader")]
-    match rt::d3d11_device() {
-        Ok(Some(d3d11)) => {
-            if let Some(base) = path.parent() {
-                let abs = rel.to_path(base);
-                match resources::Texture::new_path(&d3d11, &abs) {
-                    Ok(texture) => {
-                        let mut gooey_lock = IMGUI_TEXTURES.get().unwrap().write().unwrap();
-                        if let Some(texture) = texture.to_nexus() {
-                            gooey_lock.entry(rel.into())
-                                .or_insert(Arc::new(texture));
-                        }
-                        return
-                    },
-                    Err(e) => {
-                        log::warn!(target:"texture-loader", "failed to load {abs:?}: {e}");
-                    },
-                }
-            }
-        },
+    match res {
         Err(e) => {
-            log::info!(target:"texture-loader", "D3D11 unavailable? {e}");
+            log::error!("texture processing error: {e}");
         },
-        _ => (),
+        Ok(..) => (),
     }
-
-    texture_schedule_path(rel, path)
 }
 
 fn texture_schedule_bytes<K, B>(key: K, bytes: B) where
-    K: AsRef<str> + Into<String>,
-    B: AsRef<[u8]> + Into<Vec<u8>>,
+    K: Into<String>,
+    B: Into<Vec<u8>>,
 {
     let event = ControllerEvent::LoadTextureIntegrated(
-            key.into(),
-            bytes.into(),
+        key.into(),
+        bytes.into(),
     );
     Controller::try_send(event);
 }
 
-fn texture_schedule_path(rel: RelativePathBuf, path: PathBuf) {
+fn texture_schedule_path<R, P>(rel: R, path: P) where
+    R: Into<RelativePathBuf>,
+    P: Into<PathBuf>,
+{
     let event = ControllerEvent::LoadTexture(
-            rel,
-            path,
+        rel.into(),
+        path.into(),
     );
     Controller::try_send(event);
 }
@@ -800,6 +794,10 @@ fn unload() {
         }
     }
 
+    if let Err(e) = TEXTURES.wait_for_shutdown() {
+        log::error!("failed to shut down texture loader: {e}");
+    }
+
     match controller_quit {
         Some(Ok(())) => match controller_handle {
             Some(handle) => {
@@ -827,6 +825,8 @@ fn unload_render() {
     log::info!("Renderer unloading");
     debug_assert!(RenderState::is_render_thread());
 
+    TEXTURES.cleanup(true);
+
     #[cfg(feature = "space")]
     if engine_initialized() {
         log::debug!("unloading space engine");
@@ -851,6 +851,8 @@ fn unload_render_background() {
     {
         ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
     }
+
+    TEXTURES.cleanup(false);
 
     return
 }

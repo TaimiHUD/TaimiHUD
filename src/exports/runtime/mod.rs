@@ -2,6 +2,9 @@ use std::{path::{Path, PathBuf}, ptr::NonNull};
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
 
+pub mod textures;
+pub use self::textures::TextureLoader;
+
 pub type RuntimeError = &'static str;
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
 pub const RT_UNAVAILABLE: RuntimeError = "extension runtime unavailable";
