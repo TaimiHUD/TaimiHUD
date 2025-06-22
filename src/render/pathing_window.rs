@@ -1,11 +1,8 @@
 use {
-    crate::{engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS},
-    bitflags::bitflags,
-    nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
-    std::{
+    crate::{engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
-    },
+    }
 };
 
 bitflags! {
@@ -28,11 +25,11 @@ impl Default for PathingFilterState {
 impl PathingFilterState {
     pub fn filter_string_to_flag(str: &str) -> Self {
         match str {
-            "Enabled" => Self::Enabled,
-            "Disabled" => Self::Disabled,
-            "Ignore root state" => Self::IgnoreRoot,
-            "Ignore leaf state" => Self::IgnoreLeaves,
-            "Ignore branch state" => Self::IgnoreBranches,
+            "enabled" => Self::Enabled,
+            "disabled" => Self::Disabled,
+            "ignore-root" => Self::IgnoreRoot,
+            "ignore-leaf" => Self::IgnoreLeaves,
+            "ignore-branch" => Self::IgnoreBranches,
             _ => unreachable!("no"),
         }
     }
@@ -50,16 +47,24 @@ pub struct PathingWindowState {
     pub filter_state: PathingFilterState,
     pub open_items: HashSet<String>,
     pub search_state: PathingSearchState,
+    pub filter_options: IndexMap<String, String>,
 }
 
 impl PathingWindowState {
     pub fn new() -> Self {
+        let mut filter_options: IndexMap<String, String> = IndexMap::new();
+        filter_options.insert("enabled".to_string(),fl!("enabled"));
+        filter_options.insert("disabled".to_string(), fl!("disabled"));
+        filter_options.insert("ignore-root".to_string(), fl!("ignore-root"));
+        filter_options.insert("ignore-leaf".to_string(), fl!("ignore-leaf"));
+        filter_options.insert("ignore-branch".to_string(), fl!("ignore-branch"));
         Self {
             open: false,
             filter_open: false,
             filter_state: Default::default(),
             open_items: Default::default(),
             search_state: Default::default(),
+            filter_options,
         }
     }
 
@@ -76,16 +81,9 @@ impl PathingWindowState {
                     if engine_initialized() {
                         ENGINE.with_borrow_mut(|e| {
                             if let Some(Ok(engine)) = e {
-                                        let filter_options = vec![
-                                            "Enabled",
-                                            "Disabled",
-                                            "Ignore root state",
-                                            "Ignore leaf state",
-                                            "Ignore branch state",
-                                        ];
                                         let button_text = match self.filter_open {
-                                            true => "Hide filter options",
-                                            false => "Show filter options",
+                                            true => fl!("hide-filter"),
+                                            false => fl!("show-filter"),
                                         };
                                         if ui.button(button_text) {
                                             self.filter_open = !self.filter_open;
@@ -104,8 +102,15 @@ impl PathingWindowState {
                                         ui.dummy([4.0; 2]);
                                     }
                                         if self.filter_open {
+                                            let mut update_search = false;
                                             ui.separator();
-                                            if ui.input_text("Search", &mut self.search_state.buffer).build() {
+                                            let pushy = ui.push_id("pathing-search");
+                                            if ui.input_text("", &mut self.search_state.buffer)
+                                                .hint("Search")
+                                                .build() {
+                                                update_search = true;
+                                            }
+                                            if update_search {
                                                 self.search_state.search_candidates.clear();
                                                 if !self.search_state.buffer.is_empty() {
                                                     for (_s, pack) in &engine.packs.loaded_packs {
@@ -120,13 +125,21 @@ impl PathingWindowState {
                                                             }
                                                         }
                                                     }
-                                                    log::info!("Search: {:?}", self.search_state.search_candidates);
                                                 }
                                             }
+                                            ui.same_line();
+                                            if ui.button("X") {
+                                                self.search_state.buffer.clear();
+                                                self.search_state.search_candidates.clear();
+                                            }
+                                            if ui.is_item_hovered() {
+                                                ui.tooltip_text(fl!("searchbar-clear"));
+                                            }
+                                            pushy.pop();
                                             ui.dummy([4.0; 2]);
-                                            ui.text("Filter Options");
-                                            for filter in filter_options {
-                                                ui.checkbox_flags(filter, &mut self.filter_state, PathingFilterState::filter_string_to_flag(filter));
+                                            ui.text(fl!("filter-options"));
+                                            for (filter, filter_name) in &self.filter_options {
+                                                ui.checkbox_flags(filter_name, &mut self.filter_state, PathingFilterState::filter_string_to_flag(filter));
                                             }
                                             ui.dummy([4.0; 2]);
                                             ui.separator();
@@ -147,7 +160,7 @@ impl PathingWindowState {
                                                 user_id: Id::Str("name"),
                                             },
                                             TableColumnSetup {
-                                                name: &fl!("actions"),
+                                                name: &fl!("toggle"),
                                                 flags: TableColumnFlags::WIDTH_FIXED,
                                                 init_width_or_weight: 0.0,
                                                 user_id: Id::Str("actions"),
