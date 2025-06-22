@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Context};
-use crate::space::goggles::{self, LensClass, LENSES, LENS_PTR};
+use crate::{
+    exports::runtime as rt,
+    space::goggles::{self, LensClass, LENSES, LENS_PTR},
+};
 use nexus::imgui;
 use std::{ptr, sync::atomic::Ordering};
 use windows::core::Interface;
@@ -14,8 +17,9 @@ pub fn options_ui(ui: &imgui::Ui) {
         match enabled {
             true => {
                 if needs_setup {
-                    let ctx = nexus::AddonApi::get().get_d3d11_device()
-                        .ok_or_else(|| anyhow!("d3d11 device unavailable"))
+                    let ctx = rt::d3d11_device()
+                        .and_then(|dev| dev.ok_or("device not found"))
+                        .map_err(|e| anyhow!("d3d11 device unavailable: {e}"))
                         .and_then(|dev| unsafe {
                             dev.GetImmediateContext()
                         }.context("GetImmediateContext"));
