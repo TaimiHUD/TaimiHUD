@@ -189,6 +189,7 @@ pub struct Pack {
 
     // Actively loaded data.
     pub enabled_categories: BitVec,
+    pub user_category_state: BitVec,
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
     pub active_pois: IndexMap<Uuid, ActivePoi>,
 
@@ -224,10 +225,21 @@ impl Pack {
         for category in pack.categories.all_categories.values() {
             pack.enabled_categories.push(category.default_toggle);
         }
+        pack.user_category_state = pack.enabled_categories.clone();
 
         pack.loader = Some(Box::new(loader));
 
         Ok(pack)
+    }
+
+    pub fn recompute_enabled(&mut self) {
+        let all = &mut self.categories.all_categories;
+        for root_category_id in &self.categories.root_categories {
+            if let Some(root) = all.get(root_category_id) {
+                root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
+            }
+        }
+
     }
 
     pub fn update(&mut self, render_list: &mut RenderList) {
