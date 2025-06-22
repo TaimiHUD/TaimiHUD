@@ -46,17 +46,22 @@ pub fn options_ui(ui: &imgui::Ui) {
                 } else {
                     let _ = LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
                 }
+                if let Ok(mut lenses) = LENSES.try_write() {
+                    lenses.clear();
+                }
             },
         }
     }
 
-    let mut depth_value = crate::space::max_depth();
-    if imgui::Slider::new("depth", 25.0f32, 15000.0).build(ui, &mut depth_value) {
-        crate::space::set_max_depth(depth_value);
-    }
     let mut near_value = crate::space::min_depth();
-    if imgui::Slider::new("near", 0.001f32, 10.0).build(ui, &mut near_value) {
+    if imgui::Slider::new("near", /*0.001f32*/ 0.15f32, /*10.0*/ 1.2).build(ui, &mut near_value) {
         crate::space::set_min_depth(near_value);
+        // seems like a good rule of thumb
+        crate::space::set_max_depth(near_value * 2400.0);
+    }
+    let mut depth_value = crate::space::max_depth();
+    if imgui::Slider::new("far", /*25.0f32*/ 500.0f32, /*15000.0*/2500.0).build(ui, &mut depth_value) {
+        crate::space::set_max_depth(depth_value);
     }
 
     if let Ok(lenses) = LENSES.read() {
