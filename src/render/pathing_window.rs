@@ -1,5 +1,5 @@
 use {
-    crate::{engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window}, std::{
+    crate::{engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ChildWindow, ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     }
@@ -145,54 +145,58 @@ impl PathingWindowState {
                                             ui.separator();
                                             ui.dummy([4.0; 2]);
                                         }
-
-                                    let table_flags = TableFlags::RESIZABLE
-                                        | TableFlags::ROW_BG
-                                        | TableFlags::BORDERS;
-                                    let table_name = format!("pathing");
-                                    let table_token = ui.begin_table_header_with_flags(
-                                        &table_name,
-                                        [
-                                            TableColumnSetup {
-                                                name: &fl!("name"),
-                                                flags: TableColumnFlags::WIDTH_STRETCH,
-                                                init_width_or_weight: 0.0,
-                                                user_id: Id::Str("name"),
-                                            },
-                                            TableColumnSetup {
-                                                name: &fl!("toggle"),
-                                                flags: TableColumnFlags::WIDTH_FIXED,
-                                                init_width_or_weight: 0.0,
-                                                user_id: Id::Str("actions"),
-                                            },
-                                        ],
-                                        table_flags,
-                                    );
-                                    ui.table_next_column();
-                                    for (name, mut pack) in &mut engine.packs.loaded_packs {
-                                        let mut recompute = false;
-                                        let root = &mut pack.categories.root_categories;
-                                        let all_categories = &pack.categories.all_categories;
-                                        let enabled_categories = &mut pack.user_category_state;
-                                        for cat_name in root.iter() {
-                                            all_categories[cat_name].draw(
-                                                ui,
-                                                all_categories,
-                                                enabled_categories,
-                                                self.filter_state,
-                                                &mut self.open_items,
-                                                true,
-                                                &mut recompute,
-                                                &self.search_state
-                                            );
+                                    ChildWindow::new("pathing_subwindow")
+                                        .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
+                                        .size([0.0; 2])
+                                        .build(ui, || {
+                                        let table_flags = TableFlags::RESIZABLE
+                                            | TableFlags::ROW_BG
+                                            | TableFlags::BORDERS;
+                                        let table_name = format!("pathing");
+                                        let table_token = ui.begin_table_header_with_flags(
+                                            &table_name,
+                                            [
+                                                TableColumnSetup {
+                                                    name: &fl!("name"),
+                                                    flags: TableColumnFlags::WIDTH_STRETCH,
+                                                    init_width_or_weight: 0.0,
+                                                    user_id: Id::Str("name"),
+                                                },
+                                                TableColumnSetup {
+                                                    name: &fl!("toggle"),
+                                                    flags: TableColumnFlags::WIDTH_FIXED,
+                                                    init_width_or_weight: 0.0,
+                                                    user_id: Id::Str("actions"),
+                                                },
+                                            ],
+                                            table_flags,
+                                        );
+                                        ui.table_next_column();
+                                        for (name, mut pack) in &mut engine.packs.loaded_packs {
+                                            let mut recompute = false;
+                                            let root = &mut pack.categories.root_categories;
+                                            let all_categories = &pack.categories.all_categories;
+                                            let enabled_categories = &mut pack.user_category_state;
+                                            for cat_name in root.iter() {
+                                                all_categories[cat_name].draw(
+                                                    ui,
+                                                    all_categories,
+                                                    enabled_categories,
+                                                    self.filter_state,
+                                                    &mut self.open_items,
+                                                    true,
+                                                    &mut recompute,
+                                                    &self.search_state
+                                                );
+                                            }
+                                            if recompute {
+                                                pack.recompute_enabled();
+                                            }
                                         }
-                                        if recompute {
-                                            pack.recompute_enabled();
+                                        if let Some(token) = table_token {
+                                            token.end();
                                         }
-                                    }
-                                    if let Some(token) = table_token {
-                                        token.end();
-                                    }
+                                    });
                             }
                         });
                     }
