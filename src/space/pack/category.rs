@@ -2,7 +2,7 @@ use {
     super::{
         attributes::{parse_bool, MarkerAttributes},
         taco_safe_name, Pack, PartialItem,
-    }, crate::{marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
+    }, crate::{controller::ControllerEvent, marker::atomic::MarkerInputData, render::pathing_window::PathingFilterState, CONTROLLER_SENDER}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     }
@@ -146,6 +146,9 @@ impl Category {
                     if let Some(mut substate) = state.get_mut(idx) {
                         if ui.checkbox("", &mut substate) {
                             *recompute = true;
+                            let sender = CONTROLLER_SENDER.get().unwrap();
+                            let event_send = sender.try_send(ControllerEvent::PathingStateUpdate(self.full_id.clone(), *substate));
+                            drop(event_send);
                         };
                     }
                 }
