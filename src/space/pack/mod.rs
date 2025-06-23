@@ -404,7 +404,6 @@ impl Pack {
             self.active_trails.insert(id, trail);
             self.dirty_trails.push(false);
 
-            self.recompute_enabled();
         }
 
         self.poi_bookmark = render_entities.len();
@@ -456,6 +455,9 @@ impl Pack {
             self.textures[handle].texture = None;
             self.loaded_textures.set(handle, false);
         }
+
+        self.recompute_enabled();
+
         Ok(())
     }
 
