@@ -46,7 +46,7 @@ jobs:
       name: nix setup
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.setup
+        attrs: ci.job.main.run.bootstrap
         quiet: false
     - id: ci-dirty
       name: nix test dirty
