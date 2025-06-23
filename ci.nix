@@ -10,7 +10,7 @@ in
     name = "taimiHUD";
     ci.gh-actions.enable = true;
     # TODO: add cachix
-    cache.cachix.arc.enable = true;
+    cache.cachix.taimihud.enable = true;
     channels = {
       nixpkgs = {
         # see https://github.com/arcnmx/nixexprs-rust/issues/10
@@ -19,7 +19,7 @@ in
       };
     };
     tasks = {
-      build.inputs = with packages; [ taimiHUD taimiHUDSpace ];
+      build.inputs = with packages; [ taimiHUD ]; #taimiHUDSpace ];
     };
     jobs = {
       main = {
@@ -29,7 +29,7 @@ in
         };
         artifactPackages = {
           main = packages.taimiHUD;
-          space = packages.taimiHUDSpace;
+          #space = packages.taimiHUDSpace;
         };
       };
     };
