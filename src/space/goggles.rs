@@ -287,6 +287,15 @@ pub fn disable() -> anyhow::Result<()> {
     res
 }
 
+pub fn shutdown() -> anyhow::Result<()> {
+    if GOGGLES.get().is_none() {
+        return Ok(())
+    }
+    LENS_PTR.store(ptr::null_mut(), Ordering::SeqCst);
+
+    disable()
+}
+
 /*pub fn needs_classification(cls: LensClass) -> bool {
     match cls {
         LensClass::Space if ENGINE.with_borrow(|e| e.is_none()) =>

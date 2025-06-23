@@ -568,6 +568,11 @@ fn render_space(ui: &nexus::imgui::Ui) {
 fn unload() {
     log::info!("Unloading addon");
 
+    #[cfg(feature = "goggles")]
+    if let Err(e) = goggles::shutdown() {
+        log::error!("Goggles shutdown failed: {e}");
+    }
+
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
     let controller_quit = CONTROLLER_SENDER.write().unwrap().take()
         .map(|sender| sender.try_send(ControllerEvent::Quit));
