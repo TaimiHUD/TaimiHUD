@@ -21,6 +21,7 @@ use {
     },
 };
 
+#[derive(Clone)]
 pub struct Poi {
     pub category: String,
     pub guid: Uuid,
@@ -199,6 +200,7 @@ struct PoiSpriteData {
 }
 
 pub struct ActivePoi {
+    pub poi_idx: usize,
     pub category_idx: usize,
     pub filtered: bool,
     pub bounds: Box3<MapSpace>,
@@ -238,6 +240,7 @@ impl ActivePoi {
         let bounds = Box3::from_origin_and_size(position, glamour::size3!(max_diagonal));
 
         Ok(ActivePoi {
+            poi_idx: index,
             category_idx,
             filtered: false,
             bounds,

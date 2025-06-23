@@ -238,6 +238,20 @@ impl Pack {
         Ok(pack)
     }
 
+    pub fn get_copyable_pois(&self) -> Vec<poi::Poi> {
+        let mut current_pois = Vec::new();
+        for (_, poi) in &self.active_pois {
+            if !poi.filtered {
+                let actual_poi = &self.pois[poi.poi_idx];
+                if actual_poi.attributes.copy_value.is_some() {
+                    let actual_poi = actual_poi.clone();
+                    current_pois.push(actual_poi);
+                }
+            }
+        }
+        current_pois
+    }
+
     pub fn disable_paths(&mut self, paths: &HashSet<String>) {
         for path in paths {
             if let Some(idx) = self.categories.all_categories.get_index_of(path) {
@@ -256,18 +270,24 @@ impl Pack {
                 root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
             }
         }
+        // in response to update(...), moving update_filters down here where it should actually be
+        // effective to save on useless loops
+        self.update_filters();
 
     }
 
     pub fn update(&mut self, render_list: &mut RenderList) {
-        self.update_filters();
+        // why are we doing 4 for loops over all trails and pois currently active every frame?
+        // ::update(...) is a no-op, filters should NOT be changing every frame and even then
+        // should be a matter of when recompute_enabled(); is called :s
+        /*self.update_filters();
 
         for trail_idx in 0..self.active_trails.len() {
             ActiveTrail::update(self, trail_idx);
         }
         for poi_idx in 0..self.active_pois.len() {
             ActivePoi::update(self, poi_idx);
-        }
+        }*/
 
         // TODO: Scripting engine update.
 
