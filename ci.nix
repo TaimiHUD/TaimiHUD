@@ -27,7 +27,7 @@ in
     };
     tasks = {
       build.inputs = with packages; [ taimiHUD ]; #taimiHUDSpace ];
-      cache.inputs = with packages; [ taimiHUD taimiHUD.deps ]; #taimiHUDSpace ];
+      cache.inputs = with packages; [ taimiHUD taimiHUD.cargoDeps ]; #taimiHUDSpace ];
     };
     jobs = {
       main = {
