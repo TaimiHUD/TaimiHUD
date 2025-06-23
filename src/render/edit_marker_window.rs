@@ -7,7 +7,7 @@ use {
             format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
         },
         util::{ComboInput, PositionInput, UiExt},
-        ControllerEvent, ACCOUNT_NAME_CELL, CONTROLLER_SENDER,
+        ControllerEvent, Controller, ACCOUNT_NAME_CELL,
     },
     glam::Vec3,
     nexus::{
@@ -173,9 +173,7 @@ impl EditMarkerWindowState {
     }
 
     pub fn request_filenames(&self) {
-        let sender = CONTROLLER_SENDER.get().unwrap();
-        let event_send = sender.try_send(ControllerEvent::GetMarkerPaths);
-        drop(event_send);
+        Controller::try_send(ControllerEvent::GetMarkerPaths);
     }
 
     pub fn save_file(&mut self) {
@@ -195,9 +193,7 @@ impl EditMarkerWindowState {
                             self.idx.unwrap(),
                         ),
                     };
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::SaveMarker(evt));
-                    drop(event_send);
+                    Controller::try_send(ControllerEvent::SaveMarker(evt));
                 }
             }
         }

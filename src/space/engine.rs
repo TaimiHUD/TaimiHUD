@@ -20,7 +20,7 @@ use {
     itertools::Itertools,
     nexus::{imgui::Ui, paths::get_addon_dir},
     std::{collections::HashMap, path::PathBuf, sync::Arc},
-    tokio::{sync::mpsc::Receiver, time::Instant},
+    tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 
 #[derive(Component)]
@@ -316,6 +316,12 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    pub fn sender() -> Option<Sender<SpaceEvent>> {
+        crate::SPACE_SENDER.try_read()
+            .as_ref().ok()
+            .and_then(|s| (*s).clone())
     }
 
     pub fn cleanup(&mut self) {

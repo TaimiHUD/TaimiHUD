@@ -207,9 +207,9 @@ impl Settings {
 
     pub async fn set_window_state(&mut self, window: &str, state: Option<bool>) {
         let window_open = match window {
-            "primary" => &mut self.primary_window_open,
-            "timers" => &mut self.timers_window_open,
-            "markers" => &mut self.markers_window_open,
+            crate::WINDOW_PRIMARY => &mut self.primary_window_open,
+            crate::WINDOW_TIMERS => &mut self.timers_window_open,
+            crate::WINDOW_MARKERS => &mut self.markers_window_open,
             _ => unreachable!("unsupported window"),
         };
 

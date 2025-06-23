@@ -9,7 +9,7 @@ use {
         render::{MarkerWindowState, PrimaryWindowState, TimerWindowState},
         settings::ProgressBarSettings,
         timer::{PhaseState, TextAlert, TimerFile},
-        CONTROLLER_SENDER, IMGUI_TEXTURES, RENDER_STATE,
+        Controller, IMGUI_TEXTURES, RENDER_SENDER,
     },
     glam::Vec2,
     nexus::{
@@ -22,12 +22,13 @@ use {
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
     std::{
+        cell::Cell,
         collections::HashMap,
         path::PathBuf,
         sync::{Arc, MutexGuard},
     },
     strum_macros::{Display, EnumIter},
-    tokio::sync::mpsc::Receiver,
+    tokio::sync::mpsc::{Receiver, Sender},
 };
 
 #[cfg(feature = "markers-edit")]
@@ -51,6 +52,7 @@ pub enum RenderEvent {
     #[cfg(feature = "markers-edit")]
     GiveMarkerPaths(Vec<PathBuf>),
     ProgressBarUpdate(ProgressBarSettings),
+    Quit,
 }
 
 #[derive(Display, Default, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq)]
@@ -164,6 +166,10 @@ impl RenderState {
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(timer);
                     }
+                    Quit => {
+                        self.quit();
+                        return;
+                    },
                 }
             }
             Err(_error) => (),
@@ -208,12 +214,10 @@ impl RenderState {
             Image::new(icon.id(), size).build(ui);
             ui.same_line();
         } else if let Some(data) = marker_icon_data(marker.clone()) {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::LoadTextureIntegrated(
+            Controller::try_send(ControllerEvent::LoadTextureIntegrated(
                 marker.to_string(),
                 data,
             ));
-            drop(event_send);
         }
     }
 
@@ -237,12 +241,10 @@ impl RenderState {
                     Image::new(icon.id(), size).build(ui);
                     ui.same_line();
                 } else {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::LoadTexture(
+                    Controller::try_send(ControllerEvent::LoadTexture(
                         icon.clone(),
                         path.to_path_buf(),
                     ));
-                    drop(event_send);
                 }
             }
         };
@@ -262,12 +264,10 @@ impl RenderState {
         );
         if ui.button(&text) {
             log::info!("Triggered open {openable:?} for {text}");
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::OpenOpenable(
+            Controller::try_send(ControllerEvent::OpenOpenable(
                 entry_name.clone(),
                 openable.clone(),
             ));
-            drop(event_send);
         }
         if ui.is_item_hovered() {
             ui.tooltip_text(fl!("location", path = openable_display));
@@ -383,9 +383,72 @@ impl RenderState {
         font_handle.pop();
     }
 
-    pub fn lock() -> MutexGuard<'static, RenderState> {
-        RENDER_STATE.get().unwrap().lock().unwrap()
+    fn quit(&mut self) {
+        crate::unload_render();
     }
+
+    fn shutdown(&mut self) {
+        // Drain remaining queue for relevant events
+        while let Ok(e) = self.receiver.try_recv() {
+            match e {
+                RenderEvent::Quit => {
+                    self.quit();
+                    break
+                },
+                // discard and ignore anything else
+                _ => (),
+            }
+        }
+    }
+
+    pub fn lock() -> MutexGuard<'static, Option<RenderState>> {
+        crate::RENDER_STATE.lock().unwrap()
+    }
+
+    pub fn sender() -> Option<Sender<RenderEvent>> {
+        RENDER_SENDER.try_read()
+            .as_ref().ok()
+            .and_then(|s| (*s).clone())
+    }
+
+    pub fn try_send(e: RenderEvent) {
+        let sender = RENDER_SENDER.try_read();
+        let sender = sender.as_ref().map(|s| &**s);
+        if let Ok(Some(sender)) = sender {
+            let _ = sender.try_send(e);
+        }
+    }
+
+    pub fn is_running() -> bool {
+        RENDER_SENDER.read()
+            .map(|sender| sender.is_some())
+            .unwrap_or(false)
+    }
+
+    pub fn render_ui(ui: &Ui) {
+        IS_RENDER_THREAD.set(true);
+        let is_running = Self::is_running();
+
+        let mut lock = Self::lock();
+        match &mut *lock {
+            None => (),
+            Some(state) if is_running => {
+                state.draw(ui);
+            },
+            Some(state) => {
+                state.shutdown();
+                lock.take();
+            },
+        }
+    }
+
+    pub fn is_render_thread() -> bool {
+        IS_RENDER_THREAD.get()
+    }
+}
+
+thread_local! {
+    static IS_RENDER_THREAD: Cell<bool> = Cell::new(false);
 }
 
 pub struct Alignment {}

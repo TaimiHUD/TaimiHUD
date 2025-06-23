@@ -4,7 +4,7 @@ use {
         fl,
         settings::ProgressBarSettings,
         timer::{PhaseState, TimerAlert, TimerFile},
-        ControllerEvent, CONTROLLER_SENDER, SETTINGS,
+        ControllerEvent, Controller, SETTINGS,
     },
     glam::Vec2,
     nexus::imgui::{ProgressBar, StyleColor, Ui, Window},
@@ -39,9 +39,7 @@ impl TimerWindowState {
                 .build(ui, || {
                     if !self.phase_states.is_empty() {
                         if ui.button(fl!("reset-timers")) {
-                            let sender = CONTROLLER_SENDER.get().unwrap();
-                            let event_send = sender.try_send(ControllerEvent::TimerReset);
-                            drop(event_send);
+                            Controller::try_send(ControllerEvent::TimerReset);
                             self.reset_phases();
                         }
                         ui.dummy([2.0; 2]);
@@ -63,12 +61,10 @@ impl TimerWindowState {
         }
 
         if open != self.open {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::WindowState(
+            Controller::try_send(ControllerEvent::WindowState(
                 "timers".to_string(),
                 Some(open),
             ));
-            drop(event_send);
             self.open = open;
         }
     }

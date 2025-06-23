@@ -1,12 +1,12 @@
 use {
     super::Alignment,
     crate::{
-        controller::ControllerEvent,
+        controller::{ControllerEvent, Controller},
         fl,
         render::RenderState,
         settings::{RemoteSource, TimerSettings},
         timer::TimerFile,
-        CONTROLLER_SENDER, SETTINGS,
+        SETTINGS,
     },
     glam::Vec2,
     indexmap::IndexMap,
@@ -65,9 +65,7 @@ impl TimerTabState {
         );
         ui.same_line();
         if ui.button(fl!("reload-timers")) {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::ReloadTimers);
-            drop(event_send);
+            Controller::try_send(ControllerEvent::ReloadTimers);
         }
         /*let button_text = match timer_window_state.open {
             true => "Close Timers",
@@ -75,18 +73,14 @@ impl TimerTabState {
         };
         if ui.button(button_text) {
             timer_window_state.open = !timer_window_state.open;
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::WindowState(
+            Controller::try_send(ControllerEvent::WindowState(
                 "timers".to_string(),
                 Some(timer_window_state.open),
             ));
-            drop(event_send);
         }
         ui.same_line();
         if ui.button("Reset Timers") {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::TimerReset);
-            drop(event_send);
+            Controller::try_send(ControllerEvent::TimerReset);
             timer_window_state.reset_phases();
         }*/
         if self.category_status.len() != self.categories.keys().len() {
@@ -264,10 +258,7 @@ impl TimerTabState {
                             _ => &fl!("disable"),
                         };
                         if ui.button(button_text) {
-                            let sender = CONTROLLER_SENDER.get().unwrap();
-                            let event_send = sender
-                                .try_send(ControllerEvent::TimerToggle(selected_timer.id.clone()));
-                            drop(event_send);
+                            Controller::try_send(ControllerEvent::TimerToggle(selected_timer.id.clone()));
                         }
                     }
                 } else {

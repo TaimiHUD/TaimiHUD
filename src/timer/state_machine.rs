@@ -1,9 +1,8 @@
 use {
     super::TimerMarker,
     crate::{
-        render::RenderEvent,
+        render::{RenderEvent, RenderState},
         timer::{CombatState, Position, TimerAlert, TimerFile, TimerPhase},
-        RENDER_SENDER,
     },
     bitflags::bitflags,
     std::{fmt::Display, ops::Deref, sync::Arc},
@@ -15,7 +14,7 @@ use {
 };
 
 #[cfg(feature = "space")]
-use crate::{space::engine::SpaceEvent, SPACE_SENDER};
+use crate::space::engine::{Engine, SpaceEvent};
 
 bitflags! {
     #[derive(Debug, Clone, Default)]
@@ -44,44 +43,38 @@ impl EventMapper {
 
     #[cfg(feature = "space")]
     async fn send_space(&self) {
-        use crate::SETTINGS;
+        match crate::SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+            Some(settings) if settings.enable_katrender =>
+                (),
+            _ => return,
+        }
+        let space_sender = match Engine::sender() {
+            Some(sender) => sender,
+            None => return,
+        };
 
         match self {
             Self::Feed(ps) => {
-                if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok())
-                {
-                    if settings.enable_katrender {
-                        let space_sender = SPACE_SENDER.get().unwrap();
-                        let _ = space_sender.send(SpaceEvent::MarkerFeed(ps.clone())).await;
-                        let _ = space_sender;
-                    }
-                }
+                let _ = space_sender.send(SpaceEvent::MarkerFeed(ps.clone())).await;
             }
             Self::Reset(tf) => {
-                if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok())
-                {
-                    if settings.enable_katrender {
-                        let space_sender = SPACE_SENDER.get().unwrap();
-                        let _ = space_sender.send(SpaceEvent::MarkerReset(tf.clone())).await;
-                        let _ = space_sender;
-                    }
-                }
+                let _ = space_sender.send(SpaceEvent::MarkerReset(tf.clone())).await;
             }
         }
     }
     async fn send_render(&self) {
+        let render_sender = match RenderState::sender() {
+            Some(sender) => sender,
+            None => return,
+        };
         match self {
             Self::Feed(ps) => {
-                let render_sender = RENDER_SENDER.get().unwrap();
                 let _ = render_sender.send(RenderEvent::AlertFeed(ps.clone())).await;
-                let _ = render_sender;
             }
             Self::Reset(tf) => {
-                let render_sender = RENDER_SENDER.get().unwrap();
                 let _ = render_sender
                     .send(RenderEvent::AlertReset(tf.clone()))
                     .await;
-                let _ = render_sender;
             }
         }
     }

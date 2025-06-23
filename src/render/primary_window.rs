@@ -4,7 +4,7 @@ use {
         render::{
             ConfigTabState, DataSourceTabState, InfoTabState, TimerTabState, TimerWindowState,
         },
-        ControllerEvent, CONTROLLER_SENDER, SETTINGS,
+        ControllerEvent, Controller, SETTINGS,
     },
     nexus::imgui::{Ui, Window},
     std::collections::HashMap,
@@ -74,22 +74,18 @@ impl PrimaryWindowState {
                 });
         }
         if open != self.open {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::WindowState(
-                "primary".to_string(),
+            Controller::try_send(ControllerEvent::WindowState(
+                crate::WINDOW_PRIMARY.into(),
                 Some(open),
             ));
-            drop(event_send);
             self.open = open;
         }
     }
 
     pub fn keybind_handler(&mut self) {
-        let sender = CONTROLLER_SENDER.get().unwrap();
-        let event_send = sender.try_send(ControllerEvent::WindowState(
-            "primary".to_string(),
+        Controller::try_send(ControllerEvent::WindowState(
+            crate::WINDOW_PRIMARY.into(),
             Some(!self.open),
         ));
-        drop(event_send);
     }
 }

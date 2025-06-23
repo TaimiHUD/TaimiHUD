@@ -5,7 +5,7 @@ use {
         fl,
         render::TextFont,
         settings::{MarkerAutoPlaceSettings, SquadCondition},
-        ControllerEvent, CONTROLLER_SENDER, SETTINGS,
+        ControllerEvent, Controller, SETTINGS,
     },
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
@@ -36,9 +36,7 @@ impl ConfigTabState {
         ui.dummy([4.0, 4.0]);
         #[cfg(feature = "space")]
         if ui.checkbox("Experimental KatRender", &mut self.katrender) {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::ToggleKatRender);
-            drop(event_send);
+            Controller::try_send(ControllerEvent::ToggleKatRender);
         };
         let markers_window_closure = || {
             ui.dummy([4.0, 4.0]);
@@ -69,11 +67,9 @@ impl ConfigTabState {
                 .build(ui, autoplace_closure)
             {
                 self.marker_autoplace = selection;
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send = sender.try_send(ControllerEvent::MarkerAutoPlaceSettings(
+                Controller::try_send(ControllerEvent::MarkerAutoPlaceSettings(
                     self.marker_autoplace.clone(),
                 ));
-                drop(event_send);
             }
             if let Some(inner) = &self.marker_autoplace_inner {
                 let autoplace_inner_closure = || {
@@ -101,11 +97,9 @@ impl ConfigTabState {
                         }
                         _ => (),
                     };
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::MarkerAutoPlaceSettings(
+                    Controller::try_send(ControllerEvent::MarkerAutoPlaceSettings(
                         self.marker_autoplace.clone(),
                     ));
-                    drop(event_send);
                 }
             }
         };
@@ -118,38 +112,30 @@ impl ConfigTabState {
                 &fl!("stock-imgui-progress-bar"),
                 &mut timer_window_state.progress_bar.stock,
             ) {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send = sender.try_send(ControllerEvent::ProgressBarStyle(
+                Controller::try_send(ControllerEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Stock(timer_window_state.progress_bar.stock),
                 ));
-                drop(event_send);
             };
             if ui.checkbox(&fl!("shadow"), &mut timer_window_state.progress_bar.shadow) {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send = sender.try_send(ControllerEvent::ProgressBarStyle(
+                Controller::try_send(ControllerEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Shadow(timer_window_state.progress_bar.shadow),
                 ));
-                drop(event_send);
             }
             if ui.checkbox(
                 &fl!("centre-text-after-icon"),
                 &mut timer_window_state.progress_bar.centre_after,
             ) {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send = sender.try_send(ControllerEvent::ProgressBarStyle(
+                Controller::try_send(ControllerEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Centre(timer_window_state.progress_bar.centre_after),
                 ));
-                drop(event_send);
             }
             if Slider::new(&fl!("height"), 8.0, 256.0)
                 .display_format("%.0f")
                 .build(ui, &mut timer_window_state.progress_bar.height)
             {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send = sender.try_send(ControllerEvent::ProgressBarStyle(
+                Controller::try_send(ControllerEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Height(timer_window_state.progress_bar.height),
                 ));
-                drop(event_send);
             }
             let font_closure = || {
                 let mut selected = timer_window_state.progress_bar.font.clone();
@@ -158,12 +144,10 @@ impl ConfigTabState {
                         .selected(font == selected)
                         .build(ui)
                     {
-                        let sender = CONTROLLER_SENDER.get().unwrap();
-                        let event_send = sender.try_send(ControllerEvent::ProgressBarStyle(
+                        Controller::try_send(ControllerEvent::ProgressBarStyle(
                             ProgressBarStyleChange::Font(font.clone()),
                         ));
                         selected = font;
-                        drop(event_send);
                     }
                 }
                 selected

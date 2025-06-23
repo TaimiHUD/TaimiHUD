@@ -2,7 +2,7 @@ use {
     crate::{
         fl,
         marker::{atomic::MarkerInputData, format::MarkerSet},
-        ControllerEvent, CONTROLLER_SENDER, SETTINGS,
+        ControllerEvent, Controller, SETTINGS,
     },
     nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::sync::Arc,
@@ -36,15 +36,11 @@ impl MarkerWindowState {
                 .opened(&mut open)
                 .build(ui, || {
                     if ui.button(&fl!("clear-markers")) {
-                        let sender = CONTROLLER_SENDER.get().unwrap();
-                        let event_send = sender.try_send(ControllerEvent::ClearMarkers);
-                        drop(event_send);
+                        Controller::try_send(ControllerEvent::ClearMarkers);
                     }
                     ui.same_line();
                     if ui.button(&fl!("clear-spent-autoplace")) {
-                        let sender = CONTROLLER_SENDER.get().unwrap();
-                        let event_send = sender.try_send(ControllerEvent::ClearSpentAutoplace);
-                        drop(event_send);
+                        Controller::try_send(ControllerEvent::ClearSpentAutoplace);
                     }
                     let mid = MarkerInputData::read();
                     if !self.markers_for_map.is_empty() {
@@ -98,10 +94,7 @@ impl MarkerWindowState {
                             ui.text_wrapped(format!("{}", marker.description));
                             ui.table_next_column();
                             if ui.button(&fl!("markers-place")) {
-                                let sender = CONTROLLER_SENDER.get().unwrap();
-                                let event_send =
-                                    sender.try_send(ControllerEvent::SetMarker(marker.clone()));
-                                drop(event_send);
+                                Controller::try_send(ControllerEvent::SetMarker(marker.clone()));
                             }
                             ui.table_next_column();
                             id_token.end();
@@ -116,12 +109,10 @@ impl MarkerWindowState {
         }
 
         if open != self.open {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::WindowState(
-                "markers".to_string(),
+            Controller::try_send(ControllerEvent::WindowState(
+                crate::WINDOW_MARKERS.into(),
                 Some(open),
             ));
-            drop(event_send);
             self.open = open;
         }
     }
