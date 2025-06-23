@@ -8,7 +8,10 @@ in
 {
   config = {
     name = "taimiHUD";
-    ci.gh-actions.enable = true;
+    ci.gh-actions = {
+      enable = true;
+      export = true;
+    };
     # TODO: add cachix
     cache.cachix.taimihud = {
       enable = true;
@@ -24,6 +27,7 @@ in
     };
     tasks = {
       build.inputs = with packages; [ taimiHUD ]; #taimiHUDSpace ];
+      cache.inputs = with packages; [ taimiHUD taimiHUD.deps ]; #taimiHUDSpace ];
     };
     jobs = {
       main = {
