@@ -360,7 +360,6 @@ impl Pack {
         self.active_pois.clear();
         self.dirty_trails.clear();
         self.dirty_pois.clear();
-
         self.render_list_bookmark = render_entities.len();
 
         for i_trail in 0..self.trails.len() {
@@ -404,6 +403,8 @@ impl Pack {
 
             self.active_trails.insert(id, trail);
             self.dirty_trails.push(false);
+
+            self.recompute_enabled();
         }
 
         self.poi_bookmark = render_entities.len();
