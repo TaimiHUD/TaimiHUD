@@ -2,7 +2,7 @@ use {
     super::{
         attributes::{parse_bool, MarkerAttributes},
         taco_safe_name, Pack, PartialItem,
-    }, crate::{controller::{ControllerEvent, Controller}, marker::atomic::MarkerInputData, render::pathing_window::{PathingFilterState, PathingSearchState}}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::imgui::{Condition, TreeNode, Ui}, std::{
+    }, crate::{controller::{ControllerEvent, Controller}, marker::atomic::MarkerInputData, render::pathing_window::{PathingFilterState, PathingSearchState}}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::{alert::send_alert, imgui::{Condition, TreeNode, Ui}}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     }
@@ -133,50 +133,65 @@ impl Category {
             }
         }
         if display {
-            let mut unbuilt = TreeNode::new(&self.display_name)
-                .frame_padding(true)
-                .tree_push_on_open(false)
-                .opened(open_items.contains(&self.full_id), Condition::Always);
-            if self.is_separator {
-                unbuilt = unbuilt.leaf(true);
-            } else if self.sub_categories.is_empty() {
-                unbuilt = unbuilt.bullet(true);
-            } else {
-                unbuilt = unbuilt.framed(true);
-            }
-            let tree_token = unbuilt.push(ui);
-            ui.table_next_column();
-            if !self.is_separator {
-                if let Some(idx) = all_categories.get_index_of(&self.full_id) {
-                    if let Some(mut substate) = state.get_mut(idx) {
-                        if ui.checkbox("", &mut substate) {
-                            *recompute = true;
-                            Controller::try_send(ControllerEvent::PathingStateUpdate(self.full_id.clone(), *substate));
-                        };
+            if self.marker_attributes.copy_value.is_some() {
+                ui.indent();
+                if let Some(copy_value) = &self.marker_attributes.copy_value {
+                    if ui.small_button(&self.display_name) {
+                        ui.set_clipboard_text(copy_value);
+                        if let Some(copy_message) = &self.marker_attributes.copy_message {
+                            send_alert(copy_message);
+                        }
                     }
                 }
-            }
-            let mut internal_closure = || {
-                if !open_items.contains(&self.full_id) {
-                    open_items.insert(self.full_id.clone());
-                }
-                if !self.sub_categories.is_empty() {
-                    ui.indent(); //_by(1.0);
-                }
-                for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].draw(ui, all_categories, state, filter_state, open_items, false, recompute, search_state);
-                }
-                if !self.sub_categories.is_empty() {
-                    ui.unindent(); //_by(1.0);
-                }
-            };
-            ui.table_next_column();
-            if let Some(token) = tree_token {
-                internal_closure();
-                token.pop();
+                ui.unindent();
+                ui.table_next_column();
+                ui.table_next_column();
             } else {
-                if open_items.contains(&self.full_id) {
-                    open_items.remove(&self.full_id);
+                let mut unbuilt = TreeNode::new(&self.display_name)
+                    .frame_padding(true)
+                    .tree_push_on_open(false)
+                    .opened(open_items.contains(&self.full_id), Condition::Always);
+                if self.is_separator {
+                    unbuilt = unbuilt.leaf(true);
+                } else if self.sub_categories.is_empty() {
+                    unbuilt = unbuilt.bullet(true);
+                } else {
+                    unbuilt = unbuilt.framed(true);
+                }
+                let tree_token = unbuilt.push(ui);
+                ui.table_next_column();
+                if !self.is_separator {
+                    if let Some(idx) = all_categories.get_index_of(&self.full_id) {
+                        if let Some(mut substate) = state.get_mut(idx) {
+                            if ui.checkbox("", &mut substate) {
+                                *recompute = true;
+                                Controller::try_send(ControllerEvent::PathingStateUpdate(self.full_id.clone(), *substate));
+                            };
+                        }
+                    }
+                }
+                let mut internal_closure = || {
+                    if !open_items.contains(&self.full_id) {
+                        open_items.insert(self.full_id.clone());
+                    }
+                    if !self.sub_categories.is_empty() {
+                        ui.indent(); //_by(1.0);
+                    }
+                    for (_local, global) in self.sub_categories.iter() {
+                        all_categories[global].draw(ui, all_categories, state, filter_state, open_items, false, recompute, search_state);
+                    }
+                    if !self.sub_categories.is_empty() {
+                        ui.unindent(); //_by(1.0);
+                    }
+                };
+                ui.table_next_column();
+                if let Some(token) = tree_token {
+                    internal_closure();
+                    token.pop();
+                } else {
+                    if open_items.contains(&self.full_id) {
+                        open_items.remove(&self.full_id);
+                    }
                 }
             }
         }
