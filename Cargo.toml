@@ -31,6 +31,9 @@ space = [
   "windows/Win32_System_Diagnostics_Debug",
   "goggles",
 ]
+space-list = [
+	"bvh",
+]
 markers = [
   "dep:itertools",
   "dep:arc-atomic",
@@ -120,7 +123,7 @@ i18n-embed-fl = "0.9.4"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
-bvh = "0.11.0"
+bvh = { version = "0.11.0", optional = true }
 xml-rs = "0.8.26"
 uuid = { version = "1.17.0", features = ["v4"] }
 md5 = "0.7.0"
