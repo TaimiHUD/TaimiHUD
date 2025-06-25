@@ -1253,6 +1253,20 @@ impl Controller {
         }
         Ok(true)
     }
+
+    pub fn sender() -> Option<Sender<ControllerEvent>> {
+        crate::CONTROLLER_SENDER.try_read()
+            .as_ref().ok()
+            .and_then(|s| (*s).clone())
+    }
+
+    pub fn try_send(e: ControllerEvent) {
+        let sender = crate::CONTROLLER_SENDER.try_read();
+        let sender = sender.as_ref().map(|s| &**s);
+        if let Ok(Some(sender)) = sender {
+            let _ = sender.try_send(e);
+        }
+    }
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Display)]

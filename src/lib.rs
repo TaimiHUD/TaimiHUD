@@ -12,7 +12,14 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use space::{engine::SpaceEvent, resources::Texture, Engine};
+use {
+    space::{engine::SpaceEvent, resources::Texture, Engine},
+    std::{
+        cell::RefCell,
+        path::PathBuf,
+        sync::atomic::{AtomicBool, Ordering},
+    },
+};
 use {
     crate::{
         controller::{Controller, ControllerEvent},
@@ -50,10 +57,8 @@ use {
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
-        cell::{Cell, RefCell},
         collections::HashMap,
         ffi::{c_char, CStr},
-        path::PathBuf,
         ptr,
         sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
@@ -61,6 +66,8 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
+
+type Revertible = Box<dyn FnOnce() + Send + 'static>;
 
 // https://github.com/kellpossible/cargo-i18n/blob/95634c35eb68643d4a08ff4cd17406645e428576/i18n-embed/examples/library-fluent/src/lib.rs
 #[derive(RustEmbed)]
@@ -106,14 +113,15 @@ pub mod built_info {
 #[cfg(feature = "space")]
 static TEXTURES: OnceLock<RwLock<HashMap<PathBuf, Arc<Texture>>>> = OnceLock::new();
 static IMGUI_TEXTURES: OnceLock<RwLock<HashMap<String, Arc<NexusTexture>>>> = OnceLock::new();
-static CONTROLLER_SENDER: OnceLock<Sender<ControllerEvent>> = OnceLock::new();
-static RENDER_SENDER: OnceLock<Sender<RenderEvent>> = OnceLock::new();
+static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
+static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
+static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "space")]
-static SPACE_SENDER: OnceLock<Sender<SpaceEvent>> = OnceLock::new();
+static SPACE_SENDER: RwLock<Option<Sender<SpaceEvent>>> = RwLock::new(None);
 
-static CONTROLLER_THREAD: OnceLock<JoinHandle<()>> = OnceLock::new();
+static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 nexus::export! {
     name: "TaimiHUD",
@@ -126,15 +134,24 @@ nexus::export! {
     log_filter: "debug"
 }
 
-static RENDER_STATE: OnceLock<Mutex<RenderState>> = OnceLock::new();
+static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);
 
 static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
 #[cfg(feature = "space")]
-thread_local! {
-    static ENGINE_INITIALIZED: Cell<bool> = const { Cell::new(false) };
-    static ENGINE: RefCell<Option<Engine>> = panic!("!");
+static ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "space")]
+pub fn engine_initialized() -> bool {
+    ENGINE_INITIALIZED.load(Ordering::SeqCst)
 }
+#[cfg(feature = "space")]
+thread_local! {
+    static ENGINE: RefCell<Option<Result<Engine, ()>>> = RefCell::new(None);
+}
+
+pub const WINDOW_PRIMARY: &'static str = "primary";
+pub const WINDOW_TIMERS: &'static str = "timers";
+pub const WINDOW_MARKERS: &'static str = "markers";
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
     let arrow = include_bytes!("../icons/markers/cmdrArrow.png");
@@ -177,56 +194,34 @@ fn load() {
     let (controller_sender, controller_receiver) = channel::<ControllerEvent>(32);
     let (render_sender, render_receiver) = channel::<RenderEvent>(32);
 
-    let _ = CONTROLLER_SENDER.set(controller_sender);
-    let _ = RENDER_SENDER.set(render_sender.clone());
-
-    let controller_handler =
-        thread::spawn(|| Controller::load(controller_receiver, render_sender, addon_dir));
+    let controller_handler = {
+        let render_sender = render_sender.clone();
+        thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir))
+    };
 
     // muh queues
-    let _ = CONTROLLER_THREAD.set(controller_handler);
-    let _ = RENDER_STATE.set(Mutex::new(RenderState::new(render_receiver)));
+    *CONTROLLER_THREAD.lock().unwrap() = Some(controller_handler);
+    *CONTROLLER_SENDER.write().unwrap() = Some(controller_sender);
+
+    *RENDER_STATE.lock().unwrap() = Some(RenderState::new(render_receiver));
+    *RENDER_SENDER.write().unwrap() = Some(render_sender);
 
     // Rendering setup
     let taimi_window = render!(|ui| {
-        let mut state = RenderState::lock();
-        state.draw(ui);
-        drop(state);
+        RenderState::render_ui(ui);
     });
-    register_render(RenderType::Render, taimi_window).revert_on_unload();
+    let render_callback = register_render(RenderType::Render, taimi_window);
+    *RENDER_CALLBACK.lock().unwrap() = Some(Box::new(render_callback.into_inner()));
 
     #[cfg(feature = "space")]
-    let space_render = render!(|ui| {
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
-            if settings.enable_katrender {
-                if !ENGINE_INITIALIZED.get() {
-                    let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
-                    let _ = SPACE_SENDER.set(space_sender);
-                    let drawstate_inner = Engine::initialise(ui, space_receiver);
-                    if let Err(error) = &drawstate_inner {
-                        log::error!("DrawState setup failed: {error:?}");
-                    };
-                    ENGINE.set(drawstate_inner.ok());
-                    ENGINE_INITIALIZED.set(true);
-                }
-                ENGINE.with_borrow_mut(|ds_op| {
-                    if let Some(ds) = ds_op {
-                        if let Err(error) = ds.render(ui) {
-                            log::error!("Engine error: {error}");
-                        }
-                    }
-                });
-            }
-        }
-    });
+    let space_render = render!(|ui| render_space(ui));
     #[cfg(feature = "space")]
     register_render(RenderType::Render, space_render).revert_on_unload();
 
     // Handle window toggling with keybind and button
     let main_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let _ = sender.try_send(ControllerEvent::WindowState("primary".to_string(), None));
+            Controller::try_send(ControllerEvent::WindowState(WINDOW_PRIMARY.into(), None));
         }
     });
 
@@ -240,8 +235,7 @@ fn load() {
     // Handle window toggling with keybind and button
     let timer_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let _ = sender.try_send(ControllerEvent::WindowState("timers".to_string(), None));
+            Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
         }
     });
 
@@ -253,8 +247,7 @@ fn load() {
     .revert_on_unload();
 
     let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
-        let sender = CONTROLLER_SENDER.get().unwrap();
-        let _ = sender.try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
+        Controller::try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
     });
     for i in 0..5 {
         register_keybind_with_string(
@@ -294,17 +287,14 @@ fn load() {
         //None::<&str>,
         render!(|ui| {
             if ui.button("Timers") {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let _ = sender.try_send(ControllerEvent::WindowState("timers".to_string(), None));
+                Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
             }
             #[cfg(feature = "markers")]
             if ui.button("Markers") {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let _ = sender.try_send(ControllerEvent::WindowState("markers".to_string(), None));
+                Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
             }
             if ui.button("Primary") {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let _ = sender.try_send(ControllerEvent::WindowState("primary".to_string(), None));
+                Controller::try_send(ControllerEvent::WindowState(WINDOW_PRIMARY.into(), None));
             }
         }),
     )
@@ -325,16 +315,14 @@ fn load() {
         .revert_on_unload();
 
     let combat_callback = event_consume!(|cdata: Option<&CombatData>| {
-        let sender = CONTROLLER_SENDER.get().unwrap();
         if let Some(combat_data) = cdata {
             if let Some(evt) = combat_data.event() {
                 if let Some(agt) = combat_data.src() {
                     let agt = AgentOwned::from(unsafe { ptr::read(agt) });
-                    let event_send = sender.try_send(ControllerEvent::CombatEvent {
+                    Controller::try_send(ControllerEvent::CombatEvent {
                         src: agt,
                         evt: evt.clone(),
                     });
-                    drop(event_send);
                 }
             }
         }
@@ -344,13 +332,11 @@ fn load() {
     // MumbleLink Identity
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
-            let sender = CONTROLLER_SENDER.get().unwrap();
             match mumble_identity {
                 None => (),
                 Some(ident) => {
                     let copied_identity = ident.clone();
-                    let event_send = sender.try_send(ControllerEvent::MumbleIdentityUpdated(copied_identity));
-                    drop(event_send);
+                    Controller::try_send(ControllerEvent::MumbleIdentityUpdated(copied_identity));
                 },
             }
         }))
@@ -360,10 +346,8 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
                     let group_member: GroupMemberOwned = group_member.into();
-                        let event_send = sender.try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Left, group_member));
-                        drop(event_send);
+                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Left, group_member));
                 }
             }
         )
@@ -373,10 +357,8 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
                     let group_member: GroupMemberOwned = group_member.into();
-                        let event_send = sender.try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Joined, group_member));
-                        drop(event_send);
+                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Joined, group_member));
                 }
             }
         )
@@ -386,10 +368,8 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
                     let group_member: GroupMemberOwned = group_member.into();
-                        let event_send = sender.try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Update, group_member));
-                        drop(event_send);
+                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Update, group_member));
                 }
             }
         )
@@ -400,9 +380,7 @@ fn load() {
             <SquadUpdate> | update | {
             if let Some(update) = update {
                 let update: Vec<UserInfoOwned> = update.iter().map(|x| unsafe { ptr::read(x) }.to_owned()).collect();
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::ExtrasSquadUpdate(update));
-                    drop(event_send);
+                    Controller::try_send(ControllerEvent::ExtrasSquadUpdate(update));
                 }
             }
         )
@@ -452,18 +430,127 @@ fn reload_language() {
     (&*LANGUAGE_LOADER).set_use_isolating(false);
 }
 
+#[cfg(feature = "space")]
+fn render_space(ui: &nexus::imgui::Ui) {
+    let enabled = SETTINGS.get()
+        .and_then(|settings| settings.try_read().ok())
+        .map(|settings| settings.enable_katrender)
+        .unwrap_or(false);
+    if enabled && RenderState::is_running() {
+        if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
+            let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
+            *SPACE_SENDER.write().unwrap() = Some(space_sender);
+            let drawstate_inner = Engine::initialise(ui, space_receiver);
+            if let Err(error) = &drawstate_inner {
+                log::error!("DrawState setup failed: {error:?}");
+            };
+            ENGINE.set(Some(drawstate_inner.map_err(drop)));
+            ENGINE_INITIALIZED.store(true, Ordering::Release);
+        }
+        ENGINE.with_borrow_mut(|ds_op| {
+            if let Some(Ok(ds)) = ds_op {
+                if let Err(error) = ds.render(ui) {
+                    log::error!("Engine error: {error}");
+                }
+            }
+        });
+    }
+}
+
 fn unload() {
     log::info!("Unloading addon");
+
+    let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
+    let controller_quit = CONTROLLER_SENDER.write().unwrap().take()
+        .map(|sender| sender.try_send(ControllerEvent::Quit));
+
+    {
+        let render_sender = RENDER_SENDER.write().unwrap().take();
+        if RenderState::is_render_thread() {
+            let _state = RenderState::lock().take();
+            drop(_state);
+            unload_render();
+        } else if let Some(sender) = render_sender {
+            match sender.try_send(RenderEvent::Quit) {
+                Ok(()) => {
+                    log::debug!("TODO: wait for renderer shutdown");
+                    std::thread::sleep(std::time::Duration::from_millis(67));
+                    #[cfg(feature = "space")] {
+                        // just to be safe? idk
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                    }
+                },
+                _ => {
+                    // clean up what we can if possible
+                    unload_render_background();
+                },
+            }
+        }
+    }
+
+    match controller_quit {
+        Some(Ok(())) => match controller_handle {
+            Some(handle) => {
+                log::info!("Waiting for controller shutdown...");
+                if let Err(e) = handle.join() {
+                    log_join_error("controller", e);
+                }
+            },
+            None => {
+                log::warn!("Controller unavailable?");
+            },
+        },
+        Some(Err(..)) => {
+            log::warn!("Failed to signal controller quit");
+        },
+        None => (),
+    }
+
+    if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
+        revert_render();
+    }
+}
+
+fn unload_render() {
+    log::info!("Renderer unloading");
+    debug_assert!(RenderState::is_render_thread());
+
     #[cfg(feature = "space")]
-    let _ = ENGINE.set(None);
+    if engine_initialized() {
+        log::debug!("unloading space engine");
+        let _ = ENGINE.try_with(|e| if let Some(Ok(mut engine)) = e.borrow_mut().take() {
+            log::debug!("engine.cleanup()");
+            engine.cleanup();
+            /*log::debug!("skipping engine drop()");
+            std::mem::forget(engine);*/
+        });
+        ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
+    }
+}
+
+/// A limited form of [unload_render()] that should try its best,
+/// but isn't able to touch render TLS or single-threaded interfaces
+fn unload_render_background() {
+    log::warn!("Unloading render state from a background thread");
+
+    let _state = RENDER_STATE.lock().unwrap().take();
+
     #[cfg(feature = "space")]
-    let _ = TEXTURES.set(Default::default());
-    let _ = IMGUI_TEXTURES.set(Default::default());
-    /*ENGINE.with_borrow_mut(|e| {
-        //#[cfg(todo)]
-        //e.cleanup();
-    });*/
-    let sender = CONTROLLER_SENDER.get().unwrap();
-    let event_send = sender.try_send(ControllerEvent::Quit);
-    drop(event_send);
+    {
+        ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
+    }
+
+    return
+}
+
+fn log_join_error(name: &str, e: Box<dyn std::any::Any + Send>) {
+    let msg = if let Some(m) = e.downcast_ref::<&'static str>() {
+        *m
+    } else if let Some(m) = e.downcast_ref::<String>() {
+        &m[..]
+    } else {
+        log::error!("{name} thread panicked");
+        return
+    };
+    log::error!("{name} thread panicked: {msg}");
 }

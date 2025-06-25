@@ -4,7 +4,7 @@ use {
         fl,
         render::RenderState,
         settings::{NeedsUpdate, RemoteState, Source},
-        CONTROLLER_SENDER, SETTINGS,
+        Controller, SETTINGS,
     },
     nexus::imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},
     std::collections::HashMap,
@@ -49,10 +49,7 @@ impl DataSourceTabState {
             token.pop();
             ui.dummy([4.0, 4.0]);
             if ui.button(fl!("addon-uninstall-modal-button")) {
-                let sender = CONTROLLER_SENDER.get().unwrap();
-                let event_send =
-                    sender.try_send(ControllerEvent::UninstallAddon(rs.source.clone()));
-                drop(event_send);
+                Controller::try_send(ControllerEvent::UninstallAddon(rs.source.clone()));
                 ui.close_current_popup();
             }
             ui.same_line();
@@ -68,18 +65,14 @@ impl DataSourceTabState {
                 ui.text(fl!("checking-for-updates"))
             } else {
                 if ui.button(fl!("check-for-updates")) {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::CheckDataSourceUpdates);
-                    drop(event_send);
+                    Controller::try_send(ControllerEvent::CheckDataSourceUpdates);
                 }
                 if ui.is_item_hovered() {
                     ui.tooltip_text(fl!("check-for-updates-tooltip"));
                 }
                 ui.same_line();
                 if ui.button(fl!("reload-data-sources")) {
-                    let sender = CONTROLLER_SENDER.get().unwrap();
-                    let event_send = sender.try_send(ControllerEvent::ReloadData);
-                    drop(event_send);
+                    Controller::try_send(ControllerEvent::ReloadData);
                 }
                 if ui.is_item_hovered() {
                     ui.tooltip_text(fl!("reload-data-sources-tooltip"));
@@ -133,11 +126,9 @@ impl DataSourceTabState {
                     };
                     if let Some(button_text) = button_text {
                         if ui.button(button_text) {
-                            let sender = CONTROLLER_SENDER.get().unwrap();
-                            let event_send = sender.try_send(ControllerEvent::DoDataSourceUpdate {
+                            Controller::try_send(ControllerEvent::DoDataSourceUpdate {
                                 source: source_arc,
                             });
-                            drop(event_send);
                         }
                     }
                     RenderState::draw_open_button(

@@ -9,7 +9,7 @@ use {
         },
         render::RenderState,
         settings::MarkerSettings,
-        RenderEvent, CONTROLLER_SENDER, RENDER_SENDER, SETTINGS,
+        RenderEvent, Controller, SETTINGS,
     },
     glam::{Vec2, Vec3},
     indexmap::IndexMap,
@@ -70,16 +70,11 @@ impl MarkerTabState {
         ui.same_line();
         #[cfg(feature = "markers-edit")]
         if ui.button(fl!("marker-set-create")) {
-            let _ = RENDER_SENDER
-                .get()
-                .unwrap()
-                .try_send(RenderEvent::OpenEditMarkers(None));
+            RenderState::try_send(RenderEvent::OpenEditMarkers(None));
         }
         ui.same_line();
         if ui.button(fl!("reload-markers")) {
-            let sender = CONTROLLER_SENDER.get().unwrap();
-            let event_send = sender.try_send(ControllerEvent::ReloadMarkers);
-            drop(event_send);
+            Controller::try_send(ControllerEvent::ReloadMarkers);
         }
         #[allow(clippy::collapsible_if)]
         if self.category_status.len() != self.markers.keys().len() {
@@ -243,10 +238,7 @@ impl MarkerTabState {
                     if ui.button(fl!("marker-set-edit")) {
                         let raw_inner =
                             Arc::<MarkerSet>::unwrap_or_clone(selected_marker_set.clone());
-                        let _ = RENDER_SENDER
-                            .get()
-                            .unwrap()
-                            .try_send(RenderEvent::OpenEditMarkers(Some(raw_inner)));
+                        RenderState::try_send(RenderEvent::OpenEditMarkers(Some(raw_inner)));
                     }
                     ui.same_line();
                     // TODO: add confirm ^^;
@@ -265,13 +257,11 @@ impl MarkerTabState {
                     {
                         ui.text_colored([1.0, 0.0, 0.0, 1.0], fl!("delete-markerset-warning"));
                         if ui.button(fl!("delete")) {
-                            let sender = CONTROLLER_SENDER.get().unwrap();
-                            let event_send = sender.try_send(ControllerEvent::DeleteMarker {
+                            Controller::try_send(ControllerEvent::DeleteMarker {
                                 path: selected_marker_set.path.clone().unwrap(),
                                 category: selected_marker_set.category.clone(),
                                 idx: selected_marker_set.idx.unwrap(),
                             });
-                            drop(event_send);
                         }
                         ui.same_line();
                         if ui.button(fl!("cancel")) {
@@ -360,17 +350,11 @@ impl MarkerTabState {
                         false => fl!("autoplacement-enable"),
                     };
                     if ui.button(button_text) {
-                        let sender = CONTROLLER_SENDER.get().unwrap();
-                        let event_send = sender
-                            .try_send(ControllerEvent::MarkerToggle(selected_marker_set.id()));
-                        drop(event_send);
+                        Controller::try_send(ControllerEvent::MarkerToggle(selected_marker_set.id()));
                     }
                     ui.dummy([4.0; 2]);
                     if ui.button(&fl!("markers-place")) {
-                        let sender = CONTROLLER_SENDER.get().unwrap();
-                        let event_send = sender
-                            .try_send(ControllerEvent::SetMarker(selected_marker_set.clone()));
-                        drop(event_send);
+                        Controller::try_send(ControllerEvent::SetMarker(selected_marker_set.clone()));
                     }
                     pushy.pop();
                 } else {
