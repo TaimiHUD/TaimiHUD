@@ -115,8 +115,10 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let mut packs = PackCollection::new(&render_backend)?;
-        packs.load_all(&addon_dir.join("pathing"))?;
+        let mut packs = PackCollection::new(&render_backend)
+            .context("Initializing packs")?;
+        packs.load_all(&addon_dir.join("pathing"))
+            .context("Loading pathing packs")?;
 
         let mut engine = Engine {
             model_files,
