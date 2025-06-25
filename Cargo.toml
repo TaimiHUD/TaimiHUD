@@ -28,7 +28,7 @@ space = [
   "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
-  "windows/Win32_System_Diagnostics_Debug"
+  "windows/Win32_System_Diagnostics_Debug",
 ]
 markers = [
   "dep:itertools",

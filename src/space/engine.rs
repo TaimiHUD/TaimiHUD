@@ -297,6 +297,14 @@ impl Engine {
             .and_then(|s| (*s).clone())
     }
 
+    pub fn try_send(e: SpaceEvent) {
+        let sender = crate::SPACE_SENDER.try_read();
+        let sender = sender.as_ref().map(|s| &**s);
+        if let Ok(Some(sender)) = sender {
+            let _ = sender.try_send(e);
+        }
+    }
+
     pub fn cleanup(&mut self) {
         #[cfg(debug_assertions)] {
             log::warn!("TODO: Please clean up the engine when the program quits");

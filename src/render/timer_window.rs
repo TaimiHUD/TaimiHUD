@@ -62,7 +62,7 @@ impl TimerWindowState {
 
         if open != self.open {
             Controller::try_send(ControllerEvent::WindowState(
-                "timers".to_string(),
+                crate::WINDOW_TIMERS.into(),
                 Some(open),
             ));
             self.open = open;
