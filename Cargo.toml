@@ -125,6 +125,8 @@ zip = "4.0.0"
 croner = "2.1.0"
 bitvec = "1.0.1"
 
+include_dir = { version = "0.7.4", features = ["glob"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }
 windows-core = { optional = true, version = "0.61.0" }
