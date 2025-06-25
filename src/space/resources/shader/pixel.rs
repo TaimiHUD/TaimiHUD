@@ -15,11 +15,10 @@ pub struct PixelShader {
 }
 impl PixelShader {
     pub fn create(
-        shader_folder: &Path,
         device: &ID3D11Device,
         desc: &ShaderDescription,
     ) -> anyhow::Result<Self> {
-        let blob = Self::compile(shader_folder, desc)?;
+        let blob = Self::compile(desc)?;
 
         let blob_bytes =
             unsafe { from_raw_parts(blob.GetBufferPointer() as *const u8, blob.GetBufferSize()) };
@@ -40,7 +39,7 @@ impl PixelShader {
             context.PSSetShader(&self.shader, None);
         }
     }
-    pub fn compile(shader_folder: &Path, desc: &ShaderDescription) -> anyhow::Result<ID3DBlob> {
+    pub fn compile(desc: &ShaderDescription) -> anyhow::Result<ID3DBlob> {
         if let Some(shader_file) = SHADERS_DIR.get_file(desc.path.clone()) { 
             let entrypoint_cstring = CString::new(desc.entrypoint.clone())?;
             let entrypoint = PCSTR::from_raw(entrypoint_cstring.as_ptr() as *const u8);
