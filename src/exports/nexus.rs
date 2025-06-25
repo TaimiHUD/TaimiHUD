@@ -1,10 +1,30 @@
-use std::{path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{atomic::{AtomicBool, Ordering}, Arc}};
-use anyhow::anyhow;
-use arcdps::Language;
-use nexus::{data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink}, gamebind::invoke_gamebind_async, localization::translate, paths, rtapi::RealTimeApi, texture::{load_texture_from_file, load_texture_from_memory, Texture, RawTextureReceiveCallback}};
-use crate::{exports::{self, runtime::{textures, RuntimeResult}}, game_language_id as lang_id, load_nexus, marker::format::MarkerType, unload, TEXTURES};
-#[cfg(any(feature = "space", feature = "texture-loader"))]
-use nexus::AddonApi;
+use {
+    anyhow::anyhow,
+    arcdps::Language,
+    std::{
+        ffi::CStr,
+        fmt,
+        path::{Path, PathBuf},
+        ptr::{self, NonNull},
+        sync::atomic::{AtomicBool, Ordering},
+    },
+    nexus::{
+        data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink},
+        gamebind::invoke_gamebind_async,
+        localization::translate,
+        paths,
+        rtapi::RealTimeApi,
+        texture::{load_texture_from_file, load_texture_from_memory, Texture, RawTextureReceiveCallback},
+        AddonApi,
+    },
+    crate::{
+        exports::{self, runtime::{self as rt, RuntimeResult}},
+        game_language_id as lang_id,
+        marker::format::MarkerType,
+        unload,
+        TEXTURES,
+    },
+};
 #[cfg(feature = "space")]
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
 
@@ -18,14 +38,59 @@ pub(crate) fn pre_init() {
 }
 
 pub(crate) fn cb_load() {
+    let _ = rt::log::TaimiLog::setup();
+
     pre_init();
-    load_nexus();
+
+    #[cfg(feature = "extension-arcdps")]
+    if exports::arcdps::available() {
+        log::info!("switching over from arcdps to nexus...");
+        exports::arcdps::disable();
+    }
+
+    crate::init().expect("load failed");
+    crate::load_nexus()
 }
 
 pub(crate) fn cb_unload() {
+    #[cfg(feature = "extension-arcdps")]
+    let own_handle = match exports::arcdps::loaded() {
+        true => match exports::arcdps::unload_self() {
+            Err(e) => {
+                log::warn!("failed to request unload from arcdps: {e}");
+                None
+            },
+            Ok(Some(handle)) if !handle.is_invalid() => {
+                log::info!("scheduling DLL exit after unload...");
+                Some(handle)
+            },
+            _ => None,
+        },
+        false => None,
+    };
+
     if available() {
         unload();
     }
+
+    #[cfg(feature = "extension-arcdps")]
+    if let Some(handle) = own_handle {
+        use std::{thread, time::Duration};
+        use windows::Win32::{
+            Foundation::HMODULE,
+            System::LibraryLoader::FreeLibraryAndExitThread,
+        };
+
+        let handle = handle.0 as usize;
+        let _ = thread::spawn(move || -> ! {
+            thread::sleep(Duration::from_millis(1200));
+            log::info!("goodbye");
+            unsafe {
+                FreeLibraryAndExitThread(HMODULE(handle as *mut _), 0)
+            };
+        });
+    }
+
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
 }
 
@@ -104,6 +169,40 @@ pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) ->
         false => marker.to_place_world_gamebind(),
     };
     Ok(Some(invoke_gamebind_async(bind, duration_ms)))
+}
+
+pub fn log_write_record<W: fmt::Write>(w: &mut W, record: &log::Record) -> fmt::Result {
+    let target_written = rt::log::write_metadata_prefix(w, record.metadata(), true)?;
+    rt::log::write_record_prefix(w, record, target_written)?;
+    rt::log::write_record_body(w, record)?;
+
+    Ok(())
+}
+
+pub fn log_record_buffer(buffer: &mut rt::log::LogBuffer, record: &log::Record) -> RuntimeResult<Option<()>> {
+    if !available() {
+        return Ok(None)
+    }
+
+    log_write_record(buffer, record)
+        .map_err(|_| rt::log::RT_FORMAT_ERROR)?;
+
+    log(record.metadata(), buffer.terminate())
+}
+
+pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
+    if !available() {
+        return Ok(None)
+    }
+
+    let level = rt::log::nexus_log_level(metadata.level());
+    let channel = rt::NAME_C.as_ptr();
+
+    unsafe {
+        (AddonApi::get().log)(level, channel, message.as_ptr());
+    }
+
+    Ok(Some(()))
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]

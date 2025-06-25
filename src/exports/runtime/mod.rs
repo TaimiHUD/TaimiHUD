@@ -1,13 +1,46 @@
-use std::{path::{Path, PathBuf}, ptr::NonNull};
+use std::{ffi::CStr, path::{Path, PathBuf}, ptr::NonNull, sync::Mutex};
+use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
 
+pub mod log;
 pub mod textures;
 pub use self::textures::TextureLoader;
+
+pub use nexus::imgui;
 
 pub type RuntimeError = &'static str;
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
 pub const RT_UNAVAILABLE: RuntimeError = "extension runtime unavailable";
+
+pub const CRATE_NAME: &'static str = env!("CARGO_PKG_NAME");
+pub const CRATE_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+#[cfg(todo)]
+pub const NAME: &'static str = "TaimiHUD";
+pub const NAME_C: &'static CStr = unsafe {
+    CStr::from_bytes_with_nul_unchecked(b"TaimiHUD\0")
+};
+
+pub static LOADER_LOCK: Mutex<bool> = Mutex::new(false);
+
+pub fn nexus_available() -> bool {
+    match () {
+        #[cfg(feature = "extension-nexus")]
+        () => exports::nexus::available(),
+        #[cfg(not(feature = "extension-nexus"))]
+        _ => false,
+    }
+}
+
+#[cfg(todo)]
+pub fn arcdps_available() -> bool {
+    match () {
+        #[cfg(feature = "extension-arcdps")]
+        () => exports::arcdps::available(),
+        #[cfg(not(feature = "extension-arcdps"))]
+        _ => false,
+    }
+}
 
 pub fn addon_dir() -> RuntimeResult<PathBuf> {
     #[cfg(feature = "extension-nexus")]
@@ -39,7 +72,7 @@ pub fn detect_language() -> RuntimeResult<String> {
 
 pub fn reload_language() -> RuntimeResult {
     let language = detect_language()?;
-    log::info!("Detected language {language} for internationalization");
+    info!("Detected language {language} for internationalization");
 
     load_language(&language)
 }
@@ -120,7 +153,7 @@ pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) ->
     Err(RT_UNAVAILABLE)
 }
 
-#[cfg(feature = "space")]
+#[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
     #[cfg(feature = "extension-nexus")]
     if let Some(swap_chain) = exports::nexus::dxgi_swap_chain()? {
@@ -136,28 +169,27 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi:
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn d3d11_device() -> RuntimeResult<Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>> {
+pub fn d3d11_device() -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID3D11Device> {
     #[cfg(feature = "extension-nexus")]
-    if let Some(device) = exports::nexus::d3d11_device()? {
-        return Ok(Some(device))
+    if let Ok(Some(device)) = exports::nexus::d3d11_device() {
+        return Ok(device)
     }
 
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(device) = exports::arcdps::d3d11_device()? {
-        return Ok(Some(device))
-    }
+    let res = match dxgi_swap_chain() {
+        Ok(Some(swap_chain)) => unsafe {
+            let device = swap_chain.GetDevice()?;
+            Ok(Some(device))
+        },
+        Ok(None) => Ok(None),
+        Err(msg) => Err(msg),
+    }.transpose().unwrap_or(Err(RT_UNAVAILABLE));
 
-    Err(RT_UNAVAILABLE)
+    res.map_err(|msg| anyhow::anyhow!("d3d11 device unavailable: {msg}"))
 }
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
     #[cfg(feature = "extension-nexus")]
     if let Some(res) = exports::nexus::texture_schedule_path(key, path)? {
-        return Ok(res)
-    }
-
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(res) = exports::arcdps::texture_schedule_path(key, path)? {
         return Ok(res)
     }
 
@@ -167,11 +199,6 @@ pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
 pub fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<()> {
     #[cfg(feature = "extension-nexus")]
     if let Some(res) = exports::nexus::texture_schedule_bytes(key, &bytes)? {
-        return Ok(res)
-    }
-
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(res) = exports::arcdps::texture_schedule_bytes(key, bytes)? {
         return Ok(res)
     }
 

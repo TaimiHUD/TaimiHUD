@@ -53,14 +53,16 @@ impl RenderBackend {
     }
 
     pub fn setup(addon_dir: &Path, display_size: [f32; 2]) -> anyhow::Result<RenderBackend> {
-        log::info!("Getting d3d11 device");
-        let device = rt::d3d11_device()
-            .map_err(|e| anyhow!("{e}"))?;
         log::info!("Getting d3d11 device swap chain");
         let swap_chain = rt::dxgi_swap_chain()
-            .map_err(|e| anyhow!("{e}"))?;
-        let (device, swap_chain) = device.and_then(|d| swap_chain.map(|sc| (d, sc)))
-            .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))?;
+            .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))
+            .and_then(|sc| sc
+                .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))
+            )?;
+        log::info!("Getting d3d11 device");
+        let device = unsafe {
+            swap_chain.GetDevice()
+        }.context("GetDevice")?;
 
         PerspectiveInputData::create();
 

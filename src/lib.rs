@@ -51,6 +51,7 @@ use {
     settings::SourcesFile,
     std::{
         ffi::{c_char, CStr},
+        mem,
         ptr,
         sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
@@ -142,24 +143,24 @@ nexus::export! {
     flags: AddonFlags::None,
     provider: UpdateProvider::GitHub,
     update_link: exports::gh_repo_url!(),
-    log_filter: "debug"
 }
 
 #[cfg(feature = "extension-arcdps-codegen")]
 arcdps::export! {
     name: "TaimiHUD",
     sig: exports::arcdps::SIG,
-    init: exports::arcdps::cb_init,
-    release: exports::arcdps::cb_release,
-    imgui: exports::arcdps::cb_imgui,
-    options_end: exports::arcdps::cb_options_end,
-    wnd_filter: exports::arcdps::cb_wnd_filter,
-    combat_local: exports::arcdps::cb_combat_local,
-    update_url: exports::arcdps::cb_update_url,
-    extras_init: exports::arcdps::cb_extras_init,
-    extras_language_changed: exports::arcdps::cb_extras_language,
-    extras_keybind_changed: exports::arcdps::cb_extras_keybind,
-    extras_squad_update: exports::arcdps::cb_extras_squad_update,
+    init: exports::arcdps::cb::init,
+    release: exports::arcdps::cb::release,
+    imgui: exports::arcdps::cb::imgui,
+    options_end: exports::arcdps::cb::options_end,
+    options_windows: exports::arcdps::cb::options_windows,
+    wnd_filter: exports::arcdps::cb::wnd_filter,
+    combat_local: exports::arcdps::cb::combat_local,
+    update_url: exports::arcdps::cb::update_url,
+    extras_init: exports::arcdps::cb::extras_init,
+    extras_language_changed: exports::arcdps::cb::extras_language,
+    extras_keybind_changed: exports::arcdps::cb::extras_keybind,
+    extras_squad_update: exports::arcdps::cb::extras_squad_update,
 }
 
 static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);
@@ -207,19 +208,42 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
 }
 
 fn init() -> Result<(), &'static str> {
+    let mut loaded = match rt::LOADER_LOCK.lock() {
+        Ok(loaded) if *loaded => {
+            log::info!("already loaded, skipping init");
+            return Ok(())
+        },
+        Ok(loaded) => loaded,
+        Err(..) => {
+            let msg = "loader poisoned";
+            log::error!("{msg}");
+            return Err(msg)
+        },
+    };
     // Say hi to the world :o
-    let name = env!("CARGO_PKG_NAME");
+    let name = rt::CRATE_NAME;
+    let version = rt::CRATE_VERSION;
     let authors = env!("CARGO_PKG_AUTHORS");
-    log::info!("Loading {name} by {authors}");
+    log::info!("Loading {name} {version} by {authors}");
 
     // Set up the thread
     let addon_dir = rt::addon_dir()?;
 
     rt::reload_language()?;
 
-    #[cfg(feature = "texture-loader")] {
-        TEXTURES.setup();
-        TEXTURES.wait_for_startup();
+    #[cfg(feature = "texture-loader")]
+    if let Err(e) = TEXTURES.setup() {
+            if !rt::nexus_available() {
+                return Err(e)
+            }
+            log::error!("{e}");
+    } else {
+        if let Err(e) = TEXTURES.wait_for_startup() {
+            log::error!("{e}");
+            if !rt::nexus_available() {
+                return Err("texture loader didn't start")
+            }
+        }
     }
 
     let (controller_sender, controller_receiver) = channel::<ControllerEvent>(32);
@@ -237,13 +261,12 @@ fn init() -> Result<(), &'static str> {
     *RENDER_STATE.lock().unwrap() = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
 
+    *loaded = true;
     Ok(())
 }
 
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
-    init().expect("load failed");
-
     // Rendering setup
     let taimi_window = render!(|ui| {
         RenderState::render_ui(ui);
@@ -506,7 +529,10 @@ fn load_nexus() {
         event_consume!(
             <SquadUpdate> | update | {
                 if let Some(update) = update {
-                    receive_squad_update(update.iter());
+                    receive_squad_update(update.iter().map(|p| unsafe {
+                        // convert reference from disjoint arcdps-rs crate versions
+                        mem::transmute::<_, &UserInfo>(p)
+                    }));
                 }
             }
         )
@@ -531,8 +557,6 @@ fn load_nexus() {
 
 #[cfg(feature = "extension-arcdps")]
 fn load_arcdps() -> Result<(), &'static str> {
-    init()?;
-
     Ok(())
 }
 
@@ -626,11 +650,17 @@ fn receive_evtc_local(combat_data: &CombatData) {
         (Some(evt), Some(src)) => (evt, src),
         _ => return,
     };
+    let (evt, src) = unsafe {
+        // convert references from disjoint arcdps-rs crate versions
+        (
+            mem::transmute::<_, &arcdps::evtc::Event>(evt).clone(),
+            AgentOwned::from(ptr::read(src as *const _ as *const arcdps::evtc::Agent)),
+        )
+    };
 
-    let src = AgentOwned::from(unsafe { ptr::read(src) });
     let event = ControllerEvent::CombatEvent {
         src,
-        evt: evt.clone(),
+        evt,
     };
     Controller::try_send(event);
 }
@@ -653,7 +683,7 @@ fn process_textures() {
     #[cfg(feature = "texture-loader")]
     let res = TEXTURES.try_responses(|mut responses| -> anyhow::Result<()> {
         use {
-            anyhow::anyhow,
+            anyhow::{anyhow, Context},
             rt::textures::{TextureResponse, Texture},
             tokio::sync::mpsc::error::TryRecvError,
         };
@@ -671,8 +701,7 @@ fn process_textures() {
                         Some(d) => d,
                         device => {
                             let d3d11 = rt::d3d11_device()
-                                .map_err(|e| anyhow!("failed to get d3d11 device: {e}"))
-                                .and_then(|d| d.ok_or_else(|| anyhow!("d3d11 device required to load textures")))?;
+                                .context("d3d11 device required to load textures")?;
                             device.insert(d3d11)
                         },
                     };
@@ -759,6 +788,19 @@ fn render_space(ui: &nexus::imgui::Ui) {
 }
 
 fn unload() {
+    let mut loaded = match rt::LOADER_LOCK.lock() {
+        Ok(loaded) if !*loaded => {
+            log::warn!("not loaded, skipping unload");
+            return
+        },
+        Ok(loaded) => loaded,
+        Err(..) => {
+            let msg = "loader poisoned";
+            log::error!("{msg}");
+            return
+        },
+    };
+
     log::info!("Unloading addon");
 
     #[cfg(feature = "goggles")]
@@ -819,6 +861,8 @@ fn unload() {
     if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
         revert_render();
     }
+
+    *loaded = false;
 }
 
 fn unload_render() {

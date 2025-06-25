@@ -18,8 +18,7 @@ pub fn options_ui(ui: &imgui::Ui) {
             true => {
                 if needs_setup {
                     let ctx = rt::d3d11_device()
-                        .and_then(|dev| dev.ok_or("device not found"))
-                        .map_err(|e| anyhow!("d3d11 device unavailable: {e}"))
+                        .context("GetDevice")
                         .and_then(|dev| unsafe {
                             dev.GetImmediateContext()
                         }.context("GetImmediateContext"));
