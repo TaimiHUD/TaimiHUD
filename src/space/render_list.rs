@@ -10,11 +10,57 @@ use {
     std::collections::BinaryHeap,
 };
 
+#[derive(Copy, Clone, Debug)]
 pub struct RenderEntity {
     pub bounds: glamour::Box3<MapSpace>,
-    pub position: glamour::Vector3<MapSpace>,
+    pub position: glamour::Point3<MapSpace>,
     pub draw_ordered: bool,
-    // todo: stuff to actually draw it.
+    pub render_id: RenderId,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum RenderId {
+    TrailSection {
+        pack_idx: usize,
+        trail_idx: usize,
+        section: usize,
+    },
+    Poi {
+        pack_idx: usize,
+        poi_idx: usize,
+    },
+}
+
+pub struct RenderListBuilder {
+    pub entities: Vec<RenderEntity>,
+    // Saving these to not reset their memory between builds
+    entity_shapes: Vec<RenderEntityShape>,
+    draw_order_heap: BinaryHeap<HeapEntity>,
+}
+
+impl RenderListBuilder {
+    pub fn build(self) -> RenderList {
+        let entities = self.entities;
+        let mut shapes = self.entity_shapes;
+        shapes.clear();
+        shapes.reserve_exact(entities.len());
+        let spatial_map = SpatialMap::build(&entities, shapes);
+        RenderList {
+            entities,
+            spatial_map,
+            draw_order_heap: self.draw_order_heap,
+        }
+    }
+}
+
+impl Default for RenderListBuilder {
+    fn default() -> RenderListBuilder {
+        RenderListBuilder {
+            entities: Vec::with_capacity(8192),
+            entity_shapes: Vec::with_capacity(8192),
+            draw_order_heap: BinaryHeap::with_capacity(4096),
+        }
+    }
 }
 
 pub struct RenderList {
@@ -24,19 +70,29 @@ pub struct RenderList {
 }
 
 impl RenderList {
-    pub fn build(entities: Vec<RenderEntity>) -> RenderList {
-        let spatial_map = SpatialMap::build(&entities);
-        RenderList {
-            entities,
-            spatial_map,
-            draw_order_heap: BinaryHeap::with_capacity(4096),
-        }
+    pub fn rebuild(&mut self) -> RenderListBuilder {
+        std::mem::take(&mut self.spatial_map.bvh.nodes);
+        let mut builder = RenderListBuilder {
+            entities: std::mem::take(&mut self.entities),
+            entity_shapes: std::mem::take(&mut self.spatial_map.shapes),
+            draw_order_heap: std::mem::take(&mut self.draw_order_heap),
+        };
+        builder.entities.clear();
+        builder.entity_shapes.clear();
+        builder
+    }
+
+    pub fn update(&mut self, index: usize) {
+        self.spatial_map.shapes[index] = RenderEntityShape::new((index, &self.entities[index]));
+        self.spatial_map
+            .bvh
+            .update_shapes(Some(&index), &mut self.spatial_map.shapes);
     }
 
     /// Gets visible entities in the correct draw order.
     pub fn get_entities_for_drawing<'rs>(
         &'rs mut self,
-        cam_origin: glamour::Vector3<MapSpace>,
+        cam_origin: glamour::Point3<MapSpace>,
         cam_dir: glamour::Vector3<MapSpace>,
         frustum: &'rs MapFrustum,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
@@ -55,7 +111,7 @@ struct RenderOrderBuilder<'rs, BvhIter> {
     entities: &'rs [RenderEntity],
     bvh_iter: BvhIter,
     draw_order_heap: &'rs mut BinaryHeap<HeapEntity>,
-    cam_origin: glamour::Vector3<MapSpace>,
+    cam_origin: glamour::Point3<MapSpace>,
     cam_dir: glamour::Vector3<MapSpace>,
 }
 
@@ -142,12 +198,8 @@ struct SpatialMap {
 }
 
 impl SpatialMap {
-    fn build(entities: &[RenderEntity]) -> SpatialMap {
-        let mut shapes: Vec<_> = entities
-            .iter()
-            .enumerate()
-            .map(RenderEntityShape::new)
-            .collect();
+    fn build(entities: &[RenderEntity], mut shapes: Vec<RenderEntityShape>) -> SpatialMap {
+        shapes.extend(entities.iter().enumerate().map(RenderEntityShape::new));
         let bvh = Bvh::build_par(&mut shapes);
         SpatialMap { shapes, bvh }
     }
@@ -242,17 +294,17 @@ fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [glamour::Vector4<MapSpace>; 
 
 impl IntersectsAabb<f32, 3> for MapFrustum {
     fn intersects_aabb(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
-        let corners = aabb_corners(aabb);
-        'plane: for plane in self.0 {
-            for corner in corners {
-                // If any corner is inside this plane, move to the next.
-                if plane.dot(corner) >= 0.0 {
-                    continue 'plane;
-                }
-            }
-            // All corners are outside this plane.
-            return false;
-        }
+        // let corners = aabb_corners(aabb);
+        // 'plane: for plane in self.0 {
+        //     for corner in corners {
+        //         // If any corner is inside this plane, move to the next.
+        //         if plane.dot(corner) >= 0.0 {
+        //             continue 'plane;
+        //         }
+        //     }
+        //     // All corners are outside this plane.
+        //     return false;
+        // }
         true
     }
 }

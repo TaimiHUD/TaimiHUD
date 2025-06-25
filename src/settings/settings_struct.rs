@@ -141,6 +141,8 @@ pub struct Settings {
     pub enable_katrender: bool,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
+    #[serde(default)]
+    pub disabled_paths: HashSet<String>,
 }
 
 impl Settings {
@@ -375,6 +377,15 @@ impl Settings {
         Ok(())
     }
 
+    pub async fn pathing_state_update(&mut self, path: String, state: bool) {
+        if self.disabled_paths.contains(&path) && state {
+            self.disabled_paths.remove(&path);
+        } else if !state {
+            self.disabled_paths.insert(path);
+        }
+        let _ = self.save(&self.addon_dir).await;
+    }
+
     pub async fn new(addon_dir: &Path) -> Self {
         Self {
             last_checked: None,
@@ -389,6 +400,7 @@ impl Settings {
             primary_window_open: false,
             enable_katrender: false,
             marker_autoplace: Default::default(),
+            disabled_paths: Default::default(),
         }
     }
     pub async fn load(addon_dir: &Path) -> anyhow::Result<Self> {

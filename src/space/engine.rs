@@ -2,23 +2,20 @@ use {
     super::{
         dx11::{perspective_input_data::PERSPECTIVEINPUTDATA, InstanceBufferData, RenderBackend},
         object::{ObjectBacking, ObjectLoader},
-        pack::Pack,
+        pack::{poi::PoiCommonRenderData, Pack, PackCollection},
         render_list::{MapFrustum, RenderList},
     },
     crate::{
-        marker::atomic::MarkerInputData,
-        space::{
-            pack::{loader::DirectoryLoader, trail::ActiveTrail},
-            resources::ObjFile,
-        },
-        timer::{PhaseState, RotationType, TimerFile, TimerMarker},
+        controller::ControllerEvent, marker::atomic::MarkerInputData, space::{
+            max_depth, pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail}, resources::ObjFile
+        }, timer::{PhaseState, RotationType, TimerFile, TimerMarker}, CONTROLLER_SENDER
     },
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::{Mat4, Vec3, Vec3Swizzles},
     itertools::Itertools,
     nexus::{imgui::Ui, paths::get_addon_dir},
-    std::{collections::HashMap, path::PathBuf, sync::Arc},
+    std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::Receiver, time::Instant},
 };
 
@@ -48,6 +45,8 @@ struct MarkerBundle {
 pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
+    PathingToggle,
+    DisabledPaths(HashSet<String>),
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -78,28 +77,29 @@ pub struct Engine {
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
+    pub render_pathing: bool,
 
     schedule: Schedule,
 
     // ECS stuff
     pub world: World,
 
-    pub test_pack: Pack,
-    test_trail: usize,
-    active_test_trail: ActiveTrail,
-    render_list: Option<RenderList>,
+    pub packs: PackCollection,
 }
 
 impl Engine {
     pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
         let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
 
-        let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)?;
+        let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)
+            .context("Failed to set up render backend")?;
 
         let models_dir = addon_dir.join("models");
-        let object_descs = ObjectLoader::load_desc(&models_dir)?;
+        let object_descs = ObjectLoader::load_desc(&models_dir)
+            .context("Failed to load model descriptors")?;
         log::debug!("{:?}", object_descs);
-        let model_files = ObjFile::load(&models_dir, &object_descs)?;
+        let model_files = ObjFile::load(&models_dir, &object_descs)
+            .context("Failed to load model object")?;
 
         let object_kinds = object_descs.to_backings(
             &render_backend.device,
@@ -114,21 +114,11 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let mut test_pack = Pack::load(DirectoryLoader::new(
-            addon_dir.join("pathing/tw_ALL_IN_ONE"),
-        ))?;
-        const TEST_TRAIL: &str = "tw_guides.tw_mc_soto.tw_mc_soto_trails.tw_mc_soto_trails_thewizardstower.tw_mc_soto_trails_thewizardstower_toggletrail";
-        let test_trail = test_pack
-            .trails
-            .iter()
-            .enumerate()
-            .find(|(_, trail)| trail.category == TEST_TRAIL)
-            .map(|(idx, _)| idx)
-            .ok_or_else(|| anyhow::anyhow!("Can't find test trail"))?;
-        let active_test_trail =
-            ActiveTrail::build(&mut test_pack, test_trail, &render_backend.device)?;
+        let mut packs = PackCollection::new(&render_backend)?;
+        packs.load_all(&addon_dir.join("pathing"))?;
 
         let mut engine = Engine {
+            render_pathing: true,
             model_files,
             receiver,
             render_backend,
@@ -137,11 +127,12 @@ impl Engine {
             world,
             associated_entities: Default::default(),
             phase_states: Default::default(),
-            test_pack,
-            test_trail,
-            active_test_trail,
-            render_list: None,
+            packs,
         };
+            
+        let sender = CONTROLLER_SENDER.get().unwrap();
+        let event_send = sender.try_send(ControllerEvent::RequestDisabledPaths);
+        drop(event_send);
 
         if let Some(backing) = engine.object_kinds.get("Cat") {
             engine.world.spawn((
@@ -169,7 +160,7 @@ impl Engine {
                     &self.render_backend,
                     marker,
                     base_path.clone(),
-                )?);
+                ).context("marker object creation failed")?);
                 let entity = self.world.spawn((
                     Position(marker.position),
                     Marker {
@@ -222,8 +213,16 @@ impl Engine {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
-                    MarkerFeed(phase_state) => self.new_phase(phase_state)?,
-                    MarkerReset(timer) => self.remove_phase(timer)?,
+                    DisabledPaths(disabled_paths) => {
+                        self.packs.disable_paths(disabled_paths);
+                    }
+                    PathingToggle => {
+                        self.render_pathing = !self.render_pathing;
+                    },
+                    MarkerFeed(phase_state) => self.new_phase(phase_state)
+                        .context("marker new phase")?,
+                    MarkerReset(timer) => self.remove_phase(timer)
+                        .context("marker remove phase")?,
                 }
             }
             Err(_error) => (),
@@ -238,80 +237,73 @@ impl Engine {
 
     pub fn render(&mut self, ui: &Ui) -> anyhow::Result<()> {
         let display_size = ui.io().display_size;
-        self.process_event()?;
+        self.process_event()
+            .context("render engine event processing failure")?;
         self.schedule.run(&mut self.world);
         let backend = &mut self.render_backend;
         backend.prepare(&display_size);
         let device_context =
-            unsafe { backend.device.GetImmediateContext() }.expect("I lost my context!");
+            unsafe { backend.device.GetImmediateContext() }
+            .context("I lost my context!")?;
         let slot = 0;
-        backend.perspective_handler.set(&device_context, slot);
-        backend.depth_handler.setup(&device_context);
+        let _prespective_token = backend.perspective_handler.set(&device_context, slot);
+        let _depth_token = backend.depth_handler.setup(&device_context);
         backend.blending_handler.set(&device_context);
         let pdata = PERSPECTIVEINPUTDATA.get().unwrap().load();
-        let mut query = self.world.query::<(&mut Render, &Position)>();
-        for (_k, c) in &query
-            .iter(&self.world)
-            .chunk_by(|(r, _p)| r.backing.name.clone())
-        {
-            let mut itery = c.into_iter();
-            let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
-            let (r, p) = slice;
-            if !r.disabled {
-                let rot = match r.rotation {
-                    RotationType::Billboard => {
-                        let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
-                        let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
-                        y
-                        //Mat4::IDENTITY
-                    }
-                    _ => Mat4::IDENTITY,
-                };
-                let ibd: Vec<_> = vec![slice]
-                    .into_iter()
-                    .chain(itery)
-                    .map(|(_r, p)| {
-                        //  r.backing.render.metadata.model_matrix *
-                        let affy = Mat4::from_translation(p.0)
-                            * rot
-                            * r.backing.render.metadata.model_matrix;
-                        InstanceBufferData {
-                            world: affy,
-                            //world_position: affy.translation,
-                            colour: Vec3::new(1.0, 1.0, 1.0),
-                        }
-                    })
-                    .collect();
-                r.backing
-                    .set_and_draw(slot, &backend.device, &device_context, &ibd)?;
-            }
-        }
-        if let Some(render_list) = &mut self.render_list {
-            let frustum = MapFrustum::from_camera_data(
-                &pdata,
-                display_size[0] / display_size[1],
-                0.1,
-                1000.0,
-            );
-            let cam_origin = pdata.pos.into();
-            let cam_dir = pdata.front.into();
-            for entity in render_list.get_entities_for_drawing(cam_origin, cam_dir, &frustum) {
-                // TODO: Draw.
-            }
-        }
+        // let mut query = self.world.query::<(&mut Render, &Position)>();
+        // for (_k, c) in &query
+        //     .iter(&self.world)
+        //     .chunk_by(|(r, _p)| r.backing.name.clone())
+        // {
+        //     let mut itery = c.into_iter();
+        //     let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
+        //     let (r, p) = slice;
+        //     if !r.disabled {
+        //         let rot = match r.rotation {
+        //             RotationType::Billboard => {
+        //                 let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
+        //                 let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
+        //                 y
+        //                 //Mat4::IDENTITY
+        //             }
+        //             _ => Mat4::IDENTITY,
+        //         };
+        //         let ibd: Vec<_> = vec![slice]
+        //             .into_iter()
+        //             .chain(itery)
+        //             .map(|(_r, p)| {
+        //                 //  r.backing.render.metadata.model_matrix *
+        //                 let affy = Mat4::from_translation(p.0)
+        //                     * rot
+        //                     * r.backing.render.metadata.model_matrix;
+        //                 InstanceBufferData {
+        //                     world: affy,
+        //                     //world_position: affy.translation,
+        //                     colour: Vec3::new(1.0, 1.0, 1.0),
+        //                 }
+        //             })
+        //             .collect();
+        //         r.backing
+        //             .set_and_draw(slot, &backend.device, &device_context, &ibd)?;
+        //     }
+        // }
         let mid = MarkerInputData::read().unwrap();
-        if mid.map_id as i32 == self.test_pack.trails[self.test_trail].data.map_id {
-            backend.shaders.0["trail"].set(&device_context);
-            backend.shaders.1["trail"].set(&device_context);
-            for i in 0..self.active_test_trail.section_bounds.len() {
-                self.active_test_trail.draw_section(&device_context, i);
-            }
+        if let Err(e) = self
+            .packs
+            .prepare_new_map(mid.map_id as i32, &backend.device)
+        {
+            log::error!("{e:?}");
+        }
+        self.packs.update();
+        if self.render_pathing && !pdata.map_open && pdata.is_gameplay {
+            self.packs.draw(&pdata, &backend, &device_context);
         }
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn cleanup(&self) {
-        todo!("Please clean up the engine when the program quits");
+    pub fn cleanup(&mut self) {
+        #[cfg(debug_assertions)] {
+            log::warn!("TODO: Please clean up the engine when the program quits");
+        }
     }
 }

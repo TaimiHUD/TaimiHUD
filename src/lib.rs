@@ -12,7 +12,10 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use space::{engine::SpaceEvent, resources::Texture, Engine};
+use {
+  space::{engine::SpaceEvent, resources::Texture, Engine},
+  std::sync::atomic::{AtomicBool, Ordering},
+};
 use {
     crate::{
         controller::{Controller, ControllerEvent},
@@ -32,20 +35,12 @@ use {
             event_consume,
             extras::{SquadUpdate, EXTRAS_SQUAD_UPDATE},
             Event, MumbleIdentityUpdate, MUMBLE_IDENTITY_UPDATED,
-        },
-        gui::{register_render, render, RenderType},
-        keybind::{keybind_handler, register_keybind_with_string},
-        localization::translate,
-        paths::get_addon_dir,
-        quick_access::{add_quick_access, add_quick_access_context_menu},
-        rtapi::{
+        }, gui::{register_render, render, RenderType}, keybind::{keybind_handler, register_keybind_with_string}, localization::translate, paths::get_addon_dir, quick_access::{add_quick_access, add_quick_access_context_menu}, rtapi::{
             event::{
                 RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
             },
             GroupMember, GroupMemberOwned,
-        },
-        texture::Texture as NexusTexture,
-        AddonFlags, UpdateProvider,
+        }, texture::{load_texture_from_memory, Texture as NexusTexture}, texture_receive, AddonFlags, UpdateProvider
     },
     rust_embed::RustEmbed,
     settings::SourcesFile,
@@ -61,6 +56,8 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 // https://github.com/kellpossible/cargo-i18n/blob/95634c35eb68643d4a08ff4cd17406645e428576/i18n-embed/examples/library-fluent/src/lib.rs
 #[derive(RustEmbed)]
@@ -131,9 +128,14 @@ static RENDER_STATE: OnceLock<Mutex<RenderState>> = OnceLock::new();
 static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
 #[cfg(feature = "space")]
+static ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "space")]
+pub fn engine_initialized() -> bool {
+    ENGINE_INITIALIZED.load(Ordering::SeqCst)
+}
+#[cfg(feature = "space")]
 thread_local! {
-    static ENGINE_INITIALIZED: Cell<bool> = const { Cell::new(false) };
-    static ENGINE: RefCell<Option<Engine>> = panic!("!");
+    static ENGINE: RefCell<Option<Result<Engine, ()>>> = RefCell::new(None);
 }
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
@@ -199,18 +201,22 @@ fn load() {
     let space_render = render!(|ui| {
         if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
             if settings.enable_katrender {
-                if !ENGINE_INITIALIZED.get() {
+                if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
                     let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
                     let _ = SPACE_SENDER.set(space_sender);
                     let drawstate_inner = Engine::initialise(ui, space_receiver);
                     if let Err(error) = &drawstate_inner {
                         log::error!("DrawState setup failed: {error:?}");
                     };
-                    ENGINE.set(drawstate_inner.ok());
-                    ENGINE_INITIALIZED.set(true);
+                    ENGINE.set(Some(drawstate_inner.map_err(drop)));
+                    ENGINE_INITIALIZED.store(true, Ordering::Release);
                 }
                 ENGINE.with_borrow_mut(|ds_op| {
-                    if let Some(ds) = ds_op {
+                    if let Some(Ok(ds)) = ds_op {
+                        #[cfg(feature = "goggles")]
+                        if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
+                            goggles::classify_space_lens(ds);
+                        }
                         if let Err(error) = ds.render(ui) {
                             log::error!("Engine error: {error}");
                         }
@@ -282,6 +288,20 @@ fn load() {
     )
     .revert_on_unload();
 
+    let pathing_render_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            let sender = SPACE_SENDER.get().unwrap();
+            let _ = sender.try_send(SpaceEvent::PathingToggle);
+        }
+    });
+
+    register_keybind_with_string(
+        fl!("pathing-render-toggle"),
+        pathing_render_keybind_handler,
+        "ALT+SHIFT+N",
+    )
+    .revert_on_unload();
+
     let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
         let sender = CONTROLLER_SENDER.get().unwrap();
         let _ = sender.try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
@@ -298,8 +318,6 @@ fn load() {
 
     // Disused currently, icon loading for quick access
     /*
-    let receive_texture =
-        texture_receive!(|id: &str, _texture: Option<&Texture>| log::info!("texture {id} loaded"));
     load_texture_from_file("Taimi_ICON", addon_dir.join("icon.png"), Some(receive_texture));
     load_texture_from_file(
         "Taimi_ICON_HOVER",
@@ -307,6 +325,31 @@ fn load() {
         Some(receive_texture),
     );
     */
+
+    let taimi_icon = include_bytes!("../icons/taimi.png");
+    let taimi_hover_icon = include_bytes!("../icons/taimi-hover.png");
+    let markers_icon = include_bytes!("../icons/markers.png");
+    let markers_hover_icon = include_bytes!("../icons/markers-hover.png");
+    let timers_icon = include_bytes!("../icons/timers.png");
+    let timers_hover_icon = include_bytes!("../icons/timers-hover.png");
+    let pathing_icon = include_bytes!("../icons/pathing.png");
+    let pathing_hover_icon = include_bytes!("../icons/pathing-hover.png");
+    let pathing_toggle_icon = include_bytes!("../icons/pathing-toggle.png");
+    let pathing_toggle_hover_icon = include_bytes!("../icons/pathing-toggle-hover.png");
+
+    let receive_texture =
+        texture_receive!(|id: &str, _texture: Option<&NexusTexture>| log::info!("texture {id} loaded"));
+
+    load_texture_from_memory("TAIMI_ICON", taimi_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_ICON_HOVER", taimi_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON", markers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON_HOVER", markers_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON", timers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON_HOVER", timers_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_ICON", pathing_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_ICON_HOVER", pathing_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON", pathing_toggle_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON_HOVER", pathing_toggle_hover_icon, Some(receive_texture));
 
     let same_identifier = "TAIMI_BUTTON";
 
@@ -318,6 +361,38 @@ fn load() {
         fl!("primary-window-toggle-text"),
     )
     .revert_on_unload();
+    add_quick_access(
+        "TAIMI_PATHING_BUTTON",
+        "TAIMI_PATHING_ICON",
+        "TAIMI_PATHING_ICON_HOVER",
+        fl!("pathing-window-toggle"),
+        fl!("pathing-window-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_PATHING_RENDER_BUTTON",
+        "TAIMI_PATHING_RENDER_ICON",
+        "TAIMI_PATHING_RENDER_ICON_HOVER",
+        fl!("pathing-render-toggle"),
+        fl!("pathing-render-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_TIMER_BUTTON",
+        "TAIMI_TIMERS_ICON",
+        "TAIMI_TIMERS_ICON_HOVER",
+        fl!("timer-window-toggle"),
+        fl!("timer-window-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_MARKERS_BUTTON",
+        "TAIMI_MARKERS_ICON",
+        "TAIMI_MARKERS_ICON_HOVER",
+        fl!("marker-window-toggle"),
+        fl!("marker-window-toggle"),
+    )
+    .revert_on_unload();
 
     add_quick_access_context_menu(
         "TAIMI_MENU",
@@ -327,6 +402,11 @@ fn load() {
             if ui.button(fl!("timer-window")) {
                 let sender = CONTROLLER_SENDER.get().unwrap();
                 let _ = sender.try_send(ControllerEvent::WindowState("timers".to_string(), None));
+            }
+            #[cfg(feature = "space")]
+            if ui.button(fl!("pathing-render-toggle")) {
+                let sender = SPACE_SENDER.get().unwrap();
+                let _ = sender.try_send(SpaceEvent::PathingToggle);
             }
             #[cfg(feature = "space")]
             if ui.button(fl!("pathing-window")) {
@@ -490,16 +570,37 @@ fn reload_language() {
 
 fn unload() {
     log::info!("Unloading addon");
+
+    if let Some(sender) = CONTROLLER_SENDER.get() {
+        let _event_send = sender.try_send(ControllerEvent::Quit);
+    }
+
     #[cfg(feature = "space")]
-    let _ = ENGINE.set(None);
+    let is_render_thread = if engine_initialized() {
+        ENGINE.try_with(|e| match e.borrow_mut().take() {
+            None => {
+                log::warn!("unloading addon from a background thread, skipping engine cleanup");
+                false
+            },
+            Some(res) => {
+                if let Ok(mut engine) = res {
+                    engine.cleanup();
+                }
+                true
+            },
+        }).ok()
+    } else {
+        None
+    };
+
     #[cfg(feature = "space")]
-    let _ = TEXTURES.set(Default::default());
-    let _ = IMGUI_TEXTURES.set(Default::default());
-    /*ENGINE.with_borrow_mut(|e| {
-        //#[cfg(todo)]
-        //e.cleanup();
-    });*/
-    let sender = CONTROLLER_SENDER.get().unwrap();
-    let event_send = sender.try_send(ControllerEvent::Quit);
-    drop(event_send);
+    if is_render_thread == Some(true) {
+        if let Some(mut textures) = TEXTURES.get().and_then(|t| t.write().ok()) {
+            *textures = Default::default();
+        }
+    }
+
+    if let Some(mut textures) = IMGUI_TEXTURES.get().and_then(|t| t.write().ok()) {
+        *textures = Default::default();
+    }
 }

@@ -1,0 +1,15 @@
+[
+  {
+    "identifier": "poi",
+    "kind": "Vertex",
+    "path": "poi.hlsl",
+    "entrypoint": "VSMain",
+    "layout_type": "JustVertex",
+  },
+  {
+    "identifier": "poi",
+    "kind": "Pixel",
+    "path": "poi.hlsl",
+    "entrypoint": "PSMain",
+  },
+]

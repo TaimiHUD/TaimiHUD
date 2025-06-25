@@ -77,6 +77,7 @@ primary-window-toggle = Taimi Window Toggle
 timer-window-toggle = Timer Window Toggle
 marker-window-toggle = Marker Window Toggle
 pathing-window-toggle = Pathing Window Toggle
+pathing-render-toggle = Toggle pathing render
 primary-window-toggle-text = Show/hide taimi primary window
 timer-key-trigger = Timer Key Trigger { $id }
 
@@ -215,3 +216,11 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
+filter-options = Filter Options
+searchbar-clear = Clear the search bar and results.
+show-filter = Show filter options
+hide-filter = Hide filter options
+ignore-root = Ignore root state
+ignore-leaf = Ignore leaf state
+ignore-branch = Ignore branch state
+toggle = Toggle

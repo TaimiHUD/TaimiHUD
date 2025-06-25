@@ -8,9 +8,16 @@ in
 {
   config = {
     name = "taimiHUD";
-    ci.gh-actions.enable = true;
+    ci.gh-actions = {
+      enable = true;
+      export = true;
+    };
     # TODO: add cachix
-    cache.cachix.arc.enable = true;
+    cache.cachix.taimihud = {
+      enable = true;
+      publicKey = "taimihud.cachix.org-1:2LByDgq5eUVU2FoeIlMd5NMgUeCDXuuVarS+XbNsIkY=";
+      signingKey = "nya";
+    };
     channels = {
       nixpkgs = {
         # see https://github.com/arcnmx/nixexprs-rust/issues/10
@@ -19,7 +26,8 @@ in
       };
     };
     tasks = {
-      build.inputs = with packages; [ taimiHUD taimiHUDSpace ];
+      build.inputs = with packages; [ taimiHUD ]; #taimiHUDSpace ];
+      cache.inputs = with packages; [ taimiHUD taimiHUD.cargoArtifacts ]; #taimiHUDSpace ];
     };
     jobs = {
       main = {
@@ -29,7 +37,7 @@ in
         };
         artifactPackages = {
           main = packages.taimiHUD;
-          space = packages.taimiHUDSpace;
+          #space = packages.taimiHUDSpace;
         };
       };
     };

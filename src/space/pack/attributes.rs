@@ -22,7 +22,7 @@ pub struct MarkerAttributes {
 
     // POI-specific.
     pub height_offset: Option<f32>,
-    pub icon_file: Option<String>,
+    pub icon_file: Option<PackTextureHandle>,
     pub icon_size: Option<f32>,
     pub invert_behavior: Option<bool>,
     pub map_display_size: Option<f32>,
@@ -298,7 +298,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
             self.height_offset = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            self.icon_file = Some(attr.value.clone());
+            self.icon_file = Some(pack.register_texture(&attr.value));
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
             self.icon_size = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
@@ -467,7 +467,6 @@ impl MarkerAttributes {
         true
     }
 }
-
 
 // TODO: move parse helpers into a separate file and make pub
 
