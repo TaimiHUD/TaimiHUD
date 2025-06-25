@@ -52,7 +52,7 @@ markers-edit = [
 ]
 extension-arcdps = [
   "extension-arcdps-codegen",
-  "arcdps/log",
+  #"extension-arcdps-extern",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/identity",
   "arcloader-mumblelink/gw2_mumble",
@@ -60,16 +60,19 @@ extension-arcdps = [
   "dep:arcffi",
   "arcffi/windows-061",
   "dep:dpsapi",
-  "dpsapi/arcdps-015",
   "dpsapi/nexus",
-  "dpsapi/log",
+  "windows/Win32_System_LibraryLoader",
   "texture-loader",
 ]
 extension-arcdps-codegen = [
+  #"dpsapi/arcdps-015",
+  "dpsapi/arcdps",
+  "arcdps/export",
+]
+extension-arcdps-extern = [
+  "dep:sync-unsafe-cell",
 ]
 extension-nexus = [
-  "nexus/log",
-  "nexus/log_filter",
 ]
 goggles = [
   "dep:retour",
@@ -107,7 +110,7 @@ built = { version = "0.7.7", features = [ "chrono", "git2" ] }
 anyhow = "1.0.95"
 log = "0.4.21"
 tokio = { version = "1.43.0", features = [ "fs", "macros" ] }
-arcdps = { git = "https://github.com/zerthox/arcdps-rs", tag = "0.15.1" }
+arcdps = { git = "https://github.com/zerthox/arcdps-rs", features = ["extras"] }
 glam = { version = "0.30.0", features = [ "serde", "mint" ] }
 palette = { version = "0.7.6", features = [ "serde" ] }
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -165,6 +168,7 @@ bitvec = "1.0.1"
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
+sync-unsafe-cell = { version = "0.1", optional = true }
 
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
@@ -212,3 +216,8 @@ features = [
   "Win32_Graphics_Hlsl",
   "Win32_System_Diagnostics_Debug"
 ]
+
+[patch."https://github.com/zerthox/arcdps-rs"]
+# required to fix extension unload symbol name
+arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
+evtc = { git = "https://github.com/arcnmx/arcdps-rs" }

@@ -1,11 +1,42 @@
-use std::{borrow::Cow, cell::RefCell, collections::BTreeMap, ffi::OsStr, num::NonZeroU64, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock}, time::Duration};
-use arcdps::{exports as arc, extras::{Control, ExtrasAddonInfo, KeybindChange, UserInfoIter}, imgui, Language};
-use dpsapi::combat::{CombatArgs, CombatEvent};
-use arcloader_mumblelink::{gw2_mumble::{LinkedMem, MumbleLink, MumblePtr}, identity::MumbleIdentity};
-use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
-use crate::{
-    control_window, exports::{self, runtime::RuntimeResult}, game_language_id, load_arcdps, load_language, marker::format::MarkerType, receive_account_name, receive_evtc_local, receive_mumble_identity, render::RenderState, settings::GitHubSource, unload, WINDOW_PRIMARY, WINDOW_TIMERS
+use {
+    arcdps::{
+        extras::{Control, ExtrasAddonInfo, KeybindChange, UserInfoIter},
+        Language,
+    },
+    arcloader_mumblelink::{
+        gw2_mumble::{LinkedMem, MumbleLink, MumblePtr},
+        identity::MumbleIdentity,
+    },
+    crate::{
+        exports::{self, runtime::{self as rt, imgui::{self, Ui}, RuntimeResult}},
+        game_language_id,
+        marker::format::MarkerType,
+        render::RenderState,
+        settings::GitHubSource,
+    },
+    dpsapi::combat::{CombatArgs, CombatEvent},
+    log::Level,
+    nexus::{data_link::NexusLink, rtapi::RealTimeApi},
+    std::{
+        cell::RefCell,
+        collections::BTreeMap,
+        ffi::{c_void, CStr, OsStr},
+        fmt::{self, Write},
+        ops,
+        path::PathBuf,
+        ptr::{self, NonNull},
+        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
+        time::Duration,
+    },
+    windows::Win32::Foundation::HMODULE,
 };
+#[cfg(feature = "extension-arcdps-extern")]
+use dpsapi::api::ApiExports as _;
+
+#[cfg(feature = "extension-arcdps-extern")]
+pub(crate) mod r#extern;
+#[cfg(feature = "extension-arcdps-codegen")]
+pub(crate) mod cb;
 
 pub const SIG: u32 = exports::SIG as u32;
 
@@ -18,7 +49,8 @@ pub fn gh_repo_src() -> GitHubSource {
 }
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
-pub(crate) fn pre_init() {
+static RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
+fn pre_init() {
     RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
 
     match MumbleLink::new() {
@@ -36,42 +68,50 @@ pub(crate) fn pre_init() {
 
 #[cfg(feature = "extension-nexus")]
 fn check_for_nexus() -> bool {
-    use arcdps::exports;
-    use core::cell::Cell;
     const NEXUS_BRIDGE_SIG: u32 = -0x127e89di32 as u32;
 
-    thread_local! {
-        static HAS_NEXUS: Cell<bool> = Cell::new(false);
+    #[allow(unreachable_patterns)]
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if cb::available() && arcdps::exports::has_list_extension() => return cb::has_extension::<NEXUS_BRIDGE_SIG>(),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => match r#extern::arc_args() {
+            Some(arc) => {
+                let mut has_nexus = false;
+                let res = arc.module.extension_list(|exp| if exp.sig().map(|s| s.get()).unwrap_or_default() == NEXUS_BRIDGE_SIG {
+                    has_nexus = true;
+                });
+                if res.is_ok() {
+                    return has_nexus
+                }
+            },
+            None => (),
+        },
+        _ => (),
     }
 
-    extern "C" fn list_cb(exp: &arcdps::callbacks::ArcDpsExport) {
-        if exp.sig == NEXUS_BRIDGE_SIG {
-            HAS_NEXUS.set(true);
-        }
-    }
+    // TODO: we could fall back to check for ArcDPS.dll in the process, but...
 
-    if !exports::has_list_extension() {
-        return false
-    }
-
-    HAS_NEXUS.set(false);
-    unsafe {
-        exports::raw::list_extension(list_cb as usize as *mut _)
-    }
-
-    HAS_NEXUS.get()
+    false
 }
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_init() -> Result<(), String> {
-    #[cfg(feature = "extension-nexus")]
-    if check_for_nexus() {
-        return Err("nexus detected".into());
-    }
+fn init() -> Result<(), &'static str> {
+    RUNTIME_LOADED.store(true, Ordering::Relaxed);
+    let _ = rt::log::TaimiLog::setup();
 
     pre_init();
 
-    let res = load_arcdps();
+    #[cfg(feature = "extension-nexus")]
+    if rt::nexus_available() {
+        log::info!("already loaded by nexus");
+        disable();
+    } else if check_for_nexus() {
+        log::info!("nexus detected");
+    }
+
+    let res = crate::init()
+        .and_then(|()| crate::load_arcdps());
+
     if res.is_err() {
         RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
     }
@@ -79,18 +119,19 @@ pub(crate) fn cb_init() -> Result<(), String> {
     res.map_err(Into::into)
 }
 
-pub(crate) fn cb_release() {
-    log::trace!("arcdps::cb_release()");
+fn release() {
+    log::trace!("arcdps release");
     MUMBLE_LINK_PTR.store(ptr::null_mut(), Ordering::SeqCst);
     let _ml = MUMBLE_LINK.lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
 
-    if available() {
-        unload();
+    if available() && !rt::nexus_available() {
+        crate::unload();
     }
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
+    RUNTIME_LOADED.store(false, Ordering::SeqCst);
     EXTRAS_AVAILABLE.store(false, Ordering::SeqCst);
 }
 
@@ -130,14 +171,25 @@ fn update_mumble_link() {
     });
 
     if let Some(update) = update {
-        receive_mumble_identity(update);
+        crate::receive_mumble_identity(update);
     }
 }
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_imgui(ui: &imgui::Ui, not_charsel_loading: bool) {
+#[cfg(todo)]
+pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<Ui<'u>>> {
+    match () {
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_imgui_ui(),
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => arcdps::__macro::ui(),
+    }
+}
+
+fn imgui(ui: &Ui, not_charsel_loading: bool, _hide: u32) {
     let ingame = not_charsel_loading;
     IS_INGAME.store(ingame, Ordering::Relaxed);
+
+    if !available() { return }
 
     update_mumble_link();
 
@@ -148,15 +200,15 @@ pub(crate) fn cb_imgui(ui: &imgui::Ui, not_charsel_loading: bool) {
     RenderState::render_ui(ui);
 }
 
-pub(crate) fn cb_options_end(ui: &imgui::Ui) {
+fn imgui_options_tab(ui: &Ui) {
     ui.text("WORK IN PROGRESS");
 
     ui.checkbox("Check for updates", &mut false);
 
     ui.new_line();
     let all_windows = [
-        WINDOW_PRIMARY,
-        WINDOW_TIMERS,
+        crate::WINDOW_PRIMARY,
+        crate::WINDOW_TIMERS,
         #[cfg(feature = "markers")]
         crate::WINDOW_MARKERS,
     ];
@@ -165,7 +217,7 @@ pub(crate) fn cb_options_end(ui: &imgui::Ui) {
         let singular = window.strip_suffix("s");
         let name = crate::LANGUAGE_LOADER.get(&format!("{}-window-toggle", singular.unwrap_or(window)));
         if ui.button(name) {
-            control_window(window, None);
+            crate::control_window(window, None);
         }
         ui.same_line();
         ui.text("Keybind: ");
@@ -175,7 +227,7 @@ pub(crate) fn cb_options_end(ui: &imgui::Ui) {
         if ui.button("BIND") {
             log::warn!("TODO: keybind settings");
         }
-        if window == WINDOW_PRIMARY {
+        if window == crate::WINDOW_PRIMARY {
             let desc = crate::LANGUAGE_LOADER.get(&format!("{window}-window-toggle-text"));
             ui.text_disabled(desc);
         }
@@ -212,15 +264,20 @@ pub(crate) fn cb_options_end(ui: &imgui::Ui) {
     }
 }
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
-    true
+fn imgui_options_windows(ui: &Ui, window_name: Option<&str>) -> bool {
+    let hide_checkbox = false;
+    hide_checkbox
+}
+
+fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
+    if !available() { return msg }
+
+    msg
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_update_url() -> Option<String> {
+fn update_url() -> Option<String> {
     use tokio::{runtime, time::timeout};
 
     if !update_allowed() {
@@ -295,43 +352,25 @@ pub(crate) fn cb_update_url() -> Option<String> {
     }
 }
 
-pub fn update_allowed() -> bool {
+fn update_allowed() -> bool {
+    #[cfg(feature = "extension-nexus")]
+    if exports::nexus::available() {
+        return false
+    }
+
     // TODO: setting somewhere!
     true
 }
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_combat_local(
-    ev: Option<&arcdps::Event>,
-    src: Option<&arcdps::Agent>,
-    dst: Option<&arcdps::Agent>,
-    skill_name: Option<&'static str>,
-    id: u64,
-    revision: u64,
-) {
-    let skill_name = match skill_name {
-        // if one strongly suspects the str wasn't reallocated
-        // then you could do an out-of-bounds check, but also...
-        // just don't, it's unused anyway
-        _ => Default::default(),
-    };
-    let event = CombatArgs {
-        ev: ev
-            .map(|e| Cow::Borrowed(e.as_ref())),
-        src: src
-            .map(|a| Cow::Borrowed(a.as_ref())),
-        dst: dst
-            .map(|a| Cow::Borrowed(a.as_ref())),
-        skill_name,
-        id: NonZeroU64::new(id),
-        revision,
-    };
+fn combat_local(event: CombatArgs) {
+    if !available() { return }
+
     match event.event() {
         Some(CombatEvent::Skill(..)) =>
-            event.borrow_imp(receive_evtc_local),
+            event.borrow_imp(crate::receive_evtc_local),
         Some(CombatEvent::Agent(agent)) if agent.is_self().get() => {
             if let Some(name) = agent.account_names() {
-                receive_account_name(name.to_string_lossy());
+                crate::receive_account_name(name.to_string_lossy());
             }
         },
         None => {
@@ -343,14 +382,10 @@ pub(crate) fn cb_combat_local(
 
 static EXTRAS_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn cb_extras_init(info: ExtrasAddonInfo, account_name: Option<&str>) {
+fn extras_init(info: ExtrasAddonInfo) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
 
     log::debug!("arcdps_extras initialized: {info:?}");
-
-    if let Some(name) = account_name {
-        receive_account_name(name);
-    }
 }
 
 static GAME_LANGUAGE: AtomicI32 = AtomicI32::new(Language::English as i32);
@@ -360,11 +395,13 @@ pub fn game_language() -> Option<Language> {
     Language::try_from(id).ok()
 }
 
-pub(crate) fn cb_extras_language(language: Language) {
+fn extras_language(language: Language) {
+    if !available() { return }
+
     let id = language.into();
     let prev = GAME_LANGUAGE.swap(id, Ordering::Relaxed);
     if prev != id {
-        let res = load_language(game_language_id(language));
+        let res = crate::load_language(game_language_id(language));
         if let Err(e) = res {
             log::warn!("Failed to change language to {language:?}: {e}");
         }
@@ -386,7 +423,9 @@ const INTERESTING_BINDS: [Control; 18] = [
 
 static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap::new());
 
-pub(crate) fn cb_extras_keybind(changed: KeybindChange) {
+fn extras_keybind(changed: KeybindChange) {
+    if !available() { return }
+
     if !INTERESTING_BINDS.contains(&changed.control) {
         return
     }
@@ -401,17 +440,44 @@ pub(crate) fn cb_extras_keybind(changed: KeybindChange) {
     kb.insert(changed.control, changed);
 }
 
-#[cfg(feature = "extension-arcdps-codegen")]
-pub(crate) fn cb_extras_squad_update(members: UserInfoIter) {
-    use crate::receive_squad_update;
+fn extras_squad_update(members: UserInfoIter) {
+    if !available() { return }
 
-    receive_squad_update(members)
+    crate::receive_squad_update(members)
+}
+
+pub fn loaded() -> bool {
+    RUNTIME_LOADED.load(Ordering::Relaxed)
 }
 
 pub fn available() -> bool {
     RUNTIME_AVAILABLE.load(Ordering::Relaxed)
 }
 
+pub fn disable() {
+    RUNTIME_AVAILABLE.store(false, Ordering::SeqCst)
+}
+
+pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
+    if !loaded() {
+        return Ok(None)
+    }
+
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if !arcdps::exports::has_free_extension() => None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => Some(HMODULE(unsafe {
+            arcdps::exports::raw::free_extension(SIG).0
+        })),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_args().and_then(|arc| unsafe {
+            arc.module.arc_extension_remove2(Some(r#extern::ARC_SIG))
+        }.ok().map(|module| HMODULE(module.0))),
+    }.ok_or(NO_EXPORT).map(Some)
+}
+
+#[cfg(todo)]
 pub fn extras_available() -> bool {
     EXTRAS_AVAILABLE.load(Ordering::Relaxed)
 }
@@ -423,11 +489,14 @@ pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
         return Ok(None)
     }
 
-    if !arc::has_e0_config_path() {
-        return Err(NO_EXPORT)
-    }
-    let mut path = arcdps::exports::config_path()
-        .ok_or("Unknown arcdps config dir")?;
+    let mut path = match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if !arcdps::exports::has_e0_config_path() => None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => arcdps::exports::config_path(),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_args().and_then(|arc| arc.module.get_ini_path().ok()),
+    }.ok_or(NO_EXPORT)?;
     // remove ini leaf from path...
     if !path.pop() {
         return Err("Incomplete config path")
@@ -441,6 +510,89 @@ pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
 
     path.push(exports::ADDON_DIR_NAME);
     Ok(Some(path))
+}
+
+fn log_window_filter(metadata: &log::Metadata) -> bool {
+    match metadata.level() {
+        _ if !loaded() => false,
+        #[cfg(not(debug_assertions))]
+        #[cfg(feature = "extension-nexus")]
+        Level::Trace | Level::Debug | Level::Info if !available() && exports::nexus::available() => false,
+        #[cfg(not(debug_assertions))]
+        Level::Trace | Level::Debug => false,
+        _ => true,
+    }
+}
+
+pub fn log_write_record_buffer(w: &mut rt::log::LogBuffer, record: &log::Record) -> Result<ops::Range<usize>, fmt::Error> {
+    let colour = match record.level() {
+        _ if !log_window_filter(record.metadata()) =>
+            None,
+        Level::Error => Some("#ff0000"),
+        Level::Warn => Some("#ffa0a0"),
+        Level::Debug => Some("#80a0a0"),
+        Level::Trace => Some("#a0a080"),
+        _ => None,
+    };
+
+    let window_start = w.len();
+    let start = match colour {
+        Some(colour) => {
+            write!(w, "<c={colour}>")?;
+            w.len()
+        },
+        None => window_start,
+    };
+    log_write_record(w, record)?;
+    let end = w.len();
+
+    if let Some(..) = colour {
+        write!(w, "</c>")?;
+    }
+
+    Ok(start..end)
+}
+
+pub fn log_write_record<W: fmt::Write>(w: &mut W, record: &log::Record) -> fmt::Result {
+    rt::log::write_record(w, record)
+}
+
+pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
+    if !loaded() {
+        return Ok(None)
+    }
+
+    if !log_window_filter(metadata) {
+        return Ok(Some(()))
+    }
+
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if !arcdps::exports::has_e8_log_window() => None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => Some(unsafe {
+            arcdps::exports::raw::e8_log_window(message.as_ptr())
+        }),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_args().and_then(|arc| arc.module.arc_log_window(message.as_ref()).ok()),
+    }.ok_or(NO_EXPORT).map(Some)
+}
+
+pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
+    if !loaded() {
+        return Ok(None)
+    }
+
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if !arcdps::exports::has_e3_log_file() => None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => Some(unsafe {
+            arcdps::exports::raw::e3_log_file(message.as_ptr())
+        }),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_args().and_then(|arc| arc.module.arc_log(message.as_ref()).ok()),
+    }.ok_or(NO_EXPORT).map(Some)
 }
 
 pub fn detect_language() -> RuntimeResult<Option<String>> {
@@ -501,43 +653,15 @@ pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) ->
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn d3d11_device() -> RuntimeResult<Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>> {
-    if !available() {
-        return Ok(None)
-    }
-
-    let device = arcdps::d3d11_device().cloned();
-
-    Ok(unsafe {
-        core::mem::transmute(device)
-    })
-}
-
-#[cfg(feature = "space")]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
     if !available() {
         return Ok(None)
     }
 
-    let swap_chain = arcdps::dxgi_swap_chain().cloned();
-
-    Ok(unsafe {
-        core::mem::transmute(swap_chain)
+    Ok(match () {
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::dxgi_swap_chain().map(|sc| sc.to_owned()),
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => cb::dxgi_swap_chain(),
     })
-}
-
-pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {
-    if !available() {
-        return Ok(None)
-    }
-
-    Err("texture loading unimplemented")
-}
-
-pub fn texture_schedule_bytes(key: &str, data: Vec<u8>) -> RuntimeResult<Option<()>> {
-    if !available() {
-        return Ok(None)
-    }
-
-    Err("texture loading unimplemented")
 }
