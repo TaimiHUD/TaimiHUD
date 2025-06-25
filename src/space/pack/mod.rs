@@ -15,7 +15,7 @@ use {
     poi::{ActivePoi, PoiCommonRenderData},
     std::{
         collections::{HashMap, HashSet},
-        fs::read_dir,
+        fs::{create_dir_all, read_dir},
         io::{Cursor, Read as _},
         path::Path,
         sync::Arc,
@@ -65,6 +65,9 @@ impl PackCollection {
     }
 
     pub fn load_all(&mut self, base_dir: &Path) -> anyhow::Result<()> {
+        if !base_dir.exists() {
+            create_dir_all(base_dir)?;
+        }
         self.clear();
         for entry in read_dir(base_dir)? {
             let entry = entry?;
