@@ -1,4 +1,4 @@
-name: Build MultiMC Instance
+name: Notify about latest release
 
 on:
   workflow_dispatch:
