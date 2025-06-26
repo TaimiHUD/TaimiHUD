@@ -29,7 +29,6 @@ space = [
   "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
-  "windows/Win32_System_Diagnostics_Debug",
   "texture-loader",
   "goggles",
 ]
@@ -214,7 +213,7 @@ features = [
   "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Direct3D_Fxc",
   "Win32_Graphics_Hlsl",
-  "Win32_System_Diagnostics_Debug"
+  "Win32_System_SystemServices"
 ]
 
 [patch."https://github.com/zerthox/arcdps-rs"]
