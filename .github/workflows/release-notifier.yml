@@ -1,0 +1,22 @@
+name: Build MultiMC Instance
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "*v*.*.*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get tag message
+        id: tag_message
+        run: ./build/get-tag-description.sh
+      - name: Discord Webhook Action
+        uses: tsickert/discord-webhook@v5.3.0
+        with:
+          webhook-url: ${{ secrets.WEBHOOK_URL }}
+          embed-title: ${{ steps.tag_message.outputs.TAG_SUBJECT }}
+          embed-description: ${{ steps.tag_message.outputs.TAG_BODY }}
+          embed-url: ${{ steps.tag_message.outputs.TAG_URL }}
