@@ -1,6 +1,6 @@
 use {
     arcdps::{
-        extras::{Control, ExtrasAddonInfo, KeybindChange, UserInfoIter},
+        extras::{Control, ExtrasAddonInfo, Key, KeybindChange, UserInfoIter},
         Language,
     },
     arcloader_mumblelink::{
@@ -28,7 +28,10 @@ use {
         sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
         time::Duration,
     },
-    windows::Win32::Foundation::HMODULE,
+    windows::Win32::{
+        Foundation::HMODULE,
+        UI::Input::KeyboardAndMouse,
+    },
 };
 #[cfg(feature = "extension-arcdps-extern")]
 use dpsapi::api::ApiExports as _;
@@ -631,7 +634,7 @@ pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
     Err("RTAPI unsupported")
 }
 
-pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) -> RuntimeResult<Option<()>> {
+pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
@@ -647,9 +650,40 @@ pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) ->
         kb.get(&control).cloned()
     }.ok_or("unknown keybind")?;
 
-    let KeybindChange { key, mod_shift, mod_alt, mod_ctrl, .. } = binding;
+    let mods = rt::KeyMods::from(&binding);
+    match binding.key {
+        Key::Key(keycode) => {
+            let vk = KeyboardAndMouse::VIRTUAL_KEY(keycode as _);
+            rt::keyboard::send_key_combo(rt::keyboard::KeyInput::new(vk, down), mods)
+        },
+        Key::Mouse(button) => {
+            let key_mods = rt::KeyMods {
+                alt: mods.alt,
+                .. Default::default()
+            };
+            let mods = rt::KeyMods {
+                alt: false,
+                .. mods
+            };
 
-    Err("TODO: invoke marker bind")
+            let position = match position {
+                Some(p) => p,
+                None => rt::screen_mouse_position()?,
+            };
+            let input = rt::mouse::MouseInput::new(position, button as _, down);
+            let invoke = || match mods.is_empty() {
+                true => rt::mouse::send_input(input),
+                false => rt::mouse::send_mouse(input, mods, false),
+            };
+            match key_mods.is_empty() {
+                true => invoke(),
+                false => rt::keyboard::do_key_combo(invoke, down, key_mods),
+            }
+        },
+        Key::Unknown(..) => {
+            Err("unrecognized bind")
+        },
+    }.map(Some)
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]

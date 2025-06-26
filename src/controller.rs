@@ -669,6 +669,8 @@ impl Controller {
         self.reset_timers().await;
     }
 
+    pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(10);
+
     #[cfg(feature = "markers")]
     async fn reload_markers(&mut self) {
         self.load_markers_files()
@@ -686,36 +688,40 @@ impl Controller {
     async fn clear_markers(&self) {
         use crate::marker::format::MarkerType;
 
-        if let Err(e) = rt::invoke_marker_bind(MarkerType::ClearMarkers, false, 10i32) {
+        if let Err(e) = rt::invoke_marker_bind(MarkerType::ClearMarkers, false, Self::KEY_INVOKE_DURATION, None).await {
             log::warn!("Failed to clear markers: {e}");
         }
     }
 
     #[cfg(feature = "markers")]
-    fn get_viewport_point(rel: Vec2) -> POINT {
-        let hwnd = unsafe { GetForegroundWindow() };
+    fn get_viewport_point(rel: Vec2) -> anyhow::Result<POINT> {
+        /*let hwnd = rt::window_handle()
+            .map_err(|e| anyhow!("HWND unavailable: {e}"))?;
         let mut abs: POINT = POINT {
             x: rel.x as i32,
             y: rel.y as i32,
         };
         unsafe {
-            let _ = ClientToScreen(hwnd, &mut abs);
-        }
-        abs
+            ClientToScreen(hwnd, &mut abs);
+        }*/
+        let abs = rt::mouse::MousePosition::from(rel).to_screen()
+            .map_err(|e| anyhow!("cursor screen coords unavailable: {e}"))?
+            .into();
+        Ok(abs)
     }
 
     #[cfg(feature = "markers")]
-    fn get_viewport_coord(rel: Vec2) -> (i32, i32) {
-        let point = Self::get_viewport_point(rel);
-        (point.x, point.y)
+    fn get_viewport_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
+        let point = Self::get_viewport_point(rel)?;
+        Ok((point.x, point.y))
     }
 
     #[cfg(feature = "markers")]
-    fn get_abs_coord(rel: Vec2) -> (i32, i32) {
-        let (x, y) = Self::get_viewport_coord(rel);
+    fn get_abs_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
+        let (x, y) = Self::get_viewport_coord(rel)?;
         let dx = (x * 65536) / unsafe { GetSystemMetrics(SM_CXSCREEN) };
         let dy = (y * 65536) / unsafe { GetSystemMetrics(SM_CYSCREEN) };
-        (dx, dy)
+        Ok((dx, dy))
     }
 
     #[cfg(feature = "markers")]
@@ -748,15 +754,15 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     fn move_cursor_pos(goal: Vec2) -> anyhow::Result<()> {
-        let coords = Self::get_abs_coord(goal);
+        let coords = Self::get_abs_coord(goal)?;
         Self::mouse_event(coords, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
     }
 
     #[cfg(feature = "markers")]
     async fn drag_mouse_abs(from: Vec2, to: Vec2) -> anyhow::Result<()> {
         let wait_duration = Duration::from_millis(10);
-        let from_abs = Self::get_abs_coord(from);
-        let to_abs = Self::get_abs_coord(to);
+        let from_abs = Self::get_abs_coord(from)?;
+        let to_abs = Self::get_abs_coord(to)?;
         sleep(wait_duration).await;
         Self::mouse_event(from_abs, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)?;
         sleep(wait_duration).await;
@@ -772,7 +778,7 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn drag_mouse_rel(from: ScreenPoint, amount: ScreenVector) -> anyhow::Result<()> {
         let wait_duration = Duration::from_millis(30);
-        let from_abs = Self::get_abs_coord(from.into());
+        let from_abs = Self::get_abs_coord(from.into())?;
 
         let [amt_x, amt_y] = amount.as_array();
         let amount = (*amt_x as i32, *amt_y as i32);
@@ -793,17 +799,18 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn place_marker(
         wait_duration: Duration,
-        place_duration: i32,
+        place_duration: Duration,
         point: ScreenPoint,
         marker: &MarkerEntry,
     ) {
         sleep(wait_duration).await;
+        #[cfg(todo)]
         match Self::move_cursor_pos(point.into()) {
             Ok(_) => (),
             Err(e) => log::error!("{}", e),
         }
         sleep(wait_duration).await;
-        if let Err(e) = rt::invoke_marker_bind(marker.marker, false, place_duration) {
+        if let Err(e) = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point.into())).await {
             log::warn!("Failed to place marker {:?}: {e}", marker.marker);
         }
     }
@@ -811,7 +818,7 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn place_marker_from_map(
         wait_duration: Duration,
-        place_duration: i32,
+        place_duration: Duration,
         point: Vec3,
         marker: &MarkerEntry,
     ) {
@@ -822,7 +829,7 @@ impl Controller {
             let point = mid.map_local_to_map(point);
             let point = mid.map_map_to_screen(point);
             if let Some(point) = point {
-                Self::place_marker(wait_duration, 10i32, point, marker).await;
+                Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
             }
         }
     }
@@ -871,15 +878,16 @@ impl Controller {
         }
 
         let wait_duration = Duration::from_millis(50);
-        let mut pos_ptr: POINT = POINT::default();
+        #[cfg(todo)]
         let original_position = unsafe {
-            let hwnd = GetForegroundWindow();
+            let mut pos_ptr: POINT = POINT::default();
+            let hwnd = rt::window_handle()?;
             let pos = GetCursorPos(&mut pos_ptr);
             let _ = ScreenToClient(hwnd, &mut pos_ptr);
-            pos
-        }
-        .map_err(anyhow::Error::from)
-        .map(|()| pos_ptr)?;
+            pos.map(|()| pos_ptr)
+        }.map_err(anyhow::Error::from)?;
+        let original_position = rt::screen_mouse_position()
+            .map_err(|e| anyhow!("Getting cursor pos: {e}"))?;
         for marker in &markers.markers {
             // check if it is possible to place immediately
             let local_point: LocalPoint = Vec3::from(marker.position.clone()).into();
@@ -893,7 +901,7 @@ impl Controller {
             match screen_point {
                 // if the marker is on the map, that's fine, place it
                 Some(point) => {
-                    Self::place_marker(wait_duration, 10i32, point, marker).await;
+                    Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
                 }
                 // if the marker isn't on the map, we need to get our perspective to include
                 // the marker
@@ -957,7 +965,7 @@ impl Controller {
                             } else {
                                 Self::place_marker_from_map(
                                     wait_duration,
-                                    10i32,
+                                    Self::KEY_INVOKE_DURATION,
                                     marker.position.clone().into(),
                                     marker,
                                 )
@@ -966,12 +974,13 @@ impl Controller {
                         }
                     }
                 }
-                _ => unreachable!("set_marker: this should not happen!"),
             }
         }
         sleep(wait_duration).await;
-        let original_position = Vec2::new(original_position.x as f32, original_position.y as f32);
-        Self::move_cursor_pos(original_position)?;
+        /*let original_position = Vec2::new(original_position.x as f32, original_position.y as f32);
+        Self::move_cursor_pos(original_position)?;*/
+        rt::mouse::send_input(original_position)
+            .map_err(|e| anyhow!("Failed to restore original cursor position: {e}"))?;
         Ok(())
     }
 

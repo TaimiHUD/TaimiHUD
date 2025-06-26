@@ -1,7 +1,8 @@
 use std::{borrow::Cow, num::NonZeroU64, ptr, time::Duration};
 use arcdps::{extras::{ExtrasAddonInfo, KeybindChange, UserInfoIter}, imgui, Language};
 use dpsapi::combat::CombatArgs;
-use crate::exports::arcdps as exports;
+use crate::exports::{arcdps as exports, runtime as rt};
+use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
 
 #[cfg(feature = "extension-nexus")]
 pub fn has_extension<const SIG: u32>() -> bool {
@@ -47,22 +48,17 @@ pub fn options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
 }
 
 pub fn wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging;
-
-    let w = keycode;
-    let l = (prev_key_down as isize) << 30;
-    let msg = match key_down {
-        true => WindowsAndMessaging::WM_KEYDOWN,
-        false => WindowsAndMessaging::WM_KEYUP,
-    };
+    let vk = VIRTUAL_KEY(keycode as _);
+    let (msg, w, mut l) = rt::keyboard::KeyInput::new(vk, key_down).to_event();
+    if key_down == prev_key_down {
+        l ^= 1 << 30;
+    }
 
     match exports::wnd_filter(ptr::null_mut(), msg, w.into(), l.into()) {
         0 => false,
         _ => true,
     }
 }
-
-const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
 
 pub fn update_url() -> Option<String> {
     exports::update_url()

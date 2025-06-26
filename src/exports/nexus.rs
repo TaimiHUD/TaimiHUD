@@ -7,10 +7,11 @@ use {
         path::{Path, PathBuf},
         ptr::{self, NonNull},
         sync::atomic::{AtomicBool, Ordering},
+        time::Duration,
     },
     nexus::{
         data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink},
-        gamebind::invoke_gamebind_async,
+        gamebind,
         localization::translate,
         paths,
         rtapi::RealTimeApi,
@@ -75,7 +76,7 @@ pub(crate) fn cb_unload() {
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(handle) = own_handle {
-        use std::{thread, time::Duration};
+        use std::thread;
         use windows::Win32::{
             Foundation::HMODULE,
             System::LibraryLoader::FreeLibraryAndExitThread,
@@ -159,16 +160,32 @@ pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
     Ok(NonNull::new(get_nexus_link() as *mut NexusLink))
 }
 
-pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) -> RuntimeResult<Option<()>> {
+const MOUSE_MOVE_DELAY: Duration = Duration::from_millis(50);
+pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
+    }
+
+    if let Some(position) = position {
+        match rt::mouse::send_input(position) {
+            Ok(()) =>
+                // wait for nexus to get the event, ugh
+                tokio::time::sleep(MOUSE_MOVE_DELAY).await,
+            Err(e) => {
+                log::error!("Failed to adjust mouse position for marker placement: {e}");
+                return Err("Marker mouse move failed")
+            },
+        }
     }
 
     let bind = match target {
         true => marker.to_set_agent_gamebind(),
         false => marker.to_place_world_gamebind(),
     };
-    Ok(Some(invoke_gamebind_async(bind, duration_ms)))
+    Ok(Some(match down {
+        true => gamebind::press_gamebind(bind),
+        false => gamebind::release_gamebind(bind),
+    }))
 }
 
 pub fn log_write_record<W: fmt::Write>(w: &mut W, record: &log::Record) -> fmt::Result {

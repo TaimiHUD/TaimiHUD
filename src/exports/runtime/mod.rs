@@ -1,13 +1,27 @@
-use std::{ffi::CStr, path::{Path, PathBuf}, ptr::NonNull, sync::Mutex};
+use std::{ffi::CStr, mem, path::{Path, PathBuf}, ptr::NonNull, sync::Mutex, time::Duration};
 use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
+use windows::Win32::{
+    Foundation::{HWND, LPARAM, WPARAM},
+    UI::{
+        WindowsAndMessaging,
+        Input::KeyboardAndMouse,
+    },
+};
 
+pub mod keyboard;
 pub mod log;
+pub mod mouse;
 pub mod textures;
-pub use self::textures::TextureLoader;
-
-pub use nexus::imgui;
+pub use {
+    nexus::imgui,
+    self::{
+        mouse::MousePosition,
+        keyboard::KeyMods,
+        textures::TextureLoader,
+    },
+};
 
 pub type RuntimeError = &'static str;
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
@@ -86,7 +100,7 @@ pub fn mumble_link_ptr() -> RuntimeResult<MumblePtr> {
     #[cfg(feature = "extension-arcdps")]
     if let Some(ml) = exports::arcdps::mumble_link_ptr()? {
         return Ok(unsafe {
-            core::mem::transmute(ml)
+            mem::transmute(ml)
         })
     }
 
@@ -139,18 +153,32 @@ pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
     Err(RT_UNAVAILABLE)
 }
 
-pub fn invoke_marker_bind(marker: MarkerType, target: bool, duration_ms: i32) -> RuntimeResult<()> {
+pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<MousePosition>) -> RuntimeResult<()> {
     #[cfg(feature = "extension-nexus")]
-    if let Some(res) = exports::nexus::invoke_marker_bind(marker, target, duration_ms)? {
+    if let Some(res) = exports::nexus::press_marker_bind(marker, target, down, position).await? {
         return Ok(res)
     }
 
     #[cfg(feature = "extension-arcdps")]
-    if let Some(res) = exports::arcdps::invoke_marker_bind(marker, target, duration_ms)? {
+    if let Some(res) = exports::arcdps::press_marker_bind(marker, target, down, position).await? {
         return Ok(res)
     }
 
     Err(RT_UNAVAILABLE)
+}
+
+pub async fn invoke_marker_bind(marker: MarkerType, target: bool, duration: Duration, position: Option<MousePosition>) -> RuntimeResult<()> {
+    press_marker_bind(marker, target, true, position).await?;
+
+    tokio::time::sleep(duration).await;
+
+    #[cfg(feature = "extension-nexus")]
+    let position = match exports::nexus::available() {
+        false => position,
+        true => None,
+    };
+
+    press_marker_bind(marker, target, false, position).await
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
@@ -203,4 +231,55 @@ pub fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<()> {
     }
 
     Err(RT_UNAVAILABLE)
+}
+
+pub fn window_handle() -> RuntimeResult<HWND> {
+    let sc = dxgi_swap_chain()?
+        .ok_or("swap chain unavailable")?;
+
+    let desc = unsafe {
+        sc.GetDesc()
+    }.map_err(|_| "swap chain descriptor missing")?;
+
+    match desc.OutputWindow.is_invalid() {
+        false => Ok(desc.OutputWindow),
+        true => Err("no window handle associated with swap chain"),
+    }
+}
+
+pub fn screen_mouse_position() -> RuntimeResult<MousePosition> {
+    mouse::screen_position()
+}
+
+#[cfg(todo)]
+pub fn window_mouse_position() -> RuntimeResult<MousePosition> {
+    // TODO: maybe from imgui? or wndproc?
+    mouse::screen_position()
+        .and_then(|pos| pos.to_window())
+}
+
+pub unsafe fn window_message(msg: u32, w: usize, l: isize) -> RuntimeResult<()> {
+    let hwnd = window_handle()?;
+
+    if let Err(e) = WindowsAndMessaging::PostMessageA(Some(hwnd), msg, WPARAM(w), LPARAM(l)) {
+        ::log::warn!("failed to send message to {hwnd:?}: {e}");
+        return Err("PostMessageA failed")
+    }
+
+    Ok(())
+}
+
+pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(inputs: impl IntoIterator<Item = I>) -> RuntimeResult<()> {
+    let inputs: Vec<_> = inputs.into_iter().map(I::into).collect();
+    let res = unsafe {
+        KeyboardAndMouse::SendInput(&inputs[..], mem::size_of::<KeyboardAndMouse::INPUT>() as _)
+    };
+    match res {
+        0 => {
+            let msg = "SendInput Failed";
+            ::log::error!("{msg}: {}", windows::core::Error::from_win32());
+            Err(msg)
+        },
+        _ => Ok(()),
+    }
 }
