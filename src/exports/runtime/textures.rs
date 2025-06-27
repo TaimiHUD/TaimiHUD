@@ -1,7 +1,7 @@
 use {
     nexus::imgui::TextureId,
     relative_path::RelativePath,
-    std::{collections::{hash_map, HashMap}, mem, path::{Path, PathBuf}, sync::{Arc, RwLock as StdRwLock}},
+    std::{collections::{hash_map, HashMap}, future::Future, mem, path::{Path, PathBuf}, sync::{Arc, RwLock as StdRwLock}},
     tokio::sync::{self, mpsc, RwLock},
     windows::{
         core::Interface,
@@ -53,6 +53,7 @@ impl TextureLoader {
         let (tx_request, rx_request) = mpsc::channel(32);
         let (tx_response, rx_response) = mpsc::channel(32);
         let background = thread::spawn({
+            #[cfg(todo)]
             let tx_response = tx_response.clone();
             move || Self::background_loop(rx_request, tx_response)
         });
@@ -60,6 +61,7 @@ impl TextureLoader {
             background,
             sender: tx_request,
             upload_queue: RwLock::new(rx_response),
+            #[cfg(todo)]
             upload_queue_sender: tx_response,
         }
     }
@@ -72,6 +74,15 @@ impl TextureLoader {
                 Ok(())
             },
             _ => Err(anyhow!("texture loader thread failed to start")),
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        match () {
+            #[cfg(feature = "texture-loader")]
+            _ => self.loader.try_read().map(|loader| loader.is_some()).unwrap_or(false),
+            #[cfg(not(feature = "texture-loader"))]
+            _ => false,
         }
     }
 
@@ -90,9 +101,7 @@ impl TextureLoader {
             .map_err(|_| anyhow!("texture loader poisoned"))
     }
 
-    async fn begin_load(&self, key: &Arc<str>, request: impl FnOnce() -> TextureRequest) -> anyhow::Result<()> {
-        #[cfg(feature = "texture-loader")]
-        let sender = self.with_loader(|loader| loader.sender.clone())?;
+    pub async fn report_begin_load(&self, key: &Arc<str>, request: impl Future<Output = anyhow::Result<()>>) -> anyhow::Result<()> {
         {
             let mut textures = self.textures.write().await;
             let entry = textures.entry(key.clone());
@@ -107,14 +116,22 @@ impl TextureLoader {
                 },
             }
         }
-        match sender.send(request()).await {
+        match request.await {
             Ok(()) => Ok(()),
-            Err(..) => {
+            Err(e) => {
                 let mut textures = self.textures.write().await;
                 textures.insert(key.clone(), TextureSlot::Unavailable);
-                Err(anyhow!("texture loader unavailable"))
+                Err(e)
             }
         }
+    }
+    async fn begin_load(&self, key: &Arc<str>, request: impl FnOnce() -> TextureRequest) -> anyhow::Result<()> {
+        #[cfg(feature = "texture-loader")]
+        let sender = self.with_loader(|loader| loader.sender.clone())?;
+        self.report_begin_load(key, async move {
+            sender.send(request()).await
+                .map_err(|_| anyhow!("texture loader unavailable"))
+        }).await
     }
 
     #[cfg(feature = "texture-loader")]
@@ -189,8 +206,9 @@ impl TextureLoader {
     }
 
     #[cfg(feature = "texture-loader")]
+    #[cfg(todo)]
     pub async fn responses_async<R, F>(&self, f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> F) -> anyhow::Result<R> where
-        F: std::future::Future<Output = R>,
+        F: Future<Output = R>,
     {
         match *self.read_loader()? {
             Some(ref loader) => Ok({
@@ -423,6 +441,7 @@ pub struct TextureLoaderHandle {
     pub background: thread::JoinHandle<anyhow::Result<()>>,
     pub sender: mpsc::Sender<TextureRequest>,
     pub upload_queue: RwLock<mpsc::Receiver<TextureResponse>>,
+    #[cfg(todo)]
     pub upload_queue_sender: mpsc::Sender<TextureResponse>,
 }
 
@@ -451,6 +470,7 @@ pub enum TextureRequest {
 
 #[cfg(feature = "texture-loader")]
 impl TextureRequest {
+    #[cfg(todo)]
     pub fn key(&self) -> Option<&Arc<str>> {
         Some(match self {
             Self::LoadFile { key, .. } | Self::LoadBytes { key, .. }  =>
