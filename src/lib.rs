@@ -902,6 +902,10 @@ fn unload_render_background() {
 }
 
 fn log_join_error(name: &str, e: Box<dyn std::any::Any + Send>) {
+    log_any_error(name, &e)
+}
+
+fn log_any_error(name: &str, e: &dyn std::any::Any) {
     let msg = if let Some(m) = e.downcast_ref::<&'static str>() {
         *m
     } else if let Some(m) = e.downcast_ref::<String>() {
@@ -911,4 +915,11 @@ fn log_join_error(name: &str, e: Box<dyn std::any::Any + Send>) {
         return
     };
     log::error!("{name} thread panicked: {msg}");
+}
+
+fn panic_hook(info: &std::panic::PanicHookInfo) {
+    log_any_error(rt::NAME, info.payload());
+    if let Some(location) = info.location() {
+        log::error!("panic occurred in file '{}' at line {}", location.file(), location.line());
+    }
 }
