@@ -53,7 +53,7 @@ pub fn gh_repo_src() -> GitHubSource {
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 static RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
-fn pre_init() {
+fn early_init() {
     RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
 
     match MumbleLink::new() {
@@ -98,11 +98,13 @@ fn check_for_nexus() -> bool {
     false
 }
 
-fn init() -> Result<(), &'static str> {
+fn pre_init() {
     RUNTIME_LOADED.store(true, Ordering::Relaxed);
     let _ = rt::log::TaimiLog::setup();
+}
 
-    pre_init();
+fn init() -> Result<(), &'static str> {
+    early_init();
 
     #[cfg(feature = "extension-nexus")]
     if rt::nexus_available() {

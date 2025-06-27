@@ -31,7 +31,6 @@ pub const RT_UNAVAILABLE: RuntimeError = "extension runtime unavailable";
 
 pub const CRATE_NAME: &'static str = env!("CARGO_PKG_NAME");
 pub const CRATE_VERSION: &'static str = env!("CARGO_PKG_VERSION");
-#[cfg(todo)]
 pub const NAME: &'static str = "TaimiHUD";
 pub const NAME_C: &'static CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(b"TaimiHUD\0")
