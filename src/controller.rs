@@ -1041,7 +1041,7 @@ impl Controller {
     }
 
     async fn load_texture(&self, rel: RelativePathBuf, base: PathBuf) {
-        if let Err(e) = crate::TEXTURES.request_load_file_relative(rel.clone(), base).await {
+        if let Err(e) = rt::texture_schedule_path(rel.as_str(), &base).await {
             log::warn!("Cannot load texture {rel:?}: {e}");
         }
     }
@@ -1187,7 +1187,7 @@ impl Controller {
     }
 
     async fn load_texture_integrated(&mut self, identifier: String, data: Vec<u8>) {
-        if let Err(e) = crate::TEXTURES.request_load_bytes(&identifier[..], data).await {
+        if let Err(e) = rt::texture_schedule_bytes(&identifier[..], data).await {
             log::warn!("Cannot load texture {identifier:?}: {e}");
         }
     }

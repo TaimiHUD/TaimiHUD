@@ -9,6 +9,8 @@ use windows::Win32::{
         Input::KeyboardAndMouse,
     },
 };
+#[cfg(feature = "texture-loader")]
+use crate::TEXTURES;
 
 pub mod keyboard;
 pub mod log;
@@ -215,22 +217,56 @@ pub fn d3d11_device() -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID
     res.map_err(|msg| anyhow::anyhow!("d3d11 device unavailable: {msg}"))
 }
 
-pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
+pub async fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
+    let res = RT_UNAVAILABLE;
+
+    #[cfg(feature = "texture-loader")]
+    let res = if TEXTURES.is_available() {
+        match TEXTURES.request_load_file(key, path).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let msg = "Texture load failure";
+                ::log::error!("{msg}: {e}");
+                msg
+            },
+        }
+    } else { res };
+
     #[cfg(feature = "extension-nexus")]
     if let Some(res) = exports::nexus::texture_schedule_path(key, path)? {
         return Ok(res)
     }
 
-    Err(RT_UNAVAILABLE)
+    Err(res)
 }
 
-pub fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<()> {
+pub async fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<()> {
+    let res = RT_UNAVAILABLE;
+
+    #[cfg(feature = "texture-loader")]
+    let res = if TEXTURES.is_available() {
+        let bytes = match bytes {
+            #[cfg(feature = "extension-nexus")]
+            ref b => &b[..],
+            #[cfg(not(feature = "extension-nexus"))]
+            b => b,
+        };
+        match TEXTURES.request_load_bytes(key, bytes).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let msg = "Texture load failure";
+                ::log::error!("{msg}: {e}");
+                msg
+            },
+        }
+    } else { res };
+
     #[cfg(feature = "extension-nexus")]
     if let Some(res) = exports::nexus::texture_schedule_bytes(key, &bytes)? {
         return Ok(res)
     }
 
-    Err(RT_UNAVAILABLE)
+    Err(res)
 }
 
 pub fn window_handle() -> RuntimeResult<HWND> {
