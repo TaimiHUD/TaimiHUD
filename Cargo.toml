@@ -50,8 +50,8 @@ markers-edit = [
   "markers"
 ]
 extension-arcdps = [
-  "extension-arcdps-codegen",
-  #"extension-arcdps-extern",
+  #"extension-arcdps-codegen",
+  "extension-arcdps-extern",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/identity",
   "arcloader-mumblelink/gw2_mumble",
