@@ -266,16 +266,9 @@ impl TextureLoader {
         let handle = self.shutdown()?;
         match handle.join() {
             Ok(res) => res,
-            Err(e) => Err({
-                let msg = if let Some(m) = e.downcast_ref::<&'static str>() {
-                    &m[..]
-                } else if let Some(m) = e.downcast_ref::<String>() {
-                    &m[..]
-                } else {
-                    "unknown error"
-                };
-                anyhow!("texture loader thread panicked: {msg}")
-            })
+            Err(e) => Err(crate::with_any_error(&e, |e|
+                    anyhow!("texture loader thread panicked: {e}")
+            )),
         }
     }
 

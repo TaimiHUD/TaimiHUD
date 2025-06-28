@@ -215,7 +215,7 @@ unsafe extern "C" fn arc_cb_imgui_options_windows(window_name: Option<CStrPtr>) 
 }
 
 extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
-    panic::set_hook(Box::new(crate::panic_hook));
+    crate::setup_panic_hook();
 
     let res = panic::catch_unwind(|| {
         exports::pre_init();
@@ -243,7 +243,7 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
                 ExtensionHeader::new_failed(None)
             },
             Err(e) => {
-                crate::log_join_error("init", e);
+                crate::log_any_error("arcdps init", &e);
                 ExtensionHeader::new_failed(Some(cstr!(&"init panic")))
             },
         },
@@ -265,7 +265,6 @@ unsafe extern "C" fn arc_release() {
     // XXX: leaking these buffers because the destructors call imgui APIs :<
     ptr::write(ARC_IMGUI_CONTEXT.get(), None);
     ptr::write(ARC_IMGUI_UI.get(), None);
-    drop(panic::take_hook());
 }
 
 wrap_init_addr! {

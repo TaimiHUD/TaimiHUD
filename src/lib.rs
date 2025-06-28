@@ -52,6 +52,7 @@ use {
     std::{
         ffi::{c_char, CStr},
         mem,
+        panic,
         ptr,
         sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
@@ -208,6 +209,8 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
 }
 
 fn init() -> Result<(), &'static str> {
+    setup_panic_hook();
+
     let mut loaded = match rt::LOADER_LOCK.lock() {
         Ok(loaded) if *loaded => {
             log::info!("already loaded, skipping init");
@@ -845,7 +848,7 @@ fn unload() {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 if let Err(e) = handle.join() {
-                    log_join_error("controller", e);
+                    log_any_error("controller thread", &e);
                 }
             },
             None => {
@@ -863,6 +866,10 @@ fn unload() {
     }
 
     *loaded = false;
+
+    #[cfg(not(debug_assertions))] {
+        drop(panic::take_hook());
+    }
 }
 
 fn unload_render() {
@@ -901,25 +908,28 @@ fn unload_render_background() {
     return
 }
 
-fn log_join_error(name: &str, e: Box<dyn std::any::Any + Send>) {
-    log_any_error(name, &e)
-}
-
-fn log_any_error(name: &str, e: &dyn std::any::Any) {
-    let msg = if let Some(m) = e.downcast_ref::<&'static str>() {
+fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
+    let msg = if let Some(m) = e.downcast_ref::<&str>() {
         *m
     } else if let Some(m) = e.downcast_ref::<String>() {
         &m[..]
     } else {
-        log::error!("{name} thread panicked");
-        return
+        "unknown error"
     };
-    log::error!("{name} thread panicked: {msg}");
+    f(msg)
 }
 
-fn panic_hook(info: &std::panic::PanicHookInfo) {
+fn log_any_error(name: &str, e: &dyn std::any::Any) {
+    with_any_error(e, move |e| log::error!("{name} panicked: {e}"))
+}
+
+fn panic_hook(info: &panic::PanicHookInfo) {
     log_any_error(rt::NAME, info.payload());
     if let Some(location) = info.location() {
-        log::error!("panic occurred in file '{}' at line {}", location.file(), location.line());
+        log::error!("Panic occurred in {} at {location}", rt::CRATE_NAME);
     }
+}
+
+fn setup_panic_hook() {
+    panic::set_hook(Box::new(panic_hook))
 }
