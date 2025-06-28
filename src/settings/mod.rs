@@ -1,3 +1,4 @@
+mod arc;
 mod needs_update;
 mod progress_bar_config;
 mod settings_struct;
@@ -6,6 +7,7 @@ mod sources;
 mod v1;
 
 pub use {
+    arc::{ArcSettings, ArcVk},
     progress_bar_config::ProgressBarSettings,
     settings_struct::{
         MarkerAutoPlaceSettings, MarkerSettings, NeedsUpdate, Settings, SettingsLock,

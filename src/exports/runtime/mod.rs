@@ -20,7 +20,7 @@ pub use {
     nexus::imgui,
     self::{
         mouse::MousePosition,
-        keyboard::KeyMods,
+        keyboard::KeyState,
         textures::TextureLoader,
     },
 };

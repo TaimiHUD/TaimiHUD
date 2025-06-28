@@ -1,10 +1,9 @@
 use {
-    crate::exports::runtime::{self as rt, keyboard::KeyMods, RuntimeResult},
+    crate::exports::runtime::{self as rt, keyboard::KeyState, RuntimeResult},
     std::{iter, mem::transmute, ops, slice},
     windows::Win32::{
         Foundation::{LPARAM, POINT, ERROR_SUCCESS, SetLastError, GetLastError},
         Graphics::Gdi,
-        System::SystemServices,
         UI::{
             WindowsAndMessaging,
             Input::KeyboardAndMouse,
@@ -13,6 +12,8 @@ use {
 };
 #[cfg(feature = "markers")]
 use crate::marker::atomic::ScreenPoint;
+#[cfg(feature = "extension-arcdps")]
+use arcdps::extras::{self, KeybindChange, MouseCode};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(C)]
@@ -22,11 +23,18 @@ pub struct MousePosition {
 }
 
 impl MousePosition {
+    //pub const EMPTY: Self = Self::new(i32::MIN, i32::MIN);?
+    pub const EMPTY: Self = Self::new(0, 0);
+
     pub const fn new(x: i32, y: i32) -> Self {
         Self {
             x,
             y
         }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        matches!(*self, Self::EMPTY)
     }
 
     pub const fn to_point(self) -> POINT {
@@ -242,39 +250,81 @@ pub fn virtual_screen_bounds() -> RuntimeResult<(NonZeroI32, NonZeroI32)> {
 #[derive(Debug, Copy, Clone)]
 pub struct MouseInput {
     pub position: MousePosition,
-    pub button: Option<u32>,
-    pub down: bool,
+    pub button: KeyState,
+    pub down: Option<bool>,
 }
 
 impl MouseInput {
     pub const fn with_position(position: MousePosition) -> Self {
         Self {
             position,
-            button: None,
-            down: false,
+            button: KeyState::EMPTY,
+            down: None,
         }
     }
 
-    pub const fn new(position: MousePosition, button: u32, down: bool) -> Self {
+    pub const fn with_button(button: KeyState) -> Self {
+        Self {
+            position: MousePosition::EMPTY,
+            button,
+            down: None,
+        }
+    }
+
+    pub const fn new(position: MousePosition, button: KeyState, down: Option<bool>) -> Self {
         Self {
             position,
-            button: Some(button),
+            button,
             down,
         }
     }
 
+    pub const fn to_movement(self) -> Self {
+        Self::new(self.position, self.button, None)
+    }
+
+    pub const fn is_movement(&self) -> bool {
+        self.down.is_none() || !self.button.intersects(KeyState::BUTTON)
+    }
+
+    pub const fn buttons(&self) -> KeyState {
+        KeyState::from_bits_retain(self.button.bits() & KeyState::BUTTON.bits())
+    }
+
+    pub const fn mods(&self) -> KeyState {
+        KeyState::from_bits_retain(self.button.bits() & !KeyState::BUTTON.bits())
+    }
+
+    pub const fn button_after(&self) -> KeyState {
+        match self.down {
+            Some(false) => self.mods(),
+            _ => self.button,
+        }
+    }
+
+    pub const fn button_before(&self) -> KeyState {
+        match self.down {
+            Some(true) => self.mods(),
+            _ => self.button,
+        }
+    }
+
+    pub fn input_buttons(self) -> impl Iterator<Item = Self> + Clone + Send + Sync + 'static {
+        let Self { position, button, down } = self;
+        let buttons = button & KeyState::BUTTON;
+        let mods = button & !KeyState::BUTTON;
+        buttons.iter_keys()
+            .map(move |b| Self::new(position, b | mods, down))
+    }
+
     pub fn to_input(self) -> KeyboardAndMouse::INPUT {
         let flag_move = KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
-        let flag_button = self.button.map(|b| match (self.down, b) {
-            (true, 0) => KeyboardAndMouse::MOUSEEVENTF_LEFTDOWN,
-            (false, 0) => KeyboardAndMouse::MOUSEEVENTF_LEFTUP,
-            (true, 1) => KeyboardAndMouse::MOUSEEVENTF_RIGHTDOWN,
-            (false, 1) => KeyboardAndMouse::MOUSEEVENTF_RIGHTUP,
-            (true, 2) => KeyboardAndMouse::MOUSEEVENTF_MIDDLEDOWN,
-            (false, 2) => KeyboardAndMouse::MOUSEEVENTF_MIDDLEUP,
-            (true, ..) => KeyboardAndMouse::MOUSEEVENTF_XDOWN,
-            (false, ..) => KeyboardAndMouse::MOUSEEVENTF_XUP,
-        }).unwrap_or_default();
+        let flag_button = self.down.and_then(|down| self.button.mouse_flag(down)).unwrap_or_default();
+        let xdata = match flag_button {
+            flag if (flag & (KeyboardAndMouse::MOUSEEVENTF_XDOWN | KeyboardAndMouse::MOUSEEVENTF_XUP)).0 != 0 =>
+                self.button.button_x(),
+            _ => 0,
+        };
         #[cfg(todo)]
         let (flag_abs, Self { x: dx, y: dy }) = match relative_to {
             // XXX: relative applies thresholds and mouse speed multipliers, do not want
@@ -288,10 +338,7 @@ impl MouseInput {
                 mi: KeyboardAndMouse::MOUSEINPUT {
                     dx: self.position.x,
                     dy: self.position.y,
-                    mouseData: self.button.map(|b| match b {
-                        0..=2 => 0,
-                        x => x,
-                    }).unwrap_or(0),
+                    mouseData: xdata,
                     time: 0,
                     dwFlags: flag_button | flag_abs | flag_move,
                     dwExtraInfo: 0,
@@ -300,37 +347,48 @@ impl MouseInput {
         }
     }
 
-    pub fn to_event(self, mods: KeyMods, only_move: bool) -> Option<(u32, usize, isize)> {
-        if mods.alt {
-            log::error!("mouse events with alt modifier unimplemented");
-            return None
-        }
-        let msg = match (self.down, self.button) {
-            _ if only_move => WindowsAndMessaging::WM_MOUSEMOVE,
-            (_, None) => WindowsAndMessaging::WM_MOUSEMOVE,
-            (true, Some(0)) => WindowsAndMessaging::WM_LBUTTONDOWN,
-            (false, Some(0)) => WindowsAndMessaging::WM_LBUTTONUP,
-            (true, Some(1)) => WindowsAndMessaging::WM_RBUTTONDOWN,
-            (false, Some(1)) => WindowsAndMessaging::WM_RBUTTONUP,
-            (true, Some(2)) => WindowsAndMessaging::WM_MBUTTONDOWN,
-            (false, Some(2)) => WindowsAndMessaging::WM_MBUTTONUP,
-            (true, Some(_)) => WindowsAndMessaging::WM_XBUTTONDOWN,
-            (false, Some(_)) => WindowsAndMessaging::WM_XBUTTONUP,
+    pub const EVENT_MODS: KeyState = KeyState::from_bits_retain(KeyState::CTRL.bits() | KeyState::SHIFT.bits());
+    pub fn to_event(self) -> Option<(u32, usize, isize)> {
+        let button = self.buttons();
+
+        let msg = match self.down {
+            Some(down) if !self.is_movement() =>
+                button.event_msg(down),
+            _ => WindowsAndMessaging::WM_MOUSEMOVE,
         };
 
-        let w_mods = mods.ctrl.then_some(SystemServices::MK_CONTROL.0 as usize).into_iter()
-            .chain(mods.shift.then_some(SystemServices::MK_SHIFT.0 as usize))
-            .sum::<usize>();
-        let w_button = match self.button {
-            Some(button @ 0..=1) => SystemServices::MK_LBUTTON.0 << button,
-            Some(button @ 2..=4) => SystemServices::MK_MBUTTON.0 << (button - 2),
-            Some(..) => return None,
-            None => 0,
-        } as usize;
+        let w = button.event_w(msg) | self.button_after().to_modifierkeys().0 as usize;
 
         let l = LPARAM::from(self.position);
 
-        Some((msg, w_button | w_mods, l.0))
+        Some((msg, w, l.0))
+    }
+
+    pub fn to_events(self, prior: Option<Self>) -> impl Iterator<Item = (u32, usize, isize)> {
+        let movement = match (self.is_movement(), &prior) {
+            (_, Some(prior)) if self.position == prior.position => None,
+            (false, None) => None,
+            //(false, Some(prior)) => None,
+            /*(true_, _)*/ _ => self.to_event(),
+        };
+        let mut before = prior.as_ref().map(|p| p.button_after()).unwrap_or_else(|| self.button_before());
+        let after = self.button_after();
+        let changes = after ^ before;
+        let events = changes.iter_keys()
+            .filter_map(move |button| {
+                if !button.intersects(KeyState::BUTTON) {
+                    return None
+                }
+                let input = Self::new(self.position, button, self.down);
+                let (msg, _w, l) = input.to_event()?;
+                if let Some(down) = self.down {
+                    before.set(button, down);
+                }
+                let w = button.event_w(msg) | before.to_modifierkeys().0 as usize;
+                Some((msg, w, l))
+            });
+        movement.into_iter()
+            .chain(events)
     }
 }
 
@@ -339,6 +397,36 @@ impl From<MousePosition> for MouseInput {
         Self::with_position(position)
     }
 }
+
+impl From<KeyState> for MouseInput {
+    fn from(button: KeyState) -> Self {
+        Self::with_button(button)
+    }
+}
+
+#[cfg(feature = "extension-arcdps")]
+impl TryFrom<KeybindChange> for MouseInput {
+    type Error = rt::RuntimeError;
+
+    fn try_from(key: KeybindChange) -> Result<Self, Self::Error> {
+        let mods = KeyState::from(&key);
+        let button = match key.key {
+            extras::Key::Mouse(code) => KeyState::try_from(code),
+            _ => Err("not a mouse binding"),
+        }?;
+        Ok(Self::with_button(button | mods))
+    }
+}
+
+#[cfg(feature = "extension-arcdps")]
+impl TryFrom<MouseCode> for MouseInput {
+    type Error = rt::RuntimeError;
+
+    fn try_from(code: MouseCode) -> Result<Self, Self::Error> {
+        KeyState::try_from(code).map(Self::with_button)
+    }
+}
+
 
 impl From<MouseInput> for KeyboardAndMouse::INPUT {
     fn from(input: MouseInput) -> Self {
@@ -366,12 +454,22 @@ pub fn screen_position() -> RuntimeResult<MousePosition> {
     }
 }
 
-pub fn send_mouse(input: MouseInput, mods: KeyMods, only_move: bool) -> RuntimeResult<()> {
-    let (msg, w, l) = input.to_event(mods, only_move)
-        .ok_or("unsupported mouse input")?;
-    unsafe {
-        rt::window_message(msg, w, l)
+pub fn send_mouse(input: MouseInput, prior: Option<MouseInput>) -> RuntimeResult<()> {
+    let mut sent = false;
+    let mut error = None;
+    for (msg, w, l) in input.to_events(prior) {
+        sent = true;
+        let res = unsafe {
+            rt::window_message(msg, w, l)
+        };
+        if let Err(e) = res {
+            let _ = error.insert(e);
+        }
     }
+    error.map(Err).unwrap_or(match sent {
+        true => Ok(()),
+        false => Err("empty or unsupported mouse input"),
+    })
 }
 
 pub fn send_input<I: Into<MouseInput>>(input: I) -> RuntimeResult<()> {

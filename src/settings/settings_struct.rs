@@ -1,5 +1,5 @@
 use {
-    super::{ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
+    super::{ArcSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
     crate::{controller::ProgressBarStyleChange, SETTINGS, SOURCES},
     anyhow::anyhow,
     chrono::{DateTime, Utc},
@@ -8,6 +8,7 @@ use {
     nexus::imgui::Ui,
     serde::{Deserialize, Serialize},
     std::{
+        borrow::Cow,
         collections::{HashMap, HashSet},
         fmt::{self},
         path::{Path, PathBuf},
@@ -143,6 +144,8 @@ pub struct Settings {
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
     pub disabled_paths: HashSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arc: Option<ArcSettings>,
 }
 
 impl Settings {
@@ -215,7 +218,11 @@ impl Settings {
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
             crate::WINDOW_MARKERS => &mut self.markers_window_open,
             crate::WINDOW_PATHING => &mut self.pathing_window_open,
-            _ => unreachable!("unsupported window"),
+            _ => {
+                // consider an enum...
+                log::error!("unsupported window: {window}");
+                return
+            },
         };
 
         match state {
@@ -401,6 +408,7 @@ impl Settings {
             enable_katrender: false,
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
+            arc: Default::default(),
         }
     }
     pub async fn load(addon_dir: &Path) -> anyhow::Result<Self> {
@@ -437,5 +445,16 @@ impl Settings {
         let mut file = File::create(settings_path).await?;
         file.write_all(settings_str.as_bytes()).await?;
         Ok(())
+    }
+
+    pub fn arc(&self) -> Cow<ArcSettings> {
+        match self.arc.as_ref() {
+            Some(arc) => Cow::Borrowed(arc),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+
+    pub fn arc_mut(&mut self) -> &mut ArcSettings {
+        self.arc.get_or_insert_default()
     }
 }

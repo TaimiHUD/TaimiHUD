@@ -51,9 +51,9 @@ pub fn options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
 
 pub fn wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
     let vk = VIRTUAL_KEY(keycode as _);
-    let (msg, w, mut l) = rt::keyboard::KeyInput::new(vk, key_down).to_event();
-    if key_down == prev_key_down {
-        l ^= 1 << 30;
+    let (msg, w, mut l) = rt::keyboard::KeyInput::new(vk, rt::KeyState::default(), key_down).to_event();
+    if key_down && prev_key_down {
+        l |= 1 << 30;
     }
 
     match exports::wnd_filter(ptr::null_mut(), msg, w.into(), l.into()) {
