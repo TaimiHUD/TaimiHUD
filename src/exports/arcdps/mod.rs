@@ -8,11 +8,11 @@ use {
         identity::MumbleIdentity,
     },
     crate::{
-        exports::{self, runtime::{self as rt, imgui::{self, Ui}, RuntimeResult}},
+        exports::{self, runtime::{self as rt, imgui::{self, Ui}, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}},
         game_language_id,
         marker::format::MarkerType,
         render::RenderState,
-        settings::GitHubSource,
+        settings::{ArcSettings, ArcVk, GitHubSource},
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
@@ -30,7 +30,10 @@ use {
     },
     windows::Win32::{
         Foundation::HMODULE,
-        UI::Input::KeyboardAndMouse,
+        UI::{
+            WindowsAndMessaging,
+            Input::KeyboardAndMouse,
+        },
     },
 };
 #[cfg(feature = "extension-arcdps-extern")]
@@ -210,7 +213,86 @@ fn imgui_options_tab(ui: &Ui) {
 
     ui.checkbox("Check for updates", &mut false);
 
+    thread_local! {
+        static BINDING_BUFFERS: std::cell::RefCell<std::collections::HashMap<&'static str, String>> = Default::default();
+    }
+
+    fn keybind_ui<F: FnOnce(&ArcVk)>(ui: &Ui, vk: &'static ArcVk, action: Option<F>) {
+        let _id_token = ui.push_id(vk.id);
+        let name = vk.get_name();
+        match action {
+            Some(action) => if ui.button(name) {
+                action(vk)
+            },
+            None => ui.text(name),
+        }
+        ui.same_line();
+
+        let default_vk = vk.vkeycode_default();
+        let default_vsc = default_vk.and_then(rt::keyboard::scan_code);
+        let default_name = default_vsc.and_then(|vsc| rt::keyboard::key_name(vsc).ok());
+
+        let changed = BINDING_BUFFERS.with_borrow_mut(|b| {
+            let binding_buffer = b.entry(vk.id);
+            let is_fresh = matches!(binding_buffer, std::collections::hash_map::Entry::Vacant(..));
+            let binding_buffer = binding_buffer.or_default();
+            if is_fresh {
+                if let Some(current_vk) = vk.get_setting_vkeycode() {
+                    use std::fmt::Write;
+
+                    let current_name = rt::keyboard::scan_code(current_vk).and_then(|vsc| rt::keyboard::key_name(vsc).ok());
+                    let _ = if let Some(name) = current_name {
+                        write!(binding_buffer, "{name}")
+                    } else {
+                        write!(binding_buffer, "{}", current_vk.0)
+                    };
+                }
+            }
+            let input = ui.input_text("Keybind", binding_buffer)
+                .auto_select_all(true)
+                .always_insert_mode(true)
+                .enter_returns_true(true)
+                .no_undo_redo(true)
+                .no_horizontal_scroll(true);
+            let changed = match (default_name, default_vk) {
+                (Some(name), _) => input.hint(name.to_string()),
+                (None, Some(vk)) => input.hint(format!("{}", vk.0)),
+                (None, None) => input.hint("unbound by default".into()),
+            }.build();
+
+            match changed {
+                false => None,
+                true => match binding_buffer.parse::<u16>() {
+                    Ok(new) => {
+                        log::debug!("updating {} keybind to: {new:#x}", vk.id);
+                        Some(KeyboardAndMouse::VIRTUAL_KEY(new))
+                    },
+                    Err(_) => {
+                        log::warn!("TODO: update {} keybind to: {binding_buffer:?}", vk.id);
+                        None
+                    },
+                },
+            }
+        });
+
+        if let Some(new) = changed {
+            if let Err(e) = vk.set_vkeycode(new) {
+                log::error!("saving keybind {} failed: {}", vk.id, e);
+            }
+        }
+    }
+
     ui.new_line();
+    for &binding in ArcSettings::VK_WINDOWS {
+        keybind_ui(ui, binding, Some(|vk: &ArcVk| crate::control_window(vk.id, None)));
+    }
+    #[cfg(feature = "space")]
+    if crate::engine_initialized() {
+        keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| crate::Engine::try_send(crate::SpaceEvent::PathingToggle)));
+    }
+    for binding in &ArcSettings::VK_TIMER_TRIGGERS {
+        keybind_ui(ui, binding, Some(|vk: &ArcVk| crate::Controller::try_send(crate::ControllerEvent::TimerKeyTrigger(vk.id.into(), false))));
+    }
     let all_windows = [
         crate::WINDOW_PRIMARY,
         crate::WINDOW_TIMERS,
@@ -274,10 +356,67 @@ fn imgui_options_windows(ui: &Ui, window_name: Option<&str>) -> bool {
     hide_checkbox
 }
 
+/// Filtered means we only receive input events if the configured
+/// [modifier keys](ui_modifiers) are being held down..?
 fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     if !available() { return msg }
 
-    msg
+    match msg {
+        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_KEYUP => {
+            // no such thing as a duplicate keyup event, but just in case...
+            let prev_down = l & (1 << 30) != 0;
+
+            let is_up = msg == WindowsAndMessaging::WM_KEYUP;
+            let is_release = is_up && prev_down;
+            let settings = crate::SETTINGS.get()
+                .and_then(|s| s.try_read().ok());
+            let arc = match settings.as_ref().map(|s| s.arc()) {
+                Some(arc) => arc,
+                _ => {
+                    log::trace!("key pressed while settings unavailable");
+                    return msg
+                },
+            };
+
+            let vk = KeyboardAndMouse::VIRTUAL_KEY(w as u16);
+            let mut bound = false;
+
+            for &binding in ArcSettings::VK_WINDOWS {
+                if arc.binding_matches(binding, vk) {
+                    bound = true;
+                    if is_release {
+                        crate::control_window(binding.id, None)
+                    }
+                }
+            }
+
+            #[cfg(feature = "space")]
+            if crate::engine_initialized() && arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
+                bound = true;
+                if is_release {
+                    crate::Engine::try_send(crate::SpaceEvent::PathingToggle);
+                }
+            }
+
+            for binding in &ArcSettings::VK_TIMER_TRIGGERS {
+                if arc.binding_matches(binding, vk) {
+                    bound = true;
+                    if is_release == is_up {
+                        crate::Controller::try_send(crate::ControllerEvent::TimerKeyTrigger(binding.id.into(), is_release));
+                    }
+                }
+            }
+
+            match bound {
+                true => {
+                    // tell game to ignore our keybind
+                    0
+                },
+                false => msg,
+            }
+        },
+        _ => msg,
+    }
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
@@ -652,40 +791,109 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
         kb.get(&control).cloned()
     }.ok_or("unknown keybind")?;
 
-    let mods = rt::KeyMods::from(&binding);
+    let mut mods = KeyState::from(&binding);
     match binding.key {
         Key::Key(keycode) => {
-            let vk = KeyboardAndMouse::VIRTUAL_KEY(keycode as _);
-            rt::keyboard::send_key_combo(rt::keyboard::KeyInput::new(vk, down), mods)
+            if let Some(position) = position {
+                // move the mouse into position first...
+                rt::mouse::send_mouse(MouseInput::with_position(position), None)?;
+            }
+            let mut input = KeyInput::empty_with_mods(mods, down);
+            input.vk = KeyInput::from(keycode).vk;
+            //rt::keyboard::send_key_input(input)
+            rt::keyboard::send_key_combo(input)
         },
         Key::Mouse(button) => {
-            let key_mods = rt::KeyMods {
-                alt: mods.alt,
-                .. Default::default()
-            };
-            let mods = rt::KeyMods {
-                alt: false,
-                .. mods
-            };
-
-            let position = match position {
+            let button = KeyState::try_from(button)?;
+            let pos = match position {
                 Some(p) => p,
                 None => rt::screen_mouse_position()?,
             };
-            let input = rt::mouse::MouseInput::new(position, button as _, down);
-            let invoke = || match mods.is_empty() {
-                true => rt::mouse::send_input(input),
-                false => rt::mouse::send_mouse(input, mods, false),
+            let input = MouseInput::new(pos, button | mods, Some(down));
+            let prior = match position {
+                // ensure the mouse is moved if a position was explicitly requested
+                Some(..) => Some(MouseInput::new(rt::MousePosition::EMPTY, input.button_before(), None)),
+                _ => None,
             };
-            match key_mods.is_empty() {
+            let mouse_mods = match mods.take(MouseInput::EVENT_MODS) {
+                mouse_mods if !mods.is_empty() => {
+                    // can't eliminate the need to simulate modifier key presses, so just move all mods to that
+                    mods.insert(mouse_mods);
+                    KeyState::EMPTY
+                },
+                mouse_mods =>
+                    mouse_mods,
+            };
+
+            let invoke = || match mouse_mods.is_empty() {
+                true /*if position.is_none()*/ => rt::mouse::send_input(input),
+                _ => rt::mouse::send_mouse(input, prior),
+            };
+            match mods.is_empty() {
                 true => invoke(),
-                false => rt::keyboard::do_key_combo(invoke, down, key_mods),
+                false => rt::keyboard::do_key_combo(invoke, KeyInput::empty_with_mods(mods, down)),
             }
         },
         Key::Unknown(..) => {
             Err("unrecognized bind")
         },
     }.map(Some)
+}
+
+#[cfg(todo)]
+#[derive(Debug, Copy, Clone)]
+pub struct ModifierKeys {
+    mod1: KeyInput,
+    mod2: KeyInput,
+    modmulti: KeyInput,
+}
+
+#[cfg(todo)]
+impl ModifierKeys {
+    pub const ARC_DEFAULT: Self = Self {
+        mod1: KeyInput::vk_down(KeyboardAndMouse::VK_SHIFT),
+        mod2: KeyInput::vk_down(KeyboardAndMouse::VK_MENU),
+        modmulti: KeyInput::vk_down(KeyboardAndMouse::VK_SHIFT),
+    };
+}
+
+#[cfg(todo)]
+impl From<u64> for ModifierKeys {
+    fn from(ui_mods: u64) -> Self {
+        Self {
+            mod1: KeyInput::from(ui_mods as u16),
+            mod2: KeyInput::from((ui_mods >> 16) as u16),
+            modmulti: KeyInput::from((ui_mods >> 32) as u16),
+        }
+    }
+}
+
+#[cfg(todo)]
+#[cfg(feature = "extension-arcdps-codegen")]
+impl From<arcdps::exports::Modifiers> for ModifierKeys {
+    fn from(ui_mods: arcdps::exports::Modifiers) -> Self {
+        Self {
+            mod1: KeyInput::from(ui_mods.modifier1),
+            mod2: KeyInput::from(ui_mods.modifier2),
+            modmulti: KeyInput::from(ui_mods.modifier_multi),
+        }
+    }
+}
+
+#[cfg(todo)]
+pub fn ui_modifiers() -> ModifierKeys {
+    match available() {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        true if !arcdps::exports::has_e7_ui_modifiers() =>
+            None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        true if arcdps::exports::has_e7_ui_modifiers() =>
+            Some(arcdps::exports::modifiers().into()),
+        #[cfg(feature = "extension-arcdps-extern")]
+        true => r#extern::arc_args().and_then(|arc| arc.module.arc_ui_modifiers().ok())
+            .map(Into::into),
+        _ => None,
+    }.unwrap_or(ModifierKeys::ARC_DEFAULT)
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
