@@ -405,6 +405,18 @@ pub fn key_name(code: NonZeroU16) -> windows::core::Result<windows::core::HSTRIN
     }
 }
 
+pub fn vk_name(vk: VIRTUAL_KEY) -> windows::core::Result<windows::core::HSTRING> {
+    match u8::try_from(vk.0) {
+        Ok(c) if c.is_ascii_graphic() => {
+            let b = [vk.0];
+            Ok(windows::core::HSTRING::from_wide(&b))
+        },
+        _ => scan_code(vk)
+            .ok_or_else(|| windows::core::Error::new(windows::Win32::Foundation::ERROR_KEY_DOES_NOT_EXIST.to_hresult(), "scan code unknown"))
+            .and_then(|sc| key_name(sc))
+    }
+}
+
 pub fn scan_code_key(vsc: NonZeroU16) -> Option<VIRTUAL_KEY> {
     let vk = unsafe {
         KeyboardAndMouse::MapVirtualKeyA(vsc.get().into(), KeyboardAndMouse::MAPVK_VSC_TO_VK)

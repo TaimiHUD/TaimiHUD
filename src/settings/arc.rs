@@ -45,6 +45,7 @@ impl ArcSettings {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ArcVk {
     pub id: &'static str,
     pub default_vk: u16,
@@ -77,6 +78,18 @@ impl ArcVk {
         }
 
         crate::LANGUAGE_LOADER.get(self.id)
+    }
+
+    pub fn window_name(&self) -> Option<&'static str> {
+        Some(match *self {
+            ArcSettings::VK_WINDOW_TOGGLE_PRIMARY => crate::WINDOW_PRIMARY,
+            ArcSettings::VK_WINDOW_TOGGLE_TIMERS => crate::WINDOW_TIMERS,
+            #[cfg(feature = "markers")]
+            ArcSettings::VK_WINDOW_TOGGLE_MARKERS => crate::WINDOW_MARKERS,
+            #[cfg(feature = "space")]
+            ArcSettings::VK_WINDOW_TOGGLE_PATHING => crate::WINDOW_PATHING,
+            _ => return None,
+        })
     }
 
     pub fn get_setting_vkeycode(&self) -> Option<VIRTUAL_KEY> {

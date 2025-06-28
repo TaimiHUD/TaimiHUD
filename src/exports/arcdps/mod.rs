@@ -229,8 +229,7 @@ fn imgui_options_tab(ui: &Ui) {
         ui.same_line();
 
         let default_vk = vk.vkeycode_default();
-        let default_vsc = default_vk.and_then(rt::keyboard::scan_code);
-        let default_name = default_vsc.and_then(|vsc| rt::keyboard::key_name(vsc).ok());
+        let default_name = default_vk.and_then(|vk| rt::keyboard::vk_name(vk).ok());
 
         let changed = BINDING_BUFFERS.with_borrow_mut(|b| {
             let binding_buffer = b.entry(vk.id);
@@ -240,8 +239,8 @@ fn imgui_options_tab(ui: &Ui) {
                 if let Some(current_vk) = vk.get_setting_vkeycode() {
                     use std::fmt::Write;
 
-                    let current_name = rt::keyboard::scan_code(current_vk).and_then(|vsc| rt::keyboard::key_name(vsc).ok());
-                    let _ = if let Some(name) = current_name {
+                    let current_name = rt::keyboard::vk_name(current_vk);
+                    let _ = if let Ok(name) = current_name {
                         write!(binding_buffer, "{name}")
                     } else {
                         write!(binding_buffer, "{}", current_vk.0)
@@ -284,41 +283,18 @@ fn imgui_options_tab(ui: &Ui) {
 
     ui.new_line();
     for &binding in ArcSettings::VK_WINDOWS {
-        keybind_ui(ui, binding, Some(|vk: &ArcVk| crate::control_window(vk.id, None)));
+        keybind_ui(ui, binding, Some(|vk: &ArcVk| if let Some(window) = vk.window_name() {
+            crate::control_window(window, None);
+        }));
     }
     #[cfg(feature = "space")]
     if crate::engine_initialized() {
+        ui.separator();
         keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| crate::Engine::try_send(crate::SpaceEvent::PathingToggle)));
     }
+    ui.separator();
     for binding in &ArcSettings::VK_TIMER_TRIGGERS {
         keybind_ui(ui, binding, Some(|vk: &ArcVk| crate::Controller::try_send(crate::ControllerEvent::TimerKeyTrigger(vk.id.into(), false))));
-    }
-    let all_windows = [
-        crate::WINDOW_PRIMARY,
-        crate::WINDOW_TIMERS,
-        #[cfg(feature = "markers")]
-        crate::WINDOW_MARKERS,
-    ];
-    for window in all_windows {
-        let _id = ui.push_id(window);
-        let singular = window.strip_suffix("s");
-        let name = crate::LANGUAGE_LOADER.get(&format!("{}-window-toggle", singular.unwrap_or(window)));
-        if ui.button(name) {
-            crate::control_window(window, None);
-        }
-        ui.same_line();
-        ui.text("Keybind: ");
-        ui.same_line();
-        ui.text_disabled("ALT+SHIFT+");
-        ui.same_line();
-        if ui.button("BIND") {
-            log::warn!("TODO: keybind settings");
-        }
-        if window == crate::WINDOW_PRIMARY {
-            let desc = crate::LANGUAGE_LOADER.get(&format!("{window}-window-toggle-text"));
-            ui.text_disabled(desc);
-        }
-        ui.separator();
     }
 
     let selected_language = game_language()
@@ -367,7 +343,8 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             let prev_down = l & (1 << 30) != 0;
 
             let is_up = msg == WindowsAndMessaging::WM_KEYUP;
-            let is_release = is_up && prev_down;
+            //let is_release = is_up && prev_down;
+            let is_release = !is_up;
             let settings = crate::SETTINGS.get()
                 .and_then(|s| s.try_read().ok());
             let arc = match settings.as_ref().map(|s| s.arc()) {
@@ -378,14 +355,19 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 },
             };
 
-            let vk = KeyboardAndMouse::VIRTUAL_KEY(w as u16);
+            log::debug!("keypress: w={w:#08x}, l={l:#08x}");
+            let vk = match w as u16 {
+                w => KeyboardAndMouse::VIRTUAL_KEY(w as u16),
+            };
             let mut bound = false;
 
             for &binding in ArcSettings::VK_WINDOWS {
                 if arc.binding_matches(binding, vk) {
                     bound = true;
                     if is_release {
-                        crate::control_window(binding.id, None)
+                        if let Some(window) = binding.window_name() {
+                            crate::control_window(window, None)
+                        }
                     }
                 }
             }

@@ -218,7 +218,11 @@ impl Settings {
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
             crate::WINDOW_MARKERS => &mut self.markers_window_open,
             crate::WINDOW_PATHING => &mut self.pathing_window_open,
-            _ => unreachable!("unsupported window"),
+            _ => {
+                // consider an enum...
+                log::error!("unsupported window: {window}");
+                return
+            },
         };
 
         match state {
