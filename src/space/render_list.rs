@@ -1,12 +1,15 @@
 use {
     super::dx11::PerspectiveInputData,
     crate::marker::atomic::MapSpace,
+    glamour::vec4,
+};
+#[cfg(feature = "space-list")]
+use {
     bvh::{
         aabb::{Bounded, IntersectsAabb},
         bounding_hierarchy::{BHShape, BoundingHierarchy},
         bvh::Bvh,
     },
-    glamour::vec4,
     std::collections::BinaryHeap,
 };
 
@@ -34,20 +37,27 @@ pub enum RenderId {
 pub struct RenderListBuilder {
     pub entities: Vec<RenderEntity>,
     // Saving these to not reset their memory between builds
+    #[cfg(feature = "space-list")]
     entity_shapes: Vec<RenderEntityShape>,
+    #[cfg(feature = "space-list")]
     draw_order_heap: BinaryHeap<HeapEntity>,
 }
 
 impl RenderListBuilder {
     pub fn build(self) -> RenderList {
         let entities = self.entities;
-        let mut shapes = self.entity_shapes;
-        shapes.clear();
-        shapes.reserve_exact(entities.len());
-        let spatial_map = SpatialMap::build(&entities, shapes);
+        #[cfg(feature = "space-list")]
+        let spatial_map = {
+          let mut shapes = self.entity_shapes;
+          shapes.clear();
+          shapes.reserve_exact(entities.len());
+          SpatialMap::build(&entities, shapes)
+        };
         RenderList {
             entities,
+            #[cfg(feature = "space-list")]
             spatial_map,
+            #[cfg(feature = "space-list")]
             draw_order_heap: self.draw_order_heap,
         }
     }
@@ -57,7 +67,9 @@ impl Default for RenderListBuilder {
     fn default() -> RenderListBuilder {
         RenderListBuilder {
             entities: Vec::with_capacity(8192),
+            #[cfg(feature = "space-list")]
             entity_shapes: Vec::with_capacity(8192),
+            #[cfg(feature = "space-list")]
             draw_order_heap: BinaryHeap::with_capacity(4096),
         }
     }
@@ -65,28 +77,36 @@ impl Default for RenderListBuilder {
 
 pub struct RenderList {
     entities: Vec<RenderEntity>,
+    #[cfg(feature = "space-list")]
     spatial_map: SpatialMap,
+    #[cfg(feature = "space-list")]
     draw_order_heap: BinaryHeap<HeapEntity>,
 }
 
 impl RenderList {
     pub fn rebuild(&mut self) -> RenderListBuilder {
-        std::mem::take(&mut self.spatial_map.bvh.nodes);
+        //std::mem::take(&mut self.spatial_map.bvh.nodes);
         let mut builder = RenderListBuilder {
             entities: std::mem::take(&mut self.entities),
+            #[cfg(feature = "space-list")]
             entity_shapes: std::mem::take(&mut self.spatial_map.shapes),
+            #[cfg(feature = "space-list")]
             draw_order_heap: std::mem::take(&mut self.draw_order_heap),
         };
         builder.entities.clear();
-        builder.entity_shapes.clear();
+        #[cfg(feature = "space-list")] {
+          builder.entity_shapes.clear();
+        }
         builder
     }
 
     pub fn update(&mut self, index: usize) {
-        self.spatial_map.shapes[index] = RenderEntityShape::new((index, &self.entities[index]));
-        self.spatial_map
-            .bvh
-            .update_shapes(Some(&index), &mut self.spatial_map.shapes);
+        #[cfg(feature = "space-list")] {
+            self.spatial_map.shapes[index] = RenderEntityShape::new((index, &self.entities[index]));
+            self.spatial_map
+                .bvh
+                .update_shapes(Some(&index), &mut self.spatial_map.shapes);
+        }
     }
 
     /// Gets visible entities in the correct draw order.
@@ -96,17 +116,27 @@ impl RenderList {
         cam_dir: glamour::Vector3<MapSpace>,
         frustum: &'rs MapFrustum,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
-        self.draw_order_heap.clear();
-        RenderOrderBuilder {
-            entities: &self.entities,
-            bvh_iter: self.spatial_map.select_visible_entities(frustum),
-            draw_order_heap: &mut self.draw_order_heap,
-            cam_origin,
-            cam_dir,
+        match () {
+            #[cfg(feature = "space-list")]
+            () => {
+                self.draw_order_heap.clear();
+                RenderOrderBuilder {
+                    entities: &self.entities,
+                    bvh_iter: self.spatial_map.select_visible_entities(frustum),
+                    draw_order_heap: &mut self.draw_order_heap,
+                    cam_origin,
+                    cam_dir,
+                }
+            },
+            #[cfg(not(feature = "space-list"))]
+            () => {
+                self.entities.iter()
+            },
         }
     }
 }
 
+#[cfg(feature = "space-list")]
 struct RenderOrderBuilder<'rs, BvhIter> {
     entities: &'rs [RenderEntity],
     bvh_iter: BvhIter,
@@ -115,6 +145,7 @@ struct RenderOrderBuilder<'rs, BvhIter> {
     cam_dir: glamour::Vector3<MapSpace>,
 }
 
+#[cfg(feature = "space-list")]
 impl<'rs, BvhIter> Iterator for RenderOrderBuilder<'rs, BvhIter>
 where
     BvhIter: Iterator<Item = usize>,
@@ -141,18 +172,21 @@ where
     }
 }
 
+#[cfg(feature = "space-list")]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct HeapEntity {
     cam_dist: i32,
     idx: usize,
 }
 
+#[cfg(feature = "space-list")]
 struct RenderEntityShape {
     bounds: bvh::aabb::Aabb<f32, 3>,
     entity_idx: usize,
     bh_idx: usize,
 }
 
+#[cfg(feature = "space-list")]
 impl RenderEntityShape {
     fn new((entity_idx, entity): (usize, &RenderEntity)) -> Self {
         RenderEntityShape {
@@ -176,12 +210,14 @@ impl RenderEntityShape {
     }
 }
 
+#[cfg(feature = "space-list")]
 impl Bounded<f32, 3> for RenderEntityShape {
     fn aabb(&self) -> bvh::aabb::Aabb<f32, 3> {
         self.bounds
     }
 }
 
+#[cfg(feature = "space-list")]
 impl BHShape<f32, 3> for RenderEntityShape {
     fn set_bh_node_index(&mut self, bh_idx: usize) {
         self.bh_idx = bh_idx;
@@ -192,11 +228,13 @@ impl BHShape<f32, 3> for RenderEntityShape {
     }
 }
 
+#[cfg(feature = "space-list")]
 struct SpatialMap {
     shapes: Vec<RenderEntityShape>,
     bvh: Bvh<f32, 3>,
 }
 
+#[cfg(feature = "space-list")]
 impl SpatialMap {
     fn build(entities: &[RenderEntity], mut shapes: Vec<RenderEntityShape>) -> SpatialMap {
         shapes.extend(entities.iter().enumerate().map(RenderEntityShape::new));
@@ -279,6 +317,7 @@ fn points_to_plane(p0: glam::Vec3, p1: glam::Vec3, p2: glam::Vec3) -> glam::Vec4
     glam::Vec4::new(n.x, n.y, n.z, d)
 }
 
+#[cfg(feature = "space-list")]
 fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [glamour::Vector4<MapSpace>; 8] {
     [
         vec4!(aabb.min.x, aabb.min.y, aabb.min.z, 1.0),
@@ -292,6 +331,7 @@ fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [glamour::Vector4<MapSpace>; 
     ]
 }
 
+#[cfg(feature = "space-list")]
 impl IntersectsAabb<f32, 3> for MapFrustum {
     fn intersects_aabb(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
         // let corners = aabb_corners(aabb);

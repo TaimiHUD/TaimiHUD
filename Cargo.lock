@@ -116,11 +116,25 @@ version = "0.15.1"
 source = "git+https://github.com/zerthox/arcdps-rs?tag=0.15.1#6806b5d78183716f38e5a2c21d46d93627134cfc"
 dependencies = [
  "arcdps-imgui",
- "arcdps_codegen",
+ "arcdps_codegen 0.10.4",
  "chrono",
- "evtc",
+ "evtc 0.9.1",
  "num_enum",
  "windows 0.57.0",
+]
+
+[[package]]
+name = "arcdps"
+version = "0.16.0"
+source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+dependencies = [
+ "arcdps-imgui",
+ "arcdps_codegen 0.11.0",
+ "bitflags 2.9.0",
+ "chrono",
+ "evtc 0.9.2",
+ "num_enum",
+ "windows 0.60.0",
 ]
 
 [[package]]
@@ -154,6 +168,45 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "arcdps_codegen"
+version = "0.11.0"
+source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+dependencies = [
+ "cfg-if",
+ "paste",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "arcffi"
+version = "0.1.0"
+source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+dependencies = [
+ "windows 0.60.0",
+ "windows 0.61.1",
+ "windows-core 0.60.1",
+ "windows-core 0.61.0",
+ "windows-result 0.3.2",
+ "windows-strings 0.3.1",
+ "windows-strings 0.4.0",
+]
+
+[[package]]
+name = "arcloader-mumblelink"
+version = "0.1.0"
+source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+dependencies = [
+ "arcffi",
+ "gw2_mumble 0.2.5",
+ "log",
+ "nexus",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1038,20 +1091,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 
 [[package]]
+name = "dpsapi"
+version = "0.1.0"
+source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+dependencies = [
+ "arcdps 0.16.0",
+ "arcffi",
+ "dyload",
+ "evtc 0.9.2",
+ "nexus",
+ "windows 0.60.0",
+]
+
+[[package]]
+name = "dyload"
+version = "0.1.0"
+source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+dependencies = [
+ "arcffi",
+ "windows 0.60.0",
+ "windows-core 0.60.1",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
-
-[[package]]
-name = "env_filter"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
-dependencies = [
- "log",
- "regex",
-]
 
 [[package]]
 name = "equivalent"
@@ -1114,6 +1180,17 @@ dependencies = [
  "bitflags 2.9.0",
  "memoffset",
  "num_enum",
+]
+
+[[package]]
+name = "evtc"
+version = "0.9.2"
+source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+dependencies = [
+ "bitflags 2.9.0",
+ "memoffset",
+ "num_enum",
+ "windows-core 0.60.1",
 ]
 
 [[package]]
@@ -1530,6 +1607,21 @@ dependencies = [
  "strum 0.26.3",
  "thiserror 2.0.12",
  "windows 0.58.0",
+]
+
+[[package]]
+name = "gw2_mumble"
+version = "0.2.5"
+source = "git+https://github.com/zerthox/gw2-mumble-rs#7cb684bdb271253c99e2ad7fea4b448915ffe76f"
+dependencies = [
+ "bitflags 2.9.0",
+ "num_enum",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "strum 0.26.3",
+ "thiserror 2.0.12",
+ "windows 0.59.0",
 ]
 
 [[package]]
@@ -2278,6 +2370,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libudis86-sys"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "139bbf9ddb1bfc90c1ac64dd2923d9c957cd433cee7315c018125d72ab08a6b0"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "libz-rs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2363,6 +2465,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fae87c125b03c1d2c0150c90365d7d6bcc53fb73a9acaef207d2d065860f062"
 dependencies = [
  "imgref",
+]
+
+[[package]]
+name = "mach2"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19b955cdeb2a02b9117f121ce63aa52d08ade45de53e48fe6a38b39c10f6f709"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -2478,6 +2589,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mmap-fixed-fixed"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0681853891801e4763dc252e843672faf32bcfee27a0aa3b19733902af450acc"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "nalgebra"
 version = "0.33.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2516,13 +2637,11 @@ name = "nexus"
 version = "0.8.0"
 source = "git+https://github.com/zerthox/nexus-rs#18bace75a45fc5f0fdb0be2dc5ee709902447624"
 dependencies = [
- "arcdps",
+ "arcdps 0.15.1",
  "arcdps-imgui",
  "bitfields",
  "bitflags 2.9.0",
- "env_filter",
- "gw2_mumble",
- "log",
+ "gw2_mumble 0.2.4",
  "nexus_codegen",
  "num_enum",
  "paste",
@@ -2536,7 +2655,6 @@ version = "0.3.0"
 source = "git+https://github.com/zerthox/nexus-rs#18bace75a45fc5f0fdb0be2dc5ee709902447624"
 dependencies = [
  "cfg-if",
- "env_filter",
  "paste",
  "proc-macro2",
  "quote",
@@ -3375,6 +3493,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "region"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6b6ebd13bc009aef9cd476c1310d49ac354d36e240cf1bd753290f3dc7199a7"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
+ "mach2",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3426,6 +3556,22 @@ dependencies = [
  "wasm-streams",
  "web-sys",
  "windows-registry",
+]
+
+[[package]]
+name = "retour"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9af44d40e2400b44d491bfaf8eae111b09f23ac4de6e92728e79d93e699c527"
+dependencies = [
+ "cfg-if",
+ "generic-array",
+ "libc",
+ "libudis86-sys",
+ "mmap-fixed-fixed",
+ "once_cell",
+ "region",
+ "slice-pool2",
 ]
 
 [[package]]
@@ -3872,6 +4018,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "slice-pool2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3d689654af89bdfeba29a914ab6ac0236d382eb3b764f7454dde052f2821f8"
+
+[[package]]
 name = "smallvec"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3976,6 +4128,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync-unsafe-cell"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8deaecba5382c095cb432cd1e21068dadb144208f057b13720e76bf89749beb4"
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4014,7 +4172,9 @@ version = "0.2.26"
 dependencies = [
  "anyhow",
  "arc-atomic",
- "arcdps",
+ "arcdps 0.16.0",
+ "arcffi",
+ "arcloader-mumblelink",
  "async-compression",
  "async-tar",
  "base64",
@@ -4027,6 +4187,7 @@ dependencies = [
  "bytes",
  "chrono",
  "croner",
+ "dpsapi",
  "fluent",
  "function_name",
  "futures",
@@ -4053,6 +4214,7 @@ dependencies = [
  "rand 0.9.1",
  "relative-path",
  "reqwest",
+ "retour",
  "rust-embed",
  "serde",
  "serde_json",
@@ -4061,6 +4223,7 @@ dependencies = [
  "serde_with",
  "strum 0.27.1",
  "strum_macros 0.27.1",
+ "sync-unsafe-cell",
  "tempfile",
  "tobj",
  "tokio",
@@ -4823,15 +4986,47 @@ dependencies = [
 
 [[package]]
 name = "windows"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f919aee0a93304be7f62e8e5027811bbba96bcb1de84d6618be56e43f8a32a1"
+dependencies = [
+ "windows-core 0.59.0",
+ "windows-targets 0.53.0",
+]
+
+[[package]]
+name = "windows"
+version = "0.60.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddf874e74c7a99773e62b1c671427abf01a425e77c3d3fb9fb1e4883ea934529"
+dependencies = [
+ "windows-collections 0.1.1",
+ "windows-core 0.60.1",
+ "windows-future 0.1.1",
+ "windows-link",
+ "windows-numerics 0.1.1",
+]
+
+[[package]]
+name = "windows"
 version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5ee8f3d025738cb02bad7868bbb5f8a6327501e870bf51f1b455b0a2454a419"
 dependencies = [
- "windows-collections",
+ "windows-collections 0.2.0",
  "windows-core 0.61.0",
- "windows-future",
+ "windows-future 0.2.0",
  "windows-link",
- "windows-numerics",
+ "windows-numerics 0.2.0",
+]
+
+[[package]]
+name = "windows-collections"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5467f79cc1ba3f52ebb2ed41dbb459b8e7db636cc3429458d9a852e15bc24dec"
+dependencies = [
+ "windows-core 0.60.1",
 ]
 
 [[package]]
@@ -4870,6 +5065,32 @@ dependencies = [
 
 [[package]]
 name = "windows-core"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "810ce18ed2112484b0d4e15d022e5f598113e220c53e373fb31e67e21670c1ce"
+dependencies = [
+ "windows-implement 0.59.0",
+ "windows-interface 0.59.1",
+ "windows-result 0.3.2",
+ "windows-strings 0.3.1",
+ "windows-targets 0.53.0",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.60.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca21a92a9cae9bf4ccae5cf8368dce0837100ddf6e6d57936749e85f152f6247"
+dependencies = [
+ "windows-implement 0.59.0",
+ "windows-interface 0.59.1",
+ "windows-link",
+ "windows-result 0.3.2",
+ "windows-strings 0.3.1",
+]
+
+[[package]]
+name = "windows-core"
 version = "0.61.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4763c1de310c86d75a878046489e2e5ba02c649d185f21c67d4cf8a56d098980"
@@ -4879,6 +5100,16 @@ dependencies = [
  "windows-link",
  "windows-result 0.3.2",
  "windows-strings 0.4.0",
+]
+
+[[package]]
+name = "windows-future"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a787db4595e7eb80239b74ce8babfb1363d8e343ab072f2ffe901400c03349f0"
+dependencies = [
+ "windows-core 0.60.1",
+ "windows-link",
 ]
 
 [[package]]
@@ -4907,6 +5138,17 @@ name = "windows-implement"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bbd5b46c938e506ecbce286b6628a02171d56153ba733b6c741fc627ec9579b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "windows-implement"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83577b051e2f49a058c308f17f273b570a6a758386fc291b5f6a934dd84e48c1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4962,6 +5204,16 @@ name = "windows-link"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76840935b766e1b0a05c0066835fb9ec80071d4c09a16f6bd5f7e655e3c14c38"
+
+[[package]]
+name = "windows-numerics"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "005dea54e2f6499f2cee279b8f703b3cf3b5734a2d8d21867c8f44003182eeed"
+dependencies = [
+ "windows-core 0.60.1",
+ "windows-link",
+]
 
 [[package]]
 name = "windows-numerics"

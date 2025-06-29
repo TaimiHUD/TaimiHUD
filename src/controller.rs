@@ -14,6 +14,7 @@ use {
 };
 use {
     crate::{
+        exports::runtime as rt,
         marker::{
             atomic::ScreenVector,
             format::{MarkerEntry, MarkerFiletype},
@@ -21,22 +22,14 @@ use {
         render::TextFont,
         settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsLock, SourcesFile},
         timer::{CombatState, Position, TimerFile, TimerMachine},
-        MumbleIdentityUpdate, RenderEvent, IMGUI_TEXTURES, SETTINGS, SOURCES,
+        MumbleIdentityUpdate, RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
     },
     anyhow::anyhow,
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::{f32::Vec3, Vec2},
     nexus::{
-        data_link::{
-            get_mumble_link_ptr,
-            mumble::{MumblePtr, UiState},
-            read_nexus_link, MumbleLink,
-        },
-        gamebind::invoke_gamebind_async,
-        paths::get_addon_dir,
+        data_link::mumble::{MumblePtr, UiState},
         rtapi::GroupMemberOwned,
-        texture::{load_texture_from_file, load_texture_from_memory, RawTextureReceiveCallback},
-        texture_receive,
     },
     relative_path::RelativePathBuf,
     std::{
@@ -115,8 +108,13 @@ impl Controller {
         rt_sender: Sender<crate::RenderEvent>,
         addon_dir: PathBuf,
     ) {
-        let mumble_ptr = get_mumble_link_ptr() as *mut MumbleLink;
-        let mumble_link = unsafe { MumblePtr::new(mumble_ptr) };
+        let mumble_link = match rt::mumble_link_ptr() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                log::warn!("No MumbleLink? {e}");
+                None
+            },
+        };
         let evt_loop = async move {
             let sources = SourcesFile::load()
                 .await
@@ -275,8 +273,7 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     async fn load_markers_files(&mut self) -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let markers_dir = addon_dir.join("markers");
+        let markers_dir = crate::ADDON_DIR.join("markers");
         if !exists(&markers_dir).expect("Can't check if directory exists") {
             create_dir_all(&markers_dir).await?;
         }
@@ -319,15 +316,13 @@ impl Controller {
     async fn setup_timers(&mut self) {
         log::info!("Preparing to setup timers");
         self.timers = self.load_timer_files().await;
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let adhoc_timers_dir = addon_dir.join("timers");
-        if exists(&adhoc_timers_dir).expect("oh no i cant access my own addon dir") {
-            let adhoc_timers = TimerFile::load_many_sourceless(&adhoc_timers_dir, 100)
+        if exists(&*TIMERS_DIR).expect("oh no i cant access my own addon dir") {
+            let adhoc_timers = TimerFile::load_many_sourceless(&*TIMERS_DIR, 100)
                 .await
                 .expect("wah");
             self.timers.extend(adhoc_timers);
         } else {
-            create_dir_all(adhoc_timers_dir)
+            create_dir_all(&*TIMERS_DIR)
                 .await
                 .expect("Can't create timers dir");
         }
@@ -372,12 +367,10 @@ impl Controller {
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
         #[cfg(feature = "space")]
-        {
-            if let Some(nexus_link) = read_nexus_link() {
-                if nexus_link.is_gameplay != self.last_is_gameplay {
-                    PerspectiveInputData::swap_is_gameplay(nexus_link.is_gameplay);
-                    self.last_is_gameplay = nexus_link.is_gameplay;
-                }
+        if let Ok(is_gameplay) = rt::is_ingame() {
+            if is_gameplay != self.last_is_gameplay {
+                PerspectiveInputData::swap_is_gameplay(is_gameplay);
+                self.last_is_gameplay = is_gameplay;
             }
         }
         if let Some(mumble) = self.mumble_pointer {
@@ -412,7 +405,7 @@ impl Controller {
                         }
                     }
                 }
-                if let Some(nexus_link) = read_nexus_link() {
+                if let Ok(nexus_link) = rt::read_nexus_link() {
                     let scaling = nexus_link.scaling;
                         if self.scaling != scaling {
                             MarkerInputData::from_nexus(scaling);
@@ -676,6 +669,8 @@ impl Controller {
         self.reset_timers().await;
     }
 
+    pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(10);
+
     #[cfg(feature = "markers")]
     async fn reload_markers(&mut self) {
         self.load_markers_files()
@@ -693,34 +688,40 @@ impl Controller {
     async fn clear_markers(&self) {
         use crate::marker::format::MarkerType;
 
-        invoke_gamebind_async(MarkerType::ClearMarkers.to_place_world_gamebind(), 10i32);
+        if let Err(e) = rt::invoke_marker_bind(MarkerType::ClearMarkers, false, Self::KEY_INVOKE_DURATION, None).await {
+            log::warn!("Failed to clear markers: {e}");
+        }
     }
 
     #[cfg(feature = "markers")]
-    fn get_viewport_point(rel: Vec2) -> POINT {
-        let hwnd = unsafe { GetForegroundWindow() };
+    fn get_viewport_point(rel: Vec2) -> anyhow::Result<POINT> {
+        /*let hwnd = rt::window_handle()
+            .map_err(|e| anyhow!("HWND unavailable: {e}"))?;
         let mut abs: POINT = POINT {
             x: rel.x as i32,
             y: rel.y as i32,
         };
         unsafe {
-            let _ = ClientToScreen(hwnd, &mut abs);
-        }
-        abs
+            ClientToScreen(hwnd, &mut abs);
+        }*/
+        let abs = rt::mouse::MousePosition::from(rel).to_screen()
+            .map_err(|e| anyhow!("cursor screen coords unavailable: {e}"))?
+            .into();
+        Ok(abs)
     }
 
     #[cfg(feature = "markers")]
-    fn get_viewport_coord(rel: Vec2) -> (i32, i32) {
-        let point = Self::get_viewport_point(rel);
-        (point.x, point.y)
+    fn get_viewport_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
+        let point = Self::get_viewport_point(rel)?;
+        Ok((point.x, point.y))
     }
 
     #[cfg(feature = "markers")]
-    fn get_abs_coord(rel: Vec2) -> (i32, i32) {
-        let (x, y) = Self::get_viewport_coord(rel);
+    fn get_abs_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
+        let (x, y) = Self::get_viewport_coord(rel)?;
         let dx = (x * 65536) / unsafe { GetSystemMetrics(SM_CXSCREEN) };
         let dy = (y * 65536) / unsafe { GetSystemMetrics(SM_CYSCREEN) };
-        (dx, dy)
+        Ok((dx, dy))
     }
 
     #[cfg(feature = "markers")]
@@ -753,15 +754,15 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     fn move_cursor_pos(goal: Vec2) -> anyhow::Result<()> {
-        let coords = Self::get_abs_coord(goal);
+        let coords = Self::get_abs_coord(goal)?;
         Self::mouse_event(coords, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
     }
 
     #[cfg(feature = "markers")]
     async fn drag_mouse_abs(from: Vec2, to: Vec2) -> anyhow::Result<()> {
         let wait_duration = Duration::from_millis(10);
-        let from_abs = Self::get_abs_coord(from);
-        let to_abs = Self::get_abs_coord(to);
+        let from_abs = Self::get_abs_coord(from)?;
+        let to_abs = Self::get_abs_coord(to)?;
         sleep(wait_duration).await;
         Self::mouse_event(from_abs, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)?;
         sleep(wait_duration).await;
@@ -777,7 +778,7 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn drag_mouse_rel(from: ScreenPoint, amount: ScreenVector) -> anyhow::Result<()> {
         let wait_duration = Duration::from_millis(30);
-        let from_abs = Self::get_abs_coord(from.into());
+        let from_abs = Self::get_abs_coord(from.into())?;
 
         let [amt_x, amt_y] = amount.as_array();
         let amount = (*amt_x as i32, *amt_y as i32);
@@ -798,23 +799,26 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn place_marker(
         wait_duration: Duration,
-        place_duration: i32,
+        place_duration: Duration,
         point: ScreenPoint,
         marker: &MarkerEntry,
     ) {
         sleep(wait_duration).await;
+        #[cfg(todo)]
         match Self::move_cursor_pos(point.into()) {
             Ok(_) => (),
             Err(e) => log::error!("{}", e),
         }
         sleep(wait_duration).await;
-        invoke_gamebind_async(marker.marker.to_place_world_gamebind(), place_duration);
+        if let Err(e) = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point.into())).await {
+            log::warn!("Failed to place marker {:?}: {e}", marker.marker);
+        }
     }
 
     #[cfg(feature = "markers")]
     async fn place_marker_from_map(
         wait_duration: Duration,
-        place_duration: i32,
+        place_duration: Duration,
         point: Vec3,
         marker: &MarkerEntry,
     ) {
@@ -825,7 +829,7 @@ impl Controller {
             let point = mid.map_local_to_map(point);
             let point = mid.map_map_to_screen(point);
             if let Some(point) = point {
-                Self::place_marker(wait_duration, 10i32, point, marker).await;
+                Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
             }
         }
     }
@@ -874,15 +878,16 @@ impl Controller {
         }
 
         let wait_duration = Duration::from_millis(50);
-        let mut pos_ptr: POINT = POINT::default();
+        #[cfg(todo)]
         let original_position = unsafe {
-            let hwnd = GetForegroundWindow();
+            let mut pos_ptr: POINT = POINT::default();
+            let hwnd = rt::window_handle()?;
             let pos = GetCursorPos(&mut pos_ptr);
             let _ = ScreenToClient(hwnd, &mut pos_ptr);
-            pos
-        }
-        .map_err(anyhow::Error::from)
-        .map(|()| pos_ptr)?;
+            pos.map(|()| pos_ptr)
+        }.map_err(anyhow::Error::from)?;
+        let original_position = rt::screen_mouse_position()
+            .map_err(|e| anyhow!("Getting cursor pos: {e}"))?;
         for marker in &markers.markers {
             // check if it is possible to place immediately
             let local_point: LocalPoint = Vec3::from(marker.position.clone()).into();
@@ -896,7 +901,7 @@ impl Controller {
             match screen_point {
                 // if the marker is on the map, that's fine, place it
                 Some(point) => {
-                    Self::place_marker(wait_duration, 10i32, point, marker).await;
+                    Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
                 }
                 // if the marker isn't on the map, we need to get our perspective to include
                 // the marker
@@ -960,7 +965,7 @@ impl Controller {
                             } else {
                                 Self::place_marker_from_map(
                                     wait_duration,
-                                    10i32,
+                                    Self::KEY_INVOKE_DURATION,
                                     marker.position.clone().into(),
                                     marker,
                                 )
@@ -969,12 +974,13 @@ impl Controller {
                         }
                     }
                 }
-                _ => unreachable!("set_marker: this should not happen!"),
             }
         }
         sleep(wait_duration).await;
-        let original_position = Vec2::new(original_position.x as f32, original_position.y as f32);
-        Self::move_cursor_pos(original_position)?;
+        /*let original_position = Vec2::new(original_position.x as f32, original_position.y as f32);
+        Self::move_cursor_pos(original_position)?;*/
+        rt::mouse::send_input(original_position)
+            .map_err(|e| anyhow!("Failed to restore original cursor position: {e}"))?;
         Ok(())
     }
 
@@ -1035,20 +1041,8 @@ impl Controller {
     }
 
     async fn load_texture(&self, rel: RelativePathBuf, base: PathBuf) {
-        if let Some(base) = base.parent() {
-            let abs = rel.to_path(base);
-            let cally: RawTextureReceiveCallback = texture_receive!(|id, texture| {
-                let gooey = IMGUI_TEXTURES.get().unwrap();
-                let mut gooey_lock = gooey.write().unwrap();
-                if let Some(texture) = texture {
-                    gooey_lock
-                        .entry(id.into())
-                        .or_insert(Arc::new(texture.clone()));
-                }
-                drop(gooey_lock);
-                log::info!("Texture {id} loaded.");
-            });
-            load_texture_from_file(rel.as_str(), abs, Some(cally));
+        if let Err(e) = rt::texture_schedule_path(rel.as_str(), &base).await {
+            log::warn!("Cannot load texture {rel:?}: {e}");
         }
     }
 
@@ -1089,8 +1083,7 @@ impl Controller {
 
     #[cfg(feature = "markers-edit")]
     async fn get_marker_paths(&self) -> anyhow::Result<()> {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let markers_dir = addon_dir.join("markers");
+        let markers_dir = crate::ADDON_DIR.join("markers");
         let mut paths: Vec<PathBuf> = Vec::new();
         for path in RuntimeMarkers::get_paths(&markers_dir)? {
             paths.push(path?);
@@ -1117,9 +1110,7 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     async fn get_role(&self) -> Option<SquadRoleState> {
-        use nexus::rtapi::RealTimeApi;
-
-        if let Some(rtapi) = RealTimeApi::get() {
+        if let Ok(Some(rtapi)) = rt::rtapi() {
             if let Some(player) = rtapi.read_player() {
                 let account_name = player.account_name;
                 if let Some(squad_state) = self.rtapi_squad.get(&account_name) {
@@ -1196,18 +1187,9 @@ impl Controller {
     }
 
     async fn load_texture_integrated(&mut self, identifier: String, data: Vec<u8>) {
-        let cally: RawTextureReceiveCallback = texture_receive!(|id, texture| {
-            let gooey = IMGUI_TEXTURES.get().unwrap();
-            let mut gooey_lock = gooey.write().unwrap();
-            if let Some(texture) = texture {
-                gooey_lock
-                    .entry(id.into())
-                    .or_insert(Arc::new(texture.clone()));
-            }
-            drop(gooey_lock);
-            log::info!("Texture {id} loaded.");
-        });
-        load_texture_from_memory(identifier, &data, Some(cally));
+        if let Err(e) = rt::texture_schedule_bytes(&identifier[..], data).await {
+            log::warn!("Cannot load texture {identifier:?}: {e}");
+        }
     }
 
     #[cfg(feature = "space")]

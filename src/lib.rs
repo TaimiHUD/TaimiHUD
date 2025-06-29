@@ -1,5 +1,7 @@
 mod controller;
+mod exports;
 mod render;
+pub mod resources;
 mod settings;
 mod timer;
 mod util;
@@ -13,7 +15,7 @@ mod space;
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
 use {
-    space::{engine::SpaceEvent, resources::Texture, Engine},
+    space::{engine::{Engine, SpaceEvent}, resources::Texture},
     std::{
         cell::RefCell,
         path::PathBuf,
@@ -23,10 +25,11 @@ use {
 use {
     crate::{
         controller::{Controller, ControllerEvent},
+        exports::runtime as rt,
         render::{RenderEvent, RenderState},
         settings::SettingsLock,
     },
-    arcdps::{extras::UserInfoOwned, AgentOwned},
+    arcdps::{extras::UserInfo, AgentOwned, Language},
     controller::SquadState,
     i18n_embed::{
         fluent::{fluent_language_loader, FluentLanguageLoader},
@@ -35,22 +38,21 @@ use {
     marker::format::MarkerType,
     nexus::{
         event::{
-            arc::{CombatData, ACCOUNT_NAME, COMBAT_LOCAL},
-            event_consume,
-            extras::{SquadUpdate, EXTRAS_SQUAD_UPDATE},
-            Event, MumbleIdentityUpdate, MUMBLE_IDENTITY_UPDATED,
-        }, gui::{register_render, render, RenderType}, keybind::{keybind_handler, register_keybind_with_string}, localization::translate, paths::get_addon_dir, quick_access::{add_quick_access, add_quick_access_context_menu}, rtapi::{
-            event::{
-                RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
-            },
+            arc::CombatData,
+            extras::SquadUpdate,
+            MumbleIdentityUpdate,
+        },
+        rtapi::{
             GroupMember, GroupMemberOwned,
-        }, texture::{load_texture_from_memory, Texture as NexusTexture}, texture_receive, AddonFlags, UpdateProvider
+        },
     },
+    relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
-        collections::HashMap,
         ffi::{c_char, CStr},
+        mem,
+        panic,
         ptr,
         sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
@@ -58,6 +60,25 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
+#[cfg(feature = "extension-nexus")]
+use nexus::{
+    event::{
+        arc::{ACCOUNT_NAME, COMBAT_LOCAL},
+        event_consume,
+        extras::EXTRAS_SQUAD_UPDATE,
+        Event, MUMBLE_IDENTITY_UPDATED,
+    },
+    texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
+    gui::{register_render, render, RenderType},
+    keybind::{keybind_handler, register_keybind_with_string},
+    quick_access::{add_quick_access, add_quick_access_context_menu},
+    rtapi::event::{
+        RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
+    },
+    AddonFlags, UpdateProvider,
+};
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 type Revertible = Box<dyn FnOnce() + Send + 'static>;
 
@@ -69,7 +90,7 @@ pub struct LocalizationsEmbed;
 pub static LOCALIZATIONS: LazyLock<RustEmbedNotifyAssets<LocalizationsEmbed>> =
     LazyLock::new(|| {
         RustEmbedNotifyAssets::new(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/"),
         )
     });
 
@@ -102,11 +123,10 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
-#[cfg(feature = "space")]
-static TEXTURES: OnceLock<RwLock<HashMap<PathBuf, Arc<Texture>>>> = OnceLock::new();
-static IMGUI_TEXTURES: OnceLock<RwLock<HashMap<String, Arc<NexusTexture>>>> = OnceLock::new();
+static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
 static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
+#[cfg(feature = "extension-nexus")]
 static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
@@ -115,15 +135,33 @@ static SPACE_SENDER: RwLock<Option<Sender<SpaceEvent>>> = RwLock::new(None);
 
 static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
+#[cfg(feature = "extension-nexus")]
 nexus::export! {
     name: "TaimiHUD",
-    signature: -0x7331BABD, // raidcore addon id or NEGATIVE random unique signature
-    load,
-    unload,
+    signature: exports::nexus::SIG,
+    load: exports::nexus::cb_load,
+    unload: exports::nexus::cb_unload,
     flags: AddonFlags::None,
     provider: UpdateProvider::GitHub,
-    update_link: "https://github.com/TaimiHUD/TaimiHUD",
-    log_filter: "debug"
+    update_link: exports::gh_repo_url!(),
+}
+
+#[cfg(feature = "extension-arcdps-codegen")]
+arcdps::export! {
+    name: "TaimiHUD",
+    sig: exports::arcdps::SIG,
+    init: exports::arcdps::cb::init,
+    release: exports::arcdps::cb::release,
+    imgui: exports::arcdps::cb::imgui,
+    options_end: exports::arcdps::cb::options_end,
+    options_windows: exports::arcdps::cb::options_windows,
+    wnd_filter: exports::arcdps::cb::wnd_filter,
+    combat_local: exports::arcdps::cb::combat_local,
+    update_url: exports::arcdps::cb::update_url,
+    extras_init: exports::arcdps::cb::extras_init,
+    extras_language_changed: exports::arcdps::cb::extras_language,
+    extras_keybind_changed: exports::arcdps::cb::extras_keybind,
+    extras_squad_update: exports::arcdps::cb::extras_squad_update,
 }
 
 static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);
@@ -170,19 +208,46 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
     }
 }
 
-fn load() {
-    let _ = IMGUI_TEXTURES.set(RwLock::new(HashMap::new()));
-    #[cfg(feature = "space")]
-    let _ = TEXTURES.set(RwLock::new(HashMap::new()));
+fn init() -> Result<(), &'static str> {
+    setup_panic_hook();
+
+    let mut loaded = match rt::LOADER_LOCK.lock() {
+        Ok(loaded) if *loaded => {
+            log::info!("already loaded, skipping init");
+            return Ok(())
+        },
+        Ok(loaded) => loaded,
+        Err(..) => {
+            let msg = "loader poisoned";
+            log::error!("{msg}");
+            return Err(msg)
+        },
+    };
     // Say hi to the world :o
-    let name = env!("CARGO_PKG_NAME");
+    let name = rt::CRATE_NAME;
+    let version = rt::CRATE_VERSION;
     let authors = env!("CARGO_PKG_AUTHORS");
-    log::info!("Loading {name} by {authors}");
+    log::info!("Loading {name} {version} by {authors}");
 
     // Set up the thread
-    let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
+    let addon_dir = rt::addon_dir()?;
 
-    reload_language();
+    rt::reload_language()?;
+
+    #[cfg(feature = "texture-loader")]
+    if let Err(e) = TEXTURES.setup() {
+            if !rt::nexus_available() {
+                return Err(e)
+            }
+            log::error!("{e}");
+    } else {
+        if let Err(e) = TEXTURES.wait_for_startup() {
+            log::error!("{e}");
+            if !rt::nexus_available() {
+                return Err("texture loader didn't start")
+            }
+        }
+    }
 
     let (controller_sender, controller_receiver) = channel::<ControllerEvent>(32);
     let (render_sender, render_receiver) = channel::<RenderEvent>(32);
@@ -199,6 +264,12 @@ fn load() {
     *RENDER_STATE.lock().unwrap() = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
 
+    *loaded = true;
+    Ok(())
+}
+
+#[cfg(feature = "extension-nexus")]
+fn load_nexus() {
     // Rendering setup
     let taimi_window = render!(|ui| {
         RenderState::render_ui(ui);
@@ -214,7 +285,7 @@ fn load() {
     // Handle window toggling with keybind and button
     let main_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            Controller::try_send(ControllerEvent::WindowState(WINDOW_PRIMARY.into(), None));
+            control_window(WINDOW_PRIMARY, None);
         }
     });
 
@@ -229,7 +300,7 @@ fn load() {
     #[cfg(feature = "markers")]
     let marker_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
+            control_window(WINDOW_MARKERS, None);
         }
     });
 
@@ -244,7 +315,7 @@ fn load() {
     // Handle window toggling with keybind and button
     let timer_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
+            control_window(WINDOW_TIMERS, None);
         }
     });
 
@@ -259,7 +330,7 @@ fn load() {
     #[cfg(feature = "space")]
     let pathing_window_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            Controller::try_send(ControllerEvent::WindowState(WINDOW_PATHING.into(), None));
+            control_window(WINDOW_PATHING, None);
         }
     });
 
@@ -381,7 +452,7 @@ fn load() {
         //None::<&str>,
         render!(|ui| {
             if ui.button(fl!("timer-window")) {
-                Controller::try_send(ControllerEvent::WindowState(WINDOW_TIMERS.into(), None));
+                control_window(WINDOW_TIMERS, None);
             }
             #[cfg(feature = "space")]
             if ui.button(fl!("pathing-render-toggle")) {
@@ -389,14 +460,14 @@ fn load() {
             }
             #[cfg(feature = "space")]
             if ui.button(fl!("pathing-window")) {
-                Controller::try_send(ControllerEvent::WindowState(WINDOW_PATHING.into(), None));
+                control_window(WINDOW_PATHING, None);
             }
             #[cfg(feature = "markers")]
             if ui.button(fl!("marker-window")) {
-                Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
+                control_window(WINDOW_MARKERS, None);
             }
             if ui.button(fl!("primary-window")) {
-                Controller::try_send(ControllerEvent::WindowState(WINDOW_PRIMARY.into(), None));
+                control_window(WINDOW_PRIMARY, None);
             }
         }),
     )
@@ -406,27 +477,14 @@ fn load() {
         .subscribe(event_consume!(<c_char> |name| {
             if let Some(name) = name {
                 let name = unsafe {CStr::from_ptr(name as *const c_char)};
-                let name = name.to_string_lossy().to_string();
-                log::info!("Received account name: {name:?}");
-                match ACCOUNT_NAME_CELL.set(name) {
-                    Ok(_) => (),
-                    Err(err) => log::error!("Error with account name cell: {err}"),
-                }
+                receive_account_name(name.to_string_lossy());
             }
         }))
         .revert_on_unload();
 
     let combat_callback = event_consume!(|cdata: Option<&CombatData>| {
         if let Some(combat_data) = cdata {
-            if let Some(evt) = combat_data.event() {
-                if let Some(agt) = combat_data.src() {
-                    let agt = AgentOwned::from(unsafe { ptr::read(agt) });
-                    Controller::try_send(ControllerEvent::CombatEvent {
-                        src: agt,
-                        evt: evt.clone(),
-                    });
-                }
-            }
+            receive_evtc_local(combat_data);
         }
     });
     COMBAT_LOCAL.subscribe(combat_callback).revert_on_unload();
@@ -434,12 +492,8 @@ fn load() {
     // MumbleLink Identity
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
-            match mumble_identity {
-                None => (),
-                Some(ident) => {
-                    let copied_identity = ident.clone();
-                    Controller::try_send(ControllerEvent::MumbleIdentityUpdated(copied_identity));
-                },
+            if let Some(mumble_identity) = mumble_identity {
+                receive_mumble_identity(mumble_identity.clone());
             }
         }))
         .revert_on_unload();
@@ -448,8 +502,7 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let group_member: GroupMemberOwned = group_member.into();
-                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Left, group_member));
+                    receive_group_update(SquadState::Left, group_member);
                 }
             }
         )
@@ -459,8 +512,7 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let group_member: GroupMemberOwned = group_member.into();
-                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Joined, group_member));
+                    receive_group_update(SquadState::Joined, group_member);
                 }
             }
         )
@@ -470,8 +522,7 @@ fn load() {
         event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
-                    let group_member: GroupMemberOwned = group_member.into();
-                    Controller::try_send(ControllerEvent::RTAPISquadUpdate(SquadState::Update, group_member));
+                    receive_group_update(SquadState::Update, group_member);
                 }
             }
         )
@@ -480,9 +531,11 @@ fn load() {
     EXTRAS_SQUAD_UPDATE.subscribe(
         event_consume!(
             <SquadUpdate> | update | {
-            if let Some(update) = update {
-                let update: Vec<UserInfoOwned> = update.iter().map(|x| unsafe { ptr::read(x) }.to_owned()).collect();
-                    Controller::try_send(ControllerEvent::ExtrasSquadUpdate(update));
+                if let Some(update) = update {
+                    receive_squad_update(update.iter().map(|p| unsafe {
+                        // convert reference from disjoint arcdps-rs crate versions
+                        mem::transmute::<_, &UserInfo>(p)
+                    }));
                 }
             }
         )
@@ -496,40 +549,214 @@ fn load() {
     EV_LANGUAGE_CHANGED
         .subscribe(event_consume!(
             <()> |_| {
-                reload_language();
+                let res = rt::reload_language();
+                if let Err(e) = res {
+                    log::warn!("failed to load language: {e}");
+                }
             }
         ))
         .revert_on_unload();
 }
 
-fn detect_language() -> String {
-    let index_to_check = "KB_CHANGELOG";
-    let language = match &translate(index_to_check).expect("Couldn't translate string")[..] {
-        "Registro de Alterações" => "pt-br",
-        "更新日志" => "cn",
-        "Seznam změn" => "cz",
-        "Änderungsprotokoll" => "de",
-        "Changelog" => "en",
-        "Notas del parche" => "es",
-        "Journal des modifications" => "fr",
-        "Registro modifiche" => "it",
-        "Lista zmian" => "pl",
-        "Список изменений" => "ru",
-        _ => "en",
-    };
-    language.to_string()
+#[cfg(feature = "extension-arcdps")]
+fn load_arcdps() -> Result<(), &'static str> {
+    Ok(())
 }
 
-fn reload_language() {
-    let detected_language = detect_language();
-    log::info!("Detected language {detected_language} for internationalization");
+pub const LANGUAGES_GAME: [Language; 5] = [
+    Language::English,
+    Language::French,
+    Language::German ,
+    Language::Spanish,
+    Language::Chinese,
+];
+pub const LANGUAGES_EXTRA: [&'static str; 5] = [
+    "cz",
+    "it",
+    "pl",
+    "pt-br",
+    "ru",
+];
+
+pub fn game_language_id(lang: Language) -> &'static str {
+    match lang {
+        Language::English => "en",
+        Language::French => "fr",
+        Language::German => "de",
+        Language::Spanish => "es",
+        Language::Chinese => "cn",
+    }
+}
+
+fn load_language(detected_language: &str) -> rt::RuntimeResult {
     let detected_language_identifier: LanguageIdentifier = detected_language
         .parse()
-        .expect("Cannot parse detected language");
+        .map_err(|_| "Cannot parse detected language")?;
     let get_language = vec![detected_language_identifier];
     i18n_embed::select(&*LANGUAGE_LOADER, &*LOCALIZATIONS, get_language.as_slice())
-        .expect("Couldn't load language!");
+        .map_err(|_| "Couldn't load language!")?;
     (&*LANGUAGE_LOADER).set_use_isolating(false);
+    Ok(())
+}
+
+pub static ADDON_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| rt::addon_dir()
+        .unwrap_or_else(|_| PathBuf::from("Taimi"))
+    );
+pub static TIMERS_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| ADDON_DIR.join("timers"));
+
+fn control_window(window: impl Into<String>, state: Option<bool>) {
+    let window = window.into();
+    let event = ControllerEvent::WindowState(window, state);
+    Controller::try_send(event);
+}
+
+fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
+    let account_name_ref = account_name.as_ref();
+    let name = match account_name_ref.strip_prefix(":") {
+        Some(name) => name,
+        None => account_name_ref,
+    };
+    if name.is_empty() {
+        return
+    }
+    match ACCOUNT_NAME_CELL.get() {
+        // ignore duplicates
+        Some(prev) if prev == name =>
+            return,
+        _ => (),
+    }
+    log::info!("Received account name: {name:?}");
+    let name_owned = match account_name_ref.as_ptr() != name.as_ptr() {
+        // if the prefix was stripped, reallocate
+        true => name.into(),
+        false => account_name.into(),
+    };
+    match ACCOUNT_NAME_CELL.set(name_owned) {
+        Ok(_) => (),
+        Err(name) => {
+            let prev = ACCOUNT_NAME_CELL.get();
+            if Some(&name) != prev {
+                log::error!("Account name {name:?} inconsistent with previously recorded value {:?}", prev.map(|s| &s[..]).unwrap_or(""))
+            }
+        },
+    }
+}
+
+fn receive_mumble_identity(id: MumbleIdentityUpdate) {
+    Controller::try_send(ControllerEvent::MumbleIdentityUpdated(id));
+}
+
+fn receive_evtc_local(combat_data: &CombatData) {
+    let (evt, src) = match (combat_data.event(), combat_data.src()) {
+        (Some(evt), Some(src)) => (evt, src),
+        _ => return,
+    };
+    let (evt, src) = unsafe {
+        // convert references from disjoint arcdps-rs crate versions
+        (
+            mem::transmute::<_, &arcdps::evtc::Event>(evt).clone(),
+            AgentOwned::from(ptr::read(src as *const _ as *const arcdps::evtc::Agent)),
+        )
+    };
+
+    let event = ControllerEvent::CombatEvent {
+        src,
+        evt,
+    };
+    Controller::try_send(event);
+}
+
+fn receive_group_update(state: SquadState, group_member: &GroupMember) {
+    let group_member: GroupMemberOwned = group_member.into();
+    let event = ControllerEvent::RTAPISquadUpdate(state, group_member);
+    Controller::try_send(event);
+}
+
+fn receive_squad_update<'u>(update: impl IntoIterator<Item = &'u UserInfo>) {
+    let update: Vec<_> = update.into_iter()
+        .map(|x| unsafe { ptr::read(x) }.into())
+        .collect();
+    let event = ControllerEvent::ExtrasSquadUpdate(update);
+    Controller::try_send(event);
+}
+
+fn process_textures() {
+    #[cfg(feature = "texture-loader")]
+    let res = TEXTURES.try_responses(|mut responses| -> anyhow::Result<()> {
+        use {
+            anyhow::{anyhow, Context},
+            rt::textures::{TextureResponse, Texture},
+            tokio::sync::mpsc::error::TryRecvError,
+        };
+        let mut device = None;
+
+        loop {
+            let response = match responses.try_recv() {
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => Err(anyhow!("texture loader shut down?")),
+                Ok(response) => Ok(response),
+            }?;
+            match response {
+                TextureResponse::Decoded { key, format, pixels, stride, dimensions } => {
+                    let device = match &mut device {
+                        Some(d) => d,
+                        device => {
+                            let d3d11 = rt::d3d11_device()
+                                .context("d3d11 device required to load textures")?;
+                            device.insert(d3d11)
+                        },
+                    };
+                    let texture = unsafe {
+                        Texture::new_raw(device, &pixels, dimensions, stride, format)
+                    };
+                    TEXTURES.report_load(key, texture);
+                },
+                TextureResponse::DecodeFailed { key, error } => {
+                    log::error!("texture {key} failed to decode: {error}");
+                    TEXTURES.report_failure(key);
+                },
+                TextureResponse::LoopExit { id } => {
+                    log::warn!("texture loader {id:?} exited?");
+                },
+                TextureResponse::LoopEnter { id } => {
+                    log::info!("texture loader {id:?} started");
+                },
+            }
+        }
+
+        Ok(())
+    }).and_then(|res| res.transpose());
+    #[cfg(feature = "texture-loader")]
+    match res {
+        Err(e) => {
+            log::error!("texture processing error: {e}");
+        },
+        Ok(..) => (),
+    }
+}
+
+fn texture_schedule_bytes<K, B>(key: K, bytes: B) where
+    K: Into<String>,
+    B: Into<Vec<u8>>,
+{
+    let event = ControllerEvent::LoadTextureIntegrated(
+        key.into(),
+        bytes.into(),
+    );
+    Controller::try_send(event);
+}
+
+fn texture_schedule_path<R, P>(rel: R, path: P) where
+    R: Into<RelativePathBuf>,
+    P: Into<PathBuf>,
+{
+    let event = ControllerEvent::LoadTexture(
+        rel.into(),
+        path.into(),
+    );
+    Controller::try_send(event);
 }
 
 #[cfg(feature = "space")]
@@ -551,6 +778,10 @@ fn render_space(ui: &nexus::imgui::Ui) {
         }
         ENGINE.with_borrow_mut(|ds_op| {
             if let Some(Ok(ds)) = ds_op {
+                #[cfg(feature = "goggles")]
+                if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
+                    goggles::classify_space_lens(ds);
+                }
                 if let Err(error) = ds.render(ui) {
                     log::error!("Engine error: {error}");
                 }
@@ -560,7 +791,25 @@ fn render_space(ui: &nexus::imgui::Ui) {
 }
 
 fn unload() {
+    let mut loaded = match rt::LOADER_LOCK.lock() {
+        Ok(loaded) if !*loaded => {
+            log::warn!("not loaded, skipping unload");
+            return
+        },
+        Ok(loaded) => loaded,
+        Err(..) => {
+            let msg = "loader poisoned";
+            log::error!("{msg}");
+            return
+        },
+    };
+
     log::info!("Unloading addon");
+
+    #[cfg(feature = "goggles")]
+    if let Err(e) = goggles::shutdown() {
+        log::error!("Goggles shutdown failed: {e}");
+    }
 
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
     let controller_quit = CONTROLLER_SENDER.write().unwrap().take()
@@ -590,12 +839,16 @@ fn unload() {
         }
     }
 
+    if let Err(e) = TEXTURES.wait_for_shutdown() {
+        log::error!("failed to shut down texture loader: {e}");
+    }
+
     match controller_quit {
         Some(Ok(())) => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 if let Err(e) = handle.join() {
-                    log_join_error("controller", e);
+                    log_any_error("controller thread", &e);
                 }
             },
             None => {
@@ -611,11 +864,19 @@ fn unload() {
     if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
         revert_render();
     }
+
+    *loaded = false;
+
+    #[cfg(not(debug_assertions))] {
+        drop(panic::take_hook());
+    }
 }
 
 fn unload_render() {
     log::info!("Renderer unloading");
     debug_assert!(RenderState::is_render_thread());
+
+    TEXTURES.cleanup(true);
 
     #[cfg(feature = "space")]
     if engine_initialized() {
@@ -642,17 +903,33 @@ fn unload_render_background() {
         ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
     }
 
+    TEXTURES.cleanup(false);
+
     return
 }
 
-fn log_join_error(name: &str, e: Box<dyn std::any::Any + Send>) {
-    let msg = if let Some(m) = e.downcast_ref::<&'static str>() {
+fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
+    let msg = if let Some(m) = e.downcast_ref::<&str>() {
         *m
     } else if let Some(m) = e.downcast_ref::<String>() {
         &m[..]
     } else {
-        log::error!("{name} thread panicked");
-        return
+        "unknown error"
     };
-    log::error!("{name} thread panicked: {msg}");
+    f(msg)
+}
+
+fn log_any_error(name: &str, e: &dyn std::any::Any) {
+    with_any_error(e, move |e| log::error!("{name} panicked: {e}"))
+}
+
+fn panic_hook(info: &panic::PanicHookInfo) {
+    log_any_error(rt::NAME, info.payload());
+    if let Some(location) = info.location() {
+        log::error!("Panic occurred in {} at {location}", rt::CRATE_NAME);
+    }
+}
+
+fn setup_panic_hook() {
+    panic::set_hook(Box::new(panic_hook))
 }

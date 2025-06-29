@@ -1,6 +1,7 @@
 use {
     super::RenderState,
     crate::{
+        control_window,
         fl,
         settings::ProgressBarSettings,
         timer::{PhaseState, TimerAlert, TimerFile},
@@ -61,10 +62,7 @@ impl TimerWindowState {
         }
 
         if open != self.open {
-            Controller::try_send(ControllerEvent::WindowState(
-                crate::WINDOW_TIMERS.into(),
-                Some(open),
-            ));
+            control_window(crate::WINDOW_TIMERS, Some(open));
             self.open = open;
         }
     }

@@ -11,11 +11,12 @@ default = [
   "markers",
   "markers-edit",
   "space",
+  "extension-arcdps",
+  "extension-nexus",
 ]
 space = [
   "dep:itertools",
   "dep:tobj",
-  "dep:image",
   "dep:bevy_ecs",
   "dep:bevy_utils",
   "dep:arc-atomic",
@@ -28,7 +29,11 @@ space = [
   "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
-  "windows/Win32_System_Diagnostics_Debug",
+  "texture-loader",
+  "goggles",
+]
+space-list = [
+	"bvh",
 ]
 markers = [
   "dep:itertools",
@@ -37,13 +42,52 @@ markers = [
   "dep:windows-core",
   "windows/System",
   "windows/Foundation",
-  "windows/Foundation",
   "windows/Win32_UI_WindowsAndMessaging",
   "windows/Win32_UI_Input_KeyboardAndMouse",
   "windows/Win32_Graphics_Gdi",
 ]
 markers-edit = [
   "markers"
+]
+extension-arcdps = [
+  "extension-arcdps-codegen",
+  #"extension-arcdps-extern",
+  "dep:arcloader-mumblelink",
+  "arcloader-mumblelink/identity",
+  "arcloader-mumblelink/gw2_mumble",
+  "arcloader-mumblelink/log",
+  "dep:arcffi",
+  "arcffi/windows-061",
+  "dep:dpsapi",
+  "dpsapi/nexus",
+  "windows/Win32_System_LibraryLoader",
+  "texture-loader",
+]
+extension-arcdps-codegen = [
+  #"dpsapi/arcdps-015",
+  "dpsapi/arcdps",
+  "arcdps/export",
+]
+extension-arcdps-extern = [
+  "dep:sync-unsafe-cell",
+  "dpsapi/windows",
+  #"extension-arcdps-extern-cleanup"
+]
+extension-arcdps-extern-cleanup = [
+]
+extension-nexus = [
+]
+goggles = [
+  "dep:retour",
+]
+image = [
+  "dep:image",
+]
+texture-loader = [
+  "image",
+  "windows/Win32_Graphics_Direct3D11",
+  "windows/Win32_Graphics_Dxgi",
+  "windows/Win32_Graphics_Dxgi_Common",
 ]
 
 [lib]
@@ -69,7 +113,7 @@ built = { version = "0.7.7", features = [ "chrono", "git2" ] }
 anyhow = "1.0.95"
 log = "0.4.21"
 tokio = { version = "1.43.0", features = [ "fs", "macros" ] }
-arcdps = { git = "https://github.com/zerthox/arcdps-rs", tag = "0.15.1" }
+arcdps = { git = "https://github.com/zerthox/arcdps-rs", features = ["extras"] }
 glam = { version = "0.30.0", features = [ "serde", "mint" ] }
 palette = { version = "0.7.6", features = [ "serde" ] }
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -116,7 +160,7 @@ i18n-embed-fl = "0.9.4"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
-bvh = "0.11.0"
+bvh = { version = "0.11.0", optional = true }
 xml-rs = "0.8.26"
 uuid = { version = "1.17.0", features = ["v4"] }
 md5 = "0.7.0"
@@ -126,6 +170,12 @@ croner = "2.1.0"
 bitvec = "1.0.1"
 
 include_dir = { version = "0.7.4", features = ["glob"] }
+retour = { version = "0.3", optional = true }
+sync-unsafe-cell = { version = "0.1", optional = true }
+
+arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-strings = { optional = true, version = "0.4.0" }
@@ -134,8 +184,6 @@ windows-core = { optional = true, version = "0.61.0" }
 [dependencies.nexus]
 git = "https://github.com/zerthox/nexus-rs"
 features = [
-  "log",
-  "log_filter",
   "mumble",
   "arc",
   "rtapi",
@@ -169,5 +217,10 @@ features = [
   "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Direct3D_Fxc",
   "Win32_Graphics_Hlsl",
-  "Win32_System_Diagnostics_Debug"
+  "Win32_System_SystemServices"
 ]
+
+[patch."https://github.com/zerthox/arcdps-rs"]
+# required to fix extension unload symbol name
+arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
+evtc = { git = "https://github.com/arcnmx/arcdps-rs" }

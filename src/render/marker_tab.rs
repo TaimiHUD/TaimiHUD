@@ -13,12 +13,9 @@ use {
     },
     glam::{Vec2, Vec3},
     indexmap::IndexMap,
-    nexus::{
-        imgui::{
-            ChildWindow, Condition, PopupModal, Selectable, TableColumnSetup, TableFlags, TreeNode,
-            TreeNodeFlags, Ui, WindowFlags,
-        },
-        paths::get_addon_dir,
+    nexus::imgui::{
+        ChildWindow, Condition, PopupModal, Selectable, TableColumnSetup, TableFlags, TreeNode,
+        TreeNodeFlags, Ui, WindowFlags,
     },
     std::{
         collections::{HashMap, HashSet},
@@ -58,8 +55,7 @@ impl MarkerTabState {
         self.draw_sidebar_child(ui);
     }
     fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        let addon_dir = get_addon_dir("Taimi").expect("Invalid addon dir");
-        let markers_dir = addon_dir.join("markers");
+        let markers_dir = crate::ADDON_DIR.join("markers");
         let markers_dir = markers_dir.to_string_lossy().to_string();
         RenderState::draw_open_button(
             state_errors,
