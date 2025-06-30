@@ -383,13 +383,18 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     if !available() { return msg }
 
     match msg {
-        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_KEYUP => {
+        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN
+        | WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP => {
             // no such thing as a duplicate keyup event, but just in case...
             let prev_down = l & (1 << 30) != 0;
+            let repeat = l & 0xff;
 
-            let is_up = msg == WindowsAndMessaging::WM_KEYUP;
-            //let is_release = is_up && prev_down;
-            let is_release = !is_up;
+            // NOTE: modifiers may be released prior to key release, so this needs to
+            // trigger on press to be reliable
+            // (resolving this likely requires switching to the non-filtered callback)
+            let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
+            let is_trigger = !is_up && repeat == 0;
+            let is_release = is_up && prev_down;
             let settings = crate::SETTINGS.get()
                 .and_then(|s| s.try_read().ok());
             let arc = match settings.as_ref().map(|s| s.arc()) {
@@ -409,7 +414,7 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             for &binding in ArcSettings::VK_WINDOWS {
                 if arc.binding_matches(binding, vk) {
                     bound = true;
-                    if is_release {
+                    if is_trigger {
                         if let Some(window) = binding.window_name() {
                             crate::control_window(window, None)
                         }
@@ -420,7 +425,7 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             #[cfg(feature = "space")]
             if crate::engine_initialized() && arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
                 bound = true;
-                if is_release {
+                if is_trigger {
                     crate::Engine::try_send(crate::SpaceEvent::PathingToggle);
                 }
             }

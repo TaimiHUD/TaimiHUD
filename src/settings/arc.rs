@@ -126,8 +126,7 @@ impl ArcVk {
     }
 
     pub fn get_setting_vkeycode(&self) -> Option<VIRTUAL_KEY> {
-        let settings = crate::SETTINGS.get()?;
-        let settings = settings.try_read().ok()?;
+        let settings = Settings::try_read()?;
         settings.arc().get_vk(self)
     }
 
