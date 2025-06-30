@@ -187,25 +187,6 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
     }))
 }
 
-pub fn log_write_record<W: fmt::Write>(w: &mut W, record: &log::Record) -> fmt::Result {
-    let target_written = rt::log::write_metadata_prefix(w, record.metadata(), true)?;
-    rt::log::write_record_prefix(w, record, target_written)?;
-    rt::log::write_record_body(w, record)?;
-
-    Ok(())
-}
-
-pub fn log_record_buffer(buffer: &mut rt::log::LogBuffer, record: &log::Record) -> RuntimeResult<Option<()>> {
-    if !available() {
-        return Ok(None)
-    }
-
-    log_write_record(buffer, record)
-        .map_err(|_| rt::log::RT_FORMAT_ERROR)?;
-
-    log(record.metadata(), buffer.terminate())
-}
-
 pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)

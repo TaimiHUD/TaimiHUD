@@ -211,6 +211,11 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
 fn crate_init() {
     setup_panic_hook();
     let _ = rt::log::TaimiLog::setup();
+
+    // XXX: could consider calling this from a DllMain (or CRT TLS hook fn?),
+    // but defining explicit entry points is kinder anyway...
+    // but contention over who "owns" the global panic hook or logger will only
+    // ever matter if we switch to dynamic linking std anyway, so...
 }
 
 fn init() -> Result<(), &'static str> {

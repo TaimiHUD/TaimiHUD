@@ -87,7 +87,8 @@ pub fn addon_dir() -> &'static Path {
         Ok(path) =>
             ADDON_DIR.get_or_init(|| path.into()),
         Err(e) => {
-            ::log::warn!("falling back to default addon dir due to error: {e}");
+            // would complain but that will just recurse into here ><
+            //::log::warn!("falling back to default addon dir due to error: {e}");
             addon_dir_fallback()
         },
     }
