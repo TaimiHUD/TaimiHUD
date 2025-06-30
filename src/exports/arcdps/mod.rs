@@ -104,7 +104,7 @@ fn check_for_nexus() -> bool {
 
 fn pre_init() {
     RUNTIME_LOADED.store(true, Ordering::Relaxed);
-    let _ = rt::log::TaimiLog::setup();
+    crate::crate_init();
 }
 
 fn init() -> Result<(), &'static str> {
@@ -453,6 +453,9 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
 fn get_update_url() -> Option<String> {
+    // this may be called prior to init, so ensure logging is present
+    crate::crate_init();
+
     match panic::catch_unwind(|| update_url()) {
         Ok(url) => url,
         Err(e) => {
@@ -744,22 +747,30 @@ pub fn extras_available() -> bool {
 const NO_EXPORT: &'static str = "arcdps export missing";
 
 pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
-    if !available() {
+    if !loaded() {
         return Ok(None)
     }
 
-    let mut path = match () {
+    let path = match () {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_e0_config_path() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
         () => arcdps::exports::config_path(),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args().and_then(|arc| arc.module.get_ini_path().ok()),
-    }.ok_or(NO_EXPORT)?;
-    // remove ini leaf from path...
-    if !path.pop() {
-        return Err("Incomplete config path")
-    }
+    }.ok_or(NO_EXPORT)
+    .and_then(|mut path| match path.pop() {
+        // remove ini leaf from path...
+        true => Ok(path),
+        false => Err("Incomplete config path"),
+    });
+
+    let mut path = match path {
+        Ok(path) => path,
+        // we tried but aren't actually loaded, so let the caller move on to nexus or whatever
+        Err(..) if !available() => return Ok(None),
+        Err(e) => return Err(e),
+    };
 
     let in_addons = path.file_name() == Some(OsStr::new("arcdps"))
         || path.parent().and_then(|p| p.file_name()) == Some(OsStr::new("addons"));

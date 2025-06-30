@@ -215,10 +215,9 @@ unsafe extern "C" fn arc_cb_imgui_options_windows(window_name: Option<CStrPtr>) 
 }
 
 extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
-    crate::setup_panic_hook();
+    exports::pre_init();
 
     let res = panic::catch_unwind(|| {
-        exports::pre_init();
         Some(exports::init())
     });
     let exports = ExtensionExports {
