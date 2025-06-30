@@ -1,5 +1,9 @@
 use anyhow::anyhow;
-use std::collections::HashMap; 
+use crate::{
+    exports::runtime as rt,
+    settings::{Settings, NeedsUpdate},
+};
+use std::{collections::HashMap, fmt};
 use serde::{Serialize, Deserialize};
 use windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY};
 
@@ -7,6 +11,10 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY};
 pub struct ArcSettings {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub bind_vks: HashMap<String, u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_preference: Option<ArcUpdatePreference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_remote_version: Option<String>,
 }
 
 impl ArcSettings {
@@ -41,6 +49,31 @@ impl ArcSettings {
         match self.get_vk(binding) {
             Some(setting) => vkeycode == setting,
             None => false,
+        }
+    }
+
+    pub fn update_preference(&self) -> &ArcUpdatePreference {
+        self.update_preference.as_ref().unwrap_or(&ArcUpdatePreference::ASK)
+    }
+
+    pub fn set_update_preference(&mut self, preference: ArcUpdatePreference) {
+        match &preference {
+            ArcUpdatePreference::Never => {
+                self.update_remote_version = None;
+            },
+            ArcUpdatePreference::Ask { authorized: Some(Ok(xthorized) | Err(xthorized)) } if Some(xthorized) != self.update_remote_version.as_ref() => {
+                self.update_remote_version = None;
+            },
+            _ => (),
+        }
+        self.update_preference = Some(preference);
+    }
+
+    pub fn update_available(&self) -> Option<NeedsUpdate> {
+        match &self.update_remote_version {
+            None => None,
+            Some(v) if v.is_empty() => Some(NeedsUpdate::Unknown),
+            Some(v) => Some(NeedsUpdate::Known(v != rt::CRATE_VERSION, v.clone())),
         }
     }
 }
@@ -104,5 +137,116 @@ impl ArcVk {
             .blocking_write();
         settings.arc_mut().bind_vks.insert(self.id.into(), new.0);
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub enum ArcUpdatePreference {
+    Always,
+    Ask {
+        authorized: Option<Result<String, String>>,
+    },
+    Never,
+    Once {
+        authorized: String,
+    },
+}
+
+impl ArcUpdatePreference {
+    pub const ASK: Self = Self::Ask {
+        authorized: None,
+    };
+
+    pub const OPTIONS: [Self; 3] = [
+        Self::Never,
+        Self::ASK,
+        Self::Always,
+    ];
+
+    pub fn ask_allow<V: Into<String>>(version: V) -> Self {
+        Self::Ask {
+            authorized: Some(Ok(version.into())),
+        }
+    }
+
+    pub fn ask_deny<V: Into<String>>(version: V) -> Self {
+        Self::Ask {
+            authorized: Some(Err(version.into())),
+        }
+    }
+
+    pub fn only_once<V: Into<String>>(version: V) -> Self {
+        Self::Once {
+            authorized: version.into(),
+        }
+    }
+
+    pub fn as_option(&self) -> Self {
+        match self {
+            Self::Always => Self::Always,
+            Self::Ask { .. } => Self::ASK,
+            Self::Never | Self::Once { .. } => Self::Never,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Always => "Always",
+            Self::Ask { .. } => "Ask",
+            _ => "Never",
+        }
+    }
+
+    pub fn authorizes_version(&self, version: &str) -> Option<bool> {
+        match self {
+            Self::Once { authorized } | Self::Ask { authorized: Some(Ok(authorized)) } if authorized == version => Some(true),
+            Self::Once { .. } => Some(false),
+            Self::Ask { authorized: Some(Err(unauthorized)) } if unauthorized == version => Some(false),
+            _ => self.blanket_authorization(),
+        }
+    }
+
+    pub fn blanket_authorization(&self) -> Option<bool> {
+        match self {
+            Self::Always => Some(true),
+            Self::Never => Some(false),
+            _ => None,
+        }
+    }
+
+    pub fn authorize_update(&mut self, version: String, authorize: bool) {
+        match (&mut *self, authorize) {
+            (Self::Always, true) => (),
+            (Self::Always, false) => {
+                *self = Self::ask_allow(version);
+            },
+            (Self::Never, false) => (),
+            (Self::Never, true) => {
+                *self = Self::only_once(version);
+            },
+            (Self::Ask { ref mut authorized }, true) => {
+                *authorized = Some(Ok(version));
+            },
+            (Self::Ask { ref mut authorized }, false) => {
+                *authorized = Some(Err(version));
+            },
+            (Self::Once { ref mut authorized }, true) => {
+                *authorized = version;
+            },
+            (Self::Once { .. }, false) => {
+                *self = Self::Never;
+            },
+        }
+    }
+}
+
+impl fmt::Display for ArcUpdatePreference {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Ask { authorized: Some(Ok(v)) } => write!(f, "Allow {v}"),
+            Self::Ask { authorized: Some(Err(v)) } => write!(f, "Ignore {v}"),
+            Self::Once { authorized: v } => write!(f, "Just {v}"),
+            pref => f.write_str(pref.as_str()),
+        }
     }
 }

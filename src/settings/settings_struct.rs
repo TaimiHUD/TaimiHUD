@@ -393,7 +393,7 @@ impl Settings {
         let _ = self.save(&self.addon_dir).await;
     }
 
-    pub async fn new(addon_dir: &Path) -> Self {
+    pub fn new(addon_dir: &Path) -> Self {
         Self {
             last_checked: None,
             addon_dir: addon_dir.to_path_buf(),
@@ -420,7 +420,19 @@ impl Settings {
             settings.handle_sources_changes();
             return Ok(settings);
         }
-        Ok(Self::new(addon_dir).await)
+        Ok(Self::new(addon_dir))
+    }
+    pub fn open_blocking(addon_dir: &Path) -> anyhow::Result<Self> {
+        use std::fs;
+        let settings_path = addon_dir.join("settings.json");
+        Ok(if fs::exists(&settings_path)? {
+            let file_data = fs::read_to_string(settings_path)?;
+            let mut settings = serde_json::from_str::<Self>(&file_data)?;
+            settings.addon_dir = addon_dir.to_path_buf();
+            settings
+        } else {
+            Self::new(addon_dir)
+        })
     }
 
     pub async fn load_default(addon_dir: &Path) -> Self {
@@ -428,7 +440,7 @@ impl Settings {
             Ok(settings) => settings,
             Err(err) => {
                 log::error!("SettingsLock load error: {}", err);
-                Self::new(addon_dir).await
+                Self::new(addon_dir)
             }
         }
     }
@@ -445,6 +457,28 @@ impl Settings {
         let mut file = File::create(settings_path).await?;
         file.write_all(settings_str.as_bytes()).await?;
         Ok(())
+    }
+
+    pub fn try_read() -> Option<tokio::sync::RwLockReadGuard<'static, Self>> {
+        SETTINGS.get()
+            .and_then(|settings| settings.try_read().ok())
+    }
+
+    pub fn read_with_blocking<R, F: FnOnce(&Self) -> R>(f: F) -> anyhow::Result<R> {
+        let settings_lock;
+        let settings_temporary;
+        let settings = match SETTINGS.get() {
+            Some(settings) => {
+                settings_lock = settings.blocking_read();
+                &*settings_lock
+            },
+            None => {
+                settings_temporary = Self::open_blocking(&*crate::ADDON_DIR)?;
+                &settings_temporary
+            },
+        };
+
+        Ok(f(settings))
     }
 
     pub fn arc(&self) -> Cow<ArcSettings> {

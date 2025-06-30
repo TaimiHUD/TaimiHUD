@@ -15,7 +15,7 @@ use {
 
 mod github;
 
-pub use github::GitHubSource;
+pub use github::{GitHubSource, GitHubLatestRelease};
 
 #[derive(Deserialize, Serialize, Hash, Eq, PartialEq, Debug, Clone)]
 #[serde(tag = "type")]

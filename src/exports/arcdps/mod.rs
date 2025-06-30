@@ -12,7 +12,7 @@ use {
         game_language_id,
         marker::format::MarkerType,
         render::RenderState,
-        settings::{ArcSettings, ArcVk, GitHubSource},
+        settings::{ArcSettings, ArcUpdatePreference, ArcVk, GitHubSource, GitHubLatestRelease, NeedsUpdate, Settings},
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
@@ -23,6 +23,7 @@ use {
         ffi::{c_void, CStr, OsStr},
         fmt::{self, Write},
         ops,
+        panic,
         path::PathBuf,
         ptr::{self, NonNull},
         sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
@@ -211,7 +212,51 @@ fn imgui(ui: &Ui, not_charsel_loading: bool, _hide: u32) {
 fn imgui_options_tab(ui: &Ui) {
     ui.text("WORK IN PROGRESS");
 
-    ui.checkbox("Check for updates", &mut false);
+    if let Ok(pref) = update_preference() {
+        let mut index = ArcUpdatePreference::OPTIONS.iter().position(|opt| opt == &pref.as_option())
+            .unwrap_or(0);
+        let auto_update = ui.combo("Auto-update", &mut index, &ArcUpdatePreference::OPTIONS, |option| {
+            option.as_str().into()
+        });
+        let mut new_pref = None;
+        if auto_update {
+            new_pref = ArcUpdatePreference::OPTIONS.get(index).cloned();
+        }
+        if ui.button("Check now") {
+            log::debug!("TODO: update check");
+            let _ = update_url();
+        }
+        let blanket_auth = pref.blanket_authorization();
+        let mut authorized = blanket_auth.unwrap_or(false);
+        let auth_toggled = Settings::try_read().and_then(|s| s.arc().update_remote_version.as_ref().map(|latest| {
+            ui.same_line();
+            if latest == rt::CRATE_VERSION {
+                ui.text("Up-to-date");
+                None
+            } else if blanket_auth.is_none() {
+                authorized = pref.authorizes_version(latest).unwrap_or(false);
+                ui.checkbox(format!("Allow update to {latest}"), &mut authorized)
+                    .then(|| latest.clone())
+            } else {
+                ui.text("Update available: {latest}");
+                None
+            }
+        })).flatten();
+        if auth_toggled.is_some() || new_pref.is_some() {
+            if let Some(mut settings) = crate::SETTINGS.get().map(|s| s.blocking_write()) {
+                let arc = settings.arc_mut();
+                let pref = match new_pref {
+                    Some(pref) =>
+                        arc.update_preference.insert(pref),
+                    None =>
+                        arc.update_preference.get_or_insert_with(|| default_update_preference()),
+                };
+                if let Some(latest) = auth_toggled {
+                    pref.authorize_update(latest, authorized);
+                }
+            }
+        }
+    }
 
     thread_local! {
         static BINDING_BUFFERS: std::cell::RefCell<std::collections::HashMap<&'static str, String>> = Default::default();
@@ -402,90 +447,173 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
-
-fn update_url() -> Option<String> {
-    use tokio::{runtime, time::timeout};
-
-    if !update_allowed() {
-        log::debug!("skipping update check");
-        return None
-    }
-
-    let src = gh_repo_src();
-    log::info!("checking for updates at {}...", src);
-
-    let runner = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build();
-    let runner = match runner {
-        Ok(r) => r,
+fn get_update_url() -> Option<String> {
+    match panic::catch_unwind(|| update_url()) {
+        Ok(url) => url,
         Err(e) => {
-            log::warn!("Failed to start update check: {e}");
-            return None
+            crate::log_any_error("get_update_url", &e);
+            None
         },
-    };
-
-    let release = runner.block_on(async move {
-        let check = src.latest_release();
-        timeout(UPDATE_CHECK_TIMEOUT, check).await
-    });
-    let release = match release {
-        Ok(Ok(release)) => {
-            let built_ver = crate::built_info::GIT_HEAD_REF.and_then(|r| r.strip_prefix("refs/tags/v"));
-            match release.tag_name.strip_prefix("v") {
-                None => {
-                    log::info!("Latest version {} unrecognized", release.tag_name);
-                    return None
-                },
-                Some(remote_ver) if remote_ver == env!("CARGO_PKG_VERSION") || Some(remote_ver) == built_ver => {
-                    log::info!("{} is up-to-date!", release.name.as_ref().unwrap_or(&release.tag_name));
-                    return None
-                },
-                Some(..) => (),
-            }
-            log::info!("Latest version is {}", release.name.as_ref().unwrap_or(&release.tag_name));
-            let is_dev_build = match built_ver {
-                #[cfg(not(debug_assertions))]
-                Some(..) => false,
-                _ => true,
-            };
-            if release.prerelease {
-                log::info!("Skipping update to pre-release");
-                return None
-            } else if is_dev_build {
-                log::info!("Refusing to update development build");
-                return None
-            }
-            release
-        },
-        Ok(Err(e)) => {
-            log::warn!("Failed to check for update: {e}");
-            return None
-        },
-        Err(e) => {
-            log::warn!("{e} while checking for updates");
-            return None
-        },
-    };
-
-    let dll_asset = release.assets.into_iter()
-        .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
-
-    match dll_asset {
-        // asset.url can also work as long as Content-Type is set correctly...
-        Some(asset) => asset.browser_download_url.map(Into::into),
-        None => None,
     }
 }
 
-fn update_allowed() -> bool {
+fn update_url() -> Option<String> {
+    let authorized = match update_preference() {
+        Err(e) => {
+            log::info!("Skipping update check: {e}");
+            return None
+        },
+        Ok(ArcUpdatePreference::Never) => {
+            log::info!("Auto-update disabled");
+            return None
+        },
+        Ok(ArcUpdatePreference::Always) => {
+            Some(Ok(None))
+        },
+        Ok(ArcUpdatePreference::Ask { authorized }) => {
+            authorized.map(|a| a.map(Some))
+        },
+        Ok(ArcUpdatePreference::Once { authorized }) => {
+            Some(Ok(Some(authorized)))
+        },
+    };
+
+    let release = match rt::update::latest_release_blocking(&gh_repo_src(), UPDATE_CHECK_TIMEOUT) {
+        Err(e) => {
+            log::warn!("Update check failed: {e}");
+            return None
+        },
+        Ok(release) => release,
+    };
+    log::info!("Latest version is {}", release.name.as_ref().unwrap_or(&release.tag_name));
+    let res = rt::update::release_dll_url(&release)
+        .and_then(|dll| release_is_update(&release).map(|rv|
+            (rv, dll)
+        ));
+    let (release_version, dll_url) = match res {
+        Err(e) => {
+            log::warn!("Invalid update found: {e}");
+            return None
+        },
+        Ok((None, ..)) => return None,
+        Ok((Some(rv), url)) => (rv, url),
+    };
+
+    match release_is_allowed(release_version, &authorized) {
+        None => {
+            log::info!("Update requires user authorization");
+            mark_update_outdated(Some(release_version.into()));
+            None
+        },
+        Some(false) => {
+            log::info!("Update blacklisted, skipping");
+            None
+        },
+        Some(true) => Some(dll_url.as_str().into()),
+    }
+}
+
+pub fn release_is_update(release: &GitHubLatestRelease) -> anyhow::Result<Option<&str>> {
+    let built_ver = crate::built_info::GIT_HEAD_REF.and_then(|r| r.strip_prefix("refs/tags/v"));
+    let release_version = rt::update::release_version(release)?;
+    if release_version == rt::CRATE_VERSION || Some(release_version) == built_ver {
+        log::info!("Up-to-date with latest version {}!", release.name.as_ref().unwrap_or(&release.tag_name));
+        return Ok(None)
+    }
+    let is_dev_build = match built_ver {
+        #[cfg(not(debug_assertions))]
+        Some(..) => false,
+        _ => true,
+    };
+    if release.prerelease {
+        log::info!("Skipping update to pre-release");
+        return Ok(None)
+    } else if is_dev_build {
+        log::info!("Refusing to update development build");
+        return Ok(None)
+    }
+    Ok(Some(release_version))
+}
+
+pub fn release_is_allowed(release_version: &str, authorized: &Option<Result<Option<String>, String>>) -> Option<bool> {
+    match authorized {
+        Some(Err(unauthorized)) if unauthorized == release_version => {
+            log::info!("Update blacklisted, skipping");
+            Some(false)
+        },
+        Some(Err(..)) =>
+            None,
+        Some(Ok(None)) =>
+            Some(true),
+        Some(Ok(Some(authorized))) if authorized == release_version =>
+            Some(true),
+        Some(Ok(Some(..))) | None =>
+            None,
+    }
+}
+
+fn mark_update_outdated(latest: Option<String>) {
+    log::debug!("Recording latest available update: {latest:?}");
+    let mut settings = match crate::SETTINGS.get() {
+        Some(settings) => settings.blocking_write(),
+        None => {
+            log::warn!("Settings unavailable to record update status");
+            return
+        },
+    };
+    if latest.is_none() && settings.arc.is_none() {
+        // nothing to do...
+        return
+    }
+    let arc = settings.arc_mut();
+    let updated_pref = match arc.update_preference {
+        Some(ArcUpdatePreference::Ask { authorized: Some(..) }) =>
+            Some(ArcUpdatePreference::ASK),
+        Some(ArcUpdatePreference::Once { .. }) =>
+            Some(ArcUpdatePreference::Never),
+        _ => None,
+    };
+    if let Some(pref) = updated_pref {
+        arc.update_preference = Some(pref);
+    }
+    arc.update_remote_version = latest;
+    // TODO: schedule save
+}
+
+fn update_preference() -> anyhow::Result<ArcUpdatePreference> {
+    let mut outdated = false;
+    let pref = Settings::read_with_blocking(|settings| {
+        let arc = settings.arc();
+        match arc.update_preference.as_ref() {
+            Some(ArcUpdatePreference::Ask { authorized: Some(Ok(version) | Err(version)) }) if version == rt::CRATE_VERSION => {
+                outdated = true;
+                ArcUpdatePreference::ASK
+            },
+            Some(ArcUpdatePreference::Once { authorized }) if authorized == rt::CRATE_VERSION => {
+                outdated = true;
+                ArcUpdatePreference::Never
+            },
+            Some(pref) => pref.clone(),
+            None => default_update_preference(),
+        }
+    });
+    if outdated {
+        mark_update_outdated(None);
+    }
+    pref
+}
+
+fn default_update_preference() -> ArcUpdatePreference {
     #[cfg(feature = "extension-nexus")]
     if exports::nexus::available() {
-        return false
+        return ArcUpdatePreference::Never
     }
 
-    // TODO: setting somewhere!
-    true
+    match () {
+        #[cfg(todo)]
+        _ => ArcUpdatePreference::ASK,
+        _ => ArcUpdatePreference::Never,
+    }
 }
 
 fn combat_local(event: CombatArgs) {

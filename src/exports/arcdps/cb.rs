@@ -63,7 +63,7 @@ pub fn wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
 }
 
 pub fn update_url() -> Option<String> {
-    exports::update_url()
+    exports::get_update_url()
         .map(Into::into)
 }
 
