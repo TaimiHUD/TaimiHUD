@@ -782,7 +782,7 @@ pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
     Ok(Some(path))
 }
 
-fn log_window_filter(metadata: &log::Metadata) -> bool {
+pub fn log_window_filter(metadata: &log::Metadata) -> bool {
     match metadata.level() {
         _ if !loaded() => false,
         #[cfg(not(debug_assertions))]
@@ -813,7 +813,7 @@ pub fn log_write_record_buffer(w: &mut rt::log::LogBuffer, record: &log::Record)
         },
         None => window_start,
     };
-    log_write_record(w, record)?;
+    rt::log::write_record(w, record, false)?;
     let end = w.len();
 
     if let Some(..) = colour {
@@ -821,10 +821,6 @@ pub fn log_write_record_buffer(w: &mut rt::log::LogBuffer, record: &log::Record)
     }
 
     Ok(start..end)
-}
-
-pub fn log_write_record<W: fmt::Write>(w: &mut W, record: &log::Record) -> fmt::Result {
-    rt::log::write_record(w, record)
 }
 
 pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
