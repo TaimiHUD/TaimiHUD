@@ -208,8 +208,13 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
     }
 }
 
-fn init() -> Result<(), &'static str> {
+fn crate_init() {
     setup_panic_hook();
+    let _ = rt::log::TaimiLog::setup();
+}
+
+fn init() -> Result<(), &'static str> {
+    crate_init();
 
     let mut loaded = match rt::LOADER_LOCK.lock() {
         Ok(loaded) if *loaded => {
@@ -230,7 +235,7 @@ fn init() -> Result<(), &'static str> {
     log::info!("Loading {name} {version} by {authors}");
 
     // Set up the thread
-    let addon_dir = rt::addon_dir()?;
+    let addon_dir = &*ADDON_DIR;
 
     rt::reload_language()?;
 
@@ -254,7 +259,7 @@ fn init() -> Result<(), &'static str> {
 
     let controller_handler = {
         let render_sender = render_sender.clone();
-        thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir))
+        thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir.to_owned()))
     };
 
     // muh queues
@@ -599,10 +604,7 @@ fn load_language(detected_language: &str) -> rt::RuntimeResult {
     Ok(())
 }
 
-pub static ADDON_DIR: LazyLock<PathBuf> =
-    LazyLock::new(|| rt::addon_dir()
-        .unwrap_or_else(|_| PathBuf::from("Taimi"))
-    );
+pub const ADDON_DIR: rt::AddonDir = rt::AddonDir;
 pub static TIMERS_DIR: LazyLock<PathBuf> =
     LazyLock::new(|| ADDON_DIR.join("timers"));
 

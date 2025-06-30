@@ -36,11 +36,10 @@ static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn pre_init() {
     RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
+    crate::crate_init();
 }
 
 pub(crate) fn cb_load() {
-    let _ = rt::log::TaimiLog::setup();
-
     pre_init();
 
     #[cfg(feature = "extension-arcdps")]

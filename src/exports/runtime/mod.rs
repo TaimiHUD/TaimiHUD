@@ -1,4 +1,4 @@
-use std::{ffi::CStr, mem, path::{Path, PathBuf}, ptr::NonNull, sync::Mutex, time::Duration};
+use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::NonNull, sync::{Mutex, OnceLock}, time::Duration};
 use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
@@ -58,7 +58,7 @@ pub fn arcdps_available() -> bool {
     }
 }
 
-pub fn addon_dir() -> RuntimeResult<PathBuf> {
+pub fn try_addon_dir() -> RuntimeResult<PathBuf> {
     #[cfg(feature = "extension-nexus")]
     if let Some(path) = exports::nexus::addon_dir()? {
         return Ok(path)
@@ -70,6 +70,36 @@ pub fn addon_dir() -> RuntimeResult<PathBuf> {
     }
 
     Err(RT_UNAVAILABLE)
+}
+
+pub fn addon_dir_fallback() -> &'static Path {
+    Path::new("addons/Taimi")
+}
+
+static ADDON_DIR: OnceLock<Cow<'static, Path>> = OnceLock::new();
+
+pub fn addon_dir() -> &'static Path {
+    if let Some(path) = ADDON_DIR.get() {
+        return path
+    }
+
+    match try_addon_dir() {
+        Ok(path) =>
+            ADDON_DIR.get_or_init(|| path.into()),
+        Err(e) => {
+            ::log::warn!("falling back to default addon dir due to error: {e}");
+            addon_dir_fallback()
+        },
+    }
+}
+
+pub struct AddonDir;
+impl ops::Deref for AddonDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        addon_dir()
+    }
 }
 
 pub fn detect_language() -> RuntimeResult<String> {
