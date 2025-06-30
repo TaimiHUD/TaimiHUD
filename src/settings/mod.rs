@@ -7,13 +7,13 @@ mod sources;
 mod v1;
 
 pub use {
-    arc::{ArcSettings, ArcVk},
+    arc::{ArcSettings, ArcUpdatePreference, ArcVk},
     progress_bar_config::ProgressBarSettings,
     settings_struct::{
         MarkerAutoPlaceSettings, MarkerSettings, NeedsUpdate, Settings, SettingsLock,
         SquadCondition,
     },
-    source::{GitHubSource, RemoteSource, Source},
+    source::{GitHubSource, GitHubLatestRelease, RemoteSource, Source},
     sources::{SourceKind, SourcesFile},
     v1::{RemoteState, TimerSettings},
 };

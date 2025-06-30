@@ -16,6 +16,7 @@ pub mod keyboard;
 pub mod log;
 pub mod mouse;
 pub mod textures;
+pub mod update;
 pub use {
     nexus::imgui,
     self::{

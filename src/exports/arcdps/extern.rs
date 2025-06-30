@@ -280,7 +280,7 @@ pub unsafe extern "system" fn get_release_addr() -> Option<ReleaseFn> {
 pub unsafe extern "system" fn get_update_url() -> Option<CStrPtr16<'static>> {
     use windows::core::HSTRING;
 
-    let url = exports::update_url()?;
+    let url = exports::get_update_url()?;
     let url = HSTRING::from(url);
     let ptr = url.as_ptr();
     // memory leak, goodbye
