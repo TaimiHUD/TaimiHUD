@@ -4,6 +4,10 @@ use tokio::{runtime, time::timeout};
 use std::time::Duration;
 use url::Url;
 
+pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
+pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
+pub const GIT_REF_RELEASE_PREFIX: &'static str = "refs/tags/v";
+
 pub fn latest_release_blocking(src: &GitHubSource, patience: Duration) -> anyhow::Result<GitHubLatestRelease> {
     log::info!("Checking for updates at {}...", src);
 

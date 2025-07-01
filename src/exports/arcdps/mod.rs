@@ -12,7 +12,7 @@ use {
         game_language_id,
         marker::format::MarkerType,
         render::RenderState,
-        settings::{ArcSettings, ArcUpdatePreference, ArcVk, GitHubSource, GitHubLatestRelease, NeedsUpdate, Settings},
+        settings::{ArcSettings, ArcUpdatePreference, ArcVk, GitHubSource, GitHubLatestRelease, Settings},
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
@@ -522,13 +522,13 @@ fn update_url() -> Option<String> {
 }
 
 pub fn release_is_update(release: &GitHubLatestRelease) -> anyhow::Result<Option<&str>> {
-    let built_ver = crate::built_info::GIT_HEAD_REF.and_then(|r| r.strip_prefix("refs/tags/v"));
     let release_version = rt::update::release_version(release)?;
-    if release_version == rt::CRATE_VERSION || Some(release_version) == built_ver {
+    // TODO: this is a mess without proper semver
+    if release_version == rt::CRATE_VERSION || Some(&release.tag_name[..]) == crate::built_info::git_tag_name() {
         log::info!("Up-to-date with latest version {}!", release.name.as_ref().unwrap_or(&release.tag_name));
         return Ok(None)
     }
-    let is_dev_build = match built_ver {
+    let is_dev_build = match crate::built_info::git_release() {
         #[cfg(not(debug_assertions))]
         Some(..) => false,
         _ => true,
@@ -617,9 +617,9 @@ fn default_update_preference() -> ArcUpdatePreference {
         return ArcUpdatePreference::Never
     }
 
-    match () {
+    match crate::built_info::is_release() {
         #[cfg(todo)]
-        _ => ArcUpdatePreference::ASK,
+        true => ArcUpdatePreference::ASK,
         _ => ArcUpdatePreference::Never,
     }
 }

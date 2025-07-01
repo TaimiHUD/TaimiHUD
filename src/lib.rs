@@ -121,6 +121,78 @@ pub fn localizer() -> DefaultLocalizer<'static> {
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+    pub const IS_TAGGED_VERSION: bool = check_is_release();
+
+    /// Official tagged release build
+    pub fn is_release() -> bool {
+        #[allow(unreachable_patterns)]
+        match IS_TAGGED_VERSION {
+            // never allow debug builds to be marked as a release
+            #[cfg(debug_assertions)]
+            true => false,
+            true if git_release() == Some(crate::exports::runtime::CRATE_VERSION) =>
+                true,
+            _ => false,
+        }
+    }
+
+    /// Ok(tag) or Err(branch)
+    pub fn git_ref_name() -> Result<&'static str, &'static str> {
+        match git_tag_name() {
+            Some(tag) => Ok(tag),
+            None => Err(git_branch_name()
+                .or(GIT_HEAD_REF)
+                .unwrap_or("HEAD")
+            ),
+        }
+    }
+
+    pub fn git_tag_name() -> Option<&'static str> {
+        GIT_HEAD_REF.and_then(|head| head.strip_prefix(GIT_REF_TAG_PREFIX))
+    }
+
+    pub fn git_branch_name() -> Option<&'static str> {
+        GIT_HEAD_REF.and_then(|head| head.strip_prefix(GIT_REF_BRANCH_PREFIX))
+    }
+
+    pub fn git_release() -> Option<&'static str> {
+        GIT_HEAD_REF.and_then(|head| head.strip_prefix(GIT_REF_RELEASE_PREFIX))
+    }
+
+    use crate::exports::runtime::update::{GIT_REF_BRANCH_PREFIX, GIT_REF_RELEASE_PREFIX, GIT_REF_TAG_PREFIX};
+    const fn check_is_release() -> bool {
+        let head = match GIT_HEAD_REF {
+            Some(head) if head.len() >= GIT_REF_RELEASE_PREFIX.len() => head,
+            _ => return false,
+        }.as_bytes();
+        let refs = "refs/".len();
+        let tag = refs + "tags/".len();
+        const TAG_STR: [u8; 3] = *b"tag";
+        match [head[refs], head[refs + 1], head[refs + 2]] {
+            TAG_STR if head[tag] != b'v' => (),
+            _ => return false,
+        }
+
+        let prefix_matches = has_prefix(head, GIT_REF_RELEASE_PREFIX.len(), crate::exports::runtime::CRATE_VERSION.as_bytes(), 0);
+
+        match prefix_matches {
+            false => panic!("release version mismatch"),
+            true => true,
+        }
+    }
+    const fn has_prefix(s: &[u8], off: usize, prefix: &[u8], poff: usize) -> bool {
+        if s.len() <= off || prefix.len() < poff {
+            return false
+        } else if prefix.len() == poff {
+            return true
+        }
+
+        match s[off] == prefix[poff] {
+            false => false,
+            true => has_prefix(s, off + 1, prefix, poff + 1),
+        }
+    }
 }
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
@@ -238,6 +310,19 @@ fn init() -> Result<(), &'static str> {
     let version = rt::CRATE_VERSION;
     let authors = env!("CARGO_PKG_AUTHORS");
     log::info!("Loading {name} {version} by {authors}");
+    match (built_info::git_ref_name(), built_info::GIT_COMMIT_HASH_SHORT) {
+        (Ok(_), _) if built_info::is_release() => (),
+        (Ok(tag), commit) => {
+            let commit = commit.unwrap_or("HEAD");
+            log::info!("Release build {tag}({commit})");
+        },
+        (Err(branch), Some(commit)) => {
+            let platform = built_info::CI_PLATFORM.unwrap_or("unknown");
+            log::info!("Development build of {branch}({commit}) on {platform}");
+        },
+        (Err(branch), None) =>
+            log::info!("Development build of {branch}"),
+    }
 
     // Set up the thread
     let addon_dir = &*ADDON_DIR;
