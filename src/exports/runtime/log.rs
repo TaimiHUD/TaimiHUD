@@ -167,7 +167,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
 
         let file = match logger.log_file.get() {
             Some(f) => Some(f),
-            None if matches!(res, Some(Ok(()))) =>
+            None if matches!(res, Some(Ok(()))) && crate::built_info::is_release() =>
                 None,
             None => logger.open_file().ok(),
         };
