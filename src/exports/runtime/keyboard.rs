@@ -2,6 +2,7 @@ use {
     std::{convert::identity, iter, mem::size_of, num::NonZeroU16},
     crate::exports::runtime::{self as rt, RuntimeResult},
     windows::Win32::{
+        Foundation::LPARAM,
         System::SystemServices::{self, MODIFIERKEYS_FLAGS},
         UI::{
             WindowsAndMessaging,
@@ -387,10 +388,17 @@ pub fn scan_code(vk: VIRTUAL_KEY) -> Option<NonZeroU16> {
     NonZeroU16::new(vsc as u16)
 }
 
-pub fn key_name(code: NonZeroU16) -> windows::core::Result<windows::core::HSTRING> {
+pub fn key_char(vk: VIRTUAL_KEY) -> Option<NonZeroU16> {
+    let vsc = unsafe {
+        KeyboardAndMouse::MapVirtualKeyA(vk.0.into(), KeyboardAndMouse::MAPVK_VK_TO_CHAR)
+    };
+    NonZeroU16::new(vsc as u16)
+}
+
+pub fn key_name(code: LPARAM) -> windows::core::Result<windows::core::HSTRING> {
     let mut buf = [0u16; 128];
     let res = unsafe {
-        match KeyboardAndMouse::GetKeyNameTextW(code.get() as i32, &mut buf) {
+        match KeyboardAndMouse::GetKeyNameTextW(code.0 as i32, &mut buf) {
             0 => Err(windows::core::Error::from_win32()),
             sz => Ok(sz as usize),
         }
@@ -406,15 +414,22 @@ pub fn key_name(code: NonZeroU16) -> windows::core::Result<windows::core::HSTRIN
 }
 
 pub fn vk_name(vk: VIRTUAL_KEY) -> windows::core::Result<windows::core::HSTRING> {
-    match u8::try_from(vk.0) {
-        Ok(c) if c.is_ascii_graphic() => {
-            let b = [vk.0];
-            Ok(windows::core::HSTRING::from_wide(&b))
-        },
-        _ => scan_code(vk)
-            .ok_or_else(|| windows::core::Error::new(windows::Win32::Foundation::ERROR_KEY_DOES_NOT_EXIST.to_hresult(), "scan code unknown"))
-            .and_then(|sc| key_name(sc))
+    let char_fastpath = key_char(vk).map(|c| {
+        let b = [c.get()];
+        windows::core::HSTRING::from_wide(&b)
+    });
+    if let Some(name) = char_fastpath {
+        return Ok(name)
     }
+    // TODO: ToUnicodeEx exists for this too?
+
+    scan_code(vk)
+        .ok_or_else(|| windows::core::Error::new(windows::Win32::Foundation::ERROR_KEY_DOES_NOT_EXIST.to_hresult(), "scan code unknown"))
+        .and_then(|sc| key_name(scan_code_param(sc)))
+}
+
+pub fn scan_code_param(sc: NonZeroU16) -> LPARAM {
+    LPARAM((sc.get() as usize as isize) << 16)
 }
 
 pub fn scan_code_key(vsc: NonZeroU16) -> Option<VIRTUAL_KEY> {
