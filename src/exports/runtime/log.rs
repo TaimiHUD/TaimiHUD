@@ -174,7 +174,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
 
         let res = if let Some(mut file) = file {
             use io::Write as _;
-            let fres = write!(file, "{} ", TaimiLog::timestamp())
+            let fres = write!(file, "{:.3} ", TaimiLog::timestamp())
                 .and_then(|_| file.write(message.to_bytes()).map(drop))
                 .and_then(|_| file.write(&[b'\n']).map(drop))
                 .map_err(|_| "log file IO write failed");
@@ -252,21 +252,25 @@ pub fn write_record_body<W: fmt::Write>(w: &mut W, record: &Record) -> fmt::Resu
 }
 
 pub fn write_record<W: fmt::Write>(w: &mut W, record: &Record, implicit_target_level: bool) -> fmt::Result {
-    write_metadata_prefix(w, record.metadata(), implicit_target_level)?;
-    write_record_prefix(w, record)?;
+    let prefix_meta = write_metadata_prefix(w, record.metadata(), implicit_target_level)?;
+    let prefix_record = write_record_prefix(w, record)?;
+    if prefix_meta > 0 || prefix_record > 0 {
+        w.write_str(" ")?;
+    }
     write_record_body(w, record)?;
     write_record_suffix(w, record)?;
     Ok(())
 }
 
-fn strip_crate_root(target: &str) -> Option<&str> {
+fn strip_crate_root(target: &str) -> Result<&str, Option<&str>> {
     let target = target.strip_prefix(rt::CRATE_NAME)
-        .map(|target| target.strip_prefix("::").unwrap_or(target));
+        .map(|target| target.strip_prefix("::").unwrap_or(target))
+        .map(Err).unwrap_or(Ok(target));
 
     match target {
-        Some(target) if !target.is_empty() =>
-            Some(target),
-        _ => None,
+        Err(target) if target.is_empty() =>
+            Err(None),
+        res => res.map_err(Some),
     }
 }
 
@@ -279,16 +283,20 @@ const LOG_SEGMENT_LEVEL_LEN: usize = 5 + LOG_SEGMENT_LEVEL_LEN_SEP;
 
 pub fn write_metadata_target<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Result<usize, fmt::Error> {
     let target = match strip_crate_root(meta.target()) {
-        Some(target) => target,
-        None =>
+        Ok(target) => {
+            write!(w, "{target}:")?;
+            return Ok(target.len() + 1)
+        },
+        Err(Some(target)) => target,
+        Err(None) =>
             return Ok(0),
     };
 
-    write!(w, "::{target}")?;
+    write!(w, "::{target};")?;
     let amt = target.len() + LOG_SEGMENT_TARGET_LEN_SEP;
     Ok(amt)
 }
-const LOG_SEGMENT_TARGET_LEN_SEP: usize = 2;
+const LOG_SEGMENT_TARGET_LEN_SEP: usize = 3;
 
 /// Nexus metadata includes our name and level, so can be omitted
 pub fn write_metadata_prefix<W: fmt::Write>(w: &mut W, meta: &Metadata, implicit_target_level: bool) -> Result<usize, fmt::Error> {
@@ -311,9 +319,8 @@ pub fn write_record_prefix<W: fmt::Write>(_w: &mut W, _record: &Record) -> Resul
 pub fn write_record_suffix<W: fmt::Write>(w: &mut W, record: &Record) -> Result<usize, fmt::Error> {
     let amt = 0;
     #[cfg(debug_assertions)]
-    let amt = amt + match record.module_path().and_then(strip_crate_root) {
-        None => 0,
-        Some(module) => {
+    let amt = amt + match record.module_path().map(strip_crate_root) {
+        Some(Ok(module)) | Some(Err(Some(module))) => {
             write!(w, " ({module})")?;
             let amt_mod = module.len() + LOG_SEGMENT_MOD_LEN_SEP;
             let amt_line = if let Some(line) = record.line() {
@@ -322,6 +329,7 @@ pub fn write_record_suffix<W: fmt::Write>(w: &mut W, record: &Record) -> Result<
             } else { 0 };
             amt_mod + amt_line
         },
+        _ => 0,
     };
 
     Ok(amt)
