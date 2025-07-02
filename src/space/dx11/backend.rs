@@ -1,5 +1,5 @@
 use {
-    super::{BlendingHandler, DepthHandler, PerspectiveHandler, PerspectiveInputData},
+    super::{BlendingHandler, DepthHandler, PerspectiveHandler},
     crate::{
         exports::runtime as rt,
         space::resources::ShaderLoader,
@@ -63,8 +63,6 @@ impl RenderBackend {
         let device = unsafe {
             swap_chain.GetDevice()
         }.context("GetDevice")?;
-
-        PerspectiveInputData::create();
 
         let shaders = ShaderLoader::load(addon_dir, &device)
             .context("Shaders failed to load")?;

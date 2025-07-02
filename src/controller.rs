@@ -1,7 +1,7 @@
 #[cfg(feature = "markers")]
 use {
     crate::marker::{
-        atomic::{CurrentPerspective, MarkerInputData, MinimapPlacement, ScreenPoint},
+        atomic::{MarkerInputData, ScreenPoint},
         format::{MarkerSet, RuntimeMarkers},
     },
     arcdps::extras::UserInfoOwned,
@@ -92,10 +92,6 @@ pub struct Controller {
     pub sources_to_timers: HashMap<Arc<RemoteSource>, Vec<Arc<TimerFile>>>,
     pub map_id_to_timers: HashMap<u32, Vec<Arc<TimerFile>>>,
     settings: SettingsLock,
-    last_fov: f32,
-    scaling: f32,
-    last_map_open: bool,
-    last_is_gameplay: bool,
 }
 
 impl Controller {
@@ -129,7 +125,6 @@ impl Controller {
                 extras_squad: Default::default(),
                 #[cfg(feature = "markers")]
                 marker_autoplace: Default::default(),
-                last_fov: 0.0,
                 previous_combat_state: Default::default(),
                 rt_sender,
                 settings,
@@ -149,9 +144,6 @@ impl Controller {
                 current_timers: Default::default(),
                 sources_to_timers: Default::default(),
                 map_id_to_timers: Default::default(),
-                last_map_open: false,
-                last_is_gameplay: false,
-                scaling: 0.0f32,
             };
             let _ = SETTINGS.set(state.settings.clone());
             let settings = SETTINGS.get().unwrap();
@@ -367,29 +359,37 @@ impl Controller {
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
         #[cfg(feature = "space")]
-        if let Ok(is_gameplay) = rt::is_ingame() {
-            if is_gameplay != self.last_is_gameplay {
-                PerspectiveInputData::swap_is_gameplay(is_gameplay);
-                self.last_is_gameplay = is_gameplay;
+        {
+            let mut input_data = PerspectiveInputData::cloned();
+            if let Ok(is_gameplay) = rt::is_ingame() {
+                input_data.is_gameplay = Some(is_gameplay);
             }
+            if let Some(mumble) = self.mumble_pointer {
+                input_data.playpos = Vec3::from_array(mumble.read_avatar().position);
+                let camera = mumble.read_camera();
+                input_data.front = Vec3::from_array(camera.front);
+                input_data.pos = Vec3::from_array(camera.position);
+                input_data.ui_state = mumble.read_ui_state();
+            }
+            input_data.commit();
         }
         if let Some(mumble) = self.mumble_pointer {
             let playpos = Vec3::from_array(mumble.read_avatar().position);
-            #[cfg(feature = "space")]
-            {
-                let camera = mumble.read_camera();
-                let front = Vec3::from_array(camera.front);
-                let pos = Vec3::from_array(camera.position);
-                PerspectiveInputData::swap_camera(front, pos, playpos);
-                let ui_state = mumble.read_ui_state();
-                let map_open = ui_state.contains(UiState::IS_MAP_OPEN);
-                if map_open != self.last_map_open {
-                    PerspectiveInputData::swap_map_open(map_open);
-                    self.last_map_open = map_open;
-                }
-            }
             #[cfg(feature = "markers")]
             {
+                let mut marker_data = MarkerInputData::cloned();
+                marker_data.update_with_mumble_ptr_context(&mumble);
+                if let Ok(nexus_link) = rt::nexus_link_ptr() {
+                    let scaling = unsafe {
+                        (&*nexus_link.as_ptr()).scaling
+                    };
+                    marker_data.scaling = scaling;
+                }
+                if marker_data.map_id == 0 {
+                    marker_data.map_id = mumble.read_map_id();
+                }
+                marker_data.commit();
+
                 if let Some(map_id) = &self.map_id {
                     if let Some(markers_for_map) = self.map_id_to_markers.get(map_id) {
                         let mut new_spent_markers = Vec::new();
@@ -405,42 +405,9 @@ impl Controller {
                         }
                     }
                 }
-                if let Ok(nexus_link) = rt::read_nexus_link() {
-                    let scaling = nexus_link.scaling;
-                        if self.scaling != scaling {
-                            MarkerInputData::from_nexus(scaling);
-                            self.scaling = scaling;
-                        }
-                }
-                let ui_state = mumble.read_ui_state();
-                let global_player_pos = Vec2::from(mumble.read_player_position());
-                let global_map = Vec2::from(mumble.read_map_center());
-                let compass_width = mumble.read_compass_width() as f32;
-                let compass_height = mumble.read_compass_height() as f32;
-                let compass_size = Vec2::new(compass_width, compass_height);
-                let compass_rotation = mumble.read_compass_rotation();
-                let map_scale = mumble.read_map_scale();
-                let perspective = CurrentPerspective::from(ui_state.contains(UiState::IS_MAP_OPEN));
-                let minimap_placement =
-                    MinimapPlacement::from(ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT));
-                let rotation_enabled =
-                    ui_state.contains(UiState::DOES_COMPASS_HAVE_ROTATION_ENABLED);
-                MarkerInputData::from_tick(
-                    playpos,
-                    global_player_pos,
-                    global_map,
-                    compass_size,
-                    compass_rotation,
-                    map_scale,
-                    perspective,
-                    minimap_placement,
-                    rotation_enabled,
-                );
             }
             self.player_position = Some(playpos);
-            let combat_state = mumble
-                .read_context()
-                .ui_state
+            let combat_state = mumble.read_ui_state()
                 .contains(UiState::IS_IN_COMBAT);
             if combat_state != self.previous_combat_state {
                 if combat_state {
@@ -468,9 +435,10 @@ impl Controller {
     async fn handle_mumble(&mut self, identity: MumbleIdentityUpdate) {
         #[cfg(feature = "space")]
         {
-            if self.last_fov != identity.fov {
-                PerspectiveInputData::swap_fov(identity.fov);
-                self.last_fov = identity.fov;
+            let mut input_data = PerspectiveInputData::cloned();
+            if input_data.fov != identity.fov {
+                input_data.fov = identity.fov;
+                input_data.commit();
             }
         }
         let new_map_id = identity.map_id;

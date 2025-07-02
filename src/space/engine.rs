@@ -1,6 +1,6 @@
 use {
     super::{
-        dx11::{perspective_input_data::PERSPECTIVEINPUTDATA, InstanceBufferData, RenderBackend},
+        dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
         pack::{poi::PoiCommonRenderData, Pack, PackCollection},
         render_list::{MapFrustum, RenderList},
@@ -250,7 +250,7 @@ impl Engine {
         backend.perspective_handler.set(&device_context, slot);
         backend.depth_handler.setup(&device_context);
         backend.blending_handler.set(&device_context);
-        let pdata = PERSPECTIVEINPUTDATA.get().unwrap().load();
+        let pdata = PerspectiveInputData::cloned();
         // let mut query = self.world.query::<(&mut Render, &Position)>();
         // for (_k, c) in &query
         //     .iter(&self.world)
@@ -288,15 +288,14 @@ impl Engine {
         //             .set_and_draw(slot, &backend.device, &device_context, &ibd)?;
         //     }
         // }
-        let mid = MarkerInputData::read().unwrap();
-        if let Err(e) = self
-            .packs
-            .prepare_new_map(mid.map_id as i32, &backend.device)
+        if let Some(Err(e)) = MarkerInputData::read().map(|mid|
+            self.packs
+            .prepare_new_map(mid.map_id as i32, &backend.device))
         {
             log::error!("{e:?}");
         }
         self.packs.update();
-        if self.render_pathing && !pdata.map_open && pdata.is_gameplay {
+        if self.render_pathing && pdata.world_visible() {
             self.packs.draw(&pdata, &backend, &device_context);
         }
         Ok(())
