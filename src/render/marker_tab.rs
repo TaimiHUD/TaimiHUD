@@ -32,8 +32,6 @@ pub struct MarkerTabState {
 
 impl MarkerTabState {
     pub fn new() -> Self {
-        MarkerInputData::create();
-
         Self {
             markers: Default::default(),
             marker_selection: Default::default(),

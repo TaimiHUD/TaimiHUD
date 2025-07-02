@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::NonNull, sync::{Mutex, OnceLock}, time::Duration};
+use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, OnceLock}, time::Duration};
 use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
@@ -160,8 +160,11 @@ pub fn read_nexus_link() -> RuntimeResult<NexusLink> {
 }
 
 pub fn is_ingame() -> RuntimeResult<bool> {
-    if let Ok(nexus_link) = read_nexus_link() {
-        return Ok(nexus_link.is_gameplay);
+    if let Ok(nexus_link) = nexus_link_ptr() {
+        return Ok(unsafe {
+            let is_gameplay = ptr::addr_of!((*nexus_link.as_ptr()).is_gameplay);
+            is_gameplay.read_volatile()
+        });
     }
 
     #[cfg(feature = "extension-arcdps")]

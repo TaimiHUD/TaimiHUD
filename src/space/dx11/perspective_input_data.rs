@@ -1,70 +1,54 @@
 use {
     arc_atomic::AtomicArc,
     glam::Vec3,
-    std::sync::{Arc, OnceLock},
+    nexus::data_link::mumble::UiState,
+    std::sync::{Arc, LazyLock},
 };
 
-pub static PERSPECTIVEINPUTDATA: OnceLock<Arc<AtomicArc<PerspectiveInputData>>> = OnceLock::new();
+pub static PERSPECTIVEINPUTDATA: LazyLock<AtomicArc<PerspectiveInputData>> = LazyLock::new(|| AtomicArc::new(Arc::new(PerspectiveInputData::default())));
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct PerspectiveInputData {
     pub front: Vec3,
     pub pos: Vec3,
     pub fov: f32,
     pub playpos: Vec3,
-    pub map_open: bool,
-    pub is_gameplay: bool,
+    pub ui_state: UiState,
+    pub is_gameplay: Option<bool>,
 }
 
 impl PerspectiveInputData {
-    pub fn create() {
-        let aarc = Arc::new(AtomicArc::new(Arc::new(Self::default())));
-        let _ = PERSPECTIVEINPUTDATA.set(aarc);
-    }
-
+    #[deprecated = "no longer fallible; use PerspectiveInputData::get()"]
     pub fn read() -> Option<Arc<Self>> {
-        Some(PERSPECTIVEINPUTDATA.get()?.load())
-    }
-    
-    pub fn swap_is_gameplay(is_gameplay: bool) {
-        if let Some(data) = PERSPECTIVEINPUTDATA.get() {
-            let pdata = data.load();
-            data.store(Arc::new(PerspectiveInputData {
-                is_gameplay,
-                ..*pdata
-            }))
-        }
+        Some(Self::get())
     }
 
-    pub fn swap_map_open(map_open: bool) {
-        if let Some(data) = PERSPECTIVEINPUTDATA.get() {
-            let pdata = data.load();
-            data.store(Arc::new(PerspectiveInputData {
-                map_open,
-                ..*pdata
-            }))
-        }
+    pub fn get() -> Arc<Self> {
+        PERSPECTIVEINPUTDATA.load()
     }
 
-    pub fn swap_camera(front: Vec3, pos: Vec3, playpos: Vec3) {
-        if let Some(data) = PERSPECTIVEINPUTDATA.get() {
-            let pdata = data.load();
-            data.store(Arc::new(PerspectiveInputData {
-                playpos,
-                front,
-                pos,
-                ..*pdata
-            }))
-        }
+    pub fn cloned() -> Self {
+        (*PERSPECTIVEINPUTDATA.load()).clone()
     }
 
-    pub fn swap_fov(fov: f32) {
-        if let Some(data) = PERSPECTIVEINPUTDATA.get() {
-            let pdata = data.load();
-            data.store(Arc::new(PerspectiveInputData {
-                fov,
-                ..*pdata
-            }))
+    pub fn commit(self) {
+        PERSPECTIVEINPUTDATA.store(Arc::new(self))
+    }
+
+    pub fn world_visible(&self) -> bool {
+        self.is_gameplay.unwrap_or(false) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
+    }
+}
+
+impl Default for PerspectiveInputData {
+    fn default() -> Self {
+        Self {
+            front: Vec3::new(0.0, 1.0, 0.0),
+            pos: Vec3::ZERO,
+            fov: 75.0f32.to_radians(),
+            playpos: Vec3::ZERO,
+            ui_state: UiState::empty(),
+            is_gameplay: Default::default(),
         }
     }
 }

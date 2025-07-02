@@ -5,14 +5,15 @@ use {
         point3, Angle, Box2, Contains, Point2, Point3, Rect, Size2, Transform2, TransformMap, Unit,
         Vector2,
     },
+    nexus::data_link::mumble::{MumblePtr, UiState},
     rand::prelude::*,
     std::{
         f32,
-        sync::{Arc, OnceLock},
+        sync::{Arc, LazyLock},
     },
 };
 
-pub static MARKERINPUTDATA: OnceLock<Arc<AtomicArc<MarkerInputData>>> = OnceLock::new();
+pub static MARKERINPUTDATA: LazyLock<AtomicArc<MarkerInputData>> = LazyLock::new(|| AtomicArc::new(Arc::new(MarkerInputData::default())));
 
 // global coordinates / "continent" (game internals, maps, api, ...)
 // feet
@@ -88,7 +89,7 @@ pub type WorldmapToMap = Transform2<WorldmapSpace, MapSpace>;
 
 pub type MapToLocal = Transform2<MapSpace, LocalSpace>;
 
-#[derive(Copy, Debug, Default, PartialEq, Clone)]
+#[derive(Copy, Debug, PartialEq, Clone)]
 pub struct MarkerInputData {
     pub scaling: f32,
     pub local_player_pos: Vec3,
@@ -654,85 +655,76 @@ impl MarkerInputData {
         Some(local)
     }
 
-    pub fn create() {
-        let aarc = Arc::new(AtomicArc::new(Arc::new(Self::default())));
-        let _ = MARKERINPUTDATA.set(aarc);
+    pub fn is_empty(&self) -> bool {
+        self.map_scale == 0.0
+    }
+
+    pub fn get(&self) -> Option<&Self> {
+        (!self.is_empty()).then_some(self)
     }
 
     pub fn read() -> Option<Arc<Self>> {
-        Some(MARKERINPUTDATA.get()?.load())
+        let data = MARKERINPUTDATA.load();
+        (!data.is_empty()).then_some(data)
     }
 
-    pub fn from_nexus(scaling: f32) {
-        if let Some(data) = MARKERINPUTDATA.get() {
-            let mdata = data.load();
-            data.store(Arc::new(MarkerInputData { scaling, ..*mdata }));
-        }
+    pub fn cloned() -> Self {
+        (*MARKERINPUTDATA.load()).clone()
+    }
+
+    pub fn commit(self) {
+        MARKERINPUTDATA.store(Arc::new(self));
     }
 
     pub fn from_render(display_size: Vec2) {
-        if let Some(data) = MARKERINPUTDATA.get() {
-            let mdata = data.load();
-            data.store(Arc::new(MarkerInputData {
-                display_size,
-                ..*mdata
-            }));
-        }
+        let mut data = Self::cloned();
+        data.display_size = display_size;
+        data.commit();
     }
 
     pub fn reset_signobtainer() {
-        if let Some(data) = MARKERINPUTDATA.get() {
-            let mdata = data.load();
-            let sign_obtainer = SignObtainer::default();
-            data.store(Arc::new(MarkerInputData {
-                sign_obtainer,
-                ..*mdata
-            }));
-        }
+        let mut data = Self::cloned();
+        data.sign_obtainer = SignObtainer::default();
+        data.commit();
     }
 
     pub fn from_mapchange(map_id: u32) {
-        if let Some(data) = MARKERINPUTDATA.get() {
-            let mdata = data.load();
-            let sign_obtainer = SignObtainer::default();
-            data.store(Arc::new(MarkerInputData {
-                sign_obtainer,
-                map_id,
-                ..*mdata
-            }));
-        }
+        let mut data = Self::cloned();
+        data.map_id = map_id;
+        data.sign_obtainer = SignObtainer::default();
+        data.commit();
     }
 
-    pub fn from_tick(
-        local_player_pos: Vec3,
-        global_player_pos: Vec2,
-        global_map: Vec2,
-        compass_size: Vec2,
-        compass_rotation: f32,
-        map_scale: f32,
-        perspective: CurrentPerspective,
-        minimap_placement: MinimapPlacement,
-        rotation_enabled: bool,
-    ) {
-        if let Some(data) = MARKERINPUTDATA.get() {
-            let mdata = data.load();
-            let mut ndata = MarkerInputData {
-                local_player_pos,
-                global_player_pos,
-                global_map,
-                compass_size,
-                compass_rotation,
-                map_scale,
-                perspective,
-                minimap_placement,
-                rotation_enabled,
-                ..*mdata
-            };
-            ndata.sign_obtainer.prepare(
-                ndata.local_player_pos.into(),
-                ndata.global_player_pos.into(),
-            );
-            data.store(Arc::new(ndata));
+    pub fn update_with_mumble_ptr_context(&mut self, mumble: &MumblePtr) {
+        self.local_player_pos = Vec3::from_array(mumble.read_avatar().position);
+        self.global_player_pos = Vec2::from_array(mumble.read_player_position());
+        self.global_map = Vec2::from_array(mumble.read_map_center());
+        self.compass_size = Vec2::new(mumble.read_compass_width() as f32, mumble.read_compass_height() as f32);
+        self.compass_rotation = mumble.read_compass_rotation();
+        self.map_scale = mumble.read_map_scale();
+        let ui_state = mumble.read_ui_state();
+        self.perspective = ui_state.into();
+        self.minimap_placement = ui_state.into();
+        self.rotation_enabled = ui_state.contains(UiState::DOES_COMPASS_HAVE_ROTATION_ENABLED);
+    }
+}
+
+impl Default for MarkerInputData {
+    fn default() -> Self {
+        Self {
+            scaling: 1.0,
+            local_player_pos: Vec3::ZERO,
+            global_player_pos: Vec2::ZERO,
+            global_map: Vec2::ZERO,
+            compass_size: Default::default(),
+            compass_rotation: Default::default(),
+            map_scale: 0.0,
+            perspective: CurrentPerspective::default(),
+            minimap_placement: MinimapPlacement::default(),
+            rotation_enabled: false,
+            display_size: Vec2::new(1920.0, 1080.0),
+            sign_obtainer: Default::default(),
+            map_id: 0,
         }
     }
 }
@@ -744,9 +736,9 @@ pub enum CurrentPerspective {
     Minimap, // map_open: false,
 }
 
-impl From<bool> for CurrentPerspective {
-    fn from(local: bool) -> Self {
-        match local {
+impl From<UiState> for CurrentPerspective {
+    fn from(ui_state: UiState) -> Self {
+        match ui_state.contains(UiState::IS_MAP_OPEN) {
             true => Self::Global,
             false => Self::Minimap,
         }
@@ -760,9 +752,9 @@ pub enum MinimapPlacement {
     Bottom,
 }
 
-impl From<bool> for MinimapPlacement {
-    fn from(local: bool) -> Self {
-        match local {
+impl From<UiState> for MinimapPlacement {
+    fn from(ui_state: UiState) -> Self {
+        match ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT) {
             true => Self::Top,
             false => Self::Bottom,
         }
