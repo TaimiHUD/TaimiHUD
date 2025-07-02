@@ -184,6 +184,7 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
 //fn arc_cb_combat(args: CombatArgs) {}
 
 fn arc_cb_combat_local(args: CombatArgs) {
+    exports::combat_local(args)
 }
 
 //unsafe extern "C" fn arc_cb_wnd(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM) {}
