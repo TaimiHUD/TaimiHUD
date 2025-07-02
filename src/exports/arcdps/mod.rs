@@ -393,7 +393,7 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             // trigger on press to be reliable
             // (resolving this likely requires switching to the non-filtered callback)
             let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
-            let is_trigger = !is_up && repeat == 0;
+            let is_trigger = !is_up && repeat == 1;
             let is_release = is_up && prev_down;
             let settings = crate::SETTINGS.get()
                 .and_then(|s| s.try_read().ok());
@@ -405,8 +405,13 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 },
             };
 
-            log::debug!("keypress: w={w:#08x}, l={l:#08x}");
             let vk = match w as u16 {
+                #[cfg(todo)]
+                0 => {
+                    let sc = ((l >> 16) & 0xff) as u16;
+                    core::num::NonZeroU16::new(sc).and_then(rt::keyboard::scan_code_key)
+                        .unwrap_or(KeyboardAndMouse::VIRTUAL_KEY(sc))
+                },
                 w => KeyboardAndMouse::VIRTUAL_KEY(w as u16),
             };
             let mut bound = false;
