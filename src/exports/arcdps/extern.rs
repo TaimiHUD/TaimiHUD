@@ -178,6 +178,12 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
     }
     exports::pre_init();
 
+    #[cfg(feature = "extension-nexus")]
+    if rt::nexus_available() || exports::check_for_nexus() {
+        log::info!("ignoring arcdps, nexus is available");
+        return None
+    }
+
     Some(arc_init)
 }
 
