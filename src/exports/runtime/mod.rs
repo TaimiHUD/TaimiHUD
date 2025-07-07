@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, OnceLock}, time::Duration};
+use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, Once, OnceLock}, time::Duration};
 use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
 use crate::{exports, load_language, marker::format::MarkerType};
@@ -87,8 +87,16 @@ pub fn addon_dir() -> &'static Path {
         Ok(path) =>
             ADDON_DIR.get_or_init(|| path.into()),
         Err(e) => {
-            // would complain but that will just recurse into here ><
-            //::log::warn!("falling back to default addon dir due to error: {e}");
+            let warn_once = {
+                static WARN_ONCE: Once = Once::new();
+                let mut first_time = false;
+                WARN_ONCE.call_once(|| first_time = true);
+                first_time
+            };
+            if warn_once {
+                // beware, logging can recurse into here to determine log file path
+                ::log::warn!("falling back to default addon dir due to error: {e}");
+            }
             addon_dir_fallback()
         },
     }
