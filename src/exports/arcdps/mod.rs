@@ -178,7 +178,8 @@ fn init() -> Result<(), &'static str> {
 #[cfg(feature = "extension-nexus")]
 fn init_continue_with_nexus() -> Result<(), &'static str> {
     log::trace!("TODO: option to select between arcdps and nexus");
-    Err("")
+    //Err("")
+    Ok(())
 }
 
 fn release() {
