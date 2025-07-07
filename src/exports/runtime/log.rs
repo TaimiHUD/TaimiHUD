@@ -62,10 +62,11 @@ impl TaimiLog {
     }
 
     pub fn open_file(&self) -> io::Result<&fs::File> {
+        let log_path = Self::log_path();
         let res = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(Self::log_path());
+            .open(log_path);
         let f = match res {
             Ok(f) => f,
             Err(e) => return match self.log_file.get() {
