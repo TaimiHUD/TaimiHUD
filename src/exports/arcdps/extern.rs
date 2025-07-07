@@ -300,4 +300,6 @@ pub fn dxgi_swap_chain() -> Option<windows::core::InterfaceRef<'static, windows:
     })
 }
 
-// TODO: arcdps_unofficial_extras_subscriber_init
+pub unsafe extern "C" fn arcdps_unofficial_extras_subscriber_init(info: usize, subscriber: usize) {
+    exports::unofficial_extras::extras_init_raw(info as *const _, subscriber as *mut _)
+}

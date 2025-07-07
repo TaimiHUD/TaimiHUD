@@ -1,5 +1,5 @@
-use std::{borrow::Cow, num::NonZeroU64, ptr, time::Duration};
-use arcdps::{extras::{ExtrasAddonInfo, KeybindChange, UserInfoIter}, imgui, Language};
+use std::{borrow::Cow, num::NonZeroU64, ptr};
+use arcdps::imgui;
 use dpsapi::combat::CombatArgs;
 use crate::exports::{arcdps as exports, runtime as rt};
 use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
@@ -99,21 +99,25 @@ pub fn combat_local(
     exports::combat_local(event)
 }
 
+#[cfg(todo)]
 pub fn extras_init(info: ExtrasAddonInfo, account_name: Option<&str>) {
     if let Some(name) = account_name {
         crate::receive_account_name(name);
     }
-    exports::extras_init(info)
+    exports::extras_init(info.version())
 }
 
+#[cfg(todo)]
 pub fn extras_language(language: Language) {
     exports::extras_language(language)
 }
 
+#[cfg(todo)]
 pub fn extras_keybind(changed: KeybindChange) {
     exports::extras_keybind(changed)
 }
 
+#[cfg(todo)]
 pub fn extras_squad_update(members: UserInfoIter) {
     exports::extras_squad_update(members)
 }
