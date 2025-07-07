@@ -1,6 +1,6 @@
 use {
     arcdps::{
-        extras::{Control, ExtrasAddonInfo, Key, KeybindChange, UserInfoIter},
+        extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
         Language,
     },
     arcloader_mumblelink::{
@@ -44,6 +44,7 @@ use dpsapi::api::ApiExports as _;
 pub(crate) mod r#extern;
 #[cfg(feature = "extension-arcdps-codegen")]
 pub(crate) mod cb;
+pub(crate) mod unofficial_extras;
 
 pub const SIG: u32 = exports::SIG as u32;
 
@@ -74,7 +75,7 @@ fn early_init() {
 }
 
 #[cfg(feature = "extension-nexus")]
-fn check_for_nexus() -> bool {
+fn check_for_nexus_bridge() -> bool {
     const NEXUS_BRIDGE_SIG: u32 = -0x127e89di32 as u32;
 
     #[allow(unreachable_patterns)]
@@ -102,6 +103,49 @@ fn check_for_nexus() -> bool {
     false
 }
 
+#[cfg(feature = "extension-nexus")]
+fn check_for_nexus_link() -> bool {
+    use windows::{
+        core::PCSTR,
+        Win32::{
+            Foundation::CloseHandle,
+            System::Memory::{OpenFileMappingA, FILE_MAP_READ},
+        },
+    };
+
+    let object_name = {
+        //let process_id = windows::Win32::System::Threading::GetCurrentProcessId();
+        let process_id = std::process::id();
+        format!("DL_NEXUS_LINK_{process_id}\0")
+    };
+    let res = unsafe {
+        OpenFileMappingA(FILE_MAP_READ.0, false, PCSTR(object_name.as_ptr() as *const _))
+    };
+    match res {
+        Ok(handle) => {
+            let cleanup = unsafe {
+                CloseHandle(handle)
+            };
+            if let Err(e) = cleanup {
+                log::warn!("Failed to clean up mapped handle after checking for NexusLink: {e}");
+            }
+            true
+        },
+        Err(_e) => {
+            // TODO: does it matter what error code we expect, ERROR_OBJECT_NOT_FOUND?
+            #[cfg(debug_assertions)] {
+                log::debug!("NexusLink({object_name}) unavailable: {_e}");
+            }
+            false
+        },
+    }
+}
+
+#[cfg(feature = "extension-nexus")]
+fn check_for_nexus() -> bool {
+    check_for_nexus_bridge() || check_for_nexus_link()
+}
+
 fn pre_init() {
     RUNTIME_LOADED.store(true, Ordering::Relaxed);
     crate::crate_init();
@@ -114,8 +158,10 @@ fn init() -> Result<(), &'static str> {
     if rt::nexus_available() {
         log::info!("already loaded by nexus");
         disable();
+        init_continue_with_nexus()?;
     } else if check_for_nexus() {
         log::info!("nexus detected");
+        init_continue_with_nexus()?;
     }
 
     let res = crate::init()
@@ -126,6 +172,13 @@ fn init() -> Result<(), &'static str> {
     }
 
     res.map_err(Into::into)
+}
+
+/// Returns an empty error to abort init if we'd prefer nexus instead
+#[cfg(feature = "extension-nexus")]
+fn init_continue_with_nexus() -> Result<(), &'static str> {
+    log::trace!("TODO: option to select between arcdps and nexus");
+    Err("")
 }
 
 fn release() {
@@ -649,7 +702,7 @@ fn combat_local(event: CombatArgs) {
 
 static EXTRAS_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
-fn extras_init(info: ExtrasAddonInfo) {
+fn extras_init(info: ExtrasVersion) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
 
     log::debug!("arcdps_extras initialized: {info:?}");

@@ -61,6 +61,7 @@ extension-arcdps = [
   "dep:dpsapi",
   "dpsapi/nexus",
   "windows/Win32_System_LibraryLoader",
+  "windows/Win32_System_Memory",
   "texture-loader",
 ]
 extension-arcdps-codegen = [
@@ -221,6 +222,7 @@ features = [
 ]
 
 [patch."https://github.com/zerthox/arcdps-rs"]
-# required to fix extension unload symbol name
+# some fixes need to be contributed back upstream
 arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
+arcdps_codegen = { git = "https://github.com/arcnmx/arcdps-rs" }
 evtc = { git = "https://github.com/arcnmx/arcdps-rs" }

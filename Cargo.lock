@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "arcdps"
 version = "0.16.0"
-source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
 dependencies = [
  "arcdps-imgui",
  "arcdps_codegen 0.11.0",
@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "arcdps_codegen"
 version = "0.11.0"
-source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
 dependencies = [
  "cfg-if",
  "paste",
@@ -1185,7 +1185,7 @@ dependencies = [
 [[package]]
 name = "evtc"
 version = "0.9.2"
-source = "git+https://github.com/arcnmx/arcdps-rs#ff8c41639df8784d67d8692ceb470f2fb948eb24"
+source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
 dependencies = [
  "bitflags 2.9.0",
  "memoffset",
