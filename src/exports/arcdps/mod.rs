@@ -512,8 +512,16 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
 fn get_update_url() -> Option<String> {
-    // this may be called prior to init, so ensure logging is present
-    crate::crate_init();
+    if !loaded() {
+        // this may be called prior to init, so ensure logging is present
+        crate::crate_init();
+    }
+
+    #[cfg(feature = "extension-nexus")]
+    if rt::nexus_available() || check_for_nexus() {
+        log::info!("skipping get_update_url, nexus is available");
+        return None
+    }
 
     match panic::catch_unwind(|| update_url()) {
         Ok(url) => url,
