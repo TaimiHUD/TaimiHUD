@@ -6,6 +6,7 @@ use {
         render_list::{MapFrustum, RenderList},
     },
     crate::{
+        exports::runtime as rt,
         controller::ControllerEvent, marker::atomic::MarkerInputData, space::{
             max_depth, pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail}, resources::ObjFile
         }, timer::{PhaseState, RotationType, TimerFile, TimerMarker},
@@ -241,6 +242,46 @@ impl Engine {
         self.process_event()
             .context("render engine event processing failure")?;
         self.schedule.run(&mut self.world);
+
+        let mut pdata = PerspectiveInputData::cloned();
+        if let Ok(Some(rtapi)) = rt::rtapi() {
+            use nexus::rtapi::GameState;
+
+            let mut dirty = true;
+            if let Some(player) = rtapi.read_player() {
+                let playerfront = Vec3::from_array(player.character_facing);
+                if playerfront != Vec3::ZERO {
+                    pdata.playpos = Vec3::from_array(player.character_position);
+                    dirty = true;
+                }
+            }
+            if let Some(camera) = rtapi.read_camera() {
+                let front = Vec3::from_array(camera.camera_facing);
+                if front != Vec3::ZERO {
+                    pdata.front = front;
+                    pdata.pos = Vec3::from_array(camera.camera_position);
+                }
+                if camera.camera_fov != 0.0f32 {
+                    pdata.fov = camera.camera_fov;
+                }
+                dirty = true;
+            }
+            let ingame = rtapi.read_game().and_then(|game| match game.game_state {
+                Ok(GameState::Gameplay) =>
+                    Some(true),
+                Ok(GameState::LoadingScreen | GameState::CharacterSelection | GameState::CharacterCreation | GameState::Cinematic) =>
+                    Some(false),
+                Err(_) => None,
+            });
+            if let Some(ingame) = ingame {
+                pdata.is_gameplay = Some(ingame);
+                dirty = true;
+            }
+            if dirty {
+                pdata.clone().commit();
+            }
+        }
+
         let backend = &mut self.render_backend;
         backend.prepare(&display_size);
         let device_context =
@@ -250,7 +291,6 @@ impl Engine {
         backend.perspective_handler.set(&device_context, slot);
         backend.depth_handler.setup(&device_context);
         backend.blending_handler.set(&device_context);
-        let pdata = PerspectiveInputData::cloned();
         // let mut query = self.world.query::<(&mut Render, &Position)>();
         // for (_k, c) in &query
         //     .iter(&self.world)
