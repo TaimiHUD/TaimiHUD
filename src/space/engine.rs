@@ -16,7 +16,7 @@ use {
     bevy_ecs::prelude::*,
     glam::{Mat4, Vec3, Vec3Swizzles},
     itertools::Itertools,
-    nexus::imgui::Ui,
+    nexus::{imgui::Ui, rtapi::RealTimeApi},
     std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
@@ -80,6 +80,7 @@ pub struct Engine {
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
     pub render_pathing: bool,
+    rtapi: Option<RealTimeApi>,
 
     schedule: Schedule,
 
@@ -121,8 +122,26 @@ impl Engine {
         packs.load_all(&addon_dir.join("pathing"))
             .context("Loading pathing packs")?;
 
+        let rtapi = match rt::rtapi() {
+            Ok(rtapi) => {
+                match &rtapi {
+                    Some(rtapi) if rtapi.is_active() =>
+                        log::info!("Using RTAPI as perspective data source"),
+                    _ =>
+                        log::info!("RTAPI unavailable"),
+                }
+                rtapi
+            },
+            Err(e) => {
+                // TODO: listen for events in case it gets loaded later or something
+                log::debug!("RTAPI unavailable: {e}");
+                None
+            },
+        };
+
         let mut engine = Engine {
             render_pathing: true,
+            rtapi,
             model_files,
             receiver,
             render_backend,
@@ -244,7 +263,7 @@ impl Engine {
         self.schedule.run(&mut self.world);
 
         let mut pdata = PerspectiveInputData::cloned();
-        if let Ok(Some(rtapi)) = rt::rtapi() {
+        if let Some(rtapi) = &self.rtapi {
             use nexus::rtapi::GameState;
 
             let mut dirty = true;
