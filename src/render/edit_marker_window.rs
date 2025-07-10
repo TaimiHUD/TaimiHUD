@@ -69,14 +69,17 @@ impl IndividualMarkerState {
     }
     pub fn from_marker_entries(mes: Vec<MarkerEntry>) -> [Self; 8] {
         let mut markers: [IndividualMarkerState; 8] = Default::default();
-        for (i, me) in mes.iter().enumerate() {
+            for me in mes.iter() {
             let position: Vec3 = me.position.clone().into();
             let mut position_input = PositionInput::default();
             position_input.position = Some(position);
-            markers[i] = Self {
-                position: position_input,
-                description: me.id.clone().unwrap_or("".to_string()),
-            };
+            let idx = me.marker as usize;
+            if idx != 0 {
+                markers[idx - 1] = Self {
+                    position: position_input,
+                    description: me.id.clone().unwrap_or("".to_string()),
+                };
+            }
         }
         markers
     }
