@@ -941,7 +941,7 @@ impl Controller {
                             } else {
                                 Self::place_marker_from_map(
                                     wait_duration,
-                                    10i32,
+                                    100i32,
                                     marker.position.clone().into(),
                                     marker,
                                 )
