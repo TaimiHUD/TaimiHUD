@@ -39,20 +39,12 @@ use {
             event_consume,
             extras::{SquadUpdate, EXTRAS_SQUAD_UPDATE},
             Event, MumbleIdentityUpdate, MUMBLE_IDENTITY_UPDATED,
-        },
-        gui::{register_render, render, RenderType},
-        keybind::{keybind_handler, register_keybind_with_string},
-        localization::translate,
-        paths::get_addon_dir,
-        quick_access::{add_quick_access, add_quick_access_context_menu},
-        rtapi::{
+        }, gui::{register_render, render, RenderType}, keybind::{keybind_handler, register_keybind_with_string}, localization::translate, paths::get_addon_dir, quick_access::{add_quick_access, add_quick_access_context_menu}, rtapi::{
             event::{
                 RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
             },
             GroupMember, GroupMemberOwned,
-        },
-        texture::Texture as NexusTexture,
-        AddonFlags, UpdateProvider,
+        }, texture::{load_texture_from_memory, Texture as NexusTexture}, texture_receive, AddonFlags, UpdateProvider
     },
     rust_embed::RustEmbed,
     settings::SourcesFile,
@@ -239,6 +231,25 @@ fn load() {
         }
     });
 
+    // Handle window toggling with keybind and button
+    #[cfg(feature = "markers")]
+    let marker_window_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+        if !is_release {
+            Controller::try_send(ControllerEvent::WindowState(WINDOW_MARKERS.into(), None));
+        }
+        }
+    });
+
+    #[cfg(feature = "markers")]
+    register_keybind_with_string(
+        fl!("marker-window-toggle"),
+        marker_window_keybind_handler,
+        "ALT+SHIFT+L",
+    )
+    .revert_on_unload();
+
+
     register_keybind_with_string(
         fl!("timer-window-toggle"),
         timer_window_keybind_handler,
@@ -258,6 +269,14 @@ fn load() {
         .revert_on_unload();
     }
 
+    // backport
+    let taimi_icon = include_bytes!("../icons/taimi.png");
+    let taimi_hover_icon = include_bytes!("../icons/taimi-hover.png");
+    let markers_icon = include_bytes!("../icons/markers.png");
+    let markers_hover_icon = include_bytes!("../icons/markers-hover.png");
+    let timers_icon = include_bytes!("../icons/timers.png");
+    let timers_hover_icon = include_bytes!("../icons/timers-hover.png");
+
     // Disused currently, icon loading for quick access
     /*
     let receive_texture =
@@ -270,14 +289,41 @@ fn load() {
     );
     */
 
+    
+    let receive_texture =
+        texture_receive!(|id: &str, _texture: Option<&NexusTexture>| log::info!("texture {id} loaded"));
+
+    load_texture_from_memory("TAIMI_ICON", taimi_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_ICON_HOVER", taimi_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON", markers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_MARKERS_ICON_HOVER", markers_hover_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON", timers_icon, Some(receive_texture));
+    load_texture_from_memory("TAIMI_TIMERS_ICON_HOVER", timers_hover_icon, Some(receive_texture));
+
     let same_identifier = "TAIMI_BUTTON";
 
-    add_quick_access(
+add_quick_access(
         same_identifier,
         "TAIMI_ICON",
         "TAIMI_ICON_HOVER",
         fl!("primary-window-toggle"),
         fl!("primary-window-toggle-text"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_TIMER_BUTTON",
+        "TAIMI_TIMERS_ICON",
+        "TAIMI_TIMERS_ICON_HOVER",
+        fl!("timer-window-toggle"),
+        fl!("timer-window-toggle"),
+    )
+    .revert_on_unload();
+    add_quick_access(
+        "TAIMI_MARKERS_BUTTON",
+        "TAIMI_MARKERS_ICON",
+        "TAIMI_MARKERS_ICON_HOVER",
+        fl!("marker-window-toggle"),
+        fl!("marker-window-toggle"),
     )
     .revert_on_unload();
 
