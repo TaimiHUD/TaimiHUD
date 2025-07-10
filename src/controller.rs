@@ -637,7 +637,7 @@ impl Controller {
         self.reset_timers().await;
     }
 
-    pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(10);
+    pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(100);
 
     #[cfg(feature = "markers")]
     async fn reload_markers(&mut self) {
