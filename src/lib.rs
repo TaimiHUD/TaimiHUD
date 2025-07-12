@@ -720,7 +720,7 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
             return,
         _ => (),
     }
-    log::info!("Received account name: {name:?}");
+    //log::info!("Received account name: {name:?}");
     let name_owned = match account_name_ref.as_ptr() != name.as_ptr() {
         // if the prefix was stripped, reallocate
         true => name.into(),
