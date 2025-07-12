@@ -884,6 +884,7 @@ fn render_space(ui: &nexus::imgui::Ui) {
 }
 
 fn unload() {
+    log::debug!("Shutdown requested...");
     let mut loaded = match rt::LOADER_LOCK.lock() {
         Ok(loaded) if !*loaded => {
             log::warn!("not loaded, skipping unload");
@@ -964,6 +965,8 @@ fn unload() {
     #[cfg(not(debug_assertions))] {
         drop(panic::take_hook());
     }
+
+    log::debug!("Unload complete");
 }
 
 fn unload_render() {
@@ -983,6 +986,8 @@ fn unload_render() {
         });
         ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
     }
+
+    log::debug!("render unload complete");
 }
 
 /// A limited form of [unload_render()] that should try its best,
