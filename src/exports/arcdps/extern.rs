@@ -181,6 +181,7 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
     #[cfg(feature = "extension-nexus")]
     if rt::nexus_available() || exports::check_for_nexus() {
         log::info!("ignoring arcdps, nexus is available");
+        exports::disable_load();
         return None
     }
 
@@ -242,6 +243,7 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
             Ok(Some(Err(e))) => {
                 // TODO
                 ::log::error!("Failed initialization: {e}");
+                exports::disable_load();
                 let message = cstr!(&"init failed");
                 ExtensionHeader::new_failed(Some(message))
             },
@@ -250,6 +252,7 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
             },
             Err(e) => {
                 crate::log_any_error("arcdps init", &e);
+                exports::disable_load();
                 ExtensionHeader::new_failed(Some(cstr!(&"init panic")))
             },
         },
@@ -265,7 +268,7 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
 unsafe extern "C" fn arc_release() {
     exports::release();
 
-    ptr::write(ARC_ARGS.get(), InitArgs::EMPTY);
+    //ptr::write(ARC_ARGS.get(), InitArgs::EMPTY);
     ptr::write(ARC_EXPORT.get(), ExtensionExports::EMPTY);
     ptr::write(ARC_IMGUI_CONTEXT_RAW.get(), None);
     // XXX: leaking these buffers because the destructors call imgui APIs :<
