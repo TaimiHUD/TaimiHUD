@@ -29,8 +29,13 @@ pub fn has_extension<const SIG: u32>() -> bool {
 pub fn init() -> Result<(), String> {
     exports::pre_init();
 
-    exports::init()
-        .map_err(Into::into)
+    let res = exports::init();
+
+    if res.is_err() {
+        exports::disable_load();
+    }
+
+    res.map_err(Into::into)
 }
 
 pub fn release() {

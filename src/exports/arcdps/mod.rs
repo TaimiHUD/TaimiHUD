@@ -177,7 +177,7 @@ fn init() -> Result<(), &'static str> {
 /// Returns an empty error to abort init if we'd prefer nexus instead
 #[cfg(feature = "extension-nexus")]
 fn init_continue_with_nexus() -> Result<(), &'static str> {
-    log::trace!("TODO: option to select between arcdps and nexus");
+    //log::trace!("TODO: option to select between arcdps and nexus");
     //Err("")
     Ok(())
 }
@@ -783,8 +783,25 @@ pub fn available() -> bool {
     RUNTIME_AVAILABLE.load(Ordering::Relaxed)
 }
 
+pub fn exports_present() -> bool {
+    #[cfg(feature = "extension-arcdps-codegen")]
+    if cb::available() {
+        return true
+    }
+    #[cfg(feature = "extension-arcdps-extern")]
+    if r#extern::arc_args().is_some() {
+        return true
+    }
+    loaded()
+}
+
 pub fn disable() {
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst)
+}
+
+pub fn disable_load() {
+    RUNTIME_LOADED.store(false, Ordering::SeqCst);
+    disable();
 }
 
 pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
@@ -814,13 +831,9 @@ pub fn extras_available() -> bool {
 const NO_EXPORT: &'static str = "arcdps export missing";
 
 pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
-    if !loaded() {
-        return Ok(None)
-    }
-
     let path = match () {
         #[cfg(feature = "extension-arcdps-codegen")]
-        () if !arcdps::exports::has_e0_config_path() => None,
+        () if !cb::available() || !arcdps::exports::has_e0_config_path() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
         () => arcdps::exports::config_path(),
         #[cfg(feature = "extension-arcdps-extern")]
@@ -912,13 +925,17 @@ pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Opt
 }
 
 pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
-    if !loaded() {
+    if !exports_present() {
+        return Ok(None)
+    }
+    #[cfg(feature = "extension-nexus")]
+    if exports::nexus::available() && !loaded() {
         return Ok(None)
     }
 
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
-        () if !arcdps::exports::has_e3_log_file() => None,
+        () if !cb::available() || !arcdps::exports::has_e3_log_file() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
         () => Some(unsafe {
             arcdps::exports::raw::e3_log_file(message.as_ptr())
