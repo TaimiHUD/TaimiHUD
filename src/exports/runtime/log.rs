@@ -117,6 +117,8 @@ impl Log for TaimiLog {
 }
 
 pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
+    #![allow(unreachable_patterns)]
+
     let res = logger.with_log_buffer(|buffer| -> rt::RuntimeResult<Option<()>> {
         let (message, implicit_target_level) = match () {
             #[cfg(feature = "extension-arcdps")]
@@ -146,8 +148,11 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 (message, implicit_target_level)
             },
         };
-        #[cfg(feature = "extension-arcdps")]
-        let res = exports::arcdps::log(record.metadata(), &*message).transpose();
+        let res = match () {
+            #[cfg(feature = "extension-arcdps")]
+            _ => exports::arcdps::log(record.metadata(), &*message).transpose(),
+            _ => None,
+        };
 
         let message = match implicit_target_level {
             false => cstr_slice_from(&*message, LOG_SEGMENT_EXPLICIT_LEN)
