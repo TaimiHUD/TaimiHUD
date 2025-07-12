@@ -954,6 +954,7 @@ fn unload() {
         None => (),
     }
 
+    #[cfg(feature = "extension-nexus")]
     if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
         revert_render();
     }
