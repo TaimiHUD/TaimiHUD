@@ -1,5 +1,5 @@
 use {
-    crate::{engine_initialized, fl, ControllerEvent, Controller, ENGINE, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ChildWindow, ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags}, std::{
+    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ChildWindow, ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags}, std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     }
@@ -78,9 +78,7 @@ impl PathingWindowState {
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {
-                    if engine_initialized() {
-                        ENGINE.with_borrow_mut(|e| {
-                            if let Some(Ok(engine)) = e {
+                    let rendered = engine_mut(|engine| {
                                         let button_text = match self.filter_open {
                                             true => fl!("hide-filter"),
                                             false => fl!("show-filter"),
@@ -197,8 +195,9 @@ impl PathingWindowState {
                                             token.end();
                                         }
                                     });
-                            }
-                        });
+                    });
+                    if rendered.is_none() {
+                        ui.text(fl!("disabled"));
                     }
                 });
         }

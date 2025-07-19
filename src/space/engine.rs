@@ -366,6 +366,13 @@ impl Engine {
             .and_then(|s| (*s).clone())
     }
 
+    pub fn is_available() -> bool {
+        match crate::SPACE_SENDER.try_read() {
+            Ok(sender) => sender.is_some(),
+            _ => false,
+        }
+    }
+
     pub fn try_send(e: SpaceEvent) {
         let sender = crate::SPACE_SENDER.try_read();
         let sender = sender.as_ref().map(|s| &**s);
