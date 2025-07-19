@@ -37,6 +37,8 @@ use {
         },
     },
 };
+#[cfg(feature = "space")]
+use crate::space::engine::{Engine, SpaceEvent};
 #[cfg(feature = "extension-arcdps-extern")]
 use dpsapi::api::ApiExports as _;
 
@@ -387,9 +389,9 @@ fn imgui_options_tab(ui: &Ui) {
         }));
     }
     #[cfg(feature = "space")]
-    if crate::engine_initialized() {
+    if Engine::is_available() {
         ui.separator();
-        keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| crate::Engine::try_send(crate::SpaceEvent::PathingToggle)));
+        keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::PathingToggle)));
     }
     ui.separator();
     for binding in &ArcSettings::VK_TIMER_TRIGGERS {
@@ -482,10 +484,10 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             }
 
             #[cfg(feature = "space")]
-            if crate::engine_initialized() && arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
+            if Engine::is_available() && arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
                 bound = true;
                 if is_trigger {
-                    crate::Engine::try_send(crate::SpaceEvent::PathingToggle);
+                    Engine::try_send(SpaceEvent::PathingToggle);
                 }
             }
 

@@ -5,7 +5,7 @@ use {
 };
 
 #[cfg(feature = "space")]
-use crate::{engine_initialized, ENGINE, TEXTURES};
+use crate::{engine_ref, TEXTURES};
 
 pub struct InfoTabState {}
 
@@ -66,15 +66,16 @@ impl InfoTabState {
         drop(table_token);
         #[cfg(feature = "space")]
         self.space_info(ui);
+        #[cfg(feature = "texture-loader")]
+        if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
+            ui.text(&fl!("textures", count = tex_count));
+        }
     }
 
     #[cfg(feature = "space")]
     pub fn space_info(&self, ui: &Ui) {
         RenderState::font_text("big", ui, &fl!("engine"));
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
-            if settings.enable_katrender && engine_initialized() {
-                ENGINE.with_borrow(|e| {
-                    if let Some(Ok(engine)) = e {
+        engine_ref(|engine| {
                         RenderState::font_text("ui", ui, &fl!("ecs-data"));
                         let entities = engine.world.entities();
                         let used_entities = entities.used_count();
@@ -113,12 +114,6 @@ impl InfoTabState {
                             }
                         }
                         drop(table_token);
-                    }
-                });
-                if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
-                    ui.text(&fl!("textures", count = tex_count));
-                }
-            }
-        }
+        });
     }
 }

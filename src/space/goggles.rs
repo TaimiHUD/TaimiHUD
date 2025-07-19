@@ -7,7 +7,7 @@ use core::{ffi::c_void, mem::transmute, ptr::{self, NonNull}, slice::from_raw_pa
 use std::{collections::BTreeMap, sync::{OnceLock, RwLock, atomic::{AtomicPtr, Ordering}}};
 use retour::GenericDetour;
 #[cfg(feature = "space")]
-use crate::{space::Engine, ENGINE};
+use crate::{space::Engine, engine_ref};
 
 pub type Lenses = BTreeMap<usize, LensClass>;
 
@@ -237,10 +237,9 @@ pub fn setup(ctx: InterfaceRef<ID3D11DeviceContext>) -> anyhow::Result<()> {
     let clear_depth: ClearDepth = unsafe { transmute(clear_depth) };*/
     let set_targets: unsafe extern "system" fn (*mut c_void, u32, *const *mut c_void, *mut c_void) = ctx.vtable().OMSetRenderTargets;
     let set_targets: SetTargets = unsafe { transmute(set_targets) };
-    let release_depth_view: Option<unsafe extern "system" fn (*mut c_void) -> u32> = ENGINE.with_borrow(|e| match e {
-        Some(Ok(e)) => Some(e.render_backend.depth_handler.depth_stencil_view.vtable().base__.base__.base__.Release),
-        _ => None,
-    });
+    let release_depth_view: Option<unsafe extern "system" fn (*mut c_void) -> u32> = engine_ref(|e|
+        e.render_backend.depth_handler.depth_stencil_view.vtable().base__.base__.base__.Release
+    );
     let release_depth_view: Option<Release> = unsafe { transmute(release_depth_view) };
 
     let orig = unsafe {
@@ -298,7 +297,7 @@ pub fn shutdown() -> anyhow::Result<()> {
 
 /*pub fn needs_classification(cls: LensClass) -> bool {
     match cls {
-        LensClass::Space if ENGINE.with_borrow(|e| e.is_none()) =>
+        LensClass::Space if engine_ref(|_| ()).is_some() =>
             false,
         LensClass::Imgui =>
             false,

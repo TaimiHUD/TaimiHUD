@@ -251,6 +251,22 @@ pub fn engine_initialized() -> bool {
 thread_local! {
     static ENGINE: RefCell<Option<Result<Engine, ()>>> = RefCell::new(None);
 }
+#[cfg(feature = "space")]
+pub fn engine_mut<R, F: FnOnce(&mut Engine) -> R>(f: F) -> Option<R> {
+    if !engine_initialized() || !RenderState::is_render_thread() || !RenderState::is_running() {
+        return None
+    }
+
+    ENGINE.with_borrow_mut(|e| if let Some(Ok(engine)) = e {
+        Some(f(engine))
+    } else {
+        None
+    })
+}
+#[cfg(feature = "space")]
+pub fn engine_ref<R, F: FnOnce(&Engine) -> R>(f: F) -> Option<R> {
+    engine_mut(|e| f(e))
+}
 
 pub const WINDOW_PRIMARY: &'static str = "primary";
 pub const WINDOW_TIMERS: &'static str = "timers";
@@ -858,8 +874,10 @@ fn render_space(ui: &nexus::imgui::Ui) {
         .and_then(|settings| settings.try_read().ok())
         .map(|settings| settings.enable_katrender)
         .unwrap_or(false);
-    if enabled && RenderState::is_running() {
-        if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
+    if !enabled || !RenderState::is_running() {
+        return
+    }
+    if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
             let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
             *SPACE_SENDER.write().unwrap() = Some(space_sender);
             let drawstate_inner = Engine::initialise(ui, space_receiver);
@@ -868,9 +886,8 @@ fn render_space(ui: &nexus::imgui::Ui) {
             };
             ENGINE.set(Some(drawstate_inner.map_err(drop)));
             ENGINE_INITIALIZED.store(true, Ordering::Release);
-        }
-        ENGINE.with_borrow_mut(|ds_op| {
-            if let Some(Ok(ds)) = ds_op {
+    }
+    engine_mut(|ds| {
                 #[cfg(feature = "goggles")]
                 if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
                     goggles::classify_space_lens(ds);
@@ -878,9 +895,7 @@ fn render_space(ui: &nexus::imgui::Ui) {
                 if let Err(error) = ds.render(ui) {
                     log::error!("Engine error: {error}");
                 }
-            }
-        });
-    }
+    });
 }
 
 fn unload() {
@@ -909,13 +924,17 @@ fn unload() {
     let controller_quit = CONTROLLER_SENDER.write().unwrap().take()
         .map(|sender| sender.try_send(ControllerEvent::Quit));
 
-    {
-        let render_sender = RENDER_SENDER.write().unwrap().take();
+    let confirm_render_unload = {
+        #[cfg(feature = "space")]
+        let _ = SPACE_SENDER.write().unwrap().take();
+        let mut render_sender = RENDER_SENDER.write().unwrap();
+        let mut unloaded = false;
         if RenderState::is_render_thread() {
             let _state = RenderState::lock().take();
             drop(_state);
             unload_render();
-        } else if let Some(sender) = render_sender {
+            unloaded = true;
+        } else if let Some(ref sender) = *render_sender {
             match sender.try_send(RenderEvent::Quit) {
                 Ok(()) => {
                     log::debug!("TODO: wait for renderer shutdown");
@@ -928,10 +947,13 @@ fn unload() {
                 _ => {
                     // clean up what we can if possible
                     unload_render_background();
+                    unloaded = true;
                 },
             }
         }
-    }
+        let _ = render_sender.take();
+        !unloaded
+    };
 
     if let Err(e) = TEXTURES.wait_for_shutdown() {
         log::error!("failed to shut down texture loader: {e}");
@@ -958,6 +980,10 @@ fn unload() {
     #[cfg(feature = "extension-nexus")]
     if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
         revert_render();
+    }
+
+    if confirm_render_unload {
+        unload_render_background();
     }
 
     *loaded = false;
@@ -995,16 +1021,16 @@ fn unload_render() {
 fn unload_render_background() {
     log::warn!("Unloading render state from a background thread");
 
-    let _state = RENDER_STATE.lock().unwrap().take();
-
     #[cfg(feature = "space")]
     {
-        ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
+        if ENGINE_INITIALIZED.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            log::error!("TODO: engine background unload, expect to crash");
+        }
     }
 
-    TEXTURES.cleanup(false);
+    let _state = RENDER_STATE.lock().unwrap().take();
 
-    return
+    TEXTURES.cleanup(false);
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
