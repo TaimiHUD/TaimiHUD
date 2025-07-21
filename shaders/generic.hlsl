@@ -5,7 +5,7 @@ struct VSInput
     float3 color: COLOR0;
     column_major matrix Model: MODEL;
     float3 colour: COLOUR;
-     uint        instId  : SV_InstanceID;
+    //uint        instId  : SV_InstanceID;
 };
 
 cbuffer ConstantBuffer : register(b0)
@@ -24,12 +24,12 @@ struct VSOutput
 
 VSOutput VSMain(VSInput input)
 {
-    VSOutput output = (VSOutput)0;
+    VSOutput output;
 
     float4 VertPos = float4(input.position, 1.0);
-    output.position = mul(input.Model, VertPos);
-    output.position = mul(View, output.position);
-    output.position = mul(Projection, output.position);
+    float4 mpos = mul(input.Model, VertPos);
+    float4 mvpos = mul(View, mpos);
+    output.position = mul(Projection, mvpos);
 
     output.normal = input.normal;
     output.color = input.color;
@@ -54,7 +54,8 @@ struct PSOutput
 
 PSOutput PSMain(PSInput input)
 {
-    PSOutput output = (PSOutput)0;
+    PSOutput output;
+    output.color = float4(0.0, 0.0, 0.0, 0.0);
     //output.color = float4(input.color * input.colour, 1.0);
     return output;
 }

@@ -28,12 +28,12 @@ struct VSOutput
 
 VSOutput VSMain(VSInput input)
 {
-    VSOutput output = (VSOutput)0;
+    VSOutput output;
 
     float4 VertPos = float4(input.position, 1.0);
-    output.position = mul(Model, VertPos);
-    output.position = mul(View, output.position);
-    output.position = mul(Projection, output.position);
+    float4 mpos = mul(Model, VertPos);
+    float4 mvpos = mul(View, mpos);
+    output.position = mul(Projection, mvpos);
 
     output.tex = input.tex;
     output.color = tint;
@@ -48,7 +48,7 @@ struct PSOutput
 
 PSOutput PSMain(VSOutput input)
 {
-    PSOutput output = (PSOutput)0;
+    PSOutput output;
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = shaderTexture.Sample(SampleType, newtex);
     output.color = input.color * textureColour;
