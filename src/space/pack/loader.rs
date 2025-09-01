@@ -1,8 +1,9 @@
 use {
-    anyhow::Context as _,
+    anyhow::{anyhow, Context as _},
     relative_path::PathExt,
     std::{
         ffi::OsStr,
+        fmt,
         io::{Cursor, Read as _},
         path::{Path, PathBuf},
     },
@@ -81,17 +82,10 @@ impl ZipLoader {
         let archive = ZipArchive::new(file)?;
         Ok(ZipLoader { archive })
     }
-}
 
-/// Hard to imagine a valid taco data file being over 64MB.
-const SIZE_LIMIT: u64 = 64 * 1024 * 1024;
-
-impl PackLoaderContext for ZipLoader {
-    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
-        let mut file = self
-            .archive
-            .by_name(name)
-            .with_context(|| format!("{name} not found in zip archive"))?;
+    pub fn load_asset_by_index(&mut self, index: usize, name: impl fmt::Display) -> anyhow::Result<impl LoaderAssetReader> {
+        let res = self.archive.by_index(index);
+        let mut file = res.with_context(|| format!("{name} not found in zip archive"))?;
         if file.size() > SIZE_LIMIT {
             anyhow::bail!("{name} is too big at {}MB", file.size() / (1024 * 1024));
         }
@@ -100,6 +94,24 @@ impl PackLoaderContext for ZipLoader {
             .with_context(|| format!("Failed to read {name} from zip archive"))?;
 
         Ok(Cursor::new(buf))
+    }
+
+}
+
+/// Hard to imagine a valid taco data file being over 64MB.
+const SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+
+impl PackLoaderContext for ZipLoader {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        match self.archive.index_for_name(name) {
+            Some(index) => self.load_asset_by_index(index, name),
+            None => {
+                let index = self.archive.file_names()
+                    .position(|filename| filename.eq_ignore_ascii_case(name));
+                index.ok_or_else(|| anyhow!("{name} not found in zip archive"))
+                    .and_then(|index| self.load_asset_by_index(index, name))
+            },
+        }
     }
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
