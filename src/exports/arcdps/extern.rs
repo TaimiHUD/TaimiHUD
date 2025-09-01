@@ -194,7 +194,9 @@ fn arc_cb_combat_local(args: CombatArgs) {
     exports::combat_local(args)
 }
 
-//unsafe extern "C" fn arc_cb_wnd(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM) {}
+unsafe extern "C" fn arc_cb_wnd(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
+    exports::wnd(wnd.into(), msg, w.into(), l.into())
+}
 
 unsafe extern "C" fn arc_cb_wnd_filter(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
     exports::wnd_filter(wnd.into(), msg, w.into(), l.into())
@@ -231,7 +233,7 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
     let exports = ExtensionExports {
         name: Some(ARC_NAME),
         build: Some(ARC_BUILD),
-        cb_wnd: None,
+        cb_wnd: Some(arc_cb_wnd),
         cb_wnd_filter: Some(arc_cb_wnd_filter),
         cb_combat: None,
         cb_combat_local: Some(ARC_CB_COMBAT_LOCAL),

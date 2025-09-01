@@ -54,8 +54,9 @@ use {
         mem,
         panic,
         ptr,
-        sync::{Arc, LazyLock, Mutex, OnceLock, RwLock},
+        sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
+        time::Duration,
     },
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
@@ -75,6 +76,7 @@ use nexus::{
     rtapi::event::{
         RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
     },
+    wnd_proc::register_wnd_proc,
     AddonFlags, UpdateProvider,
 };
 #[cfg(feature = "goggles")]
@@ -228,6 +230,7 @@ arcdps::export! {
     options_end: exports::arcdps::cb::options_end,
     options_windows: exports::arcdps::cb::options_windows,
     wnd_filter: exports::arcdps::cb::wnd_filter,
+    raw_wnd_nofilter: exports::arcdps::cb::wnd_raw,
     combat_local: exports::arcdps::cb::combat_local,
     update_url: exports::arcdps::cb::update_url,
     raw_extras_init: exports::arcdps::unofficial_extras::extras_init_raw,
@@ -238,34 +241,32 @@ arcdps::export! {
 }
 
 static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);
+static RENDER_UNLOAD: Condvar = Condvar::new();
 
 static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
 #[cfg(feature = "space")]
-static ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
-#[cfg(feature = "space")]
-pub fn engine_initialized() -> bool {
-    ENGINE_INITIALIZED.load(Ordering::SeqCst)
-}
-#[cfg(feature = "space")]
-thread_local! {
-    static ENGINE: RefCell<Option<Result<Engine, ()>>> = RefCell::new(None);
-}
+static ENGINE: Mutex<Option<Result<Engine, ()>>> = Mutex::new(None);
 #[cfg(feature = "space")]
 pub fn engine_mut<R, F: FnOnce(&mut Engine) -> R>(f: F) -> Option<R> {
-    if !engine_initialized() || !RenderState::is_render_thread() || !RenderState::is_running() {
+    if !RenderState::is_render_thread() || !RenderState::is_running() {
         return None
     }
 
-    ENGINE.with_borrow_mut(|e| if let Some(Ok(engine)) = e {
+    if let Ok(Some(Ok(engine))) = ENGINE.lock().as_mut().map(|e| &mut **e) {
         Some(f(engine))
     } else {
         None
-    })
+    }
 }
 #[cfg(feature = "space")]
 pub fn engine_ref<R, F: FnOnce(&Engine) -> R>(f: F) -> Option<R> {
-    engine_mut(|e| f(e))
+    //engine_mut(|e| f(e))
+    if let Ok(Some(Ok(engine))) = ENGINE.try_lock().as_ref().map(|e| &**e) {
+        Some(f(engine))
+    } else {
+        None
+    }
 }
 
 pub const WINDOW_PRIMARY: &'static str = "primary";
@@ -393,6 +394,8 @@ fn load_nexus() {
     let space_render = render!(|ui| render_space(ui));
     #[cfg(feature = "space")]
     register_render(RenderType::Render, space_render).revert_on_unload();
+
+    register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
     // Handle window toggling with keybind and button
     let main_window_keybind_handler = keybind_handler!(|_id, is_release| {
@@ -877,17 +880,23 @@ fn render_space(ui: &nexus::imgui::Ui) {
     if !enabled || !RenderState::is_running() {
         return
     }
-    if !ENGINE_INITIALIZED.load(Ordering::Acquire) {
+    let mut engine = match ENGINE.try_lock() {
+        Ok(e) => e,
+        _ => return,
+    };
+    let engine = engine.get_or_insert_with(|| {
             let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
             *SPACE_SENDER.write().unwrap() = Some(space_sender);
             let drawstate_inner = Engine::initialise(ui, space_receiver);
             if let Err(error) = &drawstate_inner {
                 log::error!("DrawState setup failed: {error:?}");
             };
-            ENGINE.set(Some(drawstate_inner.map_err(drop)));
-            ENGINE_INITIALIZED.store(true, Ordering::Release);
-    }
-    engine_mut(|ds| {
+            drawstate_inner.map_err(drop)
+    });
+    let ds = match engine.as_mut() {
+        Ok(e) => e,
+        Err(..) => return,
+    };
                 #[cfg(feature = "goggles")]
                 if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
                     goggles::classify_space_lens(ds);
@@ -895,7 +904,43 @@ fn render_space(ui: &nexus::imgui::Ui) {
                 if let Err(error) = ds.render(ui) {
                     log::error!("Engine error: {error}");
                 }
-    });
+}
+
+fn notify_quit() {
+    // if !RenderState::is_running() { return }
+
+    log::info!("Preparing for game exit");
+
+    let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
+    let controller_quit = controller_sender.as_ref()
+        .map(|sender| sender.try_send(ControllerEvent::Quit));
+    if let Some(Ok(())) = controller_quit {
+        *controller_sender = None;
+    }
+
+    TEXTURES.quit();
+
+    #[cfg(feature = "goggles")]
+    if let Err(e) = goggles::shutdown() {
+        log::error!("Goggles shutdown failed: {e}");
+    }
+
+    #[cfg(feature = "space")]
+    let _ = SPACE_SENDER.write().unwrap().take();
+
+    if RenderState::is_render_thread() {
+        let state = RenderState::lock().take();
+        if let Some(state) = state {
+            state.unload();
+        }
+    } else {
+        // can't do much more than just shut down our queues...
+        let render_sender = RENDER_SENDER.write().unwrap().take();
+        if let Some(sender) = render_sender {
+            // this seems futile and unlikely to reach the other side but we can try anyway
+            let _ = sender.try_send(RenderEvent::Quit);
+        }
+    }
 }
 
 fn unload() {
@@ -915,6 +960,8 @@ fn unload() {
 
     log::info!("Unloading addon");
 
+    TEXTURES.quit();
+
     #[cfg(feature = "goggles")]
     if let Err(e) = goggles::shutdown() {
         log::error!("Goggles shutdown failed: {e}");
@@ -926,33 +973,51 @@ fn unload() {
 
     let confirm_render_unload = {
         #[cfg(feature = "space")]
-        let _ = SPACE_SENDER.write().unwrap().take();
+        let _space = SPACE_SENDER.write().unwrap().take();
         let mut render_sender = RENDER_SENDER.write().unwrap();
-        let mut unloaded = false;
-        if RenderState::is_render_thread() {
-            let _state = RenderState::lock().take();
-            drop(_state);
-            unload_render();
-            unloaded = true;
-        } else if let Some(ref sender) = *render_sender {
-            match sender.try_send(RenderEvent::Quit) {
-                Ok(()) => {
-                    log::debug!("TODO: wait for renderer shutdown");
-                    std::thread::sleep(std::time::Duration::from_millis(67));
-                    #[cfg(feature = "space")] {
-                        // just to be safe? idk
-                        std::thread::sleep(std::time::Duration::from_millis(1500));
-                    }
-                },
-                _ => {
-                    // clean up what we can if possible
-                    unload_render_background();
-                    unloaded = true;
-                },
-            }
-        }
+        let mut render_state = RenderState::lock();
+
+        let render_quit = match RenderState::is_render_thread() {
+            true => {
+                if let Some(state) = render_state.take() {
+                    state.unload();
+                }
+                None
+            },
+            _ => render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit)),
+        };
         let _ = render_sender.take();
-        !unloaded
+
+        match render_quit {
+            _ if render_state.is_none() => {
+                // it's already gone, nothing more to do here
+                false
+            },
+            Some(Ok(())) => {
+                let unload_timeout = match () {
+                    #[cfg(feature = "space")]
+                    () if _space.is_some() =>
+                        // give it time to do more shutdown if needed...
+                        Duration::from_millis(1500),
+                    _ =>
+                        Duration::from_millis(67),
+                };
+                let timeout = RENDER_UNLOAD.wait_timeout_while(render_state, unload_timeout, |state| state.is_some());
+                let (mut render_state, timeout) = timeout.unwrap_or_else(|e| e.into_inner());
+                if timeout.timed_out() {
+                    log::warn!("timed out waiting for render quit");
+                }
+                let _ = render_state.take();
+                timeout.timed_out()
+            },
+            Some(Err(..)) | None => {
+                // clean up what we can if possible
+                // anything special needed when game shutting down? if controller_quit.is_none() && controller_handle.is_some() {}
+                log::info!("discarding render state");
+                let _ = render_state.take();
+                true
+            },
+        }
     };
 
     if let Err(e) = TEXTURES.wait_for_shutdown() {
@@ -960,7 +1025,7 @@ fn unload() {
     }
 
     match controller_quit {
-        Some(Ok(())) => match controller_handle {
+        Some(Ok(())) | None => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 if let Err(e) = handle.join() {
@@ -974,7 +1039,6 @@ fn unload() {
         Some(Err(..)) => {
             log::warn!("Failed to signal controller quit");
         },
-        None => (),
     }
 
     #[cfg(feature = "extension-nexus")]
@@ -1002,18 +1066,13 @@ fn unload_render() {
     TEXTURES.cleanup(true);
 
     #[cfg(feature = "space")]
-    if engine_initialized() {
+    if let Some(Ok(mut engine)) = ENGINE.lock().unwrap().take() {
         log::debug!("unloading space engine");
-        let _ = ENGINE.try_with(|e| if let Some(Ok(mut engine)) = e.borrow_mut().take() {
-            log::debug!("engine.cleanup()");
-            engine.cleanup();
-            /*log::debug!("skipping engine drop()");
-            std::mem::forget(engine);*/
-        });
-        ENGINE_INITIALIZED.store(false, Ordering::SeqCst);
+        engine.cleanup();
     }
 
     log::debug!("render unload complete");
+    RENDER_UNLOAD.notify_all();
 }
 
 /// A limited form of [unload_render()] that should try its best,
@@ -1022,15 +1081,15 @@ fn unload_render_background() {
     log::warn!("Unloading render state from a background thread");
 
     #[cfg(feature = "space")]
-    {
-        if ENGINE_INITIALIZED.compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-            log::error!("TODO: engine background unload, expect to crash");
-        }
+    if let Some(Ok(engine)) = ENGINE.lock().unwrap().take() {
+        log::debug!("skipping engine drop()");
+        std::mem::forget(engine);
     }
 
     let _state = RENDER_STATE.lock().unwrap().take();
 
     TEXTURES.cleanup(false);
+    RENDER_UNLOAD.notify_all();
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {

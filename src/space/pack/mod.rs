@@ -203,7 +203,7 @@ pub struct Pack {
     pub active_pois: IndexMap<Uuid, ActivePoi>,
 
     // Internal rendering data.
-    loader: Option<Box<dyn PackLoaderContext>>,
+    loader: Option<Box<dyn PackLoaderContext + Send>>,
     texture_list: HashMap<String, PackTextureHandle>,
     textures: Vec<PackTexture>,
     loaded_textures: BitVec,
@@ -218,7 +218,7 @@ pub struct Pack {
 }
 
 impl Pack {
-    pub fn load(mut loader: impl PackLoaderContext + 'static) -> anyhow::Result<Pack> {
+    pub fn load(mut loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<Pack> {
         let mut pack = Pack::default();
 
         let pack_defs = loader.all_files_with_ext("xml")?;

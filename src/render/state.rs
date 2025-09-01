@@ -100,9 +100,7 @@ impl RenderState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
-        IS_RENDER_THREAD.set(true);
-
+    fn draw(&mut self, ui: &Ui) -> bool {
         let io = ui.io();
         if let Some(last_display_size) = self.last_display_size {
             if io.display_size != last_display_size {
@@ -175,7 +173,7 @@ impl RenderState {
                     }
                     Quit => {
                         self.quit();
-                        return;
+                        return false;
                     },
                 }
             }
@@ -211,6 +209,8 @@ impl RenderState {
         for item in items_to_delete {
             self.state_errors.remove(&item);
         }
+
+        true
     }
     pub fn marker_icon(ui: &Ui, height: Option<f32>, marker: &MarkerType) {
         let key = marker.to_string();
@@ -401,6 +401,12 @@ impl RenderState {
         }
     }
 
+    pub fn unload(self) {
+        //self.quit();
+        drop(self);
+        crate::unload_render();
+    }
+
     pub fn lock() -> MutexGuard<'static, Option<RenderState>> {
         crate::RENDER_STATE.lock().unwrap()
     }
@@ -434,15 +440,19 @@ impl RenderState {
         }
 
         let mut lock = Self::lock();
-        match &mut *lock {
-            None => (),
-            Some(state) if is_running => {
-                state.draw(ui);
-            },
-            Some(state) => {
-                state.shutdown();
-                lock.take();
-            },
+        let state = match &mut *lock {
+            None => return,
+            Some(state) => state,
+        };
+
+        let is_running = match is_running {
+            true => state.draw(ui),
+            false => false,
+        };
+
+        if !is_running {
+            state.shutdown();
+            lock.take();
         }
     }
 

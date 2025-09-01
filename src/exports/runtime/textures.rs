@@ -250,6 +250,13 @@ impl TextureLoader {
         }
     }
 
+    pub fn quit(&self) {
+        #[cfg(feature = "texture-loader")]
+        let _ = self.with_loader(|loader|
+            loader.sender.try_send(TextureRequest::Shutdown)
+        );
+    }
+
     #[cfg(feature = "texture-loader")]
     pub fn shutdown(&self) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
         let loader = self.loader.write().unwrap_or_else(|e| e.into_inner()).take();
