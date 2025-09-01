@@ -1181,7 +1181,14 @@ impl Controller {
 
     async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
         use ControllerEvent::*;
-        log::debug!("Controller received event: {}", event);
+        match &event {
+            // omit the worst spam offenders
+            ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated(..) =>
+                log::trace!("Controller received event: {}", event),
+            event =>
+                log::debug!("Controller received event: {}", event),
+        }
+
         match event {
             #[cfg(feature = "space")]
             RequestDisabledPaths => self.provide_disabled_paths().await,
