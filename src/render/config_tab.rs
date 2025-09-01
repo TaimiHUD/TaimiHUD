@@ -42,6 +42,19 @@ impl ConfigTabState {
         if self.katrender {
             crate::render::goggles::options_ui(ui);
         }
+        #[cfg(feature = "space")]
+        if self.katrender && ui.button("Unload All") {
+            use crate::render::RenderEvent;
+
+            // XXX: this will wipe all of render state, rather than just katrender
+            let mut render_sender = crate::RENDER_SENDER.write().unwrap();
+            let render_quit = render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit));
+            if let Some(Ok(())) = render_quit {
+                let _ = render_sender.take();
+                let _ = crate::SPACE_SENDER.write().unwrap().take();
+                crate::TEXTURES.quit();
+            }
+        }
         let markers_window_closure = || {
             if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
                 self.marker_autoplace = settings.marker_autoplace.clone();

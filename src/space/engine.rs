@@ -387,3 +387,5 @@ impl Engine {
         }
     }
 }
+
+unsafe impl Send for Engine {}

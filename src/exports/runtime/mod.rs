@@ -1,7 +1,7 @@
 use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, Once, OnceLock}, time::Duration};
 use ::log::info;
 use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
-use crate::{exports, load_language, marker::format::MarkerType};
+use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
     UI::{
@@ -360,4 +360,16 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(inputs: impl IntoIte
         },
         _ => Ok(()),
     }
+}
+
+pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
+    match msg {
+        WindowsAndMessaging::WM_DESTROY | WindowsAndMessaging::WM_QUIT | WindowsAndMessaging::WM_CLOSE => {
+            // nexus will unload you immediately after, and need to make a point not to take too long waiting for a render cb that won't come
+            notify_quit();
+        },
+        _ => (),
+    }
+
+    msg
 }

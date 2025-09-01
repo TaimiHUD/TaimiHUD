@@ -30,7 +30,7 @@ use {
         time::Duration,
     },
     windows::Win32::{
-        Foundation::HMODULE,
+        Foundation::{HMODULE, HWND},
         UI::{
             WindowsAndMessaging,
             Input::KeyboardAndMouse,
@@ -510,6 +510,17 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
         },
         _ => msg,
     }
+}
+
+fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
+    // ignore duplicates since arcdps proxies these from nexus
+    #[cfg(feature = "extension-nexus")]
+    if rt::nexus_available() { return msg }
+
+    #[cfg(todo)]
+    if !available() { return msg }
+
+    rt::handle_wnd_event(HWND(hwnd), msg, w, l)
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);

@@ -3,7 +3,6 @@ use {
     arcdps::Language,
     std::{
         ffi::CStr,
-        fmt,
         path::{Path, PathBuf},
         ptr::{self, NonNull},
         sync::atomic::{AtomicBool, Ordering},
@@ -28,6 +27,7 @@ use {
 };
 #[cfg(feature = "space")]
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 
 /// raidcore addon id or NEGATIVE random unique signature
 pub const SIG: i32 = -exports::SIG;
@@ -228,6 +228,14 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<IDXGISwapChain>> {
     }
 
     Ok(swap_chain.clone())
+}
+
+pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
+    match rt::handle_wnd_event(hwnd, msg, w.0, l.0) {
+        m if m == msg =>
+            msg,
+        _ => 0,
+    }
 }
 
 fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {

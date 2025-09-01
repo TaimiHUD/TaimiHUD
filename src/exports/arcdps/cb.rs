@@ -1,5 +1,8 @@
 use std::{borrow::Cow, num::NonZeroU64, ptr};
-use arcdps::imgui;
+use arcdps::{
+    imgui,
+    __macro::{HWND, LPARAM, WPARAM},
+};
 use dpsapi::combat::CombatArgs;
 use crate::exports::{arcdps as exports, runtime as rt};
 use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
@@ -69,6 +72,10 @@ pub fn wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
         0 => false,
         _ => true,
     }
+}
+
+pub unsafe extern "C-unwind" fn wnd_raw(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
+    exports::wnd(hwnd.0, msg, w.0, l.0)
 }
 
 pub fn update_url() -> Option<String> {
