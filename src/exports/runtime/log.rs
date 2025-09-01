@@ -63,9 +63,16 @@ impl TaimiLog {
 
     pub fn open_file(&self) -> io::Result<&fs::File> {
         let log_path = Self::log_path();
+        let append = match crate::built_info::IS_TAGGED_VERSION || crate::built_info::CI_PLATFORM.is_some() {
+            // prevent log from growing forever in production
+            #[cfg(not(debug_assertions))]
+            true if fs::metadata(&log_path).map(|md| md.len() > 0x400000).unwrap_or(false) =>
+                false,
+            _ => true,
+        };
         let res = fs::OpenOptions::new()
             .create(true)
-            .append(true)
+            .append(append)
             .open(log_path);
         let f = match res {
             Ok(f) => f,
