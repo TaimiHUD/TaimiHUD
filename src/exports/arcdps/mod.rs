@@ -26,7 +26,7 @@ use {
         panic,
         path::PathBuf,
         ptr::{self, NonNull},
-        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
+        sync::{atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicPtr, Ordering}, Mutex, RwLock},
         time::Duration,
     },
     windows::Win32::{
@@ -315,7 +315,13 @@ fn imgui_options_tab(ui: &Ui) {
     }
 
     thread_local! {
-        static BINDING_BUFFERS: std::cell::RefCell<std::collections::HashMap<&'static str, String>> = Default::default();
+        static BINDING_BUFFERS: std::cell::RefCell<std::collections::HashMap<&'static str, BindingState>> = Default::default();
+    }
+
+    #[derive(Debug, Default, Clone)]
+    struct BindingState {
+        name_buffer: String,
+        configuring: bool,
     }
 
     fn keybind_ui<F: FnOnce(&ArcVk)>(ui: &Ui, vk: &'static ArcVk, action: Option<F>) {
@@ -333,8 +339,15 @@ fn imgui_options_tab(ui: &Ui) {
         let default_name = default_vk.and_then(|vk| rt::keyboard::vk_name(vk).ok());
 
         let changed = BINDING_BUFFERS.with_borrow_mut(|b| {
+            use std::collections::hash_map::Entry;
+
+            let any_configuring = b.values().any(|b| b.configuring);
+
             let binding_buffer = b.entry(vk.id);
-            let is_fresh = matches!(binding_buffer, std::collections::hash_map::Entry::Vacant(..));
+            let is_fresh = match &binding_buffer {
+                Entry::Vacant(..) => true,
+                Entry::Occupied(b) => b.get().name_buffer.is_empty(),
+            };
             let binding_buffer = binding_buffer.or_default();
             if is_fresh {
                 if let Some(current_vk) = vk.get_setting_vkeycode() {
@@ -342,13 +355,16 @@ fn imgui_options_tab(ui: &Ui) {
 
                     let current_name = rt::keyboard::vk_name(current_vk);
                     let _ = if let Ok(name) = current_name {
-                        write!(binding_buffer, "{name}")
+                        write!(&mut binding_buffer.name_buffer, "{name}")
                     } else {
-                        write!(binding_buffer, "{}", current_vk.0)
+                        write!(&mut binding_buffer.name_buffer, "{}", current_vk.0)
                     };
+                } else {
+                    binding_buffer.name_buffer = "(unbound)".into();
                 }
             }
-            let input = ui.input_text("Keybind", binding_buffer)
+            let input = ui.input_text("Keybind", &mut binding_buffer.name_buffer)
+                .read_only(binding_buffer.configuring)
                 .auto_select_all(true)
                 .always_insert_mode(true)
                 .enter_returns_true(true)
@@ -360,9 +376,14 @@ fn imgui_options_tab(ui: &Ui) {
                 (None, None) => input.hint("unbound by default".into()),
             }.build();
 
-            match changed {
-                false => None,
-                true => match binding_buffer.parse::<u16>() {
+            ui.same_line();
+            let mut filtered = true;
+            if ui.checkbox("mod-filtered", &mut filtered) {
+                log::warn!("TODO: unfiltered keybinds");
+            }
+
+            match (binding_buffer.configuring, any_configuring) {
+                _ if changed => match binding_buffer.name_buffer.parse::<u16>() {
                     Ok(new) => {
                         log::debug!("updating {} keybind to: {new:#x}", vk.id);
                         Some(KeyboardAndMouse::VIRTUAL_KEY(new))
@@ -372,6 +393,45 @@ fn imgui_options_tab(ui: &Ui) {
                         None
                     },
                 },
+                (true, _) => {
+                    ui.same_line();
+                    ui.text_disabled("press a key");
+                    match KeyIntercept::intercept_take() {
+                        None => {
+                            log::info!("key bind cancelled");
+                            binding_buffer.configuring = false;
+                            None
+                        },
+                        Some(KeyIntercept::Pending) => None,
+                        Some(KeyIntercept::Intercepted { key }) => {
+                            log::debug!("got key bind: {key:?}");
+                            match key.down {
+                                false => {
+                                    KeyIntercept::intercept_restart();
+                                    None
+                                },
+                                true => {
+                                    binding_buffer.configuring = false;
+                                    binding_buffer.name_buffer.clear();
+                                    if !key.mods.is_empty() {
+                                        log::info!("TODO: key bind mods");
+                                    }
+                                    Some(key.vk)
+                                },
+                            }
+                        },
+                    }
+                },
+                (false, false) => {
+                    ui.same_line();
+                    debug_assert!(!KeyIntercept::intercept_ready());
+                    if ui.button("bind") {
+                        KeyIntercept::intercept_restart();
+                        binding_buffer.configuring = true;
+                    }
+                    None
+                },
+                (false, true) => None,
             }
         });
 
@@ -513,14 +573,112 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
 }
 
 fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
+    #[cfg(todo)]
+    if !available() { return msg }
+
+    match msg {
+        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN
+        | WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP if KeyIntercept::intercept_ready() => {
+            // TODO: let repeat = l & 0xff; ignore non-zero?
+
+            let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
+
+            KeyIntercept::intercept_report(KeyInput {
+                vk: KeyboardAndMouse::VIRTUAL_KEY(w as u16),
+                down: !is_up,
+                // TODO?
+                mods: KeyState::empty(),
+            });
+
+            return 0;
+        },
+        _ => (),
+    }
+
     // ignore duplicates since arcdps proxies these from nexus
     #[cfg(feature = "extension-nexus")]
     if rt::nexus_available() { return msg }
 
-    #[cfg(todo)]
-    if !available() { return msg }
-
     rt::handle_wnd_event(HWND(hwnd), msg, w, l)
+}
+
+pub enum KeyIntercept {
+    Pending,
+    Intercepted {
+        key: KeyInput,
+    },
+}
+
+static KEY_INTERCEPT: AtomicU64 = AtomicU64::new(KeyIntercept::NONE);
+impl KeyIntercept {
+    const NONE: u64 = 0;
+    const PENDING: u64 = u64::MAX;
+    const DOWN: u64 = 0x1_00000000_0000;
+
+    pub fn raw(&self) -> u64 {
+        match self {
+            Self::Pending => Self::PENDING,
+            Self::Intercepted { key } => {
+                let vk = key.vk.0 as u64;
+                let mods = (key.mods.bits() as u64) << 16;
+                let down = match key.down {
+                    true => Self::DOWN,
+                    false => 0,
+                };
+                vk as u64 | mods | down
+            },
+        }
+    }
+
+    pub fn from_raw(raw: u64) -> Option<Self> {
+        Some(match raw {
+            0 => return None,
+            Self::PENDING => Self::Pending,
+            raw => Self::Intercepted {
+                key: KeyInput {
+                    vk: KeyboardAndMouse::VIRTUAL_KEY(raw as u16),
+                    mods: KeyState::from_bits_retain((raw >> 16) as u32),
+                    down: raw & Self::DOWN != 0,
+                },
+            },
+        })
+    }
+
+    pub fn intercept_restart() {
+        KEY_INTERCEPT.store(Self::PENDING, Ordering::SeqCst);
+    }
+
+    pub fn intercept_take() -> Option<Self> {
+        let mut raw = KEY_INTERCEPT.load(Ordering::SeqCst);
+        loop {
+            let int = match Self::from_raw(raw) {
+                res @ (None | Some(Self::Pending)) => return res,
+                int => int,
+            };
+            match KEY_INTERCEPT.compare_exchange_weak(raw, Self::NONE, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(..) => break int,
+                Err(current) => {
+                    raw = current;
+                },
+            }
+        }
+    }
+
+    pub fn intercept_ready() -> bool {
+        KEY_INTERCEPT.load(Ordering::Relaxed) == Self::PENDING
+    }
+
+    #[cfg(todo)]
+    pub fn intercept_read() -> Option<Self> {
+        Self::from_raw(KEY_INTERCEPT.load(Ordering::Relaxed))
+    }
+
+    pub fn intercept_report(key: KeyInput) {
+        let int = Self::Intercepted {
+            key,
+        };
+        KEY_INTERCEPT.store(int.raw(), Ordering::SeqCst);
+    }
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
