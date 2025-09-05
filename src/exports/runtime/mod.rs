@@ -362,7 +362,7 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(inputs: impl IntoIte
     }
 }
 
-pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
+pub fn handle_wnd_event(_hwnd: HWND, msg: u32, _w: usize, _l: isize) -> u32 {
     match msg {
         WindowsAndMessaging::WM_DESTROY | WindowsAndMessaging::WM_QUIT | WindowsAndMessaging::WM_CLOSE => {
             // nexus will unload you immediately after, and need to make a point not to take too long waiting for a render cb that won't come
