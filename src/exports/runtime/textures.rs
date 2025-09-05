@@ -287,7 +287,12 @@ impl TextureLoader {
         }).map_err(|_| anyhow!("texture loader did not wait"))?;
 
         while let Some(request) = receiver.blocking_recv() {
-            log::debug!("texture loader request received: {request:?}");
+            match &request {
+                TextureRequest::LoadBytes { key, bytes } =>
+                    log::debug!("texture loader request received: load {} bytes for {key}", bytes.len()),
+                request =>
+                    log::debug!("texture loader request received: {request:?}"),
+            }
 
             if receiver.is_closed() || sender.is_closed() {
                 // no point in processing any remaining requests
