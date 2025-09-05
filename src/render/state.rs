@@ -78,7 +78,7 @@ pub struct RenderState {
     timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
-    last_display_size: Option<[f32; 2]>,
+    pub last_display_size: Option<[f32; 2]>,
     pub state_errors: HashMap<String, anyhow::Error>,
 }
 

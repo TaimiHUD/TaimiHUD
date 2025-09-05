@@ -1,24 +1,22 @@
 #[cfg(feature = "markers")]
 use {
-    crate::marker::{
-        atomic::{MarkerInputData, ScreenPoint},
-        format::{MarkerSet, RuntimeMarkers},
+    crate::{
+        exports::runtime::{
+            mouse::{send_input, MouseInput, MousePosition},
+            keyboard::KeyState,
+        },
+        marker::{
+            atomic::{MarkerInputData, ScreenPoint},
+            format::{MarkerSet, RuntimeMarkers},
+        },
     },
     arcdps::extras::UserInfoOwned,
     tokio::task::JoinHandle,
-    windows::Win32::{
-        Foundation::POINT,
-        Graphics::Gdi::ClientToScreen,
-        UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow},
-    },
 };
 use {
     crate::{
         exports::runtime as rt,
-        marker::{
-            atomic::ScreenVector,
-            format::{MarkerEntry, MarkerFiletype},
-        },
+        marker::format::{MarkerEntry, MarkerFiletype},
         render::TextFont,
         settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsLock, SourcesFile},
         timer::{CombatState, Position, TimerFile, TimerMachine},
@@ -26,7 +24,7 @@ use {
     },
     anyhow::anyhow,
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
-    glam::{f32::Vec3, Vec2},
+    glam::f32::Vec3,
     nexus::{
         data_link::mumble::{MumblePtr, UiState},
         rtapi::GroupMemberOwned,
@@ -49,16 +47,6 @@ use {
             Mutex,
         },
         time::{interval, sleep, Duration},
-    },
-    windows::Win32::{
-        Foundation::GetLastError,
-        UI::{
-            Input::KeyboardAndMouse::{
-                SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
-                MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT, MOUSE_EVENT_FLAGS,
-            },
-            WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN},
-        },
     },
 };
 
@@ -662,105 +650,19 @@ impl Controller {
     }
 
     #[cfg(feature = "markers")]
-    fn get_viewport_point(rel: Vec2) -> anyhow::Result<POINT> {
-        /*let hwnd = rt::window_handle()
-            .map_err(|e| anyhow!("HWND unavailable: {e}"))?;
-        let mut abs: POINT = POINT {
-            x: rel.x as i32,
-            y: rel.y as i32,
-        };
-        unsafe {
-            ClientToScreen(hwnd, &mut abs);
-        }*/
-        let abs = rt::mouse::MousePosition::from(rel).to_screen()
-            .map_err(|e| anyhow!("cursor screen coords unavailable: {e}"))?
-            .into();
-        Ok(abs)
-    }
-
-    #[cfg(feature = "markers")]
-    fn get_viewport_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
-        let point = Self::get_viewport_point(rel)?;
-        Ok((point.x, point.y))
-    }
-
-    #[cfg(feature = "markers")]
-    fn get_abs_coord(rel: Vec2) -> anyhow::Result<(i32, i32)> {
-        let (x, y) = Self::get_viewport_coord(rel)?;
-        let dx = (x * 65536) / unsafe { GetSystemMetrics(SM_CXSCREEN) };
-        let dy = (y * 65536) / unsafe { GetSystemMetrics(SM_CYSCREEN) };
-        Ok((dx, dy))
-    }
-
-    #[cfg(feature = "markers")]
-    fn mouse_event(coords: (i32, i32), flags: MOUSE_EVENT_FLAGS) -> anyhow::Result<()> {
-        let (dx, dy) = coords;
-        let mousey = INPUT {
-            r#type: INPUT_MOUSE,
-            Anonymous: INPUT_0 {
-                mi: MOUSEINPUT {
-                    dx,
-                    dy,
-                    mouseData: 0,
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        let inputs = [mousey];
-        let result = unsafe { SendInput(&inputs, size_of_val(&inputs) as i32) };
-        let error = unsafe { GetLastError() }.to_hresult();
-        if error.0 != 0 {
-            return Err(anyhow!("Error code: {}", error.0));
-        }
-        match result {
-            0 => Err(anyhow!("mouse event blocked by another thread")),
-            _ => Ok(()),
-        }
-    }
-
-    #[cfg(feature = "markers")]
-    fn move_cursor_pos(goal: Vec2) -> anyhow::Result<()> {
-        let coords = Self::get_abs_coord(goal)?;
-        Self::mouse_event(coords, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
-    }
-
-    #[cfg(feature = "markers")]
-    async fn drag_mouse_abs(from: Vec2, to: Vec2) -> anyhow::Result<()> {
+    async fn drag_mouse_abs(from: ScreenPoint, to: ScreenPoint) -> rt::RuntimeResult<()> {
         let wait_duration = Duration::from_millis(10);
-        let from_abs = Self::get_abs_coord(from)?;
-        let to_abs = Self::get_abs_coord(to)?;
+        let from = MousePosition::from(from);
+        let to = MousePosition::from(to);
         sleep(wait_duration).await;
-        Self::mouse_event(from_abs, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)?;
+        send_input(MouseInput::from(from))?;
         sleep(wait_duration).await;
-        Self::mouse_event(from_abs, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN)?;
+        send_input(MouseInput::new(from, KeyState::BUTTON_L, Some(true)))?;
         sleep(wait_duration).await;
-        Self::mouse_event(to_abs, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)?;
+        send_input(MouseInput::from(to))?;
         sleep(wait_duration).await;
-        Self::mouse_event(to_abs, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTUP)?;
+        send_input(MouseInput::new(to, KeyState::BUTTON_L, Some(false)))?;
         sleep(wait_duration).await;
-        Ok(())
-    }
-
-    #[cfg(feature = "markers")]
-    async fn drag_mouse_rel(from: ScreenPoint, amount: ScreenVector) -> anyhow::Result<()> {
-        let wait_duration = Duration::from_millis(30);
-        let from_abs = Self::get_abs_coord(from.into())?;
-
-        let [amt_x, amt_y] = amount.as_array();
-        let amount = (*amt_x as i32, *amt_y as i32);
-        // bounds appear to mean that only y is actually capable of being subtracted, presumably
-        // the distance from max_move in the x is negative
-        // make sure the mouse is in the right place, and then put the mouse down
-        Self::mouse_event(from_abs, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)?;
-        sleep(wait_duration).await;
-        Self::mouse_event(from_abs, MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_LEFTDOWN)?;
-        sleep(wait_duration).await;
-        Self::mouse_event(amount, MOUSEEVENTF_MOVE)?;
-        sleep(wait_duration).await;
-        Self::mouse_event((0i32, 0i32), MOUSEEVENTF_LEFTUP)?;
-        sleep(wait_duration * 10).await;
         Ok(())
     }
 
@@ -771,12 +673,6 @@ impl Controller {
         point: ScreenPoint,
         marker: &MarkerEntry,
     ) {
-        sleep(wait_duration).await;
-        #[cfg(todo)]
-        match Self::move_cursor_pos(point.into()) {
-            Ok(_) => (),
-            Err(e) => log::error!("{}", e),
-        }
         sleep(wait_duration).await;
         if let Err(e) = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point.into())).await {
             log::warn!("Failed to place marker {:?}: {e}", marker.marker);
@@ -793,11 +689,11 @@ impl Controller {
         use crate::marker::atomic::LocalPoint;
         let mid = MarkerInputData::read();
         if let Some(mid) = mid {
-            let point: LocalPoint = Vec3::from(marker.position.clone()).into();
+            let point: LocalPoint = point.into();
             let point = mid.map_local_to_map(point);
             let point = mid.map_map_to_screen(point);
             if let Some(point) = point {
-                Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
+                Self::place_marker(wait_duration, place_duration, point, marker).await;
             }
         }
     }
@@ -819,7 +715,6 @@ impl Controller {
             crate::marker::atomic::{LocalPoint, MapPoint},
             anyhow::anyhow,
             glamour::TransformMap,
-            windows::Win32::Graphics::Gdi::ScreenToClient,
         };
         if let Some(mid) = MarkerInputData::read() {
             let player_position = mid.local_player_pos;
@@ -846,15 +741,7 @@ impl Controller {
         }
 
         let wait_duration = Duration::from_millis(50);
-        #[cfg(todo)]
-        let original_position = unsafe {
-            let mut pos_ptr: POINT = POINT::default();
-            let hwnd = rt::window_handle()?;
-            let pos = GetCursorPos(&mut pos_ptr);
-            let _ = ScreenToClient(hwnd, &mut pos_ptr);
-            pos.map(|()| pos_ptr)
-        }.map_err(anyhow::Error::from)?;
-        let original_position = rt::screen_mouse_position()
+        let original_position = rt::window_mouse_position()
             .map_err(|e| anyhow!("Getting cursor pos: {e}"))?;
         for marker in &markers.markers {
             // check if it is possible to place immediately
@@ -911,7 +798,8 @@ impl Controller {
                                         drag_from,
                                         drag_res
                                     );
-                                    Self::drag_mouse_abs(drag_from.into(), drag_res.into()).await?;
+                                    Self::drag_mouse_abs(drag_from, drag_res).await
+                                        .map_err(|e| anyhow!("mouse drag failed: {e}"))?;
                                     sleep(wait_duration).await;
                                 }
                                 attempts += 1;
@@ -929,7 +817,6 @@ impl Controller {
                                 return Err(anyhow!(
                                     "Could not drag map perspective to marker location!"
                                 ));
-                                break;
                             } else {
                                 Self::place_marker_from_map(
                                     wait_duration,
@@ -945,9 +832,7 @@ impl Controller {
             }
         }
         sleep(wait_duration).await;
-        /*let original_position = Vec2::new(original_position.x as f32, original_position.y as f32);
-        Self::move_cursor_pos(original_position)?;*/
-        rt::mouse::send_input(original_position)
+        send_input(original_position)
             .map_err(|e| anyhow!("Failed to restore original cursor position: {e}"))?;
         Ok(())
     }
