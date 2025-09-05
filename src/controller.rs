@@ -1183,6 +1183,8 @@ impl Controller {
         use ControllerEvent::*;
         match &event {
             // omit the worst spam offenders
+            ControllerEvent::LoadTextureIntegrated(id, data) =>
+                log::trace!("Controller received event: Load texture {id} from {} bytes", data.len()),
             ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated(..) =>
                 log::trace!("Controller received event: {}", event),
             event =>
@@ -1342,6 +1344,7 @@ pub enum ControllerEvent {
     #[strum(to_string = "Id {0}, pressed {1}")]
     TimerKeyTrigger(String, bool),
     LoadTextureIntegrated(String, Vec<u8>),
+    #[strum(to_string = "Load texture {0} from {1:?}")]
     LoadTexture(RelativePathBuf, PathBuf),
     CheckDataSourceUpdates,
     ReloadTimers,
