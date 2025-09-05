@@ -329,10 +329,8 @@ pub fn screen_mouse_position() -> RuntimeResult<MousePosition> {
     mouse::screen_position()
 }
 
-#[cfg(todo)]
 pub fn window_mouse_position() -> RuntimeResult<MousePosition> {
-    // TODO: maybe from imgui? or wndproc?
-    mouse::screen_position()
+    screen_mouse_position()
         .and_then(|pos| pos.to_window())
 }
 

@@ -1,6 +1,6 @@
 use {
     crate::exports::runtime::{self as rt, keyboard::KeyState, RuntimeResult},
-    std::{iter, mem::transmute, ops, slice},
+    std::{iter, mem::transmute, num::NonZeroI32, ops, slice},
     windows::Win32::{
         Foundation::{LPARAM, POINT, ERROR_SUCCESS, SetLastError, GetLastError},
         Graphics::Gdi,
@@ -11,7 +11,7 @@ use {
     },
 };
 #[cfg(feature = "markers")]
-use crate::marker::atomic::ScreenPoint;
+use crate::marker::atomic::{MarkerInputData, ScreenPoint};
 #[cfg(feature = "extension-arcdps")]
 use arcdps::extras::{self, KeybindChange, MouseCode};
 
@@ -55,8 +55,8 @@ impl MousePosition {
         }
     }
 
-    #[cfg(todo)]
-    pub fn scale_to_primary(mut self) -> RuntimeResult<MousePosition> {
+    /// Normalize screen coordinate
+    pub fn scale_to_primary(self) -> RuntimeResult<MousePosition> {
         let bounds = {
             let (w, h) = primary_screen_bounds()?;
             Self {
@@ -64,7 +64,16 @@ impl MousePosition {
                 y: h.get(),
             }
         };
-        Ok(self / bounds)
+        Ok(match self * 0x10000i32 {
+            normalized => (normalized + MousePosition { x: bounds.x / 2 - 1, y: bounds.y / 2 - 1 }) / bounds,
+            #[cfg(todo)]
+            normalized => normalized / bounds,
+            #[cfg(todo)]
+            normalized => Self {
+                x: (normalized.x as f32 / bounds.x as f32).round() as i32,
+                y: (normalized.y as f32 / bounds.y as f32).round() as i32,
+            },
+        })
     }
 
     pub fn to_screen(mut self) -> RuntimeResult<MousePosition> {
@@ -96,7 +105,7 @@ impl MousePosition {
         }
     }
 
-    pub fn to_input(self) -> KeyboardAndMouse::INPUT {
+    pub fn to_input(self) -> RuntimeResult<KeyboardAndMouse::INPUT> {
         MouseInput::from(self).to_input()
     }
 }
@@ -161,11 +170,40 @@ impl<P> ops::DivAssign<P> for MousePosition where
     }
 }
 
+impl<P: Into<MousePosition>> ops::Mul<P> for MousePosition {
+    type Output = Self;
+
+    fn mul(self, rhs: P) -> Self {
+        let rhs = rhs.into();
+        Self {
+            x: self.x.saturating_mul(rhs.x),
+            y: self.y.saturating_mul(rhs.y),
+        }
+    }
+}
+impl<P> ops::MulAssign<P> for MousePosition where
+    Self: ops::Mul<P>,
+    <MousePosition as ops::Mul<P>>::Output: Into<Self>
+{
+    fn mul_assign(&mut self, rhs: P) {
+        *self = (*self * rhs).into();
+    }
+}
+
 impl From<POINT> for MousePosition {
     fn from(POINT { x, y }: POINT) -> Self {
         Self {
             x,
             y,
+        }
+    }
+}
+
+impl From<i32> for MousePosition {
+    fn from(mag: i32) -> Self {
+        Self {
+            x: mag,
+            y: mag,
         }
     }
 }
@@ -210,9 +248,21 @@ impl From<isize> for MousePosition {
 
 impl From<glam::Vec2> for MousePosition {
     fn from(point: glam::Vec2) -> Self {
+        let mut display_size = None;
+        #[cfg(feature = "markers")]
+        if let Some(mid) = MarkerInputData::read() {
+            display_size.get_or_insert(mid.display_size.to_array());
+        }
+        if let Some(sz) = crate::RENDER_STATE.try_lock().ok().and_then(|state| state.as_ref().and_then(|state| state.last_display_size)) {
+            display_size.get_or_insert(sz);
+        }
+        let [w, h] = match display_size {
+            Some([0.0f32, 0.0f32]) => panic!("screen size missing"),
+            sz => sz.expect("screen size unknown"),
+        };
         Self {
-            x: (0x10000 as f32 * point.x) as i32,
-            y: (0x10000 as f32 * point.y) as i32,
+            x: (point.x * w).round() as i32,
+            y: (point.y * h).round() as i32,
         }
     }
 }
@@ -221,13 +271,12 @@ impl From<glam::Vec2> for MousePosition {
 impl From<ScreenPoint> for MousePosition {
     fn from(point: ScreenPoint) -> Self {
         Self {
-            x: (0x10000 as f32 * point.x) as i32,
-            y: (0x10000 as f32 * point.y) as i32,
+            x: point.x.round() as i32,
+            y: point.y.round() as i32,
         }
     }
 }
 
-#[cfg(todo)]
 pub fn primary_screen_bounds() -> RuntimeResult<(NonZeroI32, NonZeroI32)> {
     let x = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CXSCREEN) };
     let y = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CYSCREEN) };
@@ -317,7 +366,7 @@ impl MouseInput {
             .map(move |b| Self::new(position, b | mods, down))
     }
 
-    pub fn to_input(self) -> KeyboardAndMouse::INPUT {
+    pub fn to_input(self) -> RuntimeResult<KeyboardAndMouse::INPUT> {
         let flag_move = KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
         let flag_button = self.down.and_then(|down| self.button.mouse_flag(down)).unwrap_or_default();
         let xdata = match flag_button {
@@ -325,26 +374,33 @@ impl MouseInput {
                 self.button.button_x(),
             _ => 0,
         };
-        #[cfg(todo)]
-        let (flag_abs, Self { x: dx, y: dy }) = match relative_to {
+        let relative_to = ();
+        let (flag_abs, MousePosition { x: dx, y: dy }) = match relative_to {
             // XXX: relative applies thresholds and mouse speed multipliers, do not want
+            #[cfg(todo)]
             Some(rel) => (0, self - rel),
-            None => (KeyboardAndMouse::MOUSEEVENTF_ABSOLUTE, self),
+            _ => {
+                let position = self.position.to_screen()
+                    .and_then(|pos| pos.scale_to_primary())?;
+                (
+                    KeyboardAndMouse::MOUSEEVENTF_ABSOLUTE,
+                    position
+                )
+            },
         };
-        let flag_abs = KeyboardAndMouse::MOUSEEVENTF_ABSOLUTE;
-        KeyboardAndMouse::INPUT {
+        Ok(KeyboardAndMouse::INPUT {
             r#type: KeyboardAndMouse::INPUT_MOUSE,
             Anonymous: KeyboardAndMouse::INPUT_0 {
                 mi: KeyboardAndMouse::MOUSEINPUT {
-                    dx: self.position.x,
-                    dy: self.position.y,
+                    dx,
+                    dy,
                     mouseData: xdata,
                     time: 0,
                     dwFlags: flag_button | flag_abs | flag_move,
                     dwExtraInfo: 0,
                 },
             },
-        }
+        })
     }
 
     pub const EVENT_MODS: KeyState = KeyState::from_bits_retain(KeyState::CTRL.bits() | KeyState::SHIFT.bits());
@@ -431,12 +487,14 @@ impl TryFrom<MouseCode> for MouseInput {
 impl From<MouseInput> for KeyboardAndMouse::INPUT {
     fn from(input: MouseInput) -> Self {
         input.to_input()
+            .expect("failed to determine screen coordinates")
     }
 }
 
 impl From<MousePosition> for KeyboardAndMouse::INPUT {
     fn from(position: MousePosition) -> Self {
         MouseInput::from(position).to_input()
+            .expect("failed to determine screen coordinates")
     }
 }
 
@@ -473,5 +531,7 @@ pub fn send_mouse(input: MouseInput, prior: Option<MouseInput>) -> RuntimeResult
 }
 
 pub fn send_input<I: Into<MouseInput>>(input: I) -> RuntimeResult<()> {
-    rt::window_send_inputs(iter::once_with(move || input.into().to_input()))
+    let input = input.into();
+    let input = input.to_input()?;
+    rt::window_send_inputs(iter::once_with(move || input))
 }
