@@ -301,7 +301,7 @@ impl KeyState {
     pub fn next_key(self) -> Option<Self> {
         let bit = match self.bits().trailing_zeros() {
             Self::INDEX_BOUND => return None,
-            shift => Self::from_bits_retain(shift),
+            shift => Self::from_index_retain(shift),
         };
         Some(bit)
     }
@@ -311,7 +311,7 @@ impl KeyState {
         if let Some(key) = key {
             self.remove(key);
         }
-        return key
+        key
     }
 
     pub fn iter_keys(mut self) -> impl Iterator<Item = Self> + Clone + Send + Sync + 'static {

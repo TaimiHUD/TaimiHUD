@@ -1015,12 +1015,13 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
         Key::Key(keycode) => {
             if let Some(position) = position {
                 // move the mouse into position first...
-                rt::mouse::send_mouse(MouseInput::with_position(position), None)?;
+                //rt::mouse::send_mouse(MouseInput::with_position(position), None)?;
+                rt::mouse::send_input(MouseInput::with_position(position))?;
             }
             let mut input = KeyInput::empty_with_mods(mods, down);
             input.vk = KeyInput::from(keycode).vk;
-            //rt::keyboard::send_key_input(input)
-            rt::keyboard::send_key_combo(input)
+            rt::keyboard::send_key_input(input)
+            //rt::keyboard::send_key_combo(input)
         },
         Key::Mouse(button) => {
             let button = KeyState::try_from(button)?;
