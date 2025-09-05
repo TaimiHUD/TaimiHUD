@@ -163,6 +163,7 @@ pub mod built_info {
     }
 
     use crate::exports::runtime::update::{GIT_REF_BRANCH_PREFIX, GIT_REF_RELEASE_PREFIX, GIT_REF_TAG_PREFIX};
+    const TAG_STR: [u8; 3] = *b"tag";
     const fn check_is_release() -> bool {
         let head = match GIT_HEAD_REF {
             Some(head) if head.len() >= GIT_REF_RELEASE_PREFIX.len() => head,
@@ -170,9 +171,8 @@ pub mod built_info {
         }.as_bytes();
         let refs = "refs/".len();
         let tag = refs + "tags/".len();
-        const TAG_STR: [u8; 3] = *b"tag";
         match [head[refs], head[refs + 1], head[refs + 2]] {
-            TAG_STR if head[tag] != b'v' => (),
+            self::TAG_STR if head[tag] == b'v' => (),
             _ => return false,
         }
 
@@ -216,7 +216,7 @@ nexus::export! {
     load: exports::nexus::cb_load,
     unload: exports::nexus::cb_unload,
     flags: AddonFlags::None,
-    provider: UpdateProvider::GitHub,
+    provider: if built_info::IS_TAGGED_VERSION { UpdateProvider::GitHub } else { UpdateProvider::Manual },
     update_link: exports::gh_repo_url!(),
 }
 
