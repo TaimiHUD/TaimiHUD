@@ -55,6 +55,9 @@ impl ConfigTabState {
                 crate::TEXTURES.quit();
             }
         }
+        if self.katrender && ui.button("Reload Render") {
+            crate::reload_render(false);
+        }
         let markers_window_closure = || {
             if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
                 self.marker_autoplace = settings.marker_autoplace.clone();

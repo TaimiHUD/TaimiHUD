@@ -14,14 +14,7 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use {
-    space::{engine::{Engine, SpaceEvent}, resources::Texture},
-    std::{
-        cell::RefCell,
-        path::PathBuf,
-        sync::atomic::{AtomicBool, Ordering},
-    },
-};
+use space::engine::{Engine, SpaceEvent};
 use {
     crate::{
         controller::{Controller, ControllerEvent},
@@ -53,6 +46,7 @@ use {
         ffi::{c_char, CStr},
         mem,
         panic,
+        path::PathBuf,
         ptr,
         sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
@@ -68,6 +62,7 @@ use nexus::{
         event_consume,
         extras::EXTRAS_SQUAD_UPDATE,
         Event, MUMBLE_IDENTITY_UPDATED,
+        WINDOW_RESIZED,
     },
     texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
     gui::{register_render, render, RenderType},
@@ -671,6 +666,10 @@ fn load_nexus() {
             }
         ))
         .revert_on_unload();
+
+    WINDOW_RESIZED.subscribe(event_consume!(<()> |_| {
+        reload_render(true);
+    })).revert_on_unload();
 }
 
 #[cfg(feature = "extension-arcdps")]
@@ -881,6 +880,8 @@ fn render_space(ui: &nexus::imgui::Ui) {
         return
     }
     let mut engine = match ENGINE.try_lock() {
+        // if early game loading or charsel, delay init
+        Ok(e) if e.is_none() && !rt::is_ingame().unwrap_or(false) => return,
         Ok(e) => e,
         _ => return,
     };
@@ -1083,13 +1084,37 @@ fn unload_render_background() {
     #[cfg(feature = "space")]
     if let Some(Ok(engine)) = ENGINE.lock().unwrap().take() {
         log::debug!("skipping engine drop()");
-        std::mem::forget(engine);
+        mem::forget(engine);
     }
 
     let _state = RENDER_STATE.lock().unwrap().take();
 
     TEXTURES.cleanup(false);
     RENDER_UNLOAD.notify_all();
+}
+
+fn reload_render(superficial: bool) {
+    log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
+
+    #[cfg(feature = "goggles")]
+    let _ = goggles::shutdown();
+
+    #[cfg(feature = "space")]
+    if let Some(Ok(mut engine)) = ENGINE.lock().unwrap().take() {
+        log::debug!("reloading space engine");
+        if RenderState::is_render_thread() {
+            engine.cleanup();
+        } else {
+            mem::forget(engine);
+            log::warn!("TODO: reloading outside of render thread");
+        }
+        // ... and let it reinit on its own next render frame
+    }
+
+    if !superficial {
+        // probably no need to reload textures/etc unless we've lost the entire d3d device or something?
+        TEXTURES.cleanup(RenderState::is_render_thread());
+    }
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
