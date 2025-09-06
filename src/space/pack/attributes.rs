@@ -1,5 +1,5 @@
 use {
-    super::{taco_xml_to_guid, Pack, PackTextureHandle},
+    super::{taco_xml_to_guid, Pack},
     std::str::FromStr,
     uuid::Uuid,
     xml::attribute::OwnedAttribute,
@@ -22,7 +22,7 @@ pub struct MarkerAttributes {
 
     // POI-specific.
     pub height_offset: Option<f32>,
-    pub icon_file: Option<PackTextureHandle>,
+    pub icon_file: Option<String>,
     pub icon_size: Option<f32>,
     pub invert_behavior: Option<bool>,
     pub map_display_size: Option<f32>,
@@ -38,7 +38,7 @@ pub struct MarkerAttributes {
 
     // Trail-specific.
     pub anim_speed: Option<f32>,
-    pub texture: Option<PackTextureHandle>,
+    pub texture: Option<String>,
     pub trail_scale: Option<f32>,
     pub is_wall: Option<bool>,
 
@@ -298,7 +298,8 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
             self.height_offset = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            self.icon_file = Some(pack.register_texture(&attr.value));
+            //self.icon_file = Some(pack.register_texture(&attr.value));
+            self.icon_file = Some(attr.value.clone());
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
             self.icon_size = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
@@ -352,7 +353,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("animspeed") {
             self.anim_speed = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("texture") {
-            self.texture = Some(pack.register_texture(&attr.value));
+            self.texture = Some(attr.value.clone());
         } else if attr_name.eq_ignore_ascii_case("trailscale") {
             self.trail_scale = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("iswall") {

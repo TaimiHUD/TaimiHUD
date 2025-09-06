@@ -1,5 +1,5 @@
 use {
-    super::{attributes::MarkerAttributes, taco_safe_name, taco_xml_to_guid, Pack},
+    super::{attributes::MarkerAttributes, taco_safe_name, taco_xml_to_guid, Pack, ActivePack},
     crate::{
         marker::atomic::MapSpace,
         space::{
@@ -223,22 +223,22 @@ pub struct ActivePoi {
 
 impl ActivePoi {
     pub fn build(
-        pack: &mut Pack,
+        pack: &mut ActivePack,
         index: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActivePoi> {
-        let category_idx = pack
+        let category_idx = pack.pack
             .categories
             .all_categories
-            .get_index_of(&pack.pois[index].category)
+            .get_index_of(&pack.pack.pois[index].category)
             .unwrap_or(0);
-        let icon_handle = pack.pois[index]
+        let icon_handle = pack.pack.pois[index]
             .attributes
             .icon_file
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
         let icon = pack.get_or_load_texture(icon_handle, device)?;
 
-        let attrs = &pack.pois[index].attributes;
+        let attrs = &pack.pack.pois[index].attributes;
         let position =
             pack.pois[index].position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
         let scale = attrs.icon_size.unwrap_or(1.0);
