@@ -1094,6 +1094,8 @@ fn unload_render_background() {
 }
 
 fn reload_render(superficial: bool) {
+    log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
+
     #[cfg(feature = "goggles")]
     let _ = goggles::shutdown();
 
