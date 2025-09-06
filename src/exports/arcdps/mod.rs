@@ -177,13 +177,13 @@ fn init() -> Result<(), &'static str> {
     if keybinds.is_empty() {
         macro_rules! default_keybind {
             () => {};
-            ($control:ident => KeyCode::$key:ident, $mod_alt:literal, $mod_ctrl:literal, $mod_shift: literal; $($rest:tt)*) => {
+            ($control:ident => KeyCode::$key:ident, $mods:expr; $($rest:tt)*) => {
                 keybinds.insert(Control::$control, KeybindChange {
                     control: Control::$control,
                     index: Control::$control as _,
-                    mod_alt: $mod_alt,
-                    mod_ctrl: $mod_ctrl,
-                    mod_shift: $mod_shift,
+                    mod_alt: $mods.contains(KeyState::ALT),
+                    mod_ctrl: $mods.contains(KeyState::CTRL),
+                    mod_shift: $mods.contains(KeyState::SHIFT),
                     key: Key::Key(arcdps::extras::KeyCode::$key)
                 });
                 default_keybind! {
@@ -192,18 +192,20 @@ fn init() -> Result<(), &'static str> {
             };
         }
 
+        #[cfg(feature = "markers")]
         default_keybind! {
-            Squad_Location_Arrow => KeyCode::Number1, true, false, false;
-            Squad_Location_Circle => KeyCode::Number2, true, false, false;
-            Squad_Location_Square => KeyCode::Number3, true, false, false;
-            Squad_Location_Heart => KeyCode::Number4, true, false, false;
-            Squad_Location_Star => KeyCode::Number5, true, false, false;
-            Squad_Location_Spiral => KeyCode::Number6, true, false, false;
-            Squad_Location_Triangle => KeyCode::Number7, true, false, false;
-            Squad_Location_X => KeyCode::Number8, true, false, false;
-            Squad_ClearAllLocationMarkers => KeyCode::Number9, true, false, false;
+            Squad_Location_Arrow => KeyCode::Number1, KeyState::ALT;
+            Squad_Location_Circle => KeyCode::Number2, KeyState::ALT;
+            Squad_Location_Square => KeyCode::Number3, KeyState::ALT;
+            Squad_Location_Heart => KeyCode::Number4, KeyState::ALT;
+            Squad_Location_Star => KeyCode::Number5, KeyState::ALT;
+            Squad_Location_Spiral => KeyCode::Number6, KeyState::ALT;
+            Squad_Location_Triangle => KeyCode::Number7, KeyState::ALT;
+            Squad_Location_X => KeyCode::Number8, KeyState::ALT;
+            Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
         }
     }
+    drop(keybinds);
 
     res.map_err(Into::into)
 }
