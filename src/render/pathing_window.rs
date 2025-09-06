@@ -172,21 +172,15 @@ impl PathingWindowState {
                                         ui.table_next_column();
                                         for (name, mut pack) in &mut engine.packs.loaded_packs {
                                             let mut recompute = false;
-                                            let root = &mut pack.categories.root_categories;
-                                            let all_categories = &pack.categories.all_categories;
-                                            let enabled_categories = &mut pack.user_category_state;
-                                            for cat_name in root.iter() {
-                                                all_categories[cat_name].draw(
-                                                    ui,
-                                                    all_categories,
-                                                    enabled_categories,
-                                                    self.filter_state,
-                                                    &mut self.open_items,
-                                                    true,
-                                                    &mut recompute,
-                                                    &self.search_state
-                                                );
-                                            }
+                                            pack.draw_categories(
+                                                ui,
+                                                enabled_categories,
+                                                self.filter_state,
+                                                &mut self.open_items,
+                                                true,
+                                                &mut recompute,
+                                                &self.search_state
+                                            );
                                             if recompute {
                                                 pack.recompute_enabled();
                                             }

@@ -2,7 +2,7 @@ use {
     super::{
         dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
-        pack::{poi::PoiCommonRenderData, Pack, PackCollection},
+        pack::{poi::PoiCommonRenderData, ActivePack, PackCollection},
         render_list::{MapFrustum, RenderList},
     },
     crate::{

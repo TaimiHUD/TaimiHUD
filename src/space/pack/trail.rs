@@ -1,7 +1,7 @@
 use {
     super::{
         attributes::MarkerAttributes, loader::PackLoaderContext, taco_safe_name, taco_xml_to_guid,
-        Pack,
+        ActivePack, Pack,
     },
     crate::{
         marker::atomic::MapSpace,
@@ -170,17 +170,18 @@ pub struct ActiveTrail {
 
 impl ActiveTrail {
     pub fn build(
-        pack: &mut Pack,
+        pack: &mut ActivePack,
         index: usize,
         render_bookmark: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActiveTrail> {
         let category_idx = pack
+            .pack
             .categories
             .all_categories
-            .get_index_of(&pack.trails[index].category)
+            .get_index_of(&pack.pack.trails[index].category)
             .unwrap_or(0);
-        let texture_handle = pack.trails[index]
+        let texture_handle = pack.pack.trails[index]
             .attributes
             .texture
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
@@ -188,7 +189,7 @@ impl ActiveTrail {
             .get_or_load_texture(texture_handle, device)
             .context("Loading trail texture")?;
 
-        let attrs = &pack.trails[index].attributes;
+        let attrs = &pack.pack.trails[index].attributes;
         let is_wall = attrs.is_wall.unwrap_or(false);
         let trail_scale = attrs.trail_scale.unwrap_or(1.0);
 
@@ -196,7 +197,7 @@ impl ActiveTrail {
         let mut section_bookmarks: Vec<u32> = vec![0];
         let mut section_bounds = Vec::new();
 
-        for (isec, section) in pack.trails[index].data.sections.iter().enumerate() {
+        for (isec, section) in pack.pack.trails[index].data.sections.iter().enumerate() {
             if section.points.is_empty() {
                 log::warn!("Section {isec} is empty.");
                 continue;
@@ -290,8 +291,8 @@ impl ActiveTrail {
         if vertices.is_empty() {
             log::error!(
                 "Empty trail {}:{}",
-                pack.trails[index].category,
-                pack.trails[index].guid,
+                pack.pack.trails[index].category,
+                pack.pack.trails[index].guid,
             );
         }
 
