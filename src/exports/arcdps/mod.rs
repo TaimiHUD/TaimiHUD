@@ -46,6 +46,7 @@ use dpsapi::api::ApiExports as _;
 pub(crate) mod r#extern;
 #[cfg(feature = "extension-arcdps-codegen")]
 pub(crate) mod cb;
+#[cfg(feature = "extension-arcdps-extras")]
 pub(crate) mod unofficial_extras;
 
 pub const SIG: u32 = exports::SIG as u32;
@@ -227,6 +228,14 @@ fn release() {
 
     if available() && !rt::nexus_available() {
         crate::unload();
+    }
+
+    #[cfg(feature = "extension-arcdps-extras")]
+    if extras_available() {
+        log::trace!("extras release");
+        unsafe {
+            unofficial_extras::extras_release();
+        }
     }
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
@@ -916,6 +925,7 @@ fn combat_local(event: CombatArgs) {
 
 static EXTRAS_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
+#[cfg(feature = "extension-arcdps-extras")]
 fn extras_init(info: ExtrasVersion) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
 
@@ -929,6 +939,7 @@ pub fn game_language() -> Option<Language> {
     Language::try_from(id).ok()
 }
 
+#[cfg(feature = "extension-arcdps-extras")]
 fn extras_language(language: Language) {
     if !available() { return }
 
@@ -957,6 +968,7 @@ const INTERESTING_BINDS: [Control; 18] = [
 
 static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap::new());
 
+#[cfg(feature = "extension-arcdps-extras")]
 fn extras_keybind(changed: KeybindChange) {
     if !available() { return }
 
@@ -974,6 +986,7 @@ fn extras_keybind(changed: KeybindChange) {
     kb.insert(changed.control, changed);
 }
 
+#[cfg(feature = "extension-arcdps-extras")]
 fn extras_squad_update(members: UserInfoIter) {
     if !available() { return }
 
@@ -1028,7 +1041,6 @@ pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
     }.ok_or(NO_EXPORT).map(Some)
 }
 
-#[cfg(todo)]
 pub fn extras_available() -> bool {
     EXTRAS_AVAILABLE.load(Ordering::Relaxed)
 }

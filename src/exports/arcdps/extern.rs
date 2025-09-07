@@ -311,6 +311,9 @@ pub fn dxgi_swap_chain() -> Option<windows::core::InterfaceRef<'static, windows:
     })
 }
 
+#[no_mangle]
+#[cfg(feature = "extension-arcdps-extras")]
 pub unsafe extern "C" fn arcdps_unofficial_extras_subscriber_init(info: usize, subscriber: usize) {
+    // TODO: "system" or "C" ABI relevant?
     exports::unofficial_extras::extras_init_raw(info as *const _, subscriber as *mut _)
 }
