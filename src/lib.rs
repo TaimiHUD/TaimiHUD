@@ -228,11 +228,7 @@ arcdps::export! {
     raw_wnd_nofilter: exports::arcdps::cb::wnd_raw,
     combat_local: exports::arcdps::cb::combat_local,
     update_url: exports::arcdps::cb::update_url,
-    raw_extras_init: exports::arcdps::unofficial_extras::extras_init_raw,
-    /*raw_extras_init: exports::arcdps::cb::extras_init,
-    extras_language_changed: exports::arcdps::cb::extras_language,
-    extras_keybind_changed: exports::arcdps::cb::extras_keybind,
-    extras_squad_update: exports::arcdps::cb::extras_squad_update,*/
+    raw_extras_init: exports::arcdps::cb::extras_init_raw,
 }
 
 static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);

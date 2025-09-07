@@ -60,6 +60,7 @@ markers-edit = [
 extension-arcdps = [
   #"extension-arcdps-codegen",
   "extension-arcdps-extern",
+  "extension-arcdps-extras",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/identity",
   "arcloader-mumblelink/gw2_mumble",
@@ -71,6 +72,9 @@ extension-arcdps = [
   "windows/Win32_System_LibraryLoader",
   "windows/Win32_System_Memory",
   "texture-loader",
+]
+extension-arcdps-extras = [
+  "closure-ffi",
 ]
 extension-arcdps-codegen = [
   #"dpsapi/arcdps-015",
@@ -183,6 +187,7 @@ taimi_pack = { path = "./pathing/pack", optional = true }
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
 sync-unsafe-cell = { version = "0.1", optional = true }
+closure-ffi = { version = "3", optional = true }
 
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }

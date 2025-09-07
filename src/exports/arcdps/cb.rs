@@ -111,27 +111,16 @@ pub fn combat_local(
     exports::combat_local(event)
 }
 
-#[cfg(todo)]
-pub fn extras_init(info: ExtrasAddonInfo, account_name: Option<&str>) {
-    if let Some(name) = account_name {
-        crate::receive_account_name(name);
+pub(crate) unsafe extern "C-unwind" fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut ExtrasSubscriberInfo) {
+    match (info, subscriber) {
+        #[cfg(feature = "extension-arcdps-extras")]
+        (info, subscriber) =>
+            exports::unofficial_extras::extras_init_raw(info, subscriber),
+        #[cfg(not(feature = "extension-arcdps-extras"))]
+        _ => {
+            log::debug!("arcdps_unofficial_extras support disabled");
+        },
     }
-    exports::extras_init(info.version())
-}
-
-#[cfg(todo)]
-pub fn extras_language(language: Language) {
-    exports::extras_language(language)
-}
-
-#[cfg(todo)]
-pub fn extras_keybind(changed: KeybindChange) {
-    exports::extras_keybind(changed)
-}
-
-#[cfg(todo)]
-pub fn extras_squad_update(members: UserInfoIter) {
-    exports::extras_squad_update(members)
 }
 
 pub fn available() -> bool {
