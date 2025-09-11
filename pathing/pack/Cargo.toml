@@ -8,10 +8,14 @@ edition = "2021"
 [features]
 default = [
   "zip",
+  "fixup-ladyelyssa",
+  "fixup-tehstrails",
 ]
 zip = [
   "dep:zip",
 ]
+fixup-ladyelyssa = []
+fixup-tehstrails = []
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
