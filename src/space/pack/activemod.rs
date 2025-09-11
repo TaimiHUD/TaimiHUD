@@ -111,8 +111,10 @@ impl ActivePack {
         }
         current_pois
     }
-    pub fn draw_categories(&mut self, ui: &Ui, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
+
+    pub fn draw_categories(&mut self, ui: &Ui, filter_state: PathingFilterState, open_items: &mut HashSet<String>, recompute: &mut bool, search_state: &PathingSearchState) {
         let root = &self.pack.categories.root_categories;
+        let is_root = true;
         let all_categories = &self.pack.categories.all_categories;
         let enabled_categories = &mut self.user_category_state;
         for cat_name in root.iter() {
@@ -121,8 +123,8 @@ impl ActivePack {
                 all_categories,
                 enabled_categories,
                 filter_state,
-               open_items,
-                true,
+                open_items,
+                is_root,
                 recompute,
                 search_state
             );
