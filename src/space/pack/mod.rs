@@ -49,24 +49,19 @@ pub struct Pack {
     pub pois: Vec<poi::Poi>,
     pub trails: Vec<trail::Trail>,
     pub categories: CategoryCollection,
-
-    loader: Option<Box<dyn PackLoaderContext + Send>>,
-
 }
 
 impl Pack {
-    pub fn load(mut loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<Pack> {
+    pub fn load<L: PackLoaderContext>(loader: &mut L) -> anyhow::Result<Pack> {
         let mut pack = Pack::default();
 
         let pack_defs = loader.all_files_with_ext("xml")?;
         for def in pack_defs {
-            parse_pack_def(&mut pack, &mut loader, &def)?;
+            parse_pack_def(&mut pack, loader, &def)?;
         }
 
         merge_category_attributes(&mut pack);
         apply_marker_attributes(&mut pack);
-
-        pack.loader = Some(Box::new(loader));
 
         Ok(pack)
     }

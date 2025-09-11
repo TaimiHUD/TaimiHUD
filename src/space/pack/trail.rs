@@ -170,27 +170,24 @@ pub struct ActiveTrail {
 
 impl ActiveTrail {
     pub fn build(
-        pack: &mut ActivePack,
+        loader: &mut ActivePack,
+        trail: &Trail,
         index: usize,
+        category_idx: usize,
         render_bookmark: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActiveTrail> {
-        let category_idx = pack
-            .pack
-            .categories
-            .all_categories
-            .get_index_of(&pack.pack.trails[index].category)
-            .unwrap_or(0);
-        let texture_handle = pack.pack.trails[index]
+        let texture_handle = trail
             .attributes
             .texture
-            .clone() // TODO: this clone could be unnecessary
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
-        let texture = pack
-            .get_or_load_texture(&texture_handle, device)
+        let texture_handle = loader.register_texture(texture_handle);
+        let texture = loader
+            .get_or_load_texture(texture_handle, device)
             .context("Loading trail texture")?;
 
-        let attrs = &pack.pack.trails[index].attributes;
+        let attrs = &trail.attributes;
         let is_wall = attrs.is_wall.unwrap_or(false);
         let trail_scale = attrs.trail_scale.unwrap_or(1.0);
 
@@ -198,7 +195,7 @@ impl ActiveTrail {
         let mut section_bookmarks: Vec<u32> = vec![0];
         let mut section_bounds = Vec::new();
 
-        for (isec, section) in pack.pack.trails[index].data.sections.iter().enumerate() {
+        for (isec, section) in trail.data.sections.iter().enumerate() {
             if section.points.is_empty() {
                 log::warn!("Section {isec} is empty.");
                 continue;
@@ -292,8 +289,8 @@ impl ActiveTrail {
         if vertices.is_empty() {
             log::error!(
                 "Empty trail {}:{}",
-                pack.pack.trails[index].category,
-                pack.pack.trails[index].guid,
+                trail.category,
+                trail.guid,
             );
         }
 
@@ -304,7 +301,7 @@ impl ActiveTrail {
             category_idx,
             filtered: false,
             section_bounds,
-            texture,
+            texture: texture.clone(),
             section_vbuffer,
             section_bookmarks,
             map_vbuffer: None,

@@ -223,25 +223,24 @@ pub struct ActivePoi {
 
 impl ActivePoi {
     pub fn build(
-        pack: &mut ActivePack,
-        index: usize,
+        loader: &mut ActivePack,
+        poi: &Poi,
+        poi_idx: usize,
+        category_idx: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActivePoi> {
-        let category_idx = pack.pack
-            .categories
-            .all_categories
-            .get_index_of(&pack.pack.pois[index].category)
-            .unwrap_or(0);
-        let icon_handle = pack.pack.pois[index]
+        let icon_handle = poi
             .attributes
             .icon_file
-            .clone() // TODO: this clone could be unnecessary
+            .as_ref() // TODO: this clone could be unnecessary
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
-        let icon = pack.get_or_load_texture(&icon_handle, device)?;
+        let icon_handle = loader.register_texture(icon_handle);
+        let icon = loader.get_or_load_texture(icon_handle, device)
+            .context("Loading poi texture")?;
 
-        let attrs = &pack.pack.pois[index].attributes;
+        let attrs = &poi.attributes;
         let position =
-            pack.pack.pois[index].position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
+            poi.position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
         let scale = attrs.icon_size.unwrap_or(1.0);
         let tint = attrs.tint.unwrap_or(Vec4::ONE);
         let opacity = attrs.alpha.unwrap_or(1.0);
@@ -251,7 +250,7 @@ impl ActivePoi {
         let bounds = Box3::from_origin_and_size(position, glamour::size3!(max_diagonal));
 
         Ok(ActivePoi {
-            poi_idx: index,
+            poi_idx,
             category_idx,
             filtered: false,
             bounds,
@@ -259,11 +258,11 @@ impl ActivePoi {
             tint,
             opacity,
             scale,
-            icon,
+            icon: icon.clone(),
         })
     }
 
-    pub fn update(pack: &mut Pack, poi_idx: usize) {
+    pub fn update(pack: &mut ActivePack, poi_idx: usize) {
         let _ = pack;
         let _ = poi_idx;
     }

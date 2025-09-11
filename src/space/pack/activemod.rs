@@ -48,9 +48,9 @@ pub enum UnloadedReason {
 
 
 
-#[derive(Default)]
 pub struct ActivePack {
-    pub pack: Pack,
+    pub pack: Arc<Pack>,
+    loader: Box<dyn PackLoaderContext + Send>,
 
     // Actively loaded data.
     pub enabled_categories: BitVec,
@@ -68,25 +68,32 @@ pub struct ActivePack {
     poi_bookmark: usize,
 
     // TODO: Scripting.
-    _script_engine: (),
+    //_script_engine: (),
 }
 
 impl ActivePack {
-    pub fn load(mut loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
-        let pack = Pack::load(loader)?;
+    pub fn load(loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
+        let mut loader = Box::new(loader);
+        let pack = Pack::load(&mut *loader)?;
+        let enabled_categories: BitVec = pack.categories.all_categories.values()
+            .map(|category| category.default_toggle)
+            .collect();
 
-        let mut active_pack = ActivePack::default();
-
-        active_pack.pack = pack;
-
-        active_pack.enabled_categories
-            .reserve(active_pack.pack.categories.all_categories.len());
-
-        for category in active_pack.pack.categories.all_categories.values() {
-            active_pack.enabled_categories.push(category.default_toggle);
-        }
-
-        active_pack.user_category_state = active_pack.enabled_categories.clone();
+        let active_pack = ActivePack {
+            loader,
+            pack: Arc::new(pack),
+            user_category_state: enabled_categories.clone(),
+            enabled_categories,
+            active_pois: Default::default(),
+            active_trails: Default::default(),
+            texture_list: Default::default(),
+            loaded_textures: Default::default(),
+            unused_textures: Default::default(),
+            dirty_pois: Default::default(),
+            dirty_trails: Default::default(),
+            render_list_bookmark: Default::default(),
+            poi_bookmark: Default::default(),
+        };
 
         Ok(active_pack)
     }
@@ -105,7 +112,7 @@ impl ActivePack {
         current_pois
     }
     pub fn draw_categories(&mut self, ui: &Ui, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
-        let root = &mut self.pack.categories.root_categories;
+        let root = &self.pack.categories.root_categories;
         let all_categories = &self.pack.categories.all_categories;
         let enabled_categories = &mut self.user_category_state;
         for cat_name in root.iter() {
@@ -233,7 +240,7 @@ impl ActivePack {
     }
 
     pub fn recompute_enabled(&mut self) {
-        let all = &mut self.pack.categories.all_categories;
+        let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
                 root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
@@ -273,7 +280,7 @@ impl ActivePack {
 
     pub fn register_texture(&mut self, asset: &str) -> usize {
         if let Some(id) = self.texture_list.get_index_of(asset) {
-            return id.clone();
+            return id;
         }
 
         self.loaded_textures.push(false);
@@ -281,22 +288,17 @@ impl ActivePack {
         self.texture_list.insert_full(asset.to_string(), None).0
     }
 
-    pub fn get_or_load_texture(
-        &mut self,
-        handle: &str,
+    pub fn get_or_load_texture<'t>(
+        &'t mut self,
+        idx: usize,
         device: &ID3D11Device,
-    ) -> anyhow::Result<Arc<Texture>> {
-        let Some(loader) = &mut self.pack.loader else {
-            anyhow::bail!("Inconsistent internal state.");
-        };
-        let slot = self.texture_list.get_full_mut(handle)
-            .ok_or_else(|| { anyhow!("Texture {} not in list at all", handle) })?;
-
-
+    ) -> anyhow::Result<&'t Arc<Texture>> {
+        let (asset, slot) = self.texture_list.get_index_mut(idx)
+            .ok_or_else(|| { anyhow!("Texture {} not in list at all", idx) })?;
 
         let texture = match slot {
-    (idx, _, slot_texture@None) => {
-                let data = loader.load_asset_dyn(handle)?;
+            slot_texture@None => {
+                let data = self.loader.load_asset_dyn(asset)?;
                 let image = image::ImageReader::new(data)
                     .with_guessed_format()?
                     .decode()?
@@ -304,13 +306,13 @@ impl ActivePack {
                     .into_flat_samples();
 
                 let texture = Arc::new(Texture::load_rgba8_uncached(device, image)?);
-                *slot_texture = Some(texture.clone());
+                let texture = slot_texture.insert(texture);
                 self.loaded_textures.set(idx, true);
                 texture
             }
-            (_, _, Some(texture)) => texture.clone(),
+            Some(texture) => texture,
         };
-        self.unused_textures.set(slot.0, false);
+        self.unused_textures.set(idx, false);
         Ok(texture)
     }
 
@@ -329,23 +331,28 @@ impl ActivePack {
         self.dirty_pois.clear();
         self.render_list_bookmark = render_entities.len();
 
-        for i_trail in 0..self.pack.trails.len() {
-            if self.pack.trails[i_trail].data.map_id != map_id {
+        let pack = self.pack.clone();
+
+        for (i_trail, pack_trail) in pack.trails.iter().enumerate() {
+            if pack_trail.data.map_id != map_id {
                 continue;
             }
-            let mut id = self.pack.trails[i_trail].guid;
+            let mut id = pack_trail.guid;
             if self.active_trails.contains_key(&id) {
                 log::warn!(
                     "Pack {} contains a duplicate trail GUID `{id}`. \
                     Randomizing to ensure it may still be rendered.",
-                    self.pack.name
+                    pack.name
                 );
                 while self.active_trails.contains_key(&id) {
                     id = Uuid::new_v4();
                 }
             }
 
-            let trail = match ActiveTrail::build(self, i_trail, render_entities.len(), device) {
+            let category_idx = pack.categories.all_categories
+                .get_index_of(&pack_trail.category)
+                .unwrap_or(0);
+            let trail = match ActiveTrail::build(self, pack_trail, i_trail, category_idx, render_entities.len(), device) {
                 Ok(trail) => trail,
                 Err(e) => {
                     log::warn!("Error loading trail: {e:?}");
@@ -375,11 +382,11 @@ impl ActivePack {
 
         self.poi_bookmark = render_entities.len();
 
-        for i_poi in 0..self.pack.pois.len() {
-            if self.pack.pois[i_poi].map_id != map_id {
+        for (i_poi, pack_poi) in pack.pois.iter().enumerate() {
+            if pack_poi.map_id != map_id {
                 continue;
             }
-            let mut id = self.pack.pois[i_poi].guid;
+            let mut id = pack_poi.guid;
             if self.active_trails.contains_key(&id) {
                 log::warn!(
                     "Pack {} contains a duplicate poi GUID `{id}`. \
@@ -391,7 +398,10 @@ impl ActivePack {
                 }
             }
 
-            let poi = match ActivePoi::build(self, i_poi, device) {
+            let category_idx = pack.categories.all_categories
+                .get_index_of(&pack_poi.category)
+                .unwrap_or(0);
+            let poi = match ActivePoi::build(self, pack_poi, i_poi, category_idx, device) {
                 Ok(poi) => poi,
                 Err(e) => {
                     log::warn!("Error loading poi: {e:?}");
