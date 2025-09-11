@@ -176,7 +176,6 @@ impl PathingWindowState {
                                                 ui,
                                                 self.filter_state,
                                                 &mut self.open_items,
-                                                true,
                                                 &mut recompute,
                                                 &self.search_state
                                             );
