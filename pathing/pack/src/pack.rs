@@ -8,11 +8,12 @@ use {
     },
     indexmap::{map::Entry, IndexMap, IndexSet},
     std::{
+        fmt,
         io::{Cursor, Read as _},
         sync::Arc,
     },
     uuid::Uuid,
-    xml::{common::Position, reader::XmlEvent},
+    xml::{common::Position, name::OwnedName, reader::XmlEvent},
 };
 
 #[derive(Default)]
@@ -82,7 +83,24 @@ pub fn parse_pack_def(
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf)?;
     let data = String::from_utf8_lossy(&buf);
-    let mut parser = xml::EventReader::new(Cursor::new(data.into_owned().into_bytes()));
+    let pack_xml = data.into_owned();
+    let pack_xml = match pack_xml {
+        #[cfg(feature = "fixup-ladyelyssa")]
+        xml => xml
+            // TODO: regex etc .-.
+            // Clean up LadyElyssa.taco typos
+            .replace("b&w.png", "b&amp;w.png")
+            .replace(r#""[&"#, r#""[&amp;"#)
+            .replace(r#"[&B"#, r#"[&amp;B"#)
+            .replace("R&D Waypoint", "R&amp;D Waypoint")
+            .replace(" & ", " &amp; ")
+            .replace("Remains&DESTROY", "Remains&amp;DESTROY")
+        ,
+        #[allow(unreachable_patterns)]
+        xml => xml,
+    };
+
+    let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_bytes()));
 
     match inner_parse_pack_def(pack, ctx, &mut parser) {
         Ok(()) => Ok(()),
@@ -133,7 +151,41 @@ fn inner_parse_pack_def(
     let mut parse_stack: Vec<PartialItem> = Vec::with_capacity(16);
 
     loop {
-        match parser.next()? {
+        let elem = parser.next()?;
+        let elem = match elem {
+            #[cfg(feature = "fixup-ladyelyssa")]
+            XmlEvent::StartElement { name, attributes, namespace } if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") => {
+                // LadyElyssa.taco typo/corruption
+                log::debug!("compensating for invalid element {name}");
+                XmlEvent::StartElement {
+                    name: OwnedName::local("markercategory"),
+                    attributes,
+                    namespace,
+                }
+            },
+            #[cfg(feature = "fixup-ladyelyssa")]
+            XmlEvent::EndElement { name } if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") => {
+                log::debug!("compensating for invalid element {name}");
+                XmlEvent::EndElement {
+                    name: OwnedName::local("markercategory"),
+                }
+            },
+            elem => elem,
+        };
+        match &elem {
+            #[cfg(feature = "fixup-tehstrails")]
+            XmlEvent::StartElement { name, .. } if name.local_name.eq_ignore_ascii_case("poi") && parse_stack.last().map(|p| matches!(p, PartialItem::OverlayData)).unwrap_or(false) => {
+                // TehsTrails/Parser/TehsTrails.xml issue
+                log::debug!("compensating for invalid element <{}> inside OverlayData", name);
+                parse_stack.push(PartialItem::PoiGroup);
+            },
+            #[cfg(feature = "fixup-tehstrails")]
+            XmlEvent::EndElement { name, .. } if name.local_name.eq_ignore_ascii_case("overlaydata") && parse_stack.last().map(|p| matches!(p, PartialItem::PoiGroup)).unwrap_or(false) => {
+                parse_stack.pop();
+            },
+            _ => (),
+        }
+        match elem {
             XmlEvent::StartElement {
                 name, attributes, ..
             } if valid_elem_start(parse_stack.last(), &name) => {
@@ -162,10 +214,10 @@ fn inner_parse_pack_def(
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },
-                    _ => anyhow::bail!("Unexpected <{name}>"),
+                    _ => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
                 }
             }
-            XmlEvent::StartElement { name, .. } => anyhow::bail!("Unexpected <{name}>"),
+            XmlEvent::StartElement { name, .. } => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
             XmlEvent::EndElement { .. }
                 if parse_stack.last().map(|i| matches!(i, PartialItem::PoisonElem)).unwrap_or(false) =>
             {
@@ -262,7 +314,28 @@ impl PartialItem {
     }
 }
 
-fn valid_elem_start(stack_top: Option<&PartialItem>, name: &xml::name::OwnedName) -> bool {
+impl fmt::Display for PartialItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::OverlayData => {
+                write!(f, "overlay data")
+            },
+            Self::PoiGroup => write!(f, "POI group"),
+            Self::MarkerCategory(category) => {
+                write!(f, "category {}", category.full_id)
+            },
+            Self::Poi(poi) => {
+                write!(f, "poi {}", poi.guid)
+            },
+            Self::Trail(trail) => {
+                write!(f, "trail {}", trail.guid)
+            },
+            Self::PoisonElem => write!(f, "poisoned"),
+        }
+    }
+}
+
+fn valid_elem_start(stack_top: Option<&PartialItem>, name: &OwnedName) -> bool {
     match (name.local_name.to_ascii_lowercase().as_str(), stack_top) {
         ("overlaydata", None) => true,
         ("markercategory", Some(PartialItem::OverlayData | PartialItem::MarkerCategory(_))) => true,
@@ -273,7 +346,7 @@ fn valid_elem_start(stack_top: Option<&PartialItem>, name: &xml::name::OwnedName
     }
 }
 
-fn valid_elem_end(stack_top: Option<&PartialItem>, name: &xml::name::OwnedName) -> bool {
+fn valid_elem_end(stack_top: Option<&PartialItem>, name: &OwnedName) -> bool {
     match (name.local_name.to_ascii_lowercase().as_str(), stack_top) {
         ("overlaydata", Some(PartialItem::OverlayData)) => true,
         ("markercategory", Some(PartialItem::MarkerCategory(_))) => true,
