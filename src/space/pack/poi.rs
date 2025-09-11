@@ -235,12 +235,13 @@ impl ActivePoi {
         let icon_handle = pack.pack.pois[index]
             .attributes
             .icon_file
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
-        let icon = pack.get_or_load_texture(icon_handle, device)?;
+        let icon = pack.get_or_load_texture(icon_handle.clone(), device)?;
 
         let attrs = &pack.pack.pois[index].attributes;
         let position =
-            pack.pois[index].position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
+            pack.pack.pois[index].position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
         let scale = attrs.icon_size.unwrap_or(1.0);
         let tint = attrs.tint.unwrap_or(Vec4::ONE);
         let opacity = attrs.alpha.unwrap_or(1.0);
