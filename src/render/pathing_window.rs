@@ -89,7 +89,7 @@ impl PathingWindowState {
                                         ui.same_line();
                                         if ui.button(&fl!("expand-all")) {
                                             for (name, pack) in &engine.packs.loaded_packs {
-                                                let all_categories = &pack.categories.all_categories;
+                                                let all_categories = &pack.pack.categories.all_categories;
                                                 self.open_items.extend(all_categories.values().map(|x| x.full_id.clone()));
                                             }
                                         }
@@ -112,7 +112,7 @@ impl PathingWindowState {
                                                 self.search_state.search_candidates.clear();
                                                 if !self.search_state.buffer.is_empty() {
                                                     for (_s, pack) in &engine.packs.loaded_packs {
-                                                        for (full_id, category) in pack.categories.all_categories.iter() {
+                                                        for (full_id, category) in pack.pack.categories.all_categories.iter() {
                                                             if category.display_name.contains(&self.search_state.buffer) {
                                                                 self.search_state.search_candidates.insert(full_id.to_string());
                                                                 let separators: Vec<_> = full_id.rmatch_indices(".").collect();
@@ -174,7 +174,6 @@ impl PathingWindowState {
                                             let mut recompute = false;
                                             pack.draw_categories(
                                                 ui,
-                                                enabled_categories,
                                                 self.filter_state,
                                                 &mut self.open_items,
                                                 true,

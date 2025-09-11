@@ -24,7 +24,7 @@ use {
     super::{
         category::Category,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
-        poi::{ActivePoi, PoiCommonRenderData},
+        poi::{Poi, ActivePoi, PoiCommonRenderData},
         trail::ActiveTrail,
     },
     std::{
@@ -93,7 +93,20 @@ impl ActivePack {
         Ok(active_pack)
     }
 
-    pub fn draw_categories(&mut self, ui: &Ui, state: &mut BitVec, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
+    pub fn get_copyable_pois(&self) -> Vec<Poi> {
+        let mut current_pois = Vec::new();
+        for (_, poi) in &self.active_pois {
+            if !poi.filtered {
+                let actual_poi = &self.pack.pois[poi.poi_idx];
+                if actual_poi.attributes.copy_value.is_some() {
+                    let actual_poi = actual_poi.clone();
+                    current_pois.push(actual_poi);
+                }
+            }
+        }
+        current_pois
+    }
+    pub fn draw_categories(&mut self, ui: &Ui, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
         let root = &mut self.pack.categories.root_categories;
         let all_categories = &self.pack.categories.all_categories;
         let enabled_categories = &mut self.user_category_state;
@@ -285,7 +298,7 @@ impl ActivePack {
             anyhow::bail!("Inconsistent internal state.");
         };
         let slot = &mut self.texture_list.get(&handle)
-            .ok_or_else(|| { anyhow!("Texture {} not in list at all", handle) });
+            .ok_or_else(|| { anyhow!("Texture {} not in list at all", handle) })?;
         let texture = match (&slot.asset, &mut slot.texture) {
             (asset, slot_texture @ None) => {
                 let data = loader.load_asset_dyn(asset)?;
@@ -321,16 +334,16 @@ impl ActivePack {
         self.dirty_pois.clear();
         self.render_list_bookmark = render_entities.len();
 
-        for i_trail in 0..self.trails.len() {
-            if self.trails[i_trail].data.map_id != map_id {
+        for i_trail in 0..self.pack.trails.len() {
+            if self.pack.trails[i_trail].data.map_id != map_id {
                 continue;
             }
-            let mut id = self.trails[i_trail].guid;
+            let mut id = self.pack.trails[i_trail].guid;
             if self.active_trails.contains_key(&id) {
                 log::warn!(
                     "Pack {} contains a duplicate trail GUID `{id}`. \
                     Randomizing to ensure it may still be rendered.",
-                    self.name
+                    self.pack.name
                 );
                 while self.active_trails.contains_key(&id) {
                     id = Uuid::new_v4();

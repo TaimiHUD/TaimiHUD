@@ -50,6 +50,8 @@ pub struct Pack {
     pub trails: Vec<trail::Trail>,
     pub categories: CategoryCollection,
 
+    loader: Option<Box<dyn PackLoaderContext + Send>>,
+
 }
 
 impl Pack {
@@ -68,23 +70,6 @@ impl Pack {
 
         Ok(pack)
     }
-
-
-
-    pub fn get_copyable_pois(&self) -> Vec<poi::Poi> {
-        let mut current_pois = Vec::new();
-        for (_, poi) in &self.active_pois {
-            if !poi.filtered {
-                let actual_poi = &self.pois[poi.poi_idx];
-                if actual_poi.attributes.copy_value.is_some() {
-                    let actual_poi = actual_poi.clone();
-                    current_pois.push(actual_poi);
-                }
-            }
-        }
-        current_pois
-    }
-
 }
 
 #[derive(Default)]
