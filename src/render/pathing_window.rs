@@ -1,8 +1,9 @@
 use {
-    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ChildWindow, ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags}, std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
-    }
+    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS},
+    bitflags::bitflags,
+    indexmap::IndexMap,
+    nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
+    std::collections::HashSet,
 };
 
 bitflags! {

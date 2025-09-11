@@ -1,7 +1,9 @@
 use {
-    super::dx11::PerspectiveInputData,
-    crate::marker::atomic::MapSpace,
-    glamour::vec4,
+    crate::space::{
+        dx11::PerspectiveInputData,
+        DrawSpace,
+    },
+    glamour::{Box3, Point3, Vector3, Vector4},
 };
 #[cfg(feature = "space-list")]
 use {
@@ -10,13 +12,14 @@ use {
         bounding_hierarchy::{BHShape, BoundingHierarchy},
         bvh::Bvh,
     },
+    glamour::vec4,
     std::collections::BinaryHeap,
 };
 
 #[derive(Copy, Clone, Debug)]
 pub struct RenderEntity {
-    pub bounds: glamour::Box3<MapSpace>,
-    pub position: glamour::Point3<MapSpace>,
+    pub bounds: Box3<DrawSpace>,
+    pub position: Point3<DrawSpace>,
     pub draw_ordered: bool,
     pub render_id: RenderId,
 }
@@ -112,8 +115,8 @@ impl RenderList {
     /// Gets visible entities in the correct draw order.
     pub fn get_entities_for_drawing<'rs>(
         &'rs mut self,
-        cam_origin: glamour::Point3<MapSpace>,
-        cam_dir: glamour::Vector3<MapSpace>,
+        cam_origin: Point3<DrawSpace>,
+        cam_dir: Vector3<DrawSpace>,
         frustum: &'rs MapFrustum,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         match () {
@@ -141,8 +144,8 @@ struct RenderOrderBuilder<'rs, BvhIter> {
     entities: &'rs [RenderEntity],
     bvh_iter: BvhIter,
     draw_order_heap: &'rs mut BinaryHeap<HeapEntity>,
-    cam_origin: glamour::Point3<MapSpace>,
-    cam_dir: glamour::Vector3<MapSpace>,
+    cam_origin: Point3<DrawSpace>,
+    cam_dir: Vector3<DrawSpace>,
 }
 
 #[cfg(feature = "space-list")]
@@ -253,7 +256,7 @@ impl SpatialMap {
 }
 
 #[derive(Copy, Clone)]
-pub struct MapFrustum(pub [glamour::Vector4<MapSpace>; 6]);
+pub struct MapFrustum(pub [Vector4<DrawSpace>; 6]);
 
 impl MapFrustum {
     pub fn from_camera_data(
@@ -318,7 +321,7 @@ fn points_to_plane(p0: glam::Vec3, p1: glam::Vec3, p2: glam::Vec3) -> glam::Vec4
 }
 
 #[cfg(feature = "space-list")]
-fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [glamour::Vector4<MapSpace>; 8] {
+fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [Vector4<DrawSpace>; 8] {
     [
         vec4!(aabb.min.x, aabb.min.y, aabb.min.z, 1.0),
         vec4!(aabb.max.x, aabb.min.y, aabb.min.z, 1.0),

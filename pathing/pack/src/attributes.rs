@@ -1,8 +1,8 @@
 use {
-    super::{taco_xml_to_guid, Pack},
+    crate::pack::taco_xml_to_guid,
     std::str::FromStr,
     uuid::Uuid,
-    xml::attribute::OwnedAttribute,
+    xml::name::Name,
 };
 
 #[derive(Default, Clone)]
@@ -49,7 +49,7 @@ pub struct MarkerAttributes {
     pub races: Option<Vec<Race>>,
     pub specializations: Option<Vec<i32>>,
     pub map_types: Option<Vec<MapType>>,
-    pub schedule: Option<croner::Cron>,
+    pub schedule: Option<String>,
     pub schedule_duration: Option<f32>,
     pub raids: Option<Vec<String>>,
 
@@ -270,8 +270,13 @@ impl MarkerAttributes {
         }
     }
 
-    pub fn try_add(&mut self, pack: &mut Pack, attr: &OwnedAttribute) -> bool {
-        let attr_name = &attr.name.local_name.trim_start_matches("bh-");
+    pub fn try_add(&mut self, name: Name<'_>, value: String) -> Result<(), ()> {
+        let attr_name = &name.local_name.trim_start_matches("bh-");
+        let attr = xml::attribute::OwnedAttribute {
+            // reduce diff noise...
+            name: xml::name::OwnedName::local(String::new()),
+            value,
+        };
         // === Common === //
         if attr_name.eq_ignore_ascii_case("alpha") {
             self.alpha = attr.value.parse().ok();
@@ -298,7 +303,6 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
             self.height_offset = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            //self.icon_file = Some(pack.register_texture(&attr.value));
             self.icon_file = Some(attr.value.clone());
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
             self.icon_size = attr.value.parse().ok();
@@ -317,7 +321,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("rotate") {
             let mut split = attr.value.split(',');
             let (Some(x), Some(y), Some(z)) = (split.next(), split.next(), split.next()) else {
-                return false;
+                return Err(());
             };
             if let (Some(x), Some(y), Some(z)) = (x.parse().ok(), y.parse().ok(), z.parse().ok()) {
                 self.rotate = Some(glam::Vec3::new(x, y, z));
@@ -402,7 +406,7 @@ impl MarkerAttributes {
                     .collect(),
             );
         } else if attr_name.eq_ignore_ascii_case("schedule") {
-            self.schedule = croner::Cron::new(&attr.value).parse().ok();
+            self.schedule = Some(attr.value.clone());
         } else if attr_name.eq_ignore_ascii_case("schedule-duration") {
             self.schedule_duration = attr.value.parse().ok();
         } else if attr_name.eq_ignore_ascii_case("raid") {
@@ -463,9 +467,9 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("script-once") {
             self.script_once = Some(attr.value.clone());
         } else {
-            return false;
+            return Err(());
         }
-        true
+        Ok(())
     }
 }
 

@@ -8,6 +8,8 @@ pub mod goggles;
 #[deprecated = "crate::resources"]
 pub(crate) use crate::resources;
 
+pub type DrawSpace = crate::marker::atomic::LocalSpace;
+
 pub use engine::Engine;
 
 pub const M_TO_UNIT: f32 = 3.28084 * 2.0;

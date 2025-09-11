@@ -2,20 +2,19 @@ use {
     super::{
         dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
-        pack::{poi::PoiCommonRenderData, ActivePack, PackCollection},
-        render_list::{MapFrustum, RenderList},
+        pack::PackCollection,
     },
     crate::{
         exports::runtime as rt,
-        controller::ControllerEvent, marker::atomic::MarkerInputData, space::{
-            max_depth, pack::{loader::DirectoryLoader, poi::ActivePoi, trail::ActiveTrail}, resources::ObjFile
-        }, timer::{PhaseState, RotationType, TimerFile, TimerMarker},
+        controller::ControllerEvent,
+        marker::atomic::MarkerInputData,
+        resources::ObjFile,
+        timer::{PhaseState, RotationType, TimerFile, TimerMarker},
         Controller, ADDON_DIR,
     },
-    anyhow::{anyhow, Context},
+    anyhow::Context,
     bevy_ecs::prelude::*,
-    glam::{Mat4, Vec3, Vec3Swizzles},
-    itertools::Itertools,
+    glam::Vec3,
     nexus::{imgui::Ui, rtapi::RealTimeApi},
     std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},

@@ -1,11 +1,14 @@
 use {
-    super::{
+    crate::{
         attributes::{parse_bool, MarkerAttributes},
-        taco_safe_name, Pack, PartialItem,
-    }, crate::{controller::{ControllerEvent, Controller}, marker::atomic::MarkerInputData, render::pathing_window::{PathingFilterState, PathingSearchState}}, bitvec::vec::BitVec, indexmap::IndexMap, nexus::{alert::send_alert, imgui::{Condition, TreeNode, Ui}}, std::{
-        collections::{HashMap, HashSet},
+        pack::{taco_safe_name, PartialItem},
+    },
+    bitvec::vec::BitVec,
+    indexmap::IndexMap,
+    std::{
+        collections::HashMap,
         sync::Arc,
-    }
+    },
 };
 
 pub struct Category {
@@ -23,7 +26,6 @@ pub struct Category {
 
 impl Category {
     pub fn from_xml(
-        pack: &mut Pack,
         parse_stack: &[PartialItem],
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Category> {
@@ -53,7 +55,7 @@ impl Category {
                 if let Ok(val) = attr.value.parse() {
                     default_toggle = val;
                 }
-            } else if !marker_attributes.try_add(pack, &attr) {
+            } else if let Err(..) = marker_attributes.try_add(attr.name.borrow(), attr.value) {
                 log::warn!(
                     "Unknown MarkerCategory attribute '{}'",
                     attr.name.local_name
@@ -107,7 +109,6 @@ impl Category {
             all_categories[global].attain_state(all_categories, state);
         }
     }
-
 
     pub fn merge(&mut self, mut new: Category) {
         if self.id != new.id || self.full_id != new.full_id {

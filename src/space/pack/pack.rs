@@ -5,38 +5,35 @@ use {
         ControllerEvent,
     },
     nexus::{
-        imgui::{ComboBox, Ui, Condition, TreeNode},
+        imgui::{Ui, Condition, TreeNode},
         alert::send_alert,
     },
     crate::render::pathing_window::{PathingFilterState, PathingSearchState},
     crate::space::{
         pack::Pack,
-        dx11::{PerspectiveHandler, PerspectiveInputData, RenderBackend},
+        dx11::{PerspectiveInputData, RenderBackend},
         render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
         resources::Texture,
     },
-    crate::marker::atomic::MapSpace,
     anyhow::Context,
     bitvec::vec::BitVec,
     glam::Vec3,
     glamour::{Point3, Vector3},
-    indexmap::{map::Entry, IndexMap, IndexSet},
+    indexmap::IndexMap,
     super::{
-        category::Category,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
-        poi::{Poi, ActivePoi, PoiCommonRenderData},
+        poi::{ActivePoi, PoiCommonRenderData},
         trail::ActiveTrail,
+        Category, Poi,
     },
     std::{
-        collections::{HashMap, HashSet},
+        collections::HashSet,
         fs::{create_dir_all, read_dir},
-        io::{Cursor, Read as _},
         path::Path,
         sync::Arc,
     },
     uuid::Uuid,
     windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
-    xml::{common::Position, reader::XmlEvent},
 };
 
 #[derive(Debug)]
@@ -280,21 +277,23 @@ impl ActivePack {
         }
     }
 
-    pub fn register_texture(&mut self, asset: &str) -> usize {
+    pub fn register_texture(&mut self, asset: &str) -> PackTextureHandle {
         if let Some(id) = self.texture_list.get_index_of(asset) {
-            return id;
+            return PackTextureHandle(id);
         }
 
         self.loaded_textures.push(false);
         self.unused_textures.push(false);
-        self.texture_list.insert_full(asset.to_string(), None).0
+        let idx = self.texture_list.insert_full(asset.to_string(), None).0;
+        PackTextureHandle(idx)
     }
 
     pub fn get_or_load_texture<'t>(
         &'t mut self,
-        idx: usize,
+        handle: PackTextureHandle,
         device: &ID3D11Device,
     ) -> anyhow::Result<&'t Arc<Texture>> {
+        let PackTextureHandle(idx) = handle;
         let (asset, slot) = self.texture_list.get_index_mut(idx)
             .ok_or_else(|| { anyhow!("Texture {} not in list at all", idx) })?;
 
@@ -302,12 +301,16 @@ impl ActivePack {
             slot_texture@None => {
                 let data = self.loader.load_asset_dyn(asset)?;
                 let image = image::ImageReader::new(data)
-                    .with_guessed_format()?
-                    .decode()?
+                    .with_guessed_format().map_err(anyhow::Error::from)
+                    .and_then(|image|
+                        image.decode().map_err(Into::into)
+                    ).with_context(|| "decoding {asset}")?
                     .into_rgba8()
                     .into_flat_samples();
 
-                let texture = Arc::new(Texture::load_rgba8_uncached(device, image)?);
+                let texture = Texture::load_rgba8_uncached(device, image)
+                    .with_context(|| format!("loading {asset}"))?;
+                let texture = Arc::new(texture);
                 let texture = slot_texture.insert(texture);
                 self.loaded_textures.set(idx, true);
                 texture
@@ -455,14 +458,6 @@ impl ActivePack {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PackTextureHandle(usize);
 
-#[derive(Clone, Debug)]
-struct PackTexture {
-    asset: String,
-    texture: Option<Arc<Texture>>,
-}
-
-
-
 pub struct PackCollection {
     pub loaded_packs: IndexMap<String, ActivePack>,
     pub unloaded_packs: IndexMap<String, UnloadedReason>,
@@ -561,8 +556,8 @@ impl PackCollection {
         backend: &RenderBackend,
         device_context: &ID3D11DeviceContext,
     ) {
-        let cam_origin: Point3<MapSpace> = cam_data.pos.into();
-        let cam_dir: Vector3<MapSpace> = cam_data.front.into();
+        let cam_origin = cam_data.camera_pos();
+        let cam_front = cam_data.camera_front();
         let frustum = MapFrustum::from_camera_data(
             cam_data,
             backend.perspective_handler.aspect_ratio(),
@@ -570,7 +565,7 @@ impl PackCollection {
             backend.perspective_handler.far(),
         );
         self.poi_common
-            .camera_update(cam_data.front.normalize(), Vec3::Y);
+            .camera_update(cam_front, cam_data.camera_up());
         #[derive(Copy, Clone, PartialEq, Eq)]
         enum ShaderState {
             None,
@@ -581,7 +576,7 @@ impl PackCollection {
         let mut num_drawn = 0;
         for entity in self
             .render_list
-            .get_entities_for_drawing(cam_origin, cam_dir, &frustum)
+            .get_entities_for_drawing(cam_origin, cam_front, &frustum)
         {
             num_drawn += 1;
             match entity.render_id {

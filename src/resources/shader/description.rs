@@ -1,12 +1,10 @@
 use {
     serde::{Deserialize, Serialize},
     std::{
-        ffi::CString,
         fs::read_to_string,
-        path::{Path, PathBuf},
+        path::PathBuf,
     },
     strum_macros::Display,
-    windows_strings::{s, HSTRING, PCSTR},
 };
 
 #[derive(Display, Debug, Serialize, Deserialize)]

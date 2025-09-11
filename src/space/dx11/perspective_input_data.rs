@@ -1,6 +1,8 @@
 use {
     arc_atomic::AtomicArc,
+    crate::space::DrawSpace,
     glam::Vec3,
+    glamour::{Point3, Vector3},
     nexus::data_link::mumble::UiState,
     std::sync::{Arc, LazyLock},
 };
@@ -37,6 +39,23 @@ impl PerspectiveInputData {
 
     pub fn world_visible(&self) -> bool {
         self.is_gameplay.unwrap_or(false) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
+    }
+
+    pub fn player_pos(&self) -> Point3<DrawSpace> {
+        Point3::from_raw(self.playpos)
+    }
+
+    pub fn camera_pos(&self) -> Point3<DrawSpace> {
+        Point3::from_raw(self.pos)
+    }
+
+    pub fn camera_front(&self) -> Vector3<DrawSpace> {
+        Vector3::from_raw(self.front)
+    }
+
+    #[inline]
+    pub fn camera_up(&self) -> Vector3<DrawSpace> {
+        Vector3::Y
     }
 }
 
