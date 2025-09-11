@@ -59,7 +59,6 @@ pub struct ActivePack {
     pub active_pois: IndexMap<Uuid, ActivePoi>,
 
     // Internal rendering data.
-    loader: Option<Box<dyn PackLoaderContext + Send>>,
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
     loaded_textures: BitVec,
     unused_textures: BitVec,
@@ -287,14 +286,17 @@ impl ActivePack {
         handle: &str,
         device: &ID3D11Device,
     ) -> anyhow::Result<Arc<Texture>> {
-        let Some(loader) = &mut self.loader else {
+        let Some(loader) = &mut self.pack.loader else {
             anyhow::bail!("Inconsistent internal state.");
         };
         let slot = self.texture_list.get_full_mut(handle)
             .ok_or_else(|| { anyhow!("Texture {} not in list at all", handle) })?;
+
+
+
         let texture = match slot {
     (idx, _, slot_texture@None) => {
-                let data = loader.load_asset_dyn(&handle)?;
+                let data = loader.load_asset_dyn(handle)?;
                 let image = image::ImageReader::new(data)
                     .with_guessed_format()?
                     .decode()?
