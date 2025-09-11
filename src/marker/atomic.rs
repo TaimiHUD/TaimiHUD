@@ -707,6 +707,22 @@ impl MarkerInputData {
         self.minimap_placement = ui_state.into();
         self.rotation_enabled = ui_state.contains(UiState::DOES_COMPASS_HAVE_ROTATION_ENABLED);
     }
+
+    #[inline]
+    pub fn player_pos_local(&self) -> LocalPoint {
+        Point3::from_raw(self.local_player_pos)
+    }
+
+    #[inline]
+    pub fn player_pos_global(&self) -> MapPoint {
+        Point2::from_raw(self.global_player_pos)
+    }
+
+    /// Centre of map
+    #[inline]
+    pub fn map_pos(&self) -> glamour::Point2<MapSpace> {
+        Point2::from_raw(self.global_map)
+    }
 }
 
 impl Default for MarkerInputData {

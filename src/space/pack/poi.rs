@@ -1,17 +1,15 @@
 use {
-    super::{attributes::MarkerAttributes, taco_safe_name, taco_xml_to_guid, Pack, ActivePack},
-    crate::{
-        marker::atomic::MapSpace,
-        space::{
-            dx11::{RenderBackend, VertexBuffer},
-            resources::{Model, ShaderPair, Texture, Vertex},
-        },
+    super::{ActivePack, PoiExt},
+    crate::space::{
+        dx11::{RenderBackend, VertexBuffer},
+        resources::{Model, ShaderPair, Texture, Vertex},
+        DrawSpace,
     },
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec4},
     glamour::{Box3, Point3, Vector3},
     std::sync::Arc,
-    uuid::Uuid,
+    taimi_pack::Poi,
     windows::Win32::Graphics::{
         Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
         Direct3D11::{
@@ -20,67 +18,6 @@ use {
         },
     },
 };
-
-#[derive(Clone)]
-pub struct Poi {
-    pub category: String,
-    pub guid: Uuid,
-    pub map_id: i32,
-    pub position: Point3<MapSpace>,
-    pub attributes: MarkerAttributes,
-}
-
-impl Poi {
-    pub fn from_xml(
-        pack: &mut Pack,
-        attrs: Vec<xml::attribute::OwnedAttribute>,
-    ) -> anyhow::Result<Poi> {
-        let mut category = String::new();
-        let mut map_id = None;
-        let mut pos_x = None;
-        let mut pos_y = None;
-        let mut pos_z = None;
-        let mut guid = None;
-        let mut attributes = MarkerAttributes::default();
-
-        for attr in attrs {
-            if attr.name.local_name.eq_ignore_ascii_case("type") {
-                category = taco_safe_name(&attr.value, true);
-            } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
-                map_id = Some(attr.value.parse().context("Parse POI MapID")?);
-            } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
-                pos_x = Some(attr.value.parse().context("Parse POI xpos")?);
-            } else if attr.name.local_name.eq_ignore_ascii_case("ypos") {
-                pos_y = Some(attr.value.parse().context("Parse POI ypos")?);
-            } else if attr.name.local_name.eq_ignore_ascii_case("zpos") {
-                pos_z = Some(attr.value.parse().context("Parse POI zpos")?);
-            } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
-                guid = Some(taco_xml_to_guid(&attr.value));
-            } else if !attributes.try_add(pack, &attr) {
-                log::warn!("Unknown POI attribute '{}'", attr.name.local_name);
-            }
-        }
-
-        let Some(map_id) = map_id else {
-            anyhow::bail!("POI must have MapID");
-        };
-
-        let (Some(pos_x), Some(pos_y), Some(pos_z)) = (pos_x, pos_y, pos_z) else {
-            anyhow::bail!("POI must have xpos, ypos, and zpos");
-        };
-        let position = glamour::point3!(pos_x, pos_y, pos_z);
-
-        let guid = guid.unwrap_or_default();
-
-        Ok(Poi {
-            category,
-            guid,
-            map_id,
-            position,
-            attributes,
-        })
-    }
-}
 
 pub struct PoiCommonRenderData {
     // Common fixed data.
@@ -125,15 +62,15 @@ impl PoiCommonRenderData {
         })
     }
 
-    pub fn camera_update(&mut self, cam_front: Vec3, cam_up: Vec3) {
+    pub fn camera_update(&mut self, cam_front: Vector3<DrawSpace>, cam_up: Vector3<DrawSpace>) {
         let cam_front = cam_front.normalize();
         let cam_right = cam_front.cross(cam_up.normalize()).normalize();
         let cam_up = cam_right.cross(cam_front).normalize();
 
         self.billboard = Mat4::from_cols(
-            cam_right.extend(0.0),
-            cam_up.extend(0.0),
-            -cam_front.extend(0.0),
+            cam_right.extend(0.0).to_raw(),
+            cam_up.extend(0.0).to_raw(),
+            -cam_front.extend(0.0).to_raw(),
             Vec3::ZERO.extend(1.0),
         );
     }
@@ -213,8 +150,8 @@ pub struct ActivePoi {
     pub poi_idx: usize,
     pub category_idx: usize,
     pub filtered: bool,
-    pub bounds: Box3<MapSpace>,
-    pub position: Point3<MapSpace>,
+    pub bounds: Box3<DrawSpace>,
+    pub position: Point3<DrawSpace>,
     pub tint: Vec4,
     pub opacity: f32,
     pub scale: f32,
@@ -229,21 +166,14 @@ impl ActivePoi {
         category_idx: usize,
         device: &ID3D11Device,
     ) -> anyhow::Result<ActivePoi> {
-        let icon_handle = poi
-            .attributes
-            .icon_file
-            .as_ref() // TODO: this clone could be unnecessary
+        let icon_handle = poi.icon_name()
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
         let icon_handle = loader.register_texture(icon_handle);
         let icon = loader.get_or_load_texture(icon_handle, device)
             .context("Loading poi texture")?;
 
-        let attrs = &poi.attributes;
-        let position =
-            poi.position + Vector3::ZERO.with_y(attrs.height_offset.unwrap_or(0.0));
-        let scale = attrs.icon_size.unwrap_or(1.0);
-        let tint = attrs.tint.unwrap_or(Vec4::ONE);
-        let opacity = attrs.alpha.unwrap_or(1.0);
+        let position = poi.position();
+        let scale = poi.icon_scale();
 
         let edge_len = scale * 2.0;
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
@@ -255,8 +185,8 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
-            tint,
-            opacity,
+            tint: poi.tint(),
+            opacity: poi.alpha(),
             scale,
             icon: icon.clone(),
         })

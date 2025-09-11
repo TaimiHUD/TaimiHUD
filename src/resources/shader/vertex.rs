@@ -3,7 +3,7 @@ use {
     crate::space::resources::{shader::{description::ShaderLayout::JustVertex, ShaderKind}, Vertex},
     anyhow::anyhow,
     core::ffi::c_char,
-    std::{ffi::{CStr, CString}, mem::offset_of, path::Path, slice::from_raw_parts},
+    std::{ffi::{CStr, CString}, mem::offset_of, slice::from_raw_parts},
     windows::Win32::Graphics::{
         Direct3D::{
             Fxc::{D3DCompile, D3DCompileFromFile, D3DCOMPILE_DEBUG},
@@ -18,7 +18,7 @@ use {
             DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32_FLOAT,
         },
     },
-    windows_strings::{s, HSTRING, PCSTR},
+    windows_strings::{s, PCSTR},
 };
 
 #[derive(PartialEq)]
