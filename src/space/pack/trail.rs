@@ -184,9 +184,10 @@ impl ActiveTrail {
         let texture_handle = pack.pack.trails[index]
             .attributes
             .texture
+            .clone() // TODO: this clone could be unnecessary
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
         let texture = pack
-            .get_or_load_texture(texture_handle, device)
+            .get_or_load_texture(&texture_handle, device)
             .context("Loading trail texture")?;
 
         let attrs = &pack.pack.trails[index].attributes;

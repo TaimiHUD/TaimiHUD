@@ -60,8 +60,7 @@ pub struct ActivePack {
 
     // Internal rendering data.
     loader: Option<Box<dyn PackLoaderContext + Send>>,
-    texture_list: HashMap<String, PackTexture>,
-    textures: Vec<PackTexture>,
+    texture_list: IndexMap<String, Option<Arc<Texture>>>,
     loaded_textures: BitVec,
     unused_textures: BitVec,
     dirty_trails: BitVec,
@@ -273,35 +272,29 @@ impl ActivePack {
         }
     }
 
-    pub fn register_texture(&mut self, asset: &str) -> PackTexture {
-        if let Some(id) = self.texture_list.get(asset) {
+    pub fn register_texture(&mut self, asset: &str) -> usize {
+        if let Some(id) = self.texture_list.get_index_of(asset) {
             return id.clone();
         }
 
-        let pt = PackTexture {
-            asset: asset.to_string(),
-            texture: None,
-        };
-        self.textures.push(pt.clone());
         self.loaded_textures.push(false);
         self.unused_textures.push(false);
-        self.texture_list.insert(asset.to_string(), pt.clone());
-        pt
+        self.texture_list.insert_full(asset.to_string(), None).0
     }
 
     pub fn get_or_load_texture(
         &mut self,
-        handle: String,
+        handle: &str,
         device: &ID3D11Device,
     ) -> anyhow::Result<Arc<Texture>> {
         let Some(loader) = &mut self.loader else {
             anyhow::bail!("Inconsistent internal state.");
         };
-        let slot = &mut self.texture_list.get(&handle)
+        let slot = self.texture_list.get_full_mut(handle)
             .ok_or_else(|| { anyhow!("Texture {} not in list at all", handle) })?;
-        let texture = match (&slot.asset, &mut slot.texture) {
-            (asset, slot_texture @ None) => {
-                let data = loader.load_asset_dyn(asset)?;
+        let texture = match slot {
+    (idx, _, slot_texture@None) => {
+                let data = loader.load_asset_dyn(&handle)?;
                 let image = image::ImageReader::new(data)
                     .with_guessed_format()?
                     .decode()?
@@ -310,12 +303,12 @@ impl ActivePack {
 
                 let texture = Arc::new(Texture::load_rgba8_uncached(device, image)?);
                 *slot_texture = Some(texture.clone());
-                self.loaded_textures.set(handle, true);
+                self.loaded_textures.set(idx, true);
                 texture
             }
-            (_, Some(texture)) => texture.clone(),
+            (_, _, Some(texture)) => texture.clone(),
         };
-        self.unused_textures.set(handle, false);
+        self.unused_textures.set(slot.0, false);
         Ok(texture)
     }
 
@@ -424,7 +417,7 @@ impl ActivePack {
 
         // Unload no longer needed textures.
         for handle in self.unused_textures.iter_ones() {
-            self.textures[handle].texture = None;
+            self.texture_list[handle] = None;
             self.loaded_textures.set(handle, false);
         }
 
