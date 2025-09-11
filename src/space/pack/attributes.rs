@@ -163,7 +163,7 @@ impl MarkerAttributes {
             self.anim_speed = base.anim_speed;
         }
         if self.texture.is_none() {
-            self.texture = base.texture;
+            self.texture = base.texture.clone();
         }
         if self.trail_scale.is_none() {
             self.trail_scale = base.trail_scale;

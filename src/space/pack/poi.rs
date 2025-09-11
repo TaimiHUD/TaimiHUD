@@ -235,9 +235,9 @@ impl ActivePoi {
         let icon_handle = pack.pack.pois[index]
             .attributes
             .icon_file
-            .as_ref()
+            .clone() // TODO: this clone could be unnecessary
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
-        let icon = pack.get_or_load_texture(icon_handle.clone(), device)?;
+        let icon = pack.get_or_load_texture(&icon_handle, device)?;
 
         let attrs = &pack.pack.pois[index].attributes;
         let position =
