@@ -48,6 +48,8 @@
           features = [ "space" ];
         };
 
+        packs = pkgs.callPackage ./pathing/pack/taco.nix;
+
         # TaimiHUD devShell
         shellToolchain = with fenix.packages.${system};
           combine [
@@ -68,7 +70,7 @@
         devShells.default = taimiShell;
 
         packages = {
-          inherit taimiHUD taimiHUDSpace;
+          inherit taimiHUD taimiHUDSpace packs;
           default = taimiHUD;
         };
       });
