@@ -306,6 +306,11 @@ impl Engine {
             }
         }
 
+        #[cfg(feature = "goggles")]
+        if pdata.is_gameplay == Some(false) && crate::space::goggles::is_enabled() {
+            crate::space::goggles::clear_lens();
+        }
+
         let backend = &mut self.render_backend;
         backend.prepare(&display_size);
         let device_context =

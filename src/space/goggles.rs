@@ -47,9 +47,13 @@ pub fn current_lens() -> Option<InterfaceRef<'static, ID3D11DepthStencilView>> {
     }
 }
 
+pub fn clear_lens() {
+    LENS_PTR.store(ptr::dangling_mut(), Ordering::Relaxed);
+}
+
 #[inline]
 pub fn is_enabled() -> bool {
-    current_lens().is_some()
+    read_lens().is_null()
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
