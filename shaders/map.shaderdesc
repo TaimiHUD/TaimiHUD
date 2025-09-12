@@ -1,0 +1,14 @@
+[
+  {
+    "identifier": "map",
+    "kind": "Vertex",
+    "path": "map.hlsl",
+    "entrypoint": "VSMain",
+  },
+  {
+    "identifier": "map",
+    "kind": "Pixel",
+    "path": "map.hlsl",
+    "entrypoint": "PSMain",
+  },
+]

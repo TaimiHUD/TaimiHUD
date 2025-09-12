@@ -53,7 +53,7 @@ pub fn clear_lens() {
 
 #[inline]
 pub fn is_enabled() -> bool {
-    read_lens().is_null()
+    !read_lens().is_null()
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

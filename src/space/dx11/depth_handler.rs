@@ -1,6 +1,6 @@
 use {
     anyhow::{anyhow, Context},
-    crate::space::max_depth,
+    crate::space::{max_depth, MapTarget, ScreenSpace},
     windows::{
         core::Interface,
         Win32::Graphics::Direct3D11::{
@@ -31,6 +31,7 @@ pub struct DepthHandler {
     viewport: D3D11_VIEWPORT,
     pub render_target_view: Vec<Option<ID3D11RenderTargetView>>,
     pub depth_stencil_state: ID3D11DepthStencilState,
+    pub depth_stencil_state_map: ID3D11DepthStencilState,
     #[cfg(feature = "goggles")]
     pub depth_stencil_state_obscured: ID3D11DepthStencilState,
     pub depth_stencil_view: ID3D11DepthStencilView,
@@ -53,6 +54,7 @@ impl DepthHandler {
         let viewport = Self::create_viewport(display_size);
         let render_target_view = vec![Self::create_render_target_view(device, &framebuffer).ok()];
         let depth_stencil_state = Self::create_depth_stencil_state(device)?;
+        let depth_stencil_state_map = Self::create_depth_stencil_state_map(device)?;
         #[cfg(feature = "goggles")]
         let depth_stencil_state_obscured = Self::create_depth_stencil_state_obscured(device)?;
         let depth_stencil_buffer = Self::create_depth_stencil_buffer(device, display_size)?;
@@ -64,6 +66,7 @@ impl DepthHandler {
             render_target_view,
             depth_stencil_view,
             depth_stencil_state,
+            depth_stencil_state_map,
             #[cfg(feature = "goggles")]
             depth_stencil_state_obscured,
             depth_stencil_buffer,
@@ -198,11 +201,9 @@ impl DepthHandler {
     pub fn create_depth_stencil_state_obscured(
         device: &ID3D11Device,
     ) -> anyhow::Result<ID3D11DepthStencilState> {
-        log::info!("Setting up depth stencil state for obscured objects");
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
             DepthWriteMask: d3d::D3D11_DEPTH_WRITE_MASK_ZERO,
-            //DepthFunc: D3D11_COMPARISON_LESS_EQUAL,
             DepthFunc: d3d::D3D11_COMPARISON_GREATER,
             StencilEnable: false.into(),
             StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
@@ -218,7 +219,6 @@ impl DepthHandler {
             )
         }.context("creating depth state")
         .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
-        log::info!("Set up depth stencil state");
         Ok(depth_stencil_state)
     }
 
@@ -308,5 +308,41 @@ impl DepthHandler {
         .and_then(|()| rasterizer_state_ptr.ok_or_else(|| anyhow!("no rasterizer state")))?;
         log::info!("Set up rasterizer state");
         Ok(rasterizer_state)
+    }
+
+    pub fn create_depth_stencil_state_map(
+        device: &ID3D11Device,
+    ) -> anyhow::Result<ID3D11DepthStencilState> {
+        let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
+            DepthEnable: false.into(),
+            DepthWriteMask: d3d::D3D11_DEPTH_WRITE_MASK_ZERO,
+            DepthFunc: d3d::D3D11_COMPARISON_ALWAYS,
+            StencilEnable: false.into(),
+            StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
+            StencilWriteMask: D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
+            FrontFace: Self::STENCILOP_DESC_DEFAULT,
+            BackFace: Self::STENCILOP_DESC_DEFAULT,
+        };
+        let mut depth_stencil_state_ptr: Option<ID3D11DepthStencilState> = None;
+        let depth_stencil_state = unsafe {
+            device.CreateDepthStencilState(
+                &depth_stencil_state_desc,
+                Some(&mut depth_stencil_state_ptr),
+            )
+        }.context("creating depth state")
+        .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
+        Ok(depth_stencil_state)
+    }
+
+    pub fn setup_map(&self, device_context: &ID3D11DeviceContext, map: &MapTarget) {
+        unsafe {
+            device_context.RSSetState(&self.rasterizer_state);
+            device_context.RSSetViewports(Some(&[self.viewport]));
+            device_context.OMSetRenderTargets(
+                Some(self.render_target_view.as_slice()),
+                None,
+            );
+            device_context.OMSetDepthStencilState(&self.depth_stencil_state_map, Self::STENCIL_REF);
+        }
     }
 }

@@ -415,7 +415,7 @@ impl MarkerInputData {
         worldmap_to_map.map(point)
     }
 
-    pub fn minimap_to_map(&self) -> MinimapToMap {
+    pub fn minimap_to_map_with(&self, minimap_rotation: Option<Angle>, map_scale: f32) -> MinimapToMap {
         // the other thing to regard is the common coordinate between the worldmap/fakespace
         // and the map coordinates; the centre, for which is provided as already scaled
         //
@@ -429,10 +429,7 @@ impl MarkerInputData {
         let map_centre: Point2<MapSpace> = self.global_map.into();
         let minimap_bound = self.minimap_bound();
         let minimap_centre = minimap_bound.center();
-        let minimap_rotation = Angle::from_radians(match self.rotation_enabled {
-            true => -self.compass_rotation,
-            false => 0f32,
-        });
+        let minimap_rotation = minimap_rotation.unwrap_or_default();
 
         // to translate a point from worldspace into mapspace,
         MinimapToMap::from_translation(-minimap_centre.to_vector().as_())
@@ -440,7 +437,7 @@ impl MarkerInputData {
             .then_scale(
                 // scale the distance by the scaling factor to take it from
                 // worldmap to mapspace units
-                Vector2::splat(self.map_scale),
+                Vector2::splat(map_scale),
             )
             .then_translate(
                 // the map space centre is used as a vector
@@ -449,6 +446,13 @@ impl MarkerInputData {
                 // in map space, so translate it as such
                 map_centre.to_vector(),
             )
+    }
+
+    pub fn minimap_to_map(&self) -> MinimapToMap {
+        self.minimap_to_map_with(match self.rotation_enabled {
+            true => Some(Angle::from_radians(-self.compass_rotation)),
+            false => None,
+        }, self.map_scale)
     }
 
     pub fn map_minimap_to_map(&self, point: MinimapPoint) -> MapPoint {

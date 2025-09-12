@@ -569,6 +569,10 @@ fn load_nexus() {
                 Engine::try_send(SpaceEvent::PathingToggle);
             }
             #[cfg(feature = "space")]
+            if ui.button("Toggle Map Rendering") {
+                Engine::try_send(SpaceEvent::MapToggle);
+            }
+            #[cfg(feature = "space")]
             if ui.button(fl!("pathing-window")) {
                 control_window(WINDOW_PATHING, None);
             }

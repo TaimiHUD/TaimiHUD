@@ -2,6 +2,7 @@ use {
     croner::Cron,
     anyhow::Context,
     glamour::{Box3, Point3, Vector3},
+    crate::space::{LocalContext, MapContext},
 };
 
 pub mod poi;
@@ -32,6 +33,14 @@ pub type PackSpace = crate::marker::atomic::LocalSpace;
 
 pub trait MarkerAttributesExt {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>>;
+    fn visibility_for_map(&self, map: MapContext) -> Option<bool>;
+    fn visibility_for(&self, ctx: LocalContext) -> Option<bool>;
+    fn is_visible_for(&self, ctx: LocalContext) -> bool {
+        self.visibility_for(ctx).unwrap_or(true)
+    }
+    fn is_visible_for_map(&self, map: MapContext) -> bool {
+        self.visibility_for_map(map).unwrap_or(true)
+    }
 }
 
 impl MarkerAttributesExt for MarkerAttributes {
@@ -41,6 +50,20 @@ impl MarkerAttributesExt for MarkerAttributes {
                 .context("parsing marker schedule")
                 .map(Some),
             None => Ok(None),
+        }
+    }
+
+    fn visibility_for(&self, ctx: LocalContext) -> Option<bool> {
+        match ctx {
+            LocalContext::World => self.in_game_visibility,
+            LocalContext::Map(map) => self.visibility_for_map(map),
+        }
+    }
+
+    fn visibility_for_map(&self, map: MapContext) -> Option<bool> {
+        match map {
+            MapContext::Global => self.map_visibility,
+            MapContext::Minimap => self.minimap_visibility,
         }
     }
 }

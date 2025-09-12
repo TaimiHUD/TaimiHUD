@@ -10,15 +10,14 @@ use {
     },
     crate::render::pathing_window::{PathingFilterState, PathingSearchState},
     crate::space::{
-        pack::Pack,
-        dx11::{PerspectiveInputData, RenderBackend},
+        pack::{Pack, MarkerAttributesExt},
+        dx11::{InstanceBuffer, InstanceBufferData, PerspectiveInputData, RenderBackend},
         render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
         resources::Texture,
+        LocalContext, MapTarget,
     },
     anyhow::Context,
     bitvec::vec::BitVec,
-    glam::Vec3,
-    glamour::{Point3, Vector3},
     indexmap::IndexMap,
     super::{
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
@@ -62,6 +61,7 @@ pub struct ActivePack {
     dirty_trails: BitVec,
     dirty_pois: BitVec,
     render_list_bookmark: usize,
+    render_poi_bookmark: usize,
     poi_bookmark: usize,
 
     // TODO: Scripting.
@@ -89,6 +89,7 @@ impl ActivePack {
             dirty_pois: Default::default(),
             dirty_trails: Default::default(),
             render_list_bookmark: Default::default(),
+            render_poi_bookmark: Default::default(),
             poi_bookmark: Default::default(),
         };
 
@@ -451,7 +452,6 @@ impl ActivePack {
             poi.filtered = !self.enabled_categories[poi.category_idx];
         }
     }
-
 }
 
 #[repr(transparent)]
@@ -536,11 +536,45 @@ impl PackCollection {
         self.current_map = Some(map_id);
         let mut render_builder = self.render_list.rebuild();
 
+        let mut render_poi_bookmark = 1;
         for (pack_idx, pack) in self.loaded_packs.values_mut().enumerate() {
             pack.prepare_new_map(pack_idx, map_id, device, &mut render_builder.entities)?;
+            pack.render_poi_bookmark = render_poi_bookmark;
+            render_poi_bookmark += pack.active_pois.len();
         }
 
+        self.recreate_buffers(device)?;
+
         self.render_list = render_builder.build();
+        Ok(())
+    }
+
+    fn recreate_buffers(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+        let poi_ib_world = {
+            let mut data = vec![InstanceBufferData::IDENTITY; 1];
+            data.extend(self.loaded_packs.values()
+                .flat_map(|pack| pack.active_pois.values())
+                .map(|poi| poi.instance_data()));
+            if data.len() > 1 {
+                Some(InstanceBuffer::create(device, &data[..])?)
+            } else {
+                None
+            }
+        };
+        let poi_ib_map = {
+            let mut data = vec![InstanceBufferData::IDENTITY; 1];
+            data.extend(self.loaded_packs.values()
+                .flat_map(|pack| pack.active_pois.values())
+                .map(|poi| poi.instance_data_map()));
+            if data.len() > 1 {
+                Some(InstanceBuffer::create(device, &data[..])?)
+            } else {
+                None
+            }
+        };
+        self.poi_common.world_ib = poi_ib_world;
+        self.poi_common.map_ib = poi_ib_map;
+
         Ok(())
     }
 
@@ -587,16 +621,11 @@ impl PackCollection {
     ) where
         E: IntoIterator<Item = &'e RenderEntity>,
     {
-        #[derive(Copy, Clone, PartialEq, Eq)]
-        enum ShaderState {
-            None,
-            Trail,
-            Poi,
-        }
+        poi_common.set_primitive(device_context);
+
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0;
-        for entity in entities
-        {
+        for entity in entities {
             num_drawn += 1;
             match entity.render_id {
                 RenderId::TrailSection {
@@ -604,21 +633,31 @@ impl PackCollection {
                     trail_idx,
                     section,
                 } => {
+                    let pack = &loaded_packs[pack_idx];
+                    let trail = &pack.active_trails[trail_idx];
+                    let info = &pack.pack.trails[trail.trail_idx];
+                    if trail.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
+                        continue
+                    }
                     if shader_state != ShaderState::Trail {
                         shader_state = ShaderState::Trail;
                         backend.shaders.0["trail"].set(device_context);
                         backend.shaders.1["trail"].set(device_context);
                     }
-                    loaded_packs[pack_idx].active_trails[trail_idx]
-                        .draw_section(device_context, section);
+                    trail.draw_section(device_context, section, LocalContext::World);
                 }
                 RenderId::Poi { pack_idx, poi_idx } => {
+                    let pack = &loaded_packs[pack_idx];
+                    let poi = &pack.active_pois[poi_idx];
+                    let info = &pack.pack.pois[poi.poi_idx];
+                    if poi.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
+                        continue
+                    }
                     if shader_state != ShaderState::Poi {
                         shader_state = ShaderState::Poi;
                         poi_common.set(device_context);
                     }
-                    loaded_packs[pack_idx].active_pois[poi_idx]
-                        .draw(device_context);
+                    poi.draw(device_context, pack.render_poi_bookmark + poi_idx, LocalContext::World);
                 }
             }
         }
@@ -631,4 +670,85 @@ impl PackCollection {
     ) -> impl Iterator<Item = &'a RenderEntity> + 'a {
         self.render_list.visible_entities(frustum)
     }
+
+    pub fn draw_map_entities<'e, E>(
+        loaded_packs: &IndexMap<String, ActivePack>,
+        poi_common: &PoiCommonRenderData,
+        device_context: &ID3D11DeviceContext,
+        backend: &RenderBackend,
+        map: &MapTarget,
+        entities: E,
+    ) where
+        E: IntoIterator<Item = &'e RenderEntity>,
+    {
+        let mut shader_state = ShaderState::None;
+        let ctx = LocalContext::/*Map(map.perspective)*/MAP;
+        for entity in entities {
+            match entity.render_id {
+                RenderId::TrailSection {
+                    pack_idx,
+                    trail_idx,
+                    section,
+                } => {
+                    let pack = &loaded_packs[pack_idx];
+                    let trail = &pack.active_trails[trail_idx];
+                    let info = &pack.pack.trails[trail.trail_idx];
+                    if trail.filtered || !info.attributes.is_visible_for_map(map.perspective) {
+                        continue
+                    }
+                    let scale = info.attributes.scale_on_map_with_zoom;
+                    if scale == Some(false) {
+                        // idk invert .-.
+                    }
+                    if shader_state == ShaderState::None {
+                        backend.shaders.0["map"].set(device_context);
+                        backend.shaders.1["map"].set(device_context);
+                        poi_common.set_primitive(device_context);
+                        poi_common.set_instance(device_context, ctx);
+                    }
+                    if shader_state != ShaderState::Trail {
+                    }
+                    shader_state = ShaderState::Trail;
+                    trail.draw_section(device_context, section, ctx);
+                }
+                RenderId::Poi { pack_idx, poi_idx } => {
+                    let pack = &loaded_packs[pack_idx];
+                    let poi = &pack.active_pois[poi_idx];
+                    let info = &pack.pack.pois[poi.poi_idx];
+                    if poi.filtered || !info.attributes.is_visible_for_map(map.perspective) {
+                        continue
+                    }
+                    let scale = info.attributes.scale_on_map_with_zoom;
+                    if scale == Some(false) {
+                        // idk invert .-.
+                    }
+                    if shader_state == ShaderState::None {
+                        backend.shaders.0["map"].set(device_context);
+                        backend.shaders.1["map"].set(device_context);
+                        poi_common.set_primitive(device_context);
+                        poi_common.set_instance(device_context, ctx);
+                    }
+                    if shader_state != ShaderState::Poi {
+                        shader_state = ShaderState::Poi;
+                        poi_common.set_vertex(device_context, ctx);
+                    }
+                    poi.draw(device_context, pack.render_poi_bookmark + poi_idx, ctx);
+                }
+            }
+        }
+    }
+
+    pub fn entities_map<'a>(
+        &'a self,
+        map: &'_ MapTarget,
+    ) -> impl Iterator<Item = &'a RenderEntity> + 'a {
+        self.render_list.map_entities(map.bounds_draw)
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ShaderState {
+    None,
+    Trail,
+    Poi,
 }

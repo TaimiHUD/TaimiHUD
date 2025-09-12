@@ -158,6 +158,16 @@ impl RenderList {
             },
         }
     }
+
+    pub fn map_entities<'rs>(
+        &'rs self,
+        bounds: Box3<DrawSpace>,
+    ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
+        // TODO: select_visible_entities?
+        use glamour::Contains;
+        self.entities.iter()
+            //.filter(move |e| bounds.contains(&e.position)) // TODO
+    }
 }
 
 #[cfg(feature = "space-list")]

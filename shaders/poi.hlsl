@@ -17,11 +17,6 @@ cbuffer ConstantBuffer : register(b0)
     float4 PlayerPos;
 }
 
-cbuffer SpriteData : register(b1)
-{
-    column_major matrix Model;
-}
-
 struct VSOutput
 {
     float4 position: SV_Position;

@@ -3,7 +3,7 @@ use {
         dx11::VertexBuffer,
         pack::{ActivePack, TrailSectionExt},
         resources::{Model, Texture, Vertex},
-        DrawSpace,
+        DrawSpace, LocalContext,
     },
     anyhow::Context,
     core::f32,
@@ -17,6 +17,7 @@ use {
 };
 
 pub struct ActiveTrail {
+    pub trail_idx: usize,
     pub category_idx: usize,
     pub filtered: bool,
     pub render_bookmark: usize,
@@ -37,7 +38,7 @@ impl ActiveTrail {
     pub fn build(
         loader: &mut ActivePack,
         trail: &Trail,
-        index: usize,
+        trail_idx: usize,
         category_idx: usize,
         render_bookmark: usize,
         device: &ID3D11Device,
@@ -156,6 +157,7 @@ impl ActiveTrail {
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer")?;
 
         Ok(ActiveTrail {
+            trail_idx,
             category_idx,
             filtered: false,
             section_bounds,
@@ -174,11 +176,7 @@ impl ActiveTrail {
 
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders must already be set.
-    pub fn draw_section(&self, device_context: &ID3D11DeviceContext, section: usize) {
-        if self.filtered {
-            return;
-        }
-
+    pub fn draw_section(&self, device_context: &ID3D11DeviceContext, section: usize, ctx: LocalContext) {
         self.texture.set(device_context, 0);
 
         unsafe {
@@ -189,11 +187,19 @@ impl ActiveTrail {
                 Some(&self.section_vbuffer.stride),
                 Some(&self.section_vbuffer.offset),
             );
-            device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-            device_context.Draw(
-                self.section_bookmarks[section + 1] - self.section_bookmarks[section],
-                self.section_bookmarks[section],
-            );
+            //device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            match ctx {
+                LocalContext::World => device_context.Draw(
+                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
+                    self.section_bookmarks[section],
+                ),
+                LocalContext::Map(..) => device_context.DrawInstanced(
+                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
+                    1,
+                    self.section_bookmarks[section],
+                    0,
+                ),
+            }
         }
     }
 }

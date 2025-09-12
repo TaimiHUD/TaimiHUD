@@ -3,6 +3,7 @@ use {
         dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
         pack::PackCollection,
+        MapTarget,
     },
     crate::{
         exports::runtime as rt,
@@ -47,6 +48,7 @@ pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
     PathingToggle,
+    MapToggle,
     DisabledPaths(HashSet<String>),
 }
 
@@ -79,6 +81,7 @@ pub struct Engine {
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
     pub render_pathing: bool,
+    pub render_pathing_map: bool,
     rtapi: Option<RealTimeApi>,
 
     schedule: Schedule,
@@ -144,6 +147,7 @@ impl Engine {
 
         let mut engine = Engine {
             render_pathing: true,
+            render_pathing_map: false,
             rtapi,
             model_files,
             receiver,
@@ -245,6 +249,9 @@ impl Engine {
                     PathingToggle => {
                         self.render_pathing = !self.render_pathing;
                     },
+                    MapToggle => {
+                        self.render_pathing_map = !self.render_pathing_map;
+                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
@@ -316,10 +323,45 @@ impl Engine {
         let device_context =
             unsafe { backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
-        let slot = 0;
-        backend.perspective_handler.set_cb(&device_context, slot);
-        backend.depth_handler.setup(&device_context);
+
+        let map_data = MarkerInputData::read();
+
+        if let Some(Err(e)) = map_data.as_ref().map(|mid|
+            self.packs
+            .prepare_new_map(mid.map_id as i32, &backend.device))
+        {
+            log::error!("{e:?}");
+        }
+        self.packs.update();
+
+        let render_map = match self.render_pathing_map && pdata.is_gameplay.unwrap_or(false) {
+            true => map_data.as_ref().map(|data| MapTarget::new(data)),
+            _ => None,
+        };
+        let render_world = match self.render_pathing && pdata.world_visible() {
+            true => Some(self.packs.update_for_draw(&pdata, backend)),
+            false => None,
+        };
+
+        let perspective_slot = 0;
         backend.blending_handler.set(&device_context);
+
+        if let Some(map) = &render_map {
+            backend.perspective_handler.update_map(map);
+
+            backend.perspective_handler.update_map_cb(&device_context);
+
+            backend.depth_handler.setup_map(&device_context, map);
+            backend.perspective_handler.set_map_cb(&device_context, perspective_slot);
+
+            let entities = self.packs.entities_map(map);
+            PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map, entities);
+        }
+
+        backend.perspective_handler.set_cb(&device_context, perspective_slot);
+
+        backend.depth_handler.setup(&device_context);
+
         // let mut query = self.world.query::<(&mut Render, &Position)>();
         // for (_k, c) in &query
         //     .iter(&self.world)
@@ -354,25 +396,11 @@ impl Engine {
         //             })
         //             .collect();
         //         r.backing
-        //             .set_and_draw(slot, &backend.device, &device_context, &ibd)?;
+        //             .set_and_draw(perspective_slot, &backend.device, &device_context, &ibd)?;
         //     }
         // }
-        if let Some(Err(e)) = MarkerInputData::read().map(|mid|
-            self.packs
-            .prepare_new_map(mid.map_id as i32, &backend.device))
-        {
-            log::error!("{e:?}");
-        }
-        self.packs.update();
 
-        let render_world = self.render_pathing && pdata.world_visible();
-
-        let render_world_context = match render_world {
-            true => Some(self.packs.update_for_draw(&pdata, &backend)),
-            false => None,
-        };
-
-        if let Some(context) = &render_world_context {
+        if let Some(context) = &render_world {
             #[cfg(feature = "goggles")]
             if crate::space::goggles::is_enabled() {
                 let prev_alpha = backend.perspective_handler.alpha();

@@ -1,15 +1,15 @@
 use {
     super::{cb_as_cb_list, PerspectiveInputData},
     anyhow::{anyhow, Context},
-    crate::space::{max_depth, min_depth},
-    glam::{Mat4, Vec3, Vec4},
+    crate::space::{max_depth, min_depth, MapTarget},
+    glam::{Mat4, Vec2, Vec3, Vec4, Quat},
     windows::Win32::Graphics::Direct3D11::{
         ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
         D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
     },
 };
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Debug)]
 pub struct PerspectiveData {
     view: Mat4,
@@ -19,7 +19,7 @@ pub struct PerspectiveData {
     player: Vec4,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Debug)]
 pub struct PixelData {
     distance_param: Vec4,
@@ -30,6 +30,10 @@ pub struct PerspectiveHandler {
     constant_buffer_data: PerspectiveData,
     constant_buffer_pixel: ID3D11Buffer,
     pub constant_buffer_pixel_data: PixelData,
+    constant_buffer_mapv: ID3D11Buffer,
+    pub constant_buffer_mapv_data: MapDataV,
+    constant_buffer_mapp: ID3D11Buffer,
+    pub constant_buffer_mapp_data: MapDataP,
     aspect_ratio: f32,
     pub alpha: f32,
     up: Vec3,
@@ -45,6 +49,10 @@ impl PerspectiveHandler {
         let constant_buffer = Self::create_constant_buffer(device, &constant_buffer_data)?;
         let constant_buffer_pixel_data = PixelData::INITIAL;
         let constant_buffer_pixel = Self::create_constant_buffer(device, &constant_buffer_pixel_data)?;
+        let constant_buffer_mapv_data = MapDataV::INITIAL;
+        let constant_buffer_mapv = Self::create_constant_buffer(device, &constant_buffer_mapv_data)?;
+        let constant_buffer_mapp_data = MapDataP::INITIAL;
+        let constant_buffer_mapp = Self::create_constant_buffer(device, &constant_buffer_mapp_data)?;
         Ok(Self {
             up: Vec3::ZERO.with_y(1.0),
             aspect_ratio,
@@ -54,6 +62,10 @@ impl PerspectiveHandler {
             constant_buffer_data,
             constant_buffer_pixel,
             constant_buffer_pixel_data,
+            constant_buffer_mapv,
+            constant_buffer_mapv_data,
+            constant_buffer_mapp,
+            constant_buffer_mapp_data,
             near: min_depth(),
             far: max_depth(),
         })
@@ -167,6 +179,68 @@ impl PerspectiveHandler {
         self.set_cb(device_context, slot);
         self.update_cb(device_context);
     }
+
+    pub fn update_map(&mut self, map: &MapTarget) {
+        let bounds = &map.bounds_draw;
+        let size = bounds.size();
+        let (left, right) = (bounds.min.x, bounds.max.x);
+        let (bottom, top) = (bounds.min.z, bounds.max.z);
+        let (near, far) = (0.001f32, 1000.0f32);
+        let mid = Vec3::new(map.centre.x, bounds.center().y, map.centre.y);
+        let (map_rotation, counter_rot) = match map.rotation {
+            Some(amt) => (Quat::from_rotation_y(-amt.to_radians()), Quat::from_rotation_y(amt.to_radians())),
+            None => (Quat::IDENTITY, Quat::IDENTITY),
+        };
+        let trans = Vec3::new(-mid.x, -mid.y, -mid.z);
+        self.constant_buffer_mapv_data.model = Mat4::from_quat(counter_rot);
+        self.constant_buffer_mapv_data.world = Mat4::from_quat(map_rotation) * Mat4::from_scale_rotation_translation(
+            Vec3::ONE,
+            Quat::IDENTITY,
+            trans,
+        );
+        let screen_mid = map.bounds_screen.center();
+        let screen_sz = map.bounds_screen.size();
+        let screen = Vec2::new(self.last_display_size[0], self.last_display_size[1]);
+        let scl = Vec3::new(screen_sz.width / screen.x, screen_sz.height / screen.y, 1.0);
+        let window_trans = Vec2::new(-mid.x, -mid.z);
+        let window_trans = Vec2::new(window_trans.x - (screen_mid.x / screen.x - 0.5) * size.width, window_trans.y + (screen_mid.y / screen.y - 0.5) * size.depth);
+        self.constant_buffer_mapv_data.view = Mat4::orthographic_lh(
+            left + window_trans.x, right + window_trans.x,
+            bottom + window_trans.y, top + window_trans.y,
+            near, far,
+        ) * Mat4::from_scale_rotation_translation(
+            scl,
+            Quat::IDENTITY,
+            Vec3::ZERO,
+        );
+    }
+
+    pub fn update_map_cb(&self, device_context: &ID3D11DeviceContext) {
+        unsafe {
+            device_context.UpdateSubresource(
+                &self.constant_buffer_mapv,
+                0,
+                None,
+                &self.constant_buffer_mapv_data as *const MapDataV as *const _,
+                0,
+                0,
+            );
+            device_context.UpdateSubresource(
+                &self.constant_buffer_mapp,
+                0,
+                None,
+                &self.constant_buffer_mapp_data as *const MapDataP as *const _,
+                0,
+                0,
+            );
+        }
+    }
+    pub fn set_map_cb(&self, device_context: &ID3D11DeviceContext, slot: u32) {
+        unsafe {
+            device_context.VSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer_mapv)));
+            device_context.PSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer_mapp)));
+        }
+    }
 }
 
 impl PerspectiveData {
@@ -214,4 +288,32 @@ impl PixelData {
             intensity => Some(intensity),
         }
     }
+}
+
+#[repr(C, align(16))]
+#[derive(Debug)]
+pub struct MapDataV {
+    pub model: Mat4,
+    pub world: Mat4,
+    pub view: Mat4,
+}
+
+impl MapDataV {
+    pub const INITIAL: Self = Self {
+        model: Mat4::IDENTITY,
+        world: Mat4::IDENTITY,
+        view: Mat4::IDENTITY,
+    };
+}
+
+#[repr(C, align(16))]
+#[derive(Debug)]
+pub struct MapDataP {
+    pub colour: Vec4,
+}
+
+impl MapDataP {
+    pub const INITIAL: Self = Self {
+        colour: Vec4::ONE,
+    };
 }
