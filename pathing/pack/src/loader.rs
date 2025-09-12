@@ -16,6 +16,24 @@ pub trait LoaderAssetReader: io::BufRead + io::Seek + 'static {}
 impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
 
 pub trait PackLoaderContext {
+    fn find_asset_near(&mut self, relative: &str, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> where
+        Self: Sized,
+    {
+        let e = match self.load_asset_dyn(name) {
+            Ok(a) => return Ok(a),
+            Err(e) => e,
+        };
+
+        if let Some(parent) = Path::new(relative).parent() {
+            let fallback = format!("{}/{}", parent.display(), name);
+            if let Ok(a) = self.load_asset_dyn(&fallback) {
+                return Ok(a)
+            }
+        }
+
+        Err(e)
+    }
+
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader>
     where
         Self: Sized;

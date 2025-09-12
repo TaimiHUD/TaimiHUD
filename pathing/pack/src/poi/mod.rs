@@ -6,6 +6,7 @@ use {
     anyhow::Context,
     glam::Vec4,
     glamour::Point3,
+    std::path::Path,
     uuid::Uuid,
 };
 
@@ -16,10 +17,12 @@ pub struct Poi {
     pub map_id: i32,
     pub position: Point3,
     pub attributes: MarkerAttributes,
+    pub parent_path: Option<String>,
 }
 
 impl Poi {
     pub fn from_xml(
+        asset: &str,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Poi> {
         let mut category = String::new();
@@ -59,12 +62,15 @@ impl Poi {
 
         let guid = guid.unwrap_or_default();
 
+        let parent_path = Path::new(asset).parent()
+            .map(|p| p.to_string_lossy().into());
         Ok(Poi {
             category,
             guid,
             map_id,
             position,
             attributes,
+            parent_path,
         })
     }
 
