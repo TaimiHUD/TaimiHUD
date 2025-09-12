@@ -46,7 +46,7 @@ impl PerspectiveHandler {
         let constant_buffer_pixel_data = PixelData::INITIAL;
         let constant_buffer_pixel = Self::create_constant_buffer(device, &constant_buffer_pixel_data)?;
         Ok(Self {
-            up: Vec3::new(0.0, 1.0, 0.0),
+            up: Vec3::ZERO.with_y(1.0),
             aspect_ratio,
             alpha: 1.0,
             last_display_size: *display_size,

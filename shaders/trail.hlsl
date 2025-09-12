@@ -28,10 +28,11 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
 
-    float3 displacement = PlayerPos.xyz - input.position.xyz;
+    float4 VertPos = float4(input.position, 1.0);
+
+    float3 displacement = PlayerPos.xyz - VertPos.xyz;
     output.distance = float4(displacement, 1.0);
 
-    float4 VertPos = float4(input.position, 1.0);
     float4 vpos = mul(View, VertPos);
     output.position = mul(Projection, vpos);
 
@@ -59,7 +60,7 @@ PSOutput PSMain(VSOutput input)
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
 
-    float displacement = input.distance.xyz;
+    float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
 
     float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
