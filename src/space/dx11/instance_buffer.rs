@@ -1,5 +1,5 @@
 use {
-    super::InstanceBufferData,
+    super::{cb_as_cb_list, InstanceBufferData},
     anyhow::anyhow,
     windows::Win32::Graphics::Direct3D11::{
         ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_VERTEX_BUFFER,
@@ -82,5 +82,19 @@ impl InstanceBuffer {
             *self = Self::create(device, data)?;
         }
         Ok(())
+    }
+
+    pub fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
+        let instance_buffer_stride = size_of::<InstanceBufferData>() as u32;
+        let instance_buffer_offset = 0_u32;
+        unsafe {
+            device_context.IASetVertexBuffers(
+                slot,
+                1,
+                Some(cb_as_cb_list(&self.buffer).as_ptr()),
+                Some([instance_buffer_stride].as_ptr()),
+                Some([instance_buffer_offset].as_ptr()),
+            );
+        }
     }
 }

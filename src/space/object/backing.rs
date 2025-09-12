@@ -11,7 +11,7 @@ use {
         },
         timer::TimerMarker,
     },
-    glam::Vec3,
+    glam::{Vec3, Vec4},
     std::{path::PathBuf, sync::RwLock},
     windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
 };
@@ -43,7 +43,7 @@ impl ObjectBacking {
         let ibd = [InstanceBufferData {
             world: model_matrix,
 
-            colour: Vec3::ONE,
+            colour: Vec4::ONE,
         }];
         let render = ObjectRenderBacking {
             instance_buffer: RwLock::new(InstanceBuffer::create(&render_backend.device, &ibd)?),

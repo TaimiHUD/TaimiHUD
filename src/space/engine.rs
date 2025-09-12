@@ -87,6 +87,10 @@ pub struct Engine {
     pub world: World,
 
     pub packs: PackCollection,
+
+    // need settings somewhere...
+    #[cfg(feature = "goggles")]
+    pub obscured_alpha: f32,
 }
 
 impl Engine {
@@ -150,6 +154,8 @@ impl Engine {
             associated_entities: Default::default(),
             phase_states: Default::default(),
             packs,
+            #[cfg(feature = "goggles")]
+            obscured_alpha: 0.35,
         };
 
         Controller::try_send(ControllerEvent::RequestDisabledPaths);
@@ -306,7 +312,7 @@ impl Engine {
             unsafe { backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
         let slot = 0;
-        backend.perspective_handler.set(&device_context, slot);
+        backend.perspective_handler.set_cb(&device_context, slot);
         backend.depth_handler.setup(&device_context);
         backend.blending_handler.set(&device_context);
         // let mut query = self.world.query::<(&mut Render, &Position)>();
@@ -353,8 +359,34 @@ impl Engine {
             log::error!("{e:?}");
         }
         self.packs.update();
-        if self.render_pathing && pdata.world_visible() {
-            self.packs.draw(&pdata, &backend, &device_context);
+
+        let render_world = self.render_pathing && pdata.world_visible();
+
+        let render_world_context = match render_world {
+            true => Some(self.packs.update_for_draw(&pdata, &backend)),
+            false => None,
+        };
+
+        if let Some(context) = &render_world_context {
+            #[cfg(feature = "goggles")]
+            if crate::space::goggles::is_enabled() {
+                let prev_alpha = backend.perspective_handler.alpha();
+
+                // first pass at reduced opacity
+                backend.perspective_handler.set_alpha(self.obscured_alpha);
+                backend.perspective_handler.update_cb(&device_context);
+                backend.depth_handler.set_state_obscured(&device_context, true);
+
+                let entities = self.packs.entities_obscured(context);
+                PackCollection::draw_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, entities);
+
+                backend.perspective_handler.set_alpha(prev_alpha);
+                backend.depth_handler.set_state_obscured(&device_context, false);
+            }
+
+            backend.perspective_handler.update_cb(&device_context);
+
+            self.packs.draw(&pdata, context, &backend, &device_context);
         }
         Ok(())
     }
