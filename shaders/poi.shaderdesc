@@ -4,7 +4,6 @@
     "kind": "Vertex",
     "path": "poi.hlsl",
     "entrypoint": "VSMain",
-    "layout_type": "JustVertex",
   },
   {
     "identifier": "poi",

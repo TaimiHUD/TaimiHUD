@@ -1,13 +1,13 @@
 use {
     super::{ActivePack, PoiExt},
     crate::space::{
-        dx11::{RenderBackend, VertexBuffer},
+        dx11::{RenderBackend, InstanceBuffer, InstanceBufferData, VertexBuffer},
         resources::{Model, ShaderPair, Texture, Vertex},
         DrawSpace,
     },
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec4},
-    glamour::{Box3, Point3, Vector3},
+    glamour::{Box3, Point3},
     std::sync::Arc,
     taimi_pack::Poi,
     windows::Win32::Graphics::{
@@ -25,12 +25,6 @@ pub struct PoiCommonRenderData {
     pub shaders: ShaderPair,
     /// Quad trianglestrip.
     quad_vb: VertexBuffer,
-
-    // Common dynamic data.
-    /// Billboard transform for current camera.
-    billboard: Mat4,
-    /// Constant buffer data for POI shader.
-    poi_cb: ID3D11Buffer,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -38,8 +32,6 @@ pub struct PoiCommonRenderData {
 impl PoiCommonRenderData {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<PoiCommonRenderData> {
         let quad_vb = Model::from_vertices(POI_QUAD_VERTICES.into()).to_buffer(&backend.device)?;
-
-        let poi_cb = create_poi_cb(&backend.device)?;
 
         Ok(PoiCommonRenderData {
             shaders: ShaderPair(
@@ -57,22 +49,21 @@ impl PoiCommonRenderData {
                     .ok_or_else(|| anyhow::anyhow!("Failed to load POI pixel shader"))?,
             ),
             quad_vb,
-            billboard: Mat4::IDENTITY,
-            poi_cb,
         })
     }
 
-    pub fn camera_update(&mut self, cam_front: Vector3<DrawSpace>, cam_up: Vector3<DrawSpace>) {
-        let cam_front = cam_front.normalize();
-        let cam_right = cam_front.cross(cam_up.normalize()).normalize();
-        let cam_up = cam_right.cross(cam_front).normalize();
-
-        self.billboard = Mat4::from_cols(
-            cam_right.extend(0.0).to_raw(),
-            cam_up.extend(0.0).to_raw(),
-            -cam_front.extend(0.0).to_raw(),
-            Vec3::ZERO.extend(1.0),
-        );
+    pub fn set(&self, device_context: &ID3D11DeviceContext) {
+        self.shaders.set(device_context);
+        unsafe {
+            device_context.IASetVertexBuffers(
+                0,
+                1,
+                Some(&self.quad_vb.buffer as *const _ as *const _),
+                Some(&self.quad_vb.stride),
+                Some(&self.quad_vb.offset),
+            );
+            device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        }
     }
 }
 
@@ -152,10 +143,14 @@ pub struct ActivePoi {
     pub filtered: bool,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
+    #[cfg(todo)]
     pub tint: Vec4,
+    #[cfg(todo)]
     pub opacity: f32,
+    #[cfg(todo)]
     pub scale: f32,
     pub icon: Arc<Texture>,
+    pub buffer: InstanceBuffer,
 }
 
 impl ActivePoi {
@@ -174,6 +169,16 @@ impl ActivePoi {
 
         let position = poi.position();
         let scale = poi.icon_scale();
+        let tint = poi.tint();
+        let opacity = poi.alpha();
+
+        let buffer = {
+            let data = InstanceBufferData {
+                world: Mat4::from_translation(position.into()) * Mat4::from_scale(Vec3::splat(scale)),
+                colour: tint * Vec4::ONE.with_w(opacity),
+            };
+            InstanceBuffer::create(device, &[data])
+        }.context("creating POI buffer")?;
 
         let edge_len = scale * 2.0;
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
@@ -184,9 +189,13 @@ impl ActivePoi {
             category_idx,
             filtered: false,
             bounds,
+            buffer,
             position,
-            tint: poi.tint(),
-            opacity: poi.alpha(),
+            #[cfg(todo)]
+            tint,
+            #[cfg(todo)]
+            opacity,
+            #[cfg(todo)]
             scale,
             icon: icon.clone(),
         })
@@ -197,45 +206,15 @@ impl ActivePoi {
         let _ = poi_idx;
     }
 
-    pub fn draw(&self, device_context: &ID3D11DeviceContext, poi_common: &mut PoiCommonRenderData) {
+    pub fn draw(&self, device_context: &ID3D11DeviceContext) {
         if self.filtered {
             return;
         }
 
-        let sprite_data = PoiSpriteData {
-            model: Mat4::from_translation(self.position.into())
-                * poi_common.billboard
-                * Mat4::from_scale(Vec3::splat(self.scale)),
-            tint: self.tint * Vec4::ONE.with_w(self.opacity),
-        };
-
         self.icon.set(device_context, 0);
+        self.buffer.set(device_context, 1);
         unsafe {
-            device_context.UpdateSubresource(
-                &poi_common.poi_cb,
-                0,
-                None,
-                &sprite_data as *const _ as *const _,
-                0,
-                0,
-            );
-            device_context.VSSetConstantBuffers(1, Some(cb_as_cb_list(&poi_common.poi_cb)));
-
-            device_context.IASetVertexBuffers(
-                0,
-                1,
-                Some(&poi_common.quad_vb.buffer as *const _ as *const _),
-                Some(&poi_common.quad_vb.stride),
-                Some(&poi_common.quad_vb.offset),
-            );
-            device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
             device_context.Draw(4, 0);
         }
     }
-}
-
-/// SAFETY: std::mem::transmute validates that both types are of the same size, therefore
-/// validating that Option<ID3D11Buffer> has the same ABI as ID3D11Buffer.
-unsafe fn cb_as_cb_list(cb: &ID3D11Buffer) -> &[Option<ID3D11Buffer>; 1] {
-    std::mem::transmute(cb)
 }

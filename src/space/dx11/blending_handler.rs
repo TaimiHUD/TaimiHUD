@@ -26,7 +26,8 @@ impl BlendingHandler {
         };
         let rt_blend_descs = [rt_blend_desc; 8];
         let blend_desc = D3D11_BLEND_DESC {
-            AlphaToCoverageEnable: true.into(),
+            // XXX: why was this true?
+            AlphaToCoverageEnable: false.into(),
             IndependentBlendEnable: false.into(),
             RenderTarget: rt_blend_descs,
         };

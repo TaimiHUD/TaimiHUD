@@ -38,25 +38,91 @@ impl ConfigTabState {
         if ui.checkbox("Experimental KatRender", &mut self.katrender) {
             Controller::try_send(ControllerEvent::ToggleKatRender);
         };
-        #[cfg(feature = "goggles")]
         if self.katrender {
-            crate::render::goggles::options_ui(ui);
-        }
-        #[cfg(feature = "space")]
-        if self.katrender && ui.button("Unload All") {
-            use crate::render::RenderEvent;
-
-            // XXX: this will wipe all of render state, rather than just katrender
-            let mut render_sender = crate::RENDER_SENDER.write().unwrap();
-            let render_quit = render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit));
-            if let Some(Ok(())) = render_quit {
-                let _ = render_sender.take();
-                let _ = crate::SPACE_SENDER.write().unwrap().take();
-                crate::TEXTURES.quit();
+            #[cfg(feature = "goggles")]
+            {
+                crate::render::goggles::options_ui(ui);
             }
-        }
-        if self.katrender && ui.button("Reload Render") {
-            crate::reload_render(false);
+
+            #[cfg(feature = "space")]
+            let (overlap, intensity, alpha, _obscured_alpha) = match crate::engine_ref(|e| (
+                e.render_backend.perspective_handler.constant_buffer_pixel_data.overlap_threshold(),
+                e.render_backend.perspective_handler.constant_buffer_pixel_data.intensity().unwrap_or(500.0),
+                e.render_backend.perspective_handler.alpha(),
+                match () {
+                    #[cfg(feature = "goggles")]
+                    _ => e.obscured_alpha,
+                    #[cfg(not(feature = "goggles"))]
+                    _ => None::<f32>,
+                },
+            )) {
+                Some((mut overlap, mut intensity, mut alpha, obscured_alpha)) => {
+                    #[cfg(feature = "goggles")]
+                    let obscured_alpha = if crate::space::goggles::is_enabled() {
+                        let mut obscured_alpha = obscured_alpha;
+                        if nexus::imgui::Slider::new("goggles x-ray opacity", 0.0f32, 1.0f32).build(ui, &mut obscured_alpha) {
+                            Some(obscured_alpha)
+                        } else { None }
+                    } else { None };
+                    let alpha = if nexus::imgui::Slider::new("pathing opacity", 0.0f32, 1.0f32).build(ui, &mut alpha) {
+                        Some(alpha)
+                    } else { None };
+                    let intensity = if nexus::imgui::Slider::new("pathing intensity", 1.0f32, 500.0f32).build(ui, &mut intensity) {
+                        Some(intensity)
+                    } else { None };
+                    let overlap = if nexus::imgui::Slider::new("player overlap fade", 0.01f32, 1000.0f32).build(ui, &mut overlap) {
+                        Some(overlap)
+                    } else { None };
+                    (overlap, intensity, alpha, obscured_alpha)
+                },
+                _ => (None, None, None, None::<f32>),
+            };
+            #[cfg(feature = "goggles")]
+            if let Some(obscured_alpha) = _obscured_alpha {
+                crate::engine_mut(|e| {
+                    e.obscured_alpha = obscured_alpha;
+                });
+            }
+            #[cfg(feature = "space")]
+            if let Some(overlap) = overlap {
+                let overlap = (overlap > 0.01f32).then_some(overlap);
+                crate::engine_mut(|e|
+                    e.render_backend.perspective_handler.constant_buffer_pixel_data.set_overlap_threshold(overlap)
+                );
+            }
+            #[cfg(feature = "space")]
+            if let Some(intensity) = intensity {
+                let intensity = (intensity < 500.0f32).then_some(intensity);
+                crate::engine_mut(|e|
+                    e.render_backend.perspective_handler.constant_buffer_pixel_data.set_intensity(intensity)
+                );
+            }
+            #[cfg(feature = "space")]
+            if let Some(alpha) = alpha {
+                crate::engine_mut(|e|
+                    e.render_backend.perspective_handler.set_alpha(alpha)
+                );
+            }
+            #[cfg(feature = "space")]
+            if ui.button("Unload All") {
+                use crate::render::RenderEvent;
+
+                // XXX: this will wipe all of render state, rather than just katrender
+                let mut render_sender = crate::RENDER_SENDER.write().unwrap();
+                let render_quit = render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit));
+                if let Some(Ok(())) = render_quit {
+                    let _ = render_sender.take();
+                    let _ = crate::SPACE_SENDER.write().unwrap().take();
+                    crate::TEXTURES.quit();
+                }
+            }
+            #[cfg(feature = "space")]
+            {
+                ui.same_line();
+            }
+            if ui.button("Reload Render") {
+                crate::reload_render(false);
+            }
         }
         let markers_window_closure = || {
             if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {

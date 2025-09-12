@@ -463,8 +463,8 @@ pub struct PackCollection {
     pub unloaded_packs: IndexMap<String, UnloadedReason>,
 
     current_map: Option<i32>,
-    render_list: RenderList,
-    poi_common: PoiCommonRenderData,
+    pub render_list: RenderList,
+    pub poi_common: PoiCommonRenderData,
 }
 
 impl PackCollection {
@@ -550,22 +550,43 @@ impl PackCollection {
         }
     }
 
+    pub fn update_for_draw(
+        &mut self,
+        cam_data: &PerspectiveInputData,
+        backend: &RenderBackend,
+    ) -> MapFrustum {
+        MapFrustum::from_camera_data(
+            cam_data,
+            backend.perspective_handler.aspect_ratio(),
+            backend.perspective_handler.near(),
+            backend.perspective_handler.far(),
+        )
+    }
+
     pub fn draw(
         &mut self,
         cam_data: &PerspectiveInputData,
+        frustum: &MapFrustum,
         backend: &RenderBackend,
         device_context: &ID3D11DeviceContext,
     ) {
         let cam_origin = cam_data.camera_pos();
         let cam_front = cam_data.camera_front();
-        let frustum = MapFrustum::from_camera_data(
-            cam_data,
-            backend.perspective_handler.aspect_ratio(),
-            backend.perspective_handler.near(),
-            backend.perspective_handler.far(),
-        );
-        self.poi_common
-            .camera_update(cam_front, cam_data.camera_up());
+        let entities = self
+            .render_list
+            .get_entities_for_drawing(cam_origin, cam_front, frustum);
+        Self::draw_entities(&self.loaded_packs, &self.poi_common, device_context, backend, entities);
+    }
+
+    pub fn draw_entities<'e, E>(
+        loaded_packs: &IndexMap<String, ActivePack>,
+        poi_common: &PoiCommonRenderData,
+        device_context: &ID3D11DeviceContext,
+        backend: &RenderBackend,
+        entities: E,
+    ) where
+        E: IntoIterator<Item = &'e RenderEntity>,
+    {
         #[derive(Copy, Clone, PartialEq, Eq)]
         enum ShaderState {
             None,
@@ -574,9 +595,7 @@ impl PackCollection {
         }
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0;
-        for entity in self
-            .render_list
-            .get_entities_for_drawing(cam_origin, cam_front, &frustum)
+        for entity in entities
         {
             num_drawn += 1;
             match entity.render_id {
@@ -590,18 +609,26 @@ impl PackCollection {
                         backend.shaders.0["trail"].set(device_context);
                         backend.shaders.1["trail"].set(device_context);
                     }
-                    self.loaded_packs[pack_idx].active_trails[trail_idx]
+                    loaded_packs[pack_idx].active_trails[trail_idx]
                         .draw_section(device_context, section);
                 }
                 RenderId::Poi { pack_idx, poi_idx } => {
                     if shader_state != ShaderState::Poi {
                         shader_state = ShaderState::Poi;
-                        self.poi_common.shaders.set(device_context);
+                        poi_common.set(device_context);
                     }
-                    self.loaded_packs[pack_idx].active_pois[poi_idx]
-                        .draw(device_context, &mut self.poi_common);
+                    loaded_packs[pack_idx].active_pois[poi_idx]
+                        .draw(device_context);
                 }
             }
         }
+    }
+
+    #[cfg(feature = "goggles")]
+    pub fn entities_obscured<'a>(
+        &'a self,
+        frustum: &'a MapFrustum,
+    ) -> impl Iterator<Item = &'a RenderEntity> + 'a {
+        self.render_list.visible_entities(frustum)
     }
 }

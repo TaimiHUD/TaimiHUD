@@ -133,6 +133,27 @@ impl RenderList {
             },
             #[cfg(not(feature = "space-list"))]
             () => {
+                let _ = cam_origin;
+                let _ = cam_dir;
+                self.visible_entities(frustum)
+            },
+        }
+    }
+
+    pub fn visible_entities<'rs>(
+        &'rs self,
+        frustum: &'rs MapFrustum,
+    ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
+        match () {
+            #[cfg(feature = "space-list")]
+            () => {
+                let entities = &self.entities;
+                self.spatial_map.select_visible_entities(frustum)
+                    .filter_map(move |i| entities.get(next))
+            },
+            #[cfg(not(feature = "space-list"))]
+            () => {
+                let _ = frustum;
                 self.entities.iter()
             },
         }

@@ -13,3 +13,10 @@ pub use {
     perspective_handler::PerspectiveHandler, perspective_input_data::PerspectiveInputData,
     vertex_buffer::VertexBuffer,
 };
+
+use windows::Win32::Graphics::Direct3D11::ID3D11Buffer;
+
+/// SAFETY: trust me
+pub(crate) unsafe fn cb_as_cb_list(cb: &ID3D11Buffer) -> &[Option<ID3D11Buffer>; 1] {
+    std::mem::transmute(cb)
+}
