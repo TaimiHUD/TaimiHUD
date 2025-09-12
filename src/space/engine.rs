@@ -155,7 +155,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             #[cfg(feature = "goggles")]
-            obscured_alpha: 0.35,
+            obscured_alpha: 0.2,
         };
 
         Controller::try_send(ControllerEvent::RequestDisabledPaths);
