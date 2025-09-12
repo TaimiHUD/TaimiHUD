@@ -47,6 +47,11 @@ pub fn current_lens() -> Option<InterfaceRef<'static, ID3D11DepthStencilView>> {
     }
 }
 
+#[inline]
+pub fn is_enabled() -> bool {
+    current_lens().is_some()
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LensClass {
     Unknown,

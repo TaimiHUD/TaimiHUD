@@ -1,3 +1,9 @@
+[workspace]
+
+members = [
+	"pathing/pack",
+]
+
 [package]
 name = "taimi_hud"
 authors = [ "kittywitch" ]
@@ -171,8 +177,10 @@ uuid = { version = "1.17.0", features = ["v4"] }
 md5 = "0.7.0"
 base64 = "0.22.1"
 zip = "4.0.0"
-croner = "2.1.0"
+croner = "3"
 bitvec = "1.0.1"
+
+taimi_pack = { path = "./pathing/pack" }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }

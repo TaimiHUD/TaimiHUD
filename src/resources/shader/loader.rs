@@ -1,5 +1,9 @@
 use {
-    super::{PixelShader, ShaderDescription, ShaderKind, VertexShader}, glob::Paths, include_dir::include_dir, std::{collections::HashMap, path::Path, sync::Arc}, windows::Win32::Graphics::Direct3D11::ID3D11Device
+    super::{PixelShader, ShaderDescription, ShaderKind, VertexShader},
+    glob::Paths,
+    include_dir::include_dir,
+    std::{collections::HashMap, path::Path, sync::Arc},
+    windows::Win32::Graphics::Direct3D11::ID3D11Device,
 };
 
 pub static SHADERS_DIR: include_dir::Dir = include_dir!("$CARGO_MANIFEST_DIR/shaders");

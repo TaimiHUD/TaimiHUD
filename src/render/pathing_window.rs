@@ -1,8 +1,9 @@
 use {
-    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS}, bitflags::bitflags, indexmap::IndexMap, nexus::imgui::{ChildWindow, ComboBox, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags}, std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
-    }
+    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS},
+    bitflags::bitflags,
+    indexmap::IndexMap,
+    nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
+    std::collections::HashSet,
 };
 
 bitflags! {
@@ -89,7 +90,7 @@ impl PathingWindowState {
                                         ui.same_line();
                                         if ui.button(&fl!("expand-all")) {
                                             for (name, pack) in &engine.packs.loaded_packs {
-                                                let all_categories = &pack.categories.all_categories;
+                                                let all_categories = &pack.pack.categories.all_categories;
                                                 self.open_items.extend(all_categories.values().map(|x| x.full_id.clone()));
                                             }
                                         }
@@ -112,7 +113,7 @@ impl PathingWindowState {
                                                 self.search_state.search_candidates.clear();
                                                 if !self.search_state.buffer.is_empty() {
                                                     for (_s, pack) in &engine.packs.loaded_packs {
-                                                        for (full_id, category) in pack.categories.all_categories.iter() {
+                                                        for (full_id, category) in pack.pack.categories.all_categories.iter() {
                                                             if category.display_name.contains(&self.search_state.buffer) {
                                                                 self.search_state.search_candidates.insert(full_id.to_string());
                                                                 let separators: Vec<_> = full_id.rmatch_indices(".").collect();
@@ -172,21 +173,13 @@ impl PathingWindowState {
                                         ui.table_next_column();
                                         for (name, mut pack) in &mut engine.packs.loaded_packs {
                                             let mut recompute = false;
-                                            let root = &mut pack.categories.root_categories;
-                                            let all_categories = &pack.categories.all_categories;
-                                            let enabled_categories = &mut pack.user_category_state;
-                                            for cat_name in root.iter() {
-                                                all_categories[cat_name].draw(
-                                                    ui,
-                                                    all_categories,
-                                                    enabled_categories,
-                                                    self.filter_state,
-                                                    &mut self.open_items,
-                                                    true,
-                                                    &mut recompute,
-                                                    &self.search_state
-                                                );
-                                            }
+                                            pack.draw_categories(
+                                                ui,
+                                                self.filter_state,
+                                                &mut self.open_items,
+                                                &mut recompute,
+                                                &self.search_state
+                                            );
                                             if recompute {
                                                 pack.recompute_enabled();
                                             }

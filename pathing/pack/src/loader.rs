@@ -4,14 +4,16 @@ use {
     std::{
         ffi::OsStr,
         fmt,
-        io::{Cursor, Read as _},
+        fs,
+        io::{self, Cursor, Read as _},
         path::{Path, PathBuf},
     },
-    zip::ZipArchive,
 };
+#[cfg(feature = "zip")]
+use zip::ZipArchive;
 
-pub trait LoaderAssetReader: std::io::BufRead + std::io::Seek + 'static {}
-impl<R> LoaderAssetReader for R where R: std::io::BufRead + std::io::Seek + 'static {}
+pub trait LoaderAssetReader: io::BufRead + io::Seek + 'static {}
+impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
 
 pub trait PackLoaderContext {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader>
@@ -21,6 +23,34 @@ pub trait PackLoaderContext {
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>>;
 
     fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>>;
+}
+
+impl PackLoaderContext for &mut dyn PackLoaderContext {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        self.load_asset_dyn(name)
+    }
+
+    fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        PackLoaderContext::load_asset_dyn(*self, name)
+    }
+
+    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
+        PackLoaderContext::all_files_with_ext(*self, ext)
+    }
+}
+
+impl PackLoaderContext for Box<dyn PackLoaderContext> {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        self.load_asset_dyn(name)
+    }
+
+    fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        PackLoaderContext::load_asset_dyn(&mut **self, name)
+    }
+
+    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
+        PackLoaderContext::all_files_with_ext(&**self, ext)
+    }
 }
 
 pub struct DirectoryLoader {
@@ -36,8 +66,8 @@ impl DirectoryLoader {
 impl PackLoaderContext for DirectoryLoader {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
         let path = self.root.join(name);
-        Ok(std::io::BufReader::new(
-            std::fs::File::open(&path).with_context(|| format!("Failed to open {path:?}"))?,
+        Ok(io::BufReader::new(
+            fs::File::open(&path).with_context(|| format!("Failed to open {path:?}"))?,
         ))
     }
 
@@ -60,7 +90,7 @@ fn visit_dir_ext(
     dir: &Path,
     ext: &str,
 ) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
+    for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
@@ -72,13 +102,18 @@ fn visit_dir_ext(
     Ok(())
 }
 
+#[cfg(feature = "zip")]
 pub struct ZipLoader {
-    archive: ZipArchive<std::fs::File>,
+    archive: ZipArchive<fs::File>,
 }
 
+#[cfg(feature = "zip")]
 impl ZipLoader {
+    /// Hard to imagine a valid taco data file being over 64MB.
+    const SIZE_LIMIT: u64 = 64 * 1024 * 1024;
+
     pub fn new(path: &Path) -> anyhow::Result<ZipLoader> {
-        let file = std::fs::File::open(path)?;
+        let file = fs::File::open(path)?;
         let archive = ZipArchive::new(file)?;
         Ok(ZipLoader { archive })
     }
@@ -86,7 +121,7 @@ impl ZipLoader {
     pub fn load_asset_by_index(&mut self, index: usize, name: impl fmt::Display) -> anyhow::Result<impl LoaderAssetReader> {
         let res = self.archive.by_index(index);
         let mut file = res.with_context(|| format!("{name} not found in zip archive"))?;
-        if file.size() > SIZE_LIMIT {
+        if file.size() > Self::SIZE_LIMIT {
             anyhow::bail!("{name} is too big at {}MB", file.size() / (1024 * 1024));
         }
         let mut buf = Vec::with_capacity(file.size() as usize);
@@ -95,12 +130,9 @@ impl ZipLoader {
 
         Ok(Cursor::new(buf))
     }
-
 }
 
-/// Hard to imagine a valid taco data file being over 64MB.
-const SIZE_LIMIT: u64 = 64 * 1024 * 1024;
-
+#[cfg(feature = "zip")]
 impl PackLoaderContext for ZipLoader {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
         match self.archive.index_for_name(name) {
