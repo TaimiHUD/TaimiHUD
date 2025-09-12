@@ -4,6 +4,11 @@ authors = [ "kittywitch" ]
 description = "GW2 TacO packs"
 version = "0.1.0"
 edition = "2021"
+autobins = false
+
+[[example]]
+name = "print_pack"
+path = "src/bin/print_pack.rs"
 
 [features]
 default = [
@@ -38,3 +43,6 @@ md5 = "0.7"
 base64 = "0.22"
 zip = { version = "4", optional = true }
 bitvec = "1.0.1"
+
+[dev-dependencies]
+env_logger = "0.11"

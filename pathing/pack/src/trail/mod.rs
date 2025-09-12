@@ -7,7 +7,10 @@ use {
     anyhow::Context,
     core::f32,
     glamour::{point3, Box3, Point3, Union},
-    std::io::{self, BufReader, Read},
+    std::{
+        io::{self, BufReader, Read},
+        path::Path,
+    },
     uuid::Uuid,
 };
 
@@ -16,16 +19,19 @@ pub struct Trail {
     pub guid: Uuid,
     pub data: TrailData,
     pub attributes: MarkerAttributes,
+    pub parent_path: Option<String>,
 }
 
 impl Trail {
     pub fn from_xml(
         ctx: &mut impl PackLoaderContext,
+        asset: &str,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Trail> {
         let mut category = String::new();
         let mut trail_path = None;
         let mut guid = None;
+        let mut map_id = None::<i32>;
         let mut attributes = MarkerAttributes::default();
 
         for attr in attrs {
@@ -35,6 +41,13 @@ impl Trail {
                 trail_path = Some(attr.value);
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
+            } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
+                match attr.value.parse() {
+                    Ok(id) => map_id = Some(id),
+                    Err(e) => {
+                        log::warn!("failed to parse trail MapID {:?}: {e}", attr.value)
+                    },
+                }
             } else if let Err(..) = attributes.try_add(attr.name.borrow(), attr.value) {
                 log::warn!("Unknown Trail attribute '{}'", attr.name);
             }
@@ -48,14 +61,23 @@ impl Trail {
             anyhow::bail!("No 'trailData' specified for Trail '{category}'");
         };
 
-        let data = read_trl_file(BufReader::new(ctx.load_asset(&trail_path)?), &trail_path)?;
+        let data = read_trl_file(BufReader::new(ctx.find_asset_near(asset, &trail_path)?), &trail_path)?;
+        if let Some(map_id) = map_id {
+            if map_id != data.map_id {
+                log::warn!("trail MapID mismatch on {trail_path}: {map_id} vs {} from trl", data.map_id);
+            }
+        }
         let guid = guid.unwrap_or_default();
+
+        let parent_path = Path::new(asset).parent()
+            .map(|p| p.to_string_lossy().into());
 
         Ok(Trail {
             category,
             guid,
             data,
             attributes,
+            parent_path,
         })
     }
 
