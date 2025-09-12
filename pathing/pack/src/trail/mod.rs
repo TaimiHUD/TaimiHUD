@@ -7,7 +7,10 @@ use {
     anyhow::Context,
     core::f32,
     glamour::{point3, Box3, Point3, Union},
-    std::io::{self, BufReader, Read},
+    std::{
+        io::{self, BufReader, Read},
+        path::Path,
+    },
     uuid::Uuid,
 };
 
@@ -16,11 +19,13 @@ pub struct Trail {
     pub guid: Uuid,
     pub data: TrailData,
     pub attributes: MarkerAttributes,
+    pub parent_path: Option<String>,
 }
 
 impl Trail {
     pub fn from_xml(
         ctx: &mut impl PackLoaderContext,
+        asset: &str,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Trail> {
         let mut category = String::new();
@@ -48,14 +53,18 @@ impl Trail {
             anyhow::bail!("No 'trailData' specified for Trail '{category}'");
         };
 
-        let data = read_trl_file(BufReader::new(ctx.load_asset(&trail_path)?), &trail_path)?;
+        let data = read_trl_file(BufReader::new(ctx.find_asset_near(asset, &trail_path)?), &trail_path)?;
         let guid = guid.unwrap_or_default();
+
+        let parent_path = Path::new(asset).parent()
+            .map(|p| p.to_string_lossy().into());
 
         Ok(Trail {
             category,
             guid,
             data,
             attributes,
+            parent_path,
         })
     }
 

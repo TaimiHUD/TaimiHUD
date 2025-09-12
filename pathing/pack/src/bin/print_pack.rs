@@ -4,6 +4,8 @@ use {
 };
 
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let fname = env::args_os().nth(1)
         .expect("marker path to parse");
     let fname = Path::new(&fname);

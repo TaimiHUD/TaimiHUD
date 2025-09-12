@@ -102,7 +102,7 @@ pub fn parse_pack_def(
 
     let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_bytes()));
 
-    match inner_parse_pack_def(pack, ctx, &mut parser) {
+    match inner_parse_pack_def(pack, ctx, &mut parser, asset) {
         Ok(()) => Ok(()),
         Err(e) => Err(e).context(format!("Parsing pack def at {asset}:{}", parser.position())),
     }
@@ -147,6 +147,7 @@ fn inner_parse_pack_def(
     pack: &mut Pack,
     ctx: &mut impl PackLoaderContext,
     parser: &mut xml::EventReader<impl std::io::Read>,
+    asset: &str,
 ) -> anyhow::Result<()> {
     let mut parse_stack: Vec<PartialItem> = Vec::with_capacity(16);
 
@@ -200,14 +201,14 @@ fn inner_parse_pack_def(
                     "pois" => {
                         parse_stack.push(PartialItem::PoiGroup);
                     }
-                    "poi" => match Poi::from_xml(attributes) {
+                    "poi" => match Poi::from_xml(asset, attributes) {
                         Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
                         Err(e) => {
                             log::warn!("POI parse failed: {e:?}");
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },
-                    "trail" => match Trail::from_xml(ctx, attributes) {
+                    "trail" => match Trail::from_xml(ctx, asset, attributes) {
                         Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                         Err(e) => {
                             log::warn!("Trail parse failed: {e:?}");
