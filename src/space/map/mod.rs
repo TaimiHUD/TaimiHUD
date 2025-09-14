@@ -52,8 +52,8 @@ impl MapTarget {
             fake_to_screen.map(map_bounds_fake.max),
         );
         let map_bounds_screen = Box2::new(
-            map_bounds_screen.0.min(map_bounds_screen.1),
-            map_bounds_screen.0.max(map_bounds_screen.1),
+            map_bounds_screen.0,
+            map_bounds_screen.1,
         );
         let map_bounds_global = (
             fake_to_map.map(map_bounds_fake.min),

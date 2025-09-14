@@ -3,7 +3,7 @@ use {
         dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
         pack::PackCollection,
-        MapTarget,
+        MapContext, MapTarget,
     },
     crate::{
         exports::runtime as rt,
@@ -346,6 +346,29 @@ impl Engine {
         let perspective_slot = 0;
         backend.blending_handler.set(&device_context);
 
+        let minimap_bounds = match &render_map {
+            Some(map) if matches!(map.perspective, MapContext::Minimap) => Some(map.bounds_screen),
+            Some(..) => None,
+            None => map_data.as_ref()
+                .and_then(|map_data| match map_data.perspective {
+                    MapContext::Minimap => Some({
+                        use glamour::{Box2, TransformMap};
+
+                        let bounds = map_data.fakespace_minimap_bound();
+                        let trans = map_data.screen_to_fake().inverse();
+                        Box2::new(
+                            trans.map(bounds.min()),
+                            trans.map(bounds.max()),
+                        )
+                    }),
+                    _ => None,
+                }),
+        };
+
+        if let Some(minimap_bounds) = &minimap_bounds {
+            backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
+        }
+
         if let Some(map) = &render_map {
             backend.perspective_handler.update_map(map);
 
@@ -358,9 +381,20 @@ impl Engine {
             PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map, entities);
         }
 
-        backend.perspective_handler.set_cb(&device_context, perspective_slot);
-
         backend.depth_handler.setup(&device_context);
+
+        if let Some(..) = &minimap_bounds {
+            backend.depth_handler.setup_depth_write(&device_context, true);
+
+            // TODO: reusing this shader is a hack
+            backend.shaders.0["map"].set(&device_context);
+            backend.depth_handler.fill_clipped(&device_context, &mut backend.perspective_handler);
+
+            backend.depth_handler.setup_depth_write(&device_context, false);
+            backend.depth_handler.clear_scissor(&device_context);
+        }
+
+        backend.perspective_handler.set_cb(&device_context, perspective_slot);
 
         // let mut query = self.world.query::<(&mut Render, &Position)>();
         // for (_k, c) in &query

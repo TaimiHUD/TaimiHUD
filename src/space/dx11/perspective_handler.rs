@@ -305,6 +305,12 @@ impl MapDataV {
     };
 }
 
+impl Default for MapDataV {
+    fn default() -> Self {
+        Self::INITIAL
+    }
+}
+
 #[repr(C, align(16))]
 #[derive(Debug)]
 pub struct MapDataP {
