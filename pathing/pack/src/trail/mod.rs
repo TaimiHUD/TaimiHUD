@@ -6,7 +6,7 @@ use {
     },
     anyhow::Context,
     core::f32,
-    glamour::{point3, Box3, Point3, Union},
+    glamour::{point3, Box3, Point3},
     std::{
         io::{self, BufReader, Read},
         path::Path,
@@ -129,7 +129,6 @@ pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailD
         max: point3!(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
     };
 
-    let mut bounds = NEG_BOX;
     let mut read_more = true;
     while read_more {
         let point_data = match read_point(&mut reader) {
@@ -144,10 +143,12 @@ pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailD
         if point_data == EMPTY_POINT {
             if !current_section.is_empty() {
                 sections.push(TrailSection {
+                    bounds: match current_section.is_empty() {
+                        true => NEG_BOX,
+                        false => Box3::from_points(current_section.iter().copied()),
+                    },
                     points: std::mem::take(&mut current_section),
-                    bounds,
                 });
-                bounds = NEG_BOX;
             } else {
                 log::warn!("Empty trail section in {name}");
             }
@@ -157,7 +158,6 @@ pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailD
             let z = f32::from_le_bytes(point_data[2]);
             let point = point3!(x, y, z);
             current_section.push(point);
-            bounds = bounds.union(Box3::new(point, point));
         }
     }
 
