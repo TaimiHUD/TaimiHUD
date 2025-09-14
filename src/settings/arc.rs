@@ -23,6 +23,7 @@ impl ArcSettings {
     pub const VK_WINDOW_TOGGLE_MARKERS: ArcVk = ArcVk::new("marker-window-toggle", vk::VK_L);
     pub const VK_WINDOW_TOGGLE_PATHING: ArcVk = ArcVk::new("pathing-window-toggle", vk::VK_N);
     pub const VK_RENDER_TOGGLE_PATHING: ArcVk = ArcVk::new("pathing-render-toggle", vk::VK_OEM_COMMA);
+    pub const VK_RENDER_TOGGLE_PATHING_MAP: ArcVk = ArcVk::new("pathing-render-map-toggle", vk::VK_F1);
     pub const VK_TIMER_TRIGGERS: [ArcVk; 5] = [
         ArcVk::empty("timer-key-trigger-0"),
         ArcVk::empty("timer-key-trigger-1"),

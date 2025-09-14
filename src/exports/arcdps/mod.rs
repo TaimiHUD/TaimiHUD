@@ -486,6 +486,8 @@ fn imgui_options_tab(ui: &Ui) {
     if Engine::is_available() {
         ui.separator();
         keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::PathingToggle)));
+        ui.separator();
+        keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle)));
     }
     ui.separator();
     for binding in &ArcSettings::VK_TIMER_TRIGGERS {
@@ -578,10 +580,18 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             }
 
             #[cfg(feature = "space")]
-            if Engine::is_available() && arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
-                bound = true;
-                if is_trigger {
-                    Engine::try_send(SpaceEvent::PathingToggle);
+            if Engine::is_available() {
+                if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
+                    bound = true;
+                    if is_trigger {
+                        Engine::try_send(SpaceEvent::PathingToggle);
+                    }
+                }
+                if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, vk) {
+                    bound = true;
+                    if is_trigger {
+                        Engine::try_send(SpaceEvent::MapToggle);
+                    }
                 }
             }
 

@@ -78,6 +78,7 @@ timer-window-toggle = Timer Window Toggle
 marker-window-toggle = Marker Window Toggle
 pathing-window-toggle = Pathing Window Toggle
 pathing-render-toggle = Toggle pathing render
+pathing-render-map-toggle = Toggle map render
 primary-window-toggle-text = Show/hide taimi primary window
 timer-key-trigger = Timer Key Trigger { $id }
 

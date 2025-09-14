@@ -452,16 +452,33 @@ fn load_nexus() {
     )
     .revert_on_unload();
 
+    #[cfg(feature = "space")]
     let pathing_render_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
             Engine::try_send(SpaceEvent::PathingToggle);
         }
     });
 
+    #[cfg(feature = "space")]
     register_keybind_with_string(
         fl!("pathing-render-toggle"),
         pathing_render_keybind_handler,
         "ALT+SHIFT+N",
+    )
+    .revert_on_unload();
+
+    #[cfg(feature = "space")]
+    let pathing_render_map_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            Engine::try_send(SpaceEvent::MapToggle);
+        }
+    });
+
+    #[cfg(feature = "space")]
+    register_keybind_with_string(
+        fl!("pathing-render-map-toggle"),
+        pathing_render_map_keybind_handler,
+        "ALT+SHIFT+F1",
     )
     .revert_on_unload();
 
@@ -569,7 +586,7 @@ fn load_nexus() {
                 Engine::try_send(SpaceEvent::PathingToggle);
             }
             #[cfg(feature = "space")]
-            if ui.button("Toggle Map Rendering") {
+            if ui.button(fl!("pathing-render-map-toggle")) {
                 Engine::try_send(SpaceEvent::MapToggle);
             }
             #[cfg(feature = "space")]
