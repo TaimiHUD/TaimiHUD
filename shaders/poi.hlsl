@@ -62,6 +62,7 @@ PSOutput PSMain(VSOutput input)
     PSOutput output;
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
+    if (textureColour.w < 0.01) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
