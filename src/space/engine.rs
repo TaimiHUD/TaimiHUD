@@ -169,7 +169,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             #[cfg(feature = "goggles")]
-            obscured_alpha: 0.2,
+            obscured_alpha: 0.15,
         };
 
         Controller::try_send(ControllerEvent::RequestDisabledPaths);
@@ -538,6 +538,11 @@ impl Engine {
     }
 
     pub fn gameplay_map_enter(&mut self, device_context: &ID3D11DeviceContext, map_id: NonZeroU32) -> anyhow::Result<()> {
+        #[cfg(feature = "goggles")]
+        {
+            crate::space::goggles::pick_lens();
+        }
+
         let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
 
         self.gameplay_map = Ok(map_id);
