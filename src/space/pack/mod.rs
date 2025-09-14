@@ -8,7 +8,7 @@ use {
 pub mod poi;
 pub mod trail;
 
-mod pack;
+pub(crate) mod pack;
 
 pub use {
     taimi_pack::{

@@ -29,7 +29,7 @@ use {
         collections::HashSet,
         fs::{create_dir_all, read_dir},
         path::Path,
-        sync::Arc,
+        sync::{atomic::{AtomicUsize, Ordering}, Arc},
     },
     uuid::Uuid,
     windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
@@ -717,6 +717,7 @@ impl PackCollection {
             .render_list
             .get_entities_for_drawing(cam_origin, cam_front, frustum);
         Self::draw_entities(&self.loaded_packs, &self.poi_common, device_context, backend, entities);
+        STATS_ENTITY_COUNT.store(self.render_list.entities_count(), Ordering::Relaxed);
     }
 
     pub fn draw_entities<'e, E>(
@@ -731,13 +732,12 @@ impl PackCollection {
         poi_common.set_primitive(device_context);
 
         let mut shader_state = ShaderState::None;
-        let mut num_drawn = 0;
+        let mut num_drawn = 0usize;
         for entity in entities {
             let render_id = match entity.render_id {
                 Some(id) => id,
                 None => continue,
             };
-            num_drawn += 1;
             match render_id {
                 RenderId::TrailSection {
                     pack_idx,
@@ -771,7 +771,9 @@ impl PackCollection {
                     poi.draw(device_context, pack.render_poi_bookmark + poi_idx, LocalContext::World);
                 }
             }
+            num_drawn += 1;
         }
+        STATS_ENTITY_DRAW.store(num_drawn, Ordering::Relaxed);
     }
 
     #[cfg(feature = "goggles")]
@@ -793,6 +795,7 @@ impl PackCollection {
         E: IntoIterator<Item = &'e RenderEntity>,
     {
         let mut shader_state = ShaderState::None;
+        let mut num_drawn = 0usize;
         let ctx = LocalContext::/*Map(map.perspective)*/MAP;
         for entity in entities {
             let render_id = match entity.render_id {
@@ -850,7 +853,9 @@ impl PackCollection {
                     poi.draw(device_context, pack.render_poi_bookmark + poi_idx, ctx);
                 }
             }
+            num_drawn += 1;
         }
+        STATS_ENTITY_DRAW_MAP.store(num_drawn, Ordering::Relaxed);
     }
 
     pub fn entities_map<'a>(
@@ -903,3 +908,7 @@ enum ShaderState {
     Trail,
     Poi,
 }
+
+pub static STATS_ENTITY_DRAW: AtomicUsize = AtomicUsize::new(0);
+pub static STATS_ENTITY_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub static STATS_ENTITY_DRAW_MAP: AtomicUsize = AtomicUsize::new(0);

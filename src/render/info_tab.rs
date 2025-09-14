@@ -74,6 +74,11 @@ impl InfoTabState {
 
     #[cfg(feature = "space")]
     pub fn space_info(&self, ui: &Ui) {
+        use {
+            crate::space::pack::pack,
+            std::sync::atomic::Ordering,
+        };
+
         RenderState::font_text("big", ui, &fl!("engine"));
         engine_ref(|engine| {
                         RenderState::font_text("ui", ui, &fl!("ecs-data"));
@@ -114,6 +119,14 @@ impl InfoTabState {
                             }
                         }
                         drop(table_token);
+
+                        RenderState::font_text("ui", ui, "Pathing Stats");
+                        let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
+                        let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
+                        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
+                        ui.text(format!("Drawn: {}", pack_entity_draw));
+                        ui.text(format!("Mapped: {}", pack_entity_draw_map));
+                        ui.text(format!("Total: {}", pack_entity_total));
         });
     }
 }

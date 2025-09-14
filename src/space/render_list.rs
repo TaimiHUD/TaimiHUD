@@ -198,6 +198,10 @@ impl RenderList {
             self.spatial_map = SpatialMap::build(&self.entities, shapes);
         };
     }
+
+    pub fn entities_count(&self) -> usize {
+        self.entities.len()
+    }
 }
 
 #[cfg(feature = "space-list")]
