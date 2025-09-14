@@ -21,8 +21,9 @@ pub use {
     },
     self::{
         pack::{
+            ActivePack,
             PackCollection,
-            ActivePack
+            LoaderBox,
         },
         poi::ActivePoi,
         trail::ActiveTrail,

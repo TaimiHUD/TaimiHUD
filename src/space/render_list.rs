@@ -21,7 +21,14 @@ pub struct RenderEntity {
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
     pub draw_ordered: bool,
-    pub render_id: RenderId,
+    pub render_id: Option<RenderId>,
+}
+
+impl RenderEntity {
+    pub fn disable(&mut self) {
+        self.render_id = None;
+        self.draw_ordered = false;
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -51,10 +58,10 @@ impl RenderListBuilder {
         let entities = self.entities;
         #[cfg(feature = "space-list")]
         let spatial_map = {
-          let mut shapes = self.entity_shapes;
-          shapes.clear();
-          shapes.reserve_exact(entities.len());
-          SpatialMap::build(&entities, shapes)
+            let mut shapes = self.entity_shapes;
+            shapes.clear();
+            shapes.reserve_exact(entities.len());
+            SpatialMap::build(&entities, shapes)
         };
         RenderList {
             entities,
@@ -98,9 +105,17 @@ impl RenderList {
         };
         builder.entities.clear();
         #[cfg(feature = "space-list")] {
-          builder.entity_shapes.clear();
+            builder.entity_shapes.clear();
         }
         builder
+    }
+
+    pub fn clear(&mut self) {
+        self.entities.clear();
+        #[cfg(feature = "space-list")] {
+            self.draw_order_heap.clear();
+            self.spatial_map.shapes.clear();
+        }
     }
 
     pub fn update(&mut self, index: usize) {
@@ -149,7 +164,7 @@ impl RenderList {
             () => {
                 let entities = &self.entities;
                 self.spatial_map.select_visible_entities(frustum)
-                    .filter_map(move |i| entities.get(next))
+                    .filter_map(move |i| entities.get(i))
             },
             #[cfg(not(feature = "space-list"))]
             () => {
@@ -167,6 +182,21 @@ impl RenderList {
         use glamour::Intersection;
         self.entities.iter()
             .filter(move |e| bounds.intersects(&e.bounds))
+    }
+
+    /// TODO: on drop, rebuild spatial map - for now just call [self.end_entities_mut()]
+    pub fn entities_mut<'rs>(&'rs mut self) -> &'rs mut Vec<RenderEntity> {
+        &mut self.entities
+    }
+
+    pub fn entities_mut_end(&mut self) {
+        #[cfg(feature = "space-list")]
+        {
+            let mut shapes = std::mem::take(&mut self.spatial_map.shapes);
+            shapes.clear();
+            shapes.reserve(self.entities.len());
+            self.spatial_map = SpatialMap::build(&self.entities, shapes);
+        };
     }
 }
 

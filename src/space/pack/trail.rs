@@ -76,7 +76,7 @@ impl ActiveTrail {
                 prev_point = point;
             }
 
-            log::info!(
+            log::trace!(
                 "Section {isec} added {} interpolation points ({} -> {}).",
                 points.len() - section.points.len(),
                 section.points.len(),

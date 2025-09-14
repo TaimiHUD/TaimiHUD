@@ -1,6 +1,6 @@
 use {
     super::{
-        dx11::{InstanceBufferData, RenderBackend, PerspectiveInputData},
+        dx11::{prelude::*, InstanceBufferData, RenderBackend, PerspectiveInputData},
         object::{ObjectBacking, ObjectLoader},
         pack::PackCollection,
         MapContext, MapTarget,
@@ -17,7 +17,7 @@ use {
     bevy_ecs::prelude::*,
     glam::Vec3,
     nexus::{imgui::Ui, rtapi::RealTimeApi},
-    std::{collections::{HashMap, HashSet}, path::PathBuf, sync::Arc},
+    std::{collections::{HashMap, HashSet}, num::NonZeroU32, path::PathBuf, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 
@@ -50,6 +50,10 @@ pub enum SpaceEvent {
     PathingToggle,
     MapToggle,
     DisabledPaths(HashSet<String>),
+    PackLoad {
+        pack: Arc<taimi_pack::Pack>,
+        loader: super::pack::LoaderBox,
+    },
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -83,6 +87,7 @@ pub struct Engine {
     pub render_pathing: bool,
     pub render_pathing_map: bool,
     rtapi: Option<RealTimeApi>,
+    gameplay_map: Result<NonZeroU32, u32>,
 
     schedule: Schedule,
 
@@ -125,8 +130,12 @@ impl Engine {
 
         let mut packs = PackCollection::new(&render_backend)
             .context("Initializing packs")?;
-        packs.load_all(&addon_dir.join("pathing"))
-            .context("Loading pathing packs")?;
+        Controller::try_send(ControllerEvent::PathingLoadAll);
+        #[cfg(todo)]
+        {
+            packs.load_all(&addon_dir.join("pathing"))
+                .context("Loading pathing packs")?;
+        }
 
         let rtapi = match rt::rtapi() {
             Ok(rtapi) => {
@@ -149,6 +158,7 @@ impl Engine {
             render_pathing: true,
             render_pathing_map: false,
             rtapi,
+            gameplay_map: Err(0),
             model_files,
             receiver,
             render_backend,
@@ -252,6 +262,12 @@ impl Engine {
                     MapToggle => {
                         self.render_pathing_map = !self.render_pathing_map;
                     },
+                    PackLoad { pack, loader } => {
+                        let pack_idx = self.packs.add_pack(pack, loader);
+                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
+                            log::error!("{e}");
+                        }
+                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
@@ -313,26 +329,49 @@ impl Engine {
             }
         }
 
-        #[cfg(feature = "goggles")]
-        if pdata.is_gameplay == Some(false) && crate::space::goggles::is_enabled() {
-            crate::space::goggles::clear_lens();
-        }
-
-        let backend = &mut self.render_backend;
-        backend.prepare(&display_size);
+        self.render_backend.prepare(&display_size);
         let device_context =
-            unsafe { backend.device.GetImmediateContext() }
+            unsafe { self.render_backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
 
         let map_data = MarkerInputData::read();
 
-        if let Some(Err(e)) = map_data.as_ref().map(|mid|
-            self.packs
-            .prepare_new_map(mid.map_id as i32, &backend.device))
-        {
-            log::error!("{e:?}");
+        let map_id = map_data.as_ref().map(|mid| NonZeroU32::new(mid.map_id));
+        let map_res = match (self.gameplay_map, pdata.is_gameplay, map_id) {
+            (Ok(map_id), Some(true), Some(Some(new_map_id))) => {
+                if new_map_id != map_id {
+                    log::info!("map changed from {map_id} to {new_map_id} without a loading screen?");
+                    self.gameplay_map_enter(&device_context, new_map_id)
+                } else { Ok(()) }
+            },
+            (Ok(prev), Some(false), _) => {
+                log::debug!("leaving map {prev}");
+                self.gameplay_map_exit(&device_context, prev)
+            },
+            (Err(_prev), Some(false), Some(None)) => {
+                log::debug!("forgetting about previous map {_prev}");
+                self.gameplay_map = Err(0);
+                Ok(())
+            },
+            (Err(prev), Some(true), Some(Some(map_id))) => {
+                log::debug!("{}entering map {map_id}", if prev == map_id.get() { "re-" } else { "" });
+                self.gameplay_map_enter(&device_context, map_id)
+            },
+            (Err(prev), Some(false), Some(Some(map_id))) if map_id.get() != prev => {
+                log::trace!("map changed to {map_id} but not in game yet...");
+                Ok(())
+            },
+            // waiting for map info...
+            (_, None, _) | (_, _, None) | (_, Some(true), Some(None)) => Ok(()),
+            _ => Ok(()),
+        };
+        if let Err(e) = map_res {
+            log::error!("Map error: {e:?}");
         }
+
         self.packs.update();
+
+        let backend = &mut self.render_backend;
 
         let render_map = match self.render_pathing_map && pdata.is_gameplay.unwrap_or(false) {
             true => map_data.as_ref().map(|data| MapTarget::new(data)),
@@ -483,6 +522,27 @@ impl Engine {
         #[cfg(debug_assertions)] {
             log::warn!("TODO: Please clean up the engine when the program quits");
         }
+    }
+
+    pub fn gameplay_map_exit(&mut self, device_context: &ID3D11DeviceContext, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
+        #[cfg(feature = "goggles")]
+        if crate::space::goggles::is_enabled() {
+            crate::space::goggles::clear_lens();
+        }
+
+        let res = self.packs.unload_map(device_context, prev_map_id.get());
+
+        self.gameplay_map = Err(prev_map_id.get());
+
+        res
+    }
+
+    pub fn gameplay_map_enter(&mut self, device_context: &ID3D11DeviceContext, map_id: NonZeroU32) -> anyhow::Result<()> {
+        let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
+
+        self.gameplay_map = Ok(map_id);
+
+        res
     }
 }
 

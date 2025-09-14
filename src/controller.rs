@@ -22,7 +22,7 @@ use {
         timer::{CombatState, Position, TimerFile, TimerMachine},
         MumbleIdentityUpdate, RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
     },
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::f32::Vec3,
     nexus::{
@@ -51,7 +51,14 @@ use {
 };
 
 #[cfg(feature = "space")]
-use crate::space::dx11::PerspectiveInputData;
+use {
+    crate::space::{
+        dx11::PerspectiveInputData,
+        pack::LoaderBox,
+        Engine, engine::SpaceEvent,
+    },
+    taimi_pack::Pack,
+};
 
 #[derive(Debug, Clone)]
 pub struct Controller {
@@ -1063,6 +1070,95 @@ impl Controller {
             let _event_send = sender.send(SpaceEvent::DisabledPaths(disabled_paths)).await;
         }
     }
+    #[cfg(feature = "space")]
+    async fn pathing_load_all(&self) {
+        let res = self.pathing_load_all_inner().await
+            .context("Loading all paths");
+        if let Err(e) = res {
+            log::error!("{e}");
+        }
+    }
+
+    #[cfg(feature = "space")]
+    async fn pathing_load_all_inner(&self) -> anyhow::Result<()> {
+        use tokio::fs::read_dir;
+
+        let pathing_dir = crate::ADDON_DIR.join("pathing");
+        if !exists(&pathing_dir).unwrap_or(false) {
+            create_dir_all(&pathing_dir).await?;
+        }
+
+        let mut path_loads = tokio::task::JoinSet::new();
+
+        log::info!("Pre-loading all paths...");
+        let mut dir = read_dir(pathing_dir).await?;
+        loop {
+            let entry = match dir.next_entry().await {
+                Ok(Some(e)) => e,
+                Ok(None) => break,
+                Err(e) => {
+                    log::error!("Failed to list pathing files: {e}");
+                    continue
+                },
+            };
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let context = format!("Loading pathing pack {name}");
+            log::info!("{context}...");
+            let path = entry.path();
+            let is_taco = path.extension().map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
+            let loader = move || {
+                let res = if path.is_file() || is_taco.unwrap_or(false) {
+                    Self::pathing_load_taco(name, path)
+                } else {
+                    Self::pathing_load_dir(name, path)
+                }.context(context);
+
+                if let Err(e) = res {
+                    log::error!("Path load failed: {e}");
+                }
+            };
+            path_loads.spawn_blocking(loader);
+        }
+
+        while let Some(res) = path_loads.join_next().await {
+            if let Err(e) = res {
+                log::error!("Path load panicked: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "space")]
+    fn pathing_load_taco(name: String, path: PathBuf) -> anyhow::Result<()> {
+        use taimi_pack::loader::ZipLoader;
+        let mut loader = ZipLoader::new(&path)?;
+        let pack = Pack::load(&mut loader)?;
+        Self::pathing_load_pack(pack, Box::new(loader), name);
+        Ok(())
+    }
+
+    #[cfg(feature = "space")]
+    fn pathing_load_dir(name: String, path: PathBuf) -> anyhow::Result<()> {
+        use taimi_pack::loader::DirectoryLoader;
+        let mut loader = DirectoryLoader::new(path);
+        let pack = Pack::load(&mut loader)?;
+        Self::pathing_load_pack(pack, Box::new(loader), name);
+        Ok(())
+    }
+
+    fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
+        if pack.name.is_empty() {
+            pack.name = name;
+        }
+        let event = SpaceEvent::PackLoad {
+            pack: Arc::new(pack),
+            loader,
+        };
+        if let Some(sender) = Engine::sender() {
+            let _ = sender.blocking_send(event);
+        }
+    }
 
     async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
         use ControllerEvent::*;
@@ -1077,6 +1173,8 @@ impl Controller {
         }
 
         match event {
+            #[cfg(feature = "space")]
+            PathingLoadAll => self.pathing_load_all().await,
             #[cfg(feature = "space")]
             RequestDisabledPaths => self.provide_disabled_paths().await,
             #[cfg(feature = "space")]
@@ -1187,6 +1285,8 @@ pub enum SquadState {
 
 #[derive(Debug, Clone, Display)]
 pub enum ControllerEvent {
+    #[cfg(feature = "space")]
+    PathingLoadAll,
     #[cfg(feature = "space")]
     RequestDisabledPaths,
     #[cfg(feature = "space")]

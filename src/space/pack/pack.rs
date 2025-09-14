@@ -42,11 +42,11 @@ pub enum UnloadedReason {
     LoadingFailed(String),
 }
 
-
+pub type LoaderBox = Box<dyn PackLoaderContext + Send + 'static>;
 
 pub struct ActivePack {
     pub pack: Arc<Pack>,
-    loader: Box<dyn PackLoaderContext + Send>,
+    loader: LoaderBox,
 
     // Actively loaded data.
     pub enabled_categories: BitVec,
@@ -60,7 +60,7 @@ pub struct ActivePack {
     unused_textures: BitVec,
     dirty_trails: BitVec,
     dirty_pois: BitVec,
-    render_list_bookmark: usize,
+    render_list_bookmark: Option<usize>,
     render_poi_bookmark: usize,
     poi_bookmark: usize,
 
@@ -69,16 +69,14 @@ pub struct ActivePack {
 }
 
 impl ActivePack {
-    pub fn load(loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
-        let mut loader = Box::new(loader);
-        let pack = Pack::load(&mut *loader)?;
+    pub fn new(pack: Arc<Pack>, loader: LoaderBox) -> Self {
         let enabled_categories: BitVec = pack.categories.all_categories.values()
             .map(|category| category.default_toggle)
             .collect();
 
-        let active_pack = ActivePack {
+        ActivePack {
             loader,
-            pack: Arc::new(pack),
+            pack,
             user_category_state: enabled_categories.clone(),
             enabled_categories,
             active_pois: Default::default(),
@@ -91,9 +89,13 @@ impl ActivePack {
             render_list_bookmark: Default::default(),
             render_poi_bookmark: Default::default(),
             poi_bookmark: Default::default(),
-        };
+        }
+    }
 
-        Ok(active_pack)
+    pub fn load(loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
+        let mut loader = Box::new(loader);
+        let pack = Pack::load(&mut *loader)?;
+        Ok(Self::new(Arc::new(pack), loader))
     }
 
     pub fn get_copyable_pois(&self) -> Vec<Poi> {
@@ -329,17 +331,14 @@ impl ActivePack {
         device: &ID3D11Device,
         render_entities: &mut Vec<RenderEntity>,
     ) -> anyhow::Result<()> {
-        self.unused_textures
-            .copy_from_bitslice(&self.loaded_textures);
-        self.active_trails.clear();
-        self.active_pois.clear();
-        self.dirty_trails.clear();
-        self.dirty_pois.clear();
-        self.render_list_bookmark = render_entities.len();
+        self.clear();
+        self.render_list_bookmark = Some(render_entities.len());
 
         let pack = self.pack.clone();
 
-        for (i_trail, pack_trail) in pack.trails.iter().enumerate() {
+        let trails = pack.trails.iter().enumerate()
+            .filter(|(_, t)| t.data.map_id == map_id);
+        for (i_trail, pack_trail, ..) in trails {
             if pack_trail.data.map_id != map_id {
                 continue;
             }
@@ -372,11 +371,11 @@ impl ActivePack {
                     bounds: trail.section_bounds[i_section],
                     position: trail.section_bounds[i_section].center(),
                     draw_ordered: false,
-                    render_id: RenderId::TrailSection {
+                    render_id: Some(RenderId::TrailSection {
                         pack_idx,
                         trail_idx,
                         section: i_section,
-                    },
+                    }),
                 };
                 render_entities.push(entity);
             }
@@ -420,7 +419,7 @@ impl ActivePack {
                 bounds: poi.bounds,
                 position: poi.position,
                 draw_ordered: true,
-                render_id: RenderId::Poi { pack_idx, poi_idx },
+                render_id: Some(RenderId::Poi { pack_idx, poi_idx }),
             };
             render_entities.push(entity);
             self.active_pois.insert(id, poi);
@@ -433,11 +432,7 @@ impl ActivePack {
             self.active_pois.len()
         );
 
-        // Unload no longer needed textures.
-        for handle in self.unused_textures.iter_ones() {
-            self.texture_list[handle] = None;
-            self.loaded_textures.set(handle, false);
-        }
+        self.cleanup_textures();
 
         self.recompute_enabled();
 
@@ -451,6 +446,27 @@ impl ActivePack {
         for (_, poi) in &mut self.active_pois {
             poi.filtered = !self.enabled_categories[poi.category_idx];
         }
+    }
+
+    pub fn clear(&mut self) {
+        //self.unused_textures.copy_from_bitslice(&self.loaded_textures);
+        self.unused_textures |= &self.loaded_textures;
+        self.active_trails.clear();
+        self.active_pois.clear();
+        self.dirty_trails.clear();
+        self.dirty_pois.clear();
+        self.render_list_bookmark = None;
+        self.render_poi_bookmark = 0;
+        self.poi_bookmark = 0;
+    }
+
+    /// Unload no longer needed textures.
+    pub fn cleanup_textures(&mut self) {
+        for handle in self.unused_textures.iter_ones() {
+            self.texture_list[handle] = None;
+            self.loaded_textures.set(handle, false);
+        }
+        self.unused_textures.fill(false);
     }
 }
 
@@ -529,6 +545,71 @@ impl PackCollection {
         self.loaded_packs.insert(name.into(), pack);
     }
 
+    pub fn add_pack(&mut self, pack: Arc<Pack>, loader: LoaderBox) -> usize {
+        let name = pack.name.clone();
+        let active = ActivePack::new(pack, loader);
+        let (idx, old) = self.loaded_packs.insert_full(name, active);
+        if let Some(pack) = old {
+            log::info!("Pack {} reloaded", pack.pack.name);
+            if let Some(bookmark) = pack.render_list_bookmark {
+                let end = bookmark + pack.active_pois.len() + pack.active_trails.len();
+                for e in self.render_list.entities_mut().get_mut(bookmark..end).into_iter().flatten() {
+                    e.disable();
+                }
+            }
+            drop(pack);
+        }
+        idx
+    }
+
+    pub fn load_pack(&mut self, device: &ID3D11Device, pack_idx: usize) -> anyhow::Result<()> {
+        let pack = &mut self.loaded_packs[pack_idx];
+        if pack.render_list_bookmark.is_some() {
+            log::info!("skipping pack {}, already loaded?", pack.pack.name);
+            return Ok(())
+        }
+        let map_id = match self.current_map {
+            Some(map_id) => map_id,
+            None => {
+                log::trace!("delaying pack {} load once in-game", pack.pack.name);
+                return Ok(())
+            },
+        };
+
+        log::info!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
+        self.build_active_pack(pack_idx, device, None, map_id)?;
+
+        self.recreate_buffers(device)?;
+
+        Ok(())
+    }
+
+    fn build_active_pack(&mut self, pack_idx: usize, device: &ID3D11Device, render_entities: Option<&mut Vec<RenderEntity>>, map_id: i32) -> anyhow::Result<()> {
+        let pack = &mut self.loaded_packs[pack_idx];
+
+        let (entities, inplace) = match render_entities {
+            Some(e) => (e, false),
+            None => (self.render_list.entities_mut(), true),
+        };
+        let res = pack.prepare_new_map(pack_idx, map_id, device, entities)
+            .with_context(|| format!("loading pack {} for map {map_id}", pack.pack.name));
+        if res.is_err() {
+            log::info!("pack {} failed to load for map {map_id}, disabling...", pack.pack.name);
+            if let Some(bookmark) = pack.render_list_bookmark {
+                let _ = entities.drain(bookmark..);
+                /*for entity in &mut self.render_list.entities_mut()[bookmark..] {
+                    entity.disable();
+                }*/
+            }
+            pack.clear();
+            pack.cleanup_textures();
+        }
+        if inplace {
+            self.render_list.entities_mut_end();
+        }
+        res
+    }
+
     pub fn prepare_new_map(&mut self, map_id: i32, device: &ID3D11Device) -> anyhow::Result<()> {
         if self.current_map == Some(map_id) {
             return Ok(());
@@ -536,46 +617,72 @@ impl PackCollection {
         self.current_map = Some(map_id);
         let mut render_builder = self.render_list.rebuild();
 
+        let mut succ = false;
+        let mut res = None;
+        let packs_len = self.loaded_packs.len();
+        for pack_idx in 0..packs_len {
+            let pack_res = self.build_active_pack(pack_idx, device, Some(&mut render_builder.entities), map_id);
+            if let Err(e) = pack_res {
+                log::warn!("Pack {} failed to load: {e}", self.loaded_packs[pack_idx].pack.name);
+                let _ = res.get_or_insert(e);
+            } else {
+                succ = true;
+            }
+        }
+        match res {
+            Some(e) if !succ =>
+                return Err(e.into()),
+            _ => (),
+        }
+
+        let res = self.recreate_buffers(device);
+
+        self.render_list = render_builder.build();
+
+        res
+    }
+
+    fn recreate_buffers_inner(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+        // identity at start for trail drawing
+        let mut data_world = vec![InstanceBufferData::IDENTITY; 1];
+        let mut data_map = vec![InstanceBufferData::IDENTITY; 1];
+
         let mut render_poi_bookmark = 1;
-        for (pack_idx, pack) in self.loaded_packs.values_mut().enumerate() {
-            pack.prepare_new_map(pack_idx, map_id, device, &mut render_builder.entities)?;
+        for pack in self.loaded_packs.values_mut() {
+            data_world.extend(pack.active_pois.values()
+                .map(|poi| poi.instance_data())
+            );
+            data_map.extend(pack.active_pois.values()
+                .map(|poi| poi.instance_data_map())
+            );
             pack.render_poi_bookmark = render_poi_bookmark;
             render_poi_bookmark += pack.active_pois.len();
         }
-
-        self.recreate_buffers(device)?;
-
-        self.render_list = render_builder.build();
-        Ok(())
-    }
-
-    fn recreate_buffers(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
-        let poi_ib_world = {
-            let mut data = vec![InstanceBufferData::IDENTITY; 1];
-            data.extend(self.loaded_packs.values()
-                .flat_map(|pack| pack.active_pois.values())
-                .map(|poi| poi.instance_data()));
-            if data.len() > 1 {
-                Some(InstanceBuffer::create(device, &data[..])?)
-            } else {
-                None
-            }
-        };
-        let poi_ib_map = {
-            let mut data = vec![InstanceBufferData::IDENTITY; 1];
-            data.extend(self.loaded_packs.values()
-                .flat_map(|pack| pack.active_pois.values())
-                .map(|poi| poi.instance_data_map()));
-            if data.len() > 1 {
-                Some(InstanceBuffer::create(device, &data[..])?)
-            } else {
-                None
-            }
+        let (poi_ib_world, poi_ib_map) = if data_world.len() > 1 {
+            (
+                Some(InstanceBuffer::create(device, &data_world[..])?),
+                Some(InstanceBuffer::create(device, &data_map[..])?),
+            )
+        } else {
+            (None, None)
         };
         self.poi_common.world_ib = poi_ib_world;
         self.poi_common.map_ib = poi_ib_map;
 
         Ok(())
+    }
+
+    fn recreate_buffers(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+        let res = self.recreate_buffers_inner(device)
+            .context("preparing POI instance buffers");
+        if res.is_err() {
+            let _ = self.poi_common.world_ib.take();
+            let _ = self.poi_common.map_ib.take();
+            for pack in self.loaded_packs.values_mut() {
+                pack.render_poi_bookmark = 0;
+            }
+        }
+        res
     }
 
     pub fn update(&mut self) {
@@ -626,8 +733,12 @@ impl PackCollection {
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0;
         for entity in entities {
+            let render_id = match entity.render_id {
+                Some(id) => id,
+                None => continue,
+            };
             num_drawn += 1;
-            match entity.render_id {
+            match render_id {
                 RenderId::TrailSection {
                     pack_idx,
                     trail_idx,
@@ -684,7 +795,11 @@ impl PackCollection {
         let mut shader_state = ShaderState::None;
         let ctx = LocalContext::/*Map(map.perspective)*/MAP;
         for entity in entities {
-            match entity.render_id {
+            let render_id = match entity.render_id {
+                Some(id) => id,
+                None => continue,
+            };
+            match render_id {
                 RenderId::TrailSection {
                     pack_idx,
                     trail_idx,
@@ -751,6 +866,34 @@ impl PackCollection {
         bounds.max.z += buffer.depth;
 
         self.render_list.map_entities(bounds)
+    }
+
+    pub fn unload_map(&mut self, _device_context: &ID3D11DeviceContext, _map_id: u32) -> anyhow::Result<()> {
+        //if self.current_map != Some(_map_id) { return }
+        self.clear_active();
+        self.current_map = None;
+
+        Ok(())
+    }
+
+    pub fn load_map(&mut self, device: &ID3D11Device, _device_context: &ID3D11DeviceContext, map_id: u32) -> anyhow::Result<()> {
+        self.prepare_new_map(map_id as i32, device)
+    }
+
+    pub fn clear_active(&mut self) {
+        self.render_list.clear();
+        for pack in self.loaded_packs.values_mut() {
+            pack.clear();
+        }
+
+        let _ = self.poi_common.world_ib.take();
+        let _ = self.poi_common.map_ib.take();
+    }
+
+    pub fn cleanup_textures(&mut self) {
+        for pack in self.loaded_packs.values_mut() {
+            pack.cleanup_textures();
+        }
     }
 }
 
