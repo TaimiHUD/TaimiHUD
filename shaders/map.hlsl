@@ -32,7 +32,7 @@ VSOutput VSMain(VSInput input)
     float4 mvpos = mul(World, mpos);
     output.position = mul(View, mvpos.xzyw);
 
-    output.tex = float2(1.0 - input.tex.x, input.tex.y);
+    output.tex = input.tex;
 
     output.colour = input.colour;
 

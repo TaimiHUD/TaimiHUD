@@ -73,6 +73,8 @@ impl PoiCommonRenderData {
                 let mut vertices = POI_QUAD_VERTICES;
                 for vertex in &mut vertices {
                     vertex.position = vertex.position.xzy();
+                    vertex.normal = Vec3::Y;
+                    vertex.texture.x = 1.0 - vertex.texture.x;
                 }
                 vertices
             },
