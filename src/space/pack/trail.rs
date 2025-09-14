@@ -1,6 +1,6 @@
 use {
     crate::space::{
-        dx11::VertexBuffer,
+        dx11::{prelude::*, VertexBuffer},
         pack::{ActivePack, TrailSectionExt},
         resources::{Model, Texture, Vertex},
         DrawSpace, LocalContext,
@@ -10,10 +10,6 @@ use {
     glamour::{Box3, Vector3},
     std::sync::Arc,
     taimi_pack::Trail,
-    windows::Win32::Graphics::{
-        Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
-        Direct3D11::{ID3D11Device, ID3D11DeviceContext},
-    },
 };
 
 pub struct ActiveTrail {
@@ -180,14 +176,8 @@ impl ActiveTrail {
         self.texture.set(device_context, 0);
 
         unsafe {
-            device_context.IASetVertexBuffers(
-                0,
-                1,
-                Some(&self.section_vbuffer.buffer as *const _ as *const _),
-                Some(&self.section_vbuffer.stride),
-                Some(&self.section_vbuffer.offset),
-            );
-            //device_context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            self.section_vbuffer.set(device_context, 0);
+            //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {
                 LocalContext::World => device_context.Draw(
                     self.section_bookmarks[section + 1] - self.section_bookmarks[section],

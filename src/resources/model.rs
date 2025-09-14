@@ -27,7 +27,7 @@ impl Model {
         Self(vertices)
     }
 
-    pub fn quad() -> anyhow::Result<Self> {
+    pub fn quad() -> Self {
         let mut vertices = Vec::new();
         let height = 1.0;
         let width = 1.0;
@@ -58,7 +58,7 @@ impl Model {
             });
         }
 
-        Ok(Self(vertices))
+        Self(vertices)
     }
 
     pub fn to_buffer(&self, device: &ID3D11Device) -> anyhow::Result<VertexBuffer> {

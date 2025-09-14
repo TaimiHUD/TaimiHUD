@@ -16,7 +16,7 @@ use {
         collections::HashMap,
         fs::read_to_string,
         path::PathBuf,
-        sync::{Arc, RwLock},
+        sync::Arc,
     },
     windows::Win32::Graphics::Direct3D11::ID3D11Device,
 };
@@ -106,7 +106,7 @@ impl ObjectDescription {
 
         let render_backing = ObjectRenderBacking {
             metadata: render_metadata,
-            instance_buffer: RwLock::new(InstanceBuffer::create_empty(device)?),
+            instance_buffer: InstanceBuffer::create_empty(device)?,
             vertex_buffer,
             shaders,
         };

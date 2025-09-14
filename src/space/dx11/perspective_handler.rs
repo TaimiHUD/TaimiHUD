@@ -1,11 +1,10 @@
 use {
-    super::{cb_as_cb_list, PerspectiveInputData},
+    super::{prelude::*, PerspectiveInputData},
     anyhow::{anyhow, Context},
     crate::space::{max_depth, min_depth, MapTarget},
     glam::{Mat4, Vec2, Vec3, Vec4, Quat},
     windows::Win32::Graphics::Direct3D11::{
-        ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
-        D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_USAGE_DEFAULT,
+        D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
     },
 };
 
@@ -102,8 +101,8 @@ impl PerspectiveHandler {
     fn create_constant_buffer<D>(device: &ID3D11Device, initial: &D) -> anyhow::Result<ID3D11Buffer> {
         let constant_buffer_desc = D3D11_BUFFER_DESC {
             ByteWidth: size_of::<D>().next_multiple_of(16) as u32,
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+            Usage: d3d11::D3D11_USAGE_DEFAULT,
+            BindFlags: d3d11::D3D11_BIND_CONSTANT_BUFFER.0 as u32,
             CPUAccessFlags: 0,
             MiscFlags: 0,
             StructureByteStride: 0,
@@ -171,8 +170,8 @@ impl PerspectiveHandler {
     }
     pub fn set_cb(&self, device_context: &ID3D11DeviceContext, slot: u32) {
         unsafe {
-            device_context.VSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer)));
-            device_context.PSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer_pixel)));
+            device_context.VSSetConstantBuffers(slot, Some(self.constant_buffer.as_params()));
+            device_context.PSSetConstantBuffers(slot, Some(self.constant_buffer_pixel.as_params()));
         }
     }
     pub fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
@@ -237,8 +236,8 @@ impl PerspectiveHandler {
     }
     pub fn set_map_cb(&self, device_context: &ID3D11DeviceContext, slot: u32) {
         unsafe {
-            device_context.VSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer_mapv)));
-            device_context.PSSetConstantBuffers(slot, Some(cb_as_cb_list(&self.constant_buffer_mapp)));
+            device_context.VSSetConstantBuffers(slot, Some(self.constant_buffer_mapv.as_params()));
+            device_context.PSSetConstantBuffers(slot, Some(self.constant_buffer_mapp.as_params()));
         }
     }
 }

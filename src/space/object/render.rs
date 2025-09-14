@@ -1,19 +1,17 @@
 use {
     super::{
         super::{
-            dx11::{InstanceBuffer, InstanceBufferData, VertexBuffer},
+            dx11::{prelude::*, InstanceBuffer, InstanceBufferData, VertexBuffer},
             resources::{Model, ObjMaterial, ShaderPair},
         },
         PrimitiveTopology,
     },
     glam::Mat4,
-    std::sync::RwLock,
-    windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
 };
 
 pub struct ObjectRenderBacking {
     pub metadata: ObjectRenderMetadata,
-    pub instance_buffer: RwLock<InstanceBuffer>,
+    pub instance_buffer: InstanceBuffer,
     pub vertex_buffer: VertexBuffer,
     pub shaders: ShaderPair,
 }
@@ -34,9 +32,7 @@ impl ObjectRenderBacking {
         data: &[InstanceBufferData],
     ) -> anyhow::Result<()> {
         // TODO: extract inner error somehow, arc's suggestion didn't work o:
-        let mut lock = self.instance_buffer.write().unwrap();
-        lock.update(device, device_context, data)?;
-        drop(lock);
+        self.instance_buffer.update(device, device_context, data)?;
         Ok(())
     }
 
@@ -51,34 +47,17 @@ impl ObjectRenderBacking {
     }
 
     pub fn set_buffers(&self, slot: u32, device_context: &ID3D11DeviceContext) {
-        let instance_buffer_stride = size_of::<InstanceBufferData>() as u32;
-        let instance_buffer_offset = 0_u32;
-        let lock = self.instance_buffer.read().unwrap();
-        let buffers = [
-            Some(self.vertex_buffer.buffer.clone()),
-            Some(lock.get_buffer()),
-        ];
-        drop(lock);
-        let strides = [self.vertex_buffer.stride, instance_buffer_stride];
-        let offsets = [self.vertex_buffer.offset, instance_buffer_offset];
-        unsafe {
-            device_context.IASetVertexBuffers(
-                slot,
-                2,
-                Some(buffers.as_ptr().cast()),
-                Some(strides.as_ptr()),
-                Some(offsets.as_ptr()),
-            );
-        }
+        VertexBuffer::set_all(device_context, slot, &[
+            &self.vertex_buffer,
+            &self.instance_buffer,
+        ])
     }
 
     pub fn draw(&self, start: u32, device_context: &ID3D11DeviceContext) {
-        let lock = self.instance_buffer.read().unwrap();
-        let instances = lock.get_count();
-        drop(lock);
+        let instances = self.instance_buffer.get_count();
         let total = self.vertex_buffer.count + instances as u32;
+        self.metadata.topology.set(device_context);
         unsafe {
-            device_context.IASetPrimitiveTopology(self.metadata.topology.dx11());
             device_context.DrawInstanced(total, instances as u32, start, 0)
         }
     }
@@ -95,5 +74,13 @@ impl ObjectRenderBacking {
         self.set_buffers(slot, device_context);
         self.draw(slot, device_context);
         Ok(())
+    }
+}
+
+impl D3d11ContextBindableSlot for ObjectRenderBacking {
+    fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
+        self.set_shaders(device_context);
+        self.set_texture(slot, device_context);
+        self.set_buffers(slot, device_context);
     }
 }

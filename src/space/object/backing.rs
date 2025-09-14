@@ -12,7 +12,7 @@ use {
         timer::TimerMarker,
     },
     glam::{Vec3, Vec4},
-    std::{path::PathBuf, sync::RwLock},
+    std::path::PathBuf,
     windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
 };
 
@@ -38,7 +38,7 @@ impl ObjectBacking {
             render_backend.shaders.0["textured"].clone(),
             render_backend.shaders.1["textured"].clone(),
         );
-        let model = Model::quad()?;
+        let model = Model::quad();
         let model_matrix = marker.model_matrix();
         let ibd = [InstanceBufferData {
             world: model_matrix,
@@ -46,7 +46,7 @@ impl ObjectBacking {
             colour: Vec4::ONE,
         }];
         let render = ObjectRenderBacking {
-            instance_buffer: RwLock::new(InstanceBuffer::create(&render_backend.device, &ibd)?),
+            instance_buffer: InstanceBuffer::create(&render_backend.device, &ibd)?,
             vertex_buffer: model.to_buffer(&render_backend.device)?,
             shaders,
             metadata: ObjectRenderMetadata {
