@@ -383,6 +383,7 @@ impl Controller {
                 if marker_data.map_id == 0 {
                     marker_data.map_id = mumble.read_map_id();
                 }
+                marker_data.sign_obtainer.prepare(marker_data.player_pos_local(), marker_data.player_pos_global());
                 marker_data.commit();
 
                 if let Some(map_id) = &self.map_id {

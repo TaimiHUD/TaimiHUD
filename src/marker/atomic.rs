@@ -147,6 +147,10 @@ impl SignObtainer {
         0.3048f32
     }
 
+    pub fn has_sign(&self) -> bool {
+        self.point2.is_some()
+    }
+
     pub fn sign(&self) -> Vec2 {
         // the most common value, held by 1009/1022 maps from the maps api endpoint is
         // 24.0, 24.0 (2 feet per continent unit).
