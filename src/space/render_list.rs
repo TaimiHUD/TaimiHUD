@@ -164,9 +164,9 @@ impl RenderList {
         bounds: Box3<DrawSpace>,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         // TODO: select_visible_entities?
-        use glamour::Contains;
+        use glamour::Intersection;
         self.entities.iter()
-            //.filter(move |e| bounds.contains(&e.position)) // TODO
+            .filter(move |e| bounds.intersects(&e.bounds))
     }
 }
 

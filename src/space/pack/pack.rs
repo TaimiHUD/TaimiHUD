@@ -742,7 +742,15 @@ impl PackCollection {
         &'a self,
         map: &'_ MapTarget,
     ) -> impl Iterator<Item = &'a RenderEntity> + 'a {
-        self.render_list.map_entities(map.bounds_draw)
+        let mut bounds = map.bounds_draw;
+        // adding some wiggle room around the map edges...
+        let buffer = bounds.size() * 0.15;
+        bounds.min.x -= buffer.width;
+        bounds.min.z -= buffer.depth;
+        bounds.max.x += buffer.width;
+        bounds.max.z += buffer.depth;
+
+        self.render_list.map_entities(bounds)
     }
 }
 
