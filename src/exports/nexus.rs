@@ -25,7 +25,7 @@ use {
         TEXTURES,
     },
 };
-#[cfg(feature = "space")]
+#[cfg(any(feature = "space", feature = "texture-loader"))]
 use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 
@@ -83,7 +83,7 @@ pub(crate) fn cb_unload() {
 
         let handle = handle.0 as usize;
         let _ = thread::spawn(move || -> ! {
-            thread::sleep(Duration::from_millis(1200));
+            thread::sleep(Duration::from_millis(400));
             log::info!("goodbye");
             unsafe {
                 FreeLibraryAndExitThread(HMODULE(handle as *mut _), 0)
@@ -212,7 +212,7 @@ pub fn d3d11_device() -> RuntimeResult<Option<windows::Win32::Graphics::Direct3D
     Ok(api.get_d3d11_device())
 }
 
-#[cfg(feature = "space")]
+#[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<IDXGISwapChain>> {
     if !available() {
         return Ok(None)

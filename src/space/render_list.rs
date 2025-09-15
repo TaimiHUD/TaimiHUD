@@ -306,7 +306,7 @@ struct SpatialMap {
 impl SpatialMap {
     fn build(entities: &[RenderEntity], mut shapes: Vec<RenderEntityShape>) -> SpatialMap {
         shapes.extend(entities.iter().enumerate().map(RenderEntityShape::new));
-        let bvh = Bvh::build_par(&mut shapes);
+        let bvh = Bvh::build(&mut shapes);
         SpatialMap { shapes, bvh }
     }
 

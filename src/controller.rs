@@ -178,7 +178,14 @@ impl Controller {
                 }
             }
         };
-        let rt = match runtime::Builder::new_current_thread().enable_all().build() {
+        let rt = runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .max_blocking_threads(12)
+            .thread_keep_alive(Duration::from_secs(12))
+            .thread_name("taimi-controller")
+            .build();
+        let rt = match rt {
             Ok(rt) => rt,
             Err(error) => {
                 log::error!("Error! {}", error);
@@ -186,6 +193,7 @@ impl Controller {
             }
         };
         rt.block_on(evt_loop);
+        rt.shutdown_timeout(Duration::from_secs(8));
     }
 
     /*async fn load_markers_file(&mut self) -> anyhow::Result<()> {

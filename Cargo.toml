@@ -37,9 +37,11 @@ space = [
   "windows/Win32_Graphics_Hlsl",
   "texture-loader",
   "goggles",
+  #"space-list",
+  "dep:taimi_pack",
 ]
 space-list = [
-	"bvh",
+  "dep:bvh",
 ]
 markers = [
   "dep:itertools",
@@ -119,7 +121,7 @@ built = { version = "0.7.7", features = [ "chrono", "git2" ] }
 [dependencies]
 anyhow = "1.0.95"
 log = "0.4.21"
-tokio = { version = "1.43.0", features = [ "fs", "macros" ] }
+tokio = { version = "1.43.0", features = [ "fs", "macros" ], default-features = false }
 arcdps = { git = "https://github.com/zerthox/arcdps-rs", features = ["extras"] }
 glam = { version = "0.30.0", features = [ "serde", "mint" ] }
 palette = { version = "0.7.6", features = [ "serde" ] }
@@ -167,7 +169,7 @@ i18n-embed-fl = "0.9.4"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
-bvh = { version = "0.11.0", optional = true }
+bvh = { version = "0.11.0", default-features = false, optional = true }
 xml-rs = "0.8.26"
 uuid = { version = "1.17.0", features = ["v4"] }
 md5 = "0.7.0"
@@ -176,7 +178,7 @@ zip = "4.0.0"
 croner = "3"
 bitvec = "1.0.1"
 
-taimi_pack = { path = "./pathing/pack" }
+taimi_pack = { path = "./pathing/pack", optional = true }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
@@ -202,6 +204,7 @@ features = [
 
 [dependencies.image]
 optional = true
+default-features = false
 version = "0.25.6"
 features = [
   "png",
