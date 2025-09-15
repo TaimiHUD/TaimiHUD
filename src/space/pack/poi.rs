@@ -211,12 +211,16 @@ impl ActivePoi {
     }
 
     pub fn instance_data_map(&self) -> InstanceBufferData {
-        use glamour::TransformMap;
+        use {
+            crate::marker::atomic::{MarkerInputData, SignObtainer},
+            glamour::TransformMap,
+        };
+        const DEFAULT_SCALE: f32 = SignObtainer::meters_per_feet() * 2.0;
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
         let size_px = self.scale_map / 2.0;
-        let scale = crate::marker::atomic::MarkerInputData::read()
+        let scale = MarkerInputData::read()
             .map(|data| data.minimap_to_map_with(None, 1.0).then(data.map_to_local()).map(glamour::Vector2::<_>::splat(size_px)).x)
-            .unwrap_or(size_px * 0.64f32);
+            .unwrap_or_else(|| size_px * DEFAULT_SCALE);
         InstanceBufferData {
             world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(scale)),
             colour: self.tint(),

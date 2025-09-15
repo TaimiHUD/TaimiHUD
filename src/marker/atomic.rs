@@ -143,7 +143,7 @@ impl SignObtainer {
         // once we have two points, this becomes a no-op other than the comparison
     }
 
-    pub fn meters_per_feet() -> f32 {
+    pub const fn meters_per_feet() -> f32 {
         0.3048f32
     }
 
