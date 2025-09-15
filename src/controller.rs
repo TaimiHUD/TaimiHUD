@@ -1132,11 +1132,13 @@ impl Controller {
             path_loads.spawn_blocking(loader);
         }
 
-        while let Some(res) = path_loads.join_next().await {
-            if let Err(e) = res {
-                log::error!("Path load panicked: {e}");
+        tokio::spawn(async move {
+            while let Some(res) = path_loads.join_next().await {
+                if let Err(e) = res {
+                    log::error!("Path load panicked: {e}");
+                }
             }
-        }
+        });
 
         Ok(())
     }
