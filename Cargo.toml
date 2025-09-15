@@ -37,7 +37,7 @@ space = [
   "windows/Win32_Graphics_Hlsl",
   "texture-loader",
   "goggles",
-  #"space-list",
+  "space-list",
   "dep:taimi_pack",
 ]
 space-list = [

@@ -3,7 +3,7 @@ use {
         dx11::PerspectiveInputData,
         DrawSpace,
     },
-    glamour::{Box3, Point3, Vector3, Vector4},
+    glamour::{Box3, Intersection, Point3, Vector3, Vector4},
 };
 #[cfg(feature = "space-list")]
 use {
@@ -169,8 +169,8 @@ impl RenderList {
             },
             #[cfg(not(feature = "space-list"))]
             () => {
-                let _ = frustum;
                 self.entities.iter()
+                    //.filter(move |e| frustum.intersects(&e.bounds)).rev()
             },
         }
     }
@@ -180,7 +180,6 @@ impl RenderList {
         bounds: Box3<DrawSpace>,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         // TODO: select_visible_entities?
-        use glamour::Intersection;
         self.entities.iter()
             .filter(move |e| bounds.intersects(&e.bounds))
     }
@@ -322,9 +321,25 @@ impl SpatialMap {
 }
 
 #[derive(Copy, Clone)]
+#[cfg(todo)]
 pub struct MapFrustum(pub [Vector4<DrawSpace>; 6]);
 
+#[derive(Copy, Clone)]
+pub struct MapFrustum {
+    pub near: Vector4<DrawSpace>,
+    #[cfg(feature = "space-list")]
+    pub far: Vector4<DrawSpace>,
+    pub left: Vector4<DrawSpace>,
+    #[cfg(feature = "space-list")]
+    pub right: Vector4<DrawSpace>,
+    #[cfg(feature = "space-list")]
+    pub up: Vector4<DrawSpace>,
+    #[cfg(feature = "space-list")]
+    pub down: Vector4<DrawSpace>,
+}
+
 impl MapFrustum {
+    #[cfg(todo)]
     pub fn from_camera_data(
         data: &PerspectiveInputData,
         aspect_ratio: f32,
@@ -376,6 +391,84 @@ impl MapFrustum {
             left_plane.into(),
         ])
     }
+
+    #[cfg(todo)]
+    pub fn planes(&self) -> &[Vector4<DrawSpace>; 6] {
+        self.0
+    }
+
+    pub fn from_camera_data(
+        data: &PerspectiveInputData,
+        aspect_ratio: f32,
+        near: f32,
+        far: f32,
+    ) -> MapFrustum {
+        // TODO: higher accuracy/correctness using fov and perspective idk
+        let pos = data.camera_pos();
+
+        let camera_dir = data.camera_front();
+        let camera_far = camera_dir * far;
+        let camera_near = camera_dir * near;
+
+        let camera_dir_right = camera_dir.cross(data.camera_up()).normalize();
+        let camera_dir_up = camera_dir_right.cross(camera_dir).normalize();
+
+        let near_focal_point = pos + camera_near;
+        let fov_ratio = 3.0; // or 2.0 horiz? but 140 should be a reasonable enough max fov .-.
+        let near_width2 = near * fov_ratio;
+        let near_h = camera_dir_up * near_width2;
+        let near_w = camera_dir_right * near_width2;
+
+        let near_topleft = near_focal_point + near_h - near_w;
+        let near_topright = near_topleft + near_w * 2.0;
+        let near_bottomleft = near_topleft - near_h * 2.0;
+        #[cfg(feature = "space-list")]
+        let near_bottomright = near_bottomleft + near_w * 2.0;
+        let near_plane = points_to_plane(near_topleft.to_raw(), near_topright.to_raw(), near_bottomleft.to_raw());
+
+        let far_focal_point = pos + camera_far;
+        let far_width2 = far * fov_ratio;
+        let far_h = camera_dir_up * far_width2;
+        let far_w = camera_dir_right * far_width2;
+
+        let far_topleft = far_focal_point + far_h - far_w;
+        #[cfg(feature = "space-list")]
+        let far_topright = far_topleft + far_w * 2.0;
+        #[cfg(feature = "space-list")]
+        let far_bottomright = far_topright - far_h * 2.0;
+        let far_bottomleft = far_topleft - far_h * 2.0;
+        #[cfg(feature = "space-list")]
+        let far_plane = points_to_plane(far_topright.to_raw(), far_topleft.to_raw(), far_bottomright.to_raw());
+
+        let left_plane = points_to_plane(far_topleft.to_raw(), near_topleft.to_raw(), far_bottomleft.to_raw());
+        #[cfg(feature = "space-list")]
+        let right_plane = points_to_plane(far_topright.to_raw(), far_bottomright.to_raw(), near_topright.to_raw());
+
+        #[cfg(feature = "space-list")]
+        let up_plane = points_to_plane(far_topleft.to_raw(), far_topright.to_raw(), near_topleft.to_raw());
+        #[cfg(feature = "space-list")]
+        let down_plane = points_to_plane(far_bottomright.to_raw(), far_bottomleft.to_raw(), near_bottomright.to_raw());
+
+        MapFrustum {
+            near: near_plane.into(),
+            #[cfg(feature = "space-list")]
+            far: far_plane.into(),
+            left: left_plane.into(),
+            #[cfg(feature = "space-list")]
+            right: right_plane.into(),
+            #[cfg(feature = "space-list")]
+            up: up_plane.into(),
+            #[cfg(feature = "space-list")]
+            down: down_plane.into(),
+        }
+    }
+
+    const PLANES: usize = size_of::<MapFrustum>() / size_of::<Vector4>();
+    pub fn planes(&self) -> &[Vector4<DrawSpace>; MapFrustum::PLANES] {
+        unsafe {
+            &*(self as *const Self as *const [Vector4<DrawSpace>; MapFrustum::PLANES])
+        }
+    }
 }
 
 fn points_to_plane(p0: glam::Vec3, p1: glam::Vec3, p2: glam::Vec3) -> glam::Vec4 {
@@ -403,17 +496,54 @@ fn aabb_corners(aabb: &bvh::aabb::Aabb<f32, 3>) -> [Vector4<DrawSpace>; 8] {
 #[cfg(feature = "space-list")]
 impl IntersectsAabb<f32, 3> for MapFrustum {
     fn intersects_aabb(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
-        // let corners = aabb_corners(aabb);
-        // 'plane: for plane in self.0 {
-        //     for corner in corners {
-        //         // If any corner is inside this plane, move to the next.
-        //         if plane.dot(corner) >= 0.0 {
-        //             continue 'plane;
-        //         }
-        //     }
-        //     // All corners are outside this plane.
-        //     return false;
-        // }
+        let corners = aabb_corners(aabb);
+        'plane: for plane in self.planes() {
+            for corner in corners {
+                // If any corner is inside this plane, move to the next.
+                if plane.dot(corner) >= 0.0 {
+                    continue 'plane;
+                }
+            }
+            // All corners are outside this plane.
+            return false;
+        }
         true
+    }
+}
+
+#[cfg(not(feature = "space-list"))]
+impl Intersection<Point3<DrawSpace>> for MapFrustum {
+    type Intersection = bool;
+
+    fn intersects(&self, thing: &Point3<DrawSpace>) -> bool {
+        self.intersection(thing) == Some(true)
+    }
+
+    fn intersection(&self, thing: &Point3<DrawSpace>) -> Option<Self::Intersection> {
+        let point = thing.extend(1.0);
+        for plane in self.planes() {
+                if plane.dot(point.into()) < 0.0 {
+                    return Some(false)
+                }
+            }
+
+        Some(true)
+    }
+}
+
+#[cfg(not(feature = "space-list"))]
+impl Intersection<Box3<DrawSpace>> for MapFrustum {
+    type Intersection = bool;
+
+    fn intersects(&self, thing: &Box3<DrawSpace>) -> bool {
+        self.intersection(thing) == Some(true)
+    }
+
+    fn intersection(&self, thing: &Box3<DrawSpace>) -> Option<Self::Intersection> {
+        if self.intersects(&thing.min) || self.intersects(&thing.max) {
+            Some(true)
+        } else {
+            Some(false)
+        }
     }
 }
