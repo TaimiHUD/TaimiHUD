@@ -54,6 +54,7 @@ pub enum SpaceEvent {
         pack: Arc<taimi_pack::Pack>,
         loader: super::pack::LoaderBox,
     },
+    PackUnloadAll,
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -128,7 +129,7 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let mut packs = PackCollection::new(&render_backend)
+        let packs = PackCollection::new(&render_backend)
             .context("Initializing packs")?;
         Controller::try_send(ControllerEvent::PathingLoadAll);
         #[cfg(todo)]
@@ -267,6 +268,10 @@ impl Engine {
                         if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
                             log::error!("{e}");
                         }
+                    },
+                    PackUnloadAll => {
+                        log::info!("Unloading all paths...");
+                        self.packs.clear();
                     },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,

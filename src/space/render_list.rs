@@ -114,6 +114,7 @@ impl RenderList {
         self.entities.clear();
         #[cfg(feature = "space-list")] {
             self.draw_order_heap.clear();
+            self.spatial_map.bvh.nodes.clear();
             self.spatial_map.shapes.clear();
         }
     }

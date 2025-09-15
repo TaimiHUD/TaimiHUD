@@ -117,6 +117,11 @@ impl PoiCommonRenderData {
     pub fn set_primitive(&self, device_context: &ID3D11DeviceContext) {
         PrimitiveTopology::TriangleStrip.set(device_context);
     }
+
+    pub fn clear(&mut self) {
+        let _ = self.world_ib.take();
+        let _ = self.map_ib.take();
+    }
 }
 
 const POI_QUAD_VERTICES: [Vertex; 4] = [

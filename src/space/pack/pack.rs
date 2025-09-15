@@ -360,7 +360,7 @@ impl ActivePack {
             let trail = match ActiveTrail::build(self, pack_trail, i_trail, category_idx, render_entities.len(), device) {
                 Ok(trail) => trail,
                 Err(e) => {
-                    log::warn!("Error loading trail: {e:?}");
+                    log::warn!("Error loading trail: {e}");
                     continue;
                 }
             };
@@ -409,7 +409,7 @@ impl ActivePack {
             let poi = match ActivePoi::build(self, pack_poi, i_poi, category_idx, device) {
                 Ok(poi) => poi,
                 Err(e) => {
-                    log::warn!("Error loading poi: {e:?}");
+                    log::warn!("Error loading poi: {e}");
                     continue;
                 }
             };
@@ -504,6 +504,9 @@ impl PackCollection {
     pub fn clear(&mut self) {
         self.loaded_packs.clear();
         self.unloaded_packs.clear();
+
+        self.render_list.clear();
+        self.poi_common.clear();
     }
 
     pub fn load_all(&mut self, base_dir: &Path) -> anyhow::Result<()> {
@@ -676,8 +679,7 @@ impl PackCollection {
         let res = self.recreate_buffers_inner(device)
             .context("preparing POI instance buffers");
         if res.is_err() {
-            let _ = self.poi_common.world_ib.take();
-            let _ = self.poi_common.map_ib.take();
+            self.poi_common.clear();
             for pack in self.loaded_packs.values_mut() {
                 pack.render_poi_bookmark = 0;
             }
@@ -891,8 +893,7 @@ impl PackCollection {
             pack.clear();
         }
 
-        let _ = self.poi_common.world_ib.take();
-        let _ = self.poi_common.map_ib.take();
+        self.poi_common.clear();
     }
 
     pub fn cleanup_textures(&mut self) {

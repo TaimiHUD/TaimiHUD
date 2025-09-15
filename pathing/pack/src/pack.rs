@@ -222,7 +222,7 @@ fn inner_parse_pack_def(
                     "poi" => match Poi::from_xml(asset, attributes) {
                         Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
                         Err(e) => {
-                            log::warn!("POI parse failed in {asset}: {e:?}");
+                            log::warn!("POI parse failed in {asset}: {e}");
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },

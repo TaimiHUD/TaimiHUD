@@ -100,6 +100,16 @@ impl PathingWindowState {
                                         ui.separator();
                                         ui.dummy([4.0; 2]);
                                     }
+                                    ui.same_line();
+                                    // TODO? Engine::try_send(SpaceEvent::PackUnloadAll); instead of inline here...
+                                    if ui.button("Reload All") {
+                                        engine.packs.clear();
+                                        Controller::try_send(ControllerEvent::PathingLoadAll);
+                                    }
+                                    ui.same_line();
+                                    if ui.button("Unload All") {
+                                        engine.packs.clear();
+                                    }
                                         if self.filter_open {
                                             let mut update_search = false;
                                             ui.separator();
