@@ -1156,6 +1156,7 @@ impl Controller {
         Ok(())
     }
 
+    #[cfg(feature = "space")]
     fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
         if pack.name.is_empty() {
             pack.name = name;
