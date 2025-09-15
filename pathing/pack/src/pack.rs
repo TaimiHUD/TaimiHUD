@@ -62,6 +62,20 @@ pub fn taco_safe_name(value: &str, is_full: bool) -> String {
     result
 }
 
+pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
+    let locator = locator.as_bytes();
+    let path = path.as_ref();
+    if path.len() != locator.len() {
+        return false
+    }
+    locator.iter().zip(path.iter())
+        .all(|(&l, &p)| match (l, p) {
+            // path seps whee
+            (b'/', b'\\') | (b'\\', b'/') => true,
+            (l, p) => l.eq_ignore_ascii_case(&p),
+        })
+}
+
 /// I hate this. See: https://github.com/blish-hud/Pathing/blob/main/Utility/AttributeParsingUtil.cs#L39
 pub fn taco_xml_to_guid(value: &str) -> Uuid {
     use base64::{engine::general_purpose, Engine as _};
@@ -215,7 +229,7 @@ fn inner_parse_pack_def(
                     "trail" => match Trail::from_xml(ctx, asset, attributes) {
                         Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                         Err(e) => {
-                            log::warn!("Trail parse failed in {asset}: {e:?}");
+                            log::warn!("Trail parse failed in {asset}: {e}");
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },

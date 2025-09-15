@@ -1,5 +1,6 @@
 use {
     anyhow::{anyhow, Context as _},
+    crate::pack::file_path_eq,
     relative_path::PathExt,
     std::{
         ffi::OsStr,
@@ -157,7 +158,7 @@ impl PackLoaderContext for ZipLoader {
             Some(index) => self.load_asset_by_index(index, name),
             None => {
                 let index = self.archive.file_names()
-                    .position(|filename| filename.eq_ignore_ascii_case(name));
+                    .position(|filename| file_path_eq(name, filename));
                 index.ok_or_else(|| anyhow!("{name} not found in zip archive"))
                     .and_then(|index| self.load_asset_by_index(index, name))
             },
