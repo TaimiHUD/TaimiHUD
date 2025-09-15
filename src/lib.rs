@@ -746,13 +746,10 @@ fn control_window(window: impl Into<String>, state: Option<bool>) {
 
 fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
     let account_name_ref = account_name.as_ref();
-    let name = match account_name_ref.strip_prefix(":") {
-        Some(name) => name,
-        None => account_name_ref,
+    let name = match account_name_canon(account_name_ref) {
+        Some(n) => n,
+        None => return,
     };
-    if name.is_empty() {
-        return
-    }
     match ACCOUNT_NAME_CELL.get() {
         // ignore duplicates
         Some(prev) if prev == name =>
@@ -773,6 +770,18 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
                 log::error!("Account name {name:?} inconsistent with previously recorded value {:?}", prev.map(|s| &s[..]).unwrap_or(""))
             }
         },
+    }
+}
+
+pub fn account_name_canon<N: ?Sized + AsRef<str>>(account_name: &N) -> Option<&str> {
+    let account_name = account_name.as_ref();
+    let name = match account_name.strip_prefix(":") {
+        Some(name) => name,
+        None => account_name,
+    };
+    match name.is_empty() {
+        true => None,
+        false => Some(name),
     }
 }
 

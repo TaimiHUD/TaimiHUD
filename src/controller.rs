@@ -1,6 +1,7 @@
 #[cfg(feature = "markers")]
 use {
     crate::{
+        account_name_canon,
         exports::runtime::{
             mouse::{send_input, MouseInput, MousePosition},
             keyboard::KeyState,
@@ -9,8 +10,9 @@ use {
             atomic::{MarkerInputData, ScreenPoint},
             format::{MarkerSet, RuntimeMarkers},
         },
+        ACCOUNT_NAME_CELL,
     },
-    arcdps::extras::UserInfoOwned,
+    arcdps::extras::{UserInfoOwned, UserRole},
     tokio::task::JoinHandle,
 };
 use {
@@ -994,7 +996,6 @@ impl Controller {
             }
         }
         if !self.extras_squad.is_empty() {
-            use {crate::ACCOUNT_NAME_CELL, arcdps::extras::user::UserRole};
             if let Some(account_name) = ACCOUNT_NAME_CELL.get() {
                 if let Some(squad_state) = self.extras_squad.get(account_name) {
                     return match squad_state.role {
@@ -1016,23 +1017,25 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     async fn rtapi_squad_update(&mut self, change: SquadState, member: GroupMemberOwned) {
-        use crate::ACCOUNT_NAME_CELL;
-
         let account_name = ACCOUNT_NAME_CELL.get();
         if let Some(account_name) = account_name {
+            let member_name = match account_name_canon(&member.account_name) {
+                Some(name) => name,
+                None => return,
+            };
             match change {
                 SquadState::Left => {
-                    if member.account_name == *account_name {
+                    if member_name == account_name {
                         self.rtapi_squad.clear();
                     } else {
-                        self.rtapi_squad.remove(&member.account_name);
+                        self.rtapi_squad.remove(member_name);
                     }
                 }
                 SquadState::Joined => {
-                    self.rtapi_squad.insert(member.account_name.clone(), member);
+                    self.rtapi_squad.insert(member_name.into(), member);
                 }
                 SquadState::Update => {
-                    if let Some(entry) = self.rtapi_squad.get_mut(&member.account_name) {
+                    if let Some(entry) = self.rtapi_squad.get_mut(member_name) {
                         *entry = member;
                     }
                 }
