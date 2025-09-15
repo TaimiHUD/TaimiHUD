@@ -91,6 +91,7 @@ pub(crate) unsafe fn extras_release() {
         _ => hotload::extras_release(),
         #[cfg(not(feature = "closure-ffi"))]
         _ => {
+            // TODO: if game exiting, don't bother saying this
             log::error!("cannot unsubscribe, expect to crash soon");
         },
     }
@@ -113,11 +114,11 @@ pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::k
 
 #[cfg(feature = "closure-ffi")]
 mod hotload {
-    #[cfg(feature = "closure-ffi")]
     use {
         arcdps::{extras::{keybinds::RawKeybindChange, user::UserInfo}, Language},
-        closure_ffi::{jit_alloc::{GlobalJitAlloc, JitAllocError}, BareFnAny, cc::CUnwind as C},
-        std::{mem, ptr, sync::Mutex},
+        closure_ffi::{jit_alloc::JitAllocError, BareFnAny, cc::CUnwind as C},
+        jit_allocator2::{JitAllocator, JitAllocatorOptions},
+        std::{mem, ptr, sync::{LazyLock, Mutex}},
     };
     pub unsafe fn extras_release() {
         let mut callbacks = match CALLBACKS.lock() {
@@ -132,10 +133,35 @@ mod hotload {
         callbacks.leak_unload();
 
         // TODO: stash away pointers somewhere so we can reclaim them later on hot reload?
+
+        if let Ok(mut jit) = JIT.lock() {
+            let jit = mem::replace(&mut *jit, new_jit());
+            mem::forget(jit);
+            log::debug!("leaking JIT allocations");
+        }
     }
 
     pub(crate) static CALLBACKS: Mutex<ExtrasCallbacks> = Mutex::new(ExtrasCallbacks::EMPTY);
-    type ErasedBareFn = closure_ffi::UntypedBareFn<dyn Send>;
+    pub(crate) static JIT: LazyLock<Mutex<JitAllocator>> = LazyLock::new(|| {
+        // TODO: impl JitAlloc for box etc
+        Mutex::new(new_jit())
+    });
+    type StaticJitAlloc = &'static LazyLock<Mutex<JitAllocator>>;
+    type ErasedBareFn = closure_ffi::UntypedBareFn<dyn Send, StaticJitAlloc>;
+
+    fn new_jit() -> JitAllocator {
+        let opts = JitAllocatorOptions {
+            use_dual_mapping: false,
+            use_multiple_pools: false,
+            immediate_release: true,
+            .. Default::default()
+        };
+        let jit = mem::ManuallyDrop::new(JitAllocator::new(opts));
+        let jit = unsafe {
+            std::ptr::read(&**jit)
+        };
+        jit
+    }
 
     #[derive(Default)]
     pub(crate) struct ExtrasCallbacks {
@@ -164,10 +190,9 @@ mod hotload {
                 super::cb_keybind_changed_raw(keybind)
             };
 
-            let jit = GlobalJitAlloc;
-            let squad_update = BareFnAny::try_with_cc_in(C, squad_update, jit)?;
-            let language_changed = BareFnAny::try_with_cc_in(C, language_changed, jit)?;
-            let keybind_changed = BareFnAny::try_with_cc_in(C, keybind_changed, jit)?;
+            let squad_update = BareFnAny::try_with_cc_in(C, squad_update, &JIT)?;
+            let language_changed = BareFnAny::try_with_cc_in(C, language_changed, &JIT)?;
+            let keybind_changed = BareFnAny::try_with_cc_in(C, keybind_changed, &JIT)?;
 
             Ok(Self {
                 squad_update: Some(squad_update.into_untyped()),
@@ -182,16 +207,27 @@ mod hotload {
 
             let stub_template: &[u8] = &__EXTRAS_STUB_TEMPLATE;
 
-            let jit = GlobalJitAlloc;
             let f = f as *const u8;
-            let f_w = {
-                jit.protect_jit_memory(f, stub_template.len(), ProtectJitAccess::ReadWrite);
-                f as *mut u8
+            let f_w = JIT.lock()
+                .ok().and_then(|mut jit| {
+                    jit.query(f).ok()
+                });
+            let (base, f_w, len) = match f_w {
+                Some((base, f_w, len)) => {
+                    (base, f_w, len)
+                },
+                None => {
+                    log::warn!("query JIT memory {f:p} failed");
+                    (f, f as *mut u8, stub_template.len())
+                },
             };
-            ptr::copy_nonoverlapping(stub_template.as_ptr(), f_w, stub_template.len());
+            let jit = &JIT;
+            let offset = f.offset_from_unsigned(base);
+            jit.protect_jit_memory(base, len, ProtectJitAccess::ReadWrite);
+            ptr::copy_nonoverlapping(stub_template.as_ptr(), f_w.add(offset), stub_template.len());
 
-            jit.protect_jit_memory(f, stub_template.len(), ProtectJitAccess::ReadExecute);
-            jit.flush_instruction_cache(f, stub_template.len());
+            jit.protect_jit_memory(base, len, ProtectJitAccess::ReadExecute);
+            jit.flush_instruction_cache(base, len);
         }
 
         /// Replace allocated trampoline with a no-op stub
@@ -250,6 +286,7 @@ mod hotload {
         ".balign 8",
         "{stub_template_return}:",
         "ret",
+        "nop",
         ".balign 8",
         stub_template_return = sym __EXTRAS_STUB_TEMPLATE,
     }

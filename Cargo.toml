@@ -75,6 +75,7 @@ extension-arcdps = [
 ]
 extension-arcdps-extras = [
   "closure-ffi",
+  "jit-allocator2",
 ]
 extension-arcdps-codegen = [
   #"dpsapi/arcdps-015",
@@ -188,6 +189,7 @@ include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
 sync-unsafe-cell = { version = "0.1", optional = true }
 closure-ffi = { version = "3", optional = true }
+jit-allocator2 = { version = "0.2", optional = true }
 
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }

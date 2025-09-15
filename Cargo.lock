@@ -4019,6 +4019,7 @@ dependencies = [
  "include_dir",
  "indexmap 2.9.0",
  "itertools",
+ "jit-allocator2",
  "json-strip-comments",
  "lininterp",
  "log",
