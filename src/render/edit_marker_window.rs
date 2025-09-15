@@ -1,6 +1,7 @@
 use {
     crate::{
         controller::MarkerSaveEvent,
+        exports::runtime as rt,
         fl,
         marker::{
             atomic::MarkerInputData,
@@ -15,7 +16,7 @@ use {
             ComboBox, Id, PopupModal, Selectable, TableColumnFlags, TableColumnSetup, TableFlags,
             Ui, Window,
         },
-        rtapi::{GroupType, RealTimeApi},
+        rtapi::GroupType,
     },
     std::{f32, mem, path::PathBuf},
     strum::IntoEnumIterator,
@@ -263,15 +264,15 @@ impl EditMarkerWindowState {
         if !self.open {
             let author = match ACCOUNT_NAME_CELL.get() {
                 Some(a) => (a[1..]).to_string(),
-                None => match RealTimeApi::get() {
-                    Some(rtapi) => {
+                None => match rt::rtapi() {
+                    Ok(Some(rtapi)) => {
                         if let Some(player_data) = rtapi.read_player() {
                             player_data.account_name
                         } else {
                             "".to_string()
                         }
                     }
-                    None => "".to_string(),
+                    _ => "".to_string(),
                 },
             };
             let map_id = if let Some(mid) = MarkerInputData::read() {
@@ -322,7 +323,7 @@ impl EditMarkerWindowState {
                     self.trigger.draw_take_current(ui);
                     self.trigger.draw_edit_manual(ui, true);
                     ui.dummy([4.0; 2]);
-                    if let Some(rtapi) = RealTimeApi::get() {
+                    if let Ok(Some(rtapi)) = rt::rtapi() {
                         if let Some(group) = rtapi.read_group() {
                             let is_squad = matches!(
                                 group.group_type,
