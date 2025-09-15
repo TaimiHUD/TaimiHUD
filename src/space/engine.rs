@@ -157,7 +157,7 @@ impl Engine {
 
         let mut engine = Engine {
             render_pathing: true,
-            render_pathing_map: true,
+            render_pathing_map: false,
             rtapi,
             gameplay_map: Err(0),
             model_files,
