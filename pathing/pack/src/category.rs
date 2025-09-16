@@ -1,4 +1,5 @@
 use {
+    anyhow::Context,
     crate::{
         attributes::{parse_bool, MarkerAttributes},
         pack::{taco_safe_name, PartialItem},
@@ -39,27 +40,29 @@ impl Category {
 
         for attr in attrs {
             let attr_name = attr.name.local_name.trim_start_matches("bh-");
-            if attr_name.eq_ignore_ascii_case("name") {
+            let res = if attr_name.eq_ignore_ascii_case("name") {
                 id = taco_safe_name(&attr.value, false);
+                Ok(())
             } else if attr_name.eq_ignore_ascii_case("displayname") {
                 display_name = Some(attr.value);
+                Ok(())
             } else if attr_name.eq_ignore_ascii_case("isseparator") {
-                if let Some(val) = parse_bool(&attr.value) {
-                    is_separator = val;
-                }
+                parse_bool(&attr.value)
+                    .map(|val| is_separator = val)
+                    .map_err(From::from)
             } else if attr_name.eq_ignore_ascii_case("ishidden") {
-                if let Some(val) = parse_bool(&attr.value) {
-                    is_hidden = val;
-                }
+                parse_bool(&attr.value)
+                    .map(|val| is_hidden = val)
+                    .map_err(From::from)
             } else if attr_name.eq_ignore_ascii_case("defaulttoggle") {
-                if let Ok(val) = attr.value.parse() {
-                    default_toggle = val;
-                }
-            } else if let Err(..) = marker_attributes.try_add(attr.name.borrow(), attr.value) {
-                log::warn!(
-                    "Unknown MarkerCategory attribute '{}'",
-                    attr.name.local_name
-                );
+                parse_bool(&attr.value)
+                    .map(|val| default_toggle = val)
+                    .map_err(From::from)
+            } else {
+                marker_attributes.try_add(attr.name.borrow(), attr.value)
+            }.with_context(|| format!("parsing category attribute '{}'", attr.name));
+            if let Err(e) = res {
+                log::warn!("{e:#}");
             }
         }
 

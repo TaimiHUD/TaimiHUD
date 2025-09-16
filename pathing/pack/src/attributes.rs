@@ -1,6 +1,7 @@
 use {
+    anyhow::{anyhow, Context},
     crate::pack::taco_xml_to_guid,
-    std::str::FromStr,
+    std::{fmt, str::FromStr},
     uuid::Uuid,
     xml::name::Name,
 };
@@ -270,204 +271,150 @@ impl MarkerAttributes {
         }
     }
 
-    pub fn try_add(&mut self, name: Name<'_>, value: String) -> Result<(), ()> {
+    pub fn try_add(&mut self, name: Name<'_>, value: String) -> anyhow::Result<()> {
         let attr_name = &name.local_name.trim_start_matches("bh-");
-        let attr = xml::attribute::OwnedAttribute {
-            // reduce diff noise...
-            name: xml::name::OwnedName::local(String::new()),
-            value,
-        };
         // === Common === //
         if attr_name.eq_ignore_ascii_case("alpha") {
-            self.alpha = attr.value.parse().ok();
+            self.alpha = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("canfade") {
-            self.can_fade = parse_bool(&attr.value);
+            self.can_fade = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint")
         {
-            self.tint = parse_color(&attr.value);
+            self.tint = Some(parse_color(&value)?);
         } else if attr_name.eq_ignore_ascii_case("cull") {
-            self.cull = attr.value.parse().ok();
+            self.cull = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("edittag") {
-            self.edit_tag = attr.value.parse().ok();
+            self.edit_tag = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("fadenear") {
-            self.fade_near = attr.value.parse().ok();
+            self.fade_near = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("fadefar") {
-            self.fade_far = attr.value.parse().ok();
+            self.fade_far = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("minimapvisibility") {
-            self.minimap_visibility = parse_bool(&attr.value);
+            self.minimap_visibility = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mapvisibility") {
-            self.map_visibility = parse_bool(&attr.value);
+            self.map_visibility = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("ingamevisibility") {
-            self.in_game_visibility = parse_bool(&attr.value);
+            self.in_game_visibility = Some(parse_bool(&value)?);
         // === POI-specific === //
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
-            self.height_offset = attr.value.parse().ok();
+            self.height_offset = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            self.icon_file = Some(attr.value.clone());
+            self.icon_file = Some(value);
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
-            self.icon_size = attr.value.parse().ok();
+            self.icon_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
-            self.invert_behavior = parse_bool(&attr.value);
+            self.invert_behavior = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mapdisplaysize") {
-            self.map_display_size = attr.value.parse().ok();
+            self.map_display_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("scaleonmapwithzoom") {
-            self.scale_on_map_with_zoom = parse_bool(&attr.value);
+            self.scale_on_map_with_zoom = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("minsize") {
-            self.min_size = attr.value.parse().ok();
+            self.min_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("maxsize") {
-            self.max_size = attr.value.parse().ok();
+            self.max_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("occlude") {
-            self.occlude = parse_bool(&attr.value);
+            self.occlude = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("rotate") {
-            let mut split = attr.value.split(',');
-            let (Some(x), Some(y), Some(z)) = (split.next(), split.next(), split.next()) else {
-                return Err(());
-            };
-            if let (Some(x), Some(y), Some(z)) = (x.parse().ok(), y.parse().ok(), z.parse().ok()) {
-                self.rotate = Some(glam::Vec3::new(x, y, z));
-            }
+            self.rotate = Some(glam::Vec3::from_array(parse_array(&value)?));
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
-            let mut vec = self.rotate.unwrap_or_default();
-            if let Ok(x) = attr.value.parse() {
-                vec.x = x;
-                self.rotate = Some(vec);
-            }
+            let x = value.parse()?;
+            self.rotate.get_or_insert_default().x = x;
         } else if attr_name.eq_ignore_ascii_case("rotate-y") {
-            let mut vec = self.rotate.unwrap_or_default();
-            if let Ok(y) = attr.value.parse() {
-                vec.y = y;
-                self.rotate = Some(vec);
-            }
+            let y = value.parse()?;
+            self.rotate.get_or_insert_default().y = y;
         } else if attr_name.eq_ignore_ascii_case("rotate-z") {
-            let mut vec = self.rotate.unwrap_or_default();
-            if let Ok(z) = attr.value.parse() {
-                vec.z = z;
-                self.rotate = Some(vec);
-            }
+            let z = value.parse()?;
+            self.rotate.get_or_insert_default().z = z;
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title")
         {
-            self.billboard_text = Some(attr.value.clone());
+            self.billboard_text = Some(value);
         } else if attr_name.eq_ignore_ascii_case("title-color") {
-            self.billboard_text_color = parse_color(&attr.value);
+            self.billboard_text_color = Some(parse_color(&value)?);
         } else if attr_name.eq_ignore_ascii_case("tip-name") {
-            self.tip_name = Some(attr.value.clone());
+            self.tip_name = Some(value);
         } else if attr_name.eq_ignore_ascii_case("tip-description") {
-            self.tip_description = Some(attr.value.clone());
+            self.tip_description = Some(value);
         // === Trail-specific === //
         } else if attr_name.eq_ignore_ascii_case("animspeed") {
-            self.anim_speed = attr.value.parse().ok();
+            self.anim_speed = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("texture") {
-            self.texture = Some(attr.value.clone());
+            self.texture = Some(value);
         } else if attr_name.eq_ignore_ascii_case("trailscale") {
-            self.trail_scale = attr.value.parse().ok();
+            self.trail_scale = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iswall") {
-            self.is_wall = parse_bool(&attr.value);
+            self.is_wall = Some(parse_bool(&value)?);
         // === Filters === //
         } else if attr_name.eq_ignore_ascii_case("festival") {
-            self.festivals = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.festivals = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mount") {
-            self.mounts = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.mounts = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("profession") {
-            self.professions = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.professions = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("race") {
-            self.races = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.races = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("specialization") {
-            self.specializations = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.specializations = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("maptype") {
-            self.map_types = Some(
-                attr.value
-                    .split(',')
-                    .filter_map(|f| f.parse().ok())
-                    .collect(),
-            );
+            self.map_types = Some(parse_list(&value)?);
         } else if attr_name.eq_ignore_ascii_case("schedule") {
-            self.schedule = Some(attr.value.clone());
+            self.schedule = Some(value);
         } else if attr_name.eq_ignore_ascii_case("schedule-duration") {
-            self.schedule_duration = attr.value.parse().ok();
+            self.schedule_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("raid") {
-            self.raids = Some(attr.value.split(',').map(String::from).collect());
+            self.raids = Some(parse_list(&value)?);
         // === Taco Behaviors === //
         } else if attr_name.eq_ignore_ascii_case("behavior") {
-            self.taco_behavior = attr
-                .value
-                .parse::<i32>()
-                .ok()
-                .and_then(|i| i.try_into().ok());
+            self.taco_behavior = Some(value.parse::<i32>()?.try_into()?);
         } else if attr_name.eq_ignore_ascii_case("achievementid") {
-            self.achievement_id = attr.value.parse().ok();
+            self.achievement_id = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("achievementbit") {
-            self.achievement_bit = attr.value.parse().ok();
+            self.achievement_bit = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("resetlength") {
-            self.reset_length = attr.value.parse().ok();
+            self.reset_length = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("autotrigger") {
-            self.auto_trigger = parse_bool(&attr.value);
+            self.auto_trigger = Some(parse_bool(&value)?);
         // === Modifiers === //
         } else if attr_name.eq_ignore_ascii_case("info") {
-            self.info = Some(attr.value.clone());
+            self.info = Some(value);
         } else if attr_name.eq_ignore_ascii_case("inforange")
             || attr_name.eq_ignore_ascii_case("triggerrange")
         {
-            self.info_range = attr.value.parse().ok();
+            self.info_range = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce") {
-            self.bounce_behavior = attr.value.parse().ok();
+            self.bounce_behavior = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-delay") {
-            self.bounce_delay = attr.value.parse().ok();
+            self.bounce_delay = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-height") {
-            self.bounce_height = attr.value.parse().ok();
+            self.bounce_height = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-duration") {
-            self.bounce_duration = attr.value.parse().ok();
+            self.bounce_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("copy") {
-            self.copy_value = Some(attr.value.clone());
+            self.copy_value = Some(value);
         } else if attr_name.eq_ignore_ascii_case("copy-message") {
-            self.copy_message = Some(attr.value.clone());
+            self.copy_message = Some(value);
         } else if attr_name.eq_ignore_ascii_case("toggle")
             || attr_name.eq_ignore_ascii_case("togglecategory")
         {
-            self.toggle_category = Some(attr.value.clone());
+            self.toggle_category = Some(value);
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
-            self.reset_guids = Some(attr.value.split(',').map(|g| taco_xml_to_guid(g)).collect());
+            self.reset_guids = Some(value.split(',').map(|g| taco_xml_to_guid(g)).collect());
         } else if attr_name.eq_ignore_ascii_case("show") {
-            self.show_category = Some(attr.value.clone());
+            self.show_category = Some(value);
         } else if attr_name.eq_ignore_ascii_case("hide") {
-            self.hide_category = Some(attr.value.clone());
+            self.hide_category = Some(value);
         // === Scripting === //
         } else if attr_name.eq_ignore_ascii_case("script-tick") {
-            self.script_tick = Some(attr.value.clone());
+            self.script_tick = Some(value);
         } else if attr_name.eq_ignore_ascii_case("script-focus") {
-            self.script_focus = Some(attr.value.clone());
+            self.script_focus = Some(value);
         } else if attr_name.eq_ignore_ascii_case("script-trigger") {
-            self.script_trigger = Some(attr.value.clone());
+            self.script_trigger = Some(value);
         } else if attr_name.eq_ignore_ascii_case("script-filter") {
-            self.script_filter = Some(attr.value.clone());
+            self.script_filter = Some(value);
         } else if attr_name.eq_ignore_ascii_case("script-once") {
-            self.script_once = Some(attr.value.clone());
+            self.script_once = Some(value);
         } else {
-            return Err(());
+            anyhow::bail!("unrecognized attribute");
         }
         Ok(())
     }
@@ -475,27 +422,68 @@ impl MarkerAttributes {
 
 // TODO: move parse helpers into a separate file and make pub
 
-pub fn parse_bool(value: &str) -> Option<bool> {
-    value
-        .parse()
-        .ok()
-        .or_else(|| value.parse::<i32>().ok().map(|i| i != 0))
+pub fn parse_bool(value: &str) -> anyhow::Result<bool> {
+    match value {
+        value if value.eq_ignore_ascii_case("true") =>
+            Ok(true),
+        value if value.eq_ignore_ascii_case("false") =>
+            Ok(false),
+        value => value.parse::<i32>()
+            .map(|i| i != 0)
+            .map_err(|_| anyhow!("unexpected bool `{value}`")),
+    }
 }
 
-fn parse_color(value: &str) -> Option<glam::Vec4> {
+fn parse_color(value: &str) -> anyhow::Result<glam::Vec4> {
     let val = value.trim_start_matches('#');
-    if let Ok(mut itint) = u32::from_str_radix(val, 16) {
-        if val.len() == 6 {
-            itint |= 0xFF000000;
-        }
-        return Some(glam::Vec4::new(
-            ((itint >> 16) & 0xFF) as f32 / 255.0,
-            ((itint >> 8) & 0xFF) as f32 / 255.0,
-            ((itint >> 0) & 0xFF) as f32 / 255.0,
-            ((itint >> 24) & 0xFF) as f32 / 255.0,
-        ));
+    let mut itint = u32::from_str_radix(val, 16)?;
+    if val.len() == 6 {
+        itint |= 0xFF000000;
     }
-    None
+    Ok(glam::Vec4::new(
+        ((itint >> 16) & 0xFF) as f32 / 255.0,
+        ((itint >> 8) & 0xFF) as f32 / 255.0,
+        ((itint >> 0) & 0xFF) as f32 / 255.0,
+        ((itint >> 24) & 0xFF) as f32 / 255.0,
+    ))
+}
+
+fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>> where
+    <T as FromStr>::Err: fmt::Display + Into<anyhow::Error>,
+{
+    let mut err = None;
+    let list: Vec<T> = value
+        .split(',')
+        .filter_map(|f| match f.parse() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                if let Some(e) = err.replace(e) {
+                    log::error!("unrecognized item `{f}` in list `{value}`: {e}");
+                }
+                None
+            },
+        }).collect();
+
+    match err {
+        Some(e) if list.is_empty() =>
+            Err(e.into()),
+        _ => Ok(list),
+    }
+}
+
+fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]> where
+    T: Default + Copy,
+    <T as FromStr>::Err: Into<anyhow::Error>,
+{
+    let mut list = [T::default(); N];
+
+    let values = value.split(',').map(FromStr::from_str);
+    for (dest, item) in list.iter_mut().zip(values) {
+        *dest = item.map_err(Into::into)
+            .with_context(|| format!("parsing list `{value}`"))?;
+    }
+
+    Ok(list)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -506,24 +494,23 @@ pub enum CullDirection {
 }
 
 impl FromStr for CullDirection {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("none") {
+        if s.is_empty() || s.eq_ignore_ascii_case("none") {
             Ok(CullDirection::None)
         } else if s.eq_ignore_ascii_case("clockwise") {
             Ok(CullDirection::Clockwise)
         } else if s.eq_ignore_ascii_case("counterclockwise") {
             Ok(CullDirection::CounterClockwise)
         } else {
-            Err(())
+            Err(anyhow!("unexpected cull direction `{s}`"))
         }
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Festival {
-    Unknown,
     Halloween,
     Wintersday,
     SuperAdventureBox,
@@ -533,7 +520,7 @@ pub enum Festival {
 }
 
 impl FromStr for Festival {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Festival::*;
@@ -550,8 +537,7 @@ impl FromStr for Festival {
         } else if s.eq_ignore_ascii_case("dragonbash") {
             Ok(DragonBash)
         } else {
-            log::warn!("Unknown festival `{s}`");
-            Ok(Unknown)
+            Err(anyhow!("unexpected festival `{s}`"))
         }
     }
 }
@@ -572,7 +558,7 @@ pub enum Mount {
 }
 
 impl TryFrom<i32> for Mount {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use Mount::*;
@@ -589,15 +575,14 @@ impl TryFrom<i32> for Mount {
             9 => Skiff,
             10 => SiegeTurtle,
             _ => {
-                log::warn!("Unknown mount `{value}`");
-                return Err(());
+                anyhow::bail!("unknown mount `{value}`")
             }
         })
     }
 }
 
 impl FromStr for Mount {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Mount::*;
@@ -626,8 +611,7 @@ impl FromStr for Mount {
         } else if s.eq_ignore_ascii_case("siegeturtle") {
             Ok(SiegeTurtle)
         } else {
-            log::warn!("Unknown mount `{s}`");
-            Err(())
+            Err(anyhow!("unknown mount `{s}`"))
         }
     }
 }
@@ -646,7 +630,7 @@ pub enum Profession {
 }
 
 impl TryFrom<i32> for Profession {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use Profession::*;
@@ -661,15 +645,14 @@ impl TryFrom<i32> for Profession {
             8 => Necromancer,
             9 => Revenant,
             _ => {
-                log::warn!("Unknown profession `{value}`");
-                return Err(());
+                anyhow::bail!("unknown profession `{value}`")
             }
         })
     }
 }
 
 impl FromStr for Profession {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Profession::*;
@@ -694,8 +677,7 @@ impl FromStr for Profession {
         } else if s.eq_ignore_ascii_case("revenant") {
             Ok(Revenant)
         } else {
-            log::warn!("Unknown profession `{s}`");
-            Err(())
+            Err(anyhow!("unknown profession `{s}`"))
         }
     }
 }
@@ -710,7 +692,7 @@ pub enum Race {
 }
 
 impl TryFrom<i32> for Race {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use Race::*;
@@ -721,15 +703,14 @@ impl TryFrom<i32> for Race {
             3 => Norn,
             4 => Sylvari,
             _ => {
-                log::warn!("Unknown race `{value}`");
-                return Err(());
+                anyhow::bail!("unknown race `{value}`");
             }
         })
     }
 }
 
 impl FromStr for Race {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Race::*;
@@ -746,8 +727,7 @@ impl FromStr for Race {
         } else if s.eq_ignore_ascii_case("sylvari") {
             Ok(Sylvari)
         } else {
-            log::warn!("Unknown race `{s}`");
-            Err(())
+            Err(anyhow!("unknown race `{s}`"))
         }
     }
 }
@@ -777,7 +757,7 @@ pub enum MapType {
 }
 
 impl TryFrom<i32> for MapType {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use MapType::*;
@@ -803,15 +783,14 @@ impl TryFrom<i32> for MapType {
             17 => BigBattle,
             18 => WvwLounge,
             _ => {
-                log::warn!("Unknown map type `{value}`");
-                Unknown
+                anyhow::bail!("unknown map type `{value}`");
             }
         })
     }
 }
 
 impl FromStr for MapType {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use MapType::*;
@@ -861,8 +840,7 @@ impl FromStr for MapType {
         } else if s.eq_ignore_ascii_case("wvwlounge") {
             Ok(WvwLounge)
         } else {
-            log::warn!("Unknown MapType `{s}`");
-            Ok(Unknown)
+            Err(anyhow!("unknown map type `{s}`"))
         }
     }
 }
@@ -882,7 +860,7 @@ pub enum TacoBehavior {
 }
 
 impl TryFrom<i32> for TacoBehavior {
-    type Error = ();
+    type Error = anyhow::Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         use TacoBehavior::*;
@@ -897,8 +875,7 @@ impl TryFrom<i32> for TacoBehavior {
             7 => OnceDailyPerCharacter,
             101 => ReappearOnWeeklyReset,
             _ => {
-                log::warn!("Unknown taco behavior `{value}`");
-                return Err(());
+                anyhow::bail!("unknown taco behavior `{value}`");
             }
         })
     }
@@ -911,7 +888,7 @@ pub enum BounceBehavior {
 }
 
 impl FromStr for BounceBehavior {
-    type Err = ();
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("bounce") {
@@ -919,8 +896,7 @@ impl FromStr for BounceBehavior {
         } else if s.eq_ignore_ascii_case("rise") {
             Ok(BounceBehavior::Rise)
         } else {
-            log::warn!("Unknown BounceBehavior `{}`", s);
-            Err(())
+            Err(anyhow!("unknown bounce behavior `{s}`"))
         }
     }
 }

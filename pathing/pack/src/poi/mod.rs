@@ -34,20 +34,33 @@ impl Poi {
         let mut attributes = MarkerAttributes::default();
 
         for attr in attrs {
-            if attr.name.local_name.eq_ignore_ascii_case("type") {
+            let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
                 category = taco_safe_name(&attr.value, true);
+                Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
-                map_id = Some(attr.value.parse().context("Parse POI MapID")?);
+                attr.value.parse()
+                    .map(|v| map_id = Some(v))
+                    .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
-                pos_x = Some(attr.value.parse().context("Parse POI xpos")?);
+                attr.value.parse()
+                    .map(|v| pos_x = Some(v))
+                    .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("ypos") {
-                pos_y = Some(attr.value.parse().context("Parse POI ypos")?);
+                attr.value.parse()
+                    .map(|v| pos_y = Some(v))
+                    .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("zpos") {
-                pos_z = Some(attr.value.parse().context("Parse POI zpos")?);
+                attr.value.parse()
+                    .map(|v| pos_z = Some(v))
+                    .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
-            } else if let Err(..) = attributes.try_add(attr.name.borrow(), attr.value) {
-                log::warn!("Unknown POI attribute '{}'", attr.name.local_name);
+                Ok(())
+            } else {
+                attributes.try_add(attr.name.borrow(), attr.value)
+            }.with_context(|| format!("POI attribute '{}'", attr.name));
+            if let Err(e) = res {
+                log::warn!("{e:#}");
             }
         }
 

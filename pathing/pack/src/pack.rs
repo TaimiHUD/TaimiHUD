@@ -45,7 +45,7 @@ impl Pack {
                 Err(e) if strict =>
                     return Err(e.into()),
                 Err(e) => {
-                    log::error!("Pack load failure: {e}");
+                    log::error!("Pack load failure: {e:#}");
                     error.get_or_insert(e);
                 },
             }
@@ -236,14 +236,14 @@ fn inner_parse_pack_def(
                     "poi" => match Poi::from_xml(asset, attributes) {
                         Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
                         Err(e) => {
-                            log::warn!("POI parse failed in {asset}: {e}");
+                            log::warn!("POI parse failed in {asset}: {e:#}");
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },
                     "trail" => match Trail::from_xml(ctx, asset, attributes) {
                         Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                         Err(e) => {
-                            log::warn!("Trail parse failed in {asset}: {e}");
+                            log::warn!("Trail parse failed in {asset}: {e:#}");
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },

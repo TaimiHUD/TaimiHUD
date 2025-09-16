@@ -35,21 +35,24 @@ impl Trail {
         let mut attributes = MarkerAttributes::default();
 
         for attr in attrs {
-            if attr.name.local_name.eq_ignore_ascii_case("type") {
+            let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
                 category = taco_safe_name(&attr.value, true);
+                Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("traildata") {
                 trail_path = Some(attr.value);
+                Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
+                Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
-                match attr.value.parse() {
-                    Ok(id) => map_id = Some(id),
-                    Err(e) => {
-                        log::warn!("failed to parse trail MapID {:?}: {e}", attr.value)
-                    },
-                }
-            } else if let Err(..) = attributes.try_add(attr.name.borrow(), attr.value) {
-                log::warn!("Unknown Trail attribute '{}'", attr.name);
+                attr.value.parse()
+                    .map(|v| map_id = Some(v))
+                    .map_err(From::from)
+            } else {
+                attributes.try_add(attr.name.borrow(), attr.value)
+            }.with_context(|| format!("Trail attribute '{}'", attr.name));
+            if let Err(e) = res {
+                log::warn!("{e:#}");
             }
         }
 
