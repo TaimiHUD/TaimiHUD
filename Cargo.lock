@@ -3784,6 +3784,7 @@ dependencies = [
  "indexmap 2.9.0",
  "log",
  "md5",
+ "regex",
  "relative-path",
  "uuid",
  "xml-rs",

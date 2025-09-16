@@ -96,39 +96,11 @@ pub fn parse_pack_def(
     let mut stream = ctx.load_asset(asset)?;
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf)?;
-    let data = String::from_utf8_lossy(&buf);
-    let pack_xml = data.into_owned();
-    let mut pack_xml = match pack_xml {
-        #[cfg(feature = "fixup-ladyelyssa")]
-        xml => xml
-            // TODO: regex etc .-.
-            // Clean up LadyElyssa.taco typos
-            .replace("b&w.png", "b&amp;w.png")
-            .replace(r#""[&"#, r#""[&amp;"#)
-            .replace(r#"[&B"#, r#"[&amp;B"#)
-            .replace("R&D Waypoint", "R&amp;D Waypoint")
-            .replace(" & ", " &amp; ")
-            .replace("Remains&DESTROY", "Remains&amp;DESTROY")
-            // reactif-en
-            // TODO: resetoffset? hascountdown?
-            .replace("resetlenght=", "resetlength=")
-            .replace("nimsize=", "minsize=")
-            // rediche's WvW marker pack
-            .replace(r#"catapults" type="#, r#"catapults" type_="#)
-            // tryhard marker pack
-            .replace("Mechanics&Directions", "Mechanics&amp;Directions")
-            .replace("Boon&Skill", "Boon&amp;Skill")
-            .replace("Nikare&Kenut", "Nikare&amp;Kenut")
-        ,
-        #[allow(unreachable_patterns)]
-        xml => xml,
-    };
-    if pack_xml.starts_with("<OverlayData") && pack_xml.trim_end().ends_with("</overlaydata>") {
-        // Metal Marker Myriad case mismatch
-        pack_xml = pack_xml.replace("</overlaydata>", "</OverlayData>");
-    }
+    let pack_xml = String::from_utf8_lossy(&buf);
+    #[cfg(feature = "fixup-typos")]
+    let pack_xml = fixup_xml_typos(&pack_xml);
 
-    let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_bytes()));
+    let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_owned().into_bytes()));
 
     match inner_parse_pack_def(pack, ctx, &mut parser, asset) {
         Ok(()) => Ok(()),
@@ -384,4 +356,146 @@ fn valid_elem_end(stack_top: Option<&PartialItem>, name: &OwnedName) -> bool {
         ("trail", Some(PartialItem::Trail(_))) => true,
         _ => false,
     }
+}
+
+#[cfg(feature = "fixup-typos")]
+fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
+    use {
+        regex::{Captures, Regex, RegexBuilder, Replacer},
+        std::{
+            borrow::Cow,
+            fmt::Write,
+            sync::LazyLock,
+        },
+    };
+
+    macro_rules! pats {
+        (&) => {
+            r#"(?<amp_pre>[^&"]*)&(?<amp_ok>[#a-zA-Z0-9]{1,5};)?(?<amp_post>[^"]*)"#
+        };
+    }
+    const PAT_FIXUP_AMPERSAND: &'static str = pats!(&);
+    const PAT_FIXUP: &'static str = concat!(
+        r#"=\s*""#, pats!(&), "\"",
+        // reactif-en
+        "|", r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
+        "|", r#"(?<attr_nospace>fadeNear|zpos)\s*=\s*""#,
+        // rediche's WvW marker pack
+        "|", r#"(?<dup_attr>type)\s*=\s*"(?<dup_attr_v0>[^" ]+)"\s+type\s*=\s*"(?<dup_attr_v1>[^" ]+)""#,
+        "|", r#"(?<dup_attr1>miniMapVisibility)\s*=\s*"(?<dup_attr1_v0>[^" ]+)".+mapVisibility=[^ ]+ miniMapVisibility="(?<dup_attr1_v1>[^" ]+)""#,
+    );
+
+    fn new_regex(pattern: &'static str) -> Regex {
+        let regex = RegexBuilder::new(pattern)
+            .multi_line(true).dot_matches_new_line(false)
+            .crlf(true)
+            .unicode(true)
+            .build();
+        match regex {
+            Ok(r) => r,
+            Err(e) => {
+                log::error!("fixup regex failed to build: {e}");
+                // try to produce a dummy that allows us to proceed anyway
+                Regex::new("").unwrap()
+            },
+        }
+    }
+    static FIXUP: LazyLock<Regex> = LazyLock::new(|| new_regex(PAT_FIXUP));
+    static FIXUP_AMP: LazyLock<Regex> = LazyLock::new(|| new_regex(PAT_FIXUP_AMPERSAND));
+
+    /// return entire match as a fallback
+    fn replacements_0<'a>(captures: &regex::Captures<'a>) -> &'a str {
+        captures.get(0)
+            .map(|m| m.as_str())
+            .unwrap_or_default()
+    }
+    fn replacements_bad(captures: &regex::Captures, dst: &mut String) {
+        log::error!("unexpected pack xml fixup match, this is a bug");
+        dst.push_str(replacements_0(captures));
+    }
+
+    struct ReplacementsAmp {
+        rec: bool,
+    }
+    impl Replacer for ReplacementsAmp {
+        fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+            if let (Some(amp_pre), amp_ok, Some(amp_post)) = (caps.name("amp_pre"), caps.name("amp_ok"), caps.name("amp_post")) {
+                let amp_pre = amp_pre.as_str();
+                let amp_post = amp_post.as_str();
+                let amp_ok = amp_ok.map(|ok| ok.as_str())
+                    .unwrap_or("amp;");
+                let (prefix, postfix) = match self.rec {
+                    false => (r#"=""#, "\""),
+                    true => ("", ""),
+                };
+                let amp_post = if amp_post.contains("&") {
+                    // whee recursion
+                    let post = FIXUP_AMP.replace_all(amp_post, ReplacementsAmp { rec: true });
+                    post
+                } else {
+                    Cow::Borrowed(amp_post)
+                };
+                let _ = write!(dst, "{prefix}{amp_pre}&{amp_ok}{amp_post}{postfix}");
+            } else {
+                replacements_bad(caps, dst)
+            }
+        }
+    }
+    struct Replacements;
+    impl Replacer for Replacements {
+        fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
+            if let (Some(..), Some(..)) = (caps.name("amp_pre"), caps.name("amp_post")) {
+                ReplacementsAmp { rec: false }.replace_append(caps, dst)
+            } else if let Some(attr_type) = caps.name("attr_typo") {
+                let replacement = match attr_type.as_str() {
+                    "nimsize" | "nimSize" => " minsize=\"",
+                    "resetlenght" | "resetLenght" => " resetlength=\"",
+                    typo => {
+                        log::error!("unexpected typo {typo:?}");
+                        replacements_0(caps)
+                    },
+                };
+                dst.push_str(replacement);
+            } else if let Some(attr_nospace) = caps.name("attr_nospace") {
+                let attr_nospace = attr_nospace.as_str();
+                let _ = write!(dst, " {attr_nospace}=\"");
+            } else if let (Some(dup_attr), Some(dup_attr_v0), Some(dup_attr_v1)) = (
+                caps.name("dup_attr").or_else(|| caps.name("dup_attr1")),
+                caps.name("dup_attr_v0").or_else(|| caps.name("dup_attr1_v0")),
+                caps.name("dup_attr_v1").or_else(|| caps.name("dup_attr1_v1")),
+            ) {
+                let dup_attr = dup_attr.as_str();
+                let dup_attr_v0 = dup_attr_v0.as_str();
+                let dup_attr_v1 = dup_attr_v1.as_str();
+                let dup_attr_mid = caps.name("dup_attr_mid")
+                    .or_else(|| caps.name("dup_attr1_mid"))
+                    .map(|m| m.as_str()).unwrap_or_default();
+                if dup_attr_v0 != dup_attr_v1 {
+                    log::error!("pack contains inconsistent duplicate:  {dup_attr}={dup_attr_v0:?} and {dup_attr}={dup_attr_v1:?}");
+                }
+                let _ = write!(dst, r#"{dup_attr_mid}{dup_attr}="{dup_attr_v0}""#);
+            } else {
+                replacements_bad(caps, dst)
+            }
+        }
+    }
+
+    let pack_xml = FIXUP.replace_all(&pack_xml, Replacements);
+
+    // Metal Marker Myriad case mismatch
+    const PAT_FIXUP_OVERLAYDATA: &'static str = r#"<(?<openclose>\/)?(?i)(?<tag>overlaydata)\b"#;
+    static FIXUP_OVERLAYDATA: LazyLock<Regex> = LazyLock::new(|| new_regex(PAT_FIXUP_OVERLAYDATA));
+
+    let overlaydata_matches = |n: u8|
+        FIXUP_OVERLAYDATA.captures_iter(&pack_xml)
+            .filter_map(|x| x.name("tag"))
+            .map(|m| m.as_str())
+            .map(|m| m.as_bytes().get(0).copied())
+            .any(|o| o == Some(n));
+    let inconsistent_case = overlaydata_matches(b'o') && overlaydata_matches(b'O');
+    let pack_xml = match inconsistent_case {
+        true => FIXUP_OVERLAYDATA.replace_all(&pack_xml, "<${openclose}OverlayData").into_owned().into(),
+        false => pack_xml,
+    };
+    pack_xml
 }
