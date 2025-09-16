@@ -218,6 +218,11 @@ fn inner_parse_pack_def(
                     _ => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
                 }
             }
+            #[cfg(feature = "fixup-typos")]
+            XmlEvent::StartElement { name, .. } | XmlEvent::EndElement { name, .. } if name.local_name.eq_ignore_ascii_case("route") => {
+                // GW2 TacO ReActif FR Externe.taco?
+                log::warn!("ignoring unsupported <{name}> group");
+            },
             XmlEvent::StartElement { name, .. } => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
             XmlEvent::EndElement { .. }
                 if parse_stack.last().map(|i| matches!(i, PartialItem::PoisonElem)).unwrap_or(false) =>
