@@ -357,10 +357,12 @@ impl ActivePack {
             let category_idx = pack.categories.all_categories
                 .get_index_of(&pack_trail.category)
                 .unwrap_or(0);
-            let trail = match ActiveTrail::build(self, pack_trail, i_trail, category_idx, render_entities.len(), device) {
+            let trail = ActiveTrail::build(self, pack_trail, i_trail, category_idx, render_entities.len(), device)
+                .with_context(|| format!("Error loading trail {pack_trail}"));
+            let trail = match trail {
                 Ok(trail) => trail,
                 Err(e) => {
-                    log::warn!("Error loading trail: {e}");
+                    log::warn!("{e:#}");
                     continue;
                 }
             };
@@ -406,10 +408,12 @@ impl ActivePack {
             let category_idx = pack.categories.all_categories
                 .get_index_of(&pack_poi.category)
                 .unwrap_or(0);
-            let poi = match ActivePoi::build(self, pack_poi, i_poi, category_idx, device) {
+            let poi = ActivePoi::build(self, pack_poi, i_poi, category_idx, device)
+                .with_context(|| format!("Error loading POI {pack_poi}"));
+            let poi = match poi {
                 Ok(poi) => poi,
                 Err(e) => {
-                    log::warn!("Error loading poi: {e}");
+                    log::warn!("{e:#}");
                     continue;
                 }
             };
@@ -624,9 +628,10 @@ impl PackCollection {
         let mut res = None;
         let packs_len = self.loaded_packs.len();
         for pack_idx in 0..packs_len {
-            let pack_res = self.build_active_pack(pack_idx, device, Some(&mut render_builder.entities), map_id);
+            let pack_res = self.build_active_pack(pack_idx, device, Some(&mut render_builder.entities), map_id)
+                .with_context(|| format!("Pack {} failed to load", self.loaded_packs[pack_idx].pack.name));
             if let Err(e) = pack_res {
-                log::warn!("Pack {} failed to load: {e}", self.loaded_packs[pack_idx].pack.name);
+                log::warn!("{e:#}");
                 let _ = res.get_or_insert(e);
             } else {
                 succ = true;

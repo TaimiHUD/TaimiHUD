@@ -6,7 +6,7 @@ use {
     anyhow::Context,
     glam::Vec4,
     glamour::Point3,
-    std::path::Path,
+    std::{fmt, path::Path},
     uuid::Uuid,
 };
 
@@ -110,5 +110,17 @@ impl Poi {
     #[inline]
     pub fn alpha(&self) -> f32 {
         self.attributes.alpha.unwrap_or(1.0)
+    }
+}
+
+impl fmt::Display for Poi {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let guid = &self.guid;
+        match &self.parent_path {
+            Some(parent) =>
+                write!(f, "{parent}/{guid}"),
+            None =>
+                write!(f, "{guid}"),
+        }
     }
 }

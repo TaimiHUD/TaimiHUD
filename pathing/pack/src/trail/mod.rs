@@ -8,6 +8,7 @@ use {
     core::f32,
     glamour::{point3, Box3, Point3},
     std::{
+        fmt,
         io::{self, BufReader, Read},
         path::Path,
     },
@@ -175,4 +176,16 @@ fn read_point(reader: &mut impl Read) -> io::Result<[[u8; 4]; 3]> {
     reader.read_exact(&mut point_data[1])?;
     reader.read_exact(&mut point_data[2])?;
     Ok(point_data)
+}
+
+impl fmt::Display for Trail {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let guid = &self.guid;
+        match &self.parent_path {
+            Some(parent) =>
+                write!(f, "{parent}/{guid}"),
+            None =>
+                write!(f, "{guid}"),
+        }
+    }
 }

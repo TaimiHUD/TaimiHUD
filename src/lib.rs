@@ -22,6 +22,7 @@ use {
         render::{RenderEvent, RenderState},
         settings::SettingsLock,
     },
+    anyhow::Context,
     arcdps::{extras::UserInfo, AgentOwned, Language},
     controller::SquadState,
     i18n_embed::{
@@ -343,10 +344,10 @@ fn init() -> Result<(), &'static str> {
             if !rt::nexus_available() {
                 return Err(e)
             }
-            log::error!("{e}");
+            log::error!("{e:#}");
     } else {
         if let Err(e) = TEXTURES.wait_for_startup() {
-            log::error!("{e}");
+            log::error!("{e:#}");
             if !rt::nexus_available() {
                 return Err("texture loader didn't start")
             }
@@ -676,9 +677,11 @@ fn load_nexus() {
     EV_LANGUAGE_CHANGED
         .subscribe(event_consume!(
             <()> |_| {
-                let res = rt::reload_language();
+                let res = rt::reload_language()
+                    .map_err(anyhow::Error::msg)
+                    .context("failed to load language");
                 if let Err(e) = res {
-                    log::warn!("failed to load language: {e}");
+                    log::warn!("{e:#}");
                 }
             }
         ))
@@ -851,7 +854,7 @@ fn process_textures() {
                     TEXTURES.report_load(key, texture);
                 },
                 TextureResponse::DecodeFailed { key, error } => {
-                    log::error!("texture {key} failed to decode: {error}");
+                    log::error!("texture {key} failed to decode: {error:#}");
                     TEXTURES.report_failure(key);
                 },
                 TextureResponse::LoopExit { id } => {
@@ -868,7 +871,7 @@ fn process_textures() {
     #[cfg(feature = "texture-loader")]
     match res {
         Err(e) => {
-            log::error!("texture processing error: {e}");
+            log::error!("texture processing error: {e:#}");
         },
         Ok(..) => (),
     }
@@ -928,8 +931,8 @@ fn render_space(ui: &nexus::imgui::Ui) {
                 if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
                     goggles::classify_space_lens(ds);
                 }
-                if let Err(error) = ds.render(ui) {
-                    log::error!("Engine error: {error}");
+                if let Err(error) = ds.render(ui).context("Engine render failure") {
+                    log::error!("{error:#}");
                 }
 }
 
@@ -948,8 +951,8 @@ fn notify_quit() {
     TEXTURES.quit();
 
     #[cfg(feature = "goggles")]
-    if let Err(e) = goggles::shutdown() {
-        log::error!("Goggles shutdown failed: {e}");
+    if let Err(e) = goggles::shutdown().context("Goggles shutdown failed") {
+        log::error!("{e:#}");
     }
 
     #[cfg(feature = "space")]
@@ -990,8 +993,8 @@ fn unload() {
     TEXTURES.quit();
 
     #[cfg(feature = "goggles")]
-    if let Err(e) = goggles::shutdown() {
-        log::error!("Goggles shutdown failed: {e}");
+    if let Err(e) = goggles::shutdown().context("Goggles shutdown failed") {
+        log::error!("{e:#}");
     }
 
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
@@ -1047,8 +1050,8 @@ fn unload() {
         }
     };
 
-    if let Err(e) = TEXTURES.wait_for_shutdown() {
-        log::error!("failed to shut down texture loader: {e}");
+    if let Err(e) = TEXTURES.wait_for_shutdown().context("failed to shut down texture loader") {
+        log::error!("{e:#}");
     }
 
     match controller_quit {

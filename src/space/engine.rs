@@ -132,13 +132,11 @@ impl Engine {
         let packs = PackCollection::new(&render_backend)
             .context("Initializing packs")?;
         Controller::try_send(ControllerEvent::PathingLoadAll);
-        #[cfg(todo)]
-        {
-            packs.load_all(&addon_dir.join("pathing"))
-                .context("Loading pathing packs")?;
-        }
 
-        let rtapi = match rt::rtapi() {
+        let rtapi = rt::rtapi()
+            .map_err(anyhow::Error::msg)
+            .context("RTAPI unavailable");
+        let rtapi = match rt::rtapi().map_err(anyhow::Error::msg) {
             Ok(rtapi) => {
                 match &rtapi {
                     Some(rtapi) if rtapi.is_active() =>
@@ -150,7 +148,7 @@ impl Engine {
             },
             Err(e) => {
                 // TODO: listen for events in case it gets loaded later or something
-                log::debug!("RTAPI unavailable: {e}");
+                log::debug!("{e:#}");
                 None
             },
         };
@@ -266,7 +264,7 @@ impl Engine {
                     PackLoad { pack, loader } => {
                         let pack_idx = self.packs.add_pack(pack, loader);
                         if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
-                            log::error!("{e}");
+                            log::error!("{e:#}");
                         }
                     },
                     PackUnloadAll => {
@@ -371,7 +369,7 @@ impl Engine {
             _ => Ok(()),
         };
         if let Err(e) = map_res {
-            log::error!("Map error: {e:?}");
+            log::error!("Map error: {e:#}");
         }
 
         self.packs.update();
