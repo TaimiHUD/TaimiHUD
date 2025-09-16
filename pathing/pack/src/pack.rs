@@ -98,7 +98,7 @@ pub fn parse_pack_def(
     stream.read_to_end(&mut buf)?;
     let data = String::from_utf8_lossy(&buf);
     let pack_xml = data.into_owned();
-    let pack_xml = match pack_xml {
+    let mut pack_xml = match pack_xml {
         #[cfg(feature = "fixup-ladyelyssa")]
         xml => xml
             // TODO: regex etc .-.
@@ -113,10 +113,20 @@ pub fn parse_pack_def(
             // TODO: resetoffset? hascountdown?
             .replace("resetlenght=", "resetlength=")
             .replace("nimsize=", "minsize=")
+            // rediche's WvW marker pack
+            .replace(r#"catapults" type="#, r#"catapults" type_="#)
+            // tryhard marker pack
+            .replace("Mechanics&Directions", "Mechanics&amp;Directions")
+            .replace("Boon&Skill", "Boon&amp;Skill")
+            .replace("Nikare&Kenut", "Nikare&amp;Kenut")
         ,
         #[allow(unreachable_patterns)]
         xml => xml,
     };
+    if pack_xml.starts_with("<OverlayData") && pack_xml.trim_end().ends_with("</overlaydata>") {
+        // Metal Marker Myriad case mismatch
+        pack_xml = pack_xml.replace("</overlaydata>", "</OverlayData>");
+    }
 
     let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_bytes()));
 
