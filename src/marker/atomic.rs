@@ -60,17 +60,17 @@ impl SignObtainer {
             let local = local.xz();
             if let Some(point1) = self.point1 {
                 // take point from 0.5m away in each direction, for accuracy
-                if (local.x - point1.local.x).abs() > 5.0 && (local.y - point1.local.y).abs() > 5.0
+                if (local.x - point1.local.x).abs() > 8.0 && (local.y - point1.local.y).abs() > 8.0
                 {
                     self.point2 = Some(LocalGlobalHolder { local, global });
-                    // though, if it's less than a minimum, wipe it and try again
-                    let test_sign = self.sign();
+                    // round it to the default if it's close enough
+                    let target = MapLocalScale::COMMON.scale.to_raw();
+                    let test_sign = (self.sign() - target).abs();
                     if test_sign
-                        .cmple(Vec2::new(Self::meters_per_feet(), Self::meters_per_feet()))
+                        .cmple(target * 0.2)
                         .all()
                     {
-                        self.point1 = None;
-                        self.point2 = None;
+                        self.set_scale(MapLocalScale::COMMON)
                     }
                 }
             } else {
