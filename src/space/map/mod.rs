@@ -1,9 +1,10 @@
 use {
     crate::{
-        marker::atomic::{CurrentPerspective, FakeSpace, LocalSpace, MapSpace, MarkerInputData},
-        space::{DrawSpace, ScreenSpace},
+        marker::atomic::MarkerInputData,
+        space::DrawSpace,
     },
     glamour::{Angle, Point2, Point3, Box3, Box2, TransformMap, Vector2},
+    taimi_meta::coords::{CurrentPerspective, FakeSpace, LocalSpace, MapSpace, MinimapSpace, ScreenSpace},
 };
 
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ impl MapTarget {
             CurrentPerspective::Minimap => {
                 let bound = map_data.fakespace_minimap_bound();
                 let map = map_data.fake_to_minimap(bound)
-                    .then(map_data.minimap_to_map_with(None, map_data.map_scale));
+                    .then(MinimapSpace::to_map(map_data.map_scale, None, map_data.map_pos(), map_data.minimap_bound().center()));
                     let rotation = map_data.rotation_enabled.then_some(glamour::Angle::from_radians(-map_data.compass_rotation));
                     (bound, map, rotation)
             },

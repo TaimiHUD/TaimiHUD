@@ -217,17 +217,20 @@ impl ActivePoi {
 
     pub fn instance_data_map(&self) -> InstanceBufferData {
         use {
-            crate::marker::atomic::{MarkerInputData, SignObtainer},
-            glamour::TransformMap,
+            crate::marker::atomic::MarkerInputData,
+            glamour::{TransformMap, Vector2},
+            taimi_meta::coords::{MapLocalScale, MinimapSpace},
         };
-        const DEFAULT_SCALE: f32 = SignObtainer::meters_per_feet() * 2.0;
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-        let size_px = self.scale_map / 2.0;
+        let size = Vector2::splat(self.scale_map / 2.0);
         let scale = MarkerInputData::read()
-            .map(|data| data.minimap_to_map_with(None, 1.0).then(data.map_to_local()).map(glamour::Vector2::<_>::splat(size_px)).x)
-            .unwrap_or_else(|| size_px * DEFAULT_SCALE);
+            .map(|data| MinimapSpace::to_map(1.0, None, data.map_pos(), data.minimap_bound().center())
+                .then(data.map_to_local())
+                .map(size)
+            ).unwrap_or_else(|| size.as_() * MapLocalScale::COMMON.scale)
+            .abs();
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(scale)),
+            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(scale.extend(scale.y).into()),
             colour: self.tint(),
         }
     }

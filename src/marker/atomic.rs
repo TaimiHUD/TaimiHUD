@@ -2,8 +2,7 @@ use {
     arc_atomic::AtomicArc,
     glam::{Vec2, Vec3, Vec3Swizzles},
     glamour::{
-        point3, Angle, Box2, Contains, Point2, Point3, Rect, Size2, Transform2, TransformMap, Unit,
-        Vector2,
+        point3, Angle, Contains, Point2, Point3, Size2, Transform2, TransformMap,
     },
     nexus::data_link::mumble::{MumblePtr, UiState},
     rand::prelude::*,
@@ -15,69 +14,7 @@ use {
 
 pub static MARKERINPUTDATA: LazyLock<AtomicArc<MarkerInputData>> = LazyLock::new(|| AtomicArc::new(Arc::new(MarkerInputData::default())));
 
-// global coordinates / "continent" (game internals, maps, api, ...)
-// feet
-// e.g. map_center
-pub struct MapSpace;
-impl Unit for MapSpace {
-    type Scalar = f32;
-}
-
-// local coordinates (mumblelink)
-// meters
-// e.g. local_player_pos
-pub struct LocalSpace;
-impl Unit for LocalSpace {
-    type Scalar = f32;
-}
-
-// real pixels (imgui, etc)
-// e.g. mouse_pos
-pub struct ScreenSpace;
-impl Unit for ScreenSpace {
-    type Scalar = f32;
-}
-
-// minimap space; it's a subset of screenspace
-// and exists within it as ...a rect boundary
-// realistically an offset from screenspace's origin,
-// plus clamping?
-pub struct MinimapSpace;
-impl Unit for MinimapSpace {
-    type Scalar = f32;
-}
-
-// worldmap space is the same as the above, except unclamped.
-// it's basically closer to fakespace than it is to anything else?
-pub struct WorldmapSpace;
-impl Unit for WorldmapSpace {
-    type Scalar = f32;
-}
-
-// fake pixels (mumblelink-post-scale)
-// includes world-map o.o
-// e.g. compass_size
-pub struct FakeSpace;
-impl Unit for FakeSpace {
-    type Scalar = f32;
-}
-
-pub type MapPoint = Point2<MapSpace>;
-
-pub type LocalPoint = Point3<LocalSpace>;
-
-pub type ScreenPoint = Point2<ScreenSpace>;
-pub type ScreenBound = Rect<ScreenSpace>;
-pub type ScreenVector = Vector2<ScreenSpace>;
-
-pub type FakePoint = Point2<FakeSpace>;
-pub type FakeVector = Vector2<FakeSpace>;
-pub type FakeBound = Rect<FakeSpace>;
-
-pub type MinimapPoint = Point2<MinimapSpace>;
-pub type WorldmapPoint = Point2<WorldmapSpace>;
-pub type MinimapBound = Rect<MinimapSpace>;
-pub type WorldmapBound = Rect<WorldmapSpace>;
+pub use taimi_meta::coords::*;
 
 pub type ScreenToFake = Transform2<ScreenSpace, FakeSpace>;
 
@@ -144,7 +81,7 @@ impl SignObtainer {
     }
 
     pub const fn meters_per_feet() -> f32 {
-        0.3048f32
+        MapLocalScale::METRES_PER_FEET
     }
 
     pub fn has_sign(&self) -> bool {
@@ -154,8 +91,7 @@ impl SignObtainer {
     pub fn sign(&self) -> Vec2 {
         // the most common value, held by 1009/1022 maps from the maps api endpoint is
         // 24.0, 24.0 (2 feet per continent unit).
-        let default = Self::meters_per_feet() * 2.0;
-        let default_vec2 = Vec2::new(default, -default);
+        let default_vec2 = MapLocalScale::COMMON.scale.to_raw();
         // if point1 and point2 are each >+/-0.5 away in x,y
         // then its always going to be -1 or 1 for each
         // i think it only matters if they are *different* signs
@@ -174,6 +110,10 @@ impl SignObtainer {
             // until we find it out, let's just go for Sure man it's the same why not
             default_vec2
         }
+    }
+
+    pub fn scale(&self) -> MapLocalScale {
+        MapLocalScale::with_scale(self.sign().into())
     }
 }
 
@@ -228,107 +168,45 @@ impl MarkerInputData {
     }
 
     pub fn screen_to_fake(&self) -> Transform2<ScreenSpace, FakeSpace> {
-        let screen_scaling_factor = Vector2::splat(1.0 / self.scaling);
-        ScreenToFake::from_scale(screen_scaling_factor)
+        FakeSpace::from_screen(self.scaling)
+    }
+
+    pub fn screen_size(&self) -> Size2<ScreenSpace> {
+        self.display_size.into()
     }
 
     pub fn screen_bound(&self) -> ScreenBound {
-        ScreenBound::from_size(self.display_size.into())
+        ScreenBound::from_size(self.screen_size())
     }
 
-    pub fn fake_bound(&self) -> FakeBound {
-        let screen_bound = self.screen_bound();
+    pub fn fake_size(&self) -> Size2<FakeSpace> {
+        let size = self.screen_size();
         // unfortunately transform2 is exclusively a description of
         // matrix transformation, and cannot be used to provide
         // a scalar factor for a Size2, Rect2 or a Box2.
-        let fb_size_in_sb = screen_bound.size / self.scaling;
-        let fb_size: Size2<FakeSpace> = fb_size_in_sb.cast();
-        FakeBound::from_size(fb_size)
+        //self.screen_to_fake().map(size)
+        (size.to_raw() / self.scaling).into()
     }
 
-    // the conversion to use is dependent upon the current perspective,
-    // derived from mumblelink data on whether or not the worldmap itself is open
-    //
-    // conversions as such are necessary:
-    //
-    // * fake -> minimap:
-    //   (a confined, scaled screenspace (a confinement of fakespace))
-    // * fake -> worldmap:
-    //   (an unconfined, scaled screenspace)
-    //
-    // (* minimap -> map
-    // * worldmap -> map):
-    //   (a conversion of the Point coordinates into Continent coordinates,
-    //   in ft and inches; confined or otherwise)
-    //
-    // it is unlikely one would want to directly use the underlying fake to mini
-    // and fake to world, but it is VERY likely one will want to convert from
-    // fake to map, and map to fake. (in reality, they'll actually want
-    // screenspace to these things, but fake exists thanks to DPI, UI scalings)
+    pub fn fake_bound(&self) -> FakeBound {
+        FakeBound::from_size(self.fake_size())
+    }
 
-    // due to a changing origin, this does not derive itself from
-    // the fakespace related display_size stuff
     pub fn minimap_bound(&self) -> MinimapBound {
         let compass_size = self.compass_size();
         MinimapBound::from_size(compass_size.as_())
     }
 
-    // this relies upon the fakespace display_size because it is the
-    // boundary *within fakespace* for the minimap
     pub fn fakespace_minimap_bound(&self) -> FakeBound {
-        let fakebound = self.fake_bound();
-        // fake means we're already scaled proportionate to self.scaling,
-        // or the scaling factor provided by Nexus, which is the coordinate system
-        // that self.compass_size, the worldmap size and the UI offsets live within
-        //
-        // having a way to construct *typed scalars* would be nice
-        let compass_size = self.compass_size();
-
-        let max = match self.minimap_placement {
-            MinimapPlacement::Top => fakebound.size.with_height(compass_size.height),
-            MinimapPlacement::Bottom => fakebound.size - Size2::new(0.0, 37.0),
-        };
-        let min = max - compass_size;
-        let min = min.to_vector().to_point();
-        let max = max.to_vector().to_point();
-        let minimap_bound: Box2<FakeSpace> = Box2::new(min, max);
-        minimap_bound.to_rect()
+        MinimapSpace::fake_bound_with(self.minimap_placement, self.compass_size().as_(), self.fake_size())
     }
 
     pub fn fakespace_minimap_drag_bound(&self) -> FakeBound {
-        let fakebound = self.fake_bound();
-        // fake means we're already scaled proportionate to self.scaling,
-        // or the scaling factor provided by Nexus, which is the coordinate system
-        // that self.compass_size, the worldmap size and the UI offsets live within
-        //
-        // having a way to construct *typed scalars* would be nice
-        let compass_size = self.compass_size();
-
-        // the thing on the side on hover-over
-        let width_to_ignore = 26.0;
-        let width_bound = Size2::new(width_to_ignore, 0.0);
-
-        let fakebound_size = fakebound.size - width_bound;
-
-        let max = match self.minimap_placement {
-            MinimapPlacement::Top => fakebound_size.with_height(compass_size.height),
-            MinimapPlacement::Bottom => fakebound_size - Size2::new(0.0, 37.0),
-        };
-        let min = max - compass_size;
-        let min = min.to_vector().to_point();
-        let max = max.to_vector().to_point();
-        let minimap_bound: Box2<FakeSpace> = Box2::new(min, max);
-        minimap_bound.to_rect()
+        MinimapSpace::fake_bound_for_drag(self.minimap_placement, self.compass_size().as_(), self.fake_size())
     }
 
     pub fn fake_to_minimap(&self, fakespace_minimap_bound: FakeBound) -> FakeToMinimap {
-        // without matrices, this would be: point - minimap_bound.min
-        // with it, it's just a translation by the *negative*
-        // of the minimap_bound, to represent the offset from
-        // changing the origin from (0,0) as in fakespace
-        // to min, or the top left point (not pixel, its scaled)
-        // coordinate of the minimap
-        FakeToMinimap::from_translation(-fakespace_minimap_bound.min().to_vector())
+        FakeSpace::to_minimap(fakespace_minimap_bound)
     }
 
     pub fn map_fake_to_minimap(&self, point: FakePoint) -> Option<MinimapPoint> {
@@ -358,152 +236,36 @@ impl MarkerInputData {
     }
 
     pub fn map_fake_to_worldmap(&self, point: FakePoint) -> Option<WorldmapPoint> {
-        // worldmapspace is actually THE SAME as fakespace,
-        // it isn't confined at all. but it should still be contemplated about as
-        // "separate"; it's a mode!
-        //
-        // things within fakespace cannot be out of bounds on worldmapspace
-        // they are 1:1
-        let fakespace_worldmap_bound = self.fakespace_worldmap_bound();
-        if fakespace_worldmap_bound.contains(&point) {
-            let fake_to_worldmap = self.fake_to_worldmap();
-            Some(fake_to_worldmap.map(point))
-        } else {
-            // the current point cannot be represented within the
-            // coordinate system, since it is *fully bounded*,
-            // this point would be out of bounds
-            None
-        }
+        WorldmapSpace::fake_point(point, self.worldmap_bound())
     }
 
-    // worldmap and minimap both have the same scaling factor of
-    // points (fakespace pixels) to continent coordinates (ft and inches)
-    // there is very little in what differs between their conversion, in reality?
-
     pub fn worldmap_to_map(&self) -> WorldmapToMap {
-        // the other thing to regard is the common coordinate between the worldmap/fakespace
-        // and the map coordinates; the centre, for which is provided as already scaled
-        //
-        // if map_scale is pt -> continent, then we can regard this as:
-        // distance = worldmap_point - worldmap_centre
-        // distance_map = distance * map_scale
-        // map_point = map_centre + distance_map
-        //
-        // with matrices, we want to make sure the scalar is being applied to the
-        // distance, not the overall resulting coordinates
-        let map_centre: Point2<MapSpace> = self.global_map.into();
-        let worldmap_bound = self.worldmap_bound();
-        let worldmap_centre = worldmap_bound.center();
-
-        // to translate a point from worldspace into mapspace,
-        WorldmapToMap::from_translation(-worldmap_centre.to_vector())
-            .then_scale(
-                // scale the distance by the scaling factor to take it from
-                // worldmap to mapspace units
-                Vector2::splat(self.map_scale),
-            )
-            .then_translate(
-                // the map space centre is used as a vector
-                // when combined with the distance vector,
-                // it provides the full offset from the origin
-                // in map space, so translate it as such
-                map_centre.to_vector(),
-            )
+        WorldmapSpace::to_map(self.map_scale, self.map_pos(), self.worldmap_bound().center())
     }
 
     pub fn map_worldmap_to_map(&self, point: WorldmapPoint) -> MapPoint {
-        // the scaling factor (map_scale) is applied uniformly to x,y
-        // if there are DPI scaling factors, they have already been taken into account
-        // as part of the conversion into fakespace
         let worldmap_to_map = self.worldmap_to_map();
         worldmap_to_map.map(point)
     }
 
-    pub fn minimap_to_map_with(&self, minimap_rotation: Option<Angle>, map_scale: f32) -> MinimapToMap {
-        // the other thing to regard is the common coordinate between the worldmap/fakespace
-        // and the map coordinates; the centre, for which is provided as already scaled
-        //
-        // if map_scale is pt -> continent, then we can regard this as:
-        // distance = worldmap_point - worldmap_centre
-        // distance_map = distance * map_scale
-        // map_point = map_centre + distance_map
-        //
-        // with matrices, we want to make sure the scalar is being applied to the
-        // distance, not the overall resulting coordinates
-        let map_centre: Point2<MapSpace> = self.global_map.into();
-        let minimap_bound = self.minimap_bound();
-        let minimap_centre = minimap_bound.center();
-        let minimap_rotation = minimap_rotation.unwrap_or_default();
-
-        // to translate a point from worldspace into mapspace,
-        MinimapToMap::from_translation(-minimap_centre.to_vector().as_())
-            .then_rotate(minimap_rotation)
-            .then_scale(
-                // scale the distance by the scaling factor to take it from
-                // worldmap to mapspace units
-                Vector2::splat(map_scale),
-            )
-            .then_translate(
-                // the map space centre is used as a vector
-                // when combined with the distance vector,
-                // it provides the full offset from the origin
-                // in map space, so translate it as such
-                map_centre.to_vector(),
-            )
+    pub fn minimap_rotation(&self) -> Option<Angle> {
+        match self.rotation_enabled {
+            true => Some(Angle::from_radians(self.compass_rotation)),
+            false => None,
+        }
     }
 
     pub fn minimap_to_map(&self) -> MinimapToMap {
-        self.minimap_to_map_with(match self.rotation_enabled {
-            true => Some(Angle::from_radians(-self.compass_rotation)),
-            false => None,
-        }, self.map_scale)
+        MinimapSpace::to_map(self.map_scale, self.minimap_rotation(), self.map_pos(), self.minimap_bound().center())
     }
 
     pub fn map_minimap_to_map(&self, point: MinimapPoint) -> MapPoint {
-        // the scaling factor (map_scale) is applied uniformly to x,y
-        // if there are DPI scaling factors, they have already been taken into account
-        // as part of the conversion into fakespace
         let minimap_to_map = self.minimap_to_map();
         minimap_to_map.map(point)
     }
 
-    // finally, map to local
-    // between map and local, the common coordinate is no longer the
-    // centre of the map, it is in fact the player themselves.
-    // thus, the distance is between the player, and a point!
-
     pub fn map_to_local(&self) -> MapToLocal {
-        // map coordinates (continent) are in ft and inches
-        // a foot is 0.3048 meters
-        // a meter is 1/0.3048 feet
-        // if we want local, we have to convert ft to m
-        let signs = Vector2::from(self.sign_obtainer.sign());
-
-        let map_player_pos: MapPoint = self.global_player_pos.into();
-        let local_player_pos_xz: Point2<LocalSpace> = self.local_player_pos.xz().into();
-        // to translate a point from mapspace into localspace,
-        MapToLocal::from_translation(
-            // first obtain the distance from the common point
-            -map_player_pos.to_vector(),
-        )
-        .then_scale(
-            // scale the distance by the scaling factor to take it from
-            // mapspace to localspace units
-            // ~~local z+ is global y-, so for y scale negatively~~
-            // THAT WAS WRONG, EVERY MAP HAS ITS OWN AXES
-            signs, //* Vector2::new(scaling_factor_meters_per_feet, scaling_factor_meters_per_feet)
-        )
-        .then_translate(
-            // the player's position is used as a vector
-            // when combined with the distance vector,
-            // it provides the full offset from the origin
-            // in local space, so translate it as such
-            //
-            // the player's local position is a coordinate in 3D space
-            // to translate the 2D point, we must drop the height
-            // in our scheme, this is the Y coordinate
-            local_player_pos_xz.to_vector(),
-        )
+        LocalSpace::from_map(self.sign_obtainer.scale(), self.player_pos_global(), self.player_pos_local2())
     }
 
     pub fn map_map_to_local(&self, point: MapPoint) -> LocalPoint {
@@ -717,6 +479,11 @@ impl MarkerInputData {
     }
 
     #[inline]
+    pub fn player_pos_local2(&self) -> LocalPoint2 {
+        LocalSpace::to2(self.player_pos_local())
+    }
+
+    #[inline]
     pub fn player_pos_local(&self) -> LocalPoint {
         Point3::from_raw(self.local_player_pos)
     }
@@ -749,38 +516,6 @@ impl Default for MarkerInputData {
             display_size: Vec2::new(1920.0, 1080.0),
             sign_obtainer: Default::default(),
             map_id: 0,
-        }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Clone, Copy)]
-pub enum CurrentPerspective {
-    Global, // map_open: true,
-    #[default]
-    Minimap, // map_open: false,
-}
-
-impl From<UiState> for CurrentPerspective {
-    fn from(ui_state: UiState) -> Self {
-        match ui_state.contains(UiState::IS_MAP_OPEN) {
-            true => Self::Global,
-            false => Self::Minimap,
-        }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Clone, Copy)]
-pub enum MinimapPlacement {
-    Top,
-    #[default]
-    Bottom,
-}
-
-impl From<UiState> for MinimapPlacement {
-    fn from(ui_state: UiState) -> Self {
-        match ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT) {
-            true => Self::Top,
-            false => Self::Bottom,
         }
     }
 }

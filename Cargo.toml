@@ -38,14 +38,17 @@ space = [
   "texture-loader",
   "goggles",
   "space-list",
+  "dep:taimi_meta",
   "dep:taimi_pack",
 ]
 space-list = [
   "dep:bvh",
+  "dep:nalgebra",
 ]
 markers = [
   "dep:itertools",
   "dep:arc-atomic",
+  "dep:taimi_meta",
   "dep:windows-strings",
   "dep:windows-core",
   "windows/System",
@@ -107,9 +110,12 @@ texture-loader = [
 [lib]
 crate-type = ["cdylib"] # nexus addons are dynamic system libraries (dll)
 
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(todo)'] }
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+  'cfg(todo, values("unused"))',
+  'cfg(todo)',
+]
 
 [profile.release]
 opt-level = "z"
@@ -174,6 +180,7 @@ unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
 bvh = { version = "0.11.0", default-features = false, optional = true }
+nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
 xml-rs = "0.8.26"
 uuid = { version = "1.17.0", features = ["v4"] }
 md5 = "0.7.0"
@@ -183,6 +190,7 @@ croner = "3"
 bitvec = "1.0.1"
 
 taimi_pack = { path = "./pathing/pack", optional = true }
+taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "gzip", "mumblelink-nexus"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }

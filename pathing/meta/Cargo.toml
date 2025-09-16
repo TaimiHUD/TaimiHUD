@@ -1,0 +1,39 @@
+[package]
+name = "taimi_meta"
+authors = [ "kittywitch" ]
+description = "GW2 Metadata"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = [
+  "serde",
+  "gzip",
+  "mumblelink-nexus",
+]
+mumblelink-nexus = [
+  "dep:gw2_mumble_nexus",
+]
+serde = [
+  "dep:serde",
+  "dep:serde_json",
+  "glam/serde",
+  "glamour/serde",
+]
+gzip = [
+  "dep:async-compression",
+  "async-compression/gzip",
+]
+
+[dependencies]
+anyhow = "1"
+async-compression = { version = "0.4", optional = true }
+log = "0.4"
+tokio = { version = "1", default-features = false }
+glam = "0.30"
+glamour = "0.18"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+# keep version in sync with nexus dependency (TODO: maybe move this to a workspace dependency?)
+gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false, optional = true }
