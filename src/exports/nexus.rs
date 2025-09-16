@@ -54,19 +54,17 @@ pub(crate) fn cb_load() {
 
 pub(crate) fn cb_unload() {
     #[cfg(feature = "extension-arcdps")]
-    let own_handle = match exports::arcdps::loaded() {
-        true => match exports::arcdps::unload_self() {
-            Err(e) => {
-                log::warn!("failed to request unload from arcdps: {e}");
-                None
-            },
-            Ok(Some(handle)) if !handle.is_invalid() => {
-                log::info!("scheduling DLL exit after unload...");
-                Some(handle)
-            },
-            _ => None,
+    let own_handle = match exports::arcdps::ExitHandle::try_exit() {
+        Err(e) => {
+            log::warn!("failed to request unload from arcdps: {e}");
+            None
         },
-        false => None,
+        Ok(exit) => {
+            if exit.is_some() {
+                log::info!("scheduling DLL exit after unload...");
+            }
+            exit
+        },
     };
 
     if available() {
@@ -75,20 +73,7 @@ pub(crate) fn cb_unload() {
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(handle) = own_handle {
-        use std::thread;
-        use windows::Win32::{
-            Foundation::HMODULE,
-            System::LibraryLoader::FreeLibraryAndExitThread,
-        };
-
-        let handle = handle.0 as usize;
-        let _ = thread::spawn(move || -> ! {
-            thread::sleep(Duration::from_millis(400));
-            log::info!("goodbye");
-            unsafe {
-                FreeLibraryAndExitThread(HMODULE(handle as *mut _), 0)
-            };
-        });
+        handle.spawn_free();
     }
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);

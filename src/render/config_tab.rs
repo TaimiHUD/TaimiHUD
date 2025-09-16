@@ -115,6 +115,7 @@ impl ConfigTabState {
                     let _ = crate::SPACE_SENDER.write().unwrap().take();
                     crate::TEXTURES.quit();
                 }
+                Controller::try_send(ControllerEvent::UnloadAll);
             }
             #[cfg(feature = "space")]
             {

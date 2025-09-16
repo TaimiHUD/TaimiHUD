@@ -27,6 +27,7 @@ use {
         path::PathBuf,
         ptr::{self, NonNull},
         sync::{atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicPtr, Ordering}, Mutex, RwLock},
+        thread,
         time::Duration,
     },
     windows::Win32::{
@@ -241,6 +242,68 @@ fn release() {
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
     RUNTIME_LOADED.store(false, Ordering::SeqCst);
     EXTRAS_AVAILABLE.store(false, Ordering::SeqCst);
+}
+
+pub struct ExitHandle {
+    own_handle: HMODULE,
+}
+
+impl ExitHandle {
+    pub fn try_exit() -> RuntimeResult<Option<Self>> {
+        let handle = match exports::arcdps::loaded() {
+            true => match exports::arcdps::unload_self()? {
+                Some(handle) if !handle.is_invalid() => {
+                    Some(handle)
+                },
+                _ => None,
+            },
+            false => None,
+        };
+
+        Ok(handle.map(|own_handle| Self {
+            own_handle,
+        }))
+    }
+
+    #[cfg(todo)]
+    pub fn free_and_pray(self) {
+        use windows::Win32::System::LibraryLoader::FreeLibraryAndExitThread;
+
+        unsafe {
+            FreeLibraryAndExitThread(self.own_handle, 0)
+        };
+    }
+
+    pub fn free_and_exit(self) -> ! {
+        use windows::Win32::System::LibraryLoader::FreeLibraryAndExitThread;
+
+        log::info!("goodbye");
+        unsafe {
+            FreeLibraryAndExitThread(self.own_handle, 0)
+        };
+    }
+
+    pub fn spawn_free(self) {
+        let _ = thread::spawn(move || -> ! {
+            thread::sleep(Duration::from_millis(400));
+            self.free_and_exit();
+        });
+    }
+}
+
+unsafe impl Send for ExitHandle {}
+
+/// This may block!
+pub fn exit() -> RuntimeResult<()> {
+    let exit = match ExitHandle::try_exit()? {
+        None => return Err("arcdps is unaware of us, maybe not loaded?"),
+        Some(h) => h,
+    };
+
+    // TODO: stash this away in a static to be spawned *after* release has been called?
+    exit.spawn_free();
+
+    Ok(())
 }
 
 static IS_INGAME: AtomicBool = AtomicBool::new(false);

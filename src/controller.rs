@@ -1247,6 +1247,13 @@ impl Controller {
             #[cfg(feature = "markers-edit")]
             GetMarkerPaths => self.get_marker_paths().await?,
             Quit => return Ok(false),
+            UnloadAll => {
+                #[cfg(feature = "extension-arcdps")]
+                std::thread::spawn(|| if let Err(e) = crate::exports::arcdps::exit() {
+                    log::error!("Failed to leave arcdps: {e}");
+                });
+                return Ok(false)
+            },
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:
             //_ => (),
         }
@@ -1370,4 +1377,7 @@ pub enum ControllerEvent {
     #[strum(to_string = "Toggled {0}")]
     TimerToggle(String),
     Quit,
+    /// Like quit but will also request addon release
+    /// (if possible)
+    UnloadAll,
 }
