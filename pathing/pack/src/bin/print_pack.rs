@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
         &mut loader_dir as &mut dyn loader::PackLoaderContext
     };
 
-    let pack = Pack::load(&mut loader)?;
+    let pack = Pack::load_strict(&mut loader, true)?;
 
     eprintln!("loaded pack {} with {} trails and {} pois", pack.name, pack.trails.len(), pack.pois.len());
 

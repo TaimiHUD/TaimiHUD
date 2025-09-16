@@ -28,17 +28,43 @@ pub struct Pack {
 
 impl Pack {
     pub fn load<L: PackLoaderContext>(loader: &mut L) -> anyhow::Result<Pack> {
+        Self::load_strict(loader, false)
+    }
+
+    pub fn load_strict<L: PackLoaderContext>(loader: &mut L, strict: bool) -> anyhow::Result<Pack> {
         let mut pack = Pack::default();
 
-        let pack_defs = loader.all_files_with_ext("xml")?;
+        let pack_defs = loader.all_files_with_ext_owned("xml");
+        let mut error = None;
         for def in pack_defs {
-            parse_pack_def(&mut pack, loader, &def)?;
+            let res = def.and_then(|def|
+                parse_pack_def(&mut pack, loader, &def.to_string_lossy())
+            );
+            match res {
+                Ok(()) => (),
+                Err(e) if strict =>
+                    return Err(e.into()),
+                Err(e) => {
+                    log::error!("Pack load failure: {e}");
+                    error.get_or_insert(e);
+                },
+            }
+        }
+
+        match error {
+            Some(e) if pack.is_empty() =>
+                return Err(e.into()),
+            _ => (),
         }
 
         merge_category_attributes(&mut pack);
         apply_marker_attributes(&mut pack);
 
         Ok(pack)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.categories.is_empty() && self.pois.is_empty() && self.trails.is_empty()
     }
 }
 
@@ -48,6 +74,12 @@ pub struct CategoryCollection {
     pub all_categories: IndexMap<String, Category>,
     /// List of root categories.
     pub root_categories: IndexSet<String>,
+}
+
+impl CategoryCollection {
+    pub fn is_empty(&self) -> bool {
+        self.all_categories.is_empty() && self.root_categories.is_empty()
+    }
 }
 
 pub fn taco_safe_name(value: &str, is_full: bool) -> String {

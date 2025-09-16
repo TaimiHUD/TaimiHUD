@@ -3,7 +3,7 @@ use {
     crate::pack::file_path_eq,
     relative_path::PathExt,
     std::{
-        ffi::OsStr,
+        borrow::Cow,
         fmt,
         fs,
         io::{self, Cursor, Read as _},
@@ -15,6 +15,8 @@ use zip::ZipArchive;
 
 pub trait LoaderAssetReader: io::BufRead + io::Seek + 'static {}
 impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
+
+pub type PackFilenameIter<'a> = Box<dyn Iterator<Item = anyhow::Result<Cow<'a, Path>>> + 'a>;
 
 pub trait PackLoaderContext {
     fn find_asset_near(&mut self, relative: &str, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> where
@@ -41,7 +43,15 @@ pub trait PackLoaderContext {
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>>;
 
-    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>>;
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a>;
+
+    fn all_files_with_ext_owned(&self, ext: &'static str) -> Vec<anyhow::Result<PathBuf>> where
+        Self: Sized,
+    {
+        self.all_files_with_ext(ext)
+            .map(|def| def.map(|asset| asset.into_owned()))
+            .collect()
+    }
 }
 
 impl PackLoaderContext for &mut dyn PackLoaderContext {
@@ -53,7 +63,7 @@ impl PackLoaderContext for &mut dyn PackLoaderContext {
         PackLoaderContext::load_asset_dyn(*self, name)
     }
 
-    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(*self, ext)
     }
 }
@@ -67,7 +77,7 @@ impl PackLoaderContext for Box<dyn PackLoaderContext> {
         PackLoaderContext::load_asset_dyn(&mut **self, name)
     }
 
-    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(&**self, ext)
     }
 }
@@ -94,31 +104,55 @@ impl PackLoaderContext for DirectoryLoader {
         Ok(Box::new(self.load_asset(name)?))
     }
 
-    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
-        let mut files = vec![];
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
+        let iter = visit_dir_ext(&self.root, Cow::Borrowed(&self.root), ext);
 
-        visit_dir_ext(&mut files, &self.root, &self.root, ext)?;
-
-        Ok(files)
+        Box::new(iter)
     }
 }
 
-fn visit_dir_ext(
-    files: &mut Vec<String>,
-    base: &Path,
-    dir: &Path,
-    ext: &str,
-) -> anyhow::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            visit_dir_ext(files, base, &path, ext)?;
-        } else if path.extension() == Some(OsStr::new(ext)) {
-            files.push(path.relative_to(base)?.into_string());
-        }
-    }
-    Ok(())
+fn visit_dir_ext<'a>(
+    base: &'a Path,
+    dir: Cow<'a, Path>,
+    ext: &'static str,
+) -> impl Iterator<Item = anyhow::Result<Cow<'a, Path>>> + 'a {
+    let (read, e) = match fs::read_dir(dir) {
+        Ok(read) => (Some(read), None),
+        Err(e) => (None, Some(anyhow::Error::from(e))),
+    };
+    let iter = read.into_iter()
+        .flatten()
+        .flat_map(move |file| {
+            let (f, d, e) = match file {
+                Ok(file) => {
+                    let path = file.path();
+                    let (f, d) = match path.is_dir() {
+                        true => (None, Some((path, file))),
+                        false => (Some((path, file)), None),
+                    };
+                    (f, d, None)
+                },
+                Err(e) => (None, None, Some(anyhow::Error::from(e))),
+            };
+
+            let f = f.into_iter()
+                .map(move |(path, _)| path.relative_to(base)
+                    .map_err(anyhow::Error::from)
+                    .map(|f| PathBuf::from(f.into_string()).into())
+                );
+
+            let d = d.into_iter()
+                .flat_map(move |(path, _)| {
+                    let iter = visit_dir_ext(base, Cow::Owned(path), ext);
+                    Box::new(iter) as PackFilenameIter
+                });
+
+            e.into_iter().map(Err)
+                .chain(f)
+                .chain(d)
+        });
+    e.into_iter().map(Err)
+        .chain(iter)
 }
 
 #[cfg(feature = "zip")]
@@ -169,12 +203,12 @@ impl PackLoaderContext for ZipLoader {
         Ok(Box::new(self.load_asset(name)?))
     }
 
-    fn all_files_with_ext(&self, ext: &str) -> anyhow::Result<Vec<String>> {
-        Ok(self
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
+        let iter = self
             .archive
             .file_names()
             .filter(|name| name.rsplit_once('.').map(|(_, e)| e) == Some(ext))
-            .map(|s| s.to_string())
-            .collect())
+            .map(|name| Ok(Path::new(name).into()));
+        Box::new(iter)
     }
 }
