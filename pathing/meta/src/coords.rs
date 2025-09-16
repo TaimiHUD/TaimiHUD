@@ -442,6 +442,31 @@ impl MapLocalScale {
         );
         Self::with_game_scale(scale)
     }
+
+    #[cfg(feature = "map-cache")]
+    pub fn for_map(map_id: u32) -> Option<Self> {
+        use {
+            crate::map::Map,
+            std::{
+                collections::BTreeMap,
+                sync::LazyLock,
+            },
+        };
+
+        #[cfg(not(feature = "gzip"))]
+        const MAPS_SIGN_JSON: &'static str = include_str!("../data/maps-sign.json");
+        static MAPS_SIGN: LazyLock<BTreeMap<u32, Map>> = LazyLock::new(|| {
+            let maps = serde_json::from_str::<BTreeMap<u32, Map>>(MAPS_SIGN_JSON);
+            if let Err(_e) = &maps {
+                log::error!("failed to deserialize map cache: {_e}");
+            }
+            maps.unwrap_or_default()
+        });
+
+        let map = MAPS_SIGN.get(&map_id)?;
+
+        Some(Self::with_game_bounds(map.map_rect(), map.continent_rect()))
+    }
 }
 
 impl Default for MapLocalScale {

@@ -19,6 +19,7 @@ default = [
   "space",
   "extension-arcdps",
   "extension-nexus",
+  "taimi_meta?/map-cache",
 ]
 space = [
   "dep:itertools",
@@ -190,7 +191,7 @@ croner = "3"
 bitvec = "1.0.1"
 
 taimi_pack = { path = "./pathing/pack", optional = true }
-taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "gzip", "mumblelink-nexus"] }
+taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "mumblelink-nexus"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }

@@ -8,8 +8,11 @@ edition = "2021"
 [features]
 default = [
   "serde",
-  "gzip",
   "mumblelink-nexus",
+]
+map-cache = [
+  "serde",
+  #"gzip", # TODO
 ]
 mumblelink-nexus = [
   "dep:gw2_mumble_nexus",

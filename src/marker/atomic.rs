@@ -85,7 +85,7 @@ impl SignObtainer {
     }
 
     pub fn has_sign(&self) -> bool {
-        self.point2.is_some()
+        matches!((self.point1, self.point2), (Some(..), Some(..)))
     }
 
     pub fn sign(&self) -> Vec2 {
@@ -110,6 +110,14 @@ impl SignObtainer {
             // until we find it out, let's just go for Sure man it's the same why not
             default_vec2
         }
+    }
+
+    pub fn set_scale(&mut self, scale: MapLocalScale) {
+        self.point1 = Some(LocalGlobalHolder::default());
+        self.point2 = Some(LocalGlobalHolder {
+            local: scale.scale.into(),
+            global: Vec2::splat(1.0).into(),
+        });
     }
 
     pub fn scale(&self) -> MapLocalScale {
@@ -462,6 +470,9 @@ impl MarkerInputData {
         let mut data = Self::cloned();
         data.map_id = map_id;
         data.sign_obtainer = SignObtainer::default();
+        if let Some(sign) = MapLocalScale::for_map(map_id) {
+            data.sign_obtainer.set_scale(sign);
+        }
         data.commit();
     }
 
