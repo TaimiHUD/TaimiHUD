@@ -1138,6 +1138,7 @@ impl Controller {
                     log::error!("Path load panicked: {e}");
                 }
             }
+            Self::try_send(ControllerEvent::RequestDisabledPaths);
         });
 
         Ok(())

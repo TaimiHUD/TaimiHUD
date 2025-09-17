@@ -384,6 +384,7 @@ impl Settings {
         Ok(())
     }
 
+    #[cfg(feature = "space")]
     pub async fn pathing_state_update(&mut self, path: String, state: bool) {
         if self.disabled_paths.contains(&path) && state {
             self.disabled_paths.remove(&path);
