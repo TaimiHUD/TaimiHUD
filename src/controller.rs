@@ -1125,20 +1125,51 @@ impl Controller {
                     Self::pathing_load_dir(name, path)
                 }.context(context);
 
-                if let Err(e) = res {
-                    log::error!("Path load failed: {e}");
+                if let Err(e) = &res {
+                    log::error!("Path load failed: {e:#}");
                 }
+                res.is_ok()
             };
             path_loads.spawn_blocking(loader);
         }
 
         tokio::spawn(async move {
-            while let Some(res) = path_loads.join_next().await {
-                if let Err(e) = res {
-                    log::error!("Path load panicked: {e}");
+            let mut disabled_paths_dirty = false;
+            loop {
+                let pack_load = path_loads.join_next();
+                let res = if disabled_paths_dirty {
+                    // throttle repeated state event if packs load quickly enough...
+                    let timeout = sleep(Duration::from_millis(74));
+                    tokio::pin!(timeout);
+                    tokio::pin!(pack_load);
+                    loop {
+                        select! {
+                            res = &mut pack_load => break res,
+                            _ = &mut timeout => {
+                                // this will take a while, so emit the pending update
+                                Self::try_send(ControllerEvent::RequestDisabledPaths);
+                                disabled_paths_dirty = false;
+                            },
+                        }
+                    }
+                } else {
+                    pack_load.await
+                };
+                match res {
+                    None => break,
+                    Some(Err(e)) =>
+                        log::error!("Path load panicked: {e}"),
+                    Some(Ok(true)) =>
+                        disabled_paths_dirty = true,
+                    Some(Ok(..)) => (),
                 }
             }
-            Self::try_send(ControllerEvent::RequestDisabledPaths);
+
+            // TODO: sender+await, or ideally just make this unnecessary
+
+            if disabled_paths_dirty {
+                Self::try_send(ControllerEvent::RequestDisabledPaths);
+            }
         });
 
         Ok(())
@@ -1171,6 +1202,7 @@ impl Controller {
             pack: Arc::new(pack),
             loader,
         };
+        // TODO: await!
         if let Some(sender) = Engine::sender() {
             let _ = sender.blocking_send(event);
         }

@@ -171,8 +171,6 @@ impl Engine {
             obscured_alpha: 0.15,
         };
 
-        Controller::try_send(ControllerEvent::RequestDisabledPaths);
-
         if let Some(backing) = engine.object_kinds.get("Cat") {
             engine.world.spawn((
                 Position(Vec3::new(0.0, 130.0, 0.0)),
