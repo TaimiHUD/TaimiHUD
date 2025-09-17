@@ -9,27 +9,27 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Map {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     min_level: Option<isize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     max_level: Option<isize>,
     default_floor: Option<isize>,
-    #[serde(rename = "type")]
-    kind: MapType,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "type", default)]
+    kind: Option<MapType>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     floors: Vec<isize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     region_id: Option<isize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     region_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     continent_id: Option<isize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     continent_name: Option<String>,
-    map_rect: [[u32; 2]; 2],
-    continent_rect: [[u32; 2]; 2],
+    map_rect: [[i32; 2]; 2],
+    continent_rect: [[i32; 2]; 2],
 }
 
 impl Map {
