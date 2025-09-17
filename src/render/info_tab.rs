@@ -1,11 +1,11 @@
 use {
     super::TimerWindowState,
-    crate::{built_info, fl, render::RenderState, SETTINGS},
+    crate::{built_info, fl, render::RenderState, TEXTURES},
     nexus::imgui::{TableColumnSetup, Ui},
 };
 
 #[cfg(feature = "space")]
-use crate::{engine_ref, TEXTURES};
+use crate::engine_ref;
 
 pub struct InfoTabState {}
 
@@ -66,7 +66,6 @@ impl InfoTabState {
         drop(table_token);
         #[cfg(feature = "space")]
         self.space_info(ui);
-        #[cfg(feature = "texture-loader")]
         if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
             ui.text(&fl!("textures", count = tex_count));
         }
