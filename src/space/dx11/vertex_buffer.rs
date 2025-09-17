@@ -17,21 +17,6 @@ impl VertexBuffer {
     }
 }
 
-#[cfg(todo)]
-impl D3d11ContextBindableSlot for VertexBuffer {
-    fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        unsafe {
-            device_context.IASetVertexBuffers(
-                slot,
-                1,
-                Some(self.buffer.as_params().as_ptr()),
-                Some(&self.stride),
-                Some(&self.offset),
-            );
-        }
-    }
-}
-
 pub unsafe trait D3d11ContextBindableVertexBuffer: D3d11ContextBindableSlot {
     fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void;
     fn vertex_buffer_stride(&self) -> u32;

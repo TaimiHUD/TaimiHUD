@@ -175,24 +175,6 @@ impl Drop for InstanceBuffer {
     }
 }
 
-#[cfg(todo)]
-impl D3d11ContextBindableSlot for InstanceBuffer {
-    fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        let stride = array::from_ref(&self.stride);
-        unsafe {
-            let buffer = &*self.as_buffer();
-            let offset = [0_u32];
-            device_context.IASetVertexBuffers(
-                slot,
-                1,
-                Some(buffer.as_params().as_ptr()),
-                Some(stride.as_ptr()),
-                Some(offset.as_ptr()),
-            );
-        }
-    }
-}
-
 unsafe impl D3d11ContextBindableVertexBuffer for InstanceBuffer {
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void {
         self.as_ptr().as_ptr()
