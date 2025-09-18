@@ -1,7 +1,7 @@
 use {
     crate::{
         fl,
-        marker::{atomic::MarkerInputData, format::MarkerSet},
+        marker::format::MarkerSet,
         ControllerEvent, Controller, SETTINGS,
     },
     nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
@@ -42,7 +42,6 @@ impl MarkerWindowState {
                     if ui.button(&fl!("clear-spent-autoplace")) {
                         Controller::try_send(ControllerEvent::ClearSpentAutoplace);
                     }
-                    let mid = MarkerInputData::read();
                     if !self.markers_for_map.is_empty() {
                         let table_flags =
                             TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;

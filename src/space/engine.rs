@@ -1,32 +1,42 @@
 use {
-    super::{
-        dx11::{prelude::*, InstanceBufferData, RenderBackend, PerspectiveInputData},
-        object::{ObjectBacking, ObjectLoader},
-        pack::PackCollection,
-        MapContext, MapTarget,
-    },
     crate::{
-        exports::runtime as rt,
         controller::ControllerEvent,
+        exports::runtime as rt,
         marker::atomic::MarkerInputData,
-        resources::ObjFile,
-        timer::{PhaseState, RotationType, TimerFile, TimerMarker},
-        Controller, ADDON_DIR,
+        space::{
+            dx11::{prelude::*, RenderBackend, PerspectiveInputData},
+            pack::PackCollection,
+            MapContext, MapTarget,
+        },
+        timer::{PhaseState, TimerFile, TimerMarker},
+        Controller,
     },
     anyhow::Context,
     bevy_ecs::prelude::*,
     glam::Vec3,
     nexus::{imgui::Ui, rtapi::RealTimeApi},
-    std::{collections::{HashMap, HashSet}, num::NonZeroU32, path::PathBuf, sync::Arc},
+    std::{collections::{HashMap, HashSet}, num::NonZeroU32, sync::Arc},
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
+};
+#[cfg(feature = "space-ecs")]
+use {
+    crate::{
+        resources::ObjFile,
+        space::object::{ObjectBacking, ObjectLoader},
+        timer::RotationType,
+    },
+    std::path::PathBuf,
 };
 
 #[derive(Component)]
 struct Render {
     disabled: bool,
+    #[cfg(feature = "space-ecs")]
     backing: Arc<ObjectBacking>,
+    #[cfg(feature = "space-ecs")]
     rotation: RotationType,
 }
+#[cfg(feature = "space-ecs")]
 #[derive(Component)]
 struct Position(Vec3);
 
@@ -40,6 +50,7 @@ struct Marker {
 
 #[derive(Bundle)]
 struct MarkerBundle {
+    #[cfg(feature = "space-ecs")]
     position: Position,
     render: Render,
 }
@@ -81,7 +92,9 @@ fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Mark
 pub struct Engine {
     receiver: Receiver<SpaceEvent>,
     pub render_backend: RenderBackend,
+    #[cfg(feature = "space-ecs")]
     pub model_files: HashMap<PathBuf, ObjFile>,
+    #[cfg(feature = "space-ecs")]
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
@@ -104,24 +117,27 @@ pub struct Engine {
 
 impl Engine {
     pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
-        let addon_dir = &*ADDON_DIR;
-
-        let render_backend = RenderBackend::setup(&addon_dir, ui.io().display_size)
+        let render_backend = RenderBackend::setup(ui.io().display_size)
             .context("Failed to set up render backend")?;
 
-        let models_dir = addon_dir.join("models");
-        let object_descs = ObjectLoader::load_desc(&models_dir)
-            .context("Failed to load model descriptors")?;
-        log::debug!("{:?}", object_descs);
-        let model_files = ObjFile::load(&models_dir, &object_descs)
-            .context("Failed to load model object")?;
+        #[cfg(feature = "space-ecs")]
+        let object_kinds = {
+            let models_dir = crate::ADDON_DIR.join("models");
+            let object_descs = ObjectLoader::load_desc(&models_dir)
+                .context("Failed to load model descriptors")?;
+            log::debug!("{:?}", object_descs);
+            let model_files = ObjFile::load(&models_dir, &object_descs)
+                .context("Failed to load model object")?;
 
-        let object_kinds = object_descs.to_backings(
-            &render_backend.device,
-            &model_files,
-            &render_backend.shaders.0,
-            &render_backend.shaders.1,
-        );
+            let object_kinds = object_descs.to_backings(
+                &render_backend.device,
+                &model_files,
+                &render_backend.shaders.0,
+                &render_backend.shaders.1,
+            );
+
+            object_kinds
+        };
 
         let world = World::new();
 
@@ -153,14 +169,16 @@ impl Engine {
             },
         };
 
-        let mut engine = Engine {
+        let engine = Engine {
             render_pathing: true,
             render_pathing_map: false,
             rtapi,
             gameplay_map: Err(0),
+            #[cfg(feature = "space-ecs")]
             model_files,
             receiver,
             render_backend,
+            #[cfg(feature = "space-ecs")]
             object_kinds,
             schedule,
             world,
@@ -171,8 +189,12 @@ impl Engine {
             obscured_alpha: 0.15,
         };
 
+        #[cfg(feature = "space-ecs")]
+        let mut engine = engine;
+        #[cfg(feature = "space-ecs")]
         if let Some(backing) = engine.object_kinds.get("Cat") {
             engine.world.spawn((
+                #[cfg(feature = "space-ecs")]
                 Position(Vec3::new(0.0, 130.0, 0.0)),
                 Render {
                     disabled: false,
@@ -192,19 +214,22 @@ impl Engine {
             .entry(phase_state.timer.name.clone())
             .or_default();
         for marker in markers {
-            if let Some(base_path) = &phase_state.timer.path {
+            if let Some(_base_path) = &phase_state.timer.path {
+                #[cfg(feature = "space-ecs")]
                 let backing = Arc::new(ObjectBacking::create_marker(
                     &self.render_backend,
                     marker,
-                    base_path.clone(),
+                    _base_path.clone(),
                 ).context("marker object creation failed")?);
                 let entity = self.world.spawn((
+                    #[cfg(feature = "space-ecs")]
                     Position(marker.position),
                     Marker {
                         phase: phase_state.clone(),
                         start: phase_state.start,
                         marker: marker.clone(),
                     },
+                    #[cfg(feature = "space-ecs")]
                     Render {
                         rotation: marker.kind.clone(),
                         disabled: true,
@@ -432,47 +457,50 @@ impl Engine {
 
             backend.depth_handler.setup_depth_write(&device_context, false);
             backend.depth_handler.clear_scissor(&device_context);
+            // TODO: flush context state?
         }
 
         backend.perspective_handler.set_cb(&device_context, perspective_slot);
 
-        // let mut query = self.world.query::<(&mut Render, &Position)>();
-        // for (_k, c) in &query
-        //     .iter(&self.world)
-        //     .chunk_by(|(r, _p)| r.backing.name.clone())
-        // {
-        //     let mut itery = c.into_iter();
-        //     let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
-        //     let (r, p) = slice;
-        //     if !r.disabled {
-        //         let rot = match r.rotation {
-        //             RotationType::Billboard => {
-        //                 let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
-        //                 let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
-        //                 y
-        //                 //Mat4::IDENTITY
-        //             }
-        //             _ => Mat4::IDENTITY,
-        //         };
-        //         let ibd: Vec<_> = vec![slice]
-        //             .into_iter()
-        //             .chain(itery)
-        //             .map(|(_r, p)| {
-        //                 //  r.backing.render.metadata.model_matrix *
-        //                 let affy = Mat4::from_translation(p.0)
-        //                     * rot
-        //                     * r.backing.render.metadata.model_matrix;
-        //                 InstanceBufferData {
-        //                     world: affy,
-        //                     //world_position: affy.translation,
-        //                     colour: Vec3::new(1.0, 1.0, 1.0),
-        //                 }
-        //             })
-        //             .collect();
-        //         r.backing
-        //             .set_and_draw(perspective_slot, &backend.device, &device_context, &ibd)?;
-        //     }
-        // }
+        #[cfg(feature = "space-ecs")]
+        let mut query = self.world.query::<(&mut Render, &Position)>();
+        #[cfg(feature = "space-ecs")]
+        for (_k, c) in &query
+            .iter(&self.world)
+            .chunk_by(|(r, _p)| r.backing.name.clone())
+        {
+            let mut itery = c.into_iter();
+            let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
+            let (r, p) = slice;
+            if !r.disabled {
+                let rot = match r.rotation {
+                    RotationType::Billboard => {
+                        let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
+                        let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
+                        y
+                        //Mat4::IDENTITY
+                    }
+                    _ => Mat4::IDENTITY,
+                };
+                let ibd: Vec<_> = vec![slice]
+                    .into_iter()
+                    .chain(itery)
+                    .map(|(_r, p)| {
+                        //  r.backing.render.metadata.model_matrix *
+                        let affy = Mat4::from_translation(p.0)
+                            * rot
+                            * r.backing.render.metadata.model_matrix;
+                        InstanceBufferData {
+                            world: affy,
+                            //world_position: affy.translation,
+                            colour: Vec3::new(1.0, 1.0, 1.0),
+                        }
+                    })
+                    .collect();
+                r.backing
+                    .set_and_draw(perspective_slot, &backend.device, &device_context, &ibd)?;
+            }
+        }
 
         if let Some(context) = &render_world {
             #[cfg(feature = "goggles")]

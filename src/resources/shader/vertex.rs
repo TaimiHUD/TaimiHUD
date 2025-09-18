@@ -6,7 +6,7 @@ use {
     std::{ffi::{CStr, CString}, mem::offset_of, slice::from_raw_parts},
     windows::Win32::Graphics::{
         Direct3D::{
-            Fxc::{D3DCompile, D3DCompileFromFile, D3DCOMPILE_DEBUG},
+            Fxc::{D3DCompile, D3DCOMPILE_DEBUG},
             ID3DBlob,
         },
         Direct3D11::{

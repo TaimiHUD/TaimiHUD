@@ -39,8 +39,11 @@ space = [
   "texture-loader",
   "goggles",
   "space-list",
+  #"space-ecs",
   "dep:taimi_meta",
   "dep:taimi_pack",
+]
+space-ecs = [
 ]
 space-list = [
   "dep:bvh",

@@ -11,16 +11,12 @@ use {
     windows::{
         core::Interface,
         Win32::Graphics::Direct3D11::{
-            self as d3d,
             ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext,
             ID3D11RasterizerState, ID3D11RenderTargetView, ID3D11Texture2D,
-            D3D11_BIND_DEPTH_STENCIL, D3D11_CLEAR_DEPTH, D3D11_CLEAR_STENCIL,
-            D3D11_COMPARISON_ALWAYS, D3D11_COMPARISON_LESS, D3D11_CULL_BACK, D3D11_CULL_NONE,
-            D3D11_DEFAULT_STENCIL_READ_MASK, D3D11_DEFAULT_STENCIL_WRITE_MASK,
             D3D11_DEPTH_STENCILOP_DESC, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_STENCIL_VIEW_DESC,
-            D3D11_DEPTH_STENCIL_VIEW_DESC_0, D3D11_DEPTH_WRITE_MASK_ALL,
-            D3D11_DSV_DIMENSION_TEXTURE2D, D3D11_FILL_SOLID, D3D11_RASTERIZER_DESC,
-            D3D11_STENCIL_OP_KEEP, D3D11_TEX2D_DSV, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+            D3D11_DEPTH_STENCIL_VIEW_DESC_0,
+            D3D11_DSV_DIMENSION_TEXTURE2D, D3D11_RASTERIZER_DESC,
+            D3D11_TEX2D_DSV, D3D11_TEXTURE2D_DESC,
             D3D11_VIEWPORT,
         },
         Win32::Graphics::Dxgi::{
@@ -105,7 +101,7 @@ impl DepthHandler {
             if let Some(clear_depth) = clear_depth {
                 device_context.ClearDepthStencilView(
                     dsview,
-                    D3D11_CLEAR_DEPTH.0 | D3D11_CLEAR_STENCIL.0,
+                    d3d11::D3D11_CLEAR_DEPTH.0 | d3d11::D3D11_CLEAR_STENCIL.0,
                     clear_depth,
                     0,
                 );
@@ -192,10 +188,10 @@ impl DepthHandler {
     }
 
     const STENCILOP_DESC_DEFAULT: D3D11_DEPTH_STENCILOP_DESC = D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: D3D11_COMPARISON_ALWAYS,
-        StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilPassOp: D3D11_STENCIL_OP_KEEP,
+        StencilFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        StencilDepthFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
+        StencilFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
+        StencilPassOp: d3d11::D3D11_STENCIL_OP_KEEP,
     };
 
     pub fn create_depth_stencil_state(
@@ -204,11 +200,11 @@ impl DepthHandler {
         log::info!("Setting up depth stencil state");
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
-            DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ALL,
+            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
             DepthFunc: d3d11::D3D11_COMPARISON_LESS_EQUAL,
             StencilEnable: false.into(),
-            StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
+            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
+            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
             FrontFace: Self::STENCILOP_DESC_DEFAULT,
             BackFace: Self::STENCILOP_DESC_DEFAULT,
         };
@@ -230,11 +226,11 @@ impl DepthHandler {
     ) -> anyhow::Result<ID3D11DepthStencilState> {
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
-            DepthWriteMask: d3d::D3D11_DEPTH_WRITE_MASK_ZERO,
-            DepthFunc: d3d::D3D11_COMPARISON_GREATER,
+            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+            DepthFunc: d3d11::D3D11_COMPARISON_GREATER,
             StencilEnable: false.into(),
-            StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
+            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
+            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
             FrontFace: Self::STENCILOP_DESC_DEFAULT,
             BackFace: Self::STENCILOP_DESC_DEFAULT,
         };
@@ -265,8 +261,8 @@ impl DepthHandler {
             ArraySize: 1,
             Format: DXGI_FORMAT_D24_UNORM_S8_UINT,
             SampleDesc: depth_stencil_buffer_sample_desc,
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_DEPTH_STENCIL.0 as u32,
+            Usage: d3d11::D3D11_USAGE_DEFAULT,
+            BindFlags: d3d11::D3D11_BIND_DEPTH_STENCIL.0 as u32,
             CPUAccessFlags: 0,
             MiscFlags: 0,
         };
@@ -316,8 +312,8 @@ impl DepthHandler {
     pub fn create_rasterizer_state(device: &ID3D11Device) -> anyhow::Result<ID3D11RasterizerState> {
         log::info!("Setting up rasterizer state");
         let rasterizer_state_desc = D3D11_RASTERIZER_DESC {
-            FillMode: D3D11_FILL_SOLID,
-            CullMode: D3D11_CULL_NONE,
+            FillMode: d3d11::D3D11_FILL_SOLID,
+            CullMode: d3d11::D3D11_CULL_NONE,
             FrontCounterClockwise: true.into(),
             DepthBias: 0,
             DepthBiasClamp: 0.0,
@@ -342,11 +338,11 @@ impl DepthHandler {
     ) -> anyhow::Result<ID3D11DepthStencilState> {
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: false.into(),
-            DepthWriteMask: d3d::D3D11_DEPTH_WRITE_MASK_ZERO,
-            DepthFunc: d3d::D3D11_COMPARISON_ALWAYS,
+            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+            DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
             StencilEnable: false.into(),
-            StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
+            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
+            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
             FrontFace: Self::STENCILOP_DESC_DEFAULT,
             BackFace: Self::STENCILOP_DESC_DEFAULT,
         };
@@ -361,7 +357,7 @@ impl DepthHandler {
         Ok(depth_stencil_state)
     }
 
-    pub fn setup_map(&self, device_context: &ID3D11DeviceContext, map: &MapTarget) {
+    pub fn setup_map(&self, device_context: &ID3D11DeviceContext, _map: &MapTarget) {
         unsafe {
             device_context.RSSetState(&self.rasterizer_state);
             device_context.RSSetViewports(Some(&[self.viewport]));
@@ -378,11 +374,11 @@ impl DepthHandler {
     ) -> anyhow::Result<ID3D11DepthStencilState> {
         let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
             DepthEnable: true.into(),
-            DepthWriteMask: d3d::D3D11_DEPTH_WRITE_MASK_ALL,
-            DepthFunc: d3d::D3D11_COMPARISON_ALWAYS,
+            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
+            DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
             StencilEnable: false.into(),
-            StencilReadMask: D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
+            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
+            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
             FrontFace: Self::STENCILOP_DESC_DEFAULT,
             BackFace: Self::STENCILOP_DESC_DEFAULT,
         };

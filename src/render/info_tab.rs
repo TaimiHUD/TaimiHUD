@@ -80,52 +80,56 @@ impl InfoTabState {
 
         RenderState::font_text("big", ui, &fl!("engine"));
         engine_ref(|engine| {
-                        RenderState::font_text("ui", ui, &fl!("ecs-data"));
-                        let entities = engine.world.entities();
-                        let used_entities = entities.used_count();
-                        let total_entities = entities.total_count();
-                        ui.text(format!("Used: {}", used_entities));
-                        ui.text(format!("Total: {}", total_entities));
-                        RenderState::font_text("ui", ui, &fl!("object-data"));
-                        let table_token = ui.begin_table_header(
-                            "object_types",
-                            [TableColumnSetup::new(&fl!("object-kind"))],
-                        );
+            RenderState::font_text("ui", ui, &fl!("ecs-data"));
+            let entities = engine.world.entities();
+            let used_entities = entities.used_count();
+            let total_entities = entities.total_count();
+            ui.text(format!("Used: {}", used_entities));
+            ui.text(format!("Total: {}", total_entities));
+            #[cfg(feature = "space-ecs")]
+            {
+                RenderState::font_text("ui", ui, &fl!("object-data"));
+                let table_token = ui.begin_table_header(
+                    "object_types",
+                    [TableColumnSetup::new(&fl!("object-kind"))],
+                );
+                ui.table_next_column();
+                for object in engine.object_kinds.keys() {
+                    ui.text(object);
+                    ui.table_next_column();
+                }
+                drop(table_token);
+                RenderState::font_text("ui", ui, &fl!("model-files"));
+                #[cfg(feature = "space-ecs")]
+                let table_token = ui.begin_table_header(
+                    "model_files",
+                    [
+                        TableColumnSetup::new(&fl!("name")),
+                        TableColumnSetup::new(&fl!("path")),
+                        TableColumnSetup::new(&fl!("vertices")),
+                    ],
+                );
+                ui.table_next_column();
+                for (path, file) in &engine.model_files {
+                    for model in &file.models {
+                        ui.text(format!("{:?}", path));
                         ui.table_next_column();
-                        for object in engine.object_kinds.keys() {
-                            ui.text(object);
-                            ui.table_next_column();
-                        }
-                        drop(table_token);
-                        RenderState::font_text("ui", ui, &fl!("model-files"));
-                        let table_token = ui.begin_table_header(
-                            "model_files",
-                            [
-                                TableColumnSetup::new(&fl!("name")),
-                                TableColumnSetup::new(&fl!("path")),
-                                TableColumnSetup::new(&fl!("vertices")),
-                            ],
-                        );
+                        ui.text(&model.0.name);
                         ui.table_next_column();
-                        for (path, file) in &engine.model_files {
-                            for model in &file.models {
-                                ui.text(format!("{:?}", path));
-                                ui.table_next_column();
-                                ui.text(&model.0.name);
-                                ui.table_next_column();
-                                ui.text(format!("{}", model.0.mesh.positions.len() / 3));
-                                ui.table_next_column();
-                            }
-                        }
-                        drop(table_token);
+                        ui.text(format!("{}", model.0.mesh.positions.len() / 3));
+                        ui.table_next_column();
+                    }
+                }
+                drop(table_token);
+            }
 
-                        RenderState::font_text("ui", ui, "Pathing Stats");
-                        let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
-                        let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
-                        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
-                        ui.text(format!("Drawn: {}", pack_entity_draw));
-                        ui.text(format!("Mapped: {}", pack_entity_draw_map));
-                        ui.text(format!("Total: {}", pack_entity_total));
+            RenderState::font_text("ui", ui, "Pathing Stats");
+            let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
+            let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
+            let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
+            ui.text(format!("Drawn: {}", pack_entity_draw));
+            ui.text(format!("Mapped: {}", pack_entity_draw_map));
+            ui.text(format!("Total: {}", pack_entity_total));
         });
     }
 }

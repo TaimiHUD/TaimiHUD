@@ -32,7 +32,6 @@ pub use {
 };
 
 use {
-    crate::space::object::PrimitiveTopology,
     std::{array, mem},
     windows::{
         core::InterfaceRef,

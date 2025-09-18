@@ -16,8 +16,6 @@ pub static MARKERINPUTDATA: LazyLock<AtomicArc<MarkerInputData>> = LazyLock::new
 
 pub use taimi_meta::coords::*;
 
-pub type ScreenToFake = Transform2<ScreenSpace, FakeSpace>;
-
 pub type FakeToMinimap = Transform2<FakeSpace, MinimapSpace>;
 pub type FakeToWorldmap = Transform2<FakeSpace, WorldmapSpace>;
 

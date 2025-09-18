@@ -89,7 +89,7 @@ impl PathingWindowState {
                                         }
                                         ui.same_line();
                                         if ui.button(&fl!("expand-all")) {
-                                            for (name, pack) in &engine.packs.loaded_packs {
+                                            for pack in engine.packs.loaded_packs.values() {
                                                 let all_categories = &pack.pack.categories.all_categories;
                                                 self.open_items.extend(all_categories.values().map(|x| x.full_id.clone()));
                                             }
@@ -181,7 +181,7 @@ impl PathingWindowState {
                                             table_flags,
                                         );
                                         ui.table_next_column();
-                                        for (name, mut pack) in &mut engine.packs.loaded_packs {
+                                        for pack in engine.packs.loaded_packs.values_mut() {
                                             let mut recompute = false;
                                             pack.draw_categories(
                                                 ui,

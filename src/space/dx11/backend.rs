@@ -6,7 +6,6 @@ use {
     },
     anyhow::{anyhow, Context},
     glam::Vec4,
-    std::path::Path,
     windows::Win32::Graphics::{
         Direct3D11::{
             ID3D11Device, ID3D11SamplerState, D3D11_COMPARISON_ALWAYS,
@@ -52,7 +51,7 @@ impl RenderBackend {
         Ok(sampler_state)
     }
 
-    pub fn setup(addon_dir: &Path, display_size: [f32; 2]) -> anyhow::Result<RenderBackend> {
+    pub fn setup(display_size: [f32; 2]) -> anyhow::Result<RenderBackend> {
         log::info!("Getting d3d11 device swap chain");
         let swap_chain = rt::dxgi_swap_chain()
             .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))
@@ -64,7 +63,7 @@ impl RenderBackend {
             swap_chain.GetDevice()
         }.context("GetDevice")?;
 
-        let shaders = ShaderLoader::load(addon_dir, &device)
+        let shaders = ShaderLoader::load_bundled(&device)
             .context("Shaders failed to load")?;
         let perspective_handler = PerspectiveHandler::setup(&device, &display_size)
             .context("Perspective handler setup failed")?;

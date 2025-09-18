@@ -12,21 +12,17 @@ pub(crate) mod pack;
 
 pub use {
     taimi_pack::{
-        attributes::{self, MarkerAttributes},
-        category::{self, Category},
+        attributes::MarkerAttributes,
+        category::Category,
         loader,
         poi::Poi,
-        trail::{Trail, TrailSection},
+        trail::TrailSection,
         pack::Pack,
     },
-    self::{
-        pack::{
-            ActivePack,
-            PackCollection,
-            LoaderBox,
-        },
-        poi::ActivePoi,
-        trail::ActiveTrail,
+    self::pack::{
+        ActivePack,
+        PackCollection,
+        LoaderBox,
     },
 };
 

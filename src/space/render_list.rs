@@ -9,7 +9,7 @@ use {
 use {
     bvh::{
         aabb::{Bounded, IntersectsAabb},
-        bounding_hierarchy::{BHShape, BoundingHierarchy},
+        bounding_hierarchy::BHShape,
         bvh::Bvh,
     },
     glamour::vec4,
@@ -399,7 +399,7 @@ impl MapFrustum {
 
     pub fn from_camera_data(
         data: &PerspectiveInputData,
-        aspect_ratio: f32,
+        _aspect_ratio: f32,
         near: f32,
         far: f32,
     ) -> MapFrustum {

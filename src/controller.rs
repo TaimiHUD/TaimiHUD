@@ -531,7 +531,7 @@ impl Controller {
 
     async fn toggle_marker(&mut self, id: &str) {
         let mut settings_lock = self.settings.write().await;
-        let disabled = settings_lock.toggle_marker(id.to_string()).await;
+        settings_lock.toggle_marker(id.to_string()).await;
         drop(settings_lock);
     }
 
@@ -1293,6 +1293,7 @@ impl Controller {
         Ok(true)
     }
 
+    #[cfg(todo = "unused")]
     pub fn sender() -> Option<Sender<ControllerEvent>> {
         crate::CONTROLLER_SENDER.try_read()
             .as_ref().ok()

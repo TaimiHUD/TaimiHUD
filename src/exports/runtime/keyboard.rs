@@ -432,6 +432,7 @@ pub fn scan_code_param(sc: NonZeroU16) -> LPARAM {
     LPARAM((sc.get() as usize as isize) << 16)
 }
 
+#[cfg(todo = "unused")]
 pub fn scan_code_key(vsc: NonZeroU16) -> Option<VIRTUAL_KEY> {
     let vk = unsafe {
         KeyboardAndMouse::MapVirtualKeyA(vsc.get().into(), KeyboardAndMouse::MAPVK_VSC_TO_VK)
@@ -441,6 +442,7 @@ pub fn scan_code_key(vsc: NonZeroU16) -> Option<VIRTUAL_KEY> {
         .map(VIRTUAL_KEY)
 }
 
+#[cfg(todo = "unused")]
 pub fn send_key_combo<I: Into<KeyInput>>(input: I) -> RuntimeResult<()> {
     let input = input.into();
     do_key_combo(move || send_key(input), input)

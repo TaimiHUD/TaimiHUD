@@ -1,8 +1,7 @@
 use {
     super::{PixelShader, ShaderDescription, ShaderKind, VertexShader},
-    glob::Paths,
     include_dir::include_dir,
-    std::{collections::HashMap, path::Path, sync::Arc},
+    std::{collections::HashMap, sync::Arc},
     windows::Win32::Graphics::Direct3D11::ID3D11Device,
 };
 
@@ -14,10 +13,8 @@ pub type PixelShaders = HashMap<String, Arc<PixelShader>>;
 pub struct ShaderLoader(pub VertexShaders, pub PixelShaders);
 
 impl ShaderLoader {
-    pub fn load(addon_dir: &Path, device: &ID3D11Device) -> anyhow::Result<Self> {
-        log::info!("Beginning shader setup!");
+    pub fn load_bundled(device: &ID3D11Device) -> anyhow::Result<Self> {
         let mut shader_descriptions: Vec<ShaderDescription> = Vec::new();
-        let mut shaders: ShaderLoader = Self(HashMap::new(), HashMap::new());
         let shader_description_paths = SHADERS_DIR.find("*.shaderdesc")?;
         for shader_description_path in shader_description_paths {
             if let Some(file) = shader_description_path.as_file() {
@@ -28,6 +25,20 @@ impl ShaderLoader {
                 }
             }
         }
+
+        Self::load_from(shader_descriptions, device)
+    }
+
+    #[cfg(todo)]
+    pub fn load_dir(addon_dir: &std::path::Path, device: &ID3D11Device) -> anyhow::Result<Self> {
+        use glob::Paths;
+    }
+
+    pub fn load_from<S>(shader_descriptions: S, device: &ID3D11Device) -> anyhow::Result<Self> where
+        S: IntoIterator<Item = ShaderDescription>,
+    {
+        log::info!("Beginning shader setup!");
+        let mut shaders: ShaderLoader = Self(HashMap::new(), HashMap::new());
         for shader_description in shader_descriptions {
             match shader_description.kind {
                 ShaderKind::Vertex => {
