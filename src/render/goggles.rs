@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use crate::{
     exports::runtime as rt,
     space::goggles::{self, LensClass, LENSES, LENS_PTR},

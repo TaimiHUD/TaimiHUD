@@ -1,9 +1,9 @@
 use anyhow::anyhow;
 use windows::{
     core::{Interface, InterfaceRef, IUnknown},
-    Win32::Graphics::Direct3D11::{ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11RenderTargetView, D3D11_COMPARISON_LESS, D3D11_COMPARISON_LESS_EQUAL, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_VIEWPORT},
+    Win32::Graphics::Direct3D11::{ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11RenderTargetView, D3D11_COMPARISON_LESS, D3D11_COMPARISON_LESS_EQUAL, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_VIEWPORT},
 };
-use core::{ffi::c_void, mem::transmute, ptr::{self, NonNull}, slice::from_raw_parts};
+use core::{ffi::c_void, mem::transmute, ptr::{self, NonNull}};
 use std::{collections::BTreeMap, sync::{OnceLock, RwLock, atomic::{AtomicPtr, Ordering}}};
 use retour::GenericDetour;
 #[cfg(feature = "space")]
@@ -109,9 +109,10 @@ unsafe extern "system" fn taimi_set_targets(
     views_ptr: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
     depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
 ) {
+    #[cfg(todo)]
     let views = match count as usize {
         0 => &[],
-        count => from_raw_parts(views_ptr, count),
+        count => core::slice::from_raw_parts(views_ptr, count),
     };
 
     //log::trace!("D3D11DeviceContext::OMSetRenderTargets({this:?}, {views:?}, {depth_view:?})");
@@ -120,7 +121,7 @@ unsafe extern "system" fn taimi_set_targets(
         let key = view.as_raw() as usize;
         let known = LENSES.read().map_err(drop).map(|l| l.get(&key).copied());
         match known {
-            Ok(Some(lens)) => {
+            Ok(Some(_lens)) => {
                 //log::trace!("recognized as {lens:?}");
             },
             Ok(None) => {
@@ -140,7 +141,7 @@ unsafe extern "system" fn taimi_set_targets(
                         state.GetDesc(&mut desc_state);
                     }
                     match &state {
-                        Some(state) => {
+                        Some(_state) => {
                             //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
                             //log::trace!("{desc_state:?}");
                             match desc_state.DepthEnable.0 != 0 {
