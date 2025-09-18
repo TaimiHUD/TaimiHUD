@@ -85,23 +85,8 @@ fn check_for_nexus_bridge() -> bool {
     const NEXUS_BRIDGE_SIG: u32 = -0x127e89di32 as u32;
 
     #[allow(unreachable_patterns)]
-    match () {
-        #[cfg(feature = "extension-arcdps-codegen")]
-        () if cb::available() && arcdps::exports::has_list_extension() => return cb::has_extension::<NEXUS_BRIDGE_SIG>(),
-        #[cfg(feature = "extension-arcdps-extern")]
-        () => match r#extern::arc_args() {
-            Some(arc) => {
-                let mut has_nexus = false;
-                let res = arc.module.extension_list(|exp| if exp.sig().map(|s| s.get()).unwrap_or_default() == NEXUS_BRIDGE_SIG {
-                    has_nexus = true;
-                });
-                if res.is_ok() {
-                    return has_nexus
-                }
-            },
-            None => (),
-        },
-        _ => (),
+    if let Some(has_nexus) = has_extension(NEXUS_BRIDGE_SIG) {
+        return has_nexus
     }
 
     // TODO: we could fall back to check for ArcDPS.dll in the process, but...
@@ -150,6 +135,26 @@ fn check_for_nexus_link() -> bool {
 #[cfg(feature = "extension-nexus")]
 fn check_for_nexus() -> bool {
     check_for_nexus_bridge() || check_for_nexus_link()
+}
+
+#[allow(unreachable_patterns)]
+pub(crate) fn has_extension(sig: u32) -> Option<bool> {
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if cb::available() && arcdps::exports::has_list_extension() => Some(cb::has_extension(sig)),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => match r#extern::arc_args() {
+            Some(arc) => {
+                let mut has_ext = false;
+                let res = arc.module.extension_list(|exp| if exp.sig().map(|s| s.get()).unwrap_or_default() == sig {
+                    has_ext = true;
+                });
+                res.ok().map(|_| has_ext)
+            },
+            None => None,
+        },
+        _ => None,
+    }
 }
 
 fn pre_init() {
@@ -208,9 +213,17 @@ fn init() -> Result<(), &'static str> {
             Squad_Location_X => KeyCode::Number8, KeyState::ALT;
             Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
             Miscellaneous_Interact => KeyCode::F, KeyState::empty();
+            // TODO: settarget, setpersonaltarget, setjadebotwaypoint
+            // TODO: setpersonalwaypoint, draw-on-map
         }
     }
     drop(keybinds);
+
+    #[cfg(feature = "extension-arcdps-extras")]
+    if !extras_available() && unofficial_extras::extras_resubscribe() {
+        // TODO: extras_reinit() and stash info?
+        EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
+    }
 
     res.map_err(Into::into)
 }

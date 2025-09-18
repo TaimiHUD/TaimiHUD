@@ -89,6 +89,8 @@ extension-arcdps-extras = [
   "closure-ffi",
   "jit-allocator2",
   "nexus/extras",
+  "windows/Win32_System_Memory",
+  "windows/Win32_Security",
 ]
 extension-arcdps-codegen = [
   "dpsapi",
@@ -224,7 +226,7 @@ taimi_meta = { path = "./pathing/meta", optional = true, default-features = fals
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
 sync-unsafe-cell = { version = "0.1", optional = true }
-closure-ffi = { version = "3", optional = true }
+closure-ffi = { version = "3", default-features = false, features = ["std"], optional = true }
 jit-allocator2 = { version = "0.2", optional = true }
 
 nexus = { workspace = true }

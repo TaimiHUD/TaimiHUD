@@ -33,12 +33,10 @@ use {
         DefaultLocalizer, LanguageLoader, RustEmbedNotifyAssets,
     },
     marker::format::MarkerType,
-    nexus::{
-        event::{
-            arc::CombatData,
-            extras::SquadUpdate,
-            MumbleIdentityUpdate,
-        },
+    nexus::event::{
+        arc::CombatData,
+        extras::SquadUpdate,
+        MumbleIdentityUpdate,
     },
     relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
@@ -968,6 +966,7 @@ fn notify_quit() {
     // if !RenderState::is_running() { return }
 
     log::info!("Preparing for game exit");
+    rt::notify_shutdown();
 
     let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
     let controller_quit = controller_sender.as_ref()
@@ -1047,7 +1046,7 @@ fn unload() {
         let _ = render_sender.take();
 
         match render_quit {
-            _ if render_state.is_none() => {
+            _ if rt::is_shutdown() || render_state.is_none() => {
                 // it's already gone, nothing more to do here
                 false
             },

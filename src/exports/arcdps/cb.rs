@@ -8,26 +8,29 @@ use dpsapi::combat::CombatArgs;
 use crate::exports::{arcdps as exports, runtime as rt};
 use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
 
-#[cfg(feature = "extension-nexus")]
-pub fn has_extension<const SIG: u32>() -> bool {
+#[cfg(any(feature = "extension-nexus", feature = "extension-arcdps-extras"))]
+pub fn has_extension(sig: u32) -> bool {
     use core::cell::Cell;
 
     thread_local! {
-        static HAS_EXT: Cell<bool> = Cell::new(false);
+        static HAS_EXT: Cell<Result<bool, u32>> = Cell::new(Ok(false));
     }
 
-    extern "C" fn list_cb<const SIG: u32>(exp: &arcdps::callbacks::ArcDpsExport) {
-        if exp.sig == SIG {
-            HAS_EXT.set(true);
+    extern "C" fn list_cb(exp: &arcdps::callbacks::ArcDpsExport) {
+        match HAS_EXT.get() {
+            Err(sig) if exp.sig == sig =>
+                HAS_EXT.set(Ok(true)),
+            _ => (),
         }
     }
 
-    HAS_EXT.set(false);
+    HAS_EXT.set(Err(sig));
     unsafe {
         arcdps::exports::raw::list_extension(list_cb::<SIG> as usize as *mut _)
     }
 
-    HAS_EXT.get()
+    let res = HAS_EXT.replace(Ok(false));
+    res.unwrap_or(false)
 }
 
 pub fn init() -> Result<(), String> {

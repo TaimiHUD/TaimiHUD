@@ -1,4 +1,16 @@
-use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, Once, OnceLock}, time::Duration};
+use std::{
+    borrow::Cow,
+    ffi::CStr,
+    mem,
+    ops,
+    path::{Path, PathBuf},
+    ptr::{self, NonNull},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, Once, OnceLock,
+    },
+    time::Duration,
+};
 use ::log::info;
 use nexus::data_link::mumble::MumblePtr;
 use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
@@ -190,6 +202,14 @@ pub fn is_ingame() -> RuntimeResult<bool> {
     // TODO: fall back to mumblelink
 
     Err(RT_UNAVAILABLE)
+}
+
+static EXIT: AtomicBool = AtomicBool::new(false);
+pub fn is_shutdown() -> bool {
+    EXIT.load(Ordering::Relaxed)
+}
+pub fn notify_shutdown() {
+    EXIT.store(true, Ordering::Relaxed);
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
