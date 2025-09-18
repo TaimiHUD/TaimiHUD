@@ -136,7 +136,7 @@ impl Engine {
         let rtapi = rt::rtapi()
             .map_err(anyhow::Error::msg)
             .context("RTAPI unavailable");
-        let rtapi = match rt::rtapi().map_err(anyhow::Error::msg) {
+        let rtapi = match rtapi.map_err(anyhow::Error::msg) {
             Ok(rtapi) => {
                 match &rtapi {
                     Some(rtapi) if rtapi.is_active() =>
