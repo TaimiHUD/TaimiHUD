@@ -80,6 +80,8 @@ pub struct RenderState {
     alert: Option<TextAlert>,
     pub last_display_size: Option<[f32; 2]>,
     pub state_errors: HashMap<String, anyhow::Error>,
+    #[cfg(feature = "extension-arcdps")]
+    pub arc: super::ArcRenderState,
 }
 
 impl RenderState {
@@ -97,6 +99,8 @@ impl RenderState {
             pathing_window: PathingWindowState::new(),
             last_display_size: Default::default(),
             state_errors: Default::default(),
+            #[cfg(feature = "extension-arcdps")]
+            arc: Default::default(),
         }
     }
 

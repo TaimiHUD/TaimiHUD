@@ -1,11 +1,10 @@
-use anyhow::anyhow;
-use crate::{
-    exports::runtime as rt,
-    settings::{Settings, NeedsUpdate},
+use {
+    anyhow::anyhow,
+    crate::settings::Settings,
+    std::{collections::HashMap, fmt},
+    serde::{Serialize, Deserialize},
+    windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY},
 };
-use std::{collections::HashMap, fmt};
-use serde::{Serialize, Deserialize};
-use windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct ArcSettings {
@@ -53,10 +52,12 @@ impl ArcSettings {
         }
     }
 
+    #[cfg(todo = "unused")]
     pub fn update_preference(&self) -> &ArcUpdatePreference {
         self.update_preference.as_ref().unwrap_or(&ArcUpdatePreference::ASK)
     }
 
+    #[cfg(todo = "unused")]
     pub fn set_update_preference(&mut self, preference: ArcUpdatePreference) {
         match &preference {
             ArcUpdatePreference::Never => {
@@ -70,6 +71,7 @@ impl ArcSettings {
         self.update_preference = Some(preference);
     }
 
+    #[cfg(todo = "unused")]
     pub fn update_available(&self) -> Option<NeedsUpdate> {
         match &self.update_remote_version {
             None => None,
@@ -169,6 +171,7 @@ impl ArcUpdatePreference {
         }
     }
 
+    #[cfg(todo = "unused")]
     pub fn ask_deny<V: Into<String>>(version: V) -> Self {
         Self::Ask {
             authorized: Some(Err(version.into())),

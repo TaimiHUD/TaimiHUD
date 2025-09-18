@@ -1,15 +1,13 @@
 use core::{
     num::{NonZeroU32, NonZeroUsize},
-    mem::{self, ManuallyDrop, transmute},
+    mem::{self, ManuallyDrop},
     ptr::{self, NonNull},
-    slice,
 };
 use std::panic;
 use arcffi::cstr::{cstr, CStrPtr, CStrPtr16};
 use dpsapi::api::header::{
     c_bool32, wrap_init_addr,
     HWND, LPARAM, WPARAM,
-    GetInitFn,
     ExtensionExports, ExtensionHeader,
     ExtensionFnCombat,
     InitArgs, CombatArgs,
@@ -20,7 +18,7 @@ use crate::exports::{
     arcdps as exports,
     runtime::{
         self as rt,
-        imgui::{self, sys::{self as imgui_sys, ImGuiContext}, Ui},
+        imgui::{self, sys as imgui_sys, Ui},
     },
 };
 use sync_unsafe_cell::SyncUnsafeCell;
@@ -30,7 +28,6 @@ pub const ARC_SIG: NonZeroU32 = unsafe {
 };
 static ARC_ARGS: SyncUnsafeCell<InitArgs> = SyncUnsafeCell::new(InitArgs::EMPTY);
 static ARC_EXPORT: SyncUnsafeCell<ExtensionExports<'static>> = SyncUnsafeCell::new(ExtensionExports::EMPTY);
-static ARC_IMGUI_CONTEXT_RAW: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
 static ARC_IMGUI_CONTEXT: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
 static ARC_IMGUI_UI: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
 //pub const ARC_CB_COMBAT: ExtensionFnCombat = ExtensionExports::wrap_combat_fn_item(&arc_cb_combat);
@@ -49,14 +46,6 @@ pub fn arc_args() -> Option<&'static InitArgs> {
     match args.module.module().is_invalid() {
         true => None,
         false => Some(args),
-    }
-}
-
-pub unsafe fn arc_imgui_context_raw(arc: &InitArgs) -> Option<NonNull<ImGuiContext>> {
-    unsafe {
-        
-        let c = *ARC_IMGUI_CONTEXT_RAW.get();
-        transmute(c)
     }
 }
 
@@ -91,6 +80,7 @@ pub unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
 const DEFAULT_BUFFER_CAP: usize = 1024;
 #[cfg(feature = "extension-arcdps-extern-cleanup")]
 fn find_buffer_offset<T>(ui: *const T, ignore_context: usize) -> Result<usize, &'static str> {
+    use core::slice;
     let res = unsafe {
         let szs = mem::size_of::<T>() / mem::size_of::<usize>();
         let ptrs = slice::from_raw_parts(ui as *const usize, szs);
@@ -272,7 +262,6 @@ unsafe extern "C" fn arc_release() {
 
     //ptr::write(ARC_ARGS.get(), InitArgs::EMPTY);
     ptr::write(ARC_EXPORT.get(), ExtensionExports::EMPTY);
-    ptr::write(ARC_IMGUI_CONTEXT_RAW.get(), None);
     // XXX: leaking these buffers because the destructors call imgui APIs :<
     ptr::write(ARC_IMGUI_CONTEXT.get(), None);
     ptr::write(ARC_IMGUI_UI.get(), None);
@@ -283,12 +272,12 @@ wrap_init_addr! {
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn get_release_addr() -> Option<ReleaseFn> {
+pub unsafe extern "C" fn get_release_addr() -> Option<ReleaseFn> {
     Some(arc_release)
 }
 
 #[no_mangle]
-pub unsafe extern "system" fn get_update_url() -> Option<CStrPtr16<'static>> {
+pub unsafe extern "C" fn get_update_url() -> Option<CStrPtr16<'static>> {
     use windows::core::HSTRING;
 
     let url = exports::get_update_url()?;

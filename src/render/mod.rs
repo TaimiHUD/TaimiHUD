@@ -1,3 +1,5 @@
+#[cfg(feature = "extension-arcdps")]
+pub mod arc;
 pub mod config_tab;
 pub mod data_source_tab;
 #[cfg(feature = "markers-edit")]
@@ -29,6 +31,8 @@ pub use {
 };
 #[cfg(feature = "space")]
 pub use pathing_window::PathingWindowState;
+#[cfg(feature = "extension-arcdps")]
+pub use arc::ArcRenderState;
 
 #[cfg(feature = "markers")]
 pub use {marker_tab::MarkerTabState, marker_window::MarkerWindowState};
