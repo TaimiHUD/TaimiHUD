@@ -468,6 +468,7 @@ impl MarkerInputData {
         let mut data = Self::cloned();
         data.map_id = map_id;
         data.sign_obtainer = SignObtainer::default();
+        #[cfg(feature = "meta-cache")]
         if let Some(sign) = MapLocalScale::for_map(map_id) {
             data.sign_obtainer.set_scale(sign);
         }

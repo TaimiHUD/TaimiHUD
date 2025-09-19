@@ -1,7 +1,8 @@
 [workspace]
-
+resolver = "3"
 members = [
-	"pathing/pack",
+  "pathing/pack",
+  "pathing/meta",
 ]
 
 [package]
@@ -16,10 +17,10 @@ build = "build.rs"
 default = [
   "markers",
   "markers-edit",
+  "meta-cache",
   "space",
   "extension-arcdps",
   "extension-nexus",
-  "taimi_meta?/map-cache",
 ]
 space = [
   "dep:itertools",
@@ -63,6 +64,9 @@ markers = [
 ]
 markers-edit = [
   "markers"
+]
+meta-cache = [
+  "taimi_meta?/map-cache",
 ]
 extension-arcdps = [
   #"extension-arcdps-codegen",
