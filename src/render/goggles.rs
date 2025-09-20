@@ -56,17 +56,6 @@ pub fn options_ui(ui: &imgui::Ui) {
         }
     }
 
-    let mut near_value = crate::space::min_depth();
-    if imgui::Slider::new("near", /*0.001f32*/ 0.15f32, /*10.0*/ 1.2).build(ui, &mut near_value) {
-        crate::space::set_min_depth(near_value);
-        // seems like a good rule of thumb
-        crate::space::set_max_depth(near_value * 2400.0);
-    }
-    let mut depth_value = crate::space::max_depth();
-    if imgui::Slider::new("far", /*25.0f32*/ 500.0f32, /*15000.0*/2500.0).build(ui, &mut depth_value) {
-        crate::space::set_max_depth(depth_value);
-    }
-
     if let Ok(lenses) = LENSES.read() {
         let selected_lens = LENS_PTR.load(Ordering::Relaxed);
         let preview = match selected_lens {

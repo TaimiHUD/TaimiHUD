@@ -1,7 +1,10 @@
 use {
     super::{prelude::*, PerspectiveInputData},
     anyhow::{anyhow, Context},
-    crate::space::{max_depth, min_depth, MapTarget},
+    crate::{
+        settings::pathing::SpaceSettings,
+        space::{max_depth, min_depth, MapTarget},
+    },
     glam::{Mat4, Vec2, Vec3, Vec4, Quat},
     windows::Win32::Graphics::Direct3D11::{
         D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
@@ -11,11 +14,12 @@ use {
 #[repr(C, align(16))]
 #[derive(Debug)]
 pub struct PerspectiveData {
-    view: Mat4,
-    projection: Mat4,
+    pub view: Mat4,
+    pub projection: Mat4,
     /// Billboard transform for current camera.
-    billboard: Mat4,
-    player: Vec4,
+    pub billboard: Mat4,
+    pub player: Vec4,
+    pub expand: Vec4,
 }
 
 #[repr(C, align(16))]
@@ -26,7 +30,7 @@ pub struct PixelData {
 
 pub struct PerspectiveHandler {
     constant_buffer: ID3D11Buffer,
-    constant_buffer_data: PerspectiveData,
+    pub constant_buffer_data: PerspectiveData,
     constant_buffer_pixel: ID3D11Buffer,
     pub constant_buffer_pixel_data: PixelData,
     constant_buffer_mapv: ID3D11Buffer,
@@ -70,12 +74,15 @@ impl PerspectiveHandler {
         })
     }
 
-    pub fn update_perspective(&mut self, display_size: &[f32; 2]) {
+    pub fn prepare(&mut self, display_size: &[f32; 2]) {
+        if *display_size != self.last_display_size {
+            self.aspect_ratio = display_size[0] / display_size[1];
+            self.last_display_size = *display_size;
+        }
+    }
+
+    pub fn update_perspective(&mut self, poi_scale: Vec3) {
         let data = PerspectiveInputData::get();
-            if *display_size != self.last_display_size {
-                self.aspect_ratio = display_size[0] / display_size[1];
-                self.last_display_size = *display_size;
-            }
 
             self.constant_buffer_data.view = Mat4::look_to_lh(data.pos, data.front, self.up);
             self.near = min_depth();
@@ -95,7 +102,7 @@ impl PerspectiveHandler {
                 -cam_front.extend(0.0),
                 Vec4::ZERO.with_w(1.0),
             )
-        };
+        } * Mat4::from_scale(poi_scale);
     }
 
     fn create_constant_buffer<D>(device: &ID3D11Device, initial: &D) -> anyhow::Result<ID3D11Buffer> {
@@ -248,6 +255,7 @@ impl PerspectiveData {
         projection: Mat4::IDENTITY,
         player: Vec4::ZERO,
         billboard: Mat4::IDENTITY,
+        expand: Vec4::ZERO,
     };
 }
 
@@ -257,11 +265,11 @@ impl PixelData {
     };
 
     pub const OVERLAP_THRESHOLD_OFF: f32 = 0.01;
-    pub const OVERLAP_THRESHOLD_DEFAULT: f32 = 38.0;
+    pub const OVERLAP_THRESHOLD_DEFAULT: f32 = SpaceSettings::DEFAULT_PLAYER_OVERLAP_THRESHOLD;
     pub const OVERLAP_DEFAULT: f32 = Self::OVERLAP_THRESHOLD_DEFAULT;
 
     pub const INTENSITY_OFF: f32 = 1_000_000.0;
-    pub const INTENSITY_DEFAULT: f32 = 88.0;
+    pub const INTENSITY_DEFAULT: f32 = SpaceSettings::DEFAULT_DISTANCE_FADE_INTENSITY;
 
     pub fn set_overlap_threshold(&mut self, threshold: Option<f32>) {
         self.distance_param.x = match threshold {
@@ -295,6 +303,7 @@ pub struct MapDataV {
     pub model: Mat4,
     pub world: Mat4,
     pub view: Mat4,
+    pub expand: Vec4,
 }
 
 impl MapDataV {
@@ -302,6 +311,7 @@ impl MapDataV {
         model: Mat4::IDENTITY,
         world: Mat4::IDENTITY,
         view: Mat4::IDENTITY,
+        expand: Vec4::ZERO,
     };
 }
 

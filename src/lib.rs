@@ -14,7 +14,10 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use space::engine::{Engine, SpaceEvent};
+use space::{
+    engine::{Engine, SpaceEvent},
+    MapContext,
+};
 use {
     crate::{
         controller::{Controller, ControllerEvent},
@@ -468,9 +471,24 @@ fn load_nexus() {
     .revert_on_unload();
 
     #[cfg(feature = "space")]
+    let pathing_render_minimap_keybind_handler = keybind_handler!(|_id, is_release| {
+        if !is_release {
+            Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+        }
+    });
+
+    #[cfg(feature = "space")]
+    register_keybind_with_string(
+        fl!("pathing-render-minimap-toggle"),
+        pathing_render_minimap_keybind_handler,
+        "ALT+SHIFT+F1",
+    )
+    .revert_on_unload();
+
+    #[cfg(feature = "space")]
     let pathing_render_map_keybind_handler = keybind_handler!(|_id, is_release| {
         if !is_release {
-            Engine::try_send(SpaceEvent::MapToggle);
+            Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
         }
     });
 
@@ -478,7 +496,7 @@ fn load_nexus() {
     register_keybind_with_string(
         fl!("pathing-render-map-toggle"),
         pathing_render_map_keybind_handler,
-        "ALT+SHIFT+F1",
+        "ALT+SHIFT+F2",
     )
     .revert_on_unload();
 
@@ -582,16 +600,19 @@ fn load_nexus() {
                 control_window(WINDOW_TIMERS, None);
             }
             #[cfg(feature = "space")]
-            if ui.button(fl!("pathing-render-toggle")) {
-                Engine::try_send(SpaceEvent::PathingToggle);
-            }
-            #[cfg(feature = "space")]
-            if ui.button(fl!("pathing-render-map-toggle")) {
-                Engine::try_send(SpaceEvent::MapToggle);
-            }
-            #[cfg(feature = "space")]
-            if ui.button(fl!("pathing-window")) {
-                control_window(WINDOW_PATHING, None);
+            {
+                if ui.button(fl!("pathing-render-toggle")) {
+                    Engine::try_send(SpaceEvent::PathingToggle);
+                }
+                if ui.button(fl!("pathing-render-minimap-toggle")) {
+                    Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+                }
+                if ui.button(fl!("pathing-render-map-toggle")) {
+                    Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+                }
+                if ui.button(fl!("pathing-window")) {
+                    control_window(WINDOW_PATHING, None);
+                }
             }
             #[cfg(feature = "markers")]
             if ui.button(fl!("marker-window")) {

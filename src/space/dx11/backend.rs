@@ -102,7 +102,7 @@ impl RenderBackend {
     }
 
     pub fn prepare(&mut self, display_size: &[f32; 2]) {
-        self.perspective_handler.update_perspective(display_size);
+        self.perspective_handler.prepare(display_size);
     }
     /*
     pub fn draw(&mut self, io: &Io) {

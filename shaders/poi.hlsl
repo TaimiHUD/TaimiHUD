@@ -15,6 +15,7 @@ cbuffer ConstantBuffer : register(b0)
     column_major matrix Projection;
     column_major matrix Billboard;
     float4 PlayerPos;
+    float4 Expand;
 }
 
 struct VSOutput
@@ -29,8 +30,9 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
 
-    float4 VertPos = float4(input.position, 1.0);
-    float4 bpos = mul(Billboard, VertPos);
+    float4 pos = float4(input.position, 1.0);
+    // TODO? float3 pos = input.position + input.position * Expand.y;
+    float4 bpos = mul(Billboard, pos);
     float4 mpos = mul(input.Model, bpos);
 
     float3 displacement = PlayerPos.xyz - mpos.xyz;

@@ -12,7 +12,10 @@ use {
     windows::Win32::UI::Input::KeyboardAndMouse,
 };
 #[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
+use crate::space::{
+    engine::{Engine, SpaceEvent},
+    MapContext,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct ArcRenderState {
@@ -90,7 +93,9 @@ impl ArcRenderState {
             ui.separator();
             self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::PathingToggle)));
             ui.separator();
-            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle)));
+            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap))));
+            ui.separator();
+            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle(MapContext::Global))));
         }
         ui.separator();
         for binding in &ArcSettings::VK_TIMER_TRIGGERS {

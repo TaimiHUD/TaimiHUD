@@ -1067,7 +1067,7 @@ impl Controller {
     #[cfg(feature = "space")]
     async fn pathing_state_update(&mut self, path: String, state: bool) {
         let mut settings_lock = self.settings.write().await;
-        settings_lock.pathing_state_update(path, state).await;
+        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
         drop(settings_lock);
 
     }

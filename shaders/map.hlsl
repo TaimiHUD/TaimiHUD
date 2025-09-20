@@ -2,6 +2,7 @@ struct VSInput
 {
     float3 position: POSITION;
     float2 tex: TEXCOORD0;
+    float3 normal: NORMAL;
     column_major matrix Model: MODEL;
     float4 colour: COLOUR;
 };
@@ -14,6 +15,7 @@ cbuffer ConstantBuffer : register(b0)
     column_major matrix Model;
     column_major matrix World;
     column_major matrix View;
+    float4 Expand;
 }
 
 struct VSOutput
@@ -27,12 +29,23 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
 
-    float4 VertPos = float4(input.position, 1.0);
-    float4 mpos = mul(input.Model, mul(Model, VertPos));
+    //float expand_dir = normalize(input.normal);
+    float3 expand_dir = input.normal;
+    float isTrail = dot(expand_dir, expand_dir); // 1.0 for trails, 0.0 for POIs
+    //float isPoi = step(isTrail, 0.5);
+    float isPoi = 1.0 - isTrail;
+
+    float3 norm = expand_dir * Expand.x;
+    float scalePos = isPoi * Expand.y;
+    //float scalePos = 0.0;
+    float3 pos = input.position + norm + input.position * scalePos;
+
+    float4 mpos = mul(input.Model, mul(Model, float4(pos, 1.0)));
     float4 mvpos = mul(World, mpos);
     output.position = mul(View, mvpos.xzyw);
 
-    output.tex = input.tex;
+    float scaleTex = Expand.w - 1.0;
+    output.tex = float2(input.tex.x, input.tex.y + isTrail * (input.tex.y * scaleTex + Expand.z));
 
     output.colour = input.colour;
 

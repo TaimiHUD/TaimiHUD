@@ -39,7 +39,10 @@ use {
     },
 };
 #[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
+use crate::space::{
+    engine::{Engine, SpaceEvent},
+    MapContext,
+};
 #[cfg(feature = "extension-arcdps-extern")]
 use dpsapi::api::ApiExports as _;
 
@@ -444,10 +447,16 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                         Engine::try_send(SpaceEvent::PathingToggle);
                     }
                 }
+                if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP, vk) {
+                    bound = true;
+                    if is_trigger {
+                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+                    }
+                }
                 if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, vk) {
                     bound = true;
                     if is_trigger {
-                        Engine::try_send(SpaceEvent::MapToggle);
+                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
                     }
                 }
             }

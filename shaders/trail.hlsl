@@ -2,6 +2,7 @@ struct VSInput
 {
     float3 position: POSITION;
     float3 color: COLOR0;
+    float3 normal: NORMAL;
     float2 tex: TEXCOORD0;
 };
 
@@ -14,6 +15,7 @@ cbuffer ConstantBuffer : register(b0)
     column_major matrix Projection;
     column_major matrix Billboard;
     float4 PlayerPos;
+    float4 Expand;
 }
 
 struct VSOutput
@@ -28,15 +30,17 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
 
-    float4 VertPos = float4(input.position, 1.0);
+    float3 norm = input.normal * Expand.x;
+    float4 pos = float4(input.position + norm, 1.0);
+    //float4 pos = float4(input.position, 1.0);
 
-    float3 displacement = PlayerPos.xyz - VertPos.xyz;
+    float3 displacement = PlayerPos.xyz - pos.xyz;
     output.distance = float4(displacement, 1.0);
 
-    float4 vpos = mul(View, VertPos);
+    float4 vpos = mul(View, pos);
     output.position = mul(Projection, vpos);
 
-    output.tex = input.tex;
+    output.tex = float2(input.tex.x, input.tex.y * Expand.w + Expand.z);
 
     float alpha = PlayerPos.w;
     output.color = float4(input.color, alpha);

@@ -105,17 +105,20 @@ impl ActiveTrail {
                 }
 
                 mod_distance = offset * normal_offset * flip_over;
+                let normal_scale_dir = mod_distance.to_raw().normalize_or(
+                    glam::vec3(1.0, 0.0, 1.0).normalize().copysign(mod_distance.to_raw())
+                );
 
                 vertices.push(Vertex {
                     position: (cur_point - mod_distance).into(),
                     colour: glam::Vec3::ONE,
-                    normal: glam::Vec3::ZERO,
+                    normal: -normal_scale_dir,
                     texture: glam::vec2(1.0, distance / (TRAIL_WIDTH * 2.0) - 1.0),
                 });
                 vertices.push(Vertex {
                     position: (cur_point + mod_distance).into(),
                     colour: glam::Vec3::ONE,
-                    normal: glam::Vec3::ZERO,
+                    normal: normal_scale_dir,
                     texture: glam::vec2(0.0, distance / (TRAIL_WIDTH * 2.0) - 1.0),
                 });
 
@@ -124,16 +127,19 @@ impl ActiveTrail {
                 cur_point = next_point;
             }
 
+            let normal_scale_dir = mod_distance.to_raw().normalize_or(
+                glam::vec3(1.0, 0.0, 1.0).normalize().copysign(mod_distance.to_raw())
+            );
             vertices.push(Vertex {
                 position: (cur_point - mod_distance).into(),
                 colour: glam::Vec3::ONE,
-                normal: glam::Vec3::ZERO,
+                normal: -normal_scale_dir,
                 texture: glam::vec2(1.0, distance / (TRAIL_WIDTH * 2.0) - 1.0),
             });
             vertices.push(Vertex {
                 position: (cur_point + mod_distance).into(),
                 colour: glam::Vec3::ONE,
-                normal: glam::Vec3::ZERO,
+                normal: normal_scale_dir,
                 texture: glam::vec2(0.0, distance / (TRAIL_WIDTH * 2.0) - 1.0),
             });
 

@@ -3,8 +3,9 @@ use {
         controller::ControllerEvent,
         exports::runtime as rt,
         marker::atomic::MarkerInputData,
+        settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
-            dx11::{prelude::*, RenderBackend, PerspectiveInputData},
+            dx11::{prelude::*, PerspectiveInputData, RenderBackend},
             pack::PackCollection,
             MapContext, MapTarget,
         },
@@ -13,9 +14,13 @@ use {
     },
     anyhow::Context,
     bevy_ecs::prelude::*,
-    glam::Vec3,
+    glam::{Vec3, Vec4},
     nexus::{imgui::Ui, rtapi::RealTimeApi},
-    std::{collections::{HashMap, HashSet}, num::NonZeroU32, sync::Arc},
+    std::{
+        collections::{HashMap, HashSet},
+        num::NonZeroU32,
+        sync::Arc,
+    },
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 #[cfg(feature = "space-ecs")]
@@ -59,7 +64,7 @@ pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
     PathingToggle,
-    MapToggle,
+    MapToggle(MapContext),
     DisabledPaths(HashSet<String>),
     PackLoad {
         pack: Arc<taimi_pack::Pack>,
@@ -98,10 +103,8 @@ pub struct Engine {
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
-    pub render_pathing: bool,
-    pub render_pathing_map: bool,
     rtapi: Option<RealTimeApi>,
-    gameplay_map: Result<NonZeroU32, u32>,
+    pub gameplay_map: Result<NonZeroU32, u32>,
 
     schedule: Schedule,
 
@@ -110,9 +113,7 @@ pub struct Engine {
 
     pub packs: PackCollection,
 
-    // need settings somewhere...
-    #[cfg(feature = "goggles")]
-    pub obscured_alpha: f32,
+    pub settings: Option<PathingSettings>,
 }
 
 impl Engine {
@@ -170,8 +171,6 @@ impl Engine {
         };
 
         let engine = Engine {
-            render_pathing: true,
-            render_pathing_map: false,
             rtapi,
             gameplay_map: Err(0),
             #[cfg(feature = "space-ecs")]
@@ -186,7 +185,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             #[cfg(feature = "goggles")]
-            obscured_alpha: 0.15,
+            settings: None,
         };
 
         #[cfg(feature = "space-ecs")]
@@ -279,10 +278,21 @@ impl Engine {
                         self.packs.disable_paths(disabled_paths);
                     }
                     PathingToggle => {
-                        self.render_pathing = !self.render_pathing;
+                        if let Err(e) = self.map_settings_mut(|s| {
+                            s.space.visible_space = Some(!s.space.visible_space());
+                        }).context("toggle paths") {
+                            log::warn!("{e:#}");
+                        }
                     },
-                    MapToggle => {
-                        self.render_pathing_map = !self.render_pathing_map;
+                    MapToggle(cx) => {
+                        if let Err(e) = self.map_settings_mut(|s| match cx {
+                            MapContext::Minimap =>
+                                s.space.visible_map_mini = Some(!s.space.visible_minimap()),
+                            MapContext::Global =>
+                                s.space.visible_map_world = Some(!s.space.visible_worldmap()),
+                        }).context("toggle map paths") {
+                            log::warn!("{e:#}");
+                        }
                     },
                     PackLoad { pack, loader } => {
                         let pack_idx = self.packs.add_pack(pack, loader);
@@ -397,19 +407,25 @@ impl Engine {
 
         self.packs.update();
 
-        let backend = &mut self.render_backend;
-
-        let render_map = match self.render_pathing_map && pdata.is_gameplay.unwrap_or(false) {
+        let map_ctx = map_data.as_ref().map(|mid| mid.perspective);
+        let (visible_space, visible_map) = self.map_settings(|s| (
+            (
+                s.space.visible_space().then_some(s.space.distance_max()),
+                map_ctx.map(|ctx| s.space.visible_map(ctx)),
+            )
+        ));
+        let render_map = match visible_map.unwrap_or(false) && pdata.is_gameplay.unwrap_or(false) {
             true => map_data.as_ref().map(|data| MapTarget::new(data)),
             _ => None,
         };
-        let render_world = match self.render_pathing && pdata.world_visible() {
-            true => Some(self.packs.update_for_draw(&pdata, backend)),
-            false => None,
+        let render_world = match visible_space {
+            Some(distance_max) if pdata.world_visible() =>
+                Some(self.packs.update_for_draw(&pdata, distance_max, &mut self.render_backend)),
+            _ => None,
         };
 
         let perspective_slot = 0;
-        backend.blending_handler.set(&device_context);
+        self.render_backend.blending_handler.set(&device_context);
 
         let minimap_bounds = match &render_map {
             Some(map) if matches!(map.perspective, MapContext::Minimap) => Some(map.bounds_screen),
@@ -431,24 +447,54 @@ impl Engine {
         };
 
         if let Some(minimap_bounds) = &minimap_bounds {
-            backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
+            self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
         }
 
         if let Some(map) = &render_map {
-            backend.perspective_handler.update_map(map);
+            let (
+                trail_textured,
+                trail_scale,
+                trail_alpha,
+                poi_scale,
+                poi_alpha,
+            ) = self.map_settings(|s| (
+                s.space.trail_textured_map(map.perspective),
+                s.space.trail_scale_map(map.perspective),
+                s.space.trail_alpha_map(map.perspective),
+                s.space.poi_scale_map(map.perspective),
+                s.space.poi_alpha_map(map.perspective),
+            ));
+            {
+                let vdata = &mut self.render_backend.perspective_handler.constant_buffer_mapv_data;
+                vdata.expand = Self::scale_expand(trail_scale, trail_textured, poi_scale);
+            }
+            {
+                // TODO: cpbuffer per type? just mixing them together for now...
+                let alpha = trail_alpha * poi_alpha;
+                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_mapp_data;
+                pdata.colour.w = alpha;
+            }
 
-            backend.perspective_handler.update_map_cb(&device_context);
+            if trail_alpha > 0.0 || poi_alpha > 0.0 {
+                let backend = &mut self.render_backend;
+                backend.perspective_handler.update_map(map);
 
-            backend.depth_handler.setup_map(&device_context, map);
-            backend.perspective_handler.set_map_cb(&device_context, perspective_slot);
+                backend.perspective_handler.update_map_cb(&device_context);
 
-            let entities = self.packs.entities_map(map);
-            PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map, entities);
+                backend.depth_handler.setup_map(&device_context, map);
+                backend.perspective_handler.set_map_cb(&device_context, perspective_slot);
+
+                let entities = self.packs.entities_map(map);
+                PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map, entities);
+            }
         }
 
-        backend.depth_handler.setup(&device_context);
+        let distance_max = visible_space
+            .unwrap_or(SpaceSettings::DEFAULT_DISTANCE_MAX);
+        self.render_backend.depth_handler.setup(&device_context, distance_max);
 
         if let Some(..) = &minimap_bounds {
+            let backend = &mut self.render_backend;
             backend.depth_handler.setup_depth_write(&device_context, true);
 
             // TODO: reusing this shader is a hack
@@ -460,7 +506,7 @@ impl Engine {
             // TODO: flush context state?
         }
 
-        backend.perspective_handler.set_cb(&device_context, perspective_slot);
+        self.render_backend.perspective_handler.set_cb(&device_context, perspective_slot);
 
         #[cfg(feature = "space-ecs")]
         let mut query = self.world.query::<(&mut Render, &Position)>();
@@ -498,30 +544,71 @@ impl Engine {
                     })
                     .collect();
                 r.backing
-                    .set_and_draw(perspective_slot, &backend.device, &device_context, &ibd)?;
+                    .set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &ibd)?;
             }
         }
 
         if let Some(context) = &render_world {
+            let (
+                overlap_threshold,
+                distance_intensity,
+                trail_textured,
+                trail_scale,
+                trail_alpha,
+                poi_scale,
+                poi_alpha,
+                _obscured_alpha,
+            ) = self.map_settings(|s| (
+                s.space.player_overlap_threshold(),
+                s.space.distance_fade_intensity(),
+                s.space.trail_textured_space(),
+                s.space.trail_scale_space(),
+                s.space.trail_alpha(),
+                s.space.poi_scale_space(),
+                s.space.poi_alpha(),
+                match () {
+                    #[cfg(feature = "goggles")]
+                    _ => s.space.goggles.obscured_alpha(),
+                    #[cfg(not(feature = "goggles"))]
+                    _ => (),
+                },
+            ));
+            // TODO: cpbuffer per type? just mixing them together for now...
+            let alpha = trail_alpha * poi_alpha;
+            let expand = Self::scale_expand(trail_scale, trail_textured, poi_scale);
+            {
+                let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
+                vdata.expand = expand;
+            }
+            {
+                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_pixel_data;
+                pdata.set_overlap_threshold(overlap_threshold);
+                pdata.set_intensity(distance_intensity);
+            }
+
+            self.render_backend.perspective_handler.update_perspective(Vec3::splat(expand.y + 1.0));
+
             #[cfg(feature = "goggles")]
-            if crate::space::goggles::is_enabled() {
-                let prev_alpha = backend.perspective_handler.alpha();
+            if crate::space::goggles::is_enabled() && _obscured_alpha > 0.0 {
 
                 // first pass at reduced opacity
-                backend.perspective_handler.set_alpha(self.obscured_alpha);
+                let backend = &mut self.render_backend;
+                backend.perspective_handler.set_alpha(_obscured_alpha);
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
                 let entities = self.packs.entities_obscured(context);
                 PackCollection::draw_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, entities);
 
-                backend.perspective_handler.set_alpha(prev_alpha);
                 backend.depth_handler.set_state_obscured(&device_context, false);
             }
 
-            backend.perspective_handler.update_cb(&device_context);
+            if trail_alpha > 0.0 || poi_alpha > 0.0 {
+                self.render_backend.perspective_handler.set_alpha(alpha);
+                self.render_backend.perspective_handler.update_cb(&device_context);
 
-            self.packs.draw(&pdata, context, &backend, &device_context);
+                self.packs.draw(&pdata, context, &self.render_backend, &device_context);
+            }
         }
         Ok(())
     }
@@ -569,7 +656,17 @@ impl Engine {
     pub fn gameplay_map_enter(&mut self, device_context: &ID3D11DeviceContext, map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
         {
-            crate::space::goggles::pick_lens();
+            use crate::space::{self, goggles};
+
+            goggles::pick_lens();
+
+            let depth = self.map_settings_ref(|s| s.map(|s|
+                s.space.goggles.map_depth_calibration(map_id.get())
+            ));
+            if let Some((min, max)) = depth {
+                space::set_min_depth(space::MIN_DEPTH * min);
+                space::set_max_depth(space::MAX_DEPTH * max);
+            }
         }
 
         let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
@@ -577,6 +674,116 @@ impl Engine {
         self.gameplay_map = Ok(map_id);
 
         res
+    }
+
+    pub fn map_settings_ref<R, F: FnOnce(Option<&PathingSettings>) -> R>(&self, f: F) -> R {
+        match self.settings.as_ref() {
+            Some(s) => f(Some(s)),
+            None => {
+                let mut f = Some(f);
+                let res = Settings::read_with_blocking(|s| {
+                    match f.take() {
+                        Some(f) => f(Some(&s.pathing())),
+                        None => unreachable!(),
+                    }
+                }).context("map settings unavailable");
+                if let Err(e) = &res {
+                    log::warn!("{e:#}");
+                }
+                match (f, res) {
+                    (Some(f), _) => {
+                        f(None)
+                    },
+                    (None, Ok(res)) => res,
+                    (None, Err(..)) => unreachable!(),
+                }
+            },
+        }
+    }
+
+    pub fn map_settings<R, F: FnOnce(&PathingSettings) -> R>(&mut self, f: F) -> R {
+        let mut fail = None;
+        let s = self.settings.get_or_insert_with(|| {
+            match Settings::read_with_blocking(|s| s.pathing.clone()) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    fail = Some(None);
+                    Default::default()
+                },
+                Err(e) => {
+                    fail = Some(Some(e));
+                    Default::default()
+                },
+            }
+        });
+        match fail {
+            None => f(s),
+            Some(e) => {
+                if let Some(e) = e.as_ref() {
+                    log::warn!("map settings unavailable: {e:#}");
+                }
+                let res = f(s);
+                if e.is_some() {
+                    let _ = self.settings.take();
+                }
+                res
+            },
+        }
+    }
+
+    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(&mut self, f: F) -> anyhow::Result<R> {
+        let mut fail = None;
+        let s = self.settings.get_or_insert_with(|| {
+            match Settings::read_with_blocking(|s| s.pathing.clone()) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    fail = Some(None);
+                    Default::default()
+                },
+                Err(e) => {
+                    fail = Some(Some(e));
+                    Default::default()
+                },
+            }
+        });
+        match fail {
+            Some(Some(e)) => {
+                Err(e)
+            },
+            _ => Ok({
+                let res = f(s);
+
+                if let Some(mut settings) = Settings::try_write() {
+                    // TODO: copy over everything properly
+                    settings.pathing_mut().space = s.space.clone();
+                } else {
+                    log::warn!("settings unavailable for saving");
+                }
+                res
+            }),
+        }
+    }
+
+    fn scale_factor(trail_scale: f32, poi_scale: f32) -> Vec3 {
+        let trail_scale = (trail_scale - 1.0) / 2.0;
+        let poi_scale = poi_scale - 1.0;
+        Vec3::new(trail_scale, poi_scale, 0.0)
+    }
+
+    fn scale_expand(trail_scale: f32, trail_textured: bool, poi_scale: f32) -> Vec4 {
+        let scale = Self::scale_factor(trail_scale, poi_scale);
+        match trail_textured {
+            true => {
+                let scalex = scale.x * 1.5;
+                let e = (2.22149f32, -0.388849f32);
+                let scale_trail_norm = (e.1 * (scalex + 2.0)).exp() * e.0;
+                let scale_trail_tex = scale_trail_norm.clamp(0.04, 0.99);
+                scale.extend(scale_trail_tex)
+            },
+            false => {
+                scale.with_z(0.45).extend(0.0)
+            },
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use {
             max_depth, MapTarget, ScreenSpace,
         },
     },
-    std::array,
+    std::{array, borrow::Cow},
     windows::{
         core::Interface,
         Win32::Graphics::Direct3D11::{
@@ -26,7 +26,7 @@ use {
     },
 };
 #[cfg(feature = "goggles")]
-use crate::space::{goggles, MAX_DEPTH};
+use crate::space::goggles;
 
 #[allow(unused)]
 pub struct DepthHandler {
@@ -87,11 +87,11 @@ impl DepthHandler {
     }
 
     const STENCIL_REF: u32 = 1;
-    pub fn setup(&self, device_context: &ID3D11DeviceContext) {
+    pub fn setup(&self, device_context: &ID3D11DeviceContext, distance_max: f32) {
         let (dsview, clear_depth) = self.depth_stencil_view();
         unsafe {
             device_context.RSSetState(&self.rasterizer_state);
-            let viewport = self.viewport();
+            let viewport = self.viewport(distance_max);
             device_context.RSSetViewports(Some(array::from_ref(&*viewport)));
             device_context.OMSetRenderTargets(
                 Some(self.render_target_view.as_slice()),
@@ -119,18 +119,18 @@ impl DepthHandler {
         (dsview, clear_depth)
     }
 
-    #[cfg(feature = "goggles")]
-    pub fn viewport(&self) -> std::borrow::Cow<'_, D3D11_VIEWPORT> {
-        match max_depth() {
-            d if d == MAX_DEPTH =>
-                std::borrow::Cow::Borrowed(&self.viewport),
-            _ => {
+    pub fn viewport(&self, distance_max: f32) -> Cow<'_, D3D11_VIEWPORT> {
+        match distance_max / max_depth() {
+            d if d >= 1.0 =>
+                Cow::Borrowed(&self.viewport),
+            d => {
                 let display_size = [
                     self.viewport.Width,
                     self.viewport.Height,
                 ];
-                let viewport = Self::create_viewport(&display_size);
-                std::borrow::Cow::Owned(viewport)
+                let mut viewport = Self::create_viewport(&display_size);
+                viewport.MaxDepth *= d;
+                Cow::Owned(viewport)
             },
         }
     }
@@ -158,7 +158,7 @@ impl DepthHandler {
             Width: display_size[0],
             Height: display_size[1],
             MinDepth: 0.0,
-            MaxDepth: max_depth(),
+            MaxDepth: 1.0,
         };
         viewport
     }

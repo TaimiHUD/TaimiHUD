@@ -73,7 +73,10 @@ impl PoiCommonRenderData {
                 let mut vertices = POI_QUAD_VERTICES;
                 for vertex in &mut vertices {
                     vertex.position = vertex.position.xzy();
-                    vertex.normal = Vec3::Y;
+                    // we use normals to convey vertex expand direction for trails
+                    // (POIs are scaled separately, so)
+                    //vertex.normal = Vec3::Y;
+                    vertex.normal = Vec3::ZERO;
                     vertex.texture.x = 1.0 - vertex.texture.x;
                 }
                 vertices

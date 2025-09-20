@@ -1,5 +1,5 @@
 use {
-    super::{ArcSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
+    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
     crate::{controller::ProgressBarStyleChange, SETTINGS, SOURCES},
     anyhow::anyhow,
     chrono::{DateTime, Utc},
@@ -146,6 +146,8 @@ pub struct Settings {
     pub disabled_paths: HashSet<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pathing: Option<PathingSettings>,
 }
 
 impl Settings {
@@ -233,7 +235,7 @@ impl Settings {
                 *window_open = !*window_open;
             }
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
     }
 
     pub async fn toggle_timer(&mut self, timer: String) -> bool {
@@ -243,7 +245,7 @@ impl Settings {
         if irrelevant {
             self.timers.remove(&timer);
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
         new_state
     }
     pub async fn disable_timer(&mut self, timer: String) {
@@ -252,7 +254,7 @@ impl Settings {
         } else {
             self.timers.insert(timer, TimerSettings { disabled: true });
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
     }
     pub async fn enable_timer(&mut self, timer: String) {
         if let Some(entry_mut) = self.timers.get_mut(&timer) {
@@ -260,12 +262,12 @@ impl Settings {
         } else {
             self.timers.insert(timer, TimerSettings::default());
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
     }
     pub async fn toggle_marker(&mut self, marker: String) -> bool {
         let entry = self.markers.entry(marker.clone()).or_default();
         let new_state = entry.toggle();
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
         new_state
     }
     pub async fn disable_marker(&mut self, marker: String) {
@@ -275,7 +277,7 @@ impl Settings {
             self.markers
                 .insert(marker, MarkerSettings { disabled: true });
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
     }
     pub async fn enable_marker(&mut self, marker: String) {
         if let Some(entry_mut) = self.markers.get_mut(&marker) {
@@ -283,7 +285,7 @@ impl Settings {
         } else {
             self.markers.insert(marker, MarkerSettings::default());
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
     }
 
     #[allow(dead_code)]
@@ -299,7 +301,7 @@ impl Settings {
         if let Some(remote) = self.remotes.iter_mut().find(|dd| *dd.source == *source) {
             remote.uninstall().await?;
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
         Ok(())
     }
 
@@ -308,7 +310,7 @@ impl Settings {
         maps: &MarkerAutoPlaceSettings,
     ) -> anyhow::Result<()> {
         self.marker_autoplace = maps.clone();
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
         Ok(())
     }
 
@@ -329,7 +331,7 @@ impl Settings {
             if let Some(dd_mut) = settings_write_lock.get_status_for_mut(source).await {
                 let res = dd_mut.commit_downloaded(tag_name, install_dir).await;
                 let _ = settings_write_lock
-                    .save(&settings_write_lock.addon_dir)
+                    .save()
                     .await;
                 res
             } else {
@@ -348,7 +350,7 @@ impl Settings {
             Height(h) => self.progress_bar.set_height(h),
             Font(f) => self.progress_bar.set_font(f),
         }
-        let _ = self.save(&self.addon_dir).await;
+        let _ = self.save().await;
         self.progress_bar.clone()
     }
 
@@ -378,20 +380,10 @@ impl Settings {
             }
             settings_write_lock.last_checked = Some(Utc::now());
             settings_write_lock
-                .save(&settings_write_lock.addon_dir)
+                .save()
                 .await?;
         }
         Ok(())
-    }
-
-    #[cfg(feature = "space")]
-    pub async fn pathing_state_update(&mut self, path: String, state: bool) {
-        if self.disabled_paths.contains(&path) && state {
-            self.disabled_paths.remove(&path);
-        } else if !state {
-            self.disabled_paths.insert(path);
-        }
-        let _ = self.save(&self.addon_dir).await;
     }
 
     pub fn new(addon_dir: &Path) -> Self {
@@ -409,6 +401,7 @@ impl Settings {
             enable_katrender: false,
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
+            pathing: Default::default(),
             arc: Default::default(),
         }
     }
@@ -450,9 +443,14 @@ impl Settings {
         Arc::new(RwLock::new(Self::load_default(addon_dir).await))
     }
 
-    pub async fn save(&self, addon_dir: &Path) -> anyhow::Result<()> {
+    pub async fn save(&self) -> anyhow::Result<()> {
+        let addon_dir = &self.addon_dir;
         create_dir_all(addon_dir).await?;
         let settings_path = addon_dir.join("settings.json");
+        self.save_to(&settings_path).await
+    }
+
+    pub async fn save_to(&self, settings_path: &Path) -> anyhow::Result<()> {
         log::debug!("Settings: Saving to \"{:?}\".", settings_path);
         let settings_str = serde_json::to_string(self)?;
         let mut file = File::create(settings_path).await?;
@@ -482,6 +480,22 @@ impl Settings {
         Ok(f(settings))
     }
 
+    pub fn try_write() -> Option<tokio::sync::RwLockWriteGuard<'static, Self>> {
+        SETTINGS.get()
+            .and_then(|settings| settings.try_write().ok())
+    }
+
+    pub fn write_with_blocking<R, F: FnOnce(&mut Self) -> R>(f: F) -> anyhow::Result<R> {
+        let mut settings = match SETTINGS.get() {
+            Some(settings) =>
+                settings.blocking_write(),
+            None =>
+                anyhow::bail!("SETTINGS not loaded"),
+        };
+
+        Ok(f(&mut *settings))
+    }
+
     pub fn arc(&self) -> Cow<ArcSettings> {
         match self.arc.as_ref() {
             Some(arc) => Cow::Borrowed(arc),
@@ -491,5 +505,16 @@ impl Settings {
 
     pub fn arc_mut(&mut self) -> &mut ArcSettings {
         self.arc.get_or_insert_default()
+    }
+
+    pub fn pathing(&self) -> Cow<PathingSettings> {
+        match self.pathing.as_ref() {
+            Some(pathing) => Cow::Borrowed(pathing),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+
+    pub fn pathing_mut(&mut self) -> &mut PathingSettings {
+        self.pathing.get_or_insert_default()
     }
 }

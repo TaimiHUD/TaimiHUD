@@ -701,13 +701,14 @@ impl PackCollection {
     pub fn update_for_draw(
         &mut self,
         cam_data: &PerspectiveInputData,
+        distance_max: f32,
         backend: &RenderBackend,
     ) -> MapFrustum {
         MapFrustum::from_camera_data(
             cam_data,
             backend.perspective_handler.aspect_ratio(),
             backend.perspective_handler.near(),
-            backend.perspective_handler.far(),
+            backend.perspective_handler.far().min(distance_max),
         )
     }
 
