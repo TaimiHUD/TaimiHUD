@@ -437,8 +437,8 @@ impl MapLocalScale {
 
     pub fn with_game_size(map_size: Size2<GameSpace>, continent_size: Size2<MapSpace>) -> Self {
         let scale = Vector2::new(
-            continent_size.width / map_size.width,
-            continent_size.height / map_size.height,
+            map_size.width / continent_size.width,
+            map_size.height / continent_size.height,
         );
         Self::with_game_scale(scale)
     }

@@ -35,14 +35,14 @@ pub struct Map {
 impl Map {
     #[inline]
     pub fn map_rect(&self) -> Box2<GameSpace> {
-        let [[top, left], [bottom, right]] = self.map_rect;
-        Box2::new(Point2::new(bottom as _, right as _), Point2::new(top as _, left as _))
+        let [[left, top], [right, bottom]] = self.map_rect;
+        Box2::new(Point2::new(left as _, top as _), Point2::new(right as _, bottom as _))
     }
 
     #[inline]
     pub fn continent_rect(&self) -> Box2<MapSpace> {
-        let [[top, left], [bottom, right]] = self.continent_rect;
-        Box2::new(Point2::new(bottom as _, right as _), Point2::new(top as _, left as _))
+        let [[left, top], [right, bottom]] = self.continent_rect;
+        Box2::new(Point2::new(left as _, top as _), Point2::new(right as _, bottom as _))
     }
 }
 
