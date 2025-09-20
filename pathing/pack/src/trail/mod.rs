@@ -6,7 +6,7 @@ use {
     },
     anyhow::Context,
     core::f32,
-    glamour::{point3, Box3, Point3},
+    glamour::{point3, Box3, Point3, Size3},
     std::{
         fmt,
         io::{self, BufReader, Read},
@@ -149,7 +149,20 @@ pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailD
                 sections.push(TrailSection {
                     bounds: match current_section.is_empty() {
                         true => NEG_BOX,
-                        false => Box3::from_points(current_section.iter().copied()),
+                        false => {
+                            let mut bounds = Box3::<f32>::from_points(current_section.iter().copied());
+                            if bounds.is_empty() {
+                                // empty boxes are invalid...
+                                let size = bounds.size();
+                                let size = Size3::new(
+                                    size.width.max(f32::EPSILON),
+                                    size.height.max(f32::EPSILON),
+                                    size.depth.max(f32::EPSILON),
+                                );
+                                bounds.max = bounds.min + size.to_vector();
+                            }
+                            bounds
+                        },
                     },
                     points: std::mem::take(&mut current_section),
                 });
