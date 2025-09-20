@@ -1281,10 +1281,14 @@ impl Controller {
             GetMarkerPaths => self.get_marker_paths().await?,
             Quit => return Ok(false),
             UnloadAll => {
-                #[cfg(feature = "extension-arcdps")]
-                std::thread::spawn(|| if let Err(e) = crate::exports::arcdps::exit() {
-                    log::error!("Failed to leave arcdps: {e}");
-                });
+                #[cfg(feature = "extension-arcdps")] {
+                    use crate::exports::arcdps as exports;
+                    if exports::loaded() {
+                        std::thread::spawn(|| if let Err(e) = exports::exit() {
+                            log::error!("Failed to leave arcdps: {e}");
+                        });
+                    }
+                }
                 return Ok(false)
             },
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:

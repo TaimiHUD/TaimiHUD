@@ -251,8 +251,8 @@ pub struct ExitHandle {
 
 impl ExitHandle {
     pub fn try_exit() -> RuntimeResult<Option<Self>> {
-        let handle = match exports::arcdps::loaded() {
-            true => match exports::arcdps::unload_self()? {
+        let handle = match loaded() {
+            true => match unload_self()? {
                 Some(handle) if !handle.is_invalid() => {
                     Some(handle)
                 },
