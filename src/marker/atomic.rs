@@ -471,6 +471,8 @@ impl MarkerInputData {
         #[cfg(feature = "meta-cache")]
         if let Some(sign) = MapLocalScale::for_map(map_id) {
             data.sign_obtainer.set_scale(sign);
+        } else {
+            data.sign_obtainer.set_scale(MapLocalScale::COMMON)
         }
         data.commit();
     }
