@@ -136,6 +136,7 @@ fn visit_dir_ext<'a>(
             };
 
             let f = f.into_iter()
+                .filter(move |(path, _)| path.extension().unwrap_or_default().eq_ignore_ascii_case(ext))
                 .map(move |(path, _)| path.relative_to(base)
                     .map_err(anyhow::Error::from)
                     .map(|f| PathBuf::from(f.into_string()).into())
