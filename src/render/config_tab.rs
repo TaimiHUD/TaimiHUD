@@ -315,9 +315,10 @@ impl ConfigTabState {
                         Self::set_pathing(|s| {
                             let e = s.space.goggles.map_depth_calibration.entry(map_id)
                                 .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
+                            let prev = e.0;
                             e.0 = value / space::MIN_DEPTH;
                             space::set_min_depth(value);
-                            if true {
+                            if e.1 == 1.0 || e.1 == prev {
                                 e.1 = e.0;
                                 space::set_max_depth(e.1 * space::MAX_DEPTH);
                             }
