@@ -32,6 +32,8 @@ use {
     },
     std::path::PathBuf,
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
 
 #[derive(Component)]
 struct Render {
@@ -278,9 +280,21 @@ impl Engine {
                         self.packs.disable_paths(disabled_paths);
                     }
                     PathingToggle => {
-                        if let Err(e) = self.map_settings_mut(|s| {
-                            s.space.visible_space = Some(!s.space.visible_space());
-                        }).context("toggle paths") {
+                        let res = self.map_settings_mut(|s| {
+                            let visible = !s.space.visible_space();
+                            s.space.visible_space = Some(visible);
+                            visible
+                        }).context("toggle paths");
+                        #[cfg(feature = "goggles")]
+                        match &res {
+                            _ if !goggles::is_enabled() => (),
+                            Ok(false) =>
+                                goggles::clear_lens(),
+                            Ok(true) =>
+                                goggles::pick_lens(),
+                            _ => (),
+                        }
+                        if let Err(e) = res {
                             log::warn!("{e:#}");
                         }
                     },
@@ -589,7 +603,7 @@ impl Engine {
             self.render_backend.perspective_handler.update_perspective(Vec3::splat(expand.y + 1.0));
 
             #[cfg(feature = "goggles")]
-            if crate::space::goggles::is_enabled() && _obscured_alpha > 0.0 {
+            if goggles::is_enabled() && _obscured_alpha > 0.0 {
 
                 // first pass at reduced opacity
                 let backend = &mut self.render_backend;
@@ -642,8 +656,8 @@ impl Engine {
 
     pub fn gameplay_map_exit(&mut self, device_context: &ID3D11DeviceContext, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
-        if crate::space::goggles::is_enabled() {
-            crate::space::goggles::clear_lens();
+        if goggles::is_enabled() {
+            goggles::clear_lens();
         }
 
         let res = self.packs.unload_map(device_context, prev_map_id.get());
@@ -656,7 +670,7 @@ impl Engine {
     pub fn gameplay_map_enter(&mut self, device_context: &ID3D11DeviceContext, map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
         {
-            use crate::space::{self, goggles};
+            use crate::space;
 
             goggles::pick_lens();
 
