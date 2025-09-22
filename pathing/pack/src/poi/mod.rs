@@ -32,6 +32,7 @@ impl Poi {
         let mut pos_z = None;
         let mut guid = None;
         let mut attributes = MarkerAttributes::default();
+        let mut attributes_bh = MarkerAttributes::default();
 
         for attr in attrs {
             let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
@@ -56,6 +57,8 @@ impl Poi {
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
                 Ok(())
+            } else if attr.name.local_name.starts_with("bh-") {
+                attributes_bh.try_add(attr.name.borrow(), attr.value)
             } else {
                 attributes.try_add(attr.name.borrow(), attr.value)
             }.with_context(|| format!("POI attribute '{}'", attr.name));
@@ -74,6 +77,9 @@ impl Poi {
         let position = Point3::new(pos_x, pos_y, pos_z);
 
         let guid = guid.unwrap_or_default();
+
+        // TODO: support bh features properly...
+        attributes.merge(&attributes_bh);
 
         let parent_path = Path::new(asset).parent()
             .map(|p| p.to_string_lossy().into());

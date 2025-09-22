@@ -31,15 +31,19 @@ impl Category {
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Category> {
         let mut marker_attributes = MarkerAttributes::default();
+        let mut attributes_bh = MarkerAttributes::default();
 
         let mut id = String::new();
         let mut display_name = None;
+        let mut bh_display_name = None;
         let mut is_separator = false;
-        let mut is_hidden = false;
-        let mut default_toggle = true;
+        let mut is_hidden = None;
+        let mut bh_is_hidden = None;
+        let mut default_toggle = None;
+        let mut bh_default_toggle = None;
 
         for attr in attrs {
-            let attr_name = attr.name.local_name.trim_start_matches("bh-");
+            let attr_name = &attr.name.local_name;
             let res = if attr_name.eq_ignore_ascii_case("name") {
                 id = taco_safe_name(&attr.value, false);
                 Ok(())
@@ -52,12 +56,27 @@ impl Category {
                     .map_err(From::from)
             } else if attr_name.eq_ignore_ascii_case("ishidden") {
                 parse_bool(&attr.value)
-                    .map(|val| is_hidden = val)
+                    .map(|val| is_hidden = Some(val))
                     .map_err(From::from)
             } else if attr_name.eq_ignore_ascii_case("defaulttoggle") {
                 parse_bool(&attr.value)
-                    .map(|val| default_toggle = val)
+                    .map(|val| default_toggle = Some(val))
                     .map_err(From::from)
+            } else if let Some(attr_name) = attr_name.strip_prefix("bh-") {
+                if attr_name.eq_ignore_ascii_case("displayname") {
+                    bh_display_name = Some(attr.value);
+                    Ok(())
+                } else if attr_name.eq_ignore_ascii_case("ishidden") {
+                    parse_bool(&attr.value)
+                        .map(|val| bh_is_hidden = Some(val))
+                        .map_err(From::from)
+                } else if attr_name.eq_ignore_ascii_case("defaulttoggle") {
+                    parse_bool(&attr.value)
+                        .map(|val| bh_default_toggle = Some(val))
+                        .map_err(From::from)
+                } else {
+                    attributes_bh.try_add(attr.name.borrow(), attr.value)
+                }
             } else {
                 marker_attributes.try_add(attr.name.borrow(), attr.value)
             }.with_context(|| format!("parsing category attribute '{}'", attr.name));
@@ -72,10 +91,22 @@ impl Category {
             id.clone()
         };
 
+        // TODO: support bh features properly...
+        marker_attributes.merge(&attributes_bh);
+
         let marker_attributes = Arc::new(marker_attributes);
+        let display_name = display_name
+            .or(bh_display_name)
+            .unwrap_or(id.clone());
+        let is_hidden = is_hidden
+            .or(bh_is_hidden)
+            .unwrap_or(false);
+        let default_toggle = default_toggle
+            .or(bh_default_toggle)
+            .unwrap_or(true);
 
         Ok(Category {
-            display_name: display_name.unwrap_or(id.clone()),
+            display_name,
             id,
             full_id,
             is_separator,

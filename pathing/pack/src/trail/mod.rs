@@ -34,6 +34,7 @@ impl Trail {
         let mut guid = None;
         let mut map_id = None::<i32>;
         let mut attributes = MarkerAttributes::default();
+        let mut attributes_bh = MarkerAttributes::default();
 
         for attr in attrs {
             let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
@@ -49,6 +50,8 @@ impl Trail {
                 attr.value.parse()
                     .map(|v| map_id = Some(v))
                     .map_err(From::from)
+            } else if attr.name.local_name.starts_with("bh-") {
+                attributes_bh.try_add(attr.name.borrow(), attr.value)
             } else {
                 attributes.try_add(attr.name.borrow(), attr.value)
             }.with_context(|| format!("Trail attribute '{}'", attr.name));
@@ -75,6 +78,9 @@ impl Trail {
 
         let parent_path = Path::new(asset).parent()
             .map(|p| p.to_string_lossy().into());
+
+        // TODO: support bh features properly...
+        attributes.merge(&attributes_bh);
 
         Ok(Trail {
             category,
