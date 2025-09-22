@@ -795,7 +795,7 @@ impl Engine {
                 scale.extend(scale_trail_tex)
             },
             false => {
-                scale.with_z(0.45).extend(0.0)
+                scale.with_z(0.39).extend(0.0)
             },
         }
     }
