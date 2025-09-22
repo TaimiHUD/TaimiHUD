@@ -289,8 +289,11 @@ impl RenderState {
 
     pub fn font_text(font: &str, ui: &Ui, text: &str) {
         let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
+            #[cfg(feature = "extension-nexus")]
             "big" => Some(nexus_link.font_big),
+            #[cfg(feature = "extension-nexus")]
             "ui" => Some(nexus_link.font_ui),
+            #[cfg(feature = "extension-nexus")]
             "font" => Some(nexus_link.font),
             _ => None,
         }).and_then(|font| unsafe { Self::font_from_raw(font) });
@@ -307,8 +310,11 @@ impl RenderState {
         text: &str,
     ) {
         let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
+            #[cfg(feature = "extension-nexus")]
             "big" => Some(nexus_link.font_big),
+            #[cfg(feature = "extension-nexus")]
             "ui" => Some(nexus_link.font_ui),
+            #[cfg(feature = "extension-nexus")]
             "font" => Some(nexus_link.font),
             _ => None,
         }).and_then(|font| unsafe { Self::font_from_raw(font) });
@@ -342,9 +348,13 @@ impl RenderState {
     fn handle_alert(&mut self, ui: &Ui, io: &Io) {
         if let Some(alert) = &self.alert {
             let message = &alert.message;
-            let imfont = rt::read_nexus_link().ok().and_then(|nexus_link| unsafe {
-                Self::font_from_raw(nexus_link.font_big)
-            });
+            let imfont = match rt::read_nexus_link() {
+                #[cfg(feature = "extension-nexus")]
+                Ok(nexus_link) => unsafe {
+                    Self::font_from_raw(nexus_link.font_big)
+                },
+                _ => None,
+            };
             Self::render_alert(ui, io, message, imfont);
         }
     }

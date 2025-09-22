@@ -6,6 +6,9 @@ version = "0.1.0"
 edition = "2021"
 autobins = false
 
+[lints]
+workspace = true
+
 [[example]]
 name = "print_pack"
 path = "src/bin/print_pack.rs"
@@ -25,28 +28,21 @@ fixup-typos = [
 fixup-ladyelyssa = []
 fixup-tehstrails = []
 
-[lints.rust.unexpected_cfgs]
-level = "warn"
-check-cfg = [
-  'cfg(todo, values("unused"))',
-  'cfg(todo)',
-]
-
 [dependencies]
 anyhow = "1"
 log = "0.4"
 # TODO? tokio = { version = "1", features = [ "fs", "macros" ] }
-glam = "0.30"
-glamour = "0.18"
-indexmap = "2.9"
+glam = { workspace = true }
+glamour = { workspace = true }
+indexmap = { workspace = true }
 relative-path = "1"
 xml-rs = "0.8"
 regex = "1"
-uuid = { version = "1.17", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 md5 = "0.7"
 base64 = "0.22"
 zip = { version = "4", optional = true }
-bitvec = "1.0.1"
+bitvec = { workspace = true }
 
 [dev-dependencies]
 env_logger = "0.11"

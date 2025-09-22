@@ -231,12 +231,10 @@ name = "arcffi"
 version = "0.1.0"
 source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
 dependencies = [
- "windows 0.60.0",
  "windows 0.61.1",
  "windows-core 0.60.1",
  "windows-core 0.61.0",
  "windows-result 0.3.2",
- "windows-strings 0.3.1",
  "windows-strings 0.4.0",
 ]
 
@@ -951,20 +949,8 @@ source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd
 dependencies = [
  "arcdps 0.16.0",
  "arcffi",
- "dyload",
  "evtc 0.9.2",
  "nexus",
- "windows 0.60.0",
-]
-
-[[package]]
-name = "dyload"
-version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
-dependencies = [
- "arcffi",
- "windows 0.60.0",
- "windows-core 0.60.1",
 ]
 
 [[package]]
@@ -1416,8 +1402,6 @@ source = "git+https://github.com/zerthox/gw2-mumble-rs?tag=0.2.4#42729cda8525a12
 dependencies = [
  "bitflags 2.9.0",
  "num_enum",
- "serde",
- "serde_repr",
  "strum 0.26.3",
  "thiserror 2.0.12",
  "windows 0.58.0",
@@ -2390,7 +2374,6 @@ dependencies = [
  "nexus_codegen",
  "num_enum",
  "paste",
- "serde",
  "windows 0.61.1",
 ]
 
@@ -3769,8 +3752,6 @@ dependencies = [
  "uuid",
  "webpki-root-certs",
  "windows 0.61.1",
- "windows-core 0.61.0",
- "windows-strings 0.4.0",
  "xml-rs",
  "zip",
 ]

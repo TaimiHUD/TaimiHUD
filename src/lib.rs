@@ -39,9 +39,6 @@ use {
             extras::SquadUpdate,
             MumbleIdentityUpdate,
         },
-        rtapi::{
-            GroupMember, GroupMemberOwned,
-        },
     },
     relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
@@ -72,8 +69,11 @@ use nexus::{
     gui::{register_render, render, RenderType},
     keybind::{keybind_handler, register_keybind_with_string},
     quick_access::{add_quick_access, add_quick_access_context_menu},
-    rtapi::event::{
-        RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
+    rtapi::{
+        event::{
+            RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
+        },
+        GroupMember, GroupMemberOwned,
     },
     wnd_proc::register_wnd_proc,
     AddonFlags, UpdateProvider,
@@ -650,6 +650,7 @@ fn load_nexus() {
         }))
         .revert_on_unload();
 
+    #[cfg(feature = "markers")]
     RTAPI_GROUP_MEMBER_LEFT.subscribe(
         event_consume!(
             <GroupMember> | group_member | {
@@ -660,6 +661,7 @@ fn load_nexus() {
         )
     ).revert_on_unload();
 
+    #[cfg(feature = "markers")]
     RTAPI_GROUP_MEMBER_JOINED.subscribe(
         event_consume!(
             <GroupMember> | group_member | {
@@ -670,6 +672,7 @@ fn load_nexus() {
         )
     ).revert_on_unload();
 
+    #[cfg(feature = "markers")]
     RTAPI_GROUP_MEMBER_UPDATE.subscribe(
         event_consume!(
             <GroupMember> | group_member | {
@@ -832,6 +835,7 @@ fn receive_evtc_local(combat_data: &CombatData) {
     Controller::try_send(event);
 }
 
+#[cfg(all(feature = "markers", feature = "extension-nexus"))]
 fn receive_group_update(state: SquadState, group_member: &GroupMember) {
     let group_member: GroupMemberOwned = group_member.into();
     let event = ControllerEvent::RTAPISquadUpdate(state, group_member);

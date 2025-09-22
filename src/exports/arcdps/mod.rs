@@ -16,7 +16,6 @@ use {
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
-    nexus::{data_link::NexusLink, rtapi::RealTimeApi},
     std::{
         cell::RefCell,
         collections::BTreeMap,
@@ -1049,7 +1048,7 @@ pub fn mumble_link_ptr() -> RuntimeResult<Option<MumblePtr>> {
     }
 }
 
-pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
+pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<rt::NexusLink>>> {
     if !available() {
         return Ok(None)
     }
@@ -1057,7 +1056,7 @@ pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
     Err("NexusLink unavailable")
 }
 
-pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
+pub fn rtapi() -> RuntimeResult<Option<rt::RealTimeApi>> {
     if !available() {
         return Ok(None)
     }

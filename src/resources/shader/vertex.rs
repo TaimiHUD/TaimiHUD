@@ -4,21 +4,23 @@ use {
     anyhow::anyhow,
     core::ffi::c_char,
     std::{ffi::{CStr, CString}, mem::offset_of, slice::from_raw_parts},
-    windows::Win32::Graphics::{
-        Direct3D::{
-            Fxc::{D3DCompile, D3DCOMPILE_DEBUG},
-            ID3DBlob,
-        },
-        Direct3D11::{
-            ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11VertexShader,
-            D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_INSTANCE_DATA,
-            D3D11_INPUT_PER_VERTEX_DATA,
-        },
-        Dxgi::Common::{
-            DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32_FLOAT,
+    windows::{
+        core::{s, PCSTR},
+        Win32::Graphics::{
+            Direct3D::{
+                Fxc::{D3DCompile, D3DCOMPILE_DEBUG},
+                ID3DBlob,
+            },
+            Direct3D11::{
+                ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11VertexShader,
+                D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_INSTANCE_DATA,
+                D3D11_INPUT_PER_VERTEX_DATA,
+            },
+            Dxgi::Common::{
+                DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32_FLOAT,
+            },
         },
     },
-    windows_strings::{s, PCSTR},
 };
 
 #[derive(PartialEq)]

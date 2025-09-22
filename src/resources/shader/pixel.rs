@@ -1,12 +1,19 @@
 use {
-    super::ShaderDescription, crate::space::resources::shader::{loader::SHADERS_DIR, ShaderKind}, anyhow::anyhow, core::ffi::c_char, std::{ffi::{CStr, CString}, slice::from_raw_parts}, windows::Win32::Graphics::{
-        Direct3D::{
-            Fxc::{D3DCompile, D3DCOMPILE_DEBUG},
-            ID3DBlob,
+    super::ShaderDescription,
+    crate::space::resources::shader::{loader::SHADERS_DIR, ShaderKind},
+    anyhow::anyhow,
+    core::ffi::c_char,
+    std::{ffi::{CStr, CString}, slice::from_raw_parts},
+    windows::{
+        core::{s, PCSTR},
+        Win32::Graphics::{
+            Direct3D::{
+                Fxc::{D3DCompile, D3DCOMPILE_DEBUG},
+                ID3DBlob,
+            },
+            Direct3D11::{ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader},
         },
-        Direct3D11::{ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader},
     },
-    windows_strings::{s, PCSTR},
 };
 
 #[derive(PartialEq)]

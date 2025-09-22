@@ -1,5 +1,6 @@
 use std::{borrow::Cow, num::NonZeroU64, ptr};
 use arcdps::{
+    extras,
     imgui,
     __macro::{HWND, LPARAM, WPARAM},
 };
@@ -111,7 +112,7 @@ pub fn combat_local(
     exports::combat_local(event)
 }
 
-pub(crate) unsafe extern "C-unwind" fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut ExtrasSubscriberInfo) {
+pub(crate) unsafe extern "C-unwind" fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut extras::ExtrasSubscriberInfo) {
     match (info, subscriber) {
         #[cfg(feature = "extension-arcdps-extras")]
         (info, subscriber) =>

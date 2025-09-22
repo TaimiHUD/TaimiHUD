@@ -16,7 +16,6 @@ use {
             ComboBox, Id, PopupModal, Selectable, TableColumnFlags, TableColumnSetup, TableFlags,
             Ui, Window,
         },
-        rtapi::GroupType,
     },
     std::{f32, mem, path::PathBuf},
     strum::IntoEnumIterator,
@@ -265,6 +264,7 @@ impl EditMarkerWindowState {
             let author = match ACCOUNT_NAME_CELL.get() {
                 Some(a) => a.clone(),
                 None => match rt::rtapi() {
+                    #[cfg(feature = "extension-nexus")]
                     Ok(Some(rtapi)) => {
                         if let Some(player_data) = rtapi.read_player() {
                             player_data.account_name
@@ -323,7 +323,10 @@ impl EditMarkerWindowState {
                     self.trigger.draw_take_current(ui);
                     self.trigger.draw_edit_manual(ui, true);
                     ui.dummy([4.0; 2]);
+                    #[cfg(feature = "extension-nexus")]
                     if let Ok(Some(rtapi)) = rt::rtapi() {
+                        use nexus::rtapi::GroupType;
+
                         if let Some(group) = rtapi.read_group() {
                             let is_squad = matches!(
                                 group.group_type,

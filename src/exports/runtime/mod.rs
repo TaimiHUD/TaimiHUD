@@ -1,6 +1,6 @@
 use std::{borrow::Cow, ffi::CStr, mem, ops, path::{Path, PathBuf}, ptr::{self, NonNull}, sync::{Mutex, Once, OnceLock}, time::Duration};
 use ::log::info;
-use nexus::{data_link::{mumble::MumblePtr, NexusLink}, rtapi::RealTimeApi};
+use nexus::data_link::mumble::MumblePtr;
 use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
@@ -25,6 +25,12 @@ pub use {
         textures::TextureLoader,
     },
 };
+#[cfg(feature = "extension-nexus")]
+pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
+#[cfg(not(feature = "extension-nexus"))]
+pub type NexusLink = ();
+#[cfg(not(feature = "extension-nexus"))]
+pub type RealTimeApi = ();
 
 pub type RuntimeError = &'static str;
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
@@ -169,6 +175,7 @@ pub fn read_nexus_link() -> RuntimeResult<NexusLink> {
 
 pub fn is_ingame() -> RuntimeResult<bool> {
     if let Ok(nexus_link) = nexus_link_ptr() {
+        #[cfg(feature = "extension-nexus")]
         return Ok(unsafe {
             let is_gameplay = ptr::addr_of!((*nexus_link.as_ptr()).is_gameplay);
             is_gameplay.read_volatile()
@@ -179,6 +186,8 @@ pub fn is_ingame() -> RuntimeResult<bool> {
     if let Some(ingame) = exports::arcdps::is_ingame() {
         return Ok(ingame)
     }
+
+    // TODO: fall back to mumblelink
 
     Err(RT_UNAVAILABLE)
 }

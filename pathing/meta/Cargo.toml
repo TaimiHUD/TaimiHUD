@@ -5,6 +5,9 @@ description = "GW2 Metadata"
 version = "0.1.0"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [features]
 default = [
   "serde",
@@ -38,5 +41,5 @@ glamour = "0.18"
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
-# keep version in sync with nexus dependency (TODO: maybe move this to a workspace dependency?)
+# keep version in sync with nexus dependency
 gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false, optional = true }

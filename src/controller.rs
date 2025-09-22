@@ -29,7 +29,6 @@ use {
     glam::f32::Vec3,
     nexus::{
         data_link::mumble::{MumblePtr, UiState},
-        rtapi::GroupMemberOwned,
     },
     relative_path::RelativePathBuf,
     std::{
@@ -61,10 +60,12 @@ use {
     },
     taimi_pack::Pack,
 };
+#[cfg(all(feature = "markers", feature = "extension-nexus"))]
+use nexus::rtapi::GroupMemberOwned;
 
 #[derive(Debug, Clone)]
 pub struct Controller {
-    #[cfg(feature = "markers")]
+    #[cfg(all(feature = "markers", feature = "extension-nexus"))]
     pub rtapi_squad: HashMap<String, GroupMemberOwned>,
     #[cfg(feature = "markers")]
     pub extras_squad: HashMap<String, UserInfoOwned>,
@@ -116,7 +117,7 @@ impl Controller {
             let _ = SOURCES.set(sources);
             let settings = Settings::load_access(&addon_dir.clone()).await;
             let mut state = Controller {
-                #[cfg(feature = "markers")]
+                #[cfg(all(feature = "markers", feature = "extension-nexus"))]
                 rtapi_squad: Default::default(),
                 #[cfg(feature = "markers")]
                 extras_squad: Default::default(),
@@ -384,12 +385,16 @@ impl Controller {
             {
                 let mut marker_data = MarkerInputData::cloned();
                 marker_data.update_with_mumble_ptr_context(&mumble);
-                if let Ok(nexus_link) = rt::nexus_link_ptr() {
-                    let scaling = unsafe {
-                        (&*nexus_link.as_ptr()).scaling
-                    };
-                    marker_data.scaling = scaling;
-                }
+                match rt::nexus_link_ptr() {
+                    #[cfg(feature = "extension-nexus")]
+                    Ok(nexus_link) =>
+                        marker_data.scaling = unsafe {
+                            (&*nexus_link.as_ptr()).scaling
+                        },
+                    _ => {
+                        // TODO: DPI scaling and mumblelink ui size stuff
+                    },
+                };
                 if marker_data.map_id == 0 {
                     marker_data.map_id = mumble.read_map_id();
                 }
@@ -981,6 +986,7 @@ impl Controller {
 
     #[cfg(feature = "markers")]
     async fn get_role(&self) -> Option<SquadRoleState> {
+        #[cfg(feature = "extension-nexus")]
         if let Ok(Some(rtapi)) = rt::rtapi() {
             if let Some(player) = rtapi.read_player() {
                 let account_name = player.account_name;
@@ -1015,7 +1021,7 @@ impl Controller {
         None
     }
 
-    #[cfg(feature = "markers")]
+    #[cfg(all(feature = "markers", feature = "extension-nexus"))]
     async fn rtapi_squad_update(&mut self, change: SquadState, member: GroupMemberOwned) {
         let account_name = ACCOUNT_NAME_CELL.get();
         if let Some(account_name) = account_name {
@@ -1237,7 +1243,7 @@ impl Controller {
             MarkerToggle(id) => self.toggle_marker(&id).await,
             #[cfg(feature = "markers")]
             ExtrasSquadUpdate(members) => self.extras_squad_update(members).await,
-            #[cfg(feature = "markers")]
+            #[cfg(all(feature = "markers", feature = "extension-nexus"))]
             RTAPISquadUpdate(change, member) => self.rtapi_squad_update(change, member).await,
             #[cfg(feature = "markers")]
             ClearMarkers => self.clear_markers().await,
@@ -1355,7 +1361,7 @@ pub enum ControllerEvent {
     ClearSpentAutoplace,
     #[cfg(feature = "markers")]
     ExtrasSquadUpdate(Vec<UserInfoOwned>),
-    #[cfg(feature = "markers")]
+    #[cfg(all(feature = "markers", feature = "extension-nexus"))]
     RTAPISquadUpdate(SquadState, GroupMemberOwned),
     OpenOpenable(String, String),
     #[cfg(feature = "markers")]

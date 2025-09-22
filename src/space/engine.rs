@@ -15,7 +15,7 @@ use {
     anyhow::Context,
     bevy_ecs::prelude::*,
     glam::{Vec3, Vec4},
-    nexus::{imgui::Ui, rtapi::RealTimeApi},
+    nexus::imgui::Ui,
     std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
@@ -105,7 +105,7 @@ pub struct Engine {
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
-    rtapi: Option<RealTimeApi>,
+    rtapi: Option<rt::RealTimeApi>,
     pub gameplay_map: Result<NonZeroU32, u32>,
 
     schedule: Schedule,
@@ -156,6 +156,7 @@ impl Engine {
             .map_err(anyhow::Error::msg)
             .context("RTAPI unavailable");
         let rtapi = match rtapi.map_err(anyhow::Error::msg) {
+            #[cfg(feature = "extension-nexus")]
             Ok(rtapi) => {
                 match &rtapi {
                     Some(rtapi) if rtapi.is_active() =>
@@ -165,11 +166,14 @@ impl Engine {
                 }
                 rtapi
             },
+            #[cfg(feature = "extension-nexus")]
             Err(e) => {
                 // TODO: listen for events in case it gets loaded later or something
                 log::debug!("{e:#}");
                 None
             },
+            #[cfg(not(feature = "extension-nexus"))]
+            _ => None,
         };
 
         let engine = Engine {
@@ -341,6 +345,7 @@ impl Engine {
         self.schedule.run(&mut self.world);
 
         let mut pdata = PerspectiveInputData::cloned();
+        #[cfg(feature = "extension-nexus")]
         if let Some(rtapi) = &self.rtapi {
             use nexus::rtapi::GameState;
 
