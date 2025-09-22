@@ -22,7 +22,7 @@ use {
     std::{
         cell::Cell,
         collections::HashMap,
-        path::PathBuf,
+        path::{PathBuf, Path},
         sync::{Arc, MutexGuard},
     },
     strum_macros::{Display, EnumIter},
@@ -239,7 +239,7 @@ impl RenderState {
         ui: &Ui,
         height: Option<f32>,
         alert_icon: Option<&RelativePathBuf>,
-        path: Option<&PathBuf>,
+        path: Option<&Path>,
     ) {
         let icon = match alert_icon {
             Some(icon) => icon,
@@ -250,7 +250,7 @@ impl RenderState {
             Some(t) => t,
             None => {
                 if let Some(path) = path {
-                    crate::texture_schedule_path(icon, path);
+                    crate::texture_schedule_path(icon, icon.to_path(path));
                 }
                 None
             },

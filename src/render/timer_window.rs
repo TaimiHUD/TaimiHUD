@@ -79,7 +79,7 @@ impl TimerWindowState {
                 ui,
                 Some(height),
                 alert.icon.as_ref(),
-                ps.timer.path.as_ref(),
+                ps.timer.path.as_ref().and_then(|p| p.parent()),
             );
             if settings.centre_after {
                 widget_pos = Vec2::from(ui.cursor_pos());
@@ -127,7 +127,7 @@ impl TimerWindowState {
                 ui,
                 Some(height),
                 alert.icon.as_ref(),
-                ps.timer.path.as_ref(),
+                ps.timer.path.as_ref().and_then(|p| p.parent()),
             );
             let mut colour_tokens = Vec::new();
             if let Some(fill_colour) = alert.fill_colour {
