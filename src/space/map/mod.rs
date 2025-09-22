@@ -22,8 +22,10 @@ pub struct MapTarget {
 }
 
 impl MapTarget {
-    pub const HEIGHT_OFFSET_BELOW: f32 = 20.0;
-    pub const HEIGHT_OFFSET_ABOVE: f32 = 45.0;
+    pub const HEIGHT_OFFSET_BELOW: f32 = -200.0;
+    pub const HEIGHT_OFFSET_ABOVE: f32 = 200.0;
+    pub const HEIGHT_OFFSET_BELOW_MINI: f32 = -75.0;
+    pub const HEIGHT_OFFSET_ABOVE_MINI: f32 = 95.0;
 
     pub fn new(map_data: &MarkerInputData) -> Self {
         // TODO: clean all this up
@@ -70,9 +72,15 @@ impl MapTarget {
             map_bounds_local.0.max(map_bounds_local.1),
         );
 
+        let (height_offset_below, height_offset_above) = match map_data.perspective {
+            // TODO: stop using player position here...
+            CurrentPerspective::Global => (Self::HEIGHT_OFFSET_BELOW, Self::HEIGHT_OFFSET_ABOVE),
+            // XXX: adjust if airborne? need little height arrow indicators...
+            CurrentPerspective::Minimap => (Self::HEIGHT_OFFSET_BELOW_MINI, Self::HEIGHT_OFFSET_ABOVE_MINI),
+        };
         let bounds: Box3<LocalSpace> = Box3::new(
-            Point3::new(map_bounds_local.min.x, map_data.player_pos_local().y - Self::HEIGHT_OFFSET_BELOW, map_bounds_local.min.y),
-            Point3::new(map_bounds_local.max.x, map_data.player_pos_local().y + Self::HEIGHT_OFFSET_ABOVE, map_bounds_local.max.y),
+            Point3::new(map_bounds_local.min.x, map_data.player_pos_local().y + height_offset_below, map_bounds_local.min.y),
+            Point3::new(map_bounds_local.max.x, map_data.player_pos_local().y + height_offset_above, map_bounds_local.max.y),
         );
 
         Self {
