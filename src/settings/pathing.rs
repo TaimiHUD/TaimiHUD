@@ -3,7 +3,7 @@ use {
     std::{collections::BTreeMap, fmt, sync::Arc},
     strum::{VariantArray, IntoStaticStr},
     serde::{Serialize, Deserialize},
-    taimi_meta::coords::CurrentPerspective as MapContext,
+    taimi_meta::ui::MapContext,
 };
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
@@ -38,6 +38,9 @@ pub struct SpaceSettings {
     pub visible_map_world: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_map_mini: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_open: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trail_textured_space: Option<bool>,
@@ -104,6 +107,7 @@ impl SpaceSettings {
     pub const DEFAULT_DISTANCE_FADE_INTENSITY: f32 = 84.0;
     pub const DEFAULT_PLAYER_OVERLAP_THRESHOLD: f32 = 38.0;
     pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(0.8f32);
+    pub const DEFAULT_MAP_OPEN: bool = true;
 
     pub const NONE_F32: f32 = f32::MIN;
 
@@ -120,6 +124,7 @@ impl SpaceSettings {
                 camera_source: None | Some(Self::DEFAULT_CAMERA_SOURCE),
                 visible_space: None | Some(Self::DEFAULT_VISIBLE),
                 visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP), visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
+                map_open: None | Some(Self::DEFAULT_MAP_OPEN),
                 distance_max: None,
                 distance_fade_intensity: None, player_overlap_threshold: None,
                 edge_feather_scale: None | Self::DEFAULT_EDGE_FEATHER_SCALE,
@@ -157,6 +162,9 @@ impl SpaceSettings {
             MapContext::Global => self.visible_worldmap(),
             MapContext::Minimap => self.visible_minimap(),
         }
+    }
+    pub fn map_open(&self) -> bool {
+        self.map_open.unwrap_or(Self::DEFAULT_MAP_OPEN)
     }
 
     pub fn trail_textured_map(&self, ctx: MapContext) -> bool {

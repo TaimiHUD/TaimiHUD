@@ -1,0 +1,47 @@
+[package]
+name = "taimi_input"
+authors = [ "kittywitch" ]
+description = "TaimiHUD input handlers"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[features]
+default = [
+  "windows",
+]
+arcdps-extras = [
+  "dep:arcdps",
+]
+serde = [
+  "dep:serde",
+]
+windows = [
+  "dep:windows",
+  "arcffi?/windows-061",
+]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+bitflags = { workspace = true }
+glam = { workspace = true }
+glamour = { workspace = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+arcdps = { git = "https://github.com/zerthox/arcdps-rs", default-features = false, optional = true }
+
+[target.'cfg(windows)'.dependencies.windows]
+optional = true
+version = "0.61"
+features = [
+  "System",
+  "Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_HiDpi",
+  #"Win32_System_SystemServices"
+]

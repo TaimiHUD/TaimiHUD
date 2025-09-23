@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, sync::{OnceLock, RwLock, atomic::{AtomicPtr, Or
 use retour::GenericDetour;
 #[cfg(feature = "space")]
 use crate::{space::Engine, ENGINE};
+use crate::render::{RenderState, RenderEvent};
 
 pub type Lenses = BTreeMap<usize, LensClass>;
 
@@ -182,6 +183,9 @@ unsafe extern "system" fn taimi_set_targets(
                             }
                         }
                     }
+                    if cls == LensClass::World {
+                        RenderState::try_send(RenderEvent::UiDepthAcquired());
+                    }
                 }
             },
             Err(()) => {
@@ -223,7 +227,12 @@ unsafe extern "system" fn taimi_release_depth_view(
         match key {
             Some(key) if refcount == 0 => {
                 let removed = if let Ok(mut lenses) = LENSES.write() {
-                    lenses.remove(&key).is_some()
+                    let removed = lenses.remove(&key);
+                    if let Some(LensClass::World) = removed {
+                        RenderState::try_send(RenderEvent::UiDepthReleased());
+                        let _ = LENS_PTR.compare_exchange(key as *mut _, ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
+                    }
+                    removed.is_some()
                 } else {
                     false
                 };

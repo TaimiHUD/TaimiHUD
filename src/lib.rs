@@ -14,15 +14,15 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use space::{
-    engine::{Engine, SpaceEvent},
-    MapContext,
+use {
+    crate::space::engine::{Engine, SpaceEvent},
+    taimi_meta::ui::MapContext,
 };
 use {
     crate::{
         controller::{Controller, ControllerEvent},
         exports::runtime as rt,
-        render::{RenderEvent, RenderState},
+        render::{machine::RenderMachine, RenderEvent, RenderState},
         settings::SettingsLock,
     },
     anyhow::Context,
@@ -202,6 +202,8 @@ static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
 #[cfg(feature = "extension-nexus")]
 static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
+#[cfg(all(feature = "extension-nexus", feature = "space"))]
+static RENDER_CALLBACK_PRE: Mutex<Option<Revertible>> = Mutex::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "space")]
@@ -383,15 +385,20 @@ fn init() -> Result<(), &'static str> {
 fn load_nexus() {
     // Rendering setup
     let taimi_window = render!(|ui| {
+        RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
     });
     let render_callback = register_render(RenderType::Render, taimi_window);
     *RENDER_CALLBACK.lock().unwrap() = Some(Box::new(render_callback.into_inner()));
 
     #[cfg(feature = "space")]
-    let space_render = render!(|ui| render_space(ui));
-    #[cfg(feature = "space")]
-    register_render(RenderType::Render, space_render).revert_on_unload();
+    {
+        extern "C-unwind" fn nexus_pre_render() {
+            RenderMachine::turn_render_entry()
+        }
+        let render_callback_pre = register_render(RenderType::PreRender, nexus_pre_render);
+        *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
+    }
 
     register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
@@ -642,10 +649,11 @@ fn load_nexus() {
     COMBAT_LOCAL.subscribe(combat_callback).revert_on_unload();
 
     // MumbleLink Identity
+    #[cfg(feature = "markers")]
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
             if let Some(mumble_identity) = mumble_identity {
-                receive_mumble_identity(mumble_identity.clone());
+                Controller::receive_mumble_identity(mumble_identity);
             }
         }))
         .revert_on_unload();
@@ -811,10 +819,6 @@ pub fn account_name_canon<N: ?Sized + AsRef<str>>(account_name: &N) -> Option<&s
     }
 }
 
-fn receive_mumble_identity(id: MumbleIdentityUpdate) {
-    Controller::try_send(ControllerEvent::MumbleIdentityUpdated(id));
-}
-
 fn receive_evtc_local(combat_data: &CombatData) {
     let (evt, src) = match (combat_data.event(), combat_data.src()) {
         (Some(evt), Some(src)) => (evt, src),
@@ -925,43 +929,6 @@ fn texture_schedule_path<R, P>(rel: R, path: P) where
         path.into(),
     );
     Controller::try_send(event);
-}
-
-#[cfg(feature = "space")]
-fn render_space(ui: &nexus::imgui::Ui) {
-    let enabled = SETTINGS.get()
-        .and_then(|settings| settings.try_read().ok())
-        .map(|settings| settings.enable_katrender)
-        .unwrap_or(false);
-    if !enabled || !RenderState::is_running() {
-        return
-    }
-    let mut engine = match ENGINE.try_lock() {
-        // if early game loading or charsel, delay init
-        Ok(e) if e.is_none() && !rt::is_ingame().unwrap_or(false) => return,
-        Ok(e) => e,
-        _ => return,
-    };
-    let engine = engine.get_or_insert_with(|| {
-            let (space_sender, space_receiver) = channel::<SpaceEvent>(32);
-            *SPACE_SENDER.write().unwrap() = Some(space_sender);
-            let drawstate_inner = Engine::initialise(ui, space_receiver);
-            if let Err(error) = &drawstate_inner {
-                log::error!("DrawState setup failed: {error:?}");
-            };
-            drawstate_inner.map_err(drop)
-    });
-    let ds = match engine.as_mut() {
-        Ok(e) => e,
-        Err(..) => return,
-    };
-                #[cfg(feature = "goggles")]
-                if goggles::has_classification(goggles::LensClass::Space) == Some(false) {
-                    goggles::classify_space_lens(ds);
-                }
-                if let Err(error) = ds.render(ui).context("Engine render failure") {
-                    log::error!("{error:#}");
-                }
 }
 
 fn notify_quit() {
@@ -1104,6 +1071,10 @@ fn unload() {
 
     #[cfg(feature = "extension-nexus")]
     if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
+        revert_render();
+    }
+    #[cfg(all(feature = "extension-nexus", feature = "space"))]
+    if let Some(revert_render) = RENDER_CALLBACK_PRE.lock().unwrap().take() {
         revert_render();
     }
 

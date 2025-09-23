@@ -3,7 +3,10 @@ use {
     crate::{
         controller::ProgressBarStyleChange,
         fl,
-        render::{RenderEvent, TextFont},
+        render::{
+            machine::RenderMachine,
+            RenderEvent, TextFont,
+        },
         settings::{MarkerAutoPlaceSettings, Settings, SquadCondition},
         ControllerEvent, Controller,
     },
@@ -14,17 +17,19 @@ use {
 pub struct ConfigTabState {
     pub marker_autoplace: MarkerAutoPlaceSettings,
     pub marker_autoplace_inner: Option<SquadCondition>,
+    pub dpi_scaling: Option<f32>,
 }
 
 impl ConfigTabState {
     pub fn new() -> Self {
         Self {
+            dpi_scaling: Default::default(),
             marker_autoplace: Default::default(),
             marker_autoplace_inner: Default::default(),
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, timer_window_state: &mut TimerWindowState) {
+    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, timer_window_state: &mut TimerWindowState) {
         ui.text_wrapped(&fl!("imgui-notice"));
         ui.dummy([4.0, 4.0]);
         ui.text_wrapped(&fl!("keybind-triggers"));
@@ -41,9 +46,11 @@ impl ConfigTabState {
             }
             Controller::try_send(ControllerEvent::UnloadAll);
         }
+        ui.dummy([4.0, 4.0]);
 
         let markers_window_closure = || {
             if let Some(settings) = Settings::try_read() {
+                self.dpi_scaling = settings.dpi_scaling.clone();
                 self.marker_autoplace = settings.marker_autoplace.clone();
                 self.marker_autoplace_inner = match &self.marker_autoplace {
                     MarkerAutoPlaceSettings::OpenWindow(t) => Some(t.clone()),
@@ -106,6 +113,19 @@ impl ConfigTabState {
                     ));
                 }
             }
+            ui.dummy([4.0, 4.0]);
+            let mut dpi_scaling = self.dpi_scaling.is_none();
+            if ui.checkbox(&fl!("dpi-scaling"), &mut dpi_scaling) {
+                use taimi_meta::ui::MapCalibration;
+
+                // TODO: controller event
+                let _ = Settings::write_with_blocking(|settings| {
+                    settings.dpi_scaling = (!dpi_scaling).then_some(MapCalibration::DPI_REFERENCE);
+                    self.dpi_scaling = settings.dpi_scaling.clone();
+                });
+                machine.act_display_size();
+            }
+            ui.text_wrapped(&fl!("dpi-notice"));
         };
         let timers_window_closure = || {
             ui.dummy([4.0, 4.0]);

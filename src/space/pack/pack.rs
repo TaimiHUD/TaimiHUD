@@ -1,29 +1,34 @@
 use {
     anyhow::anyhow,
     crate::{
-        Controller,
-        ControllerEvent,
+        controller::{
+            Controller,
+            ControllerEvent,
+        },
+        render::{
+            machine::{RenderMachine, RenderPosition},
+            pathing_window::{PathingFilterState, PathingSearchState},
+        },
+        space::{
+            pack::{Pack, MarkerAttributesExt},
+            dx11::{InstanceBufferData, RenderBackend},
+            render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
+            resources::Texture,
+            DrawSpace,
+            LocalContext, MapContext,
+        },
     },
     nexus::{
         imgui::{Ui, Condition, TreeNode},
         alert::send_alert,
     },
-    crate::render::pathing_window::{PathingFilterState, PathingSearchState},
-    crate::space::{
-        pack::{Pack, MarkerAttributesExt},
-        dx11::{InstanceBufferData, PerspectiveInputData, RenderBackend},
-        render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
-        resources::Texture,
-        LocalContext, MapTarget,
-    },
     anyhow::Context,
     bitvec::vec::BitVec,
+    glamour::Box3,
     indexmap::IndexMap,
     super::{
-        loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         poi::{ActivePoi, PoiCommonRenderData},
         trail::ActiveTrail,
-        Category, Poi,
     },
     std::{
         collections::HashSet,
@@ -34,6 +39,10 @@ use {
     taimi_d3d::dx11::{
         prelude::*,
         buffer::BufferOf,
+    },
+    taimi_pack::{
+        loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
+        Category, Poi,
     },
     uuid::Uuid,
 };
@@ -491,7 +500,7 @@ pub struct PackCollection {
     pub loaded_packs: IndexMap<String, ActivePack>,
     pub unloaded_packs: IndexMap<String, UnloadedReason>,
 
-    current_map: Option<i32>,
+    pub current_map: Option<i32>,
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
 }
@@ -596,7 +605,8 @@ impl PackCollection {
         log::info!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
         self.build_active_pack(pack_idx, device, None, map_id)?;
 
-        self.recreate_buffers(device)?;
+        //self.recreate_buffers(device)?;
+        self.mark_buffers_dirty();
 
         Ok(())
     }
@@ -654,14 +664,16 @@ impl PackCollection {
             _ => (),
         }
 
-        let res = self.recreate_buffers(device);
+        //let res = self.recreate_buffers(device);
+        self.mark_buffers_dirty();
+        let res = Ok(());
 
         self.render_list = render_builder.build();
 
         res
     }
 
-    fn recreate_buffers_inner(&mut self, device: &Dx11Device) -> anyhow::Result<()> {
+    fn recreate_buffers_inner(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         // identity at start for trail drawing
         let mut data_world = vec![InstanceBufferData::IDENTITY; 1];
         let mut data_map = vec![InstanceBufferData::IDENTITY; 1];
@@ -672,35 +684,43 @@ impl PackCollection {
                 .map(|poi| poi.instance_data())
             );
             data_map.extend(pack.active_pois.values()
-                .map(|poi| poi.instance_data_map())
+                .map(|poi| poi.instance_data_map(machine))
             );
             pack.render_poi_bookmark = render_poi_bookmark;
             render_poi_bookmark += pack.active_pois.len();
         }
-        let (poi_ib_world, poi_ib_map) = if !self.loaded_packs.is_empty() {
-            (
+        let (poi_ib_world, poi_ib_map) = (
                 Some(BufferOf::new_with_data(device, Ok(&data_world[..]), ())?),
                 Some(BufferOf::new_with_data(device, Ok(&data_map[..]), ())?),
-            )
-        } else {
-            (None, None)
-        };
+        );
         self.poi_common.world_ib = poi_ib_world;
         self.poi_common.map_ib = poi_ib_map;
 
         Ok(())
     }
 
-    fn recreate_buffers(&mut self, device: &Dx11Device) -> anyhow::Result<()> {
-        let res = self.recreate_buffers_inner(device)
+    fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+        let res = self.recreate_buffers_inner(device, machine)
             .context("preparing POI instance buffers");
         if res.is_err() {
-            self.poi_common.clear();
-            for pack in self.loaded_packs.values_mut() {
-                pack.render_poi_bookmark = 0;
-            }
+            self.mark_buffers_dirty();
         }
         res
+    }
+
+    fn mark_buffers_dirty(&mut self) {
+        self.poi_common.clear();
+        for pack in self.loaded_packs.values_mut() {
+            pack.render_poi_bookmark = 0;
+        }
+    }
+
+    pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+        if /* !self.loaded_packs.is_empty() &&*/ self.poi_common.is_empty() {
+            self.recreate_buffers(device, machine)?;
+        }
+
+        Ok(())
     }
 
     pub fn update(&mut self) {
@@ -709,32 +729,16 @@ impl PackCollection {
         }
     }
 
-    pub fn update_for_draw(
-        &mut self,
-        cam_data: &PerspectiveInputData,
-        distance_max: f32,
-        backend: &RenderBackend,
-    ) -> MapFrustum {
-        MapFrustum::from_camera_data(
-            cam_data,
-            backend.perspective_handler.aspect_ratio(),
-            backend.perspective_handler.near(),
-            backend.perspective_handler.far().min(distance_max),
-        )
-    }
-
     pub fn draw(
         &mut self,
-        cam_data: &PerspectiveInputData,
+        camera: RenderPosition,
         frustum: &MapFrustum,
         backend: &RenderBackend,
         device_context: &Dx11Context,
     ) {
-        let cam_origin = cam_data.camera_pos();
-        let cam_front = cam_data.camera_front();
         let entities = self
             .render_list
-            .get_entities_for_drawing(cam_origin, cam_front, frustum);
+            .get_entities_for_drawing(camera, frustum);
         Self::draw_entities(&self.loaded_packs, &self.poi_common, device_context, backend, entities);
         STATS_ENTITY_COUNT.store(self.render_list.entities_count(), Ordering::Relaxed);
     }
@@ -793,6 +797,8 @@ impl PackCollection {
                             )
                         );
                     let (pack, poi, info) = match poi {
+                        Some((pack, _, _)) if pack.render_poi_bookmark == 0 =>
+                            continue,
                         Some(t) => t,
                         None => {
                             log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
@@ -827,14 +833,14 @@ impl PackCollection {
         poi_common: &PoiCommonRenderData,
         device_context: &Dx11Context,
         backend: &RenderBackend,
-        map: &MapTarget,
+        map: MapContext,
         entities: E,
     ) where
         E: IntoIterator<Item = &'e RenderEntity>,
     {
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0usize;
-        let ctx = LocalContext::/*Map(map.perspective)*/MAP;
+        let ctx = LocalContext::/*Map(map)*/MAP;
         for entity in entities {
             let render_id = match entity.render_id {
                 Some(id) => id,
@@ -859,7 +865,7 @@ impl PackCollection {
                             continue
                         },
                     };
-                    if trail.filtered || !info.attributes.is_visible_for_map(map.perspective) {
+                    if trail.filtered || !info.attributes.is_visible_for_map(map) {
                         continue
                     }
                     let scale = info.attributes.scale_on_map_with_zoom;
@@ -884,13 +890,15 @@ impl PackCollection {
                             )
                         );
                     let (pack, poi, info) = match poi {
+                        Some((pack, _, _)) if pack.render_poi_bookmark == 0 =>
+                            continue,
                         Some(t) => t,
                         None => {
                             log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
                             continue
                         },
                     };
-                    if poi.filtered || !info.attributes.is_visible_for_map(map.perspective) {
+                    if poi.filtered || !info.attributes.is_visible_for_map(map) {
                         continue
                     }
                     let scale = info.attributes.scale_on_map_with_zoom;
@@ -916,9 +924,8 @@ impl PackCollection {
 
     pub fn entities_map<'a>(
         &'a self,
-        map: &'_ MapTarget,
+        mut bounds: Box3<DrawSpace>,
     ) -> impl Iterator<Item = &'a RenderEntity> + 'a {
-        let mut bounds = map.bounds_draw;
         // adding some wiggle room around the map edges...
         let buffer = bounds.size() * 0.15;
         bounds.min.x -= buffer.width;

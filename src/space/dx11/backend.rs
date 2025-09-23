@@ -42,7 +42,7 @@ impl RenderBackend {
 
         let shaders = ShaderLoader::load_bundled(&device)
             .context("Shaders failed to load")?;
-        let perspective_handler = PerspectiveHandler::setup(&device, display_size)
+        let perspective_handler = PerspectiveHandler::setup(&device)
             .context("Perspective handler setup failed")?;
 
         let depth_handler = DepthHandler::create(display_size, &device, &swap_chain)
@@ -79,9 +79,6 @@ impl RenderBackend {
         })
     }
 
-    pub fn prepare(&mut self, display_size: Size2<ScreenSpace>) {
-        self.perspective_handler.prepare(display_size);
-    }
     /*
     pub fn draw(&mut self, io: &Io) {
         if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {

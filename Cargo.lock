@@ -3757,6 +3757,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sync-unsafe-cell",
  "taimi_d3d",
+ "taimi_input",
  "taimi_meta",
  "taimi_pack",
  "tempfile",
@@ -3774,16 +3775,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "taimi_input"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcdps 0.16.0",
+ "arcffi",
+ "bitflags 2.9.0",
+ "glam 0.30.1",
+ "glamour",
+ "log",
+ "serde",
+ "windows 0.61.1",
+]
+
+[[package]]
 name = "taimi_meta"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "arcloader-mumblelink",
  "async-compression",
+ "bitflags 2.9.0",
  "glam 0.30.1",
  "glamour",
  "gw2_mumble 0.2.4",
  "log",
+ "nexus",
+ "num-traits",
  "serde",
  "serde_json",
  "tokio",

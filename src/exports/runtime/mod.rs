@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::{
     borrow::Cow,
     ffi::CStr,
@@ -14,7 +15,7 @@ use std::{
 use ::log::info;
 use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, WPARAM},
+    Foundation::HWND,
     UI::{
         WindowsAndMessaging,
         Input::KeyboardAndMouse,
@@ -32,10 +33,12 @@ pub use {
     nexus::imgui,
     self::{
         mouse::MousePosition,
-        keyboard::KeyState,
         textures::TextureLoader,
     },
+    taimi_meta::coords::vec_eq,
+    taimi_input::win::keyboard::KeyState,
 };
+
 #[cfg(feature = "extension-arcdps")]
 pub use arcloader_mumblelink::gw2_mumble::{LinkedMem as MumbleLink, MumblePtr, UiState};
 #[cfg(not(feature = "extension-arcdps"))]
@@ -377,20 +380,37 @@ pub fn window_handle() -> RuntimeResult<HWND> {
     }
 }
 
+pub fn window_dpi() -> RuntimeResult<u32> {
+    let hwnd = window_handle()?;
+    taimi_input::win::mouse::window_dpi(hwnd)
+        .map_err(|_| RT_UNAVAILABLE)
+}
+
 pub fn screen_mouse_position() -> RuntimeResult<MousePosition> {
-    mouse::screen_position()
+    taimi_input::win::mouse::screen_position()
+        .map_err(|e| {
+            ::log::warn!("{e:#}");
+            "Screen position of mouse not found"
+        })
 }
 
 pub fn window_mouse_position() -> RuntimeResult<MousePosition> {
-    screen_mouse_position()
-        .and_then(|pos| pos.to_window())
+    let hwnd = window_handle()?;
+    taimi_input::win::mouse::screen_position()
+        .and_then(|pos| pos.to_window(hwnd))
+        .map_err(|e| {
+            ::log::warn!("{e:#}");
+            "Window position of mouse not found"
+        })
 }
 
 pub unsafe fn window_message(msg: u32, w: usize, l: isize) -> RuntimeResult<()> {
     let hwnd = window_handle()?;
 
-    if let Err(e) = WindowsAndMessaging::PostMessageA(Some(hwnd), msg, WPARAM(w), LPARAM(l)) {
-        ::log::warn!("failed to send message to {hwnd:?}: {e}");
+    let res = taimi_input::win::window_message(hwnd, msg, w, l)
+        .with_context(|| format!("failed to send window message {msg:#06x}({w:#010x}, {l:010x})"));
+    if let Err(e) = res {
+        ::log::warn!("{e:#}");
         return Err("PostMessageA failed")
     }
 
@@ -398,18 +418,22 @@ pub unsafe fn window_message(msg: u32, w: usize, l: isize) -> RuntimeResult<()> 
 }
 
 pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(inputs: impl IntoIterator<Item = I>) -> RuntimeResult<()> {
-    let inputs: Vec<_> = inputs.into_iter().map(I::into).collect();
-    let res = unsafe {
-        KeyboardAndMouse::SendInput(&inputs[..], mem::size_of::<KeyboardAndMouse::INPUT>() as _)
-    };
-    match res {
-        0 => {
-            let msg = "SendInput Failed";
-            ::log::error!("{msg}: {}", windows::core::Error::from_win32());
-            Err(msg)
+    let hwnd = match window_handle() {
+        Ok(wnd) => wnd,
+        Err(_e) => {
+            ::log::debug!("TODO: fall back for SendInput?");
+            Default::default()
         },
-        _ => Ok(()),
+    };
+
+    let res = taimi_input::win::window_send_inputs(hwnd, inputs)
+        .context("failed to send window inputs");
+    if let Err(e) = res {
+        ::log::warn!("{e:#}");
+        return Err("SendInput failed")
     }
+
+    Ok(())
 }
 
 pub fn handle_wnd_event(_hwnd: HWND, msg: u32, _w: usize, _l: isize) -> u32 {
@@ -422,23 +446,4 @@ pub fn handle_wnd_event(_hwnd: HWND, msg: u32, _w: usize, _l: isize) -> u32 {
     }
 
     msg
-}
-
-#[inline]
-pub const fn f32_bits<const N: usize>(f: [f32; N]) -> [u32; N] {
-    unsafe {
-        // XXX: transmute_unchecked is unstable...
-        mem::transmute_copy(&f)
-    }
-}
-#[inline]
-pub fn vec_bits<const N: usize, T>(f: T) -> [u32; N] where
-    T: Into<[f32; N]>,
-{
-    f32_bits(f.into())
-}
-pub fn vec_eq<const N: usize, T>(lhs: T, rhs: T) -> bool where
-    T: Into<[f32; N]>,
-{
-    vec_bits(lhs) == vec_bits(rhs)
 }

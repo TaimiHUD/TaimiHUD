@@ -1,9 +1,10 @@
 use {
-    crate::space::{
-        dx11::PerspectiveInputData,
-        DrawSpace,
+    crate::{
+        render::machine::RenderPosition,
+        space::DrawSpace,
     },
     glamour::{Box3, Intersection, Point3, Vector3, Vector4},
+    std::ops::Range,
 };
 #[cfg(feature = "space-list")]
 use {
@@ -131,8 +132,7 @@ impl RenderList {
     /// Gets visible entities in the correct draw order.
     pub fn get_entities_for_drawing<'rs>(
         &'rs mut self,
-        cam_origin: Point3<DrawSpace>,
-        cam_dir: Vector3<DrawSpace>,
+        (cam_origin, cam_dir, _cam_up): RenderPosition,
         frustum: &'rs MapFrustum,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         match () {
@@ -398,19 +398,15 @@ impl MapFrustum {
     }
 
     pub fn from_camera_data(
-        data: &PerspectiveInputData,
-        _aspect_ratio: f32,
-        near: f32,
-        far: f32,
+        (pos, camera_dir, camera_up): (Point3<DrawSpace>, Vector3<DrawSpace>, Vector3<DrawSpace>),
+        // TODO: (aspect_ratio, fov): (f32, Vec2),
+        Range { start: near, end: far }: Range<f32>,
     ) -> MapFrustum {
         // TODO: higher accuracy/correctness using fov and perspective idk
-        let pos = data.camera_pos();
-
-        let camera_dir = data.camera_front();
         let camera_far = camera_dir * far;
         let camera_near = camera_dir * near;
 
-        let camera_dir_right = camera_dir.cross(data.camera_up()).normalize();
+        let camera_dir_right = camera_dir.cross(camera_up).normalize();
         let camera_dir_up = camera_dir_right.cross(camera_dir).normalize();
 
         let near_focal_point = pos + camera_near;
