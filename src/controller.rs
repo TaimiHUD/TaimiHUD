@@ -367,17 +367,32 @@ impl Controller {
         #[cfg(feature = "space")]
         {
             let mut input_data = PerspectiveInputData::cloned();
+            let mut dirty = false;
             if let Ok(is_gameplay) = rt::is_ingame() {
+                dirty = input_data.is_gameplay != Some(is_gameplay);
                 input_data.is_gameplay = Some(is_gameplay);
             }
             if let Some(mumble) = self.mumble_pointer {
+                let ui_state = mumble.read_ui_state();
+                dirty |= input_data.ui_state != ui_state;
+                input_data.ui_state = ui_state;
+            }
+            let position_ptr = match self.mumble_pointer {
+                #[cfg(feature = "extension-nexus")]
+                Some(..) if input_data.has_rtapi =>
+                    None,
+                m => m,
+            };
+            if let Some(mumble) = position_ptr {
                 input_data.playpos = Vec3::from_array(mumble.read_avatar().position);
                 let camera = mumble.read_camera();
                 input_data.front = Vec3::from_array(camera.front);
                 input_data.pos = Vec3::from_array(camera.position);
-                input_data.ui_state = mumble.read_ui_state();
+                dirty = true;
             }
-            input_data.commit();
+            if dirty {
+                input_data.commit();
+            }
         }
         if let Some(mumble) = self.mumble_pointer {
             let playpos = Vec3::from_array(mumble.read_avatar().position);

@@ -362,6 +362,7 @@ impl Engine {
                 if front != Vec3::ZERO {
                     pdata.front = front;
                     pdata.pos = Vec3::from_array(camera.camera_position);
+                    pdata.has_rtapi = pdata.is_gameplay == Some(true);
                 }
                 if camera.camera_fov != 0.0f32 {
                     pdata.fov = camera.camera_fov;
@@ -663,6 +664,12 @@ impl Engine {
         #[cfg(feature = "goggles")]
         if goggles::is_enabled() {
             goggles::clear_lens();
+        }
+        #[cfg(feature = "extension-nexus")]
+        {
+            let mut pdata = PerspectiveInputData::cloned();
+            pdata.has_rtapi = false;
+            pdata.commit();
         }
 
         let res = self.packs.unload_map(device_context, prev_map_id.get());

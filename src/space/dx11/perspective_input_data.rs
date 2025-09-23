@@ -11,6 +11,8 @@ pub static PERSPECTIVEINPUTDATA: LazyLock<AtomicArc<PerspectiveInputData>> = Laz
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PerspectiveInputData {
+    #[cfg(feature = "extension-nexus")]
+    pub has_rtapi: bool,
     pub front: Vec3,
     pub pos: Vec3,
     pub fov: f32,
@@ -68,6 +70,8 @@ impl Default for PerspectiveInputData {
             playpos: Vec3::ZERO,
             ui_state: UiState::empty(),
             is_gameplay: Default::default(),
+            #[cfg(feature = "extension-nexus")]
+            has_rtapi: false,
         }
     }
 }
