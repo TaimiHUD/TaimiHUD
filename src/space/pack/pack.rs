@@ -443,11 +443,21 @@ impl ActivePack {
     }
 
     fn update_filters(&mut self) {
-        for (_, trail) in &mut self.active_trails {
-            trail.filtered = !self.enabled_categories[trail.category_idx];
+        for (_i, trail) in &mut self.active_trails {
+            let enabled = self.enabled_categories.get(trail.category_idx)
+                .map(|b| *b);
+            if enabled.is_none() {
+                log::error!("unknown category index {} for trail[{_i}] #{}", trail.category_idx, trail.trail_idx);
+            }
+            trail.filtered = !enabled.unwrap_or(true);
         }
-        for (_, poi) in &mut self.active_pois {
-            poi.filtered = !self.enabled_categories[poi.category_idx];
+        for (_i, poi) in &mut self.active_pois {
+            let enabled = self.enabled_categories.get(poi.category_idx)
+                .map(|b| *b);
+            if enabled.is_none() {
+                log::error!("unknown category index {} for poi[{_i}] #{}", poi.category_idx, poi.poi_idx);
+            }
+            poi.filtered = !enabled.unwrap_or(true);
         }
     }
 
@@ -569,7 +579,8 @@ impl PackCollection {
     }
 
     pub fn load_pack(&mut self, device: &Dx11Device, pack_idx: usize) -> anyhow::Result<()> {
-        let pack = &mut self.loaded_packs[pack_idx];
+        let (_, pack) = self.loaded_packs.get_index_mut(pack_idx)
+            .with_context(|| format!("unrecognized pack index {pack_idx}"))?;
         if pack.render_list_bookmark.is_some() {
             log::info!("skipping pack {}, already loaded?", pack.pack.name);
             return Ok(())
@@ -591,7 +602,8 @@ impl PackCollection {
     }
 
     fn build_active_pack(&mut self, pack_idx: usize, device: &Dx11Device, render_entities: Option<&mut Vec<RenderEntity>>, map_id: i32) -> anyhow::Result<()> {
-        let pack = &mut self.loaded_packs[pack_idx];
+        let (_, pack) = self.loaded_packs.get_index_mut(pack_idx)
+            .with_context(|| format!("unrecognized pack index {pack_idx}"))?;
 
         let (entities, inplace) = match render_entities {
             Some(e) => (e, false),
@@ -628,7 +640,7 @@ impl PackCollection {
         let packs_len = self.loaded_packs.len();
         for pack_idx in 0..packs_len {
             let pack_res = self.build_active_pack(pack_idx, device, Some(&mut render_builder.entities), map_id)
-                .with_context(|| format!("Pack {} failed to load", self.loaded_packs[pack_idx].pack.name));
+                .with_context(|| format!("Pack {} failed to load", self.loaded_packs.get_index(pack_idx).map(|(_, p)| &p.pack.name[..]).unwrap_or("<badidx>")));
             if let Err(e) = pack_res {
                 log::warn!("{e:#}");
                 let _ = res.get_or_insert(e);
@@ -751,9 +763,19 @@ impl PackCollection {
                     trail_idx,
                     section,
                 } => {
-                    let pack = &loaded_packs[pack_idx];
-                    let trail = &pack.active_trails[trail_idx];
-                    let info = &pack.pack.trails[trail.trail_idx];
+                    let trail = loaded_packs.get_index(pack_idx)
+                        .and_then(|(_, pack)| pack.active_trails.get_index(trail_idx)
+                            .and_then(|(_, trail)| pack.pack.trails.get(trail.trail_idx)
+                                .map(|info| (trail, info))
+                            )
+                        );
+                    let (trail, info) = match trail {
+                        Some(t) => t,
+                        None => {
+                            log::error!("Render ID refers to missing trail#{trail_idx} pack#{pack_idx} section#{section}");
+                            continue
+                        },
+                    };
                     if trail.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
                         continue
                     }
@@ -764,9 +786,19 @@ impl PackCollection {
                     trail.draw_section(device_context, section, LocalContext::World);
                 }
                 RenderId::Poi { pack_idx, poi_idx } => {
-                    let pack = &loaded_packs[pack_idx];
-                    let poi = &pack.active_pois[poi_idx];
-                    let info = &pack.pack.pois[poi.poi_idx];
+                    let poi = loaded_packs.get_index(pack_idx)
+                        .and_then(|(_, pack)| pack.active_pois.get_index(poi_idx)
+                            .and_then(|(_, poi)| pack.pack.pois.get(poi.poi_idx)
+                                .map(|info| (pack, poi, info))
+                            )
+                        );
+                    let (pack, poi, info) = match poi {
+                        Some(t) => t,
+                        None => {
+                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
+                            continue
+                        },
+                    };
                     if poi.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
                         continue
                     }
@@ -814,9 +846,19 @@ impl PackCollection {
                     trail_idx,
                     section,
                 } => {
-                    let pack = &loaded_packs[pack_idx];
-                    let trail = &pack.active_trails[trail_idx];
-                    let info = &pack.pack.trails[trail.trail_idx];
+                    let trail = loaded_packs.get_index(pack_idx)
+                        .and_then(|(_, pack)| pack.active_trails.get_index(trail_idx)
+                            .and_then(|(_, trail)| pack.pack.trails.get(trail.trail_idx)
+                                .map(|info| (trail, info))
+                            )
+                        );
+                    let (trail, info) = match trail {
+                        Some(t) => t,
+                        None => {
+                            log::error!("Render ID refers to missing trail#{trail_idx} pack#{pack_idx} section#{section}");
+                            continue
+                        },
+                    };
                     if trail.filtered || !info.attributes.is_visible_for_map(map.perspective) {
                         continue
                     }
@@ -835,9 +877,19 @@ impl PackCollection {
                     trail.draw_section(device_context, section, ctx);
                 }
                 RenderId::Poi { pack_idx, poi_idx } => {
-                    let pack = &loaded_packs[pack_idx];
-                    let poi = &pack.active_pois[poi_idx];
-                    let info = &pack.pack.pois[poi.poi_idx];
+                    let poi = loaded_packs.get_index(pack_idx)
+                        .and_then(|(_, pack)| pack.active_pois.get_index(poi_idx)
+                            .and_then(|(_, poi)| pack.pack.pois.get(poi.poi_idx)
+                                .map(|info| (pack, poi, info))
+                            )
+                        );
+                    let (pack, poi, info) = match poi {
+                        Some(t) => t,
+                        None => {
+                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
+                            continue
+                        },
+                    };
                     if poi.filtered || !info.attributes.is_visible_for_map(map.perspective) {
                         continue
                     }
