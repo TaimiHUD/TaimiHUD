@@ -3,7 +3,10 @@
 */
 
 use {
-    crate::{fl, marker::atomic::MarkerInputData},
+    crate::{
+        exports::runtime as rt,
+        fl,
+    },
     glam::Vec3,
     nexus::imgui::{ComboBox, InputFloat3, Selectable, StyleColor, Ui},
 };
@@ -158,8 +161,8 @@ impl PositionInput {
     }
     pub fn draw_take_current(&mut self, ui: &Ui) {
         if ui.button(&fl!("position-get")) {
-            if let Some(mid) = MarkerInputData::read() {
-                self.position = Some(mid.local_player_pos);
+            if let Ok(ml) = rt::mumble_link_ptr() {
+                self.position = Some(Vec3::from_array(ml.read_avatar().position));
             }
         }
     }

@@ -1,12 +1,16 @@
 #[cfg(feature = "markers")]
-use {crate::marker::atomic::MarkerInputData, crate::marker::format::MarkerSet};
+use crate::marker::format::MarkerSet;
 use {
     crate::{
         controller::ControllerEvent,
         fl,
         marker::format::MarkerType,
         marker_icon_data,
-        render::{MarkerWindowState, PrimaryWindowState, TimerWindowState},
+        render::{
+            machine::{RenderMachine, RenderTaskQueue},
+            MarkerWindowState, PrimaryWindowState,
+            TimerWindowState,
+        },
         exports::runtime as rt,
         settings::ProgressBarSettings,
         timer::{PhaseState, TextAlert, TimerFile},
@@ -54,6 +58,13 @@ pub enum RenderEvent {
     GiveMarkerPaths(Vec<PathBuf>),
     ProgressBarUpdate(ProgressBarSettings),
     Quit,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    UiMapOpen(taimi_meta::ui::MapOpen),
+    /// The buffer we were using has disappeared
+    #[cfg(feature = "goggles")]
+    UiDepthReleased(),
+    #[cfg(feature = "goggles")]
+    UiDepthAcquired(),
 }
 
 #[derive(Display, Default, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq)]
@@ -78,16 +89,19 @@ pub struct RenderState {
     timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
-    pub last_display_size: Option<[f32; 2]>,
     pub state_errors: HashMap<String, anyhow::Error>,
     #[cfg(feature = "extension-arcdps")]
     pub arc: super::ArcRenderState,
+    pub task_queue: RenderTaskQueue,
+    pub machine: RenderMachine,
 }
 
 impl RenderState {
     pub fn new(receiver: Receiver<RenderEvent>) -> Self {
         Self {
             receiver,
+            machine: RenderMachine::new(),
+            task_queue: Default::default(),
             alert: Default::default(),
             primary_window: PrimaryWindowState::new(),
             timer_window: TimerWindowState::new(),
@@ -97,7 +111,6 @@ impl RenderState {
             marker_window: MarkerWindowState::new(),
             #[cfg(feature = "space")]
             pathing_window: PathingWindowState::new(),
-            last_display_size: Default::default(),
             state_errors: Default::default(),
             #[cfg(feature = "extension-arcdps")]
             arc: Default::default(),
@@ -106,17 +119,6 @@ impl RenderState {
 
     fn draw(&mut self, ui: &Ui) -> bool {
         let io = ui.io();
-        if let Some(last_display_size) = self.last_display_size {
-            if io.display_size != last_display_size {
-                #[cfg(feature = "markers")]
-                MarkerInputData::from_render(io.display_size.into());
-                self.last_display_size = Some(io.display_size);
-            }
-        } else {
-            #[cfg(feature = "markers")]
-            MarkerInputData::from_render(io.display_size.into());
-            self.last_display_size = Some(io.display_size);
-        }
         match self.receiver.try_recv() {
             Ok(event) => {
                 use RenderEvent::*;
@@ -175,6 +177,20 @@ impl RenderState {
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(timer);
                     }
+                    #[cfg(any(feature = "markers", feature = "space"))]
+                    UiMapOpen(open) => {
+                        if self.machine.set_map_open(open) {
+                            self.machine.act_map_open();
+                        }
+                    },
+                    #[cfg(feature = "goggles")]
+                    UiDepthReleased() => {
+                        self.machine.turn_depth_event(false);
+                    },
+                    #[cfg(feature = "goggles")]
+                    UiDepthAcquired() => {
+                        self.machine.turn_depth_event(true);
+                    },
                     Quit => {
                         self.quit();
                         return false;
@@ -186,7 +202,7 @@ impl RenderState {
         self.handle_alert(ui, io);
         self.timer_window.draw(ui);
         self.primary_window
-            .draw(ui, &mut self.timer_window, &mut self.state_errors);
+            .draw(ui, &mut self.machine, &mut self.timer_window, &mut self.state_errors);
         #[cfg(feature = "markers")]
         self.marker_window.draw(ui);
         #[cfg(feature = "markers-edit")]

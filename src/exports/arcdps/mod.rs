@@ -1,23 +1,20 @@
 use {
+    anyhow::Context,
     arcdps::{
         extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
         Language,
     },
-    arcloader_mumblelink::{
-        gw2_mumble::{LinkedMem, MumbleLink},
-        identity::MumbleIdentity,
-    },
+    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
     crate::{
         exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}},
         game_language_id,
         marker::format::MarkerType,
-        render::RenderState,
+        render::{machine::RenderMachine, RenderState},
         settings::{ArcSettings, ArcUpdatePreference, GitHubSource, GitHubLatestRelease, Settings},
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
     std::{
-        cell::RefCell,
         collections::BTreeMap,
         ffi::{c_void, CStr, OsStr},
         fmt::{self, Write},
@@ -38,9 +35,9 @@ use {
     },
 };
 #[cfg(feature = "space")]
-use crate::space::{
-    engine::{Engine, SpaceEvent},
-    MapContext,
+use {
+    crate::space::engine::{Engine, SpaceEvent},
+    taimi_meta::ui::MapContext,
 };
 #[cfg(feature = "extension-arcdps-extern")]
 use {
@@ -346,28 +343,6 @@ pub fn is_ingame() -> Option<bool> {
 
 static MUMBLE_LINK: Mutex<Option<MumbleLink>> = Mutex::new(None);
 
-thread_local! {
-    static MUMBLE_IDENTITY: RefCell<MumbleIdentity> = RefCell::new(MumbleIdentity::new());
-}
-
-fn update_mumble_link() {
-    let ml = match rt::mumble_link_ptr() {
-        Ok(ml) => ml,
-        _ => return,
-    };
-
-    let update = MUMBLE_IDENTITY.with_borrow_mut(|identity| {
-        match identity.update(&ml) {
-            true => Some((*identity.identity).clone()),
-            false => None,
-        }
-    });
-
-    if let Some(update) = update {
-        crate::receive_mumble_identity(update);
-    }
-}
-
 #[cfg(todo)]
 pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
     match () {
@@ -381,17 +356,14 @@ pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
 fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     let available = available();
 
-    if available {
-        update_mumble_link();
-    }
-
     IS_INGAME.store(not_charsel_loading, Ordering::Relaxed);
 
     if !available { return }
 
-    #[cfg(feature = "space")] {
-        crate::render_space(ui);
-    }
+    RenderMachine::turn_ui_entry(ui);
+
+    #[cfg(feature = "space")]
+    RenderMachine::turn_render_entry();
 
     RenderState::render_ui(ui);
 }
@@ -1152,7 +1124,12 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
             //rt::keyboard::send_key_combo(input)
         },
         Key::Mouse(button) => {
-            let button = KeyState::try_from(button)?;
+            let button = KeyState::try_from(button)
+                .context("Unsupported mouse key")
+                .map_err(|e| {
+                    log::warn!("{e:#}");
+                    "Unsupported mouse key"
+                })?;
             let pos = match position {
                 Some(p) => p,
                 None => rt::screen_mouse_position()?,

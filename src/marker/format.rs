@@ -8,6 +8,7 @@ use {
     arcdps::extras::Control,
     chrono::{DateTime, Utc},
     glam::Vec3,
+    glamour::Point3,
     glob::Paths,
     nexus::{gamebind::GameBind, imgui::Ui},
     ordered_float::OrderedFloat,
@@ -20,6 +21,7 @@ use {
         sync::Arc,
     },
     strum_macros::{Display, EnumIter, FromRepr},
+    taimi_meta::coords::LocalSpace,
     tokio::{
         fs::{create_dir_all, read_to_string, File, OpenOptions},
         io::AsyncWriteExt,
@@ -498,7 +500,7 @@ pub struct MarkerEntry {
     pub position: MarkerPosition,
 }
 
-#[derive(Hash, Eq, PartialEq, Serialize, Deserialize, Debug, Clone)]
+#[derive(Hash, Eq, PartialEq, Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct MarkerPosition {
     pub x: OrderedFloat<f32>,
     pub y: OrderedFloat<f32>,
@@ -506,6 +508,12 @@ pub struct MarkerPosition {
 }
 
 impl From<MarkerPosition> for Vec3 {
+    // it's pre-swizzled
+    fn from(local: MarkerPosition) -> Self {
+        Point3::<LocalSpace>::from(local).to_raw()
+    }
+}
+impl From<MarkerPosition> for Point3<LocalSpace> {
     // it's pre-swizzled
     fn from(local: MarkerPosition) -> Self {
         Self::new(*local.x, *local.z, *local.y)

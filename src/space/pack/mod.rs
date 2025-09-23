@@ -26,7 +26,7 @@ pub use {
     },
 };
 
-pub type PackSpace = crate::marker::atomic::LocalSpace;
+pub type PackSpace = taimi_meta::coords::LocalSpace;
 
 pub trait MarkerAttributesExt {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>>;

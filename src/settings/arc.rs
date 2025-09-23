@@ -1,5 +1,4 @@
 use {
-    anyhow::anyhow,
     crate::settings::Settings,
     std::{collections::HashMap, fmt},
     serde::{Serialize, Deserialize},

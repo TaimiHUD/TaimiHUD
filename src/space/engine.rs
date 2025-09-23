@@ -1,27 +1,33 @@
 use {
     crate::{
         controller::ControllerEvent,
-        exports::runtime as rt,
-        marker::atomic::MarkerInputData,
+        render::machine::RenderMachine,
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
-            dx11::{PerspectiveInputData, RenderBackend},
+            dx11::RenderBackend,
             pack::PackCollection,
-            MapContext, MapTarget,
+            render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
         Controller,
     },
-    anyhow::Context,
+    anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::{Vec3, Vec4},
-    nexus::imgui::Ui,
+    glamour::Size2,
     std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
         sync::Arc,
     },
     taimi_d3d::dx11::prelude::*,
+    taimi_meta::{
+        coords::ScreenSpace,
+        ui::{
+            gameplay::{GameplayState, GameplayTransition},
+            MapContext, MapOpen,
+        },
+    },
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 #[cfg(feature = "space-ecs")]
@@ -63,6 +69,7 @@ struct MarkerBundle {
     render: Render,
 }
 
+#[derive(strum::IntoStaticStr)]
 pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
@@ -74,7 +81,11 @@ pub enum SpaceEvent {
         loader: super::pack::LoaderBox,
     },
     PackUnloadAll,
-    GameplayStatus(Option<bool>),
+    GameplayStatus {
+        gameplay: GameplayState,
+        trans: GameplayTransition,
+    },
+    UiResize(Option<Size2<ScreenSpace>>),
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -108,10 +119,6 @@ pub struct Engine {
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
 
-    mumble_link_frame: u32,
-    mumble_link_playpos: Vec3,
-    pub rtapi: Option<rt::RealTimeApi>,
-    pub gameplay_map: Result<NonZeroU32, u32>,
     #[cfg(feature = "goggles")]
     goggles_select_lens_delay: Option<(u32, bool)>,
 
@@ -127,8 +134,11 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
-        let render_backend = RenderBackend::setup(ui.io().display_size.into())
+    pub fn initialise(machine: &RenderMachine, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
+        let display_size = machine.display_size()
+            .ok_or_else(|| anyhow!("display size unknown"))?;
+
+        let render_backend = RenderBackend::setup(display_size)
             .context("Failed to set up render backend")?;
 
         #[cfg(feature = "space-ecs")]
@@ -159,26 +169,7 @@ impl Engine {
             .context("Initializing packs")?;
         Controller::try_send(ControllerEvent::PathingLoadAll);
 
-        let rtapi = Self::rtapi_open();
-        #[cfg(feature = "extension-nexus")]
-        match &rtapi {
-            Ok(Some(rtapi)) if !rtapi.is_active() =>
-                log::info!("RTAPI unavailable"),
-            Ok(Some(..)) =>
-                log::info!("Using RTAPI as perspective data source"),
-            Err(e) => {
-                // TODO: listen for events in case it gets loaded later or something
-                log::debug!("{e:#}");
-            },
-            _ => (),
-        }
-        let rtapi = rtapi.ok().flatten();
-
         let engine = Engine {
-            mumble_link_frame: 0,
-            mumble_link_playpos: Vec3::ZERO,
-            rtapi,
-            gameplay_map: Err(0),
             #[cfg(feature = "space-ecs")]
             model_files,
             receiver,
@@ -211,6 +202,64 @@ impl Engine {
             ));
         }
         Ok(engine)
+    }
+
+    pub fn init_mut<F>(machine: &mut RenderMachine, f: F) -> anyhow::Result<()> where
+        F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
+    {
+        let enabled = Settings::try_read()
+            .map(|s| s.enable_katrender);
+
+        let mut engine = match crate::ENGINE.try_lock() {
+            Ok(e) if e.is_none() && (machine.gameplay.is_initial() || !enabled.unwrap_or(false)) => {
+                // if early game loading or charsel, delay init
+                // TODO: make this an option, but have fallback plan if you cause crashes...
+                return Ok(())
+            },
+            Ok(e) => e,
+            _ => return Ok(()),
+        };
+        let mut res = None;
+        let engine = engine.get_or_insert_with(|| {
+            log::debug!("setting up space engine...");
+            let (tx, rx) = tokio::sync::mpsc::channel::<SpaceEvent>(64);
+            // TODO: remove this...
+            let _ = tx.try_send(SpaceEvent::GameplayStatus {
+                gameplay: machine.gameplay,
+                trans: machine.gameplay.latest_transition(),
+            });
+            match crate::SPACE_SENDER.write().map_err(|_| anyhow!("space sender poisoned?")) {
+                Ok(mut sender) =>
+                    *sender = Some(tx),
+                Err(e) => {
+                    res = Some(e);
+                    return Err(())
+                },
+            }
+            let res = Self::initialise(machine, rx)
+                .context("Space engine setup failed")
+                .map_err(|e| {
+                    res = Some(e);
+                    ()
+                });
+            #[cfg(feature = "extension-nexus")]
+            if res.is_ok() {
+                machine.rtapi_setup();
+            }
+            #[cfg(feature = "goggles")]
+            if let Ok(e) = &res {
+                goggles::classify_space_lens(e);
+            }
+            res
+        });
+        if let Some(e) = res {
+            return Err(e)
+        }
+        match engine {
+            Ok(..) if !enabled.unwrap_or(true) => Ok(()),
+            Ok(e) => f(e, machine),
+            Err(..) => Ok(())
+        }
     }
 
     pub fn new_phase(&mut self, phase_state: PhaseState) -> anyhow::Result<()> {
@@ -277,8 +326,17 @@ impl Engine {
         self.phase_states.clear();
     }
 
-    pub fn process_event(&mut self) -> anyhow::Result<()> {
-        match self.receiver.try_recv() {
+    pub fn stop(&mut self) {
+        self.packs.clear_active();
+        self.packs.clear();
+    }
+
+    pub fn process_event(&mut self) -> anyhow::Result<bool> {
+        let ev = self.receiver.try_recv();
+        if let Ok(ev) = &ev {
+            log::trace!("recv SpaceEvent::{}", <&str>::from(ev));
+        }
+        match ev {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
@@ -324,32 +382,57 @@ impl Engine {
                         log::info!("Unloading all paths...");
                         self.packs.clear();
                     },
-                    GameplayStatus(is_gameplay) => {
-                        log::trace!("GameplayStatus({is_gameplay:?})");
-                        let mut pdata = PerspectiveInputData::cloned();
-                        let is_gameplay = match is_gameplay {
-                            #[cfg(todo = "unnecessary")]
-                            Some(false) if self.gameplay_map.is_err() => None,
-                            #[cfg(todo = "unnecessary")]
-                            Some(true) if self.gameplay_map.is_ok() => None,
-                            is_gameplay => Some(is_gameplay),
-                        };
-                        if let Some(is_gameplay) = is_gameplay {
-                            if pdata.is_gameplay != is_gameplay {
-                                pdata.is_gameplay = is_gameplay;
-                                pdata.commit();
-                            }
-                        }
+                    GameplayStatus { gameplay, trans } => {
+                        let device_context =
+                            unsafe { self.render_backend.device.GetImmediateContext() }
+                            .context("I lost my context!");
+                        match gameplay {
+                            GameplayState::Gameplay { map_id: Some(new_map_id) } => {
+                                let prev = match trans {
+                                    GameplayTransition::Map { prev_map_id, .. } => prev_map_id,
+                                    GameplayTransition::Loaded { prev_map_id, .. } => prev_map_id,
+                                    GameplayTransition::Intermission { prev_map_id } => prev_map_id,
+                                };
+                                log::debug!("{}entering map {new_map_id}", if prev == Some(new_map_id) { "re-" } else { "" });
+                                self.gameplay_map_enter(&device_context?, new_map_id)
+                            },
+                            GameplayState::Gameplay { map_id: None } => {
+                                log::info!("how do we know we loaded into a null map from {trans:?} to {gameplay:?}?");
+                                Ok(())
+                            },
+                            GameplayState::Intermission { prev_map_id: Some(prev), next_map_id: None, initial: false } => {
+                                log::debug!("leaving map {prev}");
+                                self.goggles_exit();
+                                //self.gameplay_map_exit(&device_context?, prev)
+                                Ok(())
+                            },
+                            GameplayState::Intermission { prev_map_id: Some(prev), next_map_id: Some(next), initial: false } => {
+                                if prev != next {
+                                    log::info!("forget about previous map {prev}, prepare for {next}!");
+                                    self.gameplay_map_exit(&device_context?, prev)
+                                } else {
+                                    Ok(())
+                                }
+                            },
+                            _ => Ok(()),
+                        }.with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))?;
+                    },
+                    UiResize(display_size) => match display_size {
+                        None => {
+                        },
+                        Some(sz) => {
+                            log::debug!("TODO: resize event to {sz:?}");
+                        },
                     },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
                         .context("marker remove phase")?,
                 }
+                Ok(true)
             }
-            Err(_error) => (),
+            Err(_error) => Ok(false),
         }
-        Ok(())
     }
 
     #[allow(dead_code)]
@@ -357,15 +440,22 @@ impl Engine {
         todo!("this is supposed to terminate a phase when there are no more markers, ideally we should actually make something that finds the latest timestamp between sounds, directions, markers, alerts etc");
     }
 
-    pub fn render(&mut self, ui: &Ui) -> anyhow::Result<()> {
+    pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
+        let display_size = machine.display_size()
+            .ok_or_else(|| anyhow!("display size unknown"))?;
+
+        let map_ctx = machine.is_map_visible();
+        let map_id = machine.is_ingame();
         let (
             visible_space,
-            _camera_source,
+            visible_map,
+            camera_source,
             edge_feather_scale,
             (edge_scale, _obscured_alpha),
         ) = self.map_settings(|s| (
             (
-                s.space.visible_space().then_some(s.space.distance_max()),
+                map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
+                map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
                 s.space.edge_feather_scale(),
                 match () {
@@ -376,270 +466,95 @@ impl Engine {
                 },
             )
         ));
-        let display_size = ui.io().display_size;
-        self.process_event()
-            .context("render engine event processing failure")?;
+        for _ in 0..5 {
+            // try to get a couple events out of the way at a time
+            // (would be nice to batch pack loads)
+            let processed = self.process_event()
+                .context("render engine event processing failure")?;
+            if !processed {
+                break
+            }
+        }
         self.schedule.run(&mut self.world);
 
-        let mut map_data = MarkerInputData::read().map(Arc::unwrap_or_clone);
-        let mut marker_dirty = false;
-
-        let mut pdata = PerspectiveInputData::cloned();
-        let mut is_gameplay = pdata.is_gameplay;
-        #[cfg(todo = "unnecessary")]
-        let mut is_gameplay = match self.gameplay_map {
-            Err(0) => None,
-            Err(..) => Some(false),
-            Ok(..) => Some(true),
-        };
-        let mut pdata_dirty = false;
-        let mut mumble_tick_updated_playpos = false;
-        let ml = self.mumble_link_frame();
-        let mumble_link_frameskip = matches!(ml, Ok(None));
-        if let Ok(Some(ml)) = &ml {
-            let ui_state = ml.read_ui_state();
-            pdata_dirty |= pdata.ui_state != ui_state;
-            pdata.ui_state = ui_state;
-
-            if let Some(map_data) = &mut map_data {
-                map_data.update_with_mumble_ptr_context(ml, ui_state);
-                marker_dirty = true;
-            }
-
-            let playpos = Vec3::from_array(ml.read_avatar().position);
-            mumble_tick_updated_playpos = !rt::vec_eq(self.mumble_link_playpos, playpos);
-            if mumble_tick_updated_playpos {
-                pdata_dirty = true;
-                pdata.playpos = playpos;
-                self.mumble_link_playpos = playpos;
-                if let Some(map_data) = &mut map_data {
-                    map_data.local_player_pos = playpos;
-                }
-                // TODO: move this to renderstate and notify controller of player tick?
-            }
-
-            let (camera_pos, camera_front) = {
-                let camera = ml.read_camera();
-                (
-                    Vec3::from_array(camera.position),
-                    Vec3::from_array(camera.front),
-                )
-            };
-
-            pdata_dirty = pdata_dirty || !rt::vec_eq(pdata.pos, camera_pos) || !rt::vec_eq(pdata.front, camera_front);
-            pdata.front = camera_front;
-            pdata.pos = camera_pos;
-
-            if is_gameplay == Some(false) {
-                pdata_dirty = pdata_dirty || !rt::vec_eq(pdata.front, Vec3::Y);
-                pdata.front = Vec3::Y;
-            }
-        }
-        #[cfg(feature = "extension-nexus")]
-        if let Some(rtapi) = self.rtapi.as_ref().and_then(|rtapi| rtapi.is_active().then_some(rtapi)) {
-            use {
-                crate::settings::pathing::CameraSource,
-                nexus::rtapi::GameState,
-                std::ptr,
-            };
-
-            let mumble_ticked = pdata_dirty;
-            let rtapi_camera = !mumble_ticked || _camera_source == CameraSource::RealTimeAPI;
-
-            let player = (rtapi_camera || !mumble_tick_updated_playpos)
-                .then(|| (
-                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_position) }),
-                    unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_facing) },
-                ));
-            if let Some((player_pos, player_front)) = player {
-                if rt::f32_bits(player_front) != [0u32; 3] {
-                    pdata.playpos = player_pos;
-                    pdata_dirty = true;
-                    if let Some(map_data) = &mut map_data {
-                        map_data.local_player_pos = player_pos;
-                        marker_dirty = true;
-                    }
-                }
-            }
-
-            let ingame = rtapi.read_game().and_then(|game| match game.game_state {
-                Ok(GameState::Gameplay) =>
-                    Some(true),
-                Ok(GameState::LoadingScreen | GameState::CharacterSelection | GameState::CharacterCreation) =>
-                    Some(false),
-                Ok(GameState::Cinematic) => {
-                    Some(false)
-                },
-                Err(_) => None,
-            });
-            // TODO: rtapi.map_id
-            if let Some(ingame) = ingame {
-                is_gameplay = Some(ingame);
-            }
-
-            let needs_fov = pdata.fov == 0.0;
-            let camera = (ingame != Some(false) && (rtapi_camera || needs_fov))
-                .then(|| (
-                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position) }),
-                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing) }),
-                    unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_fov) },
-                ));
-            if let Some((camera_pos, camera_front, camera_fov)) = camera {
-                if rtapi_camera && rt::vec_bits(camera_front) != [0u32; 3] {
-                    if mumble_link_frameskip && _camera_source != CameraSource::RealTimeAPI {
-                        const SMOOTHING_FACTOR: f32 = 0.215;
-                        pdata.front = pdata.front.slerp(camera_front, SMOOTHING_FACTOR).normalize();
-                        //pdata.front = pdata.front.rotate_towards(camera_front, turn * SMOOTHING_FACTOR).normalize();
-                        pdata.pos = pdata.pos.lerp(camera_pos, SMOOTHING_FACTOR);
-                    } else {
-                        pdata.front = camera_front;
-                        pdata.pos = camera_pos;
-                    }
-                    pdata_dirty = true;
-                }
-                if camera_fov.to_bits() != 0u32 {
-                    pdata.fov = camera_fov;
-                    pdata_dirty = true;
-                }
-            }
-        }
-        #[cfg(todo)]
-        match &ml {
-            Ok(None) =>
-                log::debug!("MumbleLink tick {} was not synchronized with render framerate?", self.mumble_link_frame),
-            _ => (),
-        }
-        pdata_dirty |= pdata.is_gameplay != is_gameplay;
-        pdata.is_gameplay = is_gameplay;
-        if pdata_dirty {
-            pdata.clone().commit();
-        }
-        if let Some(map_data) = &map_data {
-            if marker_dirty {
-                map_data.clone().commit()
-            }
-        }
-
-        #[cfg(todo = "unnecessary")]
-        #[cfg(feature = "goggles")]
-        if is_gameplay == Some(false) {
-            self.goggles_exit();
-        }
-
-        let display_size = display_size.into();
-        self.render_backend.prepare(display_size);
         let device_context =
             unsafe { self.render_backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
 
-        let map_id = map_data.as_ref().map(|mid| NonZeroU32::new(mid.map_id));
-        let map_res = match (self.gameplay_map, pdata.is_gameplay, map_id) {
-            (Ok(map_id), Some(true), Some(Some(new_map_id))) => {
-                if new_map_id != map_id {
-                    log::info!("map changed from {map_id} to {new_map_id} without a loading screen?");
-                    self.gameplay_map_enter(&device_context, new_map_id)
-                } else { Ok(()) }
-            },
-            (Ok(prev), Some(false), _) => {
-                log::debug!("leaving map {prev}");
-                self.gameplay_map_exit(&device_context, prev)
-            },
-            (Err(_prev), Some(false), Some(None)) => {
-                log::debug!("forgetting about previous map {_prev}");
-                self.gameplay_map = Err(0);
-                Ok(())
-            },
-            (Err(prev), Some(true), Some(Some(map_id))) => {
-                log::debug!("{}entering map {map_id}", if prev == map_id.get() { "re-" } else { "" });
-                self.gameplay_map_enter(&device_context, map_id)
-            },
-            (Err(prev), Some(false), Some(Some(map_id))) if map_id.get() != prev => {
-                log::trace!("map changed to {map_id} but not in game yet...");
-                Ok(())
-            },
-            // waiting for map info...
-            (_, None, _) | (_, _, None) | (_, Some(true), Some(None)) => Ok(()),
-            _ => Ok(()),
-        };
-        if let Err(e) = map_res {
-            log::error!("Map error: {e:#}");
+        if map_id.is_none() {
+            return Ok(())
         }
 
+        self.packs.prepare(&self.render_backend.device, machine)?;
         self.packs.update();
-
-        let map_ctx = map_data.as_ref().map(|mid| mid.perspective);
-        let (
-            visible_map,
-        ) = self.map_settings(|s| (
-            (
-                map_ctx.map(|ctx| s.space.visible_map(ctx)),
-            )
-        ));
 
         match (edge_scale, self.render_backend.depth_handler.fill_edge.is_none()) {
             (None, false) => {
                 let _ = self.render_backend.depth_handler.fill_edge.take();
             },
             (Some(edge_scale), true) => {
-                self.render_backend.depth_handler.regen_edge(&self.render_backend.device, Some(edge_scale));
+                self.render_backend.depth_handler.regen_edge(&self.render_backend.device, Some((edge_scale, &machine.map.calibration)));
             },
             _ => (),
         }
 
-        let ingame = self.gameplay_map.is_ok();
-        let render_map = match visible_map.unwrap_or(ingame) && pdata.is_gameplay.unwrap_or(ingame) {
-            true => map_data.as_ref().map(|data| MapTarget::new(data)),
+        let render_map = match visible_map {
+            Some(true) => map_ctx.map(|ctx| (ctx, super::dx11::PerspectiveHandler::map_local_bounds(machine))),
             _ => None,
         };
         let render_world = match visible_space {
-            Some(distance_max) if pdata.world_visible() =>
-                Some(self.packs.update_for_draw(&pdata, distance_max, &mut self.render_backend)),
-            _ => None,
+            None => None,
+            Some(..) if machine.get_map_open_state().is_visible() =>
+                None,
+            Some(distance_max) => {
+                let depth = machine.get_depth_range()
+                    .unwrap_or(RenderMachine::DEFAULT_DEPTH_RANGE);
+                let camera = machine.get_camera(camera_source);
+                let cull = MapFrustum::from_camera_data(
+                    camera,
+                    // TODO: machine.get_aspect_ratio(),
+                    depth.start..depth.end.min(distance_max),
+                );
+                Some((camera, depth, cull))
+            },
         };
 
         let perspective_slot = 0;
         self.render_backend.blend_state.set(&device_context);
 
         let minimap_bounds = match &render_map {
-            Some(map) if matches!(map.perspective, MapContext::Minimap) => Some(map.bounds_screen),
-            Some(..) => None,
-            None => map_data.as_ref()
-                .and_then(|map_data| match map_data.perspective {
-                    MapContext::Minimap => Some({
-                        use glamour::{Box2, TransformMap};
+            Some((map_ctx, ..)) if matches!(map_ctx, MapContext::Global) => None,
+            _ => Some({
+                use glamour::{Box2, TransformMap};
 
-                        let bounds = map_data.fakespace_minimap_bound();
-                        let trans = map_data.screen_to_fake().inverse();
-                        Box2::new(
-                            trans.map(bounds.min()),
-                            trans.map(bounds.max()),
-                        )
-                    }),
-                    _ => None,
-                }),
+                let bounds = machine.map.calibration.compass_bounds();
+                Box2::from(machine.map.calibration.map(bounds))
+            }),
         };
 
         let distance_max = visible_space
             .unwrap_or(SpaceSettings::DEFAULT_DISTANCE_MAX);
-        self.render_backend.depth_handler.setup(&device_context, distance_max);
+        self.render_backend.depth_handler.setup(&device_context, machine, distance_max);
 
         if let Some(minimap_bounds) = &minimap_bounds {
             self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
         }
 
-        if let Some(map) = &render_map {
+        if let Some((map_ctx, local_bounds)) = render_map {
             let (
+                fwoom,
                 trail_textured,
                 trail_scale,
                 trail_alpha,
                 poi_scale,
                 poi_alpha,
             ) = self.map_settings(|s| (
-                s.space.trail_textured_map(map.perspective),
-                s.space.trail_scale_map(map.perspective),
-                s.space.trail_alpha_map(map.perspective),
-                s.space.poi_scale_map(map.perspective),
-                s.space.poi_alpha_map(map.perspective),
+                s.space.map_open(),
+                s.space.trail_textured_map(map_ctx),
+                s.space.trail_scale_map(map_ctx),
+                s.space.trail_alpha_map(map_ctx),
+                s.space.poi_scale_map(map_ctx),
+                s.space.poi_alpha_map(map_ctx),
             ));
             {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_mapv_data;
@@ -649,25 +564,31 @@ impl Engine {
                 // TODO: cpbuffer per type? just mixing them together for now...
                 let alpha = trail_alpha * poi_alpha;
                 let pdata = &mut self.render_backend.perspective_handler.constant_buffer_mapp_data;
-                pdata.colour.w = alpha;
+                let map_open = machine.map_open();
+                pdata.colour.w = match map_open.progress_open().map(|p| p / 0.8) {
+                    Some(p) if p < 1.0 => alpha * p * p * if fwoom { 1.0 } else { p },
+                    _ => alpha,
+                };
             }
 
             if trail_alpha > 0.0 || poi_alpha > 0.0 {
                 let backend = &mut self.render_backend;
-                backend.perspective_handler.update_map(map);
+                backend.perspective_handler.update_map(machine, local_bounds, fwoom);
 
                 backend.perspective_handler.update_map_cb(&device_context);
 
-                backend.depth_handler.setup_map(&device_context, map);
+                backend.depth_handler.setup_map(&device_context);
                 backend.perspective_handler.set_map_cb(&device_context, perspective_slot);
 
-                let entities = self.packs.entities_map(map);
-                PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map, entities);
+                let entities = self.packs.entities_map(local_bounds);
+                PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map_ctx, entities);
             }
         }
 
         #[cfg(feature = "goggles")]
-        let goggles_2pass = goggles::is_enabled() && _obscured_alpha > 0.0;
+        let goggles_enabled = goggles::is_enabled();
+        #[cfg(feature = "goggles")]
+        let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
         let masking = minimap_bounds.is_some() || edge_scale.is_some();
         let masking = match render_world.is_some() && masking {
@@ -742,7 +663,7 @@ impl Engine {
             }
         }
 
-        if let Some(context) = &render_world {
+        if let Some((camera, ref _depth, ref cull)) = render_world {
             let (
                 overlap_threshold,
                 distance_intensity,
@@ -773,8 +694,8 @@ impl Engine {
                 pdata.set_intensity(distance_intensity);
             }
 
-            self.render_backend.perspective_handler.update_perspective(Vec3::splat(expand.y + 1.0));
-            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale);
+            self.render_backend.perspective_handler.update_perspective(machine, camera, Vec3::splat(expand.y + 1.0));
+            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale, display_size);
 
             #[cfg(feature = "goggles")]
             if goggles_2pass {
@@ -784,7 +705,7 @@ impl Engine {
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
-                let entities = self.packs.entities_obscured(context);
+                let entities = self.packs.entities_obscured(cull);
                 PackCollection::draw_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, entities);
 
                 backend.depth_handler.set_state_obscured(&device_context, false);
@@ -794,22 +715,28 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
-                self.packs.draw(&pdata, context, &self.render_backend, &device_context);
+                self.packs.draw(camera.clone(), cull, &self.render_backend, &device_context);
             }
         }
 
+        self.render_backend.shaders.unset(&device_context);
+
         #[cfg(feature = "goggles")]
-        match self.goggles_select_lens_delay {
-            _ if is_gameplay != Some(true) => (),
-            Some((0, force)) if render_world.is_some() => {
-                self.goggles_start(force);
-                let _ = self.goggles_select_lens_delay.take();
-            },
-            Some((ref mut ticks, ..)) if !mumble_link_frameskip => {
-                let amt = if mumble_tick_updated_playpos { 6 } else { 1 };
-                *ticks = ticks.saturating_sub(amt);
-            },
-            _ => (),
+        if let Some(map_id) = map_id {
+            let goggles_tick = self.goggles_select_lens_delay.as_mut()
+                .map(|(d, f)| (d, *f, map_id));
+            match goggles_tick {
+                _ if machine.map_open ^ machine.map_open_timestamp.is_some() => (),
+                Some((0, force, map_id)) if render_world.is_some() => {
+                    self.goggles_start(machine, force, Some(map_id));
+                    let _ = self.goggles_select_lens_delay.take();
+                },
+                Some((ticks, ..)) => if let Some(ui_tick) = machine.ui_tick() {
+                    let amt = if ui_tick.is_player() { 6 } else { 1 };
+                    *ticks = ticks.saturating_sub(amt);
+                },
+                _ => (),
+            }
         }
 
         match self.settings_dirty.then(Settings::try_write) {
@@ -855,19 +782,13 @@ impl Engine {
     }
 
     pub fn gameplay_map_exit(&mut self, device_context: &Dx11Context, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
-        self.goggles_exit();
-
         let res = self.packs.unload_map(device_context, prev_map_id.get());
-
-        self.gameplay_map = Err(prev_map_id.get());
 
         res
     }
 
     pub fn gameplay_map_enter(&mut self, device_context: &Dx11Context, map_id: NonZeroU32) -> anyhow::Result<()> {
         let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
-
-        self.gameplay_map = Ok(map_id);
 
         self.goggles_enter(true);
 
@@ -979,50 +900,11 @@ impl Engine {
         }
     }
 
-    fn mumble_link_frame(&mut self) -> rt::RuntimeResult<Option<rt::MumblePtr>> {
-        let ml = rt::mumble_link_ptr();
-        ml.and_then(|ml| match ml.read_ui_tick() {
-            0 => Err(rt::RT_UNAVAILABLE),
-            tick if tick == self.mumble_link_frame => {
-                Ok(None)
-            },
-            tick => {
-                self.mumble_link_frame = tick;
-                Ok(Some(ml))
-            },
-        })
-    }
-
-    pub fn rtapi_open() -> anyhow::Result<Option<rt::RealTimeApi>> {
-        let rtapi = rt::rtapi()
-            .map_err(anyhow::Error::msg)
-            .context("RTAPI unavailable");
-        match rtapi {
-            #[cfg(not(feature = "extension-nexus"))]
-            Err(_) => Ok(None),
-            res => res,
-        }
-    }
-
-    pub fn rtapi_init(&mut self) -> anyhow::Result<bool> {
-        if self.rtapi.is_none() {
-            self.rtapi = Self::rtapi_open()?;
-        }
-
-        let active = self.rtapi.as_ref()
-            .map(|rtapi| rtapi.is_active());
-
-        Ok(active.unwrap_or(false))
-    }
-
     #[cfg(feature = "goggles")]
     const GOGGLES_START_DELAY_TICKS: u32 = 8 * 6;
     pub fn goggles_enter(&mut self, _force: bool) {
-        #[cfg(feature = "goggles")]
-        {
-            // fastload or early notifications can throw off the lens selection...
-            self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, _force));
-        }
+        // fastload or early notifications can throw off the lens selection...
+        self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, _force));
     }
     pub fn goggles_exit(&mut self) {
         #[cfg(feature = "goggles")]
@@ -1033,13 +915,12 @@ impl Engine {
     }
 
     #[cfg(feature = "goggles")]
-    fn goggles_start(&mut self, force: bool) {
+    fn goggles_start(&mut self, machine: &mut RenderMachine, force: bool, map_id: Option<NonZeroU32>) {
         use crate::{
             render::goggles as render_goggles,
             space,
         };
 
-        let map_id = self.gameplay_map.ok();
         let settings = self.map_settings_ref(|s| s.map(|s| (
             s.space.goggles.enabled(),
             map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get()))
@@ -1053,8 +934,7 @@ impl Engine {
             goggles::pick_lens(force);
 
             if let Some((min, max)) = depth {
-                space::set_min_depth(space::MIN_DEPTH * min);
-                space::set_max_depth(space::MAX_DEPTH * max);
+                machine.depth_range = Some(space::MIN_DEPTH*min..space::MAX_DEPTH*max);
             }
         }
     }

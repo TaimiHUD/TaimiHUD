@@ -12,9 +12,9 @@ use {
     windows::Win32::UI::Input::KeyboardAndMouse,
 };
 #[cfg(feature = "space")]
-use crate::space::{
-    engine::{Engine, SpaceEvent},
-    MapContext,
+use {
+    crate::space::engine::{Engine, SpaceEvent},
+    taimi_meta::ui::MapContext,
 };
 
 #[derive(Debug, Clone, Default)]

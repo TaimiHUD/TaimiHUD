@@ -3,19 +3,14 @@ use {
         controller::MarkerSaveEvent,
         exports::runtime as rt,
         fl,
-        marker::{
-            atomic::MarkerInputData,
-            format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
-        },
+        marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
         util::{ComboInput, PositionInput, UiExt},
         ControllerEvent, Controller, ACCOUNT_NAME_CELL,
     },
     glam::Vec3,
-    nexus::{
-        imgui::{
+    nexus::imgui::{
             ComboBox, Id, PopupModal, Selectable, TableColumnFlags, TableColumnSetup, TableFlags,
             Ui, Window,
-        },
     },
     std::{f32, mem, path::PathBuf},
     strum::IntoEnumIterator,
@@ -275,8 +270,8 @@ impl EditMarkerWindowState {
                     _ => "".to_string(),
                 },
             };
-            let map_id = if let Some(mid) = MarkerInputData::read() {
-                mid.map_id as i32
+            let map_id = if let Ok(ml) = rt::mumble_link_ptr() {
+                ml.read_map_id() as i32
             } else {
                 Default::default()
             };
@@ -307,8 +302,8 @@ impl EditMarkerWindowState {
                     let map_id_input = ui.input_int(&map_id_name, &mut self.map_id);
                     map_id_input.build();
                     if ui.button(&fl!("set-map-id")) {
-                        if let Some(mid) = MarkerInputData::read() {
-                            self.map_id = mid.map_id as i32;
+                        if let Ok(ml) = rt::mumble_link_ptr() {
+                            self.map_id = ml.read_map_id() as i32
                         }
                     }
                     ui.dummy([4.0; 2]);

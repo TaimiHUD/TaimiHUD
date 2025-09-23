@@ -2,6 +2,7 @@ use {
     crate::{
         fl,
         render::{
+            machine::RenderMachine,
             ConfigTabState, DataSourceTabState, InfoTabState, TimerTabState, TimerWindowState,
         },
         settings::Settings,
@@ -46,6 +47,7 @@ impl PrimaryWindowState {
     pub fn draw(
         &mut self,
         ui: &Ui,
+        machine: &mut RenderMachine,
         timer_window_state: &mut TimerWindowState,
         state_errors: &mut HashMap<String, anyhow::Error>,
     ) {
@@ -64,17 +66,17 @@ impl PrimaryWindowState {
                         };
                         #[cfg(feature = "markers")]
                         if let Some(_token) = ui.tab_item(&fl!("marker-tab")) {
-                            self.marker_tab.draw(ui, state_errors);
+                            self.marker_tab.draw(ui, machine, state_errors);
                         }
                         #[cfg(feature = "space")]
                         if let Some(_token) = ui.tab_item(&fl!("pathing-tab")) {
-                            self.pathing_tab.draw(ui, state_errors);
+                            self.pathing_tab.draw(ui, machine, state_errors);
                         }
                         if let Some(_token) = ui.tab_item(&fl!("data-sources-tab")) {
                             self.data_sources_tab.draw(ui, state_errors);
                         }
                         if let Some(_token) = ui.tab_item(&fl!("config-tab")) {
-                            self.config_tab.draw(ui, timer_window_state);
+                            self.config_tab.draw(ui, machine, timer_window_state);
                         }
                         if let Some(_token) = ui.tab_item(&fl!("info-tab")) {
                             self.info_tab.draw(ui, timer_window_state);

@@ -143,6 +143,8 @@ pub struct Settings {
     pub progress_bar: ProgressBarSettings,
     #[serde(default)]
     pub enable_katrender: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi_scaling: Option<f32>,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
@@ -393,6 +395,7 @@ impl Settings {
             markers_window_open: false,
             primary_window_open: false,
             enable_katrender: false,
+            dpi_scaling: None,
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
             pathing: Default::default(),

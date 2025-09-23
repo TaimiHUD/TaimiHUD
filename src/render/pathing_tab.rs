@@ -1,10 +1,12 @@
 use {
-    anyhow::Context,
     crate::{
         controller::ControllerEvent,
-        fl,
         exports::runtime as rt,
-        render::RenderState,
+        fl,
+        render::{
+            machine::RenderMachine,
+            RenderState,
+        },
         settings::{
             pathing::{
                 CameraSource,
@@ -13,15 +15,16 @@ use {
             },
             Settings,
         },
+        space,
         Controller,
         LANGUAGE_LOADER,
     },
+    anyhow::Context,
     nexus::imgui::{
         self,
-        ChildWindow, Condition, ComboBox,
-        Selectable, Slider, TreeNode,
-        TreeNodeFlags, Ui,
-        WindowFlags,
+        ChildWindow, ComboBox, Condition,
+        Selectable, Slider, TreeNode, TreeNodeFlags,
+        Ui, WindowFlags
     },
     std::collections::HashMap,
     strum::VariantArray,
@@ -38,7 +41,7 @@ impl PathingConfig {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, _state_errors: &mut HashMap<String, anyhow::Error>) {
         if let Some(settings) = Settings::try_read() {
             self.katrender = settings.enable_katrender;
         };
@@ -48,7 +51,7 @@ impl PathingConfig {
         self.draw_header(ui);
 
         let opts_primary = || {
-            let active = self.draw_pathing_opts(ui);
+            let active = self.draw_pathing_opts(ui, machine);
             if let None = active {
                 Self::draw_space_error(ui, None);
             } else if self.katrender {
@@ -78,7 +81,7 @@ impl PathingConfig {
                 .flags(TreeNodeFlags::FRAMED)
                 .opened(true, Condition::Once)
                 .tree_push_on_open(true)
-                .build(ui, || Self::draw_goggles_opts(ui));
+                .build(ui, || Self::draw_goggles_opts(ui, machine));
         };
 
         ChildWindow::new("pathing_secondary")
@@ -242,7 +245,7 @@ impl PathingConfig {
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
     const RANGE_SCALE_POI: (f32, f32) = (0.0, 5.0);
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
-    fn draw_pathing_opts(&mut self, ui: &Ui) -> Option<()> {
+    fn draw_pathing_opts(&mut self, ui: &Ui, _machine: &mut RenderMachine) -> Option<()> {
         let (
             camera_source,
             mut visible_space,
@@ -331,15 +334,13 @@ impl PathingConfig {
         if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
             if value == Some(CameraSource::RealTimeAPI) {
-                let _ = crate::engine_mut(|e| {
-                    match e.rtapi_init() {
-                        Err(e) =>
-                            log::warn!("{e:#}"),
-                        Ok(false) =>
-                            log::warn!("RTAPI inactive - make sure the addon is installed and loaded by Nexus"),
-                        Ok(true) => (),
-                    }
-                });
+                match _machine.rtapi_init() {
+                    Err(e) =>
+                        log::warn!("{e:#}"),
+                    Ok(false) =>
+                        log::warn!("RTAPI inactive - make sure the addon is installed and loaded by Nexus"),
+                    Ok(true) => (),
+                }
             }
         }
         #[cfg(feature = "extension-nexus")]
@@ -348,8 +349,8 @@ impl PathingConfig {
                 "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
             ),
             CameraSource::RealTimeAPI => {
-                if crate::engine_ref(|e| e.rtapi.is_none()) == Some(true) {
-                    ui.text_disabled(
+                if _machine.rtapi.is_none() {
+                    ui.text_wrapped(
                         "RTAPI is a separate addon that must be installed via Nexus"
                     );
                 }
@@ -365,12 +366,14 @@ impl PathingConfig {
     fn draw_map_opts(&mut self, ui: &Ui) -> Option<()> {
         let (
             mut visible_minimap, mut visible_worldmap,
+            mut map_open,
             mut trail_textured_mini, mut trail_textured_world,
             map_trail_alpha_mini, map_trail_alpha_world,
             scale_trail_mini, scale_trail_world,
             scale_poi_mini, scale_poi_world,
         ) = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| (
             s.space.visible_minimap(), s.space.visible_worldmap(),
+            s.space.map_open(),
             s.space.trail_textured_minimap(), s.space.trail_textured_worldmap(),
             s.space.trail_alpha_minimap(), s.space.trail_alpha_worldmap(),
             //s.space.poi_alpha_minimap(), s.space.poi_alpha_worldmap(),
@@ -415,6 +418,10 @@ impl PathingConfig {
             if ui.checkbox(&fl!("pathing-config-textured-worldmap"), &mut trail_textured_world) {
                 Self::set_pathing(|s| s.space.map_trail_textured_world = Some(trail_textured_world));
             }
+            ui.same_line();
+            if ui.checkbox(&fl!("pathing-config-map-open"), &mut map_open) {
+                Self::set_pathing(|s| s.space.map_open = Some(map_open));
+            }
             if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-trail-alpha-worldmap"), map_trail_alpha_world, Self::RANGE_ALPHA) {
                 Self::set_pathing(|s| s.space.map_trail_alpha_world = value);
             }
@@ -440,18 +447,21 @@ impl PathingConfig {
     }
 
     #[cfg(feature = "goggles")]
-    fn draw_goggles_opts(ui: &Ui) -> Option<()> {
-        use crate::render::goggles as render_goggles;
+    fn draw_goggles_opts(ui: &Ui, machine: &mut RenderMachine) -> Option<()> {
+        use {
+            core::ops::Range,
+            crate::render::goggles as render_goggles,
+        };
 
         let mut map_id = None;
         let (
             obscured_alpha,
-            (_near, _far),
+            Range { start: _near, end: _far },
         ) = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| {
-            map_id = e.gameplay_map.ok().map(|id| id.get());
+            map_id = e.packs.current_map.map(|id| id as _);
             (
                 s.space.goggles.obscured_alpha(),
-                (crate::space::min_depth(), crate::space::max_depth()),
+                machine.get_depth_range().unwrap_or(space::MIN_DEPTH..space::MAX_DEPTH)
             )
         }))).flatten()?;
 
@@ -496,11 +506,13 @@ impl PathingConfig {
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                     let prev = e.0;
                     e.0 = value / space::MIN_DEPTH;
-                    space::set_min_depth(value);
+                    let near = value;
+                    let mut far = _far;
                     if e.1 == 1.0 || e.1 == prev {
                         e.1 = e.0;
-                        space::set_max_depth(e.1 * space::MAX_DEPTH);
+                        far = e.1 * space::MAX_DEPTH;
                     }
+                    machine.depth_range = Some(near..far);
                 });
             }
             if let Some(Some(value)) = Self::slider_setting(ui, "far", _far, (500.0, 2500.0)) {
@@ -509,15 +521,14 @@ impl PathingConfig {
                     let e = map_depth_calibration.entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                     e.1 = value / space::MAX_DEPTH;
-                    space::set_max_depth(value);
+                    machine.depth_range = Some(_near..value);
                 });
             }
             if ui.button("distance reset") {
                 Self::set_pathing(|s| {
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
                     map_depth_calibration.remove(&map_id);
-                    space::set_max_depth(space::MAX_DEPTH);
-                    space::set_min_depth(space::MIN_DEPTH);
+                    machine.depth_range = None;
                 });
             }
         }

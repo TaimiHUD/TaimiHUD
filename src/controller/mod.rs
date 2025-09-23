@@ -3,16 +3,21 @@ use {
     crate::{
         account_name_canon,
         exports::runtime::{
-            mouse::{send_input, MouseInput, MousePosition},
+            mouse::{send_input, MouseInput},
             keyboard::KeyState,
         },
-        marker::{
-            atomic::{MarkerInputData, ScreenPoint},
-            format::{MarkerSet, RuntimeMarkers},
-        },
+        marker::format::{MarkerSet, RuntimeMarkers},
+        render::machine::RenderMachine,
         ACCOUNT_NAME_CELL,
     },
     arcdps::extras::{UserInfoOwned, UserRole},
+    taimi_meta::{
+        coords::{LocalSpace, ScreenPoint},
+        ui::{
+            gameplay::{GameplayState, GameplayTransition},
+            MapCalibration, MapOpen,
+        },
+    },
     tokio::{
         task::JoinHandle,
         time::timeout,
@@ -23,10 +28,13 @@ use {
     crate::{
         exports::runtime as rt,
         marker::format::{MarkerEntry, MarkerFiletype},
-        render::TextFont,
+        render::{
+            machine::MumblelinkTick,
+            TextFont,
+        },
         settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
         timer::{CombatState, Position, TimerFile, TimerMachine},
-        MumbleIdentityUpdate, RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
+        RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
     },
     anyhow::{anyhow, Context},
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
@@ -55,7 +63,6 @@ use {
 #[cfg(feature = "space")]
 use {
     crate::space::{
-        dx11::PerspectiveInputData,
         pack::LoaderBox,
         Engine, engine::SpaceEvent,
     },
@@ -63,6 +70,16 @@ use {
 };
 #[cfg(all(feature = "markers", feature = "extension-nexus"))]
 use nexus::rtapi::GroupMemberOwned;
+
+#[cfg(feature = "markers")]
+pub use self::markers::{
+    SquadRank,
+    SquadUpdateType as SquadState,
+};
+use SquadRank as SquadRoleState;
+
+#[cfg(feature = "markers")]
+mod markers;
 
 #[derive(Debug)]
 pub struct Controller {
@@ -72,8 +89,6 @@ pub struct Controller {
     pub extras_squad: HashMap<String, UserInfoOwned>,
     pub agent: Option<AgentOwned>,
     pub previous_combat_state: bool,
-    pub previous_is_gameplay: Option<bool>,
-    pub previous_ui_tick: Option<u32>,
     #[cfg(feature = "markers")]
     pub markers: HashMap<String, Vec<Arc<MarkerSet>>>,
     #[cfg(feature = "markers")]
@@ -83,7 +98,8 @@ pub struct Controller {
     #[cfg(feature = "markers")]
     pub marker_autoplace: Option<MarkerAutoPlaceSettings>,
     pub rt_sender: Sender<RenderEvent>,
-    pub cached_identity: Option<MumbleIdentityUpdate>,
+    #[cfg(feature = "markers")]
+    pub mumble_role: Option<SquadRank>,
     pub map_id: Option<u32>,
     pub player_position: Option<Vec3>,
     alert_sem: Arc<Mutex<()>>,
@@ -120,8 +136,6 @@ impl Controller {
                 #[cfg(feature = "markers")]
                 marker_autoplace: Default::default(),
                 previous_combat_state: Default::default(),
-                previous_ui_tick: Default::default(),
-                previous_is_gameplay: Default::default(),
                 rt_sender,
                 settings,
                 #[cfg(feature = "markers")]
@@ -130,8 +144,9 @@ impl Controller {
                 map_id_to_markers: Default::default(),
                 #[cfg(feature = "markers")]
                 spent_markers: Default::default(),
+                #[cfg(feature = "markers")]
+                mumble_role: Default::default(),
                 agent: Default::default(),
-                cached_identity: Default::default(),
                 map_id: Default::default(),
                 player_position: Default::default(),
                 alert_sem: Default::default(),
@@ -154,18 +169,6 @@ impl Controller {
             state.setup_markers().await;
             let mut taimi_interval = interval(Duration::from_millis(125));
 
-            const MUMBLELINK_TICK: Duration = Duration::from_millis(1000 / 25);
-            const MUMBLELINK_FPS: u64 = 50;
-            let mumblelink_interval = match () {
-                #[cfg(feature = "markers")]
-                _ => Duration::from_millis(1000 / MUMBLELINK_FPS),
-                #[cfg(not(feature = "markers"))]
-                _ => MUMBLELINK_TICK,
-            };
-            let mumblelink_catchup = mumblelink_interval / 3;
-            let mut mumblelink_interval = interval(mumblelink_interval - mumblelink_catchup / 2);
-            let mut mumblelink_missed = 0u32;
-
             loop {
                 select! {
                     evt = controller_receiver.recv() => match evt {
@@ -181,21 +184,6 @@ impl Controller {
                         None => {
                             break
                         },
-                    },
-                    _ = mumblelink_interval.tick() => {
-                        let missed = match mumblelink_missed {
-                            0 => 0,
-                            missed => (missed * mumblelink_catchup.as_millis() as u32 / MUMBLELINK_TICK.as_millis() as u32).max(1),
-                        };
-                        match state.mumblelink_tick(missed).await {
-                            Ok(false) => {
-                                mumblelink_missed = mumblelink_missed.saturating_add(1);
-                                mumblelink_interval.reset_after(mumblelink_catchup);
-                            },
-                            Ok(true) =>
-                                mumblelink_missed = 0,
-                            Err(..) => (),
-                        }
                     },
                     _ = taimi_interval.tick() => {
                         let _ = state.tick().await;
@@ -394,41 +382,10 @@ impl Controller {
         Ok(())
     }
 
-    async fn mumblelink_tick(&mut self, missed: u32) -> anyhow::Result<bool> {
-        let previous_ui_tick = self.previous_ui_tick;
-        let mumble_pointer = rt::mumble_link_ptr().ok();
-        let mumble = match mumble_pointer {
-            None => None,
-            Some(mumble) => {
-                let ui_tick = Some(mumble.read_ui_tick());
-                self.previous_ui_tick = ui_tick;
-                (ui_tick != previous_ui_tick).then_some(mumble)
-            },
+    async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
+        let Ok(mumble) = rt::mumble_link_ptr() else {
+            return Ok(())
         };
-
-        let is_gameplay = match rt::is_ingame() {
-            // ui ticks don't occur during loading/charsel...
-            Ok(ingame) if mumble_pointer.is_none() =>
-                Some(Some(ingame)),
-            Ok(false) if mumble.is_none() && previous_ui_tick.is_some() && missed > 4 =>
-                Some(if self.previous_is_gameplay == Some(true) { None } else { Some(false) }),
-            Ok(ingame @ true) => Some(Some(ingame)),
-            Err(..) | Ok(false) => None,
-        };
-        if let Some(is_gameplay) = is_gameplay {
-            if self.previous_is_gameplay != is_gameplay {
-                // TODO: mapchange event?
-                #[cfg(feature = "space")]
-                Engine::try_send(SpaceEvent::GameplayStatus(is_gameplay));
-            }
-            self.previous_is_gameplay = is_gameplay;
-        }
-        let Some(mumble) = mumble else {
-            return Ok(mumble_pointer.is_none())
-        };
-
-        #[cfg(feature = "markers")]
-        let mut marker_data = MarkerInputData::cloned();
 
         let ui_state = mumble.read_ui_state();
 
@@ -436,24 +393,6 @@ impl Controller {
 
             #[cfg(feature = "markers")]
             {
-                marker_data.update_with_mumble_ptr_context(&mumble, ui_state);
-                marker_data.local_player_pos = playpos;
-                match rt::nexus_link_ptr() {
-                    #[cfg(feature = "extension-nexus")]
-                    Ok(nexus_link) =>
-                        marker_data.scaling = unsafe {
-                            (&*nexus_link.as_ptr()).scaling
-                        },
-                    _ => {
-                        // TODO: DPI scaling and mumblelink ui size stuff
-                    },
-                };
-                if marker_data.map_id == 0 {
-                    marker_data.map_id = mumble.read_map_id();
-                }
-                marker_data.sign_obtainer.prepare(marker_data.player_pos_local(), marker_data.player_pos_global());
-                marker_data.commit();
-
                 if let Some(map_id) = &self.map_id {
                     if let Some(markers_for_map) = self.map_id_to_markers.get(map_id) {
                         let mut new_spent_markers = Vec::new();
@@ -491,19 +430,25 @@ impl Controller {
                     machine.tick(pos).await
                 }
             }
-            Ok(true)
+
+            Ok(())
     }
 
-    async fn handle_mumble(&mut self, identity: MumbleIdentityUpdate) {
-        #[cfg(feature = "space")]
+    async fn handle_mumble_identity(&mut self, role: SquadRank) {
+        #[cfg(feature = "markers")]
         {
-            let mut input_data = PerspectiveInputData::cloned();
-            if input_data.fov.to_bits() != identity.fov.to_bits() {
-                input_data.fov = identity.fov;
-                input_data.commit();
-            }
+            self.mumble_role = Some(role);
         }
-        let new_map_id = identity.map_id;
+    }
+
+    async fn handle_map_event(&mut self, gameplay: GameplayState, _trans: GameplayTransition) {
+        let new_map_id = match gameplay.gameplay_map() {
+            None => {
+                //self.map_id = None;
+                return
+            },
+            Some(map_id) => map_id.get(),
+        };
         if Some(new_map_id) != self.map_id {
             #[cfg(feature = "markers")]
             {
@@ -517,7 +462,6 @@ impl Controller {
                     .rt_sender
                     .send(RenderEvent::MarkerMap(event_markers))
                     .await;
-                MarkerInputData::from_mapchange(new_map_id);
                 self.spent_markers = Default::default();
             }
             for timer in &mut self.current_timers {
@@ -551,7 +495,6 @@ impl Controller {
             }
             self.map_id = Some(new_map_id);
         }
-        self.cached_identity = Some(identity);
     }
 
     async fn handle_combat_event(&mut self, src: arcdps::AgentOwned, evt: arcEvent) {
@@ -759,8 +702,8 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn drag_mouse_abs(from: ScreenPoint, to: ScreenPoint) -> rt::RuntimeResult<()> {
         let wait_duration = Duration::from_millis(10);
-        let from = MousePosition::from(from);
-        let to = MousePosition::from(to);
+        let from = rt::mouse::mouse_position_from_screen(from);
+        let to = rt::mouse::mouse_position_from_screen(to);
         sleep(wait_duration).await;
         send_input(MouseInput::from(from))?;
         sleep(wait_duration).await;
@@ -781,27 +724,12 @@ impl Controller {
         marker: &MarkerEntry,
     ) {
         sleep(wait_duration).await;
-        if let Err(e) = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point.into())).await {
-            log::warn!("Failed to place marker {:?}: {e}", marker.marker);
-        }
-    }
-
-    #[cfg(feature = "markers")]
-    async fn place_marker_from_map(
-        wait_duration: Duration,
-        place_duration: Duration,
-        point: Vec3,
-        marker: &MarkerEntry,
-    ) {
-        use crate::marker::atomic::LocalPoint;
-        let mid = MarkerInputData::read();
-        if let Some(mid) = mid {
-            let point: LocalPoint = point.into();
-            let point = mid.map_local_to_map(point);
-            let point = mid.map_map_to_screen(point);
-            if let Some(point) = point {
-                Self::place_marker(wait_duration, place_duration, point, marker).await;
-            }
+        let point = rt::mouse::mouse_position_from_screen(point);
+        let res = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point)).await
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("Failed to place marker {:?}", marker.marker));
+        if let Err(e) = res {
+            log::warn!("{e:#}");
         }
     }
 
@@ -819,15 +747,16 @@ impl Controller {
         rt_sender: Sender<crate::RenderEvent>,
     ) -> anyhow::Result<()> {
         use {
-            crate::marker::atomic::{LocalPoint, MapPoint},
             anyhow::anyhow,
             glamour::TransformMap,
+            taimi_meta::coords::LocalPoint,
         };
-        if let Some(mid) = MarkerInputData::read() {
-            let player_position = mid.local_player_pos;
+        let player_position = rt::mumble_link_ptr()
+            .map(|ml| LocalPoint::from_array(ml.read_avatar().position)).ok();
+        if let Some(player_position) = player_position {
             let mut too_far = false;
             for marker in &markers.markers {
-                if player_position.distance(marker.position.clone().into()) >= 127.0 {
+                if player_position.distance(marker.position.into()) >= 127.0 {
                     too_far = true;
                     break;
                 }
@@ -852,11 +781,15 @@ impl Controller {
             .map_err(|e| anyhow!("Getting cursor pos: {e}"))?;
         for marker in &markers.markers {
             // check if it is possible to place immediately
-            let local_point: LocalPoint = Vec3::from(marker.position.clone()).into();
-            let (map_point, screen_point) = if let Some(mid) = MarkerInputData::read() {
-                let map_point = mid.map_local_to_map(local_point);
-                let screen_point = mid.map_map_to_screen(map_point);
-                (Some(map_point), screen_point)
+            let local_point: LocalPoint = marker.position.into();
+            let map = RenderMachine::shared_map_state().lock().await.clone();
+            let (map_point, screen_point) = if let Some(map) = map.get() {
+                let map_point = map.calibration.map(LocalSpace::to2(local_point));
+                let fake_point = map.map_to_worldmap_for(map.context)
+                    .then(map.worldmap_to_fake_for(map.context))
+                    .map(map_point);
+                let screen_point = map.calibration.map(fake_point);
+                (Some(map_point), map.clip_screen(screen_point))
             } else {
                 (None, None)
             };
@@ -871,35 +804,44 @@ impl Controller {
                     if let Some(map_point) = map_point {
                         let max_attempts = 10; // inshallah
                         let mut attempts = 0;
-                        let map_centre: Option<MapPoint> =
-                            MarkerInputData::read().map(|mid| mid.global_map.into());
+                        let map_centre = RenderMachine::shared_map_state()
+                            .lock().await
+                            .get().map(|map| map.centre());
                         log::debug!("Reached none arm for marker placement");
                         if let Some(mut map_centre) = map_centre {
                             while (map_centre.distance(map_point) > 5.0)
                                 && (attempts < max_attempts)
                             {
                                 log::debug!("Attempt {}/{}", attempts, max_attempts);
-                                if let Some(mid) = MarkerInputData::read() {
-                                    let bounds = mid.screen_bound();
-                                    map_centre = mid.global_map.into();
+                                let map = RenderMachine::shared_map_state().lock().await.clone();
+                                if let Some(map) = map.get() {
+                                    let bounds = map.calibration.map(map.bounds());
+                                    map_centre = map.centre();
                                     let remaining_distance = map_centre.distance(map_point);
                                     log::debug!("Remaining distance: {}", remaining_distance);
-                                    let drag_from = mid.random_map_screen_coordinate();
-                                    let difference_map = map_point - map_centre;
-                                    let difference_fake = mid.map_to_fake_tf().map(difference_map);
-                                    let difference_screen =
-                                        mid.screen_to_fake().inverse().map(difference_fake);
+                                    let drag_from = Self::random_map_screen_coordinate(map);
+                                    let fake_point = map.map_to_worldmap_for(map.context)
+                                        .then(map.worldmap_to_fake_for(map.context))
+                                        .map(map_point);
+                                    let screen_point = map.calibration.map(fake_point);
+                                    #[cfg(todo)]
+                                    let difference_screen = map.map_to_worldmap_for(map.context)
+                                        .then(map.worldmap_to_fake_for(map.context))
+                                        .then(map.calibration.to_screen())
+                                        .map(map_point - map_centre);
+                                    let difference_screen = screen_point - bounds.center();
 
                                     // the l
-                                    let (min, max) = (bounds.min(), bounds.max());
+                                    //let (min, max) = (bounds.min(), bounds.max());
                                     let drag_res = drag_from - difference_screen;
-                                    let drag_res = drag_res.clamp(min, max);
+                                    //let drag_res = drag_res.clamp(min, max);
+                                    let drag_res = drag_res.clamp(glamour::Point2::ZERO, map.calibration.display_size.to_vector().to_point());
                                     log::debug!(
                                         "Map centre: {:?}, destination: {:?}",
                                         map_centre,
                                         map_point
                                     );
-                                    log::debug!("Min: {:?}, max: {:?}", min, max);
+                                    //log::debug!("Min: {:?}, max: {:?}", min, max);
                                     log::debug!(
                                         "Attempting a drag from {:?} to {:?}",
                                         drag_from,
@@ -928,7 +870,7 @@ impl Controller {
                                 Self::place_marker_from_map(
                                     wait_duration,
                                     Self::KEY_INVOKE_DURATION,
-                                    marker.position.clone().into(),
+                                    marker.position.into(),
                                     marker,
                                 )
                                 .await;
@@ -1097,10 +1039,8 @@ impl Controller {
                 }
             }
         }
-        if let Some(identity) = &self.cached_identity {
-            if identity.is_commander {
-                return Some(SquadRoleState::Commander);
-            }
+        if let Some(role) = self.mumble_role {
+            return Some(role)
         }
         None
     }
@@ -1302,7 +1242,7 @@ impl Controller {
             // omit the worst spam offenders
             ControllerEvent::LoadTextureIntegrated(id, data) =>
                 log::trace!("Controller received event: Load texture {id} from {} bytes", data.len()),
-            ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated(..) =>
+            ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated { .. } | ControllerEvent::UiTick(..) =>
                 log::trace!("Controller received event: {}", event),
             event =>
                 log::debug!("Controller received event: {}", event),
@@ -1339,7 +1279,7 @@ impl Controller {
             ToggleKatRender => self.toggle_katrender().await,
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
             UninstallAddon(dd) => self.uninstall_addon(&dd).await?,
-            MumbleIdentityUpdated(identity) => self.handle_mumble(identity).await,
+            MumbleIdentityUpdated { role } => self.handle_mumble_identity(role).await,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
             TimerEnable(id) => self.enable_timer(&id).await,
             TimerDisable(id) => self.disable_timer(&id).await,
@@ -1368,6 +1308,19 @@ impl Controller {
             } => self.delete_marker(&path, category, idx).await?,
             #[cfg(feature = "markers-edit")]
             GetMarkerPaths => self.get_marker_paths().await?,
+            UiTick(tick) => match tick.is_player() {
+                #[cfg(todo)]
+                false => (),
+                _ => self.mumblelink_tick().await?,
+            },
+            #[cfg(feature = "markers")]
+            UiResize(_calibration) => (),
+            #[cfg(feature = "markers")]
+            UiMapOpened(_open) => (),
+            GameplayStatus {
+                gameplay,
+                trans,
+            } => self.handle_map_event(gameplay, trans).await,
             Quit => {
                 let settings = timeout(Duration::from_secs(2), self.settings.read()).await;
                 let save = match settings {
@@ -1433,13 +1386,6 @@ impl Controller {
     }
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Display)]
-pub enum SquadRoleState {
-    Member,
-    Lieutenant,
-    Commander,
-}
-
 #[derive(Debug, Clone, Display)]
 pub enum ProgressBarStyleChange {
     Centre(bool),
@@ -1454,13 +1400,6 @@ pub enum MarkerSaveEvent {
     Append(MarkerSet, PathBuf),
     Create(MarkerSet, PathBuf, MarkerFiletype),
     Edit(MarkerSet, PathBuf, Option<String>, usize),
-}
-
-#[derive(Debug, Clone, Display)]
-pub enum SquadState {
-    Update,
-    Joined,
-    Left,
 }
 
 #[derive(Debug, Clone, Display)]
@@ -1495,7 +1434,9 @@ pub enum ControllerEvent {
     #[cfg(feature = "markers-edit")]
     GetMarkerPaths,
     UninstallAddon(Arc<RemoteSource>),
-    MumbleIdentityUpdated(MumbleIdentityUpdate),
+    MumbleIdentityUpdated {
+        role: SquadRank,
+    },
     ToggleKatRender,
     CombatEvent {
         src: arcdps::AgentOwned,
@@ -1527,6 +1468,16 @@ pub enum ControllerEvent {
     #[cfg(feature = "markers")]
     #[allow(dead_code)]
     MarkerDisable(String),
+
+    UiTick(MumblelinkTick),
+    #[cfg(feature = "markers")]
+    UiResize(MapCalibration),
+    #[cfg(feature = "markers")]
+    UiMapOpened(MapOpen),
+    GameplayStatus {
+        gameplay: GameplayState,
+        trans: GameplayTransition,
+    },
 
     #[allow(dead_code)]
     TimerEnable(String),

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "pathing/pack",
   "pathing/meta",
+  "rt/input",
   "space/d3d",
 ]
 
@@ -63,6 +64,7 @@ markers = [
   "dep:itertools",
   "dep:arc-atomic",
   "dep:taimi_meta",
+  "dep:taimi_input",
   "windows",
   "windows/System",
   "windows/Foundation",
@@ -83,6 +85,7 @@ extension-arcdps = [
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/gw2_mumble",
   "taimi_meta?/mumblelink-arcloader",
+  "taimi_input?/arcdps-extras",
   "nexus/arc",
   "windows/Win32_System_LibraryLoader",
   "windows/Win32_System_Memory",
@@ -115,6 +118,8 @@ extension-nexus = [
   "nexus/extras",
   "nexus/rtapi",
   "nexus/mumble",
+  "taimi_meta?/nexus",
+  "taimi_meta?/nexus-rtapi",
   "taimi_meta?/mumblelink-nexus",
 ]
 goggles = [
@@ -142,6 +147,7 @@ windows = [
   "arcffi?/windows-061",
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
+  "taimi_input?/windows",
 ]
 
 [lib]
@@ -226,6 +232,7 @@ bitvec = { workspace = true }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
+taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
@@ -271,6 +278,7 @@ nexus = { git = "https://github.com/zerthox/nexus-rs" }
 #gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false }
 glam = "0.30"
 glamour = "0.18"
+num-traits = { version = "0.2", default-features = false }
 indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"

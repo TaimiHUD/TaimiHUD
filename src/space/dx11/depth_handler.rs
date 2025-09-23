@@ -1,8 +1,9 @@
 use {
     crate::{
+        render::machine::RenderMachine,
         resources::Model,
         space::{
-            max_depth, MapTarget, ScreenSpace,
+            MAX_DEPTH, ScreenSpace,
         },
     },
     glamour::{Box2, Size2},
@@ -15,6 +16,7 @@ use {
         viewport::Viewport,
         SwapChain11,
     },
+    taimi_meta::ui::MapCalibration,
 };
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
@@ -148,10 +150,10 @@ impl DepthHandler {
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
 
-    pub fn setup(&self, device_context: &Dx11Context, distance_max: f32) {
+    pub fn setup(&self, device_context: &Dx11Context, machine: &RenderMachine, distance_max: f32) {
         let (dsview, clear_depth) = self.depth_stencil_view();
         self.rasterizer_state.set(device_context);
-        let viewport = self.viewport(distance_max);
+        let viewport = self.viewport(machine, distance_max);
         viewport.set(device_context);
         dsview.set(device_context);
         self.depth_stencil_state.set(device_context);
@@ -183,8 +185,10 @@ impl DepthHandler {
             .view.to_ref()
     }
 
-    pub fn viewport(&self, distance_max: f32) -> Cow<'_, Viewport> {
-        match distance_max / max_depth() {
+    pub fn viewport(&self, machine: &RenderMachine, distance_max: f32) -> Cow<'_, Viewport> {
+        let far = machine.get_depth_range().map(|r| r.end)
+            .unwrap_or(MAX_DEPTH);
+        match distance_max / far {
             d if d >= 1.0 =>
                 Cow::Borrowed(&self.viewport),
             d => {
@@ -215,7 +219,7 @@ impl DepthHandler {
         .. RasterizerState::DESC_DEFAULT
     };
 
-    pub fn setup_map(&self, device_context: &Dx11Context, _map: &MapTarget) {
+    pub fn setup_map(&self, device_context: &Dx11Context) {
         self.rasterizer_state.set(device_context);
         self.viewport.set(device_context);
         //self.render_target_view.to_ref().without_depth().set(device_context);
@@ -296,7 +300,7 @@ impl DepthHandler {
         }
     }
 
-    pub fn regen_edge(&mut self, device: &Dx11Device, edge_scale: Option<f32>) -> anyhow::Result<()> {
+    pub fn regen_edge(&mut self, device: &Dx11Device, edge_scale: Option<(f32, &MapCalibration)>) -> anyhow::Result<()> {
         self.fill_edge = edge_scale.map(|scale|
             Self::new_fill_quad(device, Some(scale))
         ).transpose()?;
@@ -306,18 +310,15 @@ impl DepthHandler {
     const FILL_QUAD_VERTEX_COUNT: u32 = 4;
     const FILL_QUAD_EDGE_COUNT: u32 = 4;
     /// TODO: hack .-.
-    pub fn new_fill_quad(device: &Dx11Device, edge_scale: Option<f32>) -> anyhow::Result<VertexBuffer> {
+    pub fn new_fill_quad(device: &Dx11Device, edge_scale: Option<(f32, &MapCalibration)>) -> anyhow::Result<VertexBuffer> {
         let mut verts: Vec<_> = crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into();
 
-        if let Some(edge_scale) = edge_scale {
+        if let Some((edge_scale, calibration)) = edge_scale {
             use {
-                crate::{
-                    exports::runtime::UiState,
-                    resources::Vertex,
-                },
-                super::PerspectiveInputData,
+                crate::resources::Vertex,
                 glam::{vec2, Vec3},
                 glamour::Box2,
+                taimi_meta::ui::MinimapPlacement,
             };
 
             fn quad_verts(b: Box2) -> [Vertex; 4] {
@@ -383,9 +384,9 @@ impl DepthHandler {
             );
             verts.extend_from_slice(&quad_verts(bottom_left));
 
-            let sign = match PerspectiveInputData::get().ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT) {
-                true => -1.0f32,
-                false => 1.0,
+            let sign = match calibration.compass_position {
+                MinimapPlacement::Top => -1.0f32,
+                MinimapPlacement::Bottom => 1.0,
             };
             let corn_w = 0.2 * edge_scale * sign;
             let corn_h = 0.4 * edge_scale * sign;

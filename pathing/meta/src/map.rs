@@ -5,6 +5,8 @@ use {
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub type MapID = u32;
+
 /// https://wiki.guildwars2.com/wiki/API:1/maps
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]

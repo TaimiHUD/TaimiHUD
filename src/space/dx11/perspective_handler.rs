@@ -1,17 +1,21 @@
 use {
-    super::PerspectiveInputData,
     crate::{
+        render::machine::{RenderMachine, RenderPosition},
         settings::pathing::SpaceSettings,
-        space::{max_depth, min_depth, MapTarget, ScreenSpace},
+        space::ScreenSpace,
     },
     glam::{Mat4, Vec2, Vec3, Vec4, Quat},
-    glamour::Size2,
+    glamour::{Box2, Box3, Point3, Size2, TransformMap},
     taimi_d3d::{
         dx11::{
             prelude::*,
             buffer::{ConstantBufferP, ConstantBufferV},
         },
         D3dContextBindableSlot,
+    },
+    taimi_meta::{
+        coords::{billboard_from_look, LocalSpace},
+        ui::MapContext,
     },
 };
 
@@ -42,17 +46,11 @@ pub struct PerspectiveHandler {
     pub constant_buffer_mapv_data: MapDataV,
     constant_buffer_mapp: ConstantBufferP,
     pub constant_buffer_mapp_data: MapDataP,
-    aspect_ratio: f32,
     pub alpha: f32,
-    up: Vec3,
-    near: f32,
-    far: f32,
-    display_size: Size2<ScreenSpace>,
 }
 
 impl PerspectiveHandler {
-    pub fn setup(device: &Dx11Device, display_size: Size2<ScreenSpace>) -> anyhow::Result<Self> {
-        let aspect_ratio = display_size.width / display_size.height;
+    pub fn setup(device: &Dx11Device) -> anyhow::Result<Self> {
         let constant_buffer_data = PerspectiveData::INITIAL;
         let constant_buffer = ConstantBufferV::new_with_data(device, &constant_buffer_data)?;
         let constant_buffer_pixel_data = PixelData::INITIAL;
@@ -62,10 +60,7 @@ impl PerspectiveHandler {
         let constant_buffer_mapp_data = MapDataP::INITIAL;
         let constant_buffer_mapp = ConstantBufferP::new_with_data(device, &constant_buffer_mapp_data)?;
         Ok(Self {
-            up: Vec3::ZERO.with_y(1.0),
-            aspect_ratio,
             alpha: 1.0,
-            display_size,
             constant_buffer,
             constant_buffer_data,
             constant_buffer_pixel,
@@ -74,52 +69,19 @@ impl PerspectiveHandler {
             constant_buffer_mapv_data,
             constant_buffer_mapp,
             constant_buffer_mapp_data,
-            near: min_depth(),
-            far: max_depth(),
         })
     }
 
-    pub fn prepare(&mut self, display_size: Size2<ScreenSpace>) {
-        if display_size != self.display_size {
-            self.aspect_ratio = display_size.width / display_size.height;
-            self.display_size = display_size;
-        }
-    }
+    pub fn update_perspective(&mut self, machine: &mut RenderMachine, camera: RenderPosition, poi_scale: Vec3) {
+        let (player_pos, ..) = machine.get_player();
+        self.constant_buffer_data.player = player_pos.extend(self.alpha).to_raw();
+        self.constant_buffer_data.projection = machine.get_space_perspective().matrix.into();
 
-    pub fn update_perspective(&mut self, poi_scale: Vec3) {
-        let data = PerspectiveInputData::get();
-
-            self.constant_buffer_data.view = Mat4::look_to_lh(data.pos, data.front, self.up);
-            self.near = min_depth();
-            self.far = max_depth();
-            self.constant_buffer_data.projection =
-                Mat4::perspective_lh(data.fov(), self.aspect_ratio, self.near, self.far);
-        self.constant_buffer_data.player =
-            data.player_pos().extend(self.alpha).to_raw();
-
-        self.constant_buffer_data.billboard = {
-            let cam_front = data.front.normalize();
-            let cam_right = cam_front.cross(self.up).normalize();
-            let cam_up = cam_right.cross(cam_front).normalize();
-            Mat4::from_cols(
-                cam_right.extend(0.0),
-                cam_up.extend(0.0),
-                -cam_front.extend(0.0),
-                Vec4::ZERO.with_w(1.0),
-            )
-        } * Mat4::from_scale(poi_scale);
-    }
-
-    pub fn aspect_ratio(&self) -> f32 {
-        self.aspect_ratio
-    }
-
-    pub fn near(&self) -> f32 {
-        self.near
-    }
-
-    pub fn far(&self) -> f32 {
-        self.far
+        let view = RenderMachine::space_view(camera).matrix;
+        self.constant_buffer_data.billboard =
+            Mat4::from(billboard_from_look(view))
+            * Mat4::from_scale(poi_scale);
+        self.constant_buffer_data.view = view.into();
     }
 
     pub fn alpha(&self) -> f32 {
@@ -133,16 +95,17 @@ impl PerspectiveHandler {
     }
 
     pub const FEATHER_SCALE_SQUARE: Vec2 = Vec2::new(0.065, 0.0825);
-    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>) {
-        let aspect_ratio = self.aspect_ratio();
-        self.set_feather(feather_scale.map(|scale| {
+    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>, display_size: Size2<ScreenSpace>) {
+        let aspect_ratio = display_size.width / display_size.height;
+        let feather = feather_scale.map(|scale| {
             let normalized = Vec2::new(1.0 / aspect_ratio, aspect_ratio) * Self::FEATHER_SCALE_SQUARE;
             scale / normalized
-        }))
+        });
+        self.set_feather(feather, display_size)
     }
 
-    pub fn set_feather(&mut self, feather_scale: Option<Vec2>) {
-        let viewport_size = feather_scale.is_some().then_some(self.display_size.to_raw());
+    pub fn set_feather(&mut self, feather_scale: Option<Vec2>, display_size: Size2<ScreenSpace>) {
+        let viewport_size = feather_scale.is_some().then_some(display_size.to_raw());
         self.constant_buffer_pixel_data.set_viewport_size(viewport_size);
         self.constant_buffer_pixel_data.set_feather_scale(feather_scale);
     }
@@ -152,15 +115,85 @@ impl PerspectiveHandler {
         self.constant_buffer_pixel.update_singleton(device_context, &self.constant_buffer_pixel_data);
     }
 
-    pub fn update_map(&mut self, map: &MapTarget) {
-        let bounds = &map.bounds_draw;
+    const HEIGHT_OFFSET_BELOW: f32 = -200.0;
+    const HEIGHT_OFFSET_ABOVE: f32 = 200.0;
+    const HEIGHT_OFFSET_BELOW_MINI: f32 = -75.0;
+    const HEIGHT_OFFSET_ABOVE_MINI: f32 = 95.0;
+
+    pub fn map_local_bounds(machine: &mut RenderMachine) -> Box3<LocalSpace> {
+        let map_to_local = machine.map.calibration.map_to_local();
+        let open = machine.map_open();
+        let ctx = machine.is_map_visible().unwrap_or(open.into());
+        let fake_to_map = match ctx {
+            #[cfg(todo)]
+            _ => machine.map.fake_to_worldmap_for(ctx),
+            MapContext::Global => machine.map.calibration.fake_to_worldmap(),
+            MapContext::Minimap => taimi_meta::ui::MapCalibration::cast_compass_to_worldmap(
+                machine.map.calibration.fake_to_compass()
+            ),
+        }.then(machine.map.worldmap_to_map_for(ctx));
+        let map_bounds_fake = machine.map.calibration.bounds_for(ctx);
+        let map_bounds_global = Box2::new(fake_to_map.map(map_bounds_fake.min()), fake_to_map.map(map_bounds_fake.max()));
+        let map_bounds_local = Box2::new(map_to_local.map(map_bounds_global.min), map_to_local.map(map_bounds_global.max));
+        let map_bounds_local = Box2::new(
+            map_bounds_local.min.min(map_bounds_local.max),
+            map_bounds_local.min.max(map_bounds_local.max),
+        );
+        let (height_offset_below, height_offset_above) = match ctx {
+            MapContext::Global => (Self::HEIGHT_OFFSET_BELOW, Self::HEIGHT_OFFSET_ABOVE),
+            MapContext::Minimap => (Self::HEIGHT_OFFSET_BELOW_MINI, Self::HEIGHT_OFFSET_ABOVE_MINI),
+        };
+        let (player_pos_local, ..) = machine.get_player();
+        Box3::<LocalSpace>::new(
+            Point3::new(map_bounds_local.min.x, player_pos_local.y + height_offset_below, map_bounds_local.min.y),
+            Point3::new(map_bounds_local.max.x, player_pos_local.y + height_offset_above, map_bounds_local.max.y),
+        )
+    }
+
+    pub fn update_map(&mut self, machine: &mut RenderMachine, bounds: Box3<LocalSpace>, fwoom: bool) {
+        let open = machine.map_open();
+        let ctx = machine.is_map_visible().unwrap_or(open.into());
+
+        let map_to_local = machine.map.calibration.map_to_local();
+        let centre_local = map_to_local.map(machine.map.centre_for(ctx));
+
+        let map_bounds_fake = machine.map.calibration.bounds_for(ctx);
+        let bounds_screen: glamour::Rect<ScreenSpace> = machine.map.calibration.map(
+            map_bounds_fake
+        );
+
+        let (_pos, cam_front, _up) = machine.get_camera(Default::default());
+        let anim_progress = open.progress()
+            .and_then(|p| fwoom.then_some(p))
+            .map(|p| {
+                let dir = cam_front.to_raw().cross(cam_front.z.signum() * -Vec3::Z).normalize();
+                //let front = Vec3::new(-front.x, front.z, -front.y);
+                let progress = match open.is_open() {
+                    true => p,
+                    false => 1.0 - p,
+                };
+                (progress, p, Vec3::new(dir.x, cam_front.z.signum() * -dir.y, dir.z))
+            });
+        let anim_rot = if let Some((progress, _p, front)) = anim_progress {
+            let amt = progress * progress;
+            let target = Quat::look_to_lh(front, /*pdata.camera_up().to_raw()*/-Vec3::Z)
+                * Quat::from_rotation_z(-0.95 * core::f32::consts::FRAC_PI_2)
+                * if cam_front.z.is_sign_negative() && cam_front.x.is_sign_negative() {
+                    //Quat::from_rotation_z(core::f32::consts::PI * 0.25)
+                    Quat::from_rotation_z(core::f32::consts::PI * -0.49)
+                        //Quat::from_rotation_z(core::f32::consts::PI * 0.98 * cam_front.x.signum())
+                } else { Quat::IDENTITY }
+            ;
+            target.normalize().lerp(Quat::IDENTITY, amt)
+            } else { Quat::IDENTITY };
+
         let size = bounds.size();
         let (left, right) = (bounds.min.x, bounds.max.x);
         let (bottom, top) = (bounds.min.z, bounds.max.z);
         let (near, far) = (0.001f32, 1000.0f32);
-        let mid = Vec3::new(map.centre.x, bounds.center().y, map.centre.y);
-        let (map_rotation, counter_rot) = match map.rotation {
-            Some(amt) => (Quat::from_rotation_y(-amt.to_radians()), Quat::from_rotation_y(amt.to_radians())),
+        let mid = Vec3::new(centre_local.x, bounds.center().y, centre_local.y);
+        let (map_rotation, counter_rot) = match machine.map.rotation() {
+            Some(amt) => (Quat::from_rotation_y(amt.to_radians()), Quat::from_rotation_y(-amt.to_radians())),
             None => (Quat::IDENTITY, Quat::IDENTITY),
         };
         let trans = Vec3::new(-mid.x, -mid.y, -mid.z);
@@ -170,9 +203,9 @@ impl PerspectiveHandler {
             Quat::IDENTITY,
             trans,
         );
-        let screen_mid = map.bounds_screen.center();
-        let screen_sz = map.bounds_screen.size();
-        let screen = self.display_size;
+        let screen_mid = bounds_screen.center();
+        let screen_sz = bounds_screen.size;
+        let screen = machine.map.calibration.display_size;
         let scl = Vec3::new(screen_sz.width / screen.width, screen_sz.height / screen.height, 1.0);
         let window_trans = Vec2::new(-mid.x, -mid.z);
         let window_trans = Vec2::new(window_trans.x - (screen_mid.x / screen.width - 0.5) * size.width, window_trans.y + (screen_mid.y / screen.height - 0.5) * size.depth);
@@ -181,8 +214,18 @@ impl PerspectiveHandler {
             bottom + window_trans.y, top + window_trans.y,
             near, far,
         ) * Mat4::from_scale_rotation_translation(
-            scl,
-            Quat::IDENTITY,
+            if let Some((_p, progress, _)) = anim_progress {
+                let (amt, prog) = match open.is_open() {
+                    true => (24.0 * taimi_meta::coords::MapLocalScale::METRES_PER_INCH / machine.map.scale_for(ctx), progress),
+                    false => (1.0, _p),
+                };
+                let amt = match open.is_open() {
+                    true => 0.8 + ((1.0 - prog * prog * prog) * amt),
+                    false => 1.0,
+                };
+                scl * amt
+            } else { scl },
+            anim_rot,
             Vec3::ZERO,
         );
         self.constant_buffer_pixel_data.set_viewport_size(None);

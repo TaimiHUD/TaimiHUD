@@ -1,13 +1,16 @@
 use {
     super::{ActivePack, PoiExt},
-    crate::space::{
-        dx11::{RenderBackend, InstanceBufferData},
-        resources::{Model, ShaderPair, Texture, Vertex},
-        DrawSpace, LocalContext,
+    crate::{
+        render::machine::RenderMachine,
+        space::{
+            dx11::{RenderBackend, InstanceBufferData},
+            resources::{Model, ShaderPair, Texture, Vertex},
+            DrawSpace, LocalContext,
+        },
     },
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
-    glamour::{Box3, Point3},
+    glamour::{Box3, Point3, Vector2},
     std::sync::Arc,
     taimi_d3d::{
         state::PrimitiveTopology,
@@ -102,6 +105,7 @@ impl PoiCommonRenderData {
             LocalContext::World => &self.world_ib,
             LocalContext::Map(..) => &self.map_ib,
         };
+        #[cfg(todo)]
         let vb = match vb {
             Some(vb) => vb,
             None => {
@@ -119,6 +123,10 @@ impl PoiCommonRenderData {
     pub fn clear(&mut self) {
         let _ = self.world_ib.take();
         let _ = self.map_ib.take();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.world_ib.is_none() && self.map_ib.is_none()
     }
 }
 
@@ -213,20 +221,11 @@ impl ActivePoi {
         }
     }
 
-    pub fn instance_data_map(&self) -> InstanceBufferData {
-        use {
-            crate::marker::atomic::MarkerInputData,
-            glamour::{TransformMap, Vector2},
-            taimi_meta::coords::{MapLocalScale, MinimapSpace},
-        };
+    pub fn instance_data_map(&self, machine: &RenderMachine) -> InstanceBufferData {
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
         let size = Vector2::splat(self.scale_map / 2.0);
-        let scale = MarkerInputData::read()
-            .map(|data| MinimapSpace::to_map(1.0, None, data.map_pos(), data.minimap_bound().center())
-                .then(data.map_to_local())
-                .map(size)
-            ).unwrap_or_else(|| size.as_() * MapLocalScale::COMMON.scale)
-            .abs();
+
+        let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
             world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(scale.extend(scale.y).into()),
             colour: self.tint(),

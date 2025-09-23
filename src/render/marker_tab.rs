@@ -3,15 +3,13 @@ use {
     crate::{
         controller::ControllerEvent,
         fl,
-        marker::{
-            atomic::{LocalPoint, MarkerInputData, ScreenPoint, SignObtainer},
-            format::MarkerSet,
-        },
-        render::RenderState,
+        marker::format::MarkerSet,
+        render::{machine::RenderMachine, RenderState},
         settings::{MarkerSettings, Settings},
         RenderEvent, Controller,
     },
-    glam::{Vec2, Vec3},
+    glam::Vec2,
+    glamour::TransformMap,
     indexmap::IndexMap,
     nexus::imgui::{
         ChildWindow, Condition, PopupModal, Selectable, TableColumnSetup, TableFlags, TreeNode,
@@ -20,6 +18,10 @@ use {
     std::{
         collections::{HashMap, HashSet},
         sync::Arc,
+    },
+    taimi_meta::coords::{
+        LocalPoint, LocalSpace,
+        MapLocalScale, ScreenPoint,
     },
 };
 
@@ -40,11 +42,11 @@ impl MarkerTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, state_errors: &mut HashMap<String, anyhow::Error>) {
         ui.columns(2, "marker_tab_start", true);
         self.draw_sidebar(ui, state_errors);
         ui.next_column();
-        self.draw_main(ui);
+        self.draw_main(ui, machine);
         ui.columns(1, "marker_tab_end", false)
     }
 
@@ -180,7 +182,7 @@ impl MarkerTabState {
         selected
     }
 
-    fn draw_main(&mut self, ui: &Ui) {
+    fn draw_main(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let child_window_flags = WindowFlags::HORIZONTAL_SCROLLBAR;
         ChildWindow::new("timer_main")
             .flags(child_window_flags)
@@ -190,10 +192,9 @@ impl MarkerTabState {
                 ui.dummy([4.0; 2]);
                 ui.separator();
                 ui.dummy([4.0; 2]);
-                let mid = MarkerInputData::read();
-                if let Some(mid) = &mid {
-                    let sign = mid.sign_obtainer.sign();
-                    let meep = SignObtainer::meters_per_feet();
+                if !machine.map.is_empty() {
+                    let sign = machine.map.calibration.local_space().scale;
+                    let meep = MapLocalScale::METRES_PER_FEET;
                     let sign_unity = sign / meep;
                     let sign_x = format!("{:.2}", sign.x);
                     let sign_y = format!("{:.2}", sign.y);
@@ -206,7 +207,8 @@ impl MarkerTabState {
                         y = sign_unity_y
                     ));
                     if ui.button(&fl!("scaling-factor-reset")) {
-                        MarkerInputData::reset_signobtainer();
+                        machine.map_sign.clear();
+                        machine.map.calibration.local_space = None;
                     }
                     ui.dummy([4.0; 2]);
                     ui.separator();
@@ -266,11 +268,15 @@ impl MarkerTabState {
                         .markers
                         .iter()
                         .flat_map(|x| {
-                            if let Some(mid) = &mid {
-                                let position: LocalPoint = Vec3::from(x.position.clone()).into();
-                                let map = mid.map_local_to_map(position);
+                            if let Some(map) = machine.map.get() {
+                                let position = LocalSpace::to2(x.position.into());
+                                let global = machine.map.calibration.map(position);
 
-                                mid.map_map_to_screen(map)
+                                let context = map.context;
+                                map.clip_screen(map.map_to_worldmap_for(context)
+                                    .then(map.worldmap_to_fake_for(context))
+                                    .then(map.calibration.to_screen())
+                                    .map(global))
                             } else {
                                 None
                             }
@@ -306,20 +312,23 @@ impl MarkerTabState {
                             ui.text_wrapped(&fl!("not-applicable"));
                         }
                         ui.table_next_column();
-                        let position: LocalPoint = Vec3::from(marker.position.clone()).into();
+                        let position: LocalPoint = marker.position.into();
                         ui.text_wrapped(format!(
                             "({:.2}, {:.2}, {:.2})",
                             position.x, position.y, position.z
                         ));
                         ui.table_next_column();
-                        if let Some(mid) = &mid {
-                            let map_position = mid.map_local_to_map(position);
+                        if let Some(map) = machine.map.get() {
+                            let map_position = map.calibration.map(LocalSpace::to2(position));
                             ui.text_wrapped(format!(
                                 "({:.2}, {:.2})",
                                 map_position.x, map_position.y
                             ));
                             ui.table_next_column();
-                            if let Some(screen_position) = mid.map_map_to_screen(map_position) {
+                            let trans = map.map_to_worldmap_for(map.context)
+                                .then(map.worldmap_to_fake_for(map.context));
+                            if let Some(take_position) = map.clip(trans.map(map_position)) {
+                                let screen_position = map.calibration.map(map_position);
                                 ui.text_wrapped(format!(
                                     "({:.2}, {:.2})",
                                     screen_position.x, screen_position.y

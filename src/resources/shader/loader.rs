@@ -151,4 +151,12 @@ impl ShaderLoader {
             shader.set(context);
         }
     }
+    pub fn unset(&self, context: &Dx11Context) {
+        unsafe {
+            context.PSSetShader(None, None);
+            context.VSSetShader(None, None);
+            context.IASetInputLayout(None);
+            //context.IASetVertexBuffers()?
+        }
+    }
 }
