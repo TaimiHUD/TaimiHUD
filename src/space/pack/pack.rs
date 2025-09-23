@@ -394,13 +394,13 @@ impl ActivePack {
                 continue;
             }
             let mut id = pack_poi.guid;
-            if self.active_trails.contains_key(&id) {
+            if self.active_pois.contains_key(&id) {
                 log::warn!(
                     "Pack {} contains a duplicate poi GUID `{id}`. \
                     Randomizing to ensure it may still be rendered.",
                     self.pack.name
                 );
-                while self.active_trails.contains_key(&id) {
+                while self.active_pois.contains_key(&id) {
                     id = Uuid::new_v4();
                 }
             }
@@ -666,7 +666,7 @@ impl PackCollection {
             pack.render_poi_bookmark = render_poi_bookmark;
             render_poi_bookmark += pack.active_pois.len();
         }
-        let (poi_ib_world, poi_ib_map) = if data_world.len() > 1 {
+        let (poi_ib_world, poi_ib_map) = if !self.loaded_packs.is_empty() {
             (
                 Some(InstanceBuffer::create(device, &data_world[..])?),
                 Some(InstanceBuffer::create(device, &data_map[..])?),
