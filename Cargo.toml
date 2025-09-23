@@ -99,6 +99,7 @@ extension-arcdps-codegen = [
 extension-arcdps-extern = [
   "dep:sync-unsafe-cell",
   "dpsapi",
+  "dpsapi/embed",
   #"extension-arcdps-extern-cleanup"
   "arcffi",
 ]
@@ -132,7 +133,7 @@ arcffi = [
 windows = [
   "dep:windows",
   "arcffi?/windows-061",
-  #"dpsapi/windows-061",
+  #"dpsapi?/windows-061",
 ]
 
 [lib]
