@@ -1,415 +1,237 @@
 use {
-    anyhow::{anyhow, Context},
     crate::{
         resources::Model,
         space::{
-            dx11::{prelude::*, VertexBuffer},
             max_depth, MapTarget, ScreenSpace,
         },
     },
-    std::{array, borrow::Cow},
-    windows::{
-        core::Interface,
-        Win32::Graphics::Direct3D11::{
-            ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device, ID3D11DeviceContext,
-            ID3D11RasterizerState, ID3D11RenderTargetView, ID3D11Texture2D,
-            D3D11_DEPTH_STENCILOP_DESC, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_STENCIL_VIEW_DESC,
-            D3D11_DEPTH_STENCIL_VIEW_DESC_0,
-            D3D11_DSV_DIMENSION_TEXTURE2D, D3D11_RASTERIZER_DESC,
-            D3D11_TEX2D_DSV, D3D11_TEXTURE2D_DESC,
-            D3D11_VIEWPORT,
-        },
-        Win32::Graphics::Dxgi::{
-            Common::{DXGI_FORMAT_D24_UNORM_S8_UINT, DXGI_SAMPLE_DESC},
-            IDXGISwapChain,
-        },
+    glamour::{Box2, Size2},
+    std::borrow::Cow,
+    taimi_d3d::dx11::{
+        prelude::*,
+        buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
+        depth::{DepthState, DepthView, D3D11_DEPTH_STENCIL_DESC},
+        raster::{RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
+        viewport::Viewport,
+        SwapChain11,
     },
 };
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
 
+type OMDepthState = taimi_d3d::dx11::OMDepthState<DepthState>;
+
 #[allow(unused)]
 pub struct DepthHandler {
-    pub framebuffer: ID3D11Texture2D,
-    viewport: D3D11_VIEWPORT,
-    pub render_target_view: Vec<Option<ID3D11RenderTargetView>>,
-    pub depth_stencil_state: ID3D11DepthStencilState,
-    pub depth_stencil_state_map: ID3D11DepthStencilState,
-    pub depth_stencil_state_write: ID3D11DepthStencilState,
+    viewport: Viewport,
+    pub render_target_view: RenderTargetViews<RenderTargetView>,
+    pub depth_stencil_state: OMDepthState,
+    pub depth_stencil_state_map: OMDepthState,
+    pub depth_stencil_state_mask: OMDepthState,
     #[cfg(feature = "goggles")]
-    pub depth_stencil_state_obscured: ID3D11DepthStencilState,
-    pub depth_stencil_view: ID3D11DepthStencilView,
-    pub depth_stencil_buffer: ID3D11Texture2D,
+    pub depth_stencil_state_write: OMDepthState,
+    #[cfg(feature = "goggles")]
+    pub depth_stencil_state_obscured: OMDepthState,
     pub fill_quad: VertexBuffer,
-    pub rasterizer_state: ID3D11RasterizerState,
+    pub fill_edge: Option<VertexBuffer>,
+    pub rasterizer_state: RasterizerState,
 }
 
 impl DepthHandler {
     pub fn create(
-        display_size: &[f32; 2],
-        device: &ID3D11Device,
-        swap_chain: &IDXGISwapChain,
+        display_size: Size2<ScreenSpace>,
+        device: &Dx11Device,
+        swap_chain: &SwapChain11,
     ) -> anyhow::Result<Self> {
-        let framebuffer = Self::get_framebuffer(swap_chain)?;
         log::debug!(
             "Setting up viewport with dimensions ({},{})",
-            display_size[0],
-            display_size[1]
+            display_size.width,
+            display_size.height,
         );
-        let viewport = Self::create_viewport(display_size);
-        let render_target_view = vec![Self::create_render_target_view(device, &framebuffer).ok()];
-        let depth_stencil_state = Self::create_depth_stencil_state(device)?;
-        let depth_stencil_state_map = Self::create_depth_stencil_state_map(device)?;
-        let depth_stencil_state_write = Self::create_depth_stencil_state_write(device)?;
+        let viewport = Viewport::with_size(display_size.extend(1.0));
+
+        let framebuffer = swap_chain.get_framebuffer11()?;
+        let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
+        let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
+        let depth_stencil_state_mask = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;
         #[cfg(feature = "goggles")]
-        let depth_stencil_state_obscured = Self::create_depth_stencil_state_obscured(device)?;
-        let depth_stencil_buffer = Self::create_depth_stencil_buffer(device, display_size)?;
-        let depth_stencil_view = Self::create_depth_stencil_view(device, &depth_stencil_buffer)?;
-        let fill_quad = Model::from_vertices(
-            // TODO: hack .-.
-            crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into()
-        ).to_buffer(device)?;
-        let rasterizer_state = Self::create_rasterizer_state(device)?;
+        let depth_stencil_state_write = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL)?;
+        #[cfg(feature = "goggles")]
+        let depth_stencil_state_obscured = DepthState::new_with_desc(device, &Self::DEPTH_DESC_OBSCURED)?;
+
+        let depth_stencil_buffer_desc = D3D11_TEXTURE2D_DESC {
+            Width: display_size.width as _,
+            Height: display_size.height as _,
+            .. Self::BUFFER_DESC
+        };
+        let depth_stencil_buffer = Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
+        let depth_stencil_view = DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
+        let fill_quad = Self::new_fill_quad(device, None)?;
+        let rasterizer_state = RasterizerState::new_with_desc(device, &Self::RASTER_DESC)?;
+
+        let render_target_view = RenderTargetView::new_with_buffer2(device, &framebuffer)?;
+        let render_target_view = RenderTargetViews::with_views(render_target_view, Some(depth_stencil_view));
         Ok(Self {
-            framebuffer,
             viewport,
             render_target_view,
-            depth_stencil_view,
-            depth_stencil_state,
-            depth_stencil_state_map,
-            depth_stencil_state_write,
+            depth_stencil_state: OMDepthState::with_state(depth_stencil_state, Self::STENCIL_REF),
+            depth_stencil_state_map: OMDepthState::with_state(depth_stencil_state_map, Self::STENCIL_REF),
+            depth_stencil_state_mask: OMDepthState::with_state(depth_stencil_state_mask, Self::STENCIL_REF_MASK),
             #[cfg(feature = "goggles")]
-            depth_stencil_state_obscured,
-            depth_stencil_buffer,
+            depth_stencil_state_write: OMDepthState::with_state(depth_stencil_state_write, Self::STENCIL_REF),
+            #[cfg(feature = "goggles")]
+            depth_stencil_state_obscured: OMDepthState::with_state(depth_stencil_state_obscured, Self::STENCIL_REF),
             rasterizer_state,
             fill_quad,
+            fill_edge: None,
         })
     }
 
-    const STENCIL_REF: u32 = 1;
-    pub fn setup(&self, device_context: &ID3D11DeviceContext, distance_max: f32) {
+    const STENCIL_REF_MASK: u32 = 0x40;
+    const STENCIL_REF: u32 = 0x01;
+    const STENCIL_CLEAR: u8 = 0x00;
+    const DEPTH_DESC_ON: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthFunc: d3d11::D3D11_COMPARISON_LESS_EQUAL,
+        StencilWriteMask: 0,
+        //StencilReadMask: 0xff,
+        StencilEnable: BOOL(1),
+        FrontFace: Self::STENCILOP_ON,
+        BackFace: Self::STENCILOP_ON,
+        .. DepthState::DESC_DEFAULT
+    };
+    const DEPTH_DESC_MAP: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        .. Self::DEPTH_DESC_IGNORE
+    };
+    const DEPTH_DESC_IGNORE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthEnable: BOOL(0),
+        DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+        DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        StencilReadMask: 0,
+        StencilEnable: BOOL(0),
+        .. Self::DEPTH_DESC_ON
+    };
+    const DEPTH_DESC_FILL: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
+        DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        DepthEnable: BOOL(1),
+        StencilEnable: BOOL(0),
+        .. DepthState::DESC_DEFAULT
+    };
+    const DEPTH_DESC_FILL_OPAQUE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+        DepthEnable: BOOL(0),
+        StencilEnable: BOOL(1),
+        StencilReadMask: 0,
+        //StencilWriteMask: 0xff,
+        FrontFace: Self::STENCILOP_FILL,
+        BackFace: Self::STENCILOP_FILL,
+        .. Self::DEPTH_DESC_FILL
+    };
+    #[cfg(feature = "goggles")]
+    const DEPTH_DESC_OBSCURED: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+        DepthFunc: d3d11::D3D11_COMPARISON_GREATER,
+        StencilEnable: BOOL(1),
+        FrontFace: Self::STENCILOP_ON,
+        BackFace: Self::STENCILOP_ON,
+        .. Self::DEPTH_DESC_ON
+    };
+    const STENCILOP_ON: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
+        StencilFunc: d3d11::D3D11_COMPARISON_GREATER,
+        .. DepthState::STENCILOP_DEFAULT
+    };
+    const STENCILOP_FILL: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
+        StencilFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        StencilPassOp: d3d11::D3D11_STENCIL_OP_REPLACE,
+        .. DepthState::STENCILOP_DEFAULT
+    };
+
+    const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
+
+    pub fn setup(&self, device_context: &Dx11Context, distance_max: f32) {
         let (dsview, clear_depth) = self.depth_stencil_view();
-        unsafe {
-            device_context.RSSetState(&self.rasterizer_state);
-            let viewport = self.viewport(distance_max);
-            device_context.RSSetViewports(Some(array::from_ref(&*viewport)));
-            device_context.OMSetRenderTargets(
-                Some(self.render_target_view.as_slice()),
-                dsview,
-            );
-            device_context.OMSetDepthStencilState(&self.depth_stencil_state, Self::STENCIL_REF);
-            if let Some(clear_depth) = clear_depth {
-                device_context.ClearDepthStencilView(
-                    dsview,
-                    d3d11::D3D11_CLEAR_DEPTH.0 | d3d11::D3D11_CLEAR_STENCIL.0,
-                    clear_depth,
-                    0,
-                );
-            }
+        self.rasterizer_state.set(device_context);
+        let viewport = self.viewport(distance_max);
+        viewport.set(device_context);
+        dsview.set(device_context);
+        self.depth_stencil_state.set(device_context);
+        if let Some(clear_depth) = clear_depth {
+            dsview.clear_depth(device_context, DepthView::CLEAR_DEPTH_STENCIL, clear_depth, Self::STENCIL_CLEAR);
         }
     }
 
-    pub fn depth_stencil_view(&self) -> (InterfaceRef<'_, ID3D11DepthStencilView>, Option<f32>) {
-        let (dsview, clear_depth) = (&self.depth_stencil_view, Some(1.0f32));
+    pub fn depth_stencil_view(&self) -> (RenderTargetViews<InterfaceRef<'_, d3d11::ID3D11RenderTargetView>, InterfaceRef<'_, d3d11::ID3D11DepthStencilView>>, Option<f32>) {
+        let dsview = self.render_target_view.to_ref()
+            .map_depth(|d| d.map(|d| d.to_ref()))
+            .map_views(RenderTargetView::to_ref);
+        let clear_depth = Some(1.0f32);
         #[cfg(feature = "goggles")]
         let (dsview, clear_depth) = match goggles::current_lens() {
-            Some(dsview) => (dsview, None),
-            None => (dsview.to_ref(), clear_depth),
+            Some(depth) => {
+                let dsview = dsview.map_depth(|_| Some(depth));
+                (dsview, None)
+            },
+            None => (dsview, clear_depth),
         };
+
         (dsview, clear_depth)
     }
 
-    pub fn viewport(&self, distance_max: f32) -> Cow<'_, D3D11_VIEWPORT> {
+    #[cfg(feature = "goggles")]
+    pub fn depth_stencil_view_ptr(&self) -> InterfaceRef<'_, d3d11::ID3D11DepthStencilView> {
+        self.render_target_view.depth.as_ref().unwrap()
+            .view.to_ref()
+    }
+
+    pub fn viewport(&self, distance_max: f32) -> Cow<'_, Viewport> {
         match distance_max / max_depth() {
             d if d >= 1.0 =>
                 Cow::Borrowed(&self.viewport),
             d => {
-                let display_size = [
-                    self.viewport.Width,
-                    self.viewport.Height,
-                ];
-                let mut viewport = Self::create_viewport(&display_size);
-                viewport.MaxDepth *= d;
+                let mut viewport = self.viewport;
+                viewport.viewport.MaxDepth *= d;
                 Cow::Owned(viewport)
             },
         }
     }
 
-    #[cfg(not(feature = "goggles"))]
-    pub fn viewport(&self) -> &D3D11_VIEWPORT {
-        &self.viewport
-    }
-
     #[cfg(feature = "goggles")]
-    pub fn set_state_obscured(&self, device_context: &ID3D11DeviceContext, obscured: bool) {
+    pub fn set_state_obscured(&self, device_context: &Dx11Context, obscured: bool) {
         let state = match obscured {
             true => &self.depth_stencil_state_obscured,
             false => &self.depth_stencil_state,
         };
-        unsafe {
-            device_context.OMSetDepthStencilState(state, Self::STENCIL_REF);
-        }
+        state.set(device_context);
     }
 
-    pub fn create_viewport(display_size: &[f32; 2]) -> D3D11_VIEWPORT {
-        let viewport = D3D11_VIEWPORT {
-            TopLeftX: 0.0,
-            TopLeftY: 0.0,
-            Width: display_size[0],
-            Height: display_size[1],
-            MinDepth: 0.0,
-            MaxDepth: 1.0,
-        };
-        viewport
-    }
-
-    pub fn get_framebuffer(swap_chain: &IDXGISwapChain) -> anyhow::Result<ID3D11Texture2D> {
-        log::info!("Setting up framebuffer");
-        let framebuffer: ID3D11Texture2D =
-            unsafe { swap_chain.GetBuffer(0) }
-            .context("getting swap chain's framebuffer")?;
-        log::info!("Set up framebuffer");
-        Ok(framebuffer)
-    }
-
-    pub fn create_render_target_view(
-        device: &ID3D11Device,
-        framebuffer: &ID3D11Texture2D,
-    ) -> anyhow::Result<ID3D11RenderTargetView> {
-        log::debug!("Setting up render target view");
-        let mut render_target_view_ptr: Option<ID3D11RenderTargetView> = None;
-        let render_target_view = unsafe {
-            device.CreateRenderTargetView(framebuffer, None, Some(&mut render_target_view_ptr))
-        }
-        .context("creating render target view")
-        .and_then(|()| render_target_view_ptr.ok_or_else(|| anyhow!("no render target view")))?;
-        log::debug!("Set up render target view");
-        Ok(render_target_view)
-    }
-
-    const STENCILOP_DESC_DEFAULT: D3D11_DEPTH_STENCILOP_DESC = D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: d3d11::D3D11_COMPARISON_ALWAYS,
-        StencilDepthFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
-        StencilFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
-        StencilPassOp: d3d11::D3D11_STENCIL_OP_KEEP,
+    const RASTER_DESC: D3D11_RASTERIZER_DESC = D3D11_RASTERIZER_DESC {
+        CullMode: d3d11::D3D11_CULL_NONE,
+        FrontCounterClockwise: BOOL(1),
+        DepthClipEnable: BOOL(0),
+        ScissorEnable: BOOL(1),
+        // TODO: on or off?
+        MultisampleEnable: BOOL(1),
+        AntialiasedLineEnable: BOOL(1),
+        .. RasterizerState::DESC_DEFAULT
     };
 
-    pub fn create_depth_stencil_state(
-        device: &ID3D11Device,
-    ) -> anyhow::Result<ID3D11DepthStencilState> {
-        log::info!("Setting up depth stencil state");
-        let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
-            DepthEnable: true.into(),
-            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
-            DepthFunc: d3d11::D3D11_COMPARISON_LESS_EQUAL,
-            StencilEnable: false.into(),
-            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
-            FrontFace: Self::STENCILOP_DESC_DEFAULT,
-            BackFace: Self::STENCILOP_DESC_DEFAULT,
-        };
-        let mut depth_stencil_state_ptr: Option<ID3D11DepthStencilState> = None;
-        let depth_stencil_state = unsafe {
-            device.CreateDepthStencilState(
-                &depth_stencil_state_desc,
-                Some(&mut depth_stencil_state_ptr),
-            )
-        }.context("creating depth state")
-        .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
-        log::info!("Set up depth stencil state");
-        Ok(depth_stencil_state)
+    pub fn setup_map(&self, device_context: &Dx11Context, _map: &MapTarget) {
+        self.rasterizer_state.set(device_context);
+        self.viewport.set(device_context);
+        //self.render_target_view.to_ref().without_depth().set(device_context);
+        //self.render_target_view.set(device_context);
+        self.depth_stencil_view().0.set(device_context);
+        self.depth_stencil_state_map.set(device_context);
     }
 
-    #[cfg(feature = "goggles")]
-    pub fn create_depth_stencil_state_obscured(
-        device: &ID3D11Device,
-    ) -> anyhow::Result<ID3D11DepthStencilState> {
-        let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
-            DepthEnable: true.into(),
-            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
-            DepthFunc: d3d11::D3D11_COMPARISON_GREATER,
-            StencilEnable: false.into(),
-            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
-            FrontFace: Self::STENCILOP_DESC_DEFAULT,
-            BackFace: Self::STENCILOP_DESC_DEFAULT,
-        };
-        let mut depth_stencil_state_ptr: Option<ID3D11DepthStencilState> = None;
-        let depth_stencil_state = unsafe {
-            device.CreateDepthStencilState(
-                &depth_stencil_state_desc,
-                Some(&mut depth_stencil_state_ptr),
-            )
-        }.context("creating depth state")
-        .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
-        Ok(depth_stencil_state)
-    }
-
-    pub fn create_depth_stencil_buffer(
-        device: &ID3D11Device,
-        display_size: &[f32; 2],
-    ) -> anyhow::Result<ID3D11Texture2D> {
-        log::info!("Setting up depth stencil buffer");
-        let depth_stencil_buffer_sample_desc = DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        };
-        let depth_stencil_buffer_desc = D3D11_TEXTURE2D_DESC {
-            Width: display_size[0] as u32,
-            Height: display_size[1] as u32,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_D24_UNORM_S8_UINT,
-            SampleDesc: depth_stencil_buffer_sample_desc,
-            Usage: d3d11::D3D11_USAGE_DEFAULT,
-            BindFlags: d3d11::D3D11_BIND_DEPTH_STENCIL.0 as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: 0,
-        };
-        log::info!("Set up depth stencil buffer");
-        let mut depth_stencil_buffer_ptr: Option<ID3D11Texture2D> = None;
-        let depth_stencil_buffer = unsafe {
-            device.CreateTexture2D(
-                &depth_stencil_buffer_desc,
-                None,
-                Some(&mut depth_stencil_buffer_ptr),
-            )
-        }.context("creating depth buffer")
-        .and_then(|()| {
-            depth_stencil_buffer_ptr.ok_or_else(|| anyhow!("no depth stencil buffer"))
-        })?;
-        Ok(depth_stencil_buffer)
-    }
-
-    pub fn create_depth_stencil_view(
-        device: &ID3D11Device,
-        buffer: &ID3D11Texture2D,
-    ) -> anyhow::Result<ID3D11DepthStencilView> {
-        let dsv_tex2d = D3D11_TEX2D_DSV { MipSlice: 0 };
-        let depth_stencil_view_anonymous = D3D11_DEPTH_STENCIL_VIEW_DESC_0 {
-            Texture2D: dsv_tex2d,
-        };
-        let depth_stencil_view_desc = D3D11_DEPTH_STENCIL_VIEW_DESC {
-            Format: DXGI_FORMAT_D24_UNORM_S8_UINT,
-            ViewDimension: D3D11_DSV_DIMENSION_TEXTURE2D,
-            Flags: 0,
-            Anonymous: depth_stencil_view_anonymous,
-        };
-        log::info!("Setting up depth stencil view");
-        let mut depth_stencil_view_ptr: Option<ID3D11DepthStencilView> = None;
-        let depth_stencil_view = unsafe {
-            device.CreateDepthStencilView(
-                buffer,
-                Some(&depth_stencil_view_desc),
-                Some(&mut depth_stencil_view_ptr),
-            )
-        }.context("creating depth view")
-        .and_then(|()| depth_stencil_view_ptr.ok_or_else(|| anyhow!("no depth stencil view")))?;
-        log::info!("Set up depth stencil view");
-        Ok(depth_stencil_view)
-    }
-
-    pub fn create_rasterizer_state(device: &ID3D11Device) -> anyhow::Result<ID3D11RasterizerState> {
-        log::info!("Setting up rasterizer state");
-        let rasterizer_state_desc = D3D11_RASTERIZER_DESC {
-            FillMode: d3d11::D3D11_FILL_SOLID,
-            CullMode: d3d11::D3D11_CULL_NONE,
-            FrontCounterClockwise: true.into(),
-            DepthBias: 0,
-            DepthBiasClamp: 0.0,
-            SlopeScaledDepthBias: 0.0,
-            DepthClipEnable: false.into(),
-            ScissorEnable: true.into(),
-            MultisampleEnable: false.into(),
-            AntialiasedLineEnable: false.into(),
-        };
-        let mut rasterizer_state_ptr: Option<ID3D11RasterizerState> = None;
-        let rasterizer_state = unsafe {
-            device.CreateRasterizerState(&rasterizer_state_desc, Some(&mut rasterizer_state_ptr))
+    pub fn setup_depth_write(&self, device_context: &Dx11Context, enable: bool) {
+        if !enable {
+            self.depth_stencil_state.set(device_context);
         }
-        .context("creating rasterizer state")
-        .and_then(|()| rasterizer_state_ptr.ok_or_else(|| anyhow!("no rasterizer state")))?;
-        log::info!("Set up rasterizer state");
-        Ok(rasterizer_state)
+        self.depth_stencil_view().0.set(device_context);
     }
 
-    pub fn create_depth_stencil_state_map(
-        device: &ID3D11Device,
-    ) -> anyhow::Result<ID3D11DepthStencilState> {
-        let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
-            DepthEnable: false.into(),
-            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
-            DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
-            StencilEnable: false.into(),
-            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
-            FrontFace: Self::STENCILOP_DESC_DEFAULT,
-            BackFace: Self::STENCILOP_DESC_DEFAULT,
-        };
-        let mut depth_stencil_state_ptr: Option<ID3D11DepthStencilState> = None;
-        let depth_stencil_state = unsafe {
-            device.CreateDepthStencilState(
-                &depth_stencil_state_desc,
-                Some(&mut depth_stencil_state_ptr),
-            )
-        }.context("creating depth state")
-        .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
-        Ok(depth_stencil_state)
-    }
-
-    pub fn setup_map(&self, device_context: &ID3D11DeviceContext, _map: &MapTarget) {
-        unsafe {
-            device_context.RSSetState(&self.rasterizer_state);
-            device_context.RSSetViewports(Some(&[self.viewport]));
-            device_context.OMSetRenderTargets(
-                Some(self.render_target_view.as_slice()),
-                None,
-            );
-            device_context.OMSetDepthStencilState(&self.depth_stencil_state_map, Self::STENCIL_REF);
-        }
-    }
-
-    pub fn create_depth_stencil_state_write(
-        device: &ID3D11Device,
-    ) -> anyhow::Result<ID3D11DepthStencilState> {
-        let depth_stencil_state_desc = D3D11_DEPTH_STENCIL_DESC {
-            DepthEnable: true.into(),
-            DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
-            DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
-            StencilEnable: false.into(),
-            StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
-            StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
-            FrontFace: Self::STENCILOP_DESC_DEFAULT,
-            BackFace: Self::STENCILOP_DESC_DEFAULT,
-        };
-        let mut depth_stencil_state_ptr: Option<ID3D11DepthStencilState> = None;
-        let depth_stencil_state = unsafe {
-            device.CreateDepthStencilState(
-                &depth_stencil_state_desc,
-                Some(&mut depth_stencil_state_ptr),
-            )
-        }.context("creating depth state")
-        .and_then(|()| depth_stencil_state_ptr.ok_or_else(|| anyhow!("no depth stencil state")))?;
-        Ok(depth_stencil_state)
-    }
-
-    pub fn setup_depth_write(&self, device_context: &ID3D11DeviceContext, enable: bool) {
-        let (dsview, _) = self.depth_stencil_view();
-        let render_target = match enable {
-            true => None,
-            false => Some(self.render_target_view.as_slice()),
-        };
-        let state = match enable {
-            true => &self.depth_stencil_state_write,
-            false => &self.depth_stencil_state,
-        };
-        unsafe {
-            device_context.OMSetRenderTargets(render_target, dsview);
-            device_context.OMSetDepthStencilState(state, Self::STENCIL_REF);
-        }
-    }
-
-    pub fn setup_minimap_scissor(&self, device_context: &ID3D11DeviceContext, bounds: &glamour::Box2<ScreenSpace>) {
+    pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
         let minimap_bounds = windows::Win32::Foundation::RECT {
             left: bounds.min.x.round_ties_even() as i32,
             top: bounds.min.y.round_ties_even() as i32,
@@ -421,29 +243,153 @@ impl DepthHandler {
         }
     }
 
-    pub fn clear_scissor(&self, device_context: &ID3D11DeviceContext) {
+    pub fn clear_scissor(&self, device_context: &Dx11Context) {
+        let size = self.viewport.size2();
         let bounds = windows::Win32::Foundation::RECT {
             left: 0,
             top: 0,
-            right: self.viewport.Width as i32,
-            bottom: self.viewport.Height as i32,
+            right: size.width as i32,
+            bottom: size.height as i32,
         };
         unsafe {
             device_context.RSSetScissorRects(Some(&[bounds]));
         }
     }
 
-    pub fn fill_clipped(&self, device_context: &ID3D11DeviceContext, perspective_handler: &mut super::PerspectiveHandler) {
-        self.fill_quad.set(device_context, 0);
-
+    pub fn setup_fill(&self, device_context: &Dx11Context, perspective_handler: &mut super::PerspectiveHandler) {
         // TODO: simplify vertex shader so this is unnecessary
         perspective_handler.constant_buffer_mapv_data = Default::default();
         perspective_handler.update_map_cb(device_context);
         perspective_handler.set_map_cb(device_context, 0);
-
+        self.depth_stencil_state_mask.set(device_context);
         unsafe {
             device_context.PSSetShader(None, None);
-            device_context.Draw(4, 0);
         }
+    }
+
+    pub fn fill_clipped(&self, device_context: &Dx11Context) {
+        self.fill_quad.set(device_context, 0);
+
+        unsafe {
+            device_context.Draw(Self::FILL_QUAD_VERTEX_COUNT, 0);
+        }
+    }
+
+    pub fn fill_corners(&self, device_context: &Dx11Context, depth: bool) {
+        let geometry = match &self.fill_edge {
+            Some(fill) => fill,
+            None => return,
+        };
+        let state = match depth {
+            #[cfg(feature = "goggles")]
+            true => &self.depth_stencil_state_write,
+            _ => &self.depth_stencil_state_mask,
+        };
+        state.set(device_context);
+        geometry.set(device_context, 0);
+
+        unsafe {
+            //device_context.DrawInstanced(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_EDGE_COUNT, Self::FILL_QUAD_VERTEX_COUNT * 1, 0);
+            for i in 1..=Self::FILL_QUAD_EDGE_COUNT {
+                device_context.Draw(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_VERTEX_COUNT * i);
+            }
+        }
+    }
+
+    pub fn regen_edge(&mut self, device: &Dx11Device, edge_scale: Option<f32>) -> anyhow::Result<()> {
+        self.fill_edge = edge_scale.map(|scale|
+            Self::new_fill_quad(device, Some(scale))
+        ).transpose()?;
+        Ok(())
+    }
+
+    const FILL_QUAD_VERTEX_COUNT: u32 = 4;
+    const FILL_QUAD_EDGE_COUNT: u32 = 5;
+    /// TODO: hack .-.
+    pub fn new_fill_quad(device: &Dx11Device, edge_scale: Option<f32>) -> anyhow::Result<VertexBuffer> {
+        let mut verts: Vec<_> = crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into();
+
+        if let Some(edge_scale) = edge_scale {
+            use {
+                crate::resources::Vertex,
+                super::PerspectiveInputData,
+                glam::{vec2, Vec3},
+                glamour::Box2,
+                nexus::data_link::mumble::UiState,
+            };
+
+            fn quad_verts(b: Box2) -> [Vertex; 4] {
+                [
+                    Vertex {
+                        position: Vec3::new(b.min.x, 0.0, b.max.y),
+                        colour: Vec3::ONE,
+                        normal: Vec3::Y,
+                        .. Default::default()
+                    },
+                    Vertex {
+                        position: Vec3::new(b.max.x, 0.0, b.max.y),
+                        colour: Vec3::ONE,
+                        normal: Vec3::Y,
+                        .. Default::default()
+                    },
+                    Vertex {
+                        position: Vec3::new(b.min.x, 0.0, b.min.y),
+                        colour: Vec3::ONE,
+                        normal: Vec3::Y,
+                        .. Default::default()
+                    },
+                    Vertex {
+                        position: Vec3::new(b.max.x, 0.0, b.min.y),
+                        colour: Vec3::ONE,
+                        normal: Vec3::Y,
+                        .. Default::default()
+                    },
+                ]
+            }
+
+            let bottom_h = 0.15 * edge_scale;
+            let bottom = Box2::new(
+                vec2(-1.0, -1.0).into(),
+                vec2(1.0, -1.0 + bottom_h).into(),
+            );
+            verts.extend_from_slice(&quad_verts(bottom));
+
+            let top_h = 0.045 * edge_scale;
+            let top = Box2::new(
+                vec2(-1.0, 1.0).into(),
+                vec2(1.0, 1.0 - top_h).into(),
+            );
+            verts.extend_from_slice(&quad_verts(top));
+
+            let left_w = 0.335 * edge_scale;
+            let tl_h = 0.6 * edge_scale;
+            let top_left = Box2::new(
+                vec2(-1.0, 1.0 - tl_h).into(),
+                vec2(-1.0 + left_w, 1.0).into(),
+            );
+            verts.extend_from_slice(&quad_verts(top_left));
+            // b-l
+            let bleft_w = 0.3 * edge_scale;
+            let bl_h = 0.5 * edge_scale;
+            let bottom_left = Box2::new(
+                vec2(-1.0, -1.0).into(),
+                vec2(-1.0 + bleft_w, -1.0 + bl_h).into(),
+            );
+            verts.extend_from_slice(&quad_verts(bottom_left));
+
+            let sign = match PerspectiveInputData::get().ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT) {
+                true => -1.0f32,
+                false => 1.0,
+            };
+            let corn_w = 0.2 * edge_scale * sign;
+            let corn_h = 0.4 * edge_scale * sign;
+            let right = Box2::from_points([
+                vec2(1.0 - corn_w, sign * (1.0 - corn_h)).into(),
+                vec2(1.0, sign).into(),
+            ]);
+            verts.extend_from_slice(&quad_verts(right));
+        }
+
+        Model::from_vertices(verts).to_buffer(device)
     }
 }

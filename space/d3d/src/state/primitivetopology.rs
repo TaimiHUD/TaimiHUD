@@ -1,13 +1,9 @@
-use {
-    crate::space::dx11::prelude::*,
-    serde::{Deserialize, Serialize},
-    windows::Win32::Graphics::Direct3D::{
-        self as d3d,
-        D3D_PRIMITIVE_TOPOLOGY,
-    },
-};
+use crate::prelude::*;
 
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub use crate::d3d::D3D_PRIMITIVE_TOPOLOGY;
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 #[repr(u32)]
 pub enum PrimitiveTopology {
     Undefined = d3d::D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED.0 as u32,
@@ -27,13 +23,5 @@ impl PrimitiveTopology {
     pub fn d3d(&self) -> D3D_PRIMITIVE_TOPOLOGY {
         let repr = *self as u32;
         D3D_PRIMITIVE_TOPOLOGY(repr as _)
-    }
-}
-
-impl D3d11ContextBindable for PrimitiveTopology {
-    fn set(&self, device_context: &ID3D11DeviceContext) {
-        unsafe {
-            device_context.IASetPrimitiveTopology(self.d3d())
-        }
     }
 }

@@ -1,8 +1,7 @@
 use {
     super::{ActivePack, PoiExt},
     crate::space::{
-        dx11::{prelude::*, RenderBackend, InstanceBuffer, InstanceBufferData, VertexBuffer},
-        object::PrimitiveTopology,
+        dx11::{RenderBackend, InstanceBufferData},
         resources::{Model, ShaderPair, Texture, Vertex},
         DrawSpace, LocalContext,
     },
@@ -10,6 +9,13 @@ use {
     glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
     glamour::{Box3, Point3},
     std::sync::Arc,
+    taimi_d3d::{
+        state::PrimitiveTopology,
+        dx11::{
+            buffer::{BufferOf, VertexBuffer},
+            prelude::*,
+        },
+    },
     taimi_pack::Poi,
 };
 
@@ -24,8 +30,8 @@ pub struct PoiCommonRenderData {
     #[cfg(todo)]
     quad_vb_map: VertexBuffer,
 
-    pub world_ib: Option<InstanceBuffer>,
-    pub map_ib: Option<InstanceBuffer>,
+    pub world_ib: Option<BufferOf<InstanceBufferData>>,
+    pub map_ib: Option<BufferOf<InstanceBufferData>>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -36,22 +42,11 @@ impl PoiCommonRenderData {
         vertices.extend_from_slice(&Self::quad(LocalContext::MAP));
 
         let quad_vb = Model::from_vertices(vertices).to_buffer(&backend.device)?;
+        let shaders = backend.shaders.pair_named("poi")
+            .context("Failed to load POI shader")?;
 
         Ok(PoiCommonRenderData {
-            shaders: ShaderPair(
-                backend
-                    .shaders
-                    .0
-                    .get("poi")
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("Failed to load POI vertex shader"))?,
-                backend
-                    .shaders
-                    .1
-                    .get("poi")
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("Failed to load POI pixel shader"))?,
-            ),
+            shaders,
             #[cfg(todo)]
             quad_vb_map: VertexBuffer {
                 offset: self.quad_vb.offset + self.quad_vb.stride * POI_QUAD_VERTICES.len() as u32,
@@ -84,14 +79,14 @@ impl PoiCommonRenderData {
         }
     }
 
-    pub fn set(&self, device_context: &ID3D11DeviceContext) {
+    pub fn set(&self, device_context: &Dx11Context) {
         self.shaders.set(device_context);
         self.set_vertex(device_context, LocalContext::World);
         self.set_instance(device_context, LocalContext::World);
     }
 
     pub const SLOT_VB: u32 = 0;
-    pub fn set_vertex(&self, device_context: &ID3D11DeviceContext, ctx: LocalContext) {
+    pub fn set_vertex(&self, device_context: &Dx11Context, ctx: LocalContext) {
         let vb = match ctx {
             #[cfg(todo)]
             LocalContext::Map(..) => &self.quad_vb_map,
@@ -102,7 +97,7 @@ impl PoiCommonRenderData {
     }
 
     pub const SLOT_IB: u32 = 1;
-    pub fn set_instance(&self, device_context: &ID3D11DeviceContext, ctx: LocalContext) {
+    pub fn set_instance(&self, device_context: &Dx11Context, ctx: LocalContext) {
         let vb = match ctx {
             LocalContext::World => &self.world_ib,
             LocalContext::Map(..) => &self.map_ib,
@@ -117,7 +112,7 @@ impl PoiCommonRenderData {
         vb.set(device_context, Self::SLOT_IB);
     }
 
-    pub fn set_primitive(&self, device_context: &ID3D11DeviceContext) {
+    pub fn set_primitive(&self, device_context: &Dx11Context) {
         PrimitiveTopology::TriangleStrip.set(device_context);
     }
 
@@ -173,7 +168,7 @@ impl ActivePoi {
         poi: &Poi,
         poi_idx: usize,
         category_idx: usize,
-        device: &ID3D11Device,
+        device: &Dx11Device,
     ) -> anyhow::Result<ActivePoi> {
         let icon_handle = poi.icon_name()
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
@@ -243,7 +238,7 @@ impl ActivePoi {
         let _ = poi_idx;
     }
 
-    pub fn draw(&self, device_context: &ID3D11DeviceContext, render_idx: usize, ctx: LocalContext) {
+    pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
         self.icon.set(device_context, 0);
         let voffset = match ctx {
             LocalContext::World => 0,

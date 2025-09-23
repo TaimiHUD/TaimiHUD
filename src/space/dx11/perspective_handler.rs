@@ -1,18 +1,22 @@
 use {
-    super::{prelude::*, PerspectiveInputData},
-    anyhow::{anyhow, Context},
+    super::PerspectiveInputData,
     crate::{
         settings::pathing::SpaceSettings,
-        space::{max_depth, min_depth, MapTarget},
+        space::{max_depth, min_depth, MapTarget, ScreenSpace},
     },
     glam::{Mat4, Vec2, Vec3, Vec4, Quat},
-    windows::Win32::Graphics::Direct3D11::{
-        D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
+    glamour::Size2,
+    taimi_d3d::{
+        dx11::{
+            prelude::*,
+            buffer::{ConstantBufferP, ConstantBufferV},
+        },
+        D3dContextBindableSlot,
     },
 };
 
 #[repr(C, align(16))]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct PerspectiveData {
     pub view: Mat4,
     pub projection: Mat4,
@@ -23,44 +27,44 @@ pub struct PerspectiveData {
 }
 
 #[repr(C, align(16))]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct PixelData {
     distance_param: Vec4,
 }
 
 pub struct PerspectiveHandler {
-    constant_buffer: ID3D11Buffer,
+    constant_buffer: ConstantBufferV,
     pub constant_buffer_data: PerspectiveData,
-    constant_buffer_pixel: ID3D11Buffer,
+    constant_buffer_pixel: ConstantBufferP,
     pub constant_buffer_pixel_data: PixelData,
-    constant_buffer_mapv: ID3D11Buffer,
+    constant_buffer_mapv: ConstantBufferV,
     pub constant_buffer_mapv_data: MapDataV,
-    constant_buffer_mapp: ID3D11Buffer,
+    constant_buffer_mapp: ConstantBufferP,
     pub constant_buffer_mapp_data: MapDataP,
     aspect_ratio: f32,
     pub alpha: f32,
     up: Vec3,
     near: f32,
     far: f32,
-    last_display_size: [f32; 2],
+    display_size: Size2<ScreenSpace>,
 }
 
 impl PerspectiveHandler {
-    pub fn setup(device: &ID3D11Device, display_size: &[f32; 2]) -> anyhow::Result<Self> {
-        let aspect_ratio = display_size[0] / display_size[1];
+    pub fn setup(device: &Dx11Device, display_size: Size2<ScreenSpace>) -> anyhow::Result<Self> {
+        let aspect_ratio = display_size.width / display_size.height;
         let constant_buffer_data = PerspectiveData::INITIAL;
-        let constant_buffer = Self::create_constant_buffer(device, &constant_buffer_data)?;
+        let constant_buffer = ConstantBufferV::new_with_data(device, &constant_buffer_data)?;
         let constant_buffer_pixel_data = PixelData::INITIAL;
-        let constant_buffer_pixel = Self::create_constant_buffer(device, &constant_buffer_pixel_data)?;
+        let constant_buffer_pixel = ConstantBufferP::new_with_data(device, &constant_buffer_pixel_data)?;
         let constant_buffer_mapv_data = MapDataV::INITIAL;
-        let constant_buffer_mapv = Self::create_constant_buffer(device, &constant_buffer_mapv_data)?;
+        let constant_buffer_mapv = ConstantBufferV::new_with_data(device, &constant_buffer_mapv_data)?;
         let constant_buffer_mapp_data = MapDataP::INITIAL;
-        let constant_buffer_mapp = Self::create_constant_buffer(device, &constant_buffer_mapp_data)?;
+        let constant_buffer_mapp = ConstantBufferP::new_with_data(device, &constant_buffer_mapp_data)?;
         Ok(Self {
             up: Vec3::ZERO.with_y(1.0),
             aspect_ratio,
             alpha: 1.0,
-            last_display_size: *display_size,
+            display_size,
             constant_buffer,
             constant_buffer_data,
             constant_buffer_pixel,
@@ -74,10 +78,10 @@ impl PerspectiveHandler {
         })
     }
 
-    pub fn prepare(&mut self, display_size: &[f32; 2]) {
-        if *display_size != self.last_display_size {
-            self.aspect_ratio = display_size[0] / display_size[1];
-            self.last_display_size = *display_size;
+    pub fn prepare(&mut self, display_size: Size2<ScreenSpace>) {
+        if display_size != self.display_size {
+            self.aspect_ratio = display_size.width / display_size.height;
+            self.display_size = display_size;
         }
     }
 
@@ -105,34 +109,6 @@ impl PerspectiveHandler {
         } * Mat4::from_scale(poi_scale);
     }
 
-    fn create_constant_buffer<D>(device: &ID3D11Device, initial: &D) -> anyhow::Result<ID3D11Buffer> {
-        let constant_buffer_desc = D3D11_BUFFER_DESC {
-            ByteWidth: size_of::<D>().next_multiple_of(16) as u32,
-            Usage: d3d11::D3D11_USAGE_DEFAULT,
-            BindFlags: d3d11::D3D11_BIND_CONSTANT_BUFFER.0 as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: 0,
-            StructureByteStride: 0,
-        };
-
-        let constant_subresource_data = D3D11_SUBRESOURCE_DATA {
-            pSysMem: initial as *const D as *const _,
-            .. D3D11_SUBRESOURCE_DATA::default()
-        };
-
-        let mut constant_buffer_ptr: Option<ID3D11Buffer> = None;
-        let constant_buffer = unsafe {
-            device.CreateBuffer(
-                &constant_buffer_desc,
-                Some(&constant_subresource_data),
-                Some(&mut constant_buffer_ptr),
-            )
-        }.context("constant buffer creation failed")
-        .and_then(|()| constant_buffer_ptr.ok_or_else(|| anyhow!("no constant buffer")))?;
-
-        Ok(constant_buffer)
-    }
-
     pub fn aspect_ratio(&self) -> f32 {
         self.aspect_ratio
     }
@@ -155,35 +131,9 @@ impl PerspectiveHandler {
         self.constant_buffer_data.player.w = self.alpha;
     }
 
-    pub fn update_cb(&self, device_context: &ID3D11DeviceContext) {
-        unsafe {
-            device_context.UpdateSubresource(
-                &self.constant_buffer,
-                0,
-                None,
-                &self.constant_buffer_data as *const PerspectiveData as *const _,
-                0,
-                0,
-            );
-            device_context.UpdateSubresource(
-                &self.constant_buffer_pixel,
-                0,
-                None,
-                &self.constant_buffer_pixel_data as *const PixelData as *const _,
-                0,
-                0,
-            );
-        }
-    }
-    pub fn set_cb(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        unsafe {
-            device_context.VSSetConstantBuffers(slot, Some(self.constant_buffer.as_params()));
-            device_context.PSSetConstantBuffers(slot, Some(self.constant_buffer_pixel.as_params()));
-        }
-    }
-    pub fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        self.set_cb(device_context, slot);
-        self.update_cb(device_context);
+    pub fn update_cb(&self, device_context: &Dx11Context) {
+        self.constant_buffer.update_singleton(device_context, &self.constant_buffer_data);
+        self.constant_buffer_pixel.update_singleton(device_context, &self.constant_buffer_pixel_data);
     }
 
     pub fn update_map(&mut self, map: &MapTarget) {
@@ -206,10 +156,10 @@ impl PerspectiveHandler {
         );
         let screen_mid = map.bounds_screen.center();
         let screen_sz = map.bounds_screen.size();
-        let screen = Vec2::new(self.last_display_size[0], self.last_display_size[1]);
-        let scl = Vec3::new(screen_sz.width / screen.x, screen_sz.height / screen.y, 1.0);
+        let screen = self.display_size;
+        let scl = Vec3::new(screen_sz.width / screen.width, screen_sz.height / screen.height, 1.0);
         let window_trans = Vec2::new(-mid.x, -mid.z);
-        let window_trans = Vec2::new(window_trans.x - (screen_mid.x / screen.x - 0.5) * size.width, window_trans.y + (screen_mid.y / screen.y - 0.5) * size.depth);
+        let window_trans = Vec2::new(window_trans.x - (screen_mid.x / screen.width - 0.5) * size.width, window_trans.y + (screen_mid.y / screen.height - 0.5) * size.depth);
         self.constant_buffer_mapv_data.view = Mat4::orthographic_lh(
             left + window_trans.x, right + window_trans.x,
             bottom + window_trans.y, top + window_trans.y,
@@ -221,31 +171,20 @@ impl PerspectiveHandler {
         );
     }
 
-    pub fn update_map_cb(&self, device_context: &ID3D11DeviceContext) {
-        unsafe {
-            device_context.UpdateSubresource(
-                &self.constant_buffer_mapv,
-                0,
-                None,
-                &self.constant_buffer_mapv_data as *const MapDataV as *const _,
-                0,
-                0,
-            );
-            device_context.UpdateSubresource(
-                &self.constant_buffer_mapp,
-                0,
-                None,
-                &self.constant_buffer_mapp_data as *const MapDataP as *const _,
-                0,
-                0,
-            );
-        }
+    pub fn update_map_cb(&self, device_context: &Dx11Context) {
+        self.constant_buffer_mapv.update_singleton(device_context, &self.constant_buffer_mapv_data);
+        self.constant_buffer_mapp.update_singleton(device_context, &self.constant_buffer_mapp_data);
     }
-    pub fn set_map_cb(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        unsafe {
-            device_context.VSSetConstantBuffers(slot, Some(self.constant_buffer_mapv.as_params()));
-            device_context.PSSetConstantBuffers(slot, Some(self.constant_buffer_mapp.as_params()));
-        }
+    pub fn set_map_cb(&self, device_context: &Dx11Context, slot: u32) {
+        self.constant_buffer_mapv.set(device_context, slot);
+        self.constant_buffer_mapp.set(device_context, slot);
+    }
+}
+
+impl D3dContextBindableSlot<Dx11Context> for PerspectiveHandler {
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        self.constant_buffer.set(context, slot);
+        self.constant_buffer_pixel.set(context, slot);
     }
 }
 
@@ -258,6 +197,8 @@ impl PerspectiveData {
         expand: Vec4::ZERO,
     };
 }
+
+unsafe impl D3dBufferData for PerspectiveData {}
 
 impl PixelData {
     pub const INITIAL: Self = Self {
@@ -297,8 +238,10 @@ impl PixelData {
     }
 }
 
+unsafe impl D3dBufferData for PixelData {}
+
 #[repr(C, align(16))]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct MapDataV {
     pub model: Mat4,
     pub world: Mat4,
@@ -321,8 +264,10 @@ impl Default for MapDataV {
     }
 }
 
+unsafe impl D3dBufferData for MapDataV {}
+
 #[repr(C, align(16))]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct MapDataP {
     pub colour: Vec4,
 }
@@ -332,3 +277,5 @@ impl MapDataP {
         colour: Vec4::ONE,
     };
 }
+
+unsafe impl D3dBufferData for MapDataP {}

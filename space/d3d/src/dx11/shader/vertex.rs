@@ -1,0 +1,54 @@
+use crate::{
+    dx11::{
+        impl_d3d_ext11,
+        prelude::*,
+    },
+    D3dContextBindable,
+};
+pub use crate::dx11::d3d11::ID3D11VertexShader;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ShaderV {
+    pub shader: ID3D11VertexShader,
+}
+
+impl ShaderV {
+    pub fn new_snapshot(context: &Dx11Context) -> Option<Self> {
+        let mut out = None;
+        // TODO: instances?
+        let mut instances = [None; 0];
+        let mut instance_count = instances.len() as u32;
+        unsafe {
+            context.VSGetShader(&mut out, Some(instances.as_mut_ptr()), Some(&mut instance_count))
+        }
+        out.map(Into::into)
+    }
+
+    pub fn new_with_bytecode<B: AsRef<[u8]>>(
+        device: &Dx11Device,
+        bytecode: B,
+    ) -> anyhow::Result<Self> {
+        let bytecode = bytecode.as_ref();
+        let mut out: Option<ID3D11VertexShader> = None;
+        unsafe {
+            device.CreateVertexShader(bytecode, None, Some(&mut out))
+        }.map_err(anyhow::Error::from)
+        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce shader pointer")))
+        .context("CreateVertexShader")
+        .map(Into::into)
+    }
+}
+
+impl D3dContextBindable<Dx11Context> for ShaderV {
+    fn set(&self, context: &Dx11Context) {
+        unsafe {
+            context.VSSetShader(&self.shader, None);
+        }
+    }
+}
+
+impl_d3d_ext11! {
+    unsafe impl ID3D11ResourceExt<Output=ID3D11VertexShader,@transparent> for ShaderV,
+        @field(&this => &this.shader);
+}

@@ -1,13 +1,13 @@
 use {
     super::{ObjectBacking, ObjectDescription},
-    crate::space::resources::{ObjFile, PixelShaders, VertexShaders},
+    crate::space::resources::{ObjFile, ShaderLoader},
     glob::Paths,
     std::{
         collections::HashMap,
         path::{Path, PathBuf},
         sync::Arc,
     },
-    windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    taimi_d3d::dx11::prelude::*,
 };
 
 #[derive(Default, Debug)]
@@ -38,16 +38,15 @@ impl ObjectLoader {
 
     pub fn to_backings(
         &self,
-        device: &ID3D11Device,
+        device: &Dx11Device,
         model_files: &HashMap<PathBuf, ObjFile>,
-        vertex_shaders: &VertexShaders,
-        pixel_shaders: &PixelShaders,
+        shaders: &ShaderLoader,
     ) -> HashMap<String, Arc<ObjectBacking>> {
         self.0
             .iter()
             .filter_map(|o| {
                 let backing = o
-                    .to_backing(model_files, device, vertex_shaders, pixel_shaders)
+                    .to_backing(model_files, device, shaders)
                     .ok();
                 if let Some(backing) = backing {
                     let backing = Arc::new(backing);

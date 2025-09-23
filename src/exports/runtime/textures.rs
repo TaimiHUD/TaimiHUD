@@ -3,9 +3,9 @@ use {
     relative_path::RelativePath,
     std::{collections::{hash_map, HashMap}, future::Future, mem, path::{Path, PathBuf}, sync::{Arc, RwLock as StdRwLock}},
     tokio::sync::{self, mpsc, RwLock},
-    windows::{
-        core::Interface,
-        Win32::Graphics::Direct3D11::ID3D11ShaderResourceView,
+    taimi_d3d::dx11::{
+        prelude::*,
+        buffer::TextureView2,
     },
 };
 #[cfg(feature = "texture-loader")]
@@ -342,21 +342,21 @@ pub enum TextureSlot {
 }
 
 impl TextureSlot {
-    pub fn resource_view(&self) -> Option<&ID3D11ShaderResourceView> {
+    pub fn resource_view(&self) -> Option<&TextureView2> {
         match self {
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) =>
-                t.view.get(0).map(Option::as_ref).flatten(),
+                Some(&t.view),
             #[cfg(feature = "extension-nexus")]
             Self::Nexus(t) =>
-                Some(&t.resource),
+                Some(t.resource.as_ref()),
             _ => None,
         }
     }
 
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
         let id = self.resource_view()
-            .map(|resource| TextureId::new(resource.as_raw() as usize));
+            .map(|resource| TextureId::new(resource.view.view.as_raw() as usize));
         let id = id.unwrap_or(TextureId::new(0));
 
         Some(match self {
@@ -384,13 +384,11 @@ impl TextureSlot {
             #[cfg(feature = "extension-nexus")]
             Self::Nexus(t) => Some({
                 let [w, h] = t.size();
-                let srv = &t.resource;
-                let texture = unsafe {
-                    srv.GetResource().and_then(|tex| tex.cast())
-                }.ok()?;
+                let view = TextureView2::from_d3d(t.resource.clone());
+                let texture = view.get_resource().ok()?;
                 Arc::new(Texture {
                     dimensions: [w as u32, h as u32],
-                    view: vec![Some(srv.clone())],
+                    view,
                     texture,
                 })
             }),

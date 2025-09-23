@@ -13,7 +13,7 @@ pub mod vertex;
 pub use {
     model::{Model, ModelKind},
     obj_format::{ObjFile, ObjInstance, ObjMaterial},
-    shader::{PixelShader, PixelShaders, ShaderLoader, ShaderPair, VertexShader, VertexShaders},
+    shader::{PixelShaders, ShaderLoader, ShaderPair, VertexShaders},
     vertex::Vertex,
 };
 #[cfg(feature = "texture-loader")]

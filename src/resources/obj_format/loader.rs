@@ -6,7 +6,7 @@ use {
         collections::HashMap,
         path::{Path, PathBuf},
     },
-    windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    taimi_d3d::dx11::prelude::*,
 };
 
 pub struct ObjFile {
@@ -33,13 +33,13 @@ impl ObjFile {
         Ok(model_files)
     }
     #[allow(dead_code)]
-    pub fn load_list(&self, device: &ID3D11Device, idxs: Vec<usize>) -> Vec<ObjInstance> {
+    pub fn load_list(&self, device: &Dx11Device, idxs: Vec<usize>) -> Vec<ObjInstance> {
         idxs.iter()
             .map(|idx| self.load_idx(device, *idx, false))
             .collect()
     }
 
-    pub fn load_idx(&self, device: &ID3D11Device, idx: usize, xzy: bool) -> ObjInstance {
+    pub fn load_idx(&self, device: &Dx11Device, idx: usize, xzy: bool) -> ObjInstance {
         let model = &self.models[idx];
         ObjInstance {
             model: model.load(xzy),
@@ -51,7 +51,7 @@ impl ObjFile {
 
     pub fn load_material_for_model(
         &self,
-        device: &ID3D11Device,
+        device: &Dx11Device,
         idx: usize,
     ) -> Option<ObjMaterial> {
         let mat_idx = &self.models[idx].0.mesh.material_id?;

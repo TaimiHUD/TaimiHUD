@@ -11,7 +11,7 @@ use {
     crate::render::pathing_window::{PathingFilterState, PathingSearchState},
     crate::space::{
         pack::{Pack, MarkerAttributesExt},
-        dx11::{InstanceBuffer, InstanceBufferData, PerspectiveInputData, RenderBackend},
+        dx11::{InstanceBufferData, PerspectiveInputData, RenderBackend},
         render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
         resources::Texture,
         LocalContext, MapTarget,
@@ -31,8 +31,11 @@ use {
         path::Path,
         sync::{atomic::{AtomicUsize, Ordering}, Arc},
     },
+    taimi_d3d::dx11::{
+        prelude::*,
+        buffer::BufferOf,
+    },
     uuid::Uuid,
-    windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext},
 };
 
 #[derive(Debug)]
@@ -290,7 +293,7 @@ impl ActivePack {
     pub fn get_or_load_texture<'t>(
         &'t mut self,
         handle: PackTextureHandle,
-        device: &ID3D11Device,
+        device: &Dx11Device,
     ) -> anyhow::Result<&'t Arc<Texture>> {
         let PackTextureHandle(idx) = handle;
         let (asset, slot) = self.texture_list.get_index_mut(idx)
@@ -324,7 +327,7 @@ impl ActivePack {
         &mut self,
         pack_idx: usize,
         map_id: i32,
-        device: &ID3D11Device,
+        device: &Dx11Device,
         render_entities: &mut Vec<RenderEntity>,
     ) -> anyhow::Result<()> {
         self.clear();
@@ -565,7 +568,7 @@ impl PackCollection {
         idx
     }
 
-    pub fn load_pack(&mut self, device: &ID3D11Device, pack_idx: usize) -> anyhow::Result<()> {
+    pub fn load_pack(&mut self, device: &Dx11Device, pack_idx: usize) -> anyhow::Result<()> {
         let pack = &mut self.loaded_packs[pack_idx];
         if pack.render_list_bookmark.is_some() {
             log::info!("skipping pack {}, already loaded?", pack.pack.name);
@@ -587,7 +590,7 @@ impl PackCollection {
         Ok(())
     }
 
-    fn build_active_pack(&mut self, pack_idx: usize, device: &ID3D11Device, render_entities: Option<&mut Vec<RenderEntity>>, map_id: i32) -> anyhow::Result<()> {
+    fn build_active_pack(&mut self, pack_idx: usize, device: &Dx11Device, render_entities: Option<&mut Vec<RenderEntity>>, map_id: i32) -> anyhow::Result<()> {
         let pack = &mut self.loaded_packs[pack_idx];
 
         let (entities, inplace) = match render_entities {
@@ -613,7 +616,7 @@ impl PackCollection {
         res
     }
 
-    pub fn prepare_new_map(&mut self, map_id: i32, device: &ID3D11Device) -> anyhow::Result<()> {
+    pub fn prepare_new_map(&mut self, map_id: i32, device: &Dx11Device) -> anyhow::Result<()> {
         if self.current_map == Some(map_id) {
             return Ok(());
         }
@@ -646,7 +649,7 @@ impl PackCollection {
         res
     }
 
-    fn recreate_buffers_inner(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+    fn recreate_buffers_inner(&mut self, device: &Dx11Device) -> anyhow::Result<()> {
         // identity at start for trail drawing
         let mut data_world = vec![InstanceBufferData::IDENTITY; 1];
         let mut data_map = vec![InstanceBufferData::IDENTITY; 1];
@@ -664,8 +667,8 @@ impl PackCollection {
         }
         let (poi_ib_world, poi_ib_map) = if !self.loaded_packs.is_empty() {
             (
-                Some(InstanceBuffer::create(device, &data_world[..])?),
-                Some(InstanceBuffer::create(device, &data_map[..])?),
+                Some(BufferOf::new_with_data(device, Ok(&data_world[..]), ())?),
+                Some(BufferOf::new_with_data(device, Ok(&data_map[..]), ())?),
             )
         } else {
             (None, None)
@@ -676,7 +679,7 @@ impl PackCollection {
         Ok(())
     }
 
-    fn recreate_buffers(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+    fn recreate_buffers(&mut self, device: &Dx11Device) -> anyhow::Result<()> {
         let res = self.recreate_buffers_inner(device)
             .context("preparing POI instance buffers");
         if res.is_err() {
@@ -713,7 +716,7 @@ impl PackCollection {
         cam_data: &PerspectiveInputData,
         frustum: &MapFrustum,
         backend: &RenderBackend,
-        device_context: &ID3D11DeviceContext,
+        device_context: &Dx11Context,
     ) {
         let cam_origin = cam_data.camera_pos();
         let cam_front = cam_data.camera_front();
@@ -727,7 +730,7 @@ impl PackCollection {
     pub fn draw_entities<'e, E>(
         loaded_packs: &IndexMap<String, ActivePack>,
         poi_common: &PoiCommonRenderData,
-        device_context: &ID3D11DeviceContext,
+        device_context: &Dx11Context,
         backend: &RenderBackend,
         entities: E,
     ) where
@@ -756,8 +759,7 @@ impl PackCollection {
                     }
                     if shader_state != ShaderState::Trail {
                         shader_state = ShaderState::Trail;
-                        backend.shaders.0["trail"].set(device_context);
-                        backend.shaders.1["trail"].set(device_context);
+                        backend.shaders.set_named(device_context, "trail");
                     }
                     trail.draw_section(device_context, section, LocalContext::World);
                 }
@@ -791,7 +793,7 @@ impl PackCollection {
     pub fn draw_map_entities<'e, E>(
         loaded_packs: &IndexMap<String, ActivePack>,
         poi_common: &PoiCommonRenderData,
-        device_context: &ID3D11DeviceContext,
+        device_context: &Dx11Context,
         backend: &RenderBackend,
         map: &MapTarget,
         entities: E,
@@ -823,8 +825,7 @@ impl PackCollection {
                         // idk invert .-.
                     }
                     if shader_state == ShaderState::None {
-                        backend.shaders.0["map"].set(device_context);
-                        backend.shaders.1["map"].set(device_context);
+                        backend.shaders.set_named(device_context, "map");
                         poi_common.set_primitive(device_context);
                         poi_common.set_instance(device_context, ctx);
                     }
@@ -845,8 +846,7 @@ impl PackCollection {
                         // idk invert .-.
                     }
                     if shader_state == ShaderState::None {
-                        backend.shaders.0["map"].set(device_context);
-                        backend.shaders.1["map"].set(device_context);
+                        backend.shaders.set_named(device_context, "map");
                         poi_common.set_primitive(device_context);
                         poi_common.set_instance(device_context, ctx);
                     }
@@ -877,7 +877,7 @@ impl PackCollection {
         self.render_list.map_entities(bounds)
     }
 
-    pub fn unload_map(&mut self, _device_context: &ID3D11DeviceContext, _map_id: u32) -> anyhow::Result<()> {
+    pub fn unload_map(&mut self, _device_context: &Dx11Context, _map_id: u32) -> anyhow::Result<()> {
         //if self.current_map != Some(_map_id) { return }
         self.clear_active();
         self.current_map = None;
@@ -885,7 +885,7 @@ impl PackCollection {
         Ok(())
     }
 
-    pub fn load_map(&mut self, device: &ID3D11Device, _device_context: &ID3D11DeviceContext, map_id: u32) -> anyhow::Result<()> {
+    pub fn load_map(&mut self, device: &Dx11Device, _device_context: &Dx11Context, map_id: u32) -> anyhow::Result<()> {
         self.prepare_new_map(map_id as i32, device)
     }
 

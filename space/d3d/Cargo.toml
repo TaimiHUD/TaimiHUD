@@ -1,0 +1,49 @@
+[package]
+name = "taimi_d3d"
+authors = [ "kittywitch" ]
+description = "TaimiHUD DirectX"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[features]
+default = [
+  "windows",
+  "dx11",
+]
+dx11 = [
+  "windows?/Win32_Graphics_Direct3D11",
+]
+serde = [
+  "dep:serde",
+]
+windows = [
+  "dep:windows",
+  "arcffi?/windows-061",
+]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+relative-path = "1"
+bitflags = { workspace = true }
+glam = { workspace = true }
+glamour = { workspace = true }
+indexmap = { workspace = true }
+bitvec = { workspace = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[target.'cfg(windows)'.dependencies.windows]
+optional = true
+version = "0.61"
+features = [
+  "System",
+  "Foundation",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Direct3D_Fxc",
+  "Win32_Graphics_Hlsl",
+]

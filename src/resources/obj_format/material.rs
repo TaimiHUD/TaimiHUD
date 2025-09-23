@@ -3,7 +3,7 @@ use {
     glam::Vec3,
     std::{path::PathBuf, sync::Arc},
     tobj::Material as tobjMaterial,
-    windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    taimi_d3d::dx11::prelude::*,
 };
 
 #[allow(unused)]
@@ -34,7 +34,7 @@ pub struct ObjMaterials {
 }
 
 impl ObjMaterials {
-    pub fn load(&self, device: &ID3D11Device, idx: usize) -> anyhow::Result<ObjMaterial> {
+    pub fn load(&self, device: &Dx11Device, idx: usize) -> anyhow::Result<ObjMaterial> {
         let material = &self.materials[idx];
         let device_context = unsafe { device.GetImmediateContext() }.expect("I lost my context!");
 

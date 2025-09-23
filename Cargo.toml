@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "pathing/pack",
   "pathing/meta",
+  "space/d3d",
 ]
 
 [package]
@@ -50,6 +51,7 @@ space = [
   #"space-ecs",
   "dep:taimi_meta",
   "dep:taimi_pack",
+  "dep:taimi_d3d",
 ]
 space-ecs = [
 ]
@@ -131,11 +133,13 @@ dpsapi = [
 ]
 arcffi = [
   "dep:arcffi",
+  "taimi_d3d?/arcffi",
 ]
 windows = [
   "dep:windows",
   "arcffi?/windows-061",
   #"dpsapi?/windows-061",
+  "taimi_d3d?/windows",
 ]
 
 [lib]
@@ -176,7 +180,7 @@ serde_with = "3.12.0"
 json-strip-comments = "1.0.4"
 strum = "0.27.1"
 strum_macros = "0.27.1"
-reqwest = { version = "0.12.15", default-features=false, features = [ "stream", "rustls-tls-native-roots" ] }
+reqwest = { version = "0.12.15", default-features = false, features = [ "stream", "rustls-tls-native-roots" ] }
 tempfile = "3.19.1"
 bytes = "1.10.1"
 async-compression = { version = "0.4.22", features = [ "tokio", "gzip" ] }
@@ -188,7 +192,7 @@ futures = "0.3.31"
 chrono = { version = "0.4.40", features = [ "serde", "alloc" ] }
 indexmap = { workspace = true }
 relative-path = { version = "1.9.3", features = [ "serde" ] }
-bitflags = "2.9.0"
+bitflags = { workspace = true }
 mint = "0.5.9"
 itertools = { optional = true, version = "0.14.0" }
 tobj = { optional = true, version = "4.0.3", features = [ "merging", "reordering" ] }
@@ -219,6 +223,7 @@ bitvec = { workspace = true }
 
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "mumblelink-nexus"] }
+taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
@@ -266,6 +271,7 @@ glam = "0.30"
 glamour = "0.18"
 indexmap = "2.9"
 bitvec = "1"
+bitflags = "2"
 
 [patch."https://github.com/zerthox/arcdps-rs"]
 # some fixes need to be contributed back upstream

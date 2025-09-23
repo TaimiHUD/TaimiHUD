@@ -1,13 +1,13 @@
 use {
-    super::{
-        super::{
-            dx11::instance_buffer::InstanceBuffer,
-            resources::{
-                ModelKind, ObjFile, ObjInstance, PixelShader, PixelShaders, ShaderPair,
-                VertexShader, VertexShaders,
-            },
+    crate::{
+        space::{
+            dx11::InstanceBufferData,
+            object::{ObjectBacking, ObjectRenderBacking, ObjectRenderMetadata},
         },
-        ObjectBacking, ObjectRenderBacking, ObjectRenderMetadata, PrimitiveTopology,
+        resources::{
+            ModelKind, ObjFile, ObjInstance, ShaderPair,
+            ShaderLoader,
+        },
     },
     anyhow::anyhow,
     glam::Mat4,
@@ -16,9 +16,14 @@ use {
         collections::HashMap,
         fs::read_to_string,
         path::PathBuf,
-        sync::Arc,
     },
-    windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    taimi_d3d::{
+        dx11::{
+            prelude::*,
+            buffer::BufferOf,
+        },
+        state::PrimitiveTopology,
+    },
 };
 
 // TODO: cut down on this
@@ -62,19 +67,18 @@ impl ObjectDescription {
 
     pub fn get_shaders(
         &self,
-        vertex_shaders: &VertexShaders,
-        pixel_shaders: &PixelShaders,
+        shaders: &ShaderLoader,
     ) -> ShaderPair {
-        let vertex_shader: Arc<VertexShader> =
-            vertex_shaders.get(&self.vertex_shader).unwrap().clone();
-        let pixel_shader: Arc<PixelShader> = pixel_shaders.get(&self.pixel_shader).unwrap().clone();
+        let vertex_shader =
+            shaders.vertex.get(&self.vertex_shader).unwrap().clone();
+        let pixel_shader = shaders.pixel.get(&self.pixel_shader).cloned().flatten();
         ShaderPair(vertex_shader, pixel_shader)
     }
 
     // TODO: make non-obj specific
     pub fn get_model_and_material(
         &self,
-        device: &ID3D11Device,
+        device: &Dx11Device,
         model_files: &HashMap<PathBuf, ObjFile>,
     ) -> anyhow::Result<ObjInstance> {
         let model_file = model_files
@@ -88,11 +92,10 @@ impl ObjectDescription {
     pub fn to_backing(
         &self,
         model_files: &HashMap<PathBuf, ObjFile>,
-        device: &ID3D11Device,
-        vertex_shaders: &VertexShaders,
-        pixel_shaders: &PixelShaders,
+        device: &Dx11Device,
+        shaders: &ShaderLoader,
     ) -> anyhow::Result<ObjectBacking> {
-        let shaders = self.get_shaders(vertex_shaders, pixel_shaders);
+        let shaders = self.get_shaders(shaders);
         let obj_data = self.get_model_and_material(device, model_files)?;
         let model = obj_data.model;
         let material = obj_data.material;
@@ -106,7 +109,7 @@ impl ObjectDescription {
 
         let render_backing = ObjectRenderBacking {
             metadata: render_metadata,
-            instance_buffer: InstanceBuffer::create_empty(device)?,
+            instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(device, Err(0), ())?.buffer.into(),
             vertex_buffer,
             shaders,
         };
