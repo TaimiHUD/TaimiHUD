@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
   "pathing/pack",
-  "pathing/meta",
+  "pathing/meta", "api",
 ]
 
 [package]
