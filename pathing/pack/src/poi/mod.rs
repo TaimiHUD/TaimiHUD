@@ -100,7 +100,7 @@ impl Poi {
 
     #[inline]
     pub fn height_offset(&self) -> f32 {
-        self.attributes.height_offset.unwrap_or(0.0)
+        self.attributes.height_offset.unwrap_or(1.5)
     }
 
     #[inline]
