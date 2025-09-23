@@ -1,17 +1,19 @@
 use {
-    super::{BlendingHandler, DepthHandler, PerspectiveHandler},
+    super::{DepthHandler, PerspectiveHandler},
     crate::{
         exports::runtime as rt,
-        space::resources::ShaderLoader,
+        space::{
+            resources::ShaderLoader,
+            ScreenSpace,
+        },
     },
     anyhow::{anyhow, Context},
-    glam::Vec4,
-    windows::Win32::Graphics::{
-        Direct3D11::{
-            ID3D11Device, ID3D11SamplerState, D3D11_COMPARISON_ALWAYS,
-            D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_SAMPLER_DESC, D3D11_TEXTURE_ADDRESS_WRAP,
-        },
-        Dxgi::IDXGISwapChain,
+    glamour::Size2,
+    taimi_d3d::dx11::{
+        prelude::*,
+        buffer::{D3D11_SAMPLER_DESC, SamplerState, TextureAddressMode},
+        blend::{BlendState, D3D11_RENDER_TARGET_BLEND_DESC, OMBlendState},
+        SwapChain11,
     },
 };
 
@@ -19,60 +21,37 @@ use {
 pub struct RenderBackend {
     pub depth_handler: DepthHandler,
     pub perspective_handler: PerspectiveHandler,
-    pub blending_handler: BlendingHandler,
+    pub blend_state: OMBlendState<BlendState>,
 
     pub shaders: ShaderLoader,
-    pub sampler_state: Vec<Option<ID3D11SamplerState>>,
-    pub device: ID3D11Device,
-    pub swap_chain: IDXGISwapChain,
-    pub aspect_ratio: Option<f32>,
-    pub display_size: Option<[f32; 2]>,
+    pub sampler_state: SamplerState,
+    pub device: Dx11Device,
+    pub swap_chain: SwapChain11,
+    pub display_size: Size2<ScreenSpace>,
 }
 
 impl RenderBackend {
-    pub fn setup_sampler(device: &ID3D11Device) -> anyhow::Result<ID3D11SamplerState> {
-        let sampler_desc = D3D11_SAMPLER_DESC {
-            Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
-            AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
-            AddressV: D3D11_TEXTURE_ADDRESS_WRAP,
-            AddressW: D3D11_TEXTURE_ADDRESS_WRAP,
-            MipLODBias: 0.0,
-            MinLOD: 0.0,
-            MaxLOD: f32::MAX,
-            MaxAnisotropy: 1,
-            ComparisonFunc: D3D11_COMPARISON_ALWAYS,
-            BorderColor: Vec4::new(0.0, 0.0, 0.0, 0.0).into(),
-        };
-        let mut sampler_state_ptr: Option<ID3D11SamplerState> = None;
-        let sampler_state =
-            unsafe { device.CreateSamplerState(&sampler_desc, Some(&mut sampler_state_ptr)) }
-                .map_err(anyhow::Error::from)
-                .and_then(|()| sampler_state_ptr.ok_or_else(|| anyhow!("no sampler state")))?;
-        Ok(sampler_state)
-    }
-
-    pub fn setup(display_size: [f32; 2]) -> anyhow::Result<RenderBackend> {
+    pub fn setup(display_size: Size2<ScreenSpace>) -> anyhow::Result<RenderBackend> {
         log::info!("Getting d3d11 device swap chain");
         let swap_chain = rt::dxgi_swap_chain()
             .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))
-            .and_then(|sc| sc
+            .and_then(|sc| sc.map(SwapChain11::from)
                 .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))
             )?;
-        log::info!("Getting d3d11 device");
-        let device = unsafe {
-            swap_chain.GetDevice()
-        }.context("GetDevice")?;
+        let device = swap_chain.get_device11()?;
 
         let shaders = ShaderLoader::load_bundled(&device)
             .context("Shaders failed to load")?;
-        let perspective_handler = PerspectiveHandler::setup(&device, &display_size)
+        let perspective_handler = PerspectiveHandler::setup(&device, display_size)
             .context("Perspective handler setup failed")?;
 
-        let depth_handler = DepthHandler::create(&display_size, &device, &swap_chain)
+        let depth_handler = DepthHandler::create(display_size, &device, &swap_chain)
             .context("Depth setup failed")?;
-        let sampler_state = vec![Self::setup_sampler(&device).ok()];
+        let sampler_state = SamplerState::new_with_desc(&device, &Self::SAMPLER_DESC)
+            .context("Sampler setup failed")?;
 
-        let blending_handler = BlendingHandler::setup(&device)
+        let blend_desc = BlendState::desc_for_target(Self::BLEND_STATE_DESC_RT, false, false);
+        let blend_state = BlendState::new_with_desc(&device, &blend_desc)
             .context("Blending setup failed")?;
         //log::info!("Setting up device context");
         //let device_context = unsafe { device.GetImmediateContext().expect("I lost my context!") };
@@ -88,20 +67,19 @@ impl RenderBackend {
             }
         }*/
         Ok(RenderBackend {
-            blending_handler,
+            blend_state: OMBlendState::new(blend_state, None, None),
             depth_handler,
             perspective_handler,
 
             device,
-            swap_chain: swap_chain.clone(),
+            swap_chain,
             shaders,
             sampler_state,
-            aspect_ratio: None,
-            display_size: None,
+            display_size,
         })
     }
 
-    pub fn prepare(&mut self, display_size: &[f32; 2]) {
+    pub fn prepare(&mut self, display_size: Size2<ScreenSpace>) {
         self.perspective_handler.prepare(display_size);
     }
     /*
@@ -146,4 +124,15 @@ impl RenderBackend {
             }
         }
     }*/
+
+    const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
+        .. BlendState::TARGET_DESC_ADDITIVE
+    };
+
+    const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
+        MinLOD: 0.0,
+        ComparisonFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        BorderColor: [0.0; 4],
+        .. SamplerState::desc_with_address(TextureAddressMode::WRAP.to_vec3())
+    };
 }

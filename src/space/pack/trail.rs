@@ -1,6 +1,5 @@
 use {
     crate::space::{
-        dx11::{prelude::*, VertexBuffer},
         pack::{ActivePack, TrailSectionExt},
         resources::{Model, Texture, Vertex},
         DrawSpace, LocalContext,
@@ -9,6 +8,10 @@ use {
     core::f32,
     glamour::{Box3, Vector3},
     std::sync::Arc,
+    taimi_d3d::dx11::{
+        buffer::VertexBuffer,
+        prelude::*,
+    },
     taimi_pack::Trail,
 };
 
@@ -37,7 +40,7 @@ impl ActiveTrail {
         trail_idx: usize,
         category_idx: usize,
         render_bookmark: usize,
-        device: &ID3D11Device,
+        device: &Dx11Device,
     ) -> anyhow::Result<ActiveTrail> {
         let texture_handle = trail.texture_name()
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
@@ -178,7 +181,7 @@ impl ActiveTrail {
 
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders must already be set.
-    pub fn draw_section(&self, device_context: &ID3D11DeviceContext, section: usize, ctx: LocalContext) {
+    pub fn draw_section(&self, device_context: &Dx11Context, section: usize, ctx: LocalContext) {
         self.texture.set(device_context, 0);
 
         unsafe {

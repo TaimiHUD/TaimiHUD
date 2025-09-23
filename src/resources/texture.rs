@@ -1,19 +1,14 @@
 use {
     anyhow::{anyhow, Context as _},
+    glam::Vec4,
     std::{fmt, path::Path, sync::Arc},
     nexus::texture::Texture as NexusTexture,
-    windows::Win32::Graphics::{
-        Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D,
-        Direct3D11::{
-            ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
-            D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
-            D3D11_RESOURCE_MISC_GENERATE_MIPS, D3D11_SHADER_RESOURCE_VIEW_DESC,
-            D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA, D3D11_TEX2D_SRV,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    taimi_d3d::{
+        dx11::{
+            prelude::*,
+            buffer::{D3D11_TEXTURE2D_DESC, BindFlags, Texture2, TextureView2, Usage},
         },
-        Dxgi::Common::{
-            DXGI_FORMAT, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
-        },
+        D3dContextBindableSlot,
     },
 };
 #[cfg(feature = "image")]
@@ -21,14 +16,14 @@ use image::{ImageReader, FlatSamples};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Texture {
-    pub texture: ID3D11Texture2D,
+    pub texture: Texture2,
     pub dimensions: [u32; 2],
-    pub view: Vec<Option<ID3D11ShaderResourceView>>,
+    pub view: TextureView2,
 }
 
 impl Texture {
     #[deprecated = "crate::texture_schedule_path"]
-    pub fn load(device: &ID3D11Device, path: &Path) -> anyhow::Result<Arc<Self>> {
+    pub fn load(device: &Dx11Device, path: &Path) -> anyhow::Result<Arc<Self>> {
         use crate::TEXTURES;
         let key = path.to_string_lossy();
 
@@ -51,79 +46,58 @@ impl Texture {
         }
     }
 
-    pub fn new_bytes<D: fmt::Debug>(device: &ID3D11Device, mut bytes: &[u8], name: D) -> anyhow::Result<Self> {
+    pub fn new_bytes<D: fmt::Debug>(device: &Dx11Device, mut bytes: &[u8], name: D) -> anyhow::Result<Self> {
         let read = std::io::Cursor::new(&mut bytes);
-        Self::new_image(device, ImageReader::new(read), name)
+        Self::new_image(device, ImageReader::new(read))
+            .with_context(|| {
+                format!("loading texture {:?}", name)
+            })
     }
 
-    pub fn new_path(device: &ID3D11Device, path: &Path) -> anyhow::Result<Self> {
+    pub fn new_path(device: &Dx11Device, path: &Path) -> anyhow::Result<Self> {
         let image_reader = ImageReader::open(path)?;
-        Self::new_image(device, image_reader, path)
+        Self::new_image(device, image_reader)
+            .with_context(|| {
+                let filename = path.file_name()
+                    .unwrap_or(path.as_os_str());
+                format!("loading texture from {}", filename.display())
+            })
     }
+
+    const DESC_TEXTURE: D3D11_TEXTURE2D_DESC = D3D11_TEXTURE2D_DESC {
+        Width: 0,
+        Height: 0,
+        Format: dxgi::DXGI_FORMAT_UNKNOWN,
+        MipLevels: 1,
+        ArraySize: 1,
+        SampleDesc: Texture2::DEFAULT_SAMPLE_DESC,
+        Usage: Usage::DEFAULT.to_d3d(),
+        BindFlags: BindFlags::SHADER_RENDER.to_uint(),
+        CPUAccessFlags: 0,
+        MiscFlags: d3d11::D3D11_RESOURCE_MISC_GENERATE_MIPS.0 as u32,
+    };
 
     #[cfg(feature = "image")]
-    pub fn new_image<R, D>(device: &ID3D11Device, image_reader: ImageReader<R>, path: D) -> anyhow::Result<Self> where
+    pub fn new_image<R>(device: &Dx11Device, image_reader: ImageReader<R>) -> anyhow::Result<Self> where
         R: std::io::BufRead + std::io::Seek,
-        D: fmt::Debug,
     {
         let format = image_reader.format();
-        log::info!("Loading {:?} texture from {path:?}!", format);
         let image = image_reader.with_guessed_format()?.decode()?;
         let rgba_image = image.to_rgba32f();
         let dimensions = rgba_image.dimensions();
         let raw_rgba_image = rgba_image.into_raw();
-        let texture_sample_desc = DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        };
-        let texture_desc = D3D11_TEXTURE2D_DESC {
+        let desc = D3D11_TEXTURE2D_DESC {
             Width: dimensions.0,
             Height: dimensions.1,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            SampleDesc: texture_sample_desc,
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_RENDER_TARGET.0) as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: D3D11_RESOURCE_MISC_GENERATE_MIPS.0 as u32,
+            Format: dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT,
+            .. Self::DESC_TEXTURE
         };
-        let texture_subresource_data = D3D11_SUBRESOURCE_DATA {
-            pSysMem: raw_rgba_image.as_ptr().cast(),
-            SysMemPitch: (size_of::<f32>() as u32 * dimensions.0 * 4),
-            SysMemSlicePitch: 0,
+        let samples: &[Vec4] = unsafe {
+            use std::slice::from_raw_parts;
+            from_raw_parts(raw_rgba_image.as_ptr() as *const Vec4, raw_rgba_image.len() / 4)
         };
-        let mut texture_ptr: Option<ID3D11Texture2D> = None;
-        let texture = unsafe {
-            device.CreateTexture2D(
-                &texture_desc,
-                Some(&texture_subresource_data),
-                Some(&mut texture_ptr),
-            )
-        }
-        .map_err(anyhow::Error::from)
-        .and_then(|()| texture_ptr.ok_or_else(|| anyhow!("no texture for {path:?}")))?;
-        log::info!("Creating a shader resource view for {:?}!", path);
-        let tex2d_srv = D3D11_TEX2D_SRV {
-            MostDetailedMip: 0,
-            MipLevels: u32::MAX,
-        };
-        let view_anonymous = D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-            Texture2D: tex2d_srv,
-        };
-        let view_desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
-            Anonymous: view_anonymous,
-        };
-        let mut view_ptr: Option<ID3D11ShaderResourceView> = None;
-        let view = unsafe {
-            device.CreateShaderResourceView(&texture, Some(&view_desc), Some(&mut view_ptr))
-        }
-        .map_err(anyhow::Error::from)
-        .and_then(|()| view_ptr.ok_or_else(|| anyhow!("no shader resource view")))?;
-        let view = vec![Some(view)];
-        log::info!("Loaded {:?} texture from {path:?}!", format);
+        let texture = Texture2::new_with_desc(device, &desc, Some(samples))?;
+        let view = TextureView2::new_with_texture2(device, &texture, None)?;
         Ok(Self {
             texture,
             view,
@@ -132,17 +106,17 @@ impl Texture {
     }
 
     pub fn to_nexus(&self) -> Option<NexusTexture> {
-        self.view.iter().filter_map(|srv| srv.as_ref()).next()
-            .map(|resource| NexusTexture {
-                resource: resource.clone(),
-                width: self.dimensions[0],
-                height: self.dimensions[1],
-            })
+        let resource = self.view.clone().into();
+        Some(NexusTexture {
+            resource,
+            width: self.dimensions[0],
+            height: self.dimensions[1],
+        })
     }
 
     #[cfg(feature = "image")]
     pub fn load_rgba8_uncached(
-        device: &ID3D11Device,
+        device: &Dx11Device,
         image: FlatSamples<Vec<u8>>,
     ) -> anyhow::Result<Texture> {
         Self::new_rgba8(
@@ -154,7 +128,7 @@ impl Texture {
     }
 
     pub fn new_rgba8(
-        device: &ID3D11Device,
+        device: &Dx11Device,
         image: &[u8],
         dimensions: [u32; 2],
         stride: usize,
@@ -162,16 +136,16 @@ impl Texture {
         // TODO: Is sRGB correct?
         debug_assert!(stride >= dimensions[0] as usize * 4);
         unsafe {
-            Self::new_raw(device, image, dimensions, stride, DXGI_FORMAT_R8G8B8A8_UNORM)
+            Self::new_raw(device, image, dimensions, stride, dxgi::DXGI_FORMAT_R8G8B8A8_UNORM)
         }
     }
 
     pub unsafe fn new_raw(
-        device: &ID3D11Device,
+        device: &Dx11Device,
         image: &[u8],
         dimensions: [u32; 2],
         stride: usize,
-        format: DXGI_FORMAT,
+        format: dxgi::DXGI_FORMAT,
     ) -> anyhow::Result<Texture> {
         let [width, height] = dimensions;
         debug_assert!(image.len() >= height as usize * stride);
@@ -179,55 +153,21 @@ impl Texture {
             let desc = D3D11_TEXTURE2D_DESC {
                 Width: width,
                 Height: height,
-                MipLevels: 1,
-                ArraySize: 1,
                 Format: format,
-                SampleDesc: DXGI_SAMPLE_DESC {
-                    Count: 1,
-                    Quality: 0,
-                },
-                Usage: D3D11_USAGE_DEFAULT,
-                BindFlags: (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).0 as u32,
-                CPUAccessFlags: 0,
-                MiscFlags: D3D11_RESOURCE_MISC_GENERATE_MIPS.0 as u32,
+                .. Self::DESC_TEXTURE
             };
-            let init_data = D3D11_SUBRESOURCE_DATA {
+            let init_data = d3d11::D3D11_SUBRESOURCE_DATA {
                 pSysMem: image.as_ptr() as *const _,
                 SysMemPitch: stride as u32,
                 SysMemSlicePitch: 0,
             };
-            let mut d3d_texture = None;
-            unsafe {
-                device
-                    .CreateTexture2D(&desc, Some(&init_data), Some(&mut d3d_texture))
-                    .context("Creating Texture2D")?;
-            }
-            d3d_texture.expect("This will always be Some because CreateTexture2D returned S_OK")
-        };
-        let view = {
-            let view_desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
-                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-                ViewDimension: D3D11_SRV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-                    Texture2D: D3D11_TEX2D_SRV {
-                        MostDetailedMip: 0,
-                        MipLevels: u32::MAX,
-                    },
-                },
-            };
-            let mut view_ptr = None;
-            unsafe {
-                device
-                    .CreateShaderResourceView(&texture, Some(&view_desc), Some(&mut view_ptr))
-                    .context("Creating SRV")?;
-            }
-            view_ptr
-                .expect("This will always be Some because CreateShaderResourceView returned S_OK")
-        };
+            Texture2::new_with_desc_unchecked(device, &desc, Some(&init_data))
+        }?;
+        let view = TextureView2::new_with_texture2(device, &texture, None)?;
 
         let texture = Texture {
             texture,
-            view: vec![Some(view)],
+            view,
             dimensions,
         };
 
@@ -238,18 +178,14 @@ impl Texture {
         Ok(texture)
     }
 
-    pub fn generate_mips(&self, device_context: &ID3D11DeviceContext) {
-        unsafe {
-            let mut itty = self.view.iter();
-            while let Some(Some(view)) = itty.next() {
-                device_context.GenerateMips(view);
-            }
-        }
+    pub fn generate_mips(&self, device_context: &Dx11Context) {
+        self.view.generate_mips(device_context);
     }
 
-    pub fn set(&self, device_context: &ID3D11DeviceContext, slot: u32) {
-        unsafe {
-            device_context.PSSetShaderResources(slot, Some(self.view.as_slice()));
-        }
+}
+
+impl D3dContextBindableSlot<Dx11Context> for Texture {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        self.view.set(device_context, slot)
     }
 }

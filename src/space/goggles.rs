@@ -264,7 +264,7 @@ pub fn setup(ctx: InterfaceRef<ID3D11DeviceContext>) -> anyhow::Result<()> {
     let set_targets: unsafe extern "system" fn (*mut c_void, u32, *const *mut c_void, *mut c_void) = ctx.vtable().OMSetRenderTargets;
     let set_targets: SetTargets = unsafe { transmute(set_targets) };
     let release_depth_view: Option<unsafe extern "system" fn (*mut c_void) -> u32> = engine_ref(|e|
-        e.render_backend.depth_handler.depth_stencil_view.vtable().base__.base__.base__.Release
+        e.render_backend.depth_handler.depth_stencil_view_ptr().vtable().base__.base__.base__.Release
     );
     let release_depth_view: Option<Release> = unsafe { transmute(release_depth_view) };
 
@@ -358,6 +358,6 @@ pub fn classify_current_lens(cls: LensClass) {
 
 #[cfg(feature = "space")]
 pub fn classify_space_lens(engine: &Engine) {
-    let dsview = engine.render_backend.depth_handler.depth_stencil_view.as_raw();
+    let dsview = engine.render_backend.depth_handler.depth_stencil_view_ptr().as_raw();
     classify_lens(dsview as *mut _, LensClass::Space);
 }

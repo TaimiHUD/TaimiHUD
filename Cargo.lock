@@ -3681,6 +3681,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "taimi_d3d"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcffi",
+ "bitflags 2.9.0",
+ "bitvec",
+ "glam 0.30.1",
+ "glamour",
+ "indexmap 2.9.0",
+ "log",
+ "relative-path",
+ "serde",
+ "windows 0.61.1",
+]
+
+[[package]]
 name = "taimi_hud"
 version = "0.2.26"
 dependencies = [
@@ -3739,6 +3756,7 @@ dependencies = [
  "strum 0.27.1",
  "strum_macros 0.27.1",
  "sync-unsafe-cell",
+ "taimi_d3d",
  "taimi_meta",
  "taimi_pack",
  "tempfile",

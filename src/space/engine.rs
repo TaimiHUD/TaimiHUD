@@ -5,7 +5,7 @@ use {
         marker::atomic::MarkerInputData,
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
-            dx11::{prelude::*, PerspectiveInputData, RenderBackend},
+            dx11::{PerspectiveInputData, RenderBackend},
             pack::PackCollection,
             MapContext, MapTarget,
         },
@@ -21,6 +21,7 @@ use {
         num::NonZeroU32,
         sync::Arc,
     },
+    taimi_d3d::dx11::prelude::*,
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 #[cfg(feature = "space-ecs")]
@@ -120,7 +121,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn initialise(ui: &Ui, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
-        let render_backend = RenderBackend::setup(ui.io().display_size)
+        let render_backend = RenderBackend::setup(ui.io().display_size.into())
             .context("Failed to set up render backend")?;
 
         #[cfg(feature = "space-ecs")]
@@ -135,8 +136,7 @@ impl Engine {
             let object_kinds = object_descs.to_backings(
                 &render_backend.device,
                 &model_files,
-                &render_backend.shaders.0,
-                &render_backend.shaders.1,
+                &render_backend.shaders,
             );
 
             object_kinds
@@ -387,7 +387,8 @@ impl Engine {
             }
         }
 
-        self.render_backend.prepare(&display_size);
+        let display_size = display_size.into();
+        self.render_backend.prepare(display_size);
         let device_context =
             unsafe { self.render_backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
@@ -430,12 +431,33 @@ impl Engine {
         self.packs.update();
 
         let map_ctx = map_data.as_ref().map(|mid| mid.perspective);
-        let (visible_space, visible_map) = self.map_settings(|s| (
+        let (
+            visible_space,
+            visible_map,
+            (edge_scale, _obscured_alpha),
+        ) = self.map_settings(|s| (
             (
                 s.space.visible_space().then_some(s.space.distance_max()),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
+                match () {
+                    #[cfg(feature = "goggles")]
+                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
+                    #[cfg(not(feature = "goggles"))]
+                    _ => (None, ()),
+                },
             )
         ));
+
+        match (edge_scale, self.render_backend.depth_handler.fill_edge.is_none()) {
+            (None, false) => {
+                let _ = self.render_backend.depth_handler.fill_edge.take();
+            },
+            (Some(edge_scale), true) => {
+                self.render_backend.depth_handler.regen_edge(&self.render_backend.device, Some(edge_scale));
+            },
+            _ => (),
+        }
+
         let ingame = self.gameplay_map.is_ok();
         let render_map = match visible_map.unwrap_or(ingame) && pdata.is_gameplay.unwrap_or(ingame) {
             true => map_data.as_ref().map(|data| MapTarget::new(data)),
@@ -448,7 +470,7 @@ impl Engine {
         };
 
         let perspective_slot = 0;
-        self.render_backend.blending_handler.set(&device_context);
+        self.render_backend.blend_state.set(&device_context);
 
         let minimap_bounds = match &render_map {
             Some(map) if matches!(map.perspective, MapContext::Minimap) => Some(map.bounds_screen),
@@ -468,6 +490,10 @@ impl Engine {
                     _ => None,
                 }),
         };
+
+        let distance_max = visible_space
+            .unwrap_or(SpaceSettings::DEFAULT_DISTANCE_MAX);
+        self.render_backend.depth_handler.setup(&device_context, distance_max);
 
         if let Some(minimap_bounds) = &minimap_bounds {
             self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
@@ -512,24 +538,39 @@ impl Engine {
             }
         }
 
-        let distance_max = visible_space
-            .unwrap_or(SpaceSettings::DEFAULT_DISTANCE_MAX);
-        self.render_backend.depth_handler.setup(&device_context, distance_max);
+        #[cfg(feature = "goggles")]
+        let goggles_2pass = goggles::is_enabled() && _obscured_alpha > 0.0;
 
-        if let Some(..) = &minimap_bounds {
+        let masking = minimap_bounds.is_some() || edge_scale.is_some();
+        if masking {
             let backend = &mut self.render_backend;
             backend.depth_handler.setup_depth_write(&device_context, true);
 
             // TODO: reusing this shader is a hack
-            backend.shaders.0["map"].set(&device_context);
-            backend.depth_handler.fill_clipped(&device_context, &mut backend.perspective_handler);
-
-            backend.depth_handler.setup_depth_write(&device_context, false);
-            backend.depth_handler.clear_scissor(&device_context);
-            // TODO: flush context state?
+            if let Some((shader, layout)) = backend.shaders.vertex.get("map") {
+                layout.set(&device_context);
+                shader.set(&device_context);
+            }
+            backend.depth_handler.setup_fill(&device_context, &mut backend.perspective_handler);
         }
 
-        self.render_backend.perspective_handler.set_cb(&device_context, perspective_slot);
+        if let Some(..) = &minimap_bounds {
+            self.render_backend.depth_handler.fill_clipped(&device_context);
+            self.render_backend.depth_handler.clear_scissor(&device_context);
+        }
+
+        if masking {
+            let depth_fill = match _obscured_alpha {
+                #[cfg(feature = "goggles")]
+                _ if goggles_2pass => true,
+                _ => false,
+            };
+            self.render_backend.depth_handler.fill_corners(&device_context, depth_fill);
+
+            self.render_backend.depth_handler.setup_depth_write(&device_context, false);
+        }
+
+        self.render_backend.perspective_handler.set(&device_context, perspective_slot);
 
         #[cfg(feature = "space-ecs")]
         let mut query = self.world.query::<(&mut Render, &Position)>();
@@ -580,7 +621,6 @@ impl Engine {
                 trail_alpha,
                 poi_scale,
                 poi_alpha,
-                _obscured_alpha,
             ) = self.map_settings(|s| (
                 s.space.player_overlap_threshold(),
                 s.space.distance_fade_intensity(),
@@ -589,12 +629,6 @@ impl Engine {
                 s.space.trail_alpha(),
                 s.space.poi_scale_space(),
                 s.space.poi_alpha(),
-                match () {
-                    #[cfg(feature = "goggles")]
-                    _ => s.space.goggles.obscured_alpha(),
-                    #[cfg(not(feature = "goggles"))]
-                    _ => (),
-                },
             ));
             // TODO: cpbuffer per type? just mixing them together for now...
             let alpha = trail_alpha * poi_alpha;
@@ -612,8 +646,7 @@ impl Engine {
             self.render_backend.perspective_handler.update_perspective(Vec3::splat(expand.y + 1.0));
 
             #[cfg(feature = "goggles")]
-            if goggles::is_enabled() && _obscured_alpha > 0.0 {
-
+            if goggles_2pass {
                 // first pass at reduced opacity
                 let backend = &mut self.render_backend;
                 backend.perspective_handler.set_alpha(_obscured_alpha);
@@ -663,7 +696,7 @@ impl Engine {
         }
     }
 
-    pub fn gameplay_map_exit(&mut self, device_context: &ID3D11DeviceContext, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
+    pub fn gameplay_map_exit(&mut self, device_context: &Dx11Context, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
         if goggles::is_enabled() {
             goggles::clear_lens();
@@ -682,7 +715,7 @@ impl Engine {
         res
     }
 
-    pub fn gameplay_map_enter(&mut self, device_context: &ID3D11DeviceContext, map_id: NonZeroU32) -> anyhow::Result<()> {
+    pub fn gameplay_map_enter(&mut self, device_context: &Dx11Context, map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
         {
             use crate::space;

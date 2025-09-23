@@ -1,6 +1,9 @@
-use glam::{Vec2, Vec3};
+use {
+    glam::{Vec2, Vec3},
+    taimi_d3d::buffer::D3dBufferData,
+};
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq)]
 #[repr(C)]
 pub struct Vertex {
     pub position: Vec3,
@@ -8,3 +11,5 @@ pub struct Vertex {
     pub normal: Vec3,
     pub texture: Vec2,
 }
+
+unsafe impl D3dBufferData for Vertex {}

@@ -247,6 +247,9 @@ pub struct GogglesSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub obscured_alpha: Option<f32>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_scale: Option<f32>,
+
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub map_depth_calibration: BTreeMap<u32, (f32, f32)>,
 }
@@ -254,11 +257,13 @@ pub struct GogglesSettings {
 impl GogglesSettings {
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
+    pub const DEFAULT_EDGE_SCALE: Option<f32> = Some(0.5f32);
 
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
                 obscured_alpha: None,
+                edge_scale: None | Self::DEFAULT_EDGE_SCALE,
                 map_depth_calibration,
             } if map_depth_calibration.is_empty() =>
                 true,
@@ -268,6 +273,12 @@ impl GogglesSettings {
 
     pub fn obscured_alpha(&self) -> f32 {
         self.obscured_alpha.unwrap_or(Self::DEFAULT_OBSCURED_ALPHA)
+    }
+
+    pub fn edge_scale(&self) -> Option<f32> {
+        self.edge_scale
+            .map(SpaceSettings::optional_f32)
+            .unwrap_or(Self::DEFAULT_EDGE_SCALE)
     }
 
     pub fn map_depth_calibration(&self, map_id: u32) -> (f32, f32) {

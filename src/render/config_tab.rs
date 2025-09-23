@@ -198,12 +198,13 @@ impl ConfigTabState {
                 _ => {
                     map_id = e.gameplay_map.ok().map(|id| id.get());
                     (
+                        s.space.goggles.edge_scale(),
                         s.space.goggles.obscured_alpha(),
                         (crate::space::min_depth(), crate::space::max_depth()),
                     )
                 },
                 #[cfg(not(feature = "goggles"))]
-                _ => ((), ((), ())),
+                _ => ((), (), ((), ())),
             },
         )))).flatten();
         if let Some(current) = current {
@@ -217,7 +218,7 @@ impl ConfigTabState {
                 map_trail_alpha_mini, map_trail_alpha_world,
                 scale_trail_mini, scale_trail_world,
                 scale_poi_mini, scale_poi_world,
-                (_obscured_alpha, (_near, _far)),
+                (_edge_scale, _obscured_alpha, (_near, _far)),
             ) = current;
             let range_alpha = (0.0, 1.0);
             let range_scale = (0.0, 25.0);
@@ -342,6 +343,17 @@ impl ConfigTabState {
                 }
                 if let Some(value) = Self::slider_setting(ui, "goggles x-ray opacity", _obscured_alpha, range_alpha) {
                     Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
+                }
+                if let Some(value) = Self::slider_opt_setting(ui, "edge boundary scale", _edge_scale, (0.1f32, 5.0)) {
+                    let mut edge_scale = value;
+                    Self::set_pathing(|s| {
+                        s.space.goggles.edge_scale = value;
+                        edge_scale = s.space.goggles.edge_scale();
+                    });
+                    let _ = crate::engine_mut(|e| {
+                        //e.render_backend.depth_handler.regen_edge(&e.render_backend.device, edge_scale);
+                        e.render_backend.depth_handler.fill_edge.take();
+                    });
                 }
             };
             #[cfg(feature = "goggles")]

@@ -1,0 +1,210 @@
+use crate::{
+    dx11::{
+        prelude::*,
+        buffer::Texture2,
+        d3d11::{D3D11_CLEAR_FLAG, ID3D11Texture2D},
+        depth::DepthView,
+        impl_d3d_ext11,
+    },
+    D3dContextBindable,
+};
+
+pub use crate::dx11::d3d11::{
+    ID3D11RasterizerState,
+    ID3D11RenderTargetView,
+    D3D11_RASTERIZER_DESC,
+};
+
+pub fn get_swap_chain_framebuffer(swap_chain: &IDXGISwapChain) -> anyhow::Result<ID3D11Texture2D> {
+    let fb = unsafe { swap_chain.GetBuffer(0) };
+    fb.context("IDXGISwapChain::GetBuffer")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct RasterizerState {
+    pub state: ID3D11RasterizerState,
+}
+
+impl RasterizerState {
+    pub fn with_state(state: ID3D11RasterizerState) -> Self {
+        Self {
+            state,
+        }
+    }
+
+    pub fn new_snapshot(context: &Dx11Context) -> anyhow::Result<Self> {
+        unsafe {
+            context.RSGetState()
+        }.context("RSGetState")
+        .map(Self::with_state)
+    }
+
+    pub const DESC_DEFAULT: D3D11_RASTERIZER_DESC = D3D11_RASTERIZER_DESC {
+        FillMode: d3d11::D3D11_FILL_SOLID,
+        CullMode: d3d11::D3D11_CULL_BACK,
+        FrontCounterClockwise: BOOL(0),
+        DepthBias: 0,
+        DepthBiasClamp: 0.0,
+        SlopeScaledDepthBias: 0.0,
+        DepthClipEnable: BOOL(1),
+        ScissorEnable: BOOL(0),
+        MultisampleEnable: BOOL(0),
+        AntialiasedLineEnable: BOOL(0),
+    };
+
+    pub fn new_with_desc(device: &Dx11Device, desc: &D3D11_RASTERIZER_DESC) -> anyhow::Result<Self> {
+        let mut out: Option<ID3D11RasterizerState> = None;
+        unsafe {
+            device.CreateRasterizerState(desc, Some(&mut out))
+        }.map_err(anyhow::Error::from)
+        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce state pointer")))
+        .context("CreateRasterizerState")
+        .map(Self::with_state)
+    }
+}
+
+impl_d3d_ext11! {
+    unsafe impl ID3D11ResourceExt<Output=ID3D11RasterizerState, @transparent> for RasterizerState,
+        @field(&this => &this.state);
+}
+
+impl D3dContextBindable<Dx11Context> for RasterizerState {
+    fn set(&self, context: &Dx11Context) {
+        unsafe {
+            context.RSSetState(&self.state);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderTargetViews<V = [Option<RenderTargetView>; MAX_RENDER_TARGETS], D = DepthView> {
+    pub views: V,
+    pub depth: Option<D>,
+}
+
+impl<V, D> RenderTargetViews<V, D> {
+    pub fn with_views(views: V, depth: Option<D>) -> Self {
+        Self {
+            views,
+            depth,
+        }
+    }
+
+    pub fn new_snapshot(context: &Dx11Context) -> Self where
+        V: Default + AsMut<[Option<ID3D11RenderTargetView>]>,
+        D: From<d3d11::ID3D11DepthStencilView>,
+    {
+        let mut views = V::default();
+        let mut depth_view = None;
+        unsafe {
+            context.OMGetRenderTargets(Some(views.as_mut()), Some(&mut depth_view));
+        }
+        Self {
+            views,
+            depth: depth_view.map(Into::into),
+        }
+    }
+
+    pub fn to_ref(&self) -> RenderTargetViews<&V, &D> {
+        RenderTargetViews::with_views(&self.views, self.depth.as_ref())
+    }
+
+    pub fn map_views<T, F: FnOnce(V) -> T>(self, f: F) -> RenderTargetViews<T, D> {
+        let Self { views, depth } = self;
+        RenderTargetViews::with_views(f(views), depth)
+    }
+    pub fn map_depth<T, F: FnOnce(Option<D>) -> Option<T>>(self, f: F) -> RenderTargetViews<V, T> {
+        let Self { views, depth } = self;
+        RenderTargetViews::with_views(views, f(depth))
+    }
+    pub fn without_depth(self) -> RenderTargetViews<V, D> {
+        self.map_depth(|_| None)
+    }
+
+    pub fn views(&self) -> &[Option<ID3D11RenderTargetView>] where
+        V: ID3D11ResourceOf<ID3D11RenderTargetView>,
+    {
+        self.views.as_params_of()
+    }
+
+    pub fn views_mut(&mut self) -> &mut [Option<ID3D11RenderTargetView>] where
+        V: AsMut<[Option<ID3D11RenderTargetView>]>,
+    {
+        self.views.as_mut()
+    }
+
+    pub fn clear_colour<C: Into<Vec4>>(&self, context: &Dx11Context, colour: C) where
+        V: ID3D11ResourceOf<ID3D11RenderTargetView>,
+    {
+        let colour = colour.into().to_array();
+        for view in self.views().iter().flatten() {
+            unsafe {
+                context.ClearRenderTargetView(view, &colour);
+            }
+        }
+    }
+
+    pub fn clear_depth(&self, context: &Dx11Context, flags: D3D11_CLEAR_FLAG, depth: f32, stencil: u8) where
+        D: AsRef<DepthView>,
+    {
+        if let Some(depth_view) = &self.depth {
+            let depth_view = depth_view.as_ref();
+            depth_view.clear(context, flags, depth, stencil)
+        }
+    }
+
+    pub fn bind_set(context: &Dx11Context, views: &V, depth: Option<&D>) where
+        V: ID3D11ResourceOf<ID3D11RenderTargetView>,
+        D: AsRef<DepthView>,
+    {
+        let views = views.as_params_of();
+        let views = match views.is_empty() {
+            #[cfg(todo = "unnecessary")]
+            true => None,
+            _ => Some(views),
+        };
+        let depth = depth.map(AsRef::as_ref);
+        let depth = depth.as_param();
+        unsafe {
+            context.OMSetRenderTargets(views, depth.as_ref())
+        }
+    }
+}
+
+impl<V, D> D3dContextBindable<Dx11Context> for RenderTargetViews<V, D> where
+    V: ID3D11ResourceOf<ID3D11RenderTargetView>,
+    D: AsRef<DepthView>,
+{
+    fn set(&self, context: &Dx11Context) {
+        Self::bind_set(context, &self.views, self.depth.as_ref())
+    }
+}
+
+pub const MAX_RENDER_TARGETS: usize = d3d11::D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT as usize;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct RenderTargetView {
+    pub view: ID3D11RenderTargetView,
+}
+
+impl RenderTargetView {
+    pub fn new_with_buffer2(
+        device: &Dx11Device,
+        framebuffer: &Texture2,
+    ) -> anyhow::Result<Self> {
+        let mut out: Option<ID3D11RenderTargetView> = None;
+        unsafe {
+            device.CreateRenderTargetView(&framebuffer.resource, None, Some(&mut out))
+        }.map_err(anyhow::Error::from)
+        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
+        .context("CreateRenderTargetView")
+        .map(Into::into)
+    }
+}
+
+impl_d3d_ext11! {
+    unsafe impl ID3D11ResourceExt<Output=ID3D11RenderTargetView, @transparent> for RenderTargetView,
+        @field(&this => &this.view);
+}
