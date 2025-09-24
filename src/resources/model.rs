@@ -68,7 +68,7 @@ impl Model {
         let offset: u32 = 0;
         let count: u32 = vertex_data_array.len() as u32;
 
-        log::info!("Setting up vertex buffer");
+        log::trace!("Setting up vertex buffer");
         let mut vertex_buffer_ptr: Option<ID3D11Buffer> = None;
         let subresource_data = D3D11_SUBRESOURCE_DATA {
             pSysMem: vertex_data_array.as_ptr() as *const _,
@@ -83,7 +83,7 @@ impl Model {
             MiscFlags: 0,
             StructureByteStride: 0,
         };
-        log::info!("Creating vertex buffer with {} elements", count);
+        log::trace!("Creating vertex buffer with {} elements", count);
         let buffer = unsafe {
             device.CreateBuffer(
                 &vertex_buffer_desc,

@@ -344,7 +344,7 @@ impl ActivePack {
             }
             let mut id = pack_trail.guid;
             if self.active_trails.contains_key(&id) {
-                log::warn!(
+                log::trace!(
                     "Pack {} contains a duplicate trail GUID `{id}`. \
                     Randomizing to ensure it may still be rendered.",
                     pack.name
@@ -395,7 +395,7 @@ impl ActivePack {
             }
             let mut id = pack_poi.guid;
             if self.active_pois.contains_key(&id) {
-                log::warn!(
+                log::trace!(
                     "Pack {} contains a duplicate poi GUID `{id}`. \
                     Randomizing to ensure it may still be rendered.",
                     self.pack.name
