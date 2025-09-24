@@ -12,7 +12,6 @@
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
-      inputs.nixpkgs.follows = "nixpkgs";
     };
     crane.url = "github:ipetkov/crane";
     rust-overlay = {
@@ -33,7 +32,9 @@
       {
         # TaimiHUD Package
         packages = {
-          taimiHUD = callPackage ./package.nix {};
+          taimiHUD = callPackage ./package.nix {
+            source = self;
+          };
           taimiHUD-debug = packages.taimiHUD.override {
             buildType = "dev";
           };
@@ -60,7 +61,10 @@
               craneLib
               fenixPackages fenixToolchain fenixToolchainShell
             ;
-            inherit (packages) taimiHUD packs;
+            taimiHUD = packages.taimiHUD.override {
+              enableLibgit = true;
+            };
+            inherit (packages) packs;
           };
 
           fenixPackages = fenix.packages.${system};

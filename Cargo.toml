@@ -28,7 +28,7 @@ default = [
   "extension-nexus",
 ]
 built-info = [
-  "built/chrono",
+  #"built/chrono",
   "built/git2",
 ]
 space = [

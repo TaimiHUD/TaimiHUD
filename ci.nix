@@ -1,6 +1,15 @@
-{ config, pkgs, lib, ... }: with pkgs; with lib; let
+{ config, pkgs, lib, env, ... }: with pkgs; with lib; let
   taimiHUD-rs = import ./.;
   packages = taimiHUD-rs.packages.${pkgs.system};
+  taimiHUD = packages.taimiHUD.override {
+    builtInfo = {
+      ${if env.platform != "none" then "platform" else null} = env.platform;
+      ${if env.git-ref != null then "ref" else null} = env.git-ref;
+      ${if env.git-commit != null then "rev" else null} = env.git-commit;
+      ${if env.git-commit != null then "shortRev" else null} = builtins.substring 0 8 env.git-commit;
+      ${if env.platform != "none" then "dirty" else null} = false;
+    };
+  };
   artifactRoot = ".ci/artifacts";
   artifacts = "${artifactRoot}/lib/TaimiHUD*.dll";
   release = "${artifactRoot}/lib/taimi_hud.dll";
@@ -26,16 +35,16 @@ in
       };
     };
     tasks = {
-      build.inputs = with packages; [ taimiHUD ]; #taimiHUDSpace ];
-      cache.inputs = with packages; [ taimiHUD taimiHUD.cargoArtifacts ]; #taimiHUDSpace ];
+      build.inputs = [ taimiHUD ]; #taimiHUDSpace ];
+      cache.inputs = [ taimiHUD taimiHUD.cargoArtifacts ]; #taimiHUDSpace ];
     };
     jobs = {
       main = {
         tasks = {
-          build-windows.inputs = singleton packages.taimiHUD;
+          build-windows.inputs = singleton taimiHUD;
         };
         artifactPackages = {
-          main = packages.taimiHUD;
+          main = taimiHUD;
         };
       };
     };
