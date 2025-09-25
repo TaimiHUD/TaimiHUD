@@ -74,9 +74,14 @@ pub(crate) fn cb_unload() {
     #[cfg(feature = "extension-arcdps")]
     if let Some(handle) = own_handle {
         handle.spawn_free();
+    } else {
+        rt::log::TaimiLog::logger().close();
     }
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
+
+    #[cfg(not(feature = "extension-arcdps"))]
+    rt::log::TaimiLog::logger().close();
 }
 
 pub fn available() -> bool {

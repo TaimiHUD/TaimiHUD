@@ -373,6 +373,8 @@ fn init() -> Result<(), &'static str> {
     *RENDER_STATE.lock().unwrap() = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
 
+    log::logger().flush();
+
     *loaded = true;
     Ok(())
 }
@@ -1045,6 +1047,7 @@ fn unload() {
         };
         let _ = render_sender.take();
 
+        log::logger().flush();
         match render_quit {
             _ if rt::is_shutdown() || render_state.is_none() => {
                 // it's already gone, nothing more to do here
@@ -1085,6 +1088,7 @@ fn unload() {
         Some(Ok(())) | None => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
+                log::logger().flush();
                 if let Err(e) = handle.join() {
                     log_any_error("controller thread", &e);
                 }
@@ -1114,6 +1118,7 @@ fn unload() {
     }
 
     log::debug!("Unload complete");
+    log::logger().flush();
 }
 
 fn unload_render() {
@@ -1147,6 +1152,8 @@ fn unload_render_background() {
 
     TEXTURES.cleanup(false);
     RENDER_UNLOAD.notify_all();
+
+    log::logger().flush();
 }
 
 fn reload_render(superficial: bool) {

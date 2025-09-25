@@ -243,7 +243,8 @@ fn release() {
         .unwrap_or_else(|e| e.into_inner())
         .take();
 
-    if available() && !rt::nexus_available() {
+    let unloading = available() && !rt::nexus_available();
+    if unloading {
         crate::unload();
     }
 
@@ -258,6 +259,11 @@ fn release() {
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
     RUNTIME_LOADED.store(false, Ordering::SeqCst);
     EXTRAS_AVAILABLE.store(false, Ordering::SeqCst);
+
+    if unloading {
+        // TODO: avoid if exit is in-flight?
+        rt::log::TaimiLog::logger().close();
+    }
 }
 
 pub struct ExitHandle {
@@ -302,6 +308,7 @@ impl ExitHandle {
     pub fn spawn_free(self) {
         let _ = thread::spawn(move || -> ! {
             thread::sleep(Duration::from_millis(400));
+            rt::log::TaimiLog::logger().close();
             self.free_and_exit();
         });
     }
