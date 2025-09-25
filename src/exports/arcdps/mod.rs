@@ -43,7 +43,10 @@ use crate::space::{
     MapContext,
 };
 #[cfg(feature = "extension-arcdps-extern")]
-use dpsapi::api::ApiExports as _;
+use {
+    dpsapi::api::ApiExports as _,
+    std::mem::transmute,
+};
 
 #[cfg(feature = "extension-arcdps-extern")]
 pub(crate) mod r#extern;
@@ -1023,7 +1026,24 @@ pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Opt
             arcdps::exports::raw::e8_log_window(message.as_ptr())
         }),
         #[cfg(feature = "extension-arcdps-extern")]
-        () => r#extern::arc_args().and_then(|arc| arc.module.arc_log_window(message.as_ref()).ok()),
+        () => r#extern::arc_args().and_then(|arc| {
+            static LOG_WINDOW_EXPORT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
+
+            match LOG_WINDOW_EXPORT.load(Ordering::Relaxed) {
+                p if p.is_null() => {
+                    let export = arc.module.lookup_e8();
+                    if let Some(export) = export {
+                        LOG_WINDOW_EXPORT.store(export as usize as *mut _, Ordering::Relaxed)
+                    }
+                    export
+                },
+                p => unsafe {
+                    transmute(p)
+                },
+            }.map(|e| unsafe {
+                e(Some(message.into()))
+            })
+        }),
     }.ok_or(NO_EXPORT).map(Some)
 }
 
@@ -1044,7 +1064,24 @@ pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()
             arcdps::exports::raw::e3_log_file(message.as_ptr())
         }),
         #[cfg(feature = "extension-arcdps-extern")]
-        () => r#extern::arc_args().and_then(|arc| arc.module.arc_log(message.as_ref()).ok()),
+        () => r#extern::arc_args().and_then(|arc| {
+            static LOG_EXPORT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
+
+            match LOG_EXPORT.load(Ordering::Relaxed) {
+                p if p.is_null() => {
+                    let export = arc.module.lookup_e3();
+                    if let Some(export) = export {
+                        LOG_EXPORT.store(export as usize as *mut _, Ordering::Relaxed)
+                    }
+                    export
+                },
+                p => unsafe {
+                    transmute(p)
+                },
+            }.map(|e| unsafe {
+                e(Some(message.into()))
+            })
+        }),
     }.ok_or(NO_EXPORT).map(Some)
 }
 
