@@ -40,7 +40,7 @@ impl PerspectiveInputData {
     }
 
     pub fn world_visible(&self) -> bool {
-        self.is_gameplay.unwrap_or(false) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
+        self.is_gameplay.unwrap_or(self.pos != Vec3::ZERO || self.has_rtapi) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
     }
 
     pub fn player_pos(&self) -> Point3<DrawSpace> {

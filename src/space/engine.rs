@@ -362,7 +362,9 @@ impl Engine {
                 if front != Vec3::ZERO {
                     pdata.front = front;
                     pdata.pos = Vec3::from_array(camera.camera_position);
-                    pdata.has_rtapi = pdata.is_gameplay == Some(true);
+                    if pdata.is_gameplay == Some(true) {
+                        pdata.has_rtapi = true;
+                    }
                 }
                 if camera.camera_fov != 0.0f32 {
                     pdata.fov = camera.camera_fov;
@@ -377,8 +379,8 @@ impl Engine {
                 Err(_) => None,
             });
             if let Some(ingame) = ingame {
+                dirty |= pdata.is_gameplay != Some(ingame);
                 pdata.is_gameplay = Some(ingame);
-                dirty = true;
             }
             if dirty {
                 pdata.clone().commit();
@@ -434,7 +436,8 @@ impl Engine {
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
             )
         ));
-        let render_map = match visible_map.unwrap_or(false) && pdata.is_gameplay.unwrap_or(false) {
+        let ingame = self.gameplay_map.is_ok();
+        let render_map = match visible_map.unwrap_or(ingame) && pdata.is_gameplay.unwrap_or(ingame) {
             true => map_data.as_ref().map(|data| MapTarget::new(data)),
             _ => None,
         };
