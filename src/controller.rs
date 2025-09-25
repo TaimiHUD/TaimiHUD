@@ -71,6 +71,7 @@ pub struct Controller {
     pub extras_squad: HashMap<String, UserInfoOwned>,
     pub agent: Option<AgentOwned>,
     pub previous_combat_state: bool,
+    pub previous_ui_tick: Option<u32>,
     #[cfg(feature = "markers")]
     pub markers: HashMap<String, Vec<Arc<MarkerSet>>>,
     #[cfg(feature = "markers")]
@@ -124,6 +125,7 @@ impl Controller {
                 #[cfg(feature = "markers")]
                 marker_autoplace: Default::default(),
                 previous_combat_state: Default::default(),
+                previous_ui_tick: Default::default(),
                 rt_sender,
                 settings,
                 #[cfg(feature = "markers")]
@@ -156,6 +158,7 @@ impl Controller {
             state.setup_markers().await;
             let mut taimi_interval = interval(Duration::from_millis(125));
             let mut mumblelink_interval = interval(Duration::from_millis(20));
+            let mut mumblelink_missed = 0u32;
             loop {
                 select! {
                     evt = controller_receiver.recv() => match evt {
@@ -173,7 +176,19 @@ impl Controller {
                         },
                     },
                     _ = mumblelink_interval.tick() => {
-                        let _ = state.mumblelink_tick().await;
+                        let missed = match mumblelink_missed {
+                            0 => 0,
+                            missed => (missed / (20/2)).max(1),
+                        };
+                        match state.mumblelink_tick(mumblelink_missed / (20/2)).await {
+                            Ok(false) => {
+                                mumblelink_missed = mumblelink_missed.saturating_add(1);
+                                mumblelink_interval.reset_after(Duration::from_millis(2));
+                            },
+                            Ok(true) =>
+                                mumblelink_missed = 0,
+                            Err(..) => (),
+                        }
                     },
                     _ = taimi_interval.tick() => {
                         let _ = state.tick().await;
@@ -363,43 +378,82 @@ impl Controller {
         Ok(())
     }
 
-    async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
+    async fn mumblelink_tick(&mut self, missed: u32) -> anyhow::Result<bool> {
+        #[cfg(feature = "space")]
+        let (mut input_data, mut input_dirty) = (PerspectiveInputData::cloned(), false);
+        #[cfg(feature = "markers")]
+        let mut marker_data = None;
+
+        let mut ui_state = UiState::empty();
+        let previous_ui_tick = self.previous_ui_tick;
+        let mumble = match self.mumble_pointer {
+            None => None,
+            Some(mumble) => {
+                let ui_tick = Some(mumble.read_ui_tick());
+                ui_state = mumble.read_ui_state();
+                self.previous_ui_tick = ui_tick;
+                (ui_tick != previous_ui_tick).then_some(mumble)
+            },
+        };
+
+        #[cfg(feature = "space")]
+        if input_data.ui_state != ui_state {
+            input_dirty |= true;
+            input_data.ui_state = ui_state;
+        }
+
         #[cfg(feature = "space")]
         {
-            let mut input_data = PerspectiveInputData::cloned();
-            let mut dirty = false;
-            if let Ok(is_gameplay) = rt::is_ingame() {
-                dirty = input_data.is_gameplay != Some(is_gameplay);
-                input_data.is_gameplay = Some(is_gameplay);
-            }
-            if let Some(mumble) = self.mumble_pointer {
-                let ui_state = mumble.read_ui_state();
-                dirty |= input_data.ui_state != ui_state;
-                input_data.ui_state = ui_state;
-            }
-            let position_ptr = match self.mumble_pointer {
-                #[cfg(feature = "extension-nexus")]
-                Some(..) if input_data.has_rtapi =>
-                    None,
-                m => m,
+            let is_gameplay = match rt::is_ingame() {
+                // ui ticks don't occur during loading/charsel apparently...
+                Ok(ingame) if self.mumble_pointer.is_none() =>
+                    Some(Some(ingame)),
+                Ok(false) if (mumble.is_none() && !input_dirty) && previous_ui_tick.is_some() && missed > 4 =>
+                    Some(if input_data.is_gameplay == Some(true) { None } else { Some(false) }),
+                Ok(ingame @ true) => Some(Some(ingame)),
+                Err(..) | Ok(false) => None,
             };
-            if let Some(mumble) = position_ptr {
-                input_data.playpos = Vec3::from_array(mumble.read_avatar().position);
-                let camera = mumble.read_camera();
-                input_data.front = Vec3::from_array(camera.front);
-                input_data.pos = Vec3::from_array(camera.position);
-                dirty = true;
+            if let Some(is_gameplay) = is_gameplay {
+                input_dirty |= input_data.is_gameplay != is_gameplay;
+                input_data.is_gameplay = is_gameplay;
             }
-            if dirty {
+        }
+        let Some(mumble) = mumble else {
+            #[cfg(feature = "space")]
+            if input_dirty {
+                input_data.commit();
+            }
+            return Ok(self.mumble_pointer.is_none())
+        };
+
+        let playpos = Vec3::from_array(mumble.read_avatar().position);
+        let camera = mumble.read_camera();
+        let camera_front = Vec3::from_array(camera.front);
+        let camera_pos = Vec3::from_array(camera.position);
+
+        #[cfg(feature = "space")]
+        {
+            let position_ptr = match playpos {
+                #[cfg(feature = "extension-nexus")]
+                _ if input_data.has_rtapi =>
+                    None,
+                p => Some(p),
+            };
+            if let Some(playpos) = position_ptr {
+                input_data.playpos = playpos;
+                input_data.front = camera_front;
+                input_data.pos = camera_pos;
+                input_dirty |= input_data.playpos != Vec3::ZERO;
+            }
+            if input_dirty {
                 input_data.commit();
             }
         }
-        if let Some(mumble) = self.mumble_pointer {
-            let playpos = Vec3::from_array(mumble.read_avatar().position);
+
             #[cfg(feature = "markers")]
             {
-                let mut marker_data = MarkerInputData::cloned();
-                marker_data.update_with_mumble_ptr_context(&mumble);
+                let marker_data = marker_data.get_or_insert_with(|| MarkerInputData::cloned());
+                marker_data.update_with_mumble_ptr_context(&mumble, ui_state, playpos);
                 match rt::nexus_link_ptr() {
                     #[cfg(feature = "extension-nexus")]
                     Ok(nexus_link) =>
@@ -433,8 +487,7 @@ impl Controller {
                 }
             }
             self.player_position = Some(playpos);
-            let combat_state = mumble.read_ui_state()
-                .contains(UiState::IS_IN_COMBAT);
+            let combat_state = ui_state.contains(UiState::IS_IN_COMBAT);
             if combat_state != self.previous_combat_state {
                 if combat_state {
                     log::info!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
@@ -454,8 +507,7 @@ impl Controller {
                     machine.tick(pos).await
                 }
             }
-        }
-        Ok(())
+            Ok(true)
     }
 
     async fn handle_mumble(&mut self, identity: MumbleIdentityUpdate) {
