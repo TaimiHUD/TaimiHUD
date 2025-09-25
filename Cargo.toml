@@ -212,11 +212,8 @@ rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
 bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
-xml-rs = "0.8.26"
-uuid = { version = "1.17.0", features = ["v4"] }
-md5 = "0.7.0"
-base64 = "0.22.1"
-zip = "4.0.0"
+uuid = "1"
+regex = "1"
 croner = "3"
 bitvec = { workspace = true }
 
