@@ -3690,7 +3690,6 @@ dependencies = [
  "arcffi",
  "arcloader-mumblelink",
  "async-compression",
- "base64",
  "bevy_ecs",
  "bevy_utils",
  "bitflags 2.9.0",
@@ -3720,7 +3719,6 @@ dependencies = [
  "lininterp",
  "log",
  "magic_migrate",
- "md5",
  "mint",
  "nalgebra",
  "nexus",
@@ -3728,6 +3726,7 @@ dependencies = [
  "ordered-float",
  "palette",
  "rand 0.9.1",
+ "regex",
  "relative-path",
  "reqwest",
  "retour",
@@ -3754,8 +3753,6 @@ dependencies = [
  "uuid",
  "webpki-root-certs",
  "windows 0.61.1",
- "xml-rs",
- "zip",
 ]
 
 [[package]]

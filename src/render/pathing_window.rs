@@ -1,9 +1,10 @@
 use {
-    crate::{engine_mut, fl, ControllerEvent, Controller, SETTINGS},
+    crate::{engine_mut, fl, space::pack::ActivePack, ControllerEvent, Controller, SETTINGS},
     bitflags::bitflags,
     indexmap::IndexMap,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
-    std::collections::HashSet,
+    regex::{Regex, RegexBuilder},
+    std::{collections::HashSet, str::FromStr},
 };
 
 bitflags! {
@@ -23,23 +24,96 @@ impl Default for PathingFilterState {
     }
 }
 
-impl PathingFilterState {
-    pub fn filter_string_to_flag(str: &str) -> Self {
-        match str {
+impl FromStr for PathingFilterState {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "enabled" => Self::Enabled,
             "disabled" => Self::Disabled,
             "ignore-root" => Self::IgnoreRoot,
             "ignore-leaf" => Self::IgnoreLeaves,
             "ignore-branch" => Self::IgnoreBranches,
-            _ => unreachable!("no"),
+            _ => anyhow::bail!("unsupported filter option `{s}`"),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct PathingSearchState {
+    pub buffer: String,
+    matcher: Option<Regex>,
+    search_candidates: HashSet<String>,
+    pub ignore_space: bool,
+    pub ignore_case: bool,
+}
+
+impl PathingSearchState {
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.matcher = None;
+        self.search_candidates.clear();
+    }
+
+    pub fn commit<'p, P: Iterator<Item=&'p ActivePack>>(&mut self, packs: P) {
+        self.search_candidates.clear();
+        if self.buffer.is_empty() {
+            return
+        }
+        self.matcher = {
+        let pattern = regex::escape(&self.buffer);
+            let matcher = RegexBuilder::new(&pattern)
+                .case_insensitive(self.ignore_case)
+                .ignore_whitespace(self.ignore_space)
+                .build();
+            if let Err(e) = &matcher {
+                log::warn!("search filter failure: {e:#}");
+            }
+            matcher.ok()
+        };
+
+        for pack in packs {
+            for (full_id, category) in pack.pack.categories.all_categories.iter() {
+                if self.matches_name(&category.display_name) || self.matches_name(&category.id) {
+                    self.search_candidates.insert(full_id.into());
+                    let separators = full_id.rmatch_indices(".");
+                    for (idx, _eu) in separators {
+                        if let Some(sub_id) = full_id.get(..idx) {
+                            self.search_candidates.insert(sub_id.into());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn matches_name(&self, name: &str) -> bool {
+        match &self.matcher {
+            Some(regex) => regex.is_match(name),
+            #[cfg(todo = "unnecessary")]
+            None if self.buffer.is_empty() => false,
+            None => name.contains(&self.buffer),
+        }
+    }
+
+    pub fn matches_id(&self, full_id: &str) -> bool {
+        match self.buffer.is_empty() {
+            false => self.search_candidates.contains(full_id),
+            true => true,
         }
     }
 }
 
-#[derive(Default, Clone)]
-pub struct PathingSearchState {
-    pub buffer: String,
-    pub search_candidates: HashSet<String>,
+impl Default for PathingSearchState {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+            matcher: Default::default(),
+            search_candidates: Default::default(),
+            ignore_case: true,
+            ignore_space: true,
+        }
+    }
 }
 
 pub struct PathingWindowState {
@@ -111,35 +185,16 @@ impl PathingWindowState {
                                         engine.packs.clear();
                                     }
                                         if self.filter_open {
-                                            let mut update_search = false;
                                             ui.separator();
                                             let pushy = ui.push_id("pathing-search");
                                             if ui.input_text("", &mut self.search_state.buffer)
                                                 .hint("Search")
                                                 .build() {
-                                                update_search = true;
-                                            }
-                                            if update_search {
-                                                self.search_state.search_candidates.clear();
-                                                if !self.search_state.buffer.is_empty() {
-                                                    for (_s, pack) in &engine.packs.loaded_packs {
-                                                        for (full_id, category) in pack.pack.categories.all_categories.iter() {
-                                                            if category.display_name.contains(&self.search_state.buffer) {
-                                                                self.search_state.search_candidates.insert(full_id.to_string());
-                                                                let separators: Vec<_> = full_id.rmatch_indices(".").collect();
-                                                                for (idx, _eu) in separators {
-                                                                    let sub_id = &full_id[..idx];
-                                                                    self.search_state.search_candidates.insert(sub_id.to_string());
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                                self.search_state.commit(engine.packs.loaded_packs.values());
                                             }
                                             ui.same_line();
                                             if ui.button("X") {
-                                                self.search_state.buffer.clear();
-                                                self.search_state.search_candidates.clear();
+                                                self.search_state.clear();
                                             }
                                             if ui.is_item_hovered() {
                                                 ui.tooltip_text(fl!("searchbar-clear"));
@@ -148,8 +203,12 @@ impl PathingWindowState {
                                             ui.dummy([4.0; 2]);
                                             ui.text(fl!("filter-options"));
                                             for (filter, filter_name) in &self.filter_options {
-                                                ui.checkbox_flags(filter_name, &mut self.filter_state, PathingFilterState::filter_string_to_flag(filter));
+                                                if let Ok(flag) = filter.parse() {
+                                                    ui.checkbox_flags(filter_name, &mut self.filter_state, flag);
+                                                }
                                             }
+                                            ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
+                                            ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
                                             ui.dummy([4.0; 2]);
                                             ui.separator();
                                             ui.dummy([4.0; 2]);

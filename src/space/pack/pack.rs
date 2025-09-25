@@ -147,11 +147,7 @@ impl ActivePack {
                 let is_branch = !is_leaf;
                 let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
                 let is_branch_filter = is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
-                let search_filter = if !search_state.buffer.is_empty() {
-                    search_state.search_candidates.contains(&category.full_id)
-                } else {
-                    true
-                };
+                let search_filter = search_state.matches_id(&category.full_id);
                 display = search_filter && (enabled_filter || disabled_filter || is_root_filter || is_leaf_filter || is_branch_filter);
             }
         }
