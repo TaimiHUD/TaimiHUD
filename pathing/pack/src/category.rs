@@ -36,7 +36,8 @@ impl Category {
         let mut id = String::new();
         let mut display_name = None;
         let mut bh_display_name = None;
-        let mut is_separator = false;
+        let mut is_separator = None;
+        let mut bh_is_separator = None;
         let mut is_hidden = None;
         let mut bh_is_hidden = None;
         let mut default_toggle = None;
@@ -52,7 +53,7 @@ impl Category {
                 Ok(())
             } else if attr_name.eq_ignore_ascii_case("isseparator") {
                 parse_bool(&attr.value)
-                    .map(|val| is_separator = val)
+                    .map(|val| is_separator = Some(val))
                     .map_err(From::from)
             } else if attr_name.eq_ignore_ascii_case("ishidden") {
                 parse_bool(&attr.value)
@@ -66,6 +67,10 @@ impl Category {
                 if attr_name.eq_ignore_ascii_case("displayname") {
                     bh_display_name = Some(attr.value);
                     Ok(())
+                } else if attr_name.eq_ignore_ascii_case("isseparator") {
+                    parse_bool(&attr.value)
+                        .map(|val| bh_is_separator = Some(val))
+                        .map_err(From::from)
                 } else if attr_name.eq_ignore_ascii_case("ishidden") {
                     parse_bool(&attr.value)
                         .map(|val| bh_is_hidden = Some(val))
@@ -75,10 +80,20 @@ impl Category {
                         .map(|val| bh_default_toggle = Some(val))
                         .map_err(From::from)
                 } else {
-                    attributes_bh.try_add(attr.name.borrow(), attr.value)
+                    match attributes_bh.try_add(attr.name.borrow(), attr.value) {
+                        Ok(false) => Ok(
+                            log::debug!("unrecognized category attribute `{}`", attr.name)
+                        ),
+                        res => res.map(drop),
+                    }
                 }
             } else {
-                marker_attributes.try_add(attr.name.borrow(), attr.value)
+                match marker_attributes.try_add(attr.name.borrow(), attr.value) {
+                    Ok(false) => Ok(
+                        log::info!("unrecognized category attribute `{}`", attr.name)
+                    ),
+                    res => res.map(drop),
+                }
             }.with_context(|| format!("parsing category attribute '{}'", attr.name));
             if let Err(e) = res {
                 log::warn!("{e:#}");
@@ -98,6 +113,9 @@ impl Category {
         let display_name = display_name
             .or(bh_display_name)
             .unwrap_or(id.clone());
+        let is_separator = is_separator
+            .or(bh_is_separator)
+            .unwrap_or(false);
         let is_hidden = is_hidden
             .or(bh_is_hidden)
             .unwrap_or(false);

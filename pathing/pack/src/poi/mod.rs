@@ -58,9 +58,19 @@ impl Poi {
                 guid = Some(taco_xml_to_guid(&attr.value));
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
-                attributes_bh.try_add(attr.name.borrow(), attr.value)
+                match attributes_bh.try_add(attr.name.borrow(), attr.value) {
+                    Ok(false) => Ok(
+                        log::debug!("unrecognized POI attribute `{}`", attr.name)
+                    ),
+                    res => res.map(drop),
+                }
             } else {
-                attributes.try_add(attr.name.borrow(), attr.value)
+                match attributes.try_add(attr.name.borrow(), attr.value) {
+                    Ok(false) => Ok(
+                        log::info!("unrecognized POI attribute `{}`", attr.name)
+                    ),
+                    res => res.map(drop),
+                }
             }.with_context(|| format!("POI attribute '{}'", attr.name));
             if let Err(e) = res {
                 log::warn!("{e:#}");

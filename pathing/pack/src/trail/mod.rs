@@ -39,24 +39,31 @@ impl Trail {
         for attr in attrs {
             let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
                 category = taco_safe_name(&attr.value, true);
-                Ok(())
+                Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("traildata") {
                 trail_path = Some(attr.value);
-                Ok(())
+                Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
-                Ok(())
+                Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
                 attr.value.parse()
-                    .map(|v| map_id = Some(v))
+                    .map(|v| {
+                        map_id = Some(v);
+                        true
+                    })
                     .map_err(From::from)
             } else if attr.name.local_name.starts_with("bh-") {
                 attributes_bh.try_add(attr.name.borrow(), attr.value)
             } else {
                 attributes.try_add(attr.name.borrow(), attr.value)
             }.with_context(|| format!("Trail attribute '{}'", attr.name));
-            if let Err(e) = res {
-                log::warn!("{e:#}");
+            match res {
+                Err(e) =>
+                    log::warn!("{e:#}"),
+                Ok(false) =>
+                    log::info!("unrecognized trail attribute `{}`", attr.name),
+                Ok(true) => (),
             }
         }
 
@@ -173,7 +180,7 @@ pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailD
                     points: std::mem::take(&mut current_section),
                 });
             } else {
-                log::warn!("Empty trail section in {name}");
+                log::debug!("Empty trail section in {name}");
             }
         } else {
             let x = f32::from_le_bytes(point_data[0]);

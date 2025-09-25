@@ -271,7 +271,7 @@ impl MarkerAttributes {
         }
     }
 
-    pub fn try_add(&mut self, name: Name<'_>, value: String) -> anyhow::Result<()> {
+    pub fn try_add(&mut self, name: Name<'_>, value: String) -> anyhow::Result<bool> {
         let attr_name = &name.local_name.trim_start_matches("bh-");
         // === Common === //
         if attr_name.eq_ignore_ascii_case("alpha") {
@@ -280,7 +280,9 @@ impl MarkerAttributes {
             self.can_fade = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint")
         {
-            self.tint = Some(parse_color(&value)?);
+            if let Some(tint) = opt_str(&value).map(parse_color).transpose()? {
+                self.tint = Some(tint);
+            }
         } else if attr_name.eq_ignore_ascii_case("cull") {
             self.cull = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("edittag") {
@@ -327,9 +329,11 @@ impl MarkerAttributes {
             self.rotate.get_or_insert_default().z = z;
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title")
         {
-            self.billboard_text = Some(value);
+            if self.billboard_text.is_none() || !value.is_empty() {
+                self.billboard_text = Some(value);
+            }
         } else if attr_name.eq_ignore_ascii_case("title-color") {
-            self.billboard_text_color = Some(parse_color(&value)?);
+            self.billboard_text_color = opt_str(&value).map(parse_color).transpose()?;
         } else if attr_name.eq_ignore_ascii_case("tip-name") {
             self.tip_name = Some(value);
         } else if attr_name.eq_ignore_ascii_case("tip-description") {
@@ -414,9 +418,9 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("script-once") {
             self.script_once = Some(value);
         } else {
-            anyhow::bail!("unrecognized attribute");
+            return Ok(false)
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -431,6 +435,13 @@ pub fn parse_bool(value: &str) -> anyhow::Result<bool> {
         value => value.parse::<i32>()
             .map(|i| i != 0)
             .map_err(|_| anyhow!("unexpected bool `{value}`")),
+    }
+}
+
+fn opt_str(value: &str) -> Option<&str> {
+    match value.is_empty() {
+        false => Some(value),
+        true => None,
     }
 }
 
