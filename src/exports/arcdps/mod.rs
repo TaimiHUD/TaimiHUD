@@ -804,7 +804,7 @@ pub fn game_language() -> Option<Language> {
 }
 
 #[cfg(feature = "extension-arcdps-extras")]
-fn extras_language(language: Language) {
+pub fn extras_language(language: Language) {
     if !available() { return }
 
     let id = language.into();
@@ -835,7 +835,7 @@ const INTERESTING_BINDS: [Control; 19] = [
 static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap::new());
 
 #[cfg(feature = "extension-arcdps-extras")]
-fn extras_keybind(changed: KeybindChange) {
+pub fn extras_keybind(changed: KeybindChange) {
     if !loaded() { return }
 
     if !INTERESTING_BINDS.contains(&changed.control) {

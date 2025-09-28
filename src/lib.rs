@@ -753,6 +753,36 @@ fn load_nexus() {
         )
     ).revert_on_unload();
 
+    #[cfg(feature = "extension-arcdps-extras")]
+    nexus::event::extras::KEYBIND_CHANGED.subscribe({
+        let cb = event_consume!(
+            <arcdps::extras::keybinds::RawKeybindChange> | keybind | {
+                if let Some(keybind) = keybind {
+                    let keybind = taimi_input::win::keyboard::keybind_change_from_raw(keybind);
+                    exports::arcdps::extras_keybind(keybind)
+                }
+            }
+        );
+        unsafe {
+            // crate versions strike again...
+            mem::transmute(cb as unsafe extern "C-unwind" fn(_))
+        }
+    }).revert_on_unload();
+    #[cfg(feature = "extension-arcdps-extras")]
+    nexus::event::extras::LANGUAGE_CHANGED.subscribe({
+        let cb = event_consume!(
+            <arcdps::Language> | language | {
+                if let Some(language) = language {
+                    exports::arcdps::extras_language(*language)
+                }
+            }
+        );
+        unsafe {
+            // crate versions strike again...
+            mem::transmute(cb as unsafe extern "C-unwind" fn(_))
+        }
+    }).revert_on_unload();
+
     pub const EV_LANGUAGE_CHANGED: Event<()> = unsafe { Event::new("EV_LANGUAGE_CHANGED") };
 
     // I don't want to store the localization data in either Nexus or communicate it with Nexus,
