@@ -433,6 +433,7 @@ pub fn write_record_suffix<W: fmt::Write>(w: &mut W, record: &Record) -> Result<
 
     Ok(amt)
 }
+#[cfg(debug_assertions)]
 const LOG_SEGMENT_MOD_LEN_SEP: usize = 2;
 const LOG_SEGMENT_LINE_LEN_SEP: usize = 1;
 
