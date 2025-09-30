@@ -1,0 +1,9 @@
+[
+  {
+    "identifier": "mask",
+    "kind": "Vertex",
+    "path": "mask.hlsl",
+    "entrypoint": "VSMain",
+    "layout_type": "JustVertex",
+  }
+]
