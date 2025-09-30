@@ -547,7 +547,7 @@ impl Engine {
             backend.depth_handler.setup_depth_write(&device_context, true);
 
             // TODO: reusing this shader is a hack
-            if let Some((shader, layout)) = backend.shaders.vertex.get("map") {
+            if let Some((shader, layout)) = backend.shaders.vertex.get("mask") {
                 layout.set(&device_context);
                 shader.set(&device_context);
             }
