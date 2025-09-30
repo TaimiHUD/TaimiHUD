@@ -178,7 +178,7 @@ impl Controller {
                     _ = mumblelink_interval.tick() => {
                         let missed = match mumblelink_missed {
                             0 => 0,
-                            missed => (missed / (20/2)).min(1),
+                            missed => (missed / (20/2)).max(1),
                         };
                         match state.mumblelink_tick(mumblelink_missed / (20/2)).await {
                             Ok(false) => {
