@@ -323,14 +323,16 @@ impl Engine {
                         self.packs.clear();
                     },
                     GameplayStatus(is_gameplay) => {
-                        log::warn!("GameplayStatus({is_gameplay:?})");
+                        log::trace!("GameplayStatus({is_gameplay:?})");
+                        let mut pdata = PerspectiveInputData::cloned();
                         let is_gameplay = match is_gameplay {
+                            #[cfg(todo = "unnecessary")]
                             Some(false) if self.gameplay_map.is_err() => None,
+                            #[cfg(todo = "unnecessary")]
                             Some(true) if self.gameplay_map.is_ok() => None,
                             is_gameplay => Some(is_gameplay),
                         };
                         if let Some(is_gameplay) = is_gameplay {
-                            let mut pdata = PerspectiveInputData::cloned();
                             if pdata.is_gameplay != is_gameplay {
                                 pdata.is_gameplay = is_gameplay;
                                 pdata.commit();
@@ -375,16 +377,17 @@ impl Engine {
             .context("render engine event processing failure")?;
         self.schedule.run(&mut self.world);
 
+        let mut map_data = MarkerInputData::read().map(Arc::unwrap_or_clone);
+        let mut marker_dirty = false;
+
+        let mut pdata = PerspectiveInputData::cloned();
+        let mut is_gameplay = pdata.is_gameplay;
+        #[cfg(todo = "unnecessary")]
         let mut is_gameplay = match self.gameplay_map {
             Err(0) => None,
             Err(..) => Some(false),
             Ok(..) => Some(true),
         };
-
-        let mut map_data = MarkerInputData::read().map(Arc::unwrap_or_clone);
-        let mut marker_dirty = false;
-
-        let mut pdata = PerspectiveInputData::cloned();
         let mut pdata_dirty = false;
         let mut mumble_tick_updated_playpos = false;
         let ml = self.mumble_link_frame();
