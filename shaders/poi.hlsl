@@ -1,5 +1,13 @@
 #define FEATHER_OFFSET float2(1.0, 0.945)
 
+//#define FEATHER_OFFSET3 float3(FEATHER_OFFSET, 1.0)
+//#define FEATHER_SIZE_Z 5.5
+//#define FEATHER_SCALE_Z 5.0
+
+#define FEATHER_OFFSET3 float3(FEATHER_OFFSET, 0.52)
+#define FEATHER_SIZE_Z 3.5
+#define FEATHER_SCALE_Z (DistanceParam.w / 3.8)
+
 struct VSInput
 {
     float3 position: POSITION;
@@ -67,19 +75,20 @@ PSOutput PSMain(VSOutput input)
     PSOutput output;
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
-    if (textureColour.w < 0.01) { discard; }
+    // TODO: just enable depth clipping?
+    if (textureColour.w < 0.01 || input.position.z < 0.175) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
     float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
     float intensity = 1.3 * distance_intensity * distance_intensity + 0.2 * distance_intensity + 0.2;
 
-    float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
-    float2 feather_scale = float2(DistanceParam.z, DistanceParam.w);
-    float2 feather2 = saturate((float2(1.0, 1.0) - abs(FEATHER_OFFSET - input.position.xy * viewport_size_1)) * feather_scale);
-    float feather = feather2.x * feather2.y;
+    float3 viewport_size_1 = float3(ViewportParam.x, ViewportParam.y, FEATHER_SIZE_Z / input.position.w);
+    float3 feather_scale = float3(DistanceParam.z, DistanceParam.w, FEATHER_SCALE_Z);
+    float3 feather3 = saturate((float3(1.0, 1.0, 1.0) - abs(FEATHER_OFFSET3 - input.position.xyz * viewport_size_1)) * feather_scale);
+    float feather = feather3.x * feather3.y;
 
-    float alpha = textureColour.w * saturate(intensity) * feather*feather;
+    float alpha = textureColour.w * saturate(intensity) * feather*feather * feather3.z;
     output.color = float4(textureColour.xyz, alpha);
 
     return output;
