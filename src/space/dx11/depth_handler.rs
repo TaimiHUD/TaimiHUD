@@ -304,7 +304,7 @@ impl DepthHandler {
     }
 
     const FILL_QUAD_VERTEX_COUNT: u32 = 4;
-    const FILL_QUAD_EDGE_COUNT: u32 = 5;
+    const FILL_QUAD_EDGE_COUNT: u32 = 4;
     /// TODO: hack .-.
     pub fn new_fill_quad(device: &Dx11Device, edge_scale: Option<f32>) -> anyhow::Result<VertexBuffer> {
         let mut verts: Vec<_> = crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into();
@@ -349,22 +349,26 @@ impl DepthHandler {
                 ]
             }
 
-            let bottom_h = 0.15 * edge_scale;
+            //let bottom_h = 0.15 * edge_scale;
+            // just enough for the xp bar...
+            let bottom_h = 0.0175 * edge_scale;
             let bottom = Box2::new(
                 vec2(-1.0, -1.0).into(),
                 vec2(1.0, -1.0 + bottom_h).into(),
             );
             verts.extend_from_slice(&quad_verts(bottom));
 
+            // use feather for this instead...
+            /*
             let top_h = 0.045 * edge_scale;
             let top = Box2::new(
                 vec2(-1.0, 1.0).into(),
                 vec2(1.0, 1.0 - top_h).into(),
             );
-            verts.extend_from_slice(&quad_verts(top));
+            verts.extend_from_slice(&quad_verts(top));*/
 
-            let left_w = 0.335 * edge_scale;
-            let tl_h = 0.6 * edge_scale;
+            let left_w = 0.18 * edge_scale;
+            let tl_h = 0.485 * edge_scale;
             let top_left = Box2::new(
                 vec2(-1.0, 1.0 - tl_h).into(),
                 vec2(-1.0 + left_w, 1.0).into(),

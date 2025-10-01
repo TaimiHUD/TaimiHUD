@@ -30,6 +30,7 @@ pub struct PerspectiveData {
 #[derive(Debug, Copy, Clone)]
 pub struct PixelData {
     distance_param: Vec4,
+    viewport_param: Vec4,
 }
 
 pub struct PerspectiveHandler {
@@ -131,6 +132,21 @@ impl PerspectiveHandler {
         self.constant_buffer_data.player.w = self.alpha;
     }
 
+    pub const FEATHER_SCALE_SQUARE: Vec2 = Vec2::new(0.065, 0.0825);
+    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>) {
+        let aspect_ratio = self.aspect_ratio();
+        self.set_feather(feather_scale.map(|scale| {
+            let normalized = Vec2::new(1.0 / aspect_ratio, aspect_ratio) * Self::FEATHER_SCALE_SQUARE;
+            scale / normalized
+        }))
+    }
+
+    pub fn set_feather(&mut self, feather_scale: Option<Vec2>) {
+        let viewport_size = feather_scale.is_some().then_some(self.display_size.to_raw());
+        self.constant_buffer_pixel_data.set_viewport_size(viewport_size);
+        self.constant_buffer_pixel_data.set_feather_scale(feather_scale);
+    }
+
     pub fn update_cb(&self, device_context: &Dx11Context) {
         self.constant_buffer.update_singleton(device_context, &self.constant_buffer_data);
         self.constant_buffer_pixel.update_singleton(device_context, &self.constant_buffer_pixel_data);
@@ -169,6 +185,7 @@ impl PerspectiveHandler {
             Quat::IDENTITY,
             Vec3::ZERO,
         );
+        self.constant_buffer_pixel_data.set_viewport_size(None);
     }
 
     pub fn update_map_cb(&self, device_context: &Dx11Context) {
@@ -202,7 +219,8 @@ unsafe impl D3dBufferData for PerspectiveData {}
 
 impl PixelData {
     pub const INITIAL: Self = Self {
-        distance_param: Vec4::new(Self::OVERLAP_DEFAULT, Self::INTENSITY_DEFAULT, 0.0, 0.0),
+        distance_param: Vec4::new(Self::OVERLAP_DEFAULT, Self::INTENSITY_DEFAULT, Self::FEATHER_SCALE_NONE, Self::FEATHER_SCALE_NONE),
+        viewport_param: Vec4::new(Self::VIEWPORT_NONE, Self::VIEWPORT_NONE, 0.0, 0.0),
     };
 
     pub const OVERLAP_THRESHOLD_OFF: f32 = 0.01;
@@ -211,6 +229,8 @@ impl PixelData {
 
     pub const INTENSITY_OFF: f32 = 1_000_000.0;
     pub const INTENSITY_DEFAULT: f32 = SpaceSettings::DEFAULT_DISTANCE_FADE_INTENSITY;
+    pub const FEATHER_SCALE_NONE: f32 = 1.0e8;
+    pub const VIEWPORT_NONE: f32 = 1.0 / 10000.0;
 
     pub fn set_overlap_threshold(&mut self, threshold: Option<f32>) {
         self.distance_param.x = match threshold {
@@ -235,6 +255,20 @@ impl PixelData {
             Self::INTENSITY_OFF => None,
             intensity => Some(intensity),
         }
+    }
+
+    pub fn set_viewport_size(&mut self, size: Option<Vec2>) {
+        let size = size.map(|size|
+            size.map(|dim| 2.0 / dim)
+        ).unwrap_or(Vec2::splat(Self::VIEWPORT_NONE));
+        self.viewport_param.x = size.x;
+        self.viewport_param.y = size.y;
+    }
+
+    pub fn set_feather_scale(&mut self, scale: Option<Vec2>) {
+        let scale = scale.unwrap_or(Vec2::splat(Self::FEATHER_SCALE_NONE));
+        self.distance_param.z = scale.x;
+        self.distance_param.w = scale.y;
     }
 }
 
