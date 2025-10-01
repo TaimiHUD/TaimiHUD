@@ -246,7 +246,7 @@ impl ConfigTabState {
                     false =>
                         crate::space::goggles::clear_lens(),
                     true =>
-                        crate::space::goggles::pick_lens(),
+                        crate::space::goggles::pick_lens(true),
                 }
             }
             ui.same_line();
@@ -382,7 +382,21 @@ impl ConfigTabState {
 
             #[cfg(feature = "goggles")]
             let goggles_opts = || {
-                crate::render::goggles::options_ui(ui);
+                use crate::render::goggles as render_goggles;
+
+                let (mut enabled, needs_setup) = render_goggles::get_state();
+                if ui.checkbox(&fl!("pathing-config-goggles"), &mut enabled) {
+                    Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));
+                    match enabled {
+                        true => {
+                            render_goggles::enable(needs_setup);
+                        },
+                        false => {
+                            render_goggles::disable();
+                        },
+                    }
+                }
+                render_goggles::options_ui_lenses(ui);
 
                 if let Some(map_id) = map_id {
                     use crate::{settings::pathing::GogglesSettings, space};

@@ -51,14 +51,14 @@ pub fn clear_lens() {
     LENS_PTR.store(ptr::dangling_mut(), Ordering::Relaxed);
 }
 
-pub fn pick_lens() {
+pub fn pick_lens(force: bool) {
     let selected_lens = LENS_PTR.load(Ordering::Relaxed);
     if selected_lens.is_null() {
         return
     }
 
     if let Ok(lenses) = LENSES.read() {
-        if lenses.contains_key(&(selected_lens as usize)) {
+        if !force && lenses.contains_key(&(selected_lens as usize)) {
             return
         }
         if let Some((&world_key, _cls)) = lenses.iter().find(|(_, cls)| matches!(cls, LensClass::World)) {

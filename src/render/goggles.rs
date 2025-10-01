@@ -7,55 +7,25 @@ use nexus::imgui;
 use std::{ptr, sync::atomic::Ordering};
 use windows::core::Interface;
 
+#[cfg(todo = "unused")]
 pub fn options_ui(ui: &imgui::Ui) {
-    let (mut enabled, needs_setup) = match goggles::GOGGLES.get() {
-        Some(orig) => (orig.set_targets.is_enabled(), false),
-        None => (false, true),
-    };
+    let (mut enabled, needs_setup) = get_state();
 
     if ui.checkbox("Goggles", &mut enabled) {
         match enabled {
             true => {
-                if needs_setup {
-                    let ctx = rt::d3d11_device()
-                        .context("GetDevice")
-                        .and_then(|dev| unsafe {
-                            dev.GetImmediateContext()
-                        }.context("GetImmediateContext"));
-
-                    let ctx = match ctx {
-                        Ok(d) => d,
-                        Err(e) => {
-                            log::error!("goggles requires device context, but: {e}");
-                            return
-                        },
-                    };
-                    if let Err(e) = goggles::setup(ctx.to_ref()) {
-                        log::error!("goggles failure: {e}");
-                        return
-                    }
-                }
-
-                if let Err(e) = goggles::enable() {
-                    log::error!("failed to enable goggles: {e}");
-                    let _ = goggles::disable();
-                } else {
-                    let _ = LENS_PTR.compare_exchange(ptr::null_mut(), ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
-                }
+                enable(needs_setup);
             },
             false => {
-                if let Err(e) = goggles::disable() {
-                    log::error!("failed to disable goggles: {e}");
-                } else {
-                    let _ = LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-                }
-                if let Ok(mut lenses) = LENSES.try_write() {
-                    lenses.clear();
-                }
+                disable();
             },
         }
     }
 
+    options_ui_lenses(ui);
+}
+
+pub fn options_ui_lenses(ui: &imgui::Ui) {
     if let Ok(lenses) = LENSES.read() {
         let selected_lens = LENS_PTR.load(Ordering::Relaxed);
         let preview = match selected_lens {
@@ -87,5 +57,52 @@ pub fn options_ui(ui: &imgui::Ui) {
                 },
             }
         }
+    }
+}
+
+pub fn get_state() -> (bool, bool) {
+    match goggles::GOGGLES.get() {
+        Some(orig) => (orig.set_targets.is_enabled(), false),
+        None => (false, true),
+    }
+}
+
+pub fn enable(needs_setup: bool) {
+    if needs_setup {
+        let ctx = rt::d3d11_device()
+            .context("GetDevice")
+            .and_then(|dev| unsafe {
+                dev.GetImmediateContext()
+            }.context("GetImmediateContext"));
+
+        let ctx = match ctx {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("goggles requires device context, but: {e}");
+                return
+            },
+        };
+        if let Err(e) = goggles::setup(ctx.to_ref()) {
+            log::error!("goggles failure: {e}");
+            return
+        }
+    }
+
+    if let Err(e) = goggles::enable() {
+        log::error!("failed to enable goggles: {e}");
+        let _ = goggles::disable();
+    } else {
+        let _ = LENS_PTR.compare_exchange(ptr::null_mut(), ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
+    }
+}
+
+pub fn disable() {
+    if let Err(e) = goggles::disable() {
+        log::error!("failed to disable goggles: {e}");
+    } else {
+        let _ = LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+    }
+    if let Ok(mut lenses) = LENSES.try_write() {
+        lenses.clear();
     }
 }
