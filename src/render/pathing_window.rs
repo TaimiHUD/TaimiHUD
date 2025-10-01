@@ -199,16 +199,22 @@ impl PathingWindowState {
                                             if ui.is_item_hovered() {
                                                 ui.tooltip_text(fl!("searchbar-clear"));
                                             }
+                                            ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
+                                            ui.same_line();
+                                            ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
                                             pushy.pop();
                                             ui.dummy([4.0; 2]);
                                             ui.text(fl!("filter-options"));
-                                            for (filter, filter_name) in &self.filter_options {
-                                                if let Ok(flag) = filter.parse() {
-                                                    ui.checkbox_flags(filter_name, &mut self.filter_state, flag);
+                                            let filters = self.filter_options.iter()
+                                                .filter_map(|(filter, name)|
+                                                    filter.parse().map(|flag| (flag, name)).ok()
+                                                );
+                                            for (i, (flag, filter_name)) in filters.enumerate() {
+                                                if i > 0 && (i + 1) % 3 != 0 {
+                                                    ui.same_line();
                                                 }
+                                                ui.checkbox_flags(filter_name, &mut self.filter_state, flag);
                                             }
-                                            ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
-                                            ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
                                             ui.dummy([4.0; 2]);
                                             ui.separator();
                                             ui.dummy([4.0; 2]);
