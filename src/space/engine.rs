@@ -354,16 +354,16 @@ impl Engine {
         let (
             visible_space,
             _camera_source,
-            (edge_scale, _obscured_alpha),
+            (edge_scale, edge_feather_scale, _obscured_alpha),
         ) = self.map_settings(|s| (
             (
                 s.space.visible_space().then_some(s.space.distance_max()),
                 s.space.camera_source(),
                 match () {
                     #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
+                    _ => (s.space.goggles.edge_scale(), s.space.goggles.edge_feather_scale(), s.space.goggles.obscured_alpha()),
                     #[cfg(not(feature = "goggles"))]
-                    _ => (None, ()),
+                    _ => (None, None, ()),
                 },
             )
         ));
@@ -756,6 +756,7 @@ impl Engine {
             }
 
             self.render_backend.perspective_handler.update_perspective(Vec3::splat(expand.y + 1.0));
+            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale);
 
             #[cfg(feature = "goggles")]
             if goggles_2pass {

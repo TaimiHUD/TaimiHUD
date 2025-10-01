@@ -1,3 +1,5 @@
+#define FEATHER_OFFSET float2(1.0, 0.945)
+
 struct VSInput
 {
     float3 position: POSITION;
@@ -52,6 +54,7 @@ VSOutput VSMain(VSInput input)
 cbuffer PConstantBuffer : register(b0)
 {
     float4 DistanceParam;
+    float4 ViewportParam;
 }
 
 struct PSOutput
@@ -71,7 +74,12 @@ PSOutput PSMain(VSOutput input)
     float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
     float intensity = 1.3 * distance_intensity * distance_intensity + 0.2 * distance_intensity + 0.2;
 
-    float alpha = textureColour.w * saturate(intensity);
+    float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
+    float2 feather_scale = float2(DistanceParam.z, DistanceParam.w);
+    float2 feather2 = saturate((float2(1.0, 1.0) - abs(FEATHER_OFFSET - input.position.xy * viewport_size_1)) * feather_scale);
+    float feather = feather2.x * feather2.y;
+
+    float alpha = textureColour.w * saturate(intensity) * feather*feather;
     output.color = float4(textureColour.xyz, alpha);
 
     return output;
