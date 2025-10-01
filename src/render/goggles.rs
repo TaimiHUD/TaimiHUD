@@ -4,8 +4,8 @@ use crate::{
     space::goggles::{self, LensClass, LENSES, LENS_PTR},
 };
 use nexus::imgui;
-use std::{ptr, sync::atomic::Ordering};
-use windows::core::Interface;
+use std::{mem, ptr, sync::atomic::Ordering, thread};
+use windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl};
 
 #[cfg(todo = "unused")]
 pub fn options_ui(ui: &imgui::Ui) {
@@ -68,37 +68,55 @@ pub fn get_state() -> (bool, bool) {
 }
 
 pub fn enable(needs_setup: bool) {
-    if needs_setup {
+    let vtbl = if needs_setup {
         let ctx = rt::d3d11_device()
             .context("GetDevice")
             .and_then(|dev| unsafe {
                 dev.GetImmediateContext()
-            }.context("GetImmediateContext"));
+            }.context("GetImmediateContext"))
+            .context("goggles requires device context");
 
         let ctx = match ctx {
             Ok(d) => d,
             Err(e) => {
-                log::error!("goggles requires device context, but: {e}");
+                log::error!("{e:#}");
                 return
             },
         };
-        if let Err(e) = goggles::setup(ctx.to_ref()) {
-            log::error!("goggles failure: {e}");
-            return
-        }
-    }
-
-    if let Err(e) = goggles::enable() {
-        log::error!("failed to enable goggles: {e}");
-        let _ = goggles::disable();
+        let vtbl = ctx.vtable();
+        Some(unsafe {
+            mem::transmute::<&ID3D11DeviceContext_Vtbl, &'static ID3D11DeviceContext_Vtbl>(vtbl)
+        })
     } else {
-        let _ = LENS_PTR.compare_exchange(ptr::null_mut(), ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
-    }
+        None
+    };
+    // avoid deadlocks...
+    thread::spawn(move || {
+        if let Some(vtbl) = vtbl {
+            let res = goggles::setup(vtbl)
+                .context("goggles failure");
+            if let Err(e) = res {
+                log::error!("{e:#}");
+                return
+            }
+        }
+
+        let res = goggles::enable()
+            .context("failed to enable goggles");
+        if let Err(e) = res {
+            log::error!("{e:#}");
+            let _ = goggles::disable();
+        } else {
+            let _ = LENS_PTR.compare_exchange(ptr::null_mut(), ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
+        }
+    });
 }
 
 pub fn disable() {
-    if let Err(e) = goggles::disable() {
-        log::error!("failed to disable goggles: {e}");
+    let res = goggles::disable()
+        .context("failed to disable goggles");
+    if let Err(e) = res {
+        log::error!("{e:#}");
     } else {
         let _ = LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
     }

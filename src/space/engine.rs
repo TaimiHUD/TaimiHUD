@@ -112,6 +112,8 @@ pub struct Engine {
     mumble_link_playpos: Vec3,
     pub rtapi: Option<rt::RealTimeApi>,
     pub gameplay_map: Result<NonZeroU32, u32>,
+    #[cfg(feature = "goggles")]
+    goggles_select_lens_delay: Option<(u32, bool)>,
 
     schedule: Schedule,
 
@@ -188,6 +190,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             #[cfg(feature = "goggles")]
+            goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
         };
 
@@ -292,7 +295,7 @@ impl Engine {
                             Ok(false) =>
                                 goggles::clear_lens(),
                             Ok(true) =>
-                                goggles::pick_lens(false),
+                                self.goggles_enter(false),
                             _ => (),
                         }
                         if let Err(e) = res {
@@ -320,7 +323,7 @@ impl Engine {
                         self.packs.clear();
                     },
                     GameplayStatus(is_gameplay) => {
-                        log::trace!("GameplayStatus({is_gameplay:?})");
+                        log::warn!("GameplayStatus({is_gameplay:?})");
                         let is_gameplay = match is_gameplay {
                             Some(false) if self.gameplay_map.is_err() => None,
                             Some(true) if self.gameplay_map.is_ok() => None,
@@ -779,6 +782,17 @@ impl Engine {
                 self.packs.draw(&pdata, context, &self.render_backend, &device_context);
             }
         }
+        #[cfg(feature = "goggles")]
+        match self.goggles_select_lens_delay {
+            Some((0, force)) if mumble_tick_updated_playpos && self.gameplay_map.is_ok() => {
+                self.goggles_start(force);
+                let _ = self.goggles_select_lens_delay.take();
+            },
+            Some((ref mut ticks, ..)) if mumble_tick_updated_playpos && is_gameplay == Some(true) && self.gameplay_map.is_ok() => {
+                *ticks = ticks.saturating_sub(1);
+            },
+            _ => (),
+        }
         Ok(())
     }
 
@@ -823,37 +837,11 @@ impl Engine {
     }
 
     pub fn gameplay_map_enter(&mut self, device_context: &Dx11Context, map_id: NonZeroU32) -> anyhow::Result<()> {
-        #[cfg(feature = "goggles")]
-        {
-            use crate::{
-                render::goggles as render_goggles,
-                space,
-            };
-
-            let settings = self.map_settings_ref(|s| s.map(|s| (
-                s.space.goggles.enabled(),
-                s.space.goggles.map_depth_calibration(map_id.get())
-            )));
-
-            if let Some((true, (min, max))) = settings {
-                if let (false, needs_setup) = render_goggles::get_state() {
-                    render_goggles::enable(needs_setup);
-                }
-
-                std::thread::spawn(|| {
-                    // fastload or early notifications can throw off the lens selection...
-                    std::thread::sleep(std::time::Duration::from_millis(320));
-                    goggles::pick_lens(true);
-                });
-
-                space::set_min_depth(space::MIN_DEPTH * min);
-                space::set_max_depth(space::MAX_DEPTH * max);
-            }
-        }
-
         let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
 
         self.gameplay_map = Ok(map_id);
+
+        self.goggles_enter(true);
 
         res
     }
@@ -1002,6 +990,43 @@ impl Engine {
             .map(|rtapi| rtapi.is_active());
 
         Ok(active.unwrap_or(false))
+    }
+
+    #[cfg(feature = "goggles")]
+    const GOGGLES_START_DELAY_TICKS: u32 = 8;
+    pub fn goggles_enter(&mut self, _force: bool) {
+        #[cfg(feature = "goggles")]
+        {
+            // fastload or early notifications can throw off the lens selection...
+            self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, _force));
+        }
+    }
+
+    #[cfg(feature = "goggles")]
+    fn goggles_start(&mut self, force: bool) {
+        use crate::{
+            render::goggles as render_goggles,
+            space,
+        };
+
+        let map_id = self.gameplay_map.ok();
+        let settings = self.map_settings_ref(|s| s.map(|s| (
+            s.space.goggles.enabled(),
+            map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get()))
+        )));
+
+        if let Some((true, depth)) = settings {
+            if let (false, needs_setup) = render_goggles::get_state() {
+                render_goggles::enable(needs_setup);
+            }
+
+            goggles::pick_lens(force);
+
+            if let Some((min, max)) = depth {
+                space::set_min_depth(space::MIN_DEPTH * min);
+                space::set_max_depth(space::MAX_DEPTH * max);
+            }
+        }
     }
 }
 
