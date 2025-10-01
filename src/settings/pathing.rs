@@ -1,6 +1,7 @@
 use {
     crate::settings::Settings,
-    std::collections::BTreeMap,
+    std::{collections::BTreeMap, fmt},
+    strum::{VariantArray, IntoStaticStr},
     serde::{Serialize, Deserialize},
     taimi_meta::coords::CurrentPerspective as MapContext,
 };
@@ -27,6 +28,9 @@ impl PathingSettings {
 pub struct SpaceSettings {
     #[serde(rename = "goggles0", default, skip_serializing_if = "GogglesSettings::is_empty")]
     pub goggles: GogglesSettings,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_source: Option<CameraSource>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_space: Option<bool>,
@@ -80,6 +84,7 @@ pub struct SpaceSettings {
 }
 
 impl SpaceSettings {
+    pub const DEFAULT_CAMERA_SOURCE: CameraSource = CameraSource::MumbleLink;
     pub const DEFAULT_VISIBLE: bool = true;
     pub const DEFAULT_VISIBLE_MAP: bool = true;
     pub const DEFAULT_TRAIL_TEXTURED: bool = true;
@@ -109,6 +114,7 @@ impl SpaceSettings {
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
+                camera_source: None | Some(Self::DEFAULT_CAMERA_SOURCE),
                 visible_space: None | Some(Self::DEFAULT_VISIBLE),
                 visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP), visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
                 distance_max: None,
@@ -127,6 +133,10 @@ impl SpaceSettings {
                 true,
             _ => false,
         }
+    }
+
+    pub fn camera_source(&self) -> CameraSource {
+        self.camera_source.unwrap_or(Self::DEFAULT_CAMERA_SOURCE)
     }
 
     pub fn visible_space(&self) -> bool {
@@ -238,6 +248,39 @@ impl SpaceSettings {
             MapContext::Global => self.trail_scale_worldmap(),
             MapContext::Minimap => self.trail_scale_minimap(),
         }
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Deserialize, Serialize, VariantArray, IntoStaticStr)]
+#[serde(rename_all = "lowercase")]
+pub enum CameraSource {
+    #[default]
+    #[strum(serialize = "mumblelink")]
+    MumbleLink,
+    #[serde(rename = "rtapi")]
+    #[strum(serialize = "rtapi")]
+    RealTimeAPI,
+}
+
+impl CameraSource {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::MumbleLink => "mumblelink",
+            Self::RealTimeAPI => "rtapi",
+        }
+    }
+}
+
+impl AsRef<str> for CameraSource {
+    fn as_ref(&self) -> &str {
+        self.name()
+    }
+}
+
+impl fmt::Display for CameraSource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.name())
     }
 }
 

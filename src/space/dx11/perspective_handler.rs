@@ -92,7 +92,7 @@ impl PerspectiveHandler {
             self.near = min_depth();
             self.far = max_depth();
             self.constant_buffer_data.projection =
-                Mat4::perspective_lh(data.fov, self.aspect_ratio, self.near, self.far);
+                Mat4::perspective_lh(data.fov(), self.aspect_ratio, self.near, self.far);
         self.constant_buffer_data.player =
             data.player_pos().extend(self.alpha).to_raw();
 

@@ -68,6 +68,7 @@ pub struct Controller {
     pub extras_squad: HashMap<String, UserInfoOwned>,
     pub agent: Option<AgentOwned>,
     pub previous_combat_state: bool,
+    pub previous_is_gameplay: Option<bool>,
     pub previous_ui_tick: Option<u32>,
     #[cfg(feature = "markers")]
     pub markers: HashMap<String, Vec<Arc<MarkerSet>>>,
@@ -122,6 +123,7 @@ impl Controller {
                 marker_autoplace: Default::default(),
                 previous_combat_state: Default::default(),
                 previous_ui_tick: Default::default(),
+                previous_is_gameplay: Default::default(),
                 rt_sender,
                 settings,
                 #[cfg(feature = "markers")]
@@ -147,8 +149,6 @@ impl Controller {
             drop(settings_lock);
             let settings_lock = settings.read().await;
             state.marker_autoplace = Some(settings_lock.marker_autoplace.clone());
-            #[cfg(feature = "space")]
-            let katrender = settings_lock.enable_katrender;
             drop(settings_lock);
             state.setup_timers().await;
             #[cfg(feature = "markers")]
@@ -156,10 +156,11 @@ impl Controller {
             let mut taimi_interval = interval(Duration::from_millis(125));
 
             const MUMBLELINK_TICK: Duration = Duration::from_millis(1000 / 25);
-            const MUMBLELINK_FPS: u64 = 80;
+            const MUMBLELINK_FPS: u64 = 50;
             let mumblelink_interval = match () {
-                #[cfg(feature = "space")]
-                _ if katrender => Duration::from_millis(1000 / MUMBLELINK_FPS),
+                #[cfg(feature = "markers")]
+                _ => Duration::from_millis(1000 / MUMBLELINK_FPS),
+                #[cfg(not(feature = "markers"))]
                 _ => MUMBLELINK_TICK,
             };
             let mumblelink_catchup = mumblelink_interval / 3;
@@ -386,85 +387,49 @@ impl Controller {
     }
 
     async fn mumblelink_tick(&mut self, missed: u32) -> anyhow::Result<bool> {
-        #[cfg(feature = "space")]
-        let (mut input_data, mut input_dirty) = (PerspectiveInputData::cloned(), false);
-        #[cfg(feature = "markers")]
-        let mut marker_data = None;
-
-        let mut ui_state = rt::UiState::empty();
         let previous_ui_tick = self.previous_ui_tick;
         let mumble_pointer = rt::mumble_link_ptr().ok();
         let mumble = match mumble_pointer {
             None => None,
             Some(mumble) => {
                 let ui_tick = Some(mumble.read_ui_tick());
-                ui_state = mumble.read_ui_state();
                 self.previous_ui_tick = ui_tick;
                 (ui_tick != previous_ui_tick).then_some(mumble)
             },
         };
 
-        #[cfg(feature = "space")]
-        if input_data.ui_state != ui_state {
-            input_dirty |= true;
-            input_data.ui_state = ui_state;
-        }
-
-        #[cfg(feature = "space")]
-        {
-            let is_gameplay = match rt::is_ingame() {
-                // ui ticks don't occur during loading/charsel apparently...
-                Ok(ingame) if mumble_pointer.is_none() =>
-                    Some(Some(ingame)),
-                Ok(false) if (mumble.is_none() && !input_dirty) && previous_ui_tick.is_some() && missed > 4 =>
-                    Some(if input_data.is_gameplay == Some(true) { None } else { Some(false) }),
-                Ok(ingame @ true) => Some(Some(ingame)),
-                Err(..) | Ok(false) => None,
-            };
-            if let Some(is_gameplay) = is_gameplay {
-                input_dirty |= input_data.is_gameplay != is_gameplay;
-                input_data.is_gameplay = is_gameplay;
-                if is_gameplay == Some(false) {
-                    input_data.front = Vec3::ZERO;
-                }
+        let is_gameplay = match rt::is_ingame() {
+            // ui ticks don't occur during loading/charsel...
+            Ok(ingame) if mumble_pointer.is_none() =>
+                Some(Some(ingame)),
+            Ok(false) if mumble.is_none() && previous_ui_tick.is_some() && missed > 4 =>
+                Some(if self.previous_is_gameplay == Some(true) { None } else { Some(false) }),
+            Ok(ingame @ true) => Some(Some(ingame)),
+            Err(..) | Ok(false) => None,
+        };
+        if let Some(is_gameplay) = is_gameplay {
+            if self.previous_is_gameplay != is_gameplay {
+                // TODO: mapchange event?
+                #[cfg(feature = "space")]
+                Engine::try_send(SpaceEvent::GameplayStatus(is_gameplay));
             }
+            self.previous_is_gameplay = is_gameplay;
         }
         let Some(mumble) = mumble else {
-            #[cfg(feature = "space")]
-            if input_dirty {
-                input_data.commit();
-            }
             return Ok(mumble_pointer.is_none())
         };
 
-        let playpos = Vec3::from_array(mumble.read_avatar().position);
-        let camera = mumble.read_camera();
-        let camera_front = Vec3::from_array(camera.front);
-        let camera_pos = Vec3::from_array(camera.position);
+        #[cfg(feature = "markers")]
+        let mut marker_data = MarkerInputData::cloned();
 
-        #[cfg(feature = "space")]
-        {
-            let position_ptr = match playpos {
-                #[cfg(feature = "extension-nexus")]
-                _ if input_data.has_rtapi =>
-                    None,
-                p => Some(p),
-            };
-            if let Some(playpos) = position_ptr {
-                input_data.playpos = playpos;
-                input_data.front = camera_front;
-                input_data.pos = camera_pos;
-                input_dirty |= input_data.playpos != Vec3::ZERO || input_data.front != Vec3::ZERO;
-            }
-            if input_dirty {
-                input_data.commit();
-            }
-        }
+        let ui_state = mumble.read_ui_state();
+
+        let playpos = Vec3::from_array(mumble.read_avatar().position);
 
             #[cfg(feature = "markers")]
             {
-                let marker_data = marker_data.get_or_insert_with(|| MarkerInputData::cloned());
-                marker_data.update_with_mumble_ptr_context(&mumble, ui_state, playpos);
+                marker_data.update_with_mumble_ptr_context(&mumble, ui_state);
+                marker_data.local_player_pos = playpos;
                 match rt::nexus_link_ptr() {
                     #[cfg(feature = "extension-nexus")]
                     Ok(nexus_link) =>
@@ -525,7 +490,7 @@ impl Controller {
         #[cfg(feature = "space")]
         {
             let mut input_data = PerspectiveInputData::cloned();
-            if input_data.fov != identity.fov {
+            if input_data.fov.to_bits() != identity.fov.to_bits() {
                 input_data.fov = identity.fov;
                 input_data.commit();
             }
@@ -1157,8 +1122,6 @@ impl Controller {
     }
     #[cfg(feature = "space")]
     async fn provide_disabled_paths(&self) {
-        use crate::space::engine::{Engine, SpaceEvent};
-
         let settings_lock = self.settings.read().await;
         let disabled_paths = settings_lock.disabled_paths.clone();
         drop(settings_lock);

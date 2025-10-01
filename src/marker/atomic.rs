@@ -477,8 +477,7 @@ impl MarkerInputData {
         data.commit();
     }
 
-    pub fn update_with_mumble_ptr_context(&mut self, mumble: &MumblePtr, ui_state: UiState, playpos: Vec3) {
-        self.local_player_pos = playpos;
+    pub fn update_with_mumble_ptr_context(&mut self, mumble: &MumblePtr, ui_state: UiState) {
         self.global_player_pos = Vec2::from_array(mumble.read_player_position());
         self.global_map = Vec2::from_array(mumble.read_map_center());
         self.compass_size = Vec2::new(mumble.read_compass_width() as f32, mumble.read_compass_height() as f32);

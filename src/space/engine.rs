@@ -74,6 +74,7 @@ pub enum SpaceEvent {
         loader: super::pack::LoaderBox,
     },
     PackUnloadAll,
+    GameplayStatus(Option<bool>),
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -106,7 +107,10 @@ pub struct Engine {
     pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
-    rtapi: Option<rt::RealTimeApi>,
+
+    mumble_link_frame: u32,
+    mumble_link_playpos: Vec3,
+    pub rtapi: Option<rt::RealTimeApi>,
     pub gameplay_map: Result<NonZeroU32, u32>,
 
     schedule: Schedule,
@@ -152,31 +156,24 @@ impl Engine {
             .context("Initializing packs")?;
         Controller::try_send(ControllerEvent::PathingLoadAll);
 
-        let rtapi = rt::rtapi()
-            .map_err(anyhow::Error::msg)
-            .context("RTAPI unavailable");
-        let rtapi = match rtapi.map_err(anyhow::Error::msg) {
-            #[cfg(feature = "extension-nexus")]
-            Ok(rtapi) => {
-                match &rtapi {
-                    Some(rtapi) if rtapi.is_active() =>
-                        log::info!("Using RTAPI as perspective data source"),
-                    _ =>
-                        log::info!("RTAPI unavailable"),
-                }
-                rtapi
-            },
-            #[cfg(feature = "extension-nexus")]
+        let rtapi = Self::rtapi_open();
+        #[cfg(feature = "extension-nexus")]
+        match &rtapi {
+            Ok(Some(rtapi)) if !rtapi.is_active() =>
+                log::info!("RTAPI unavailable"),
+            Ok(Some(..)) =>
+                log::info!("Using RTAPI as perspective data source"),
             Err(e) => {
                 // TODO: listen for events in case it gets loaded later or something
                 log::debug!("{e:#}");
-                None
             },
-            #[cfg(not(feature = "extension-nexus"))]
-            _ => None,
-        };
+            _ => (),
+        }
+        let rtapi = rtapi.ok().flatten();
 
         let engine = Engine {
+            mumble_link_frame: 0,
+            mumble_link_playpos: Vec3::ZERO,
             rtapi,
             gameplay_map: Err(0),
             #[cfg(feature = "space-ecs")]
@@ -322,6 +319,21 @@ impl Engine {
                         log::info!("Unloading all paths...");
                         self.packs.clear();
                     },
+                    GameplayStatus(is_gameplay) => {
+                        log::trace!("GameplayStatus({is_gameplay:?})");
+                        let is_gameplay = match is_gameplay {
+                            Some(false) if self.gameplay_map.is_err() => None,
+                            Some(true) if self.gameplay_map.is_ok() => None,
+                            is_gameplay => Some(is_gameplay),
+                        };
+                        if let Some(is_gameplay) = is_gameplay {
+                            let mut pdata = PerspectiveInputData::cloned();
+                            if pdata.is_gameplay != is_gameplay {
+                                pdata.is_gameplay = is_gameplay;
+                                pdata.commit();
+                            }
+                        }
+                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
@@ -339,51 +351,162 @@ impl Engine {
     }
 
     pub fn render(&mut self, ui: &Ui) -> anyhow::Result<()> {
+        let (
+            visible_space,
+            _camera_source,
+            (edge_scale, _obscured_alpha),
+        ) = self.map_settings(|s| (
+            (
+                s.space.visible_space().then_some(s.space.distance_max()),
+                s.space.camera_source(),
+                match () {
+                    #[cfg(feature = "goggles")]
+                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
+                    #[cfg(not(feature = "goggles"))]
+                    _ => (None, ()),
+                },
+            )
+        ));
         let display_size = ui.io().display_size;
         self.process_event()
             .context("render engine event processing failure")?;
         self.schedule.run(&mut self.world);
 
-        let mut pdata = PerspectiveInputData::cloned();
-        #[cfg(feature = "extension-nexus")]
-        if let Some(rtapi) = &self.rtapi {
-            use nexus::rtapi::GameState;
+        let mut is_gameplay = match self.gameplay_map {
+            Err(0) => None,
+            Err(..) => Some(false),
+            Ok(..) => Some(true),
+        };
 
-            let mut dirty = true;
-            if let Some(player) = rtapi.read_player() {
-                let playerfront = Vec3::from_array(player.character_facing);
-                if playerfront != Vec3::ZERO {
-                    pdata.playpos = Vec3::from_array(player.character_position);
-                    dirty = true;
-                }
+        let mut map_data = MarkerInputData::read().map(Arc::unwrap_or_clone);
+        let mut marker_dirty = false;
+
+        let mut pdata = PerspectiveInputData::cloned();
+        let mut pdata_dirty = false;
+        let mut mumble_tick_updated_playpos = false;
+        let ml = self.mumble_link_frame();
+        let mumble_link_frameskip = matches!(ml, Ok(None));
+        if let Ok(Some(ml)) = &ml {
+            let ui_state = ml.read_ui_state();
+            pdata_dirty |= pdata.ui_state != ui_state;
+            pdata.ui_state = ui_state;
+
+            if let Some(map_data) = &mut map_data {
+                map_data.update_with_mumble_ptr_context(ml, ui_state);
+                marker_dirty = true;
             }
-            if let Some(camera) = rtapi.read_camera() {
-                let front = Vec3::from_array(camera.camera_facing);
-                if front != Vec3::ZERO {
-                    pdata.front = front;
-                    pdata.pos = Vec3::from_array(camera.camera_position);
-                    if pdata.is_gameplay == Some(true) {
-                        pdata.has_rtapi = true;
+
+            let playpos = Vec3::from_array(ml.read_avatar().position);
+            mumble_tick_updated_playpos = !rt::vec_eq(self.mumble_link_playpos, playpos);
+            if mumble_tick_updated_playpos {
+                pdata_dirty = true;
+                pdata.playpos = playpos;
+                self.mumble_link_playpos = playpos;
+                if let Some(map_data) = &mut map_data {
+                    map_data.local_player_pos = playpos;
+                }
+                // TODO: move this to renderstate and notify controller of player tick?
+            }
+
+            let (camera_pos, camera_front) = {
+                let camera = ml.read_camera();
+                (
+                    Vec3::from_array(camera.position),
+                    Vec3::from_array(camera.front),
+                )
+            };
+
+            pdata_dirty = pdata_dirty || !rt::vec_eq(pdata.pos, camera_pos) || !rt::vec_eq(pdata.front, camera_front);
+            pdata.front = camera_front;
+            pdata.pos = camera_pos;
+
+            if is_gameplay == Some(false) {
+                pdata_dirty = pdata_dirty || !rt::vec_eq(pdata.front, Vec3::Y);
+                pdata.front = Vec3::Y;
+            }
+        }
+        #[cfg(feature = "extension-nexus")]
+        if let Some(rtapi) = self.rtapi.as_ref().and_then(|rtapi| rtapi.is_active().then_some(rtapi)) {
+            use {
+                crate::settings::pathing::CameraSource,
+                nexus::rtapi::GameState,
+                std::ptr,
+            };
+
+            let mumble_ticked = pdata_dirty;
+            let rtapi_camera = !mumble_ticked || _camera_source == CameraSource::RealTimeAPI;
+
+            let player = (rtapi_camera || !mumble_tick_updated_playpos)
+                .then(|| (
+                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_position) }),
+                    unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_facing) },
+                ));
+            if let Some((player_pos, player_front)) = player {
+                if rt::f32_bits(player_front) != [0u32; 3] {
+                    pdata.playpos = player_pos;
+                    pdata_dirty = true;
+                    if let Some(map_data) = &mut map_data {
+                        map_data.local_player_pos = player_pos;
+                        marker_dirty = true;
                     }
                 }
-                if camera.camera_fov != 0.0f32 {
-                    pdata.fov = camera.camera_fov;
-                }
-                dirty = true;
             }
+
             let ingame = rtapi.read_game().and_then(|game| match game.game_state {
                 Ok(GameState::Gameplay) =>
                     Some(true),
-                Ok(GameState::LoadingScreen | GameState::CharacterSelection | GameState::CharacterCreation | GameState::Cinematic) =>
+                Ok(GameState::LoadingScreen | GameState::CharacterSelection | GameState::CharacterCreation) =>
                     Some(false),
+                Ok(GameState::Cinematic) => {
+                    Some(false)
+                },
                 Err(_) => None,
             });
+            // TODO: rtapi.map_id
             if let Some(ingame) = ingame {
-                dirty |= pdata.is_gameplay != Some(ingame);
-                pdata.is_gameplay = Some(ingame);
+                is_gameplay = Some(ingame);
             }
-            if dirty {
-                pdata.clone().commit();
+
+            let needs_fov = pdata.fov == 0.0;
+            let camera = (ingame != Some(false) && (rtapi_camera || needs_fov))
+                .then(|| (
+                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position) }),
+                    Vec3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing) }),
+                    unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_fov) },
+                ));
+            if let Some((camera_pos, camera_front, camera_fov)) = camera {
+                if rtapi_camera && rt::vec_bits(camera_front) != [0u32; 3] {
+                    if mumble_link_frameskip && _camera_source != CameraSource::RealTimeAPI {
+                        const SMOOTHING_FACTOR: f32 = 0.215;
+                        pdata.front = pdata.front.slerp(camera_front, SMOOTHING_FACTOR).normalize();
+                        //pdata.front = pdata.front.rotate_towards(camera_front, turn * SMOOTHING_FACTOR).normalize();
+                        pdata.pos = pdata.pos.lerp(camera_pos, SMOOTHING_FACTOR);
+                    } else {
+                        pdata.front = camera_front;
+                        pdata.pos = camera_pos;
+                    }
+                    pdata_dirty = true;
+                }
+                if camera_fov.to_bits() != 0u32 {
+                    pdata.fov = camera_fov;
+                    pdata_dirty = true;
+                }
+            }
+        }
+        #[cfg(todo)]
+        match &ml {
+            Ok(None) =>
+                log::debug!("MumbleLink tick {} was not synchronized with render framerate?", self.mumble_link_frame),
+            _ => (),
+        }
+        pdata_dirty |= pdata.is_gameplay != is_gameplay;
+        pdata.is_gameplay = is_gameplay;
+        if pdata_dirty {
+            pdata.clone().commit();
+        }
+        if let Some(map_data) = &map_data {
+            if marker_dirty {
+                map_data.clone().commit()
             }
         }
 
@@ -392,8 +515,6 @@ impl Engine {
         let device_context =
             unsafe { self.render_backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
-
-        let map_data = MarkerInputData::read();
 
         let map_id = map_data.as_ref().map(|mid| NonZeroU32::new(mid.map_id));
         let map_res = match (self.gameplay_map, pdata.is_gameplay, map_id) {
@@ -432,19 +553,10 @@ impl Engine {
 
         let map_ctx = map_data.as_ref().map(|mid| mid.perspective);
         let (
-            visible_space,
             visible_map,
-            (edge_scale, _obscured_alpha),
         ) = self.map_settings(|s| (
             (
-                s.space.visible_space().then_some(s.space.distance_max()),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
-                match () {
-                    #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
-                    #[cfg(not(feature = "goggles"))]
-                    _ => (None, ()),
-                },
             )
         ));
 
@@ -701,12 +813,6 @@ impl Engine {
         if goggles::is_enabled() {
             goggles::clear_lens();
         }
-        #[cfg(feature = "extension-nexus")]
-        {
-            let mut pdata = PerspectiveInputData::cloned();
-            pdata.has_rtapi = false;
-            pdata.commit();
-        }
 
         let res = self.packs.unload_map(device_context, prev_map_id.get());
 
@@ -720,7 +826,11 @@ impl Engine {
         {
             use crate::space;
 
-            goggles::pick_lens();
+            std::thread::spawn(|| {
+                // fastload or early notifications can throw off the lens selection...
+                std::thread::sleep(std::time::Duration::from_millis(320));
+                goggles::pick_lens();
+            });
 
             let depth = self.map_settings_ref(|s| s.map(|s|
                 s.space.goggles.map_depth_calibration(map_id.get())
@@ -846,6 +956,42 @@ impl Engine {
                 scale.with_z(0.39).extend(0.0)
             },
         }
+    }
+
+    fn mumble_link_frame(&mut self) -> rt::RuntimeResult<Option<rt::MumblePtr>> {
+        let ml = rt::mumble_link_ptr();
+        ml.and_then(|ml| match ml.read_ui_tick() {
+            0 => Err(rt::RT_UNAVAILABLE),
+            tick if tick == self.mumble_link_frame => {
+                Ok(None)
+            },
+            tick => {
+                self.mumble_link_frame = tick;
+                Ok(Some(ml))
+            },
+        })
+    }
+
+    pub fn rtapi_open() -> anyhow::Result<Option<rt::RealTimeApi>> {
+        let rtapi = rt::rtapi()
+            .map_err(anyhow::Error::msg)
+            .context("RTAPI unavailable");
+        match rtapi {
+            #[cfg(not(feature = "extension-nexus"))]
+            Err(_) => Ok(None),
+            res => res,
+        }
+    }
+
+    pub fn rtapi_init(&mut self) -> anyhow::Result<bool> {
+        if self.rtapi.is_none() {
+            self.rtapi = Self::rtapi_open()?;
+        }
+
+        let active = self.rtapi.as_ref()
+            .map(|rtapi| rtapi.is_active());
+
+        Ok(active.unwrap_or(false))
     }
 }
 
