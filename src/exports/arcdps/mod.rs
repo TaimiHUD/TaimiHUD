@@ -4,7 +4,7 @@ use {
         Language,
     },
     arcloader_mumblelink::{
-        gw2_mumble::{LinkedMem, MumbleLink, UiState},
+        gw2_mumble::{LinkedMem, MumbleLink},
         identity::MumbleIdentity,
     },
     crate::{
@@ -17,7 +17,7 @@ use {
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
     std::{
-        cell::{Cell, RefCell},
+        cell::RefCell,
         collections::BTreeMap,
         ffi::{c_void, CStr, OsStr},
         fmt::{self, Write},
@@ -348,19 +348,11 @@ static MUMBLE_LINK: Mutex<Option<MumbleLink>> = Mutex::new(None);
 
 thread_local! {
     static MUMBLE_IDENTITY: RefCell<MumbleIdentity> = RefCell::new(MumbleIdentity::new());
-    static MUMBLE_TICK: Cell<u32> = Cell::new(0);
-    static MUMBLE_TICK_LAST: Cell<u32> = Cell::new(u32::MAX);
-    static MUMBLE_STATE: Cell<u8> = Cell::new(0);
 }
 
 fn update_mumble_link() {
     let ml = match rt::mumble_link_ptr() {
-        Ok(ml) => {
-            MUMBLE_TICK_LAST.set(MUMBLE_TICK.get());
-            MUMBLE_TICK.set(ml.read_ui_tick());
-            MUMBLE_STATE.set(ml.read_ui_state().bits() as u8);
-            ml
-        },
+        Ok(ml) => ml,
         _ => return,
     };
 
@@ -376,10 +368,6 @@ fn update_mumble_link() {
     }
 }
 
-fn mumble_ui_state() -> UiState {
-    UiState::from_bits_retain(MUMBLE_STATE.get().into())
-}
-
 #[cfg(todo)]
 pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
     match () {
@@ -393,20 +381,11 @@ pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
 fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     let available = available();
 
-    let tick_last = MUMBLE_TICK_LAST.get();
     if available {
         update_mumble_link();
     }
 
-    let ingame = match not_charsel_loading {
-        false if tick_last == MUMBLE_TICK.get() && tick_last == MUMBLE_TICK_LAST.get() =>
-            Some(false),
-        false => None,
-        ingame => Some(ingame),
-    };
-    if let Some(ingame) = ingame {
-        IS_INGAME.store(ingame, Ordering::Relaxed);
-    }
+    IS_INGAME.store(not_charsel_loading, Ordering::Relaxed);
 
     if !available { return }
 
