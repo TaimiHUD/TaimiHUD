@@ -3778,6 +3778,7 @@ name = "taimi_meta"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arcloader-mumblelink",
  "async-compression",
  "glam 0.30.1",
  "glamour",

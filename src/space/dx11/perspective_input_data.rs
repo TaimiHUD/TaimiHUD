@@ -1,9 +1,11 @@
 use {
     arc_atomic::AtomicArc,
-    crate::space::DrawSpace,
+    crate::{
+        exports::runtime::UiState,
+        space::DrawSpace,
+    },
     glam::Vec3,
     glamour::{Point3, Vector3},
-    nexus::data_link::mumble::UiState,
     std::sync::{Arc, LazyLock},
 };
 
@@ -40,7 +42,11 @@ impl PerspectiveInputData {
     }
 
     pub fn world_visible(&self) -> bool {
-        self.is_gameplay.unwrap_or(self.pos != Vec3::ZERO || self.has_rtapi) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
+        let has_gameplay = self.front != Vec3::Y;
+        #[cfg(feature = "extension-nexus")]
+        let has_gameplay = has_gameplay || self.has_rtapi;
+
+        self.is_gameplay.unwrap_or(has_gameplay) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
     }
 
     pub fn player_pos(&self) -> Point3<DrawSpace> {
@@ -64,7 +70,7 @@ impl PerspectiveInputData {
 impl Default for PerspectiveInputData {
     fn default() -> Self {
         Self {
-            front: Vec3::new(0.0, 1.0, 0.0),
+            front: Vec3::Y,
             pos: Vec3::ZERO,
             fov: 75.0f32.to_radians(),
             playpos: Vec3::ZERO,

@@ -514,3 +514,29 @@ mod mumblelink_nexus_impl {
         }
     }
 }
+
+#[cfg(feature = "mumblelink-arcloader")]
+mod mumblelink_arcloader_impl {
+    use {
+        arcloader_mumblelink::gw2_mumble::UiState,
+        super::{CurrentPerspective, MinimapPlacement},
+    };
+
+    impl From<UiState> for MinimapPlacement {
+        fn from(ui_state: UiState) -> Self {
+            match ui_state.contains(UiState::IS_COMPASS_TOP_RIGHT) {
+                true => Self::Top,
+                false => Self::Bottom,
+            }
+        }
+    }
+
+    impl From<UiState> for CurrentPerspective {
+        fn from(ui_state: UiState) -> Self {
+            match ui_state.contains(UiState::IS_MAP_OPEN) {
+                true => Self::Global,
+                false => Self::Minimap,
+            }
+        }
+    }
+}

@@ -82,6 +82,7 @@ extension-arcdps = [
   "extension-arcdps-extras",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/gw2_mumble",
+  "taimi_meta?/mumblelink-arcloader",
   "nexus/arc",
   "windows/Win32_System_LibraryLoader",
   "windows/Win32_System_Memory",
@@ -114,6 +115,7 @@ extension-nexus = [
   "nexus/extras",
   "nexus/rtapi",
   "nexus/mumble",
+  "taimi_meta?/mumblelink-nexus",
 ]
 goggles = [
   "dep:retour",
@@ -222,7 +224,7 @@ croner = "3"
 bitvec = { workspace = true }
 
 taimi_pack = { path = "./pathing/pack", optional = true }
-taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "mumblelink-nexus"] }
+taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }

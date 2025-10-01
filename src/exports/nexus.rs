@@ -9,7 +9,7 @@ use {
         time::Duration,
     },
     nexus::{
-        data_link::{get_mumble_link, get_nexus_link, mumble::MumblePtr, NexusLink},
+        data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
         gamebind,
         localization::translate,
         paths,
@@ -122,15 +122,15 @@ pub fn detect_language() -> RuntimeResult<Option<String>> {
     Ok(Some(language.into()))
 }
 
-pub fn mumble_link_ptr() -> RuntimeResult<Option<MumblePtr>> {
+pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
     if !available() {
         return Ok(None)
     }
 
-    match get_mumble_link() {
-        Some(ml) => Ok(Some(ml)),
-        None => Err("MumbleLink unavailable"),
-    }
+    let ml = get_mumble_link_ptr();
+    NonNull::new(ml as *mut _)
+        .ok_or("MumbleLink unavailable")
+        .map(Some)
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
