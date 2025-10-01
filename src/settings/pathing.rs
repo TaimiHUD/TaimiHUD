@@ -286,6 +286,9 @@ impl fmt::Display for CameraSource {
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct GogglesSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goggles_enabled: Option<bool>,
+
     /// X-ray opacity
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub obscured_alpha: Option<f32>,
@@ -300,6 +303,7 @@ pub struct GogglesSettings {
 }
 
 impl GogglesSettings {
+    pub const DEFAULT_ENABLED: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
     pub const DEFAULT_EDGE_SCALE: Option<f32> = Some(0.5f32);
@@ -308,6 +312,7 @@ impl GogglesSettings {
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
+                goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 obscured_alpha: None,
                 edge_scale: None | Self::DEFAULT_EDGE_SCALE,
                 edge_feather_scale: None | Self::DEFAULT_EDGE_FEATHER_SCALE,
@@ -316,6 +321,10 @@ impl GogglesSettings {
                 true,
             _ => false,
         }
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.goggles_enabled.unwrap_or(Self::DEFAULT_ENABLED)
     }
 
     pub fn obscured_alpha(&self) -> f32 {

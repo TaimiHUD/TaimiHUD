@@ -292,7 +292,7 @@ impl Engine {
                             Ok(false) =>
                                 goggles::clear_lens(),
                             Ok(true) =>
-                                goggles::pick_lens(),
+                                goggles::pick_lens(false),
                             _ => (),
                         }
                         if let Err(e) = res {
@@ -825,18 +825,27 @@ impl Engine {
     pub fn gameplay_map_enter(&mut self, device_context: &Dx11Context, map_id: NonZeroU32) -> anyhow::Result<()> {
         #[cfg(feature = "goggles")]
         {
-            use crate::space;
+            use crate::{
+                render::goggles as render_goggles,
+                space,
+            };
 
-            std::thread::spawn(|| {
-                // fastload or early notifications can throw off the lens selection...
-                std::thread::sleep(std::time::Duration::from_millis(320));
-                goggles::pick_lens();
-            });
-
-            let depth = self.map_settings_ref(|s| s.map(|s|
+            let settings = self.map_settings_ref(|s| s.map(|s| (
+                s.space.goggles.enabled(),
                 s.space.goggles.map_depth_calibration(map_id.get())
-            ));
-            if let Some((min, max)) = depth {
+            )));
+
+            if let Some((true, (min, max))) = settings {
+                if let (false, needs_setup) = render_goggles::get_state() {
+                    render_goggles::enable(needs_setup);
+                }
+
+                std::thread::spawn(|| {
+                    // fastload or early notifications can throw off the lens selection...
+                    std::thread::sleep(std::time::Duration::from_millis(320));
+                    goggles::pick_lens(true);
+                });
+
                 space::set_min_depth(space::MIN_DEPTH * min);
                 space::set_max_depth(space::MAX_DEPTH * max);
             }
