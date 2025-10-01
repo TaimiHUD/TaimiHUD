@@ -1,7 +1,7 @@
 use {
     arc_atomic::AtomicArc,
     crate::{
-        exports::runtime::UiState,
+        exports::runtime::{self as rt, UiState},
         space::DrawSpace,
     },
     glam::Vec3,
@@ -13,8 +13,6 @@ pub static PERSPECTIVEINPUTDATA: LazyLock<AtomicArc<PerspectiveInputData>> = Laz
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PerspectiveInputData {
-    #[cfg(feature = "extension-nexus")]
-    pub has_rtapi: bool,
     pub front: Vec3,
     pub pos: Vec3,
     pub fov: f32,
@@ -42,9 +40,7 @@ impl PerspectiveInputData {
     }
 
     pub fn world_visible(&self) -> bool {
-        let has_gameplay = self.front != Vec3::Y;
-        #[cfg(feature = "extension-nexus")]
-        let has_gameplay = has_gameplay || self.has_rtapi;
+        let has_gameplay = !rt::vec_eq(self.front, Vec3::Y);
 
         self.is_gameplay.unwrap_or(has_gameplay) && !self.ui_state.contains(UiState::IS_MAP_OPEN)
     }
@@ -61,6 +57,14 @@ impl PerspectiveInputData {
         Vector3::from_raw(self.front)
     }
 
+    const DEFAULT_FOV: f32 = 75.0f32.to_radians();
+    pub fn fov(&self) -> f32 {
+        match self.fov {
+            0.0 => Self::DEFAULT_FOV,
+            fov => fov,
+        }
+    }
+
     #[inline]
     pub fn camera_up(&self) -> Vector3<DrawSpace> {
         Vector3::Y
@@ -72,12 +76,10 @@ impl Default for PerspectiveInputData {
         Self {
             front: Vec3::Y,
             pos: Vec3::ZERO,
-            fov: 75.0f32.to_radians(),
+            fov: 0.0f32,
             playpos: Vec3::ZERO,
             ui_state: UiState::empty(),
             is_gameplay: Default::default(),
-            #[cfg(feature = "extension-nexus")]
-            has_rtapi: false,
         }
     }
 }

@@ -423,3 +423,22 @@ pub fn handle_wnd_event(_hwnd: HWND, msg: u32, _w: usize, _l: isize) -> u32 {
 
     msg
 }
+
+#[inline]
+pub const fn f32_bits<const N: usize>(f: [f32; N]) -> [u32; N] {
+    unsafe {
+        // XXX: transmute_unchecked is unstable...
+        mem::transmute_copy(&f)
+    }
+}
+#[inline]
+pub fn vec_bits<const N: usize, T>(f: T) -> [u32; N] where
+    T: Into<[f32; N]>,
+{
+    f32_bits(f.into())
+}
+pub fn vec_eq<const N: usize, T>(lhs: T, rhs: T) -> bool where
+    T: Into<[f32; N]>,
+{
+    vec_bits(lhs) == vec_bits(rhs)
+}

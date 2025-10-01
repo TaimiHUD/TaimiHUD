@@ -15,8 +15,14 @@ use {
     anyhow::Context,
     crate::{
         render::RenderState,
-        settings::pathing::{PathingSettings, SpaceSettings},
+        settings::pathing::{
+            CameraSource,
+            PathingSettings,
+            SpaceSettings,
+        },
+        LANGUAGE_LOADER,
     },
+    strum::VariantArray,
 };
 
 pub struct ConfigTabState {
@@ -181,6 +187,8 @@ impl ConfigTabState {
         #[cfg(feature = "goggles")]
         let mut map_id = None;
         let current = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| (
+            s.space.camera_source(),
+            s.space.visible_space(), s.space.visible_minimap(), s.space.visible_worldmap(),
             s.space.player_overlap_threshold(),
             s.space.distance_fade_intensity(),
             s.space.distance_max(),
@@ -209,6 +217,8 @@ impl ConfigTabState {
         )))).flatten();
         if let Some(current) = current {
             let (
+                camera_source,
+                mut visible_space, mut visible_minimap, mut visible_worldmap,
                 player_overlap_threshold,
                 distance_fade_intensity,
                 distance_max,
@@ -227,6 +237,18 @@ impl ConfigTabState {
             let range_scale_map = range_scale;
 
 
+            if ui.checkbox(&fl!("pathing-render-toggle"), &mut visible_space) {
+                Self::set_pathing(|s| s.space.visible_space = Some(visible_space));
+                #[cfg(feature = "goggles")]
+                match visible_space {
+                    _ if !crate::space::goggles::is_enabled() => (),
+                    false =>
+                        crate::space::goggles::clear_lens(),
+                    true =>
+                        crate::space::goggles::pick_lens(),
+                }
+            }
+            ui.same_line();
             if ui.checkbox(&fl!("pathing-config-textured"), &mut trail_textured_space) {
                 Self::set_pathing(|s| s.space.trail_textured_space = Some(trail_textured_space));
             }
@@ -252,10 +274,45 @@ impl ConfigTabState {
             if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-distance-max"), distance_max, (1.0, 2000.0)) {
                 Self::set_pathing(|s| s.space.distance_max = value);
             }
+            #[cfg(feature = "extension-nexus")]
+            if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
+                Self::set_pathing(|s| s.space.camera_source = value);
+                if value == Some(CameraSource::RealTimeAPI) {
+                    let _ = crate::engine_mut(|e| {
+                        match e.rtapi_init() {
+                            Err(e) =>
+                                log::warn!("{e:#}"),
+                            Ok(false) =>
+                                log::warn!("RTAPI inactive - make sure the addon is installed and loaded by Nexus"),
+                            Ok(true) => (),
+                        }
+                    });
+                }
+            }
+            #[cfg(feature = "extension-nexus")]
+            match camera_source {
+                CameraSource::MumbleLink => ui.text_disabled(
+                    "if you experience stuttering, try disabling Vertical Sync under the in-game graphical settings",
+                ),
+                CameraSource::RealTimeAPI => {
+                    if crate::engine_ref(|e| e.rtapi.is_none()) == Some(true) {
+                        ui.text_disabled(
+                            "RTAPI is a separate addon that must be installed via Nexus"
+                        );
+                    }
+                    ui.text_disabled(
+                        "if you experience stuttering, try disabling Vertical Sync or switching to MumbleLink",
+                    );
+                },
+            }
             //ui.separator();
 
             let minimap_opts = || {
                 //RenderState::font_text("ui", ui, &fl!("pathing-config-minimap"));
+                if ui.checkbox(&fl!("pathing-render-minimap-toggle"), &mut visible_minimap) {
+                    Self::set_pathing(|s| s.space.visible_map_mini = Some(visible_minimap));
+                }
+                ui.same_line();
                 if ui.checkbox(&fl!("pathing-config-textured-minimap"), &mut trail_textured_mini) {
                     Self::set_pathing(|s| s.space.map_trail_textured_mini = Some(trail_textured_mini));
                 }
@@ -280,6 +337,10 @@ impl ConfigTabState {
                 .build(ui, minimap_opts);
 
             let worldmap_opts = || {
+                if ui.checkbox(&fl!("pathing-render-map-toggle"), &mut visible_worldmap) {
+                    Self::set_pathing(|s| s.space.visible_map_world = Some(visible_worldmap));
+                }
+                ui.same_line();
                 if ui.checkbox(&fl!("pathing-config-textured-worldmap"), &mut trail_textured_world) {
                     Self::set_pathing(|s| s.space.map_trail_textured_world = Some(trail_textured_world));
                 }
@@ -410,6 +471,36 @@ impl ConfigTabState {
         } else {
             RenderState::font_text("ui", ui, &fl!("pathing-config"));
             ui.text_disabled("katrender options disabled");
+        }
+    }
+
+    #[cfg(feature = "space")]
+    fn combo_setting<T>(ui: &Ui, label: &str, value: T) -> Option<Option<T>> where
+        T: VariantArray + Eq + Copy + Into<&'static str>,
+    {
+        let _token = ui.push_id(label);
+        let current = LANGUAGE_LOADER.get(value.into());
+        let draw = || {
+            let mut selected = None;
+            for &opt in T::VARIANTS {
+                let name = LANGUAGE_LOADER.get(opt.into());
+                let selection = Selectable::new(name)
+                    .selected(value == opt);
+                if selection.build(ui) {
+                    selected = Some(opt.clone());
+                }
+            }
+            selected
+        };
+        let changed = ComboBox::new(label)
+            .preview_value(&current)
+            .build(ui, draw);
+        match changed {
+            Some(Some(selected)) => Some(Some(selected)),
+            None if ui.is_item_clicked_with_button(imgui::MouseButton::Right) =>
+                // reset to default
+                Some(None),
+            _ => None,
         }
     }
 

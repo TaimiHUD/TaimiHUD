@@ -346,7 +346,7 @@ impl MapFrustum {
         near: f32,
         far: f32,
     ) -> MapFrustum {
-        let fov = data.fov;
+        let fov = data.fov();
         let p = data.pos;
         let d = data.front.normalize();
         let right = d.cross(glam::Vec3::new(0.0, 1.0, 0.0)).normalize();
