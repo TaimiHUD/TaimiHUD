@@ -6,13 +6,12 @@ use std::{
     path::{Path, PathBuf},
     ptr::{self, NonNull},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicPtr, Ordering},
         Mutex, Once, OnceLock,
     },
     time::Duration,
 };
 use ::log::info;
-use nexus::data_link::mumble::MumblePtr;
 use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
@@ -37,6 +36,10 @@ pub use {
         textures::TextureLoader,
     },
 };
+#[cfg(feature = "extension-arcdps")]
+pub use arcloader_mumblelink::gw2_mumble::{LinkedMem as MumbleLink, MumblePtr, UiState};
+#[cfg(not(feature = "extension-arcdps"))]
+pub use nexus::data_link::mumble::{MumbleLink, MumblePtr, UiState};
 #[cfg(feature = "extension-nexus")]
 pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
 #[cfg(not(feature = "extension-nexus"))]
@@ -150,20 +153,40 @@ pub fn reload_language() -> RuntimeResult {
     load_language(&language)
 }
 
+static MUMBLE_LINK_PTR: AtomicPtr<MumbleLink> = AtomicPtr::new(ptr::dangling_mut());
 pub fn mumble_link_ptr() -> RuntimeResult<MumblePtr> {
+    match NonNull::new(MUMBLE_LINK_PTR.load(Ordering::Relaxed)) {
+        Some(ml) if ml == NonNull::dangling() =>
+            (),
+        Some(ml) => return Ok(unsafe {
+            mem::transmute::<_, MumblePtr>(ml)
+        }),
+        None => return Err(RT_UNAVAILABLE),
+    }
+
+    let (ptr, res) = match get_mumble_link_ptr() {
+        Err(e) => (ptr::null_mut(), Err(e)),
+        Ok(Some(ml)) => (ml.cast().as_ptr(), Ok(unsafe {
+            mem::transmute::<_, MumblePtr>(ml)
+        })),
+        Ok(None) => return Err(RT_UNAVAILABLE),
+    };
+    MUMBLE_LINK_PTR.store(ptr, Ordering::Relaxed);
+    res
+}
+
+pub fn get_mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
     #[cfg(feature = "extension-nexus")]
     if let Some(ml) = exports::nexus::mumble_link_ptr()? {
-        return Ok(ml)
+        return Ok(Some(ml.cast()))
     }
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(ml) = exports::arcdps::mumble_link_ptr()? {
-        return Ok(unsafe {
-            mem::transmute(ml)
-        })
+        return Ok(Some(ml.cast()))
     }
 
-    Err(RT_UNAVAILABLE)
+    Ok(None)
 }
 
 pub fn nexus_link_ptr() -> RuntimeResult<NonNull<NexusLink>> {

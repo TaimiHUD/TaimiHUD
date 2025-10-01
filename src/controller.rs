@@ -27,9 +27,6 @@ use {
     anyhow::{anyhow, Context},
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::f32::Vec3,
-    nexus::{
-        data_link::mumble::{MumblePtr, UiState},
-    },
     relative_path::RelativePathBuf,
     std::{
         collections::{HashMap, HashSet},
@@ -82,7 +79,6 @@ pub struct Controller {
     pub marker_autoplace: Option<MarkerAutoPlaceSettings>,
     pub rt_sender: Sender<RenderEvent>,
     pub cached_identity: Option<MumbleIdentityUpdate>,
-    pub mumble_pointer: Option<MumblePtr>,
     pub map_id: Option<u32>,
     pub player_position: Option<Vec3>,
     alert_sem: Arc<Mutex<()>>,
@@ -136,7 +132,6 @@ impl Controller {
                 spent_markers: Default::default(),
                 agent: Default::default(),
                 cached_identity: Default::default(),
-                mumble_pointer: mumble_link,
                 map_id: Default::default(),
                 player_position: Default::default(),
                 alert_sem: Default::default(),
@@ -384,9 +379,10 @@ impl Controller {
         #[cfg(feature = "markers")]
         let mut marker_data = None;
 
-        let mut ui_state = UiState::empty();
+        let mut ui_state = rt::UiState::empty();
         let previous_ui_tick = self.previous_ui_tick;
-        let mumble = match self.mumble_pointer {
+        let mumble_pointer = rt::mumble_link_ptr().ok();
+        let mumble = match mumble_pointer {
             None => None,
             Some(mumble) => {
                 let ui_tick = Some(mumble.read_ui_tick());
@@ -406,7 +402,7 @@ impl Controller {
         {
             let is_gameplay = match rt::is_ingame() {
                 // ui ticks don't occur during loading/charsel apparently...
-                Ok(ingame) if self.mumble_pointer.is_none() =>
+                Ok(ingame) if mumble_pointer.is_none() =>
                     Some(Some(ingame)),
                 Ok(false) if (mumble.is_none() && !input_dirty) && previous_ui_tick.is_some() && missed > 4 =>
                     Some(if input_data.is_gameplay == Some(true) { None } else { Some(false) }),
@@ -416,6 +412,9 @@ impl Controller {
             if let Some(is_gameplay) = is_gameplay {
                 input_dirty |= input_data.is_gameplay != is_gameplay;
                 input_data.is_gameplay = is_gameplay;
+                if is_gameplay == Some(false) {
+                    input_data.front = Vec3::ZERO;
+                }
             }
         }
         let Some(mumble) = mumble else {
@@ -423,7 +422,7 @@ impl Controller {
             if input_dirty {
                 input_data.commit();
             }
-            return Ok(self.mumble_pointer.is_none())
+            return Ok(mumble_pointer.is_none())
         };
 
         let playpos = Vec3::from_array(mumble.read_avatar().position);
@@ -443,7 +442,7 @@ impl Controller {
                 input_data.playpos = playpos;
                 input_data.front = camera_front;
                 input_data.pos = camera_pos;
-                input_dirty |= input_data.playpos != Vec3::ZERO;
+                input_dirty |= input_data.playpos != Vec3::ZERO || input_data.front != Vec3::ZERO;
             }
             if input_dirty {
                 input_data.commit();
@@ -487,7 +486,7 @@ impl Controller {
                 }
             }
             self.player_position = Some(playpos);
-            let combat_state = ui_state.contains(UiState::IS_IN_COMBAT);
+            let combat_state = ui_state.contains(rt::UiState::IS_IN_COMBAT);
             if combat_state != self.previous_combat_state {
                 if combat_state {
                     log::info!("MumbleLink: Combat begins at {:?}!", SystemTime::now());

@@ -311,11 +311,13 @@ impl DepthHandler {
 
         if let Some(edge_scale) = edge_scale {
             use {
-                crate::resources::Vertex,
+                crate::{
+                    exports::runtime::UiState,
+                    resources::Vertex,
+                },
                 super::PerspectiveInputData,
                 glam::{vec2, Vec3},
                 glamour::Box2,
-                nexus::data_link::mumble::UiState,
             };
 
             fn quad_verts(b: Box2) -> [Vertex; 4] {

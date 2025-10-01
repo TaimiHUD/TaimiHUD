@@ -4,7 +4,7 @@ use {
         Language,
     },
     arcloader_mumblelink::{
-        gw2_mumble::{LinkedMem, MumbleLink, MumblePtr, UiState},
+        gw2_mumble::{LinkedMem, MumbleLink, UiState},
         identity::MumbleIdentity,
     },
     crate::{
@@ -73,9 +73,12 @@ fn early_init() {
     match MumbleLink::new() {
         Ok(ml) => {
             log::debug!("MumbleLink initialized");
-            let ptr = ml.as_ptr();
-            *MUMBLE_LINK.lock().expect("MumbleLink poisoned") = Some(ml);
-            MUMBLE_LINK_PTR.store(ptr as *mut _, Ordering::Relaxed);
+            match MUMBLE_LINK.lock() {
+                Ok(mut lock) =>
+                    *lock = Some(ml),
+                Err(..) =>
+                    log::error!("MumbleLink poisoned"),
+            }
         },
         Err(e) => {
             log::error!("MumbleLink failed to initialize: {e}");
@@ -241,8 +244,7 @@ fn init_continue_with_nexus() -> Result<(), &'static str> {
 
 fn release() {
     log::trace!("arcdps release");
-    MUMBLE_LINK_PTR.store(ptr::null_mut(), Ordering::SeqCst);
-    let _ml = MUMBLE_LINK.lock()
+    let _ = MUMBLE_LINK.lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
 
@@ -343,12 +345,6 @@ pub fn is_ingame() -> Option<bool> {
 }
 
 static MUMBLE_LINK: Mutex<Option<MumbleLink>> = Mutex::new(None);
-static MUMBLE_LINK_PTR: AtomicPtr<LinkedMem> = AtomicPtr::new(ptr::null_mut());
-
-fn mumble_ptr() -> Option<MumblePtr> {
-    NonNull::new(MUMBLE_LINK_PTR.load(Ordering::Relaxed))
-        .and_then(|mem| unsafe { MumblePtr::new(mem.as_ptr()) })
-}
 
 thread_local! {
     static MUMBLE_IDENTITY: RefCell<MumbleIdentity> = RefCell::new(MumbleIdentity::new());
@@ -358,14 +354,14 @@ thread_local! {
 }
 
 fn update_mumble_link() {
-    let ml = match mumble_ptr() {
-        Some(ml) => {
+    let ml = match rt::mumble_link_ptr() {
+        Ok(ml) => {
             MUMBLE_TICK_LAST.set(MUMBLE_TICK.get());
             MUMBLE_TICK.set(ml.read_ui_tick());
             MUMBLE_STATE.set(ml.read_ui_state().bits() as u8);
             ml
         },
-        None => return,
+        _ => return,
     };
 
     let update = MUMBLE_IDENTITY.with_borrow_mut(|identity| {
@@ -1118,15 +1114,17 @@ pub fn detect_language() -> RuntimeResult<Option<String>> {
     Ok(language.map(Into::into))
 }
 
-pub fn mumble_link_ptr() -> RuntimeResult<Option<MumblePtr>> {
+pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<LinkedMem>>> {
     if !available() {
         return Ok(None)
     }
 
-    match mumble_ptr() {
-        Some(ml) => Ok(Some(ml)),
-        None => Err("MumbleLink unavailable"),
-    }
+    MUMBLE_LINK.lock()
+        .map_err(|_| "MumbleLink poisoned")
+        .and_then(|ml| ml.as_ref()
+            .map(|ml| ml.as_non_null())
+            .ok_or("MumbleLink unavailable")
+        ).map(Some)
 }
 
 pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<rt::NexusLink>>> {
