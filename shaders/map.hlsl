@@ -40,7 +40,7 @@ VSOutput VSMain(VSInput input)
     //float scalePos = 0.0;
     float3 pos = input.position + norm + input.position * scalePos;
 
-    float3 poipos = mul(Model, pos);
+    float3 poipos = mul(Model, float4(pos, 1.0)).xyz;
     float4 mpos = mul(input.Model, float4(pos * isTrail + isPoi * poipos, 1.0));
     float4 mvpos = mul(World, mpos);
     output.position = mul(View, mvpos.xzyw);
