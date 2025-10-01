@@ -315,6 +315,13 @@ pub fn disable() -> anyhow::Result<()> {
         }
     }
 
+    #[cfg(todo = "unnecessary")]
+    #[cfg(feature = "goggles")] {
+        if let Ok(mut lenses) = LENSES.try_write() {
+            lenses.clear();
+        }
+    }
+
     res
 }
 

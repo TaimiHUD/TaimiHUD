@@ -513,6 +513,12 @@ impl Engine {
             }
         }
 
+        #[cfg(todo = "unnecessary")]
+        #[cfg(feature = "goggles")]
+        if is_gameplay == Some(false) {
+            self.goggles_exit();
+        }
+
         let display_size = display_size.into();
         self.render_backend.prepare(display_size);
         let device_context =
@@ -657,11 +663,16 @@ impl Engine {
         let goggles_2pass = goggles::is_enabled() && _obscured_alpha > 0.0;
 
         let masking = minimap_bounds.is_some() || edge_scale.is_some();
-        if masking {
+        let masking = match render_world.is_some() && masking {
+            #[cfg(feature = "goggles")]
+            true if goggles_2pass => Some(true),
+            true => Some(false),
+            _ => None,
+        };
+        if let Some(depth_fill) = masking {
             let backend = &mut self.render_backend;
-            backend.depth_handler.setup_depth_write(&device_context, true);
+            backend.depth_handler.setup_depth_write(&device_context, Some(depth_fill));
 
-            // TODO: reusing this shader is a hack
             if let Some((shader, layout)) = backend.shaders.vertex.get("mask") {
                 layout.set(&device_context);
                 shader.set(&device_context);
@@ -670,19 +681,16 @@ impl Engine {
         }
 
         if let Some(..) = &minimap_bounds {
-            self.render_backend.depth_handler.fill_clipped(&device_context);
+            if masking.is_some() {
+                self.render_backend.depth_handler.fill_clipped(&device_context);
+            }
             self.render_backend.depth_handler.clear_scissor(&device_context);
         }
 
-        if masking {
-            let depth_fill = match _obscured_alpha {
-                #[cfg(feature = "goggles")]
-                _ if goggles_2pass => true,
-                _ => false,
-            };
+        if let Some(depth_fill) = masking {
             self.render_backend.depth_handler.fill_corners(&device_context, depth_fill);
 
-            self.render_backend.depth_handler.setup_depth_write(&device_context, false);
+            self.render_backend.depth_handler.setup_depth_write(&device_context, None);
         }
 
         self.render_backend.perspective_handler.set(&device_context, perspective_slot);
@@ -784,12 +792,14 @@ impl Engine {
         }
         #[cfg(feature = "goggles")]
         match self.goggles_select_lens_delay {
-            Some((0, force)) if mumble_tick_updated_playpos && self.gameplay_map.is_ok() => {
+            _ if is_gameplay != Some(true) => (),
+            Some((0, force)) if render_world.is_some() => {
                 self.goggles_start(force);
                 let _ = self.goggles_select_lens_delay.take();
             },
-            Some((ref mut ticks, ..)) if mumble_tick_updated_playpos && is_gameplay == Some(true) && self.gameplay_map.is_ok() => {
-                *ticks = ticks.saturating_sub(1);
+            Some((ref mut ticks, ..)) if !mumble_link_frameskip => {
+                let amt = if mumble_tick_updated_playpos { 6 } else { 1 };
+                *ticks = ticks.saturating_sub(amt);
             },
             _ => (),
         }
@@ -824,10 +834,7 @@ impl Engine {
     }
 
     pub fn gameplay_map_exit(&mut self, device_context: &Dx11Context, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
-        #[cfg(feature = "goggles")]
-        if goggles::is_enabled() {
-            goggles::clear_lens();
-        }
+        self.goggles_exit();
 
         let res = self.packs.unload_map(device_context, prev_map_id.get());
 
@@ -993,13 +1000,20 @@ impl Engine {
     }
 
     #[cfg(feature = "goggles")]
-    const GOGGLES_START_DELAY_TICKS: u32 = 8;
+    const GOGGLES_START_DELAY_TICKS: u32 = 8 * 6;
     pub fn goggles_enter(&mut self, _force: bool) {
         #[cfg(feature = "goggles")]
         {
             // fastload or early notifications can throw off the lens selection...
             self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, _force));
         }
+    }
+    pub fn goggles_exit(&mut self) {
+        #[cfg(feature = "goggles")]
+        if goggles::is_enabled() {
+            goggles::clear_lens();
+        }
+        let _ = self.goggles_select_lens_delay.take();
     }
 
     #[cfg(feature = "goggles")]

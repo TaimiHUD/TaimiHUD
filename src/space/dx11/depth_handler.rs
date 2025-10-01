@@ -224,8 +224,8 @@ impl DepthHandler {
         self.depth_stencil_state_map.set(device_context);
     }
 
-    pub fn setup_depth_write(&self, device_context: &Dx11Context, enable: bool) {
-        if !enable {
+    pub fn setup_depth_write(&self, device_context: &Dx11Context, enable: Option<bool>) {
+        if enable.is_none() {
             self.depth_stencil_state.set(device_context);
         }
         self.depth_stencil_view().0.set(device_context);
