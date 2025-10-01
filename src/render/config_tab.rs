@@ -245,8 +245,9 @@ impl ConfigTabState {
                     _ if !crate::space::goggles::is_enabled() => (),
                     false =>
                         crate::space::goggles::clear_lens(),
-                    true =>
-                        crate::space::goggles::pick_lens(true),
+                    true => {
+                        let _ = crate::engine_mut(|e| e.goggles_enter(false));
+                    },
                 }
             }
             ui.same_line();
@@ -389,7 +390,9 @@ impl ConfigTabState {
                     Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));
                     match enabled {
                         true => {
-                            render_goggles::enable(needs_setup);
+                            if crate::engine_mut(|e| e.goggles_enter(false)).is_none() {
+                                render_goggles::enable(needs_setup);
+                            }
                         },
                         false => {
                             render_goggles::disable();
