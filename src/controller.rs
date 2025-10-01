@@ -147,13 +147,25 @@ impl Controller {
             drop(settings_lock);
             let settings_lock = settings.read().await;
             state.marker_autoplace = Some(settings_lock.marker_autoplace.clone());
+            #[cfg(feature = "space")]
+            let katrender = settings_lock.enable_katrender;
             drop(settings_lock);
             state.setup_timers().await;
             #[cfg(feature = "markers")]
             state.setup_markers().await;
             let mut taimi_interval = interval(Duration::from_millis(125));
-            let mut mumblelink_interval = interval(Duration::from_millis(20));
+
+            const MUMBLELINK_TICK: Duration = Duration::from_millis(1000 / 25);
+            const MUMBLELINK_FPS: u64 = 80;
+            let mumblelink_interval = match () {
+                #[cfg(feature = "space")]
+                _ if katrender => Duration::from_millis(1000 / MUMBLELINK_FPS),
+                _ => MUMBLELINK_TICK,
+            };
+            let mumblelink_catchup = mumblelink_interval / 3;
+            let mut mumblelink_interval = interval(mumblelink_interval - mumblelink_catchup / 2);
             let mut mumblelink_missed = 0u32;
+
             loop {
                 select! {
                     evt = controller_receiver.recv() => match evt {
@@ -173,12 +185,12 @@ impl Controller {
                     _ = mumblelink_interval.tick() => {
                         let missed = match mumblelink_missed {
                             0 => 0,
-                            missed => (missed / (20/2)).max(1),
+                            missed => (missed * mumblelink_catchup.as_millis() as u32 / MUMBLELINK_TICK.as_millis() as u32).max(1),
                         };
-                        match state.mumblelink_tick(mumblelink_missed / (20/2)).await {
+                        match state.mumblelink_tick(missed).await {
                             Ok(false) => {
                                 mumblelink_missed = mumblelink_missed.saturating_add(1);
-                                mumblelink_interval.reset_after(Duration::from_millis(2));
+                                mumblelink_interval.reset_after(mumblelink_catchup);
                             },
                             Ok(true) =>
                                 mumblelink_missed = 0,
