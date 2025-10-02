@@ -55,7 +55,7 @@ impl ActiveTrail {
 
         for (isec, section) in trail.data.sections.iter().enumerate() {
             if section.points.is_empty() {
-                log::warn!("Section {isec} is empty.");
+                log::debug!("Section {isec} is empty.");
                 continue;
             }
 
@@ -151,7 +151,7 @@ impl ActiveTrail {
         }
 
         if vertices.is_empty() {
-            log::error!(
+            log::info!(
                 "Empty trail {}:{}",
                 trail.category,
                 trail.guid,
