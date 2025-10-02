@@ -17,6 +17,7 @@ use {
         task::JoinHandle,
         time::timeout,
     },
+    futures::FutureExt,
 };
 use {
     crate::{
@@ -1226,7 +1227,7 @@ impl Controller {
                 let pack_load = path_loads.join_next();
                 let res = if disabled_paths_dirty {
                     // throttle repeated state event if packs load quickly enough...
-                    let timeout = sleep(Duration::from_millis(74));
+                    let timeout = sleep(Duration::from_millis(174)).fuse();
                     tokio::pin!(timeout);
                     tokio::pin!(pack_load);
                     loop {
