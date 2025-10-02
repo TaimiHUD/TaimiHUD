@@ -8,8 +8,8 @@ use {
             format::MarkerSet,
         },
         render::RenderState,
-        settings::MarkerSettings,
-        RenderEvent, Controller, SETTINGS,
+        settings::{MarkerSettings, Settings},
+        RenderEvent, Controller,
     },
     glam::{Vec2, Vec3},
     indexmap::IndexMap,
@@ -158,7 +158,7 @@ impl MarkerTabState {
         {
             selected = true;
         }
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             let settings_for_marker = settings.markers.get(&marker.id());
             ui.same_line();
             let (color, text) = match settings_for_marker {

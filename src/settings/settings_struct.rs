@@ -1,7 +1,7 @@
 use {
     super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
     crate::{controller::ProgressBarStyleChange, SETTINGS, SOURCES},
-    anyhow::anyhow,
+    anyhow::{anyhow, Context},
     chrono::{DateTime, Utc},
     futures::stream::StreamExt,
     magic_migrate::TryMigrate,
@@ -12,7 +12,7 @@ use {
         collections::{HashMap, HashSet},
         fmt::{self},
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, atomic::{AtomicBool, Ordering}},
     },
     strum_macros::EnumIter,
     tokio::{
@@ -23,6 +23,7 @@ use {
 };
 
 pub type SettingsLock = Arc<RwLock<Settings>>;
+pub type SettingsSave = (PathBuf, String, Arc<AtomicBool>);
 #[derive(PartialEq, Clone, Debug, Default)]
 pub enum NeedsUpdate {
     #[default]
@@ -122,6 +123,8 @@ pub struct Settings {
     pub last_checked: Option<DateTime<Utc>>,
     #[serde(skip)]
     addon_dir: PathBuf,
+    #[serde(skip)]
+    dirty: Arc<AtomicBool>,
     #[serde(default)]
     pub timers: HashMap<String, TimerSettings>,
     #[serde(default)]
@@ -214,7 +217,7 @@ impl Settings {
             .collect()
     }
 
-    pub async fn set_window_state(&mut self, window: &str, state: Option<bool>) {
+    pub fn set_window_state(&mut self, window: &str, state: Option<bool>) {
         let window_open = match window {
             crate::WINDOW_PRIMARY => &mut self.primary_window_open,
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
@@ -235,65 +238,58 @@ impl Settings {
                 *window_open = !*window_open;
             }
         }
-        let _ = self.save().await;
     }
 
-    pub async fn toggle_timer(&mut self, timer: String) -> bool {
+    pub fn toggle_timer(&mut self, timer: String) -> bool {
         let entry = self.timers.entry(timer.clone()).or_default();
         let new_state = entry.toggle();
         let irrelevant = entry == &Default::default();
         if irrelevant {
             self.timers.remove(&timer);
         }
-        let _ = self.save().await;
         new_state
     }
-    pub async fn disable_timer(&mut self, timer: String) {
+    pub fn disable_timer(&mut self, timer: String) {
         if let Some(entry_mut) = self.timers.get_mut(&timer) {
             entry_mut.disable();
         } else {
             self.timers.insert(timer, TimerSettings { disabled: true });
         }
-        let _ = self.save().await;
     }
-    pub async fn enable_timer(&mut self, timer: String) {
+    pub fn enable_timer(&mut self, timer: String) {
         if let Some(entry_mut) = self.timers.get_mut(&timer) {
             entry_mut.enable();
         } else {
             self.timers.insert(timer, TimerSettings::default());
         }
-        let _ = self.save().await;
     }
-    pub async fn toggle_marker(&mut self, marker: String) -> bool {
+    pub fn toggle_marker(&mut self, marker: String) -> bool {
         let entry = self.markers.entry(marker.clone()).or_default();
         let new_state = entry.toggle();
-        let _ = self.save().await;
         new_state
     }
-    pub async fn disable_marker(&mut self, marker: String) {
+    pub fn disable_marker(&mut self, marker: String) {
         if let Some(entry_mut) = self.markers.get_mut(&marker) {
             entry_mut.disable();
         } else {
             self.markers
                 .insert(marker, MarkerSettings { disabled: true });
         }
-        let _ = self.save().await;
     }
-    pub async fn enable_marker(&mut self, marker: String) {
+    pub fn enable_marker(&mut self, marker: String) {
         if let Some(entry_mut) = self.markers.get_mut(&marker) {
             entry_mut.enable();
         } else {
             self.markers.insert(marker, MarkerSettings::default());
         }
-        let _ = self.save().await;
     }
 
     #[allow(dead_code)]
-    pub async fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
+    pub fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
         self.remotes.iter().find(|dd| *dd.source == *source)
     }
 
-    pub async fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
+    pub fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
         self.remotes.iter_mut().find(|dd| *dd.source == *source)
     }
 
@@ -301,16 +297,14 @@ impl Settings {
         if let Some(remote) = self.remotes.iter_mut().find(|dd| *dd.source == *source) {
             remote.uninstall().await?;
         }
-        let _ = self.save().await;
         Ok(())
     }
 
-    pub async fn set_marker_autoplace_settings(
+    pub fn set_marker_autoplace_settings(
         &mut self,
         maps: &MarkerAutoPlaceSettings,
     ) -> anyhow::Result<()> {
         self.marker_autoplace = maps.clone();
-        let _ = self.save().await;
         Ok(())
     }
 
@@ -328,7 +322,7 @@ impl Settings {
         let tag_name = underlying_source.download_latest().await?;
         {
             let mut settings_write_lock = settings_arc.write().await;
-            if let Some(dd_mut) = settings_write_lock.get_status_for_mut(source).await {
+            if let Some(dd_mut) = settings_write_lock.get_status_for_mut(source) {
                 let res = dd_mut.commit_downloaded(tag_name, install_dir).await;
                 let _ = settings_write_lock
                     .save()
@@ -341,7 +335,7 @@ impl Settings {
         Ok(())
     }
 
-    pub async fn set_progress_bar(&mut self, style: ProgressBarStyleChange) -> ProgressBarSettings {
+    pub fn set_progress_bar(&mut self, style: ProgressBarStyleChange) -> ProgressBarSettings {
         use ProgressBarStyleChange::*;
         match style {
             Centre(t) => self.progress_bar.set_centre_after(t),
@@ -350,11 +344,10 @@ impl Settings {
             Height(h) => self.progress_bar.set_height(h),
             Font(f) => self.progress_bar.set_font(f),
         }
-        let _ = self.save().await;
         self.progress_bar.clone()
     }
 
-    pub async fn toggle_katrender(&mut self) {
+    pub fn toggle_katrender(&mut self) {
         self.enable_katrender = !self.enable_katrender;
     }
 
@@ -373,7 +366,7 @@ impl Settings {
             let mut settings_write_lock = settings_arc.write().await;
             for (source, nu) in sources {
                 log::debug!("{} update state: {:?}", source, nu);
-                if let Some(dd) = settings_write_lock.get_status_for_mut(&source).await {
+                if let Some(dd) = settings_write_lock.get_status_for_mut(&source) {
                     log::debug!("Found dd {} update state: {:?}", dd.source, nu);
                     dd.needs_update = nu;
                 }
@@ -390,6 +383,7 @@ impl Settings {
         Self {
             last_checked: None,
             addon_dir: addon_dir.to_path_buf(),
+            dirty: Arc::new(AtomicBool::new(false)),
             timers: Default::default(),
             markers: Default::default(),
             remotes: RemoteState::suggested_sources().collect(),
@@ -443,19 +437,64 @@ impl Settings {
         Arc::new(RwLock::new(Self::load_default(addon_dir).await))
     }
 
-    pub async fn save(&self) -> anyhow::Result<()> {
+    pub async fn settings_path(&self) -> anyhow::Result<PathBuf> {
         let addon_dir = &self.addon_dir;
         create_dir_all(addon_dir).await?;
-        let settings_path = addon_dir.join("settings.json");
-        self.save_to(&settings_path).await
+        Ok(addon_dir.join("settings.json"))
     }
 
-    pub async fn save_to(&self, settings_path: &Path) -> anyhow::Result<()> {
-        log::debug!("Settings: Saving to \"{:?}\".", settings_path);
-        let settings_str = serde_json::to_string(self)?;
-        let mut file = File::create(settings_path).await?;
-        file.write_all(settings_str.as_bytes()).await?;
+    pub fn settings_str(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self)
+            .context("settings serialization error")
+    }
+
+    pub async fn start_save(&self) -> anyhow::Result<SettingsSave> {
+        Ok((
+            self.settings_path().await?,
+            self.settings_str()?,
+            self.dirty.clone(),
+        ))
+    }
+
+    pub async fn save(&self) -> anyhow::Result<()> {
+        let save = self.start_save().await?;
+        Self::save_to(&save).await
+    }
+
+    pub async fn save_to((settings_path, settings_str, dirty): &SettingsSave) -> anyhow::Result<()> {
+        log::trace!("Settings: Saving to \"{:?}\".", settings_path);
+        let res = match File::create(settings_path).await {
+            Ok(mut file) =>
+                file.write_all(settings_str.as_bytes()).await,
+            Err(e) => Err(e),
+        };
+
+        if res.is_err() {
+            dirty.store(true, Ordering::Relaxed);
+        }
+
         Ok(())
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Relaxed)
+    }
+
+    pub async fn try_commit() -> anyhow::Result<Option<SettingsSave>> {
+        let settings = match Self::try_read() {
+            None => return Ok(None),
+            Some(s) => s,
+        };
+        let dirty = settings.dirty.swap(false, Ordering::SeqCst);
+        if !dirty {
+            return Ok(None)
+        }
+
+        settings.start_save().await.map(Some)
     }
 
     pub fn try_read() -> Option<tokio::sync::RwLockReadGuard<'static, Self>> {
@@ -481,8 +520,38 @@ impl Settings {
     }
 
     pub fn try_write() -> Option<tokio::sync::RwLockWriteGuard<'static, Self>> {
-        SETTINGS.get()
-            .and_then(|settings| settings.try_write().ok())
+        let mut res = SETTINGS.get()
+            .and_then(|settings| settings.try_write().ok());
+
+        if let Some(settings) = &mut res {
+            settings.mark_dirty();
+        }
+
+        res
+    }
+
+    pub async fn async_read() -> anyhow::Result<tokio::sync::RwLockReadGuard<'static, Self>> {
+        let settings = match SETTINGS.get() {
+            Some(settings) =>
+                settings.read().await,
+            None =>
+                anyhow::bail!("SETTINGS not loaded"),
+        };
+
+        Ok(settings)
+    }
+
+    pub async fn async_write() -> anyhow::Result<tokio::sync::RwLockWriteGuard<'static, Self>> {
+        let mut settings = match SETTINGS.get() {
+            Some(settings) =>
+                settings.write().await,
+            None =>
+                anyhow::bail!("SETTINGS not loaded"),
+        };
+
+        settings.mark_dirty();
+
+        Ok(settings)
     }
 
     pub fn write_with_blocking<R, F: FnOnce(&mut Self) -> R>(f: F) -> anyhow::Result<R> {
@@ -492,6 +561,8 @@ impl Settings {
             None =>
                 anyhow::bail!("SETTINGS not loaded"),
         };
+
+        settings.mark_dirty();
 
         Ok(f(&mut *settings))
     }
@@ -504,6 +575,7 @@ impl Settings {
     }
 
     pub fn arc_mut(&mut self) -> &mut ArcSettings {
+        self.mark_dirty();
         self.arc.get_or_insert_default()
     }
 
@@ -515,6 +587,7 @@ impl Settings {
     }
 
     pub fn pathing_mut(&mut self) -> &mut PathingSettings {
+        self.mark_dirty();
         self.pathing.get_or_insert_default()
     }
 }

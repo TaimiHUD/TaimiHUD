@@ -67,7 +67,7 @@ impl ArcRenderState {
             }
         })).flatten();
         if auth_toggled.is_some() || new_pref.is_some() {
-            if let Some(mut settings) = crate::SETTINGS.get().map(|s| s.blocking_write()) {
+            let _ = Settings::write_with_blocking(|settings| {
                 let arc = settings.arc_mut();
                 let pref = match new_pref {
                     Some(pref) =>
@@ -78,7 +78,7 @@ impl ArcRenderState {
                 if let Some(latest) = auth_toggled {
                     pref.authorize_update(latest, authorized);
                 }
-            }
+            });
         }
     }
 

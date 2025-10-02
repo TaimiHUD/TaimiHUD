@@ -135,11 +135,9 @@ impl ArcVk {
     }
 
     pub fn set_vkeycode(&self, new: VIRTUAL_KEY) -> anyhow::Result<()> {
-        let mut settings = crate::SETTINGS.get()
-            .ok_or_else(|| anyhow!("settings unavailable"))?
-            .blocking_write();
-        settings.arc_mut().bind_vks.insert(self.id.into(), new.0);
-        Ok(())
+        Settings::write_with_blocking(|settings|
+            settings.arc_mut().bind_vks.insert(self.id.into(), new.0)
+        ).map(drop)
     }
 }
 

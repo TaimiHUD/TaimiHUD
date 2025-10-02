@@ -4,7 +4,8 @@ use {
         render::{
             ConfigTabState, DataSourceTabState, InfoTabState, TimerTabState, TimerWindowState,
         },
-        ControllerEvent, Controller, SETTINGS,
+        settings::Settings,
+        ControllerEvent, Controller,
     },
     nexus::imgui::{Ui, Window},
     std::collections::HashMap,
@@ -43,7 +44,7 @@ impl PrimaryWindowState {
         state_errors: &mut HashMap<String, anyhow::Error>,
     ) {
         let mut open = self.open;
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             open = settings.primary_window_open;
         };
         if open {

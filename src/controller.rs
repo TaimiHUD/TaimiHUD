@@ -13,14 +13,17 @@ use {
         ACCOUNT_NAME_CELL,
     },
     arcdps::extras::{UserInfoOwned, UserRole},
-    tokio::task::JoinHandle,
+    tokio::{
+        task::JoinHandle,
+        time::timeout,
+    },
 };
 use {
     crate::{
         exports::runtime as rt,
         marker::format::{MarkerEntry, MarkerFiletype},
         render::TextFont,
-        settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsLock, SourcesFile},
+        settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
         timer::{CombatState, Position, TimerFile, TimerMachine},
         MumbleIdentityUpdate, RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
     },
@@ -60,7 +63,7 @@ use {
 #[cfg(all(feature = "markers", feature = "extension-nexus"))]
 use nexus::rtapi::GroupMemberOwned;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Controller {
     #[cfg(all(feature = "markers", feature = "extension-nexus"))]
     pub rtapi_squad: HashMap<String, GroupMemberOwned>,
@@ -88,6 +91,7 @@ pub struct Controller {
     pub sources_to_timers: HashMap<Arc<RemoteSource>, Vec<Arc<TimerFile>>>,
     pub map_id_to_timers: HashMap<u32, Vec<Arc<TimerFile>>>,
     settings: SettingsLock,
+    save_interval: tokio::time::Interval,
 }
 
 impl Controller {
@@ -100,13 +104,6 @@ impl Controller {
         rt_sender: Sender<crate::RenderEvent>,
         addon_dir: PathBuf,
     ) {
-        let mumble_link = match rt::mumble_link_ptr() {
-            Ok(p) => Some(p),
-            Err(e) => {
-                log::warn!("No MumbleLink? {e}");
-                None
-            },
-        };
         let evt_loop = async move {
             let sources = SourcesFile::load()
                 .await
@@ -141,6 +138,7 @@ impl Controller {
                 current_timers: Default::default(),
                 sources_to_timers: Default::default(),
                 map_id_to_timers: Default::default(),
+                save_interval: interval(Duration::from_secs(60 * 10)),
             };
             let _ = SETTINGS.set(state.settings.clone());
             let settings = SETTINGS.get().unwrap();
@@ -201,6 +199,9 @@ impl Controller {
                     _ = taimi_interval.tick() => {
                         let _ = state.tick().await;
                     },
+                    _ = state.save_interval.tick() => {
+                        state.commit_settings().await;
+                    },
                 }
             }
         };
@@ -233,10 +234,16 @@ impl Controller {
         Ok(())
     }*/
 
+    async fn settings_write(&self) -> tokio::sync::RwLockWriteGuard<Settings> {
+        let mut settings = self.settings.write().await;
+        settings.mark_dirty();
+        settings
+    }
+
     #[cfg(feature = "markers")]
     async fn open_marker_window(&self) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.set_window_state("markers", Some(true)).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.set_window_state("markers", Some(true));
         drop(settings_lock);
     }
 
@@ -538,6 +545,9 @@ impl Controller {
                     machine.update_on_map(new_map_id)
                 }
             }
+            if self.map_id != None {
+                self.commit_settings().await;
+            }
             self.map_id = Some(new_map_id);
         }
         self.cached_identity = Some(identity);
@@ -578,26 +588,26 @@ impl Controller {
     }
 
     async fn toggle_marker(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.toggle_marker(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.toggle_marker(id.to_string());
         drop(settings_lock);
     }
 
     async fn enable_marker(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.enable_marker(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.enable_marker(id.to_string());
         drop(settings_lock);
     }
 
     async fn disable_marker(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.disable_marker(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.disable_marker(id.to_string());
         drop(settings_lock);
     }
 
     async fn toggle_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        let disabled = settings_lock.toggle_timer(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        let disabled = settings_lock.toggle_timer(id.to_string());
         drop(settings_lock);
         match disabled {
             false => {
@@ -632,8 +642,8 @@ impl Controller {
     }
 
     async fn enable_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.enable_timer(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.enable_timer(id.to_string());
         drop(settings_lock);
         if let Some(map_id) = self.map_id {
             if let Some(timers_for_map) = &self.map_id_to_timers.get(&map_id) {
@@ -651,8 +661,8 @@ impl Controller {
     }
 
     async fn disable_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.disable_timer(id.to_string()).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.disable_timer(id.to_string());
         drop(settings_lock);
         let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
         for timer in timers_to_remove {
@@ -675,6 +685,36 @@ impl Controller {
             .rt_sender
             .send(RenderEvent::CheckingForUpdates(false))
             .await;
+    }
+
+    async fn save_settings(&mut self) {
+        // avoid holding on to the lock for too long...
+        let settings = self.settings.read().await.start_save().await;
+        self.save_settings_internal(settings).await
+    }
+
+    async fn save_settings_internal(&mut self, settings: anyhow::Result<SettingsSave>) {
+        // avoid holding on to the lock for too long...
+        let res = match settings {
+            Ok(settings) => Settings::save_to(&settings).await,
+            Err(e) => Err(e),
+        }.context("Saving settings");
+        match res {
+            Ok(()) =>
+                self.save_interval.reset(),
+            Err(e) =>
+                log::error!("{e:#}"),
+        }
+    }
+
+    async fn commit_settings(&mut self) {
+        let settings = match Settings::try_commit().await {
+            Ok(Some(settings)) => Ok(settings),
+            Ok(None) => return,
+            Err(e) => Err(e),
+        };
+
+        self.save_settings_internal(settings).await
     }
 
     async fn reload_data(&mut self) {
@@ -912,8 +952,8 @@ impl Controller {
     }
 
     async fn progress_bar_style(&mut self, style: ProgressBarStyleChange) {
-        let mut settings_lock = self.settings.write().await;
-        let settings = settings_lock.set_progress_bar(style).await;
+        let mut settings_lock = self.settings_write().await;
+        let settings = settings_lock.set_progress_bar(style);
         let _ = self
             .rt_sender
             .send(RenderEvent::ProgressBarUpdate(settings))
@@ -923,8 +963,8 @@ impl Controller {
     }
 
     async fn set_window_state(&mut self, window: String, state: Option<bool>) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.set_window_state(&window, state).await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.set_window_state(&window, state);
         drop(settings_lock);
     }
 
@@ -940,13 +980,13 @@ impl Controller {
         }
     }
     async fn toggle_katrender(&mut self) {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.toggle_katrender().await;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.toggle_katrender();
         drop(settings_lock);
     }
 
     async fn uninstall_addon(&mut self, source: &RemoteSource) -> anyhow::Result<()> {
-        let mut settings_lock = self.settings.write().await;
+        let mut settings_lock = self.settings_write().await;
         settings_lock.uninstall_remote(source).await?;
         drop(settings_lock);
         Ok(())
@@ -1020,10 +1060,10 @@ impl Controller {
         &mut self,
         maps: MarkerAutoPlaceSettings,
     ) -> anyhow::Result<()> {
-        let mut settings_lock = self.settings.write().await;
-        settings_lock.set_marker_autoplace_settings(&maps).await?;
-        self.marker_autoplace = Some(maps);
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.set_marker_autoplace_settings(&maps)?;
         drop(settings_lock);
+        self.marker_autoplace = Some(maps);
         Ok(())
     }
 
@@ -1115,7 +1155,7 @@ impl Controller {
 
     #[cfg(feature = "space")]
     async fn pathing_state_update(&mut self, path: String, state: bool) {
-        let mut settings_lock = self.settings.write().await;
+        let mut settings_lock = self.settings_write().await;
         crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
         drop(settings_lock);
 
@@ -1289,6 +1329,7 @@ impl Controller {
             #[cfg(feature = "markers")]
             ClearMarkers => self.clear_markers().await,
             ReloadData => self.reload_data().await,
+            SaveSettings => self.save_settings().await,
             ReloadTimers => self.reload_timers().await,
             #[cfg(feature = "markers")]
             MarkerAutoPlaceSettings(maps) => self.set_marker_autoplace_settings(maps).await?,
@@ -1326,7 +1367,21 @@ impl Controller {
             } => self.delete_marker(&path, category, idx).await?,
             #[cfg(feature = "markers-edit")]
             GetMarkerPaths => self.get_marker_paths().await?,
-            Quit => return Ok(false),
+            Quit => {
+                let settings = timeout(Duration::from_secs(2), self.settings.read()).await;
+                let save = match settings {
+                    Ok(s) if s.is_dirty() => {
+                        log::info!("Saving settings on exit...");
+                        s.save().await
+                    },
+                    Ok(_) => Ok(()),
+                    Err(..) => Err(anyhow!("Read timeout")),
+                }.context("Failed to save settings");
+                if let Err(e) = save {
+                    log::error!("{e:#}");
+                }
+                return Ok(false)
+            },
             UnloadAll => {
                 #[cfg(feature = "extension-arcdps")] {
                     use {
@@ -1460,6 +1515,7 @@ pub enum ControllerEvent {
     #[cfg(feature = "markers")]
     ReloadMarkers,
     ReloadData,
+    SaveSettings,
 
     #[cfg(feature = "markers")]
     #[strum(to_string = "Toggled {0}")]

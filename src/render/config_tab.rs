@@ -4,8 +4,8 @@ use {
         controller::ProgressBarStyleChange,
         fl,
         render::TextFont,
-        settings::{MarkerAutoPlaceSettings, SquadCondition},
-        ControllerEvent, Controller, SETTINGS,
+        settings::{MarkerAutoPlaceSettings, Settings, SquadCondition},
+        ControllerEvent, Controller,
     },
     nexus::imgui::{self, ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
@@ -41,7 +41,7 @@ impl ConfigTabState {
     }
 
     pub fn draw(&mut self, ui: &Ui, timer_window_state: &mut TimerWindowState) {
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             self.katrender = settings.enable_katrender;
         };
         ui.text_wrapped(&fl!("imgui-notice"));
@@ -52,7 +52,7 @@ impl ConfigTabState {
         self.draw_space(ui);
 
         let markers_window_closure = || {
-            if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+            if let Some(settings) = Settings::try_read() {
                 self.marker_autoplace = settings.marker_autoplace.clone();
                 self.marker_autoplace_inner = match &self.marker_autoplace {
                     MarkerAutoPlaceSettings::OpenWindow(t) => Some(t.clone()),
@@ -118,7 +118,7 @@ impl ConfigTabState {
         };
         let timers_window_closure = || {
             ui.dummy([4.0, 4.0]);
-            if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+            if let Some(settings) = Settings::try_read() {
                 timer_window_state.progress_bar.stock = settings.progress_bar.stock;
             };
             if ui.checkbox(
@@ -407,7 +407,8 @@ impl ConfigTabState {
                     //RenderState::font_text("ui", ui, "Goggles");
                     if let Some(Some(value)) = Self::slider_setting(ui, "goggles near", _near, (0.15, 1.2)) {
                         Self::set_pathing(|s| {
-                            let e = s.space.goggles.map_depth_calibration.entry(map_id)
+                            let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
+                            let e = map_depth_calibration.entry(map_id)
                                 .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                             let prev = e.0;
                             e.0 = value / space::MIN_DEPTH;
@@ -420,7 +421,8 @@ impl ConfigTabState {
                     }
                     if let Some(Some(value)) = Self::slider_setting(ui, "goggles far", _far, (500.0, 2500.0)) {
                         Self::set_pathing(|s| {
-                            let e = s.space.goggles.map_depth_calibration.entry(map_id)
+                            let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
+                            let e = map_depth_calibration.entry(map_id)
                                 .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                             e.1 = value / space::MAX_DEPTH;
                             space::set_max_depth(value);
@@ -428,7 +430,8 @@ impl ConfigTabState {
                     }
                     if ui.button("goggles distance reset") {
                         Self::set_pathing(|s| {
-                            s.space.goggles.map_depth_calibration.remove(&map_id);
+                            let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
+                            map_depth_calibration.remove(&map_id);
                             space::set_max_depth(space::MAX_DEPTH);
                             space::set_min_depth(space::MIN_DEPTH);
                         });

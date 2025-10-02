@@ -2,7 +2,8 @@ use {
     crate::{
         fl,
         marker::format::MarkerSet,
-        ControllerEvent, Controller, SETTINGS,
+        settings::Settings,
+        ControllerEvent, Controller,
     },
     nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::sync::Arc,
@@ -27,7 +28,7 @@ impl MarkerWindowState {
 
     pub fn draw(&mut self, ui: &Ui) {
         let mut open = self.open;
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             open = settings.markers_window_open;
         };
         if open {
