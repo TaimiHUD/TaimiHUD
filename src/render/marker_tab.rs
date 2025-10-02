@@ -54,7 +54,7 @@ impl MarkerTabState {
     }
     fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
         let markers_dir = crate::ADDON_DIR.join("markers");
-        let markers_dir = markers_dir.to_string_lossy().to_string();
+        let markers_dir = markers_dir.to_string_lossy();
         RenderState::draw_open_button(
             state_errors,
             ui,

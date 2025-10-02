@@ -236,7 +236,7 @@ impl EditMarkerWindowState {
         let prev = mem::replace(self, Self::new());
         let markers = IndividualMarkerState::from_marker_entries(ms.markers);
         let path = if let Some(path) = ms.path {
-            Some(path.to_string_lossy().to_string())
+            Some(path.to_string_lossy().into())
         } else {
             None
         };

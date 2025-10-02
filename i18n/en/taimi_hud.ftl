@@ -99,7 +99,7 @@ autoplace-warning = If you do not have RTAPI installed, we will not be able to d
 primary-window = TaimiHUD
 timer-window = Encounter Timers
 marker-window = Squad Markers
-pathing-window = Pathing
+pathing-window = Pathing Packs
 
 ## Modals
 
@@ -155,6 +155,7 @@ textures = Textures: { $count }
 
 reload-markers = Reload { markers }
 marker-tab = { marker-window }
+pathing-tab = { pathing-config }
 marker = Marker
 markers = { marker }s
 markers-place = Place { markers }
@@ -229,6 +230,7 @@ ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
 toggle = Toggle
 pathing-config = Pathing Options
+pathing-config-enable = KatRender Pathing (Experimental)
 pathing-config-minimap = Minimap Options
 pathing-config-worldmap = Map Options
 pathing-config-trail-alpha = Opacity
@@ -250,6 +252,6 @@ pathing-config-textured = Textured trails
 pathing-config-textured-minimap = Textured trails
 pathing-config-textured-worldmap = Textured trails
 pathing-config-camera-source = Camera Data Source
-pathing-config-goggles = Goggles
+pathing-config-goggles = X-ray Goggles
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API

@@ -15,6 +15,8 @@ pub mod timer_tab;
 pub mod timer_window;
 #[cfg(feature = "space")]
 pub mod pathing_window;
+#[cfg(feature = "space")]
+pub mod pathing_tab;
 
 #[cfg(feature = "markers")]
 pub mod marker_window;
@@ -30,7 +32,10 @@ pub use {
     timer_window::TimerWindowState,
 };
 #[cfg(feature = "space")]
-pub use pathing_window::PathingWindowState;
+pub use self::{
+    pathing_window::PathingWindowState,
+    pathing_tab::PathingConfig,
+};
 #[cfg(feature = "extension-arcdps")]
 pub use arc::ArcRenderState;
 

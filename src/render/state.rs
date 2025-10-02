@@ -287,7 +287,7 @@ impl RenderState {
         }
     }
 
-    pub fn font_text(font: &str, ui: &Ui, text: &str) {
+    pub fn push_font<'a>(font: &str, ui: &'a Ui) -> Option<nexus::imgui::FontStackToken<'a>> {
         let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
             #[cfg(feature = "extension-nexus")]
             "big" => Some(nexus_link.font_big),
@@ -297,7 +297,10 @@ impl RenderState {
             "font" => Some(nexus_link.font),
             _ => None,
         }).and_then(|font| unsafe { Self::font_from_raw(font) });
-        let font_handle = imfont_pointer.map(|font| ui.push_font(font.id()));
+        imfont_pointer.map(|font| ui.push_font(font.id()))
+    }
+    pub fn font_text(font: &str, ui: &Ui, text: &str) {
+        let font_handle = Self::push_font(font, ui);
         ui.text_wrapped(text);
         drop(font_handle);
     }
@@ -309,16 +312,7 @@ impl RenderState {
         shadow: bool,
         text: &str,
     ) {
-        let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
-            #[cfg(feature = "extension-nexus")]
-            "big" => Some(nexus_link.font_big),
-            #[cfg(feature = "extension-nexus")]
-            "ui" => Some(nexus_link.font_ui),
-            #[cfg(feature = "extension-nexus")]
-            "font" => Some(nexus_link.font),
-            _ => None,
-        }).and_then(|font| unsafe { Self::font_from_raw(font) });
-        let font_handle = imfont_pointer.map(|font| ui.push_font(font.id()));
+        let font_handle = Self::push_font(font, ui);
         let text_size = Vec2::from(ui.calc_text_size(text));
         let cursor_pos =
             Alignment::get_position(Alignment::CENTRE_MIDDLE, position, bounding_size, text_size);

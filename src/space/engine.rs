@@ -361,16 +361,18 @@ impl Engine {
         let (
             visible_space,
             _camera_source,
-            (edge_scale, edge_feather_scale, _obscured_alpha),
+            edge_feather_scale,
+            (edge_scale, _obscured_alpha),
         ) = self.map_settings(|s| (
             (
                 s.space.visible_space().then_some(s.space.distance_max()),
                 s.space.camera_source(),
+                s.space.edge_feather_scale(),
                 match () {
                     #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.edge_scale(), s.space.goggles.edge_feather_scale(), s.space.goggles.obscured_alpha()),
+                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
                     #[cfg(not(feature = "goggles"))]
-                    _ => (None, None, ()),
+                    _ => (None::<f32>, ()),
                 },
             )
         ));
