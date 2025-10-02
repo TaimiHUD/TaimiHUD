@@ -3,8 +3,8 @@ use {
         controller::ControllerEvent,
         fl,
         render::RenderState,
-        settings::{NeedsUpdate, RemoteState, Source},
-        Controller, SETTINGS,
+        settings::{NeedsUpdate, RemoteState, Settings, Source},
+        Controller,
     },
     nexus::imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},
     std::collections::HashMap,
@@ -60,7 +60,7 @@ impl DataSourceTabState {
     }
 
     pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             if self.checking_for_updates {
                 ui.text(fl!("checking-for-updates"))
             } else {

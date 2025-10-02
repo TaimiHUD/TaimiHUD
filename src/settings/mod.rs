@@ -12,7 +12,8 @@ pub use {
     pathing::PathingSettings,
     progress_bar_config::ProgressBarSettings,
     settings_struct::{
-        MarkerAutoPlaceSettings, MarkerSettings, NeedsUpdate, Settings, SettingsLock,
+        MarkerAutoPlaceSettings, MarkerSettings, NeedsUpdate,
+        Settings, SettingsLock, SettingsSave,
         SquadCondition,
     },
     source::{GitHubSource, GitHubLatestRelease, RemoteSource, Source},

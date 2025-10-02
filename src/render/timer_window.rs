@@ -3,9 +3,9 @@ use {
     crate::{
         control_window,
         fl,
-        settings::ProgressBarSettings,
+        settings::{ProgressBarSettings, Settings},
         timer::{PhaseState, TimerAlert, TimerFile},
-        ControllerEvent, Controller, SETTINGS,
+        ControllerEvent, Controller,
     },
     glam::Vec2,
     nexus::imgui::{ProgressBar, StyleColor, Ui, Window},
@@ -29,7 +29,7 @@ impl TimerWindowState {
 
     pub fn draw(&mut self, ui: &Ui) {
         let mut open = self.open;
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             open = settings.timers_window_open;
             self.progress_bar = settings.progress_bar.clone();
         };

@@ -1,5 +1,5 @@
 use {
-    crate::{engine_mut, fl, space::pack::ActivePack, ControllerEvent, Controller, SETTINGS},
+    crate::{engine_mut, fl, space::pack::ActivePack, settings::Settings, ControllerEvent, Controller},
     bitflags::bitflags,
     indexmap::IndexMap,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
@@ -145,7 +145,7 @@ impl PathingWindowState {
 
     pub fn draw(&mut self, ui: &Ui) {
         let mut open = self.open;
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             open = settings.pathing_window_open;
         };
         if open {

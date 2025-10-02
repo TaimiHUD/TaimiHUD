@@ -4,9 +4,9 @@ use {
         controller::{ControllerEvent, Controller},
         fl,
         render::RenderState,
-        settings::{RemoteSource, TimerSettings},
+        settings::{RemoteSource, Settings, TimerSettings},
         timer::TimerFile,
-        SETTINGS, TIMERS_DIR,
+        TIMERS_DIR,
     },
     glam::Vec2,
     indexmap::IndexMap,
@@ -160,7 +160,7 @@ impl TimerTabState {
         {
             selected = true;
         }
-        if let Some(settings) = SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        if let Some(settings) = Settings::try_read() {
             let settings_for_timer = settings.timers.get(&timer.id);
             ui.same_line();
             let (color, text) = match settings_for_timer {
@@ -243,9 +243,7 @@ impl TimerTabState {
                     ui.dummy([4.0; 2]);
                     ui.separator();
                     ui.dummy([4.0; 2]);
-                    if let Some(settings) =
-                        SETTINGS.get().and_then(|settings| settings.try_read().ok())
-                    {
+                    if let Some(settings) = Settings::try_read() {
                         let settings_for_timer = settings.timers.get(&selected_timer.id);
                         let button_text = match settings_for_timer {
                             Some(TimerSettings { disabled: true, .. }) => &fl!("enable"),

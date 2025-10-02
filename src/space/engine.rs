@@ -122,7 +122,8 @@ pub struct Engine {
 
     pub packs: PackCollection,
 
-    pub settings: Option<PathingSettings>,
+    settings: Option<PathingSettings>,
+    settings_dirty: bool,
 }
 
 impl Engine {
@@ -192,6 +193,7 @@ impl Engine {
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
+            settings_dirty: false,
         };
 
         #[cfg(feature = "space-ecs")]
@@ -793,6 +795,7 @@ impl Engine {
                 self.packs.draw(&pdata, context, &self.render_backend, &device_context);
             }
         }
+
         #[cfg(feature = "goggles")]
         match self.goggles_select_lens_delay {
             _ if is_gameplay != Some(true) => (),
@@ -806,6 +809,19 @@ impl Engine {
             },
             _ => (),
         }
+
+        match self.settings_dirty.then(Settings::try_write) {
+            Some(Some(mut settings)) => {
+                if let Some(pathing) = &self.settings {
+                    settings.pathing_mut().space = pathing.space.clone();
+                }
+                self.settings_dirty = false;
+            },
+            Some(None) =>
+                log::debug!("settings unavailable for saving"),
+            _ => (),
+        }
+
         Ok(())
     }
 
@@ -933,12 +949,7 @@ impl Engine {
             _ => Ok({
                 let res = f(s);
 
-                if let Some(mut settings) = Settings::try_write() {
-                    // TODO: copy over everything properly
-                    settings.pathing_mut().space = s.space.clone();
-                } else {
-                    log::warn!("settings unavailable for saving");
-                }
+                self.settings_dirty = true;
                 res
             }),
         }

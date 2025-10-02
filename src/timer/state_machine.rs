@@ -2,6 +2,7 @@ use {
     super::TimerMarker,
     crate::{
         render::{RenderEvent, RenderState},
+        settings::Settings,
         timer::{CombatState, Position, TimerAlert, TimerFile, TimerPhase},
     },
     bitflags::bitflags,
@@ -43,7 +44,7 @@ impl EventMapper {
 
     #[cfg(feature = "space")]
     async fn send_space(&self) {
-        match crate::SETTINGS.get().and_then(|settings| settings.try_read().ok()) {
+        match Settings::try_read() {
             Some(settings) if settings.enable_katrender =>
                 (),
             _ => return,

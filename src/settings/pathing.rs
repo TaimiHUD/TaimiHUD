@@ -1,6 +1,6 @@
 use {
     crate::settings::Settings,
-    std::{collections::BTreeMap, fmt},
+    std::{collections::BTreeMap, fmt, sync::Arc},
     strum::{VariantArray, IntoStaticStr},
     serde::{Serialize, Deserialize},
     taimi_meta::coords::CurrentPerspective as MapContext,
@@ -299,7 +299,7 @@ pub struct GogglesSettings {
     pub edge_feather_scale: Option<f32>,
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub map_depth_calibration: BTreeMap<u32, (f32, f32)>,
+    pub map_depth_calibration: Arc<BTreeMap<u32, (f32, f32)>>,
 }
 
 impl GogglesSettings {
@@ -348,5 +348,9 @@ impl GogglesSettings {
             .get(&map_id)
             .copied()
             .unwrap_or(Self::DEFAULT_DEPTH_CALIBRATION)
+    }
+
+    pub fn map_depth_calibration_mut(&mut self) -> &mut BTreeMap<u32, (f32, f32)> {
+        Arc::make_mut(&mut self.map_depth_calibration)
     }
 }
