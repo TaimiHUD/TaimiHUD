@@ -267,6 +267,10 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
 }
 
 pub async fn invoke_marker_bind(marker: MarkerType, target: bool, duration: Duration, position: Option<MousePosition>) -> RuntimeResult<()> {
+    if let Ok(false) = mumble_link_ptr().map(|ml| ml.read_ui_state().contains(UiState::GAME_HAS_FOCUS)) {
+        return Err("Game unfocused")
+    }
+
     press_marker_bind(marker, target, true, position).await?;
 
     tokio::time::sleep(duration).await;
