@@ -13,6 +13,8 @@ use {
 
 #[cfg(feature = "markers")]
 use super::MarkerTabState;
+#[cfg(feature = "markers")]
+use super::PathingConfig;
 
 pub struct PrimaryWindowState {
     pub config_tab: ConfigTabState,
@@ -21,6 +23,8 @@ pub struct PrimaryWindowState {
     pub info_tab: InfoTabState,
     #[cfg(feature = "markers")]
     pub marker_tab: MarkerTabState,
+    #[cfg(feature = "space")]
+    pub pathing_tab: PathingConfig,
     open: bool,
 }
 
@@ -33,6 +37,8 @@ impl PrimaryWindowState {
             info_tab: InfoTabState::new(),
             #[cfg(feature = "markers")]
             marker_tab: MarkerTabState::new(),
+            #[cfg(feature = "space")]
+            pathing_tab: PathingConfig::new(),
             open: false,
         }
     }
@@ -57,10 +63,12 @@ impl PrimaryWindowState {
                             self.timer_tab.draw(ui, state_errors);
                         };
                         #[cfg(feature = "markers")]
-                        {
-                            if let Some(_token) = ui.tab_item(&fl!("marker-tab")) {
-                                self.marker_tab.draw(ui, state_errors);
-                            }
+                        if let Some(_token) = ui.tab_item(&fl!("marker-tab")) {
+                            self.marker_tab.draw(ui, state_errors);
+                        }
+                        #[cfg(feature = "space")]
+                        if let Some(_token) = ui.tab_item(&fl!("pathing-tab")) {
+                            self.pathing_tab.draw(ui, state_errors);
                         }
                         if let Some(_token) = ui.tab_item(&fl!("data-sources-tab")) {
                             self.data_sources_tab.draw(ui, state_errors);

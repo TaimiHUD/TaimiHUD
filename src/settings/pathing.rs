@@ -53,6 +53,8 @@ pub struct SpaceSettings {
     pub distance_fade_intensity: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_overlap_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge_feather_scale: Option<f32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trail_alpha: Option<f32>,
@@ -101,6 +103,7 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_MAP_ALPHA: f32 = Self::DEFAULT_TRAIL_ALPHA;
     pub const DEFAULT_DISTANCE_FADE_INTENSITY: f32 = 84.0;
     pub const DEFAULT_PLAYER_OVERLAP_THRESHOLD: f32 = 38.0;
+    pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(1.0f32);
 
     pub const NONE_F32: f32 = f32::MIN;
 
@@ -119,6 +122,7 @@ impl SpaceSettings {
                 visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP), visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
                 distance_max: None,
                 distance_fade_intensity: None, player_overlap_threshold: None,
+                edge_feather_scale: None | Self::DEFAULT_EDGE_FEATHER_SCALE,
                 trail_alpha: None,
                 poi_alpha: None,
                 trail_textured_space: None | Some(Self::DEFAULT_TRAIL_TEXTURED),
@@ -184,6 +188,11 @@ impl SpaceSettings {
         self.player_overlap_threshold
             .map(Self::optional_f32)
             .unwrap_or(Some(Self::DEFAULT_PLAYER_OVERLAP_THRESHOLD))
+    }
+    pub fn edge_feather_scale(&self) -> Option<f32> {
+        self.edge_feather_scale
+            .map(SpaceSettings::optional_f32)
+            .unwrap_or(Self::DEFAULT_EDGE_FEATHER_SCALE)
     }
 
     pub fn trail_alpha(&self) -> f32 {
@@ -295,8 +304,6 @@ pub struct GogglesSettings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_scale: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_feather_scale: Option<f32>,
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub map_depth_calibration: Arc<BTreeMap<u32, (f32, f32)>>,
@@ -307,7 +314,6 @@ impl GogglesSettings {
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
     pub const DEFAULT_EDGE_SCALE: Option<f32> = Some(0.5f32);
-    pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(1.0f32);
 
     pub fn is_empty(&self) -> bool {
         match self {
@@ -315,7 +321,6 @@ impl GogglesSettings {
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 obscured_alpha: None,
                 edge_scale: None | Self::DEFAULT_EDGE_SCALE,
-                edge_feather_scale: None | Self::DEFAULT_EDGE_FEATHER_SCALE,
                 map_depth_calibration,
             } if map_depth_calibration.is_empty() =>
                 true,
@@ -335,12 +340,6 @@ impl GogglesSettings {
         self.edge_scale
             .map(SpaceSettings::optional_f32)
             .unwrap_or(Self::DEFAULT_EDGE_SCALE)
-    }
-
-    pub fn edge_feather_scale(&self) -> Option<f32> {
-        self.edge_feather_scale
-            .map(SpaceSettings::optional_f32)
-            .unwrap_or(Self::DEFAULT_EDGE_FEATHER_SCALE)
     }
 
     pub fn map_depth_calibration(&self, map_id: u32) -> (f32, f32) {

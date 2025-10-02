@@ -1,5 +1,13 @@
 use {
-    crate::{engine_mut, fl, space::pack::ActivePack, settings::Settings, ControllerEvent, Controller},
+    crate::{
+        fl,
+        exports::runtime as rt,
+        render::{PathingConfig, RenderState},
+        space::pack::ActivePack,
+        settings::Settings,
+        ControllerEvent,
+        Controller,
+    },
     bitflags::bitflags,
     indexmap::IndexMap,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
@@ -144,6 +152,7 @@ impl PathingWindowState {
     }
 
     pub fn draw(&mut self, ui: &Ui) {
+        let mut state_errors = Default::default();
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
             open = settings.pathing_window_open;
@@ -153,7 +162,14 @@ impl PathingWindowState {
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {
-                    let rendered = engine_mut(|engine| {
+                    let pathing_dir = crate::ADDON_DIR.join("pathing");
+                    RenderState::draw_open_button(&mut state_errors,
+                        ui,
+                        fl!("open-button", kind = "folder"),
+                        pathing_dir.to_string_lossy(),
+                    );
+                    let rendered = crate::engine_mut(|engine| {
+                                        ui.same_line();
                                         let button_text = match self.filter_open {
                                             true => fl!("hide-filter"),
                                             false => fl!("show-filter"),
@@ -199,6 +215,7 @@ impl PathingWindowState {
                                             if ui.is_item_hovered() {
                                                 ui.tooltip_text(fl!("searchbar-clear"));
                                             }
+                                            ui.same_line();
                                             ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
                                             ui.same_line();
                                             ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
@@ -265,7 +282,7 @@ impl PathingWindowState {
                                     });
                     });
                     if rendered.is_none() {
-                        ui.text(fl!("disabled"));
+                        PathingConfig::draw_space_error(ui, None);
                     }
                 });
         }
