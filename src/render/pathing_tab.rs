@@ -13,13 +13,15 @@ use {
             },
             Settings,
         },
-        RenderEvent, Controller,
+        Controller,
         LANGUAGE_LOADER,
     },
     nexus::imgui::{
         self,
-        Condition, ComboBox, Selectable, Slider, TreeNode,
+        ChildWindow, Condition, ComboBox,
+        Selectable, Slider, TreeNode,
         TreeNodeFlags, Ui,
+        WindowFlags,
     },
     std::collections::HashMap,
     strum::VariantArray,
@@ -27,12 +29,14 @@ use {
 
 pub struct PathingConfig {
     katrender: bool,
+    initial: bool,
 }
 
 impl PathingConfig {
     pub fn new() -> Self {
         Self {
             katrender: false,
+            initial: true,
         }
     }
 
@@ -40,24 +44,48 @@ impl PathingConfig {
         if let Some(settings) = Settings::try_read() {
             self.katrender = settings.enable_katrender;
         };
-        self.draw_header(ui);
+
+        let [width, _height] = ui.content_region_max();
 
         ui.columns(2, "pathing_tab_start", true);
-        if let None = self.draw_map_opts(ui) {
-            Self::draw_space_error(ui, None);
-            return
+        if self.initial {
+            ui.set_column_width(0, width * 0.65);
+            self.initial = false;
         }
+
+        self.draw_header(ui);
+
+        let opts_primary = || {
+            let active = self.draw_pathing_opts(ui);
+            if let None = active {
+                Self::draw_space_error(ui, None);
+            }
+            active
+        };
+
+        let child_window_flags = WindowFlags::HORIZONTAL_SCROLLBAR;
+        let active = ChildWindow::new("pathing_main")
+            .flags(child_window_flags)
+            .size([0.0, 0.0])
+            .build(ui, opts_primary);
 
         ui.next_column();
 
-        self.draw_pathing_opts(ui);
+        let opts_secondary = || if let Some(Some(..)) = active {
+            self.draw_map_opts(ui);
 
-        #[cfg(feature = "goggles")]
-        let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
-            .flags(TreeNodeFlags::FRAMED)
-            .opened(true, Condition::Once)
-            .tree_push_on_open(true)
-            .build(ui, || Self::draw_goggles_opts(ui));
+            #[cfg(feature = "goggles")]
+            let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
+                .flags(TreeNodeFlags::FRAMED)
+                .opened(true, Condition::Once)
+                .tree_push_on_open(true)
+                .build(ui, || Self::draw_goggles_opts(ui));
+        };
+
+        ChildWindow::new("pathing_secondary")
+            .flags(child_window_flags)
+            .size([0.0, 0.0])
+            .build(ui, opts_secondary);
 
         ui.columns(1, "pathing_tab_end", false)
     }
@@ -117,7 +145,6 @@ impl PathingConfig {
 
             if self.katrender {
                 ui.same_line();
-                //let label = ;
                 let label = fl!("pathing-window");
                 if ui.button(&label) {
                     crate::control_window(crate::WINDOW_PATHING, None);
@@ -126,12 +153,13 @@ impl PathingConfig {
         }
 
         if self.katrender {
-            ui.same_line();
             if ui.button("Unload Render") {
-                Settings::write_with_blocking(|settings| {
+                let _disabled = Settings::write_with_blocking(|settings| {
                     settings.enable_katrender = false;
                 });
-                crate::reload_render(false);
+                if _disabled.is_ok() {
+                    crate::reload_render(false);
+                }
             }
 
             ui.same_line();
