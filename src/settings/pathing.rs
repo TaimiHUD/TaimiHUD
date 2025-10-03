@@ -103,7 +103,7 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_MAP_ALPHA: f32 = Self::DEFAULT_TRAIL_ALPHA;
     pub const DEFAULT_DISTANCE_FADE_INTENSITY: f32 = 84.0;
     pub const DEFAULT_PLAYER_OVERLAP_THRESHOLD: f32 = 38.0;
-    pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(1.0f32);
+    pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(0.8f32);
 
     pub const NONE_F32: f32 = f32::MIN;
 
