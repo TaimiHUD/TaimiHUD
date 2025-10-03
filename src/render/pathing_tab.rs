@@ -222,9 +222,12 @@ impl PathingConfig {
         let _token = ui.push_id(label);
         let res = if let Some(value) = value {
             let res = Self::slider_setting(ui, label, value, range);
-            ui.same_line();
             res
-        } else { None };
+        } else {
+            ui.label_text(label, &fl!("disabled"));
+            None
+        };
+        ui.same_line();
         if ui.checkbox("enable", &mut enabled) {
             return Some(match enabled {
                 false => Some(SpaceSettings::NONE_F32),
