@@ -29,14 +29,12 @@ use {
 
 pub struct PathingConfig {
     katrender: bool,
-    initial: bool,
 }
 
 impl PathingConfig {
     pub fn new() -> Self {
         Self {
             katrender: false,
-            initial: true,
         }
     }
 
@@ -45,13 +43,7 @@ impl PathingConfig {
             self.katrender = settings.enable_katrender;
         };
 
-        let [width, _height] = ui.content_region_max();
-
         ui.columns(2, "pathing_tab_start", true);
-        if self.initial {
-            ui.set_column_width(0, width * 0.65);
-            self.initial = false;
-        }
 
         self.draw_header(ui);
 
@@ -59,7 +51,14 @@ impl PathingConfig {
             let active = self.draw_pathing_opts(ui);
             if let None = active {
                 Self::draw_space_error(ui, None);
+            } else if self.katrender {
+                ui.separator();
+                let label = fl!("pathing-window");
+                if ui.button(&label) {
+                    crate::control_window(crate::WINDOW_PATHING, None);
+                }
             }
+
             active
         };
 
@@ -83,7 +82,6 @@ impl PathingConfig {
         };
 
         ChildWindow::new("pathing_secondary")
-            .flags(child_window_flags)
             .size([0.0, 0.0])
             .build(ui, opts_secondary);
 
@@ -141,18 +139,11 @@ impl PathingConfig {
             let _font = (!self.katrender).then(|| RenderState::push_font("big", ui));
             if ui.checkbox(&fl!("pathing-config-enable"), &mut self.katrender) {
                 Controller::try_send(ControllerEvent::ToggleKatRender);
-            };
-
-            if self.katrender {
-                ui.same_line();
-                let label = fl!("pathing-window");
-                if ui.button(&label) {
-                    crate::control_window(crate::WINDOW_PATHING, None);
-                }
             }
         }
 
         if self.katrender {
+            ui.same_line();
             if ui.button("Unload Render") {
                 let _disabled = Settings::write_with_blocking(|settings| {
                     settings.enable_katrender = false;
@@ -228,7 +219,7 @@ impl PathingConfig {
             None
         };
         ui.same_line();
-        if ui.checkbox("enable", &mut enabled) {
+        if ui.checkbox("", &mut enabled) {
             return Some(match enabled {
                 false => Some(SpaceSettings::NONE_F32),
                 true => None,
@@ -464,7 +455,6 @@ impl PathingConfig {
             )
         }))).flatten()?;
 
-
         let (mut enabled, needs_setup) = render_goggles::get_state();
         if ui.checkbox(&fl!("enable"), &mut enabled) {
             Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));
@@ -487,7 +477,7 @@ impl PathingConfig {
             ui.text_wrapped(concat!(
                 "Try sliding it down until paths disappear under the ground, then back off a bit.",
                 "\n(the sweet spot is usually when you can see the path but grass is slightly covering it)",
-                "\nif you see flickering/z-fighting during movement, back off a little more",
+                "\nif you see flickering/z-fighting during movement, back off a little more or tweak far",
             ));
         }
 
