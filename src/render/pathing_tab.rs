@@ -344,7 +344,7 @@ impl PathingConfig {
         }
         #[cfg(feature = "extension-nexus")]
         match camera_source {
-            CameraSource::MumbleLink => ui.text_disabled(
+            CameraSource::MumbleLink => ui.text_wrapped(
                 "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
             ),
             CameraSource::RealTimeAPI => {
@@ -353,7 +353,7 @@ impl PathingConfig {
                         "RTAPI is a separate addon that must be installed via Nexus"
                     );
                 }
-                ui.text_disabled(
+                ui.text_wrapped(
                     "if you experience stuttering, try changing Vertical Sync or switching to MumbleLink",
                 );
             },

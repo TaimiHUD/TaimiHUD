@@ -55,13 +55,13 @@ impl TimerFile {
         path: &PathBuf,
         source: Option<Arc<RemoteSource>>,
     ) -> anyhow::Result<Arc<Self>> {
-        log::debug!("Attempting to load the timer file at \"{path:?}\".");
+        log::trace!("Attempting to load the timer file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let mut data: Self = serde_json::from_str(&file_data)?;
         data.path = Some(path.to_path_buf());
         data.association = source;
-        log::debug!("Successfully loaded the timer file at \"{path:?}\".");
+        log::trace!("Successfully loaded the timer file at \"{path:?}\".");
         Ok(Arc::new(data))
     }
 
