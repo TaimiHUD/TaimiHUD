@@ -374,7 +374,7 @@ impl Controller {
                 None => "unassociated".to_string(),
             };
             // Handle id to timer file allocation
-            log::info!(
+            log::trace!(
                 "Set up {4} {0}: {3} for map {1}, category {2}",
                 timer.id,
                 timer.name.replace("\n", " "),

@@ -39,10 +39,10 @@ impl StateFile {
 
     pub async fn load() -> anyhow::Result<Self> {
         let state_path = ADDON_DIR.join("state.toml");
-        log::debug!("Attempting to load the state file at \"{state_path:?}\".");
+        log::trace!("Attempting to load the state file at \"{state_path:?}\".");
         let file_data = read_to_string(&state_path).await?;
         let data: Self = toml::from_str(&file_data)?;
-        log::debug!("Loaded the state file at \"{state_path:?}\".");
+        log::trace!("Loaded the state file at \"{state_path:?}\".");
         Ok(data)
     }
     pub async fn save(&self) -> anyhow::Result<()> {

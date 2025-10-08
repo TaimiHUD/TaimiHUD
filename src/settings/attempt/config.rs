@@ -27,7 +27,7 @@ pub struct ConfigV2 {
 impl ConfigV2 {
     pub async fn load() -> anyhow::Result<Self> {
         let config_path = ADDON_DIR.join("config.toml");
-        log::debug!("Attempting to load the config file at \"{config_path:?}\".");
+        log::trace!("Attempting to load the config file at \"{config_path:?}\".");
         let mut file_data = read_to_string(config_path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let data: Self = toml::from_str(&file_data)?;

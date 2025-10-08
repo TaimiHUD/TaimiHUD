@@ -119,7 +119,7 @@ impl RuntimeMarkers {
         Ok(marker_files)
     }
     pub async fn load_arcless(path: &PathBuf) -> anyhow::Result<Self> {
-        log::debug!("Attempting to load the markers file at \"{path:?}\".");
+        log::trace!("Attempting to load the markers file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let format: MarkerFormats = serde_json::from_str(&file_data)?;
@@ -127,7 +127,7 @@ impl RuntimeMarkers {
             file: format,
             path: Some(path.to_path_buf()),
         };
-        log::debug!("Successfully loaded the markers file at \"{path:?}\".");
+        log::trace!("Successfully loaded the markers file at \"{path:?}\".");
         Ok(data)
     }
 

@@ -252,6 +252,6 @@ pathing-config-textured = Textured trails
 pathing-config-textured-minimap = Textured trails
 pathing-config-textured-worldmap = Textured trails
 pathing-config-camera-source = Camera Data Source
-pathing-config-goggles = X-ray Goggles
+pathing-config-goggles = X-ray Goggles Experiment
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API

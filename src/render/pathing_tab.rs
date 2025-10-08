@@ -344,7 +344,7 @@ impl PathingConfig {
         }
         #[cfg(feature = "extension-nexus")]
         match camera_source {
-            CameraSource::MumbleLink => ui.text_disabled(
+            CameraSource::MumbleLink => ui.text_wrapped(
                 "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
             ),
             CameraSource::RealTimeAPI => {
