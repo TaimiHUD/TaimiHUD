@@ -354,7 +354,7 @@ impl PathingConfig {
                         "RTAPI is a separate addon that must be installed via Nexus"
                     );
                 }
-                ui.text_disabled(
+                ui.text_wrapped(
                     "if you experience stuttering, try changing Vertical Sync or switching to MumbleLink",
                 );
             },
