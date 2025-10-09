@@ -637,6 +637,18 @@ impl Controller {
         self.save_settings_internal(settings).await
     }
 
+    async fn save_on_quit(&self) -> anyhow::Result<()> {
+        let settings = timeout(Duration::from_secs(2), self.settings.read()).await;
+        match settings {
+            Ok(s) if s.is_dirty() => {
+                log::info!("Saving settings on exit...");
+                s.save().await
+            },
+            Ok(_) => Ok(()),
+            Err(..) => Err(anyhow!("Read timeout")),
+        }.context("Failed to save settings")
+    }
+
     async fn save_settings_internal(&mut self, settings: anyhow::Result<SettingsSave>) {
         // avoid holding on to the lock for too long...
         let res = match settings {
@@ -1322,21 +1334,15 @@ impl Controller {
                 trans,
             } => self.handle_map_event(gameplay, trans).await,
             Quit => {
-                let settings = timeout(Duration::from_secs(2), self.settings.read()).await;
-                let save = match settings {
-                    Ok(s) if s.is_dirty() => {
-                        log::info!("Saving settings on exit...");
-                        s.save().await
-                    },
-                    Ok(_) => Ok(()),
-                    Err(..) => Err(anyhow!("Read timeout")),
-                }.context("Failed to save settings");
-                if let Err(e) = save {
+                if let Err(e) = self.save_on_quit().await {
                     log::error!("{e:#}");
                 }
                 return Ok(false)
             },
             UnloadAll => {
+                if let Err(e) = self.save_on_quit().await {
+                    log::error!("{e:#}");
+                }
                 #[cfg(feature = "extension-arcdps")] {
                     use {
                         crate::exports::arcdps as exports,
