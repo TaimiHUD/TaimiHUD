@@ -149,7 +149,7 @@ pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
     Ok(NonNull::new(get_nexus_link() as *mut NexusLink))
 }
 
-const MOUSE_MOVE_DELAY: Duration = Duration::from_millis(100); // 50 too low?
+const MOUSE_MOVE_DELAY: Duration = Duration::from_millis(60); // 50 too low?
 pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
