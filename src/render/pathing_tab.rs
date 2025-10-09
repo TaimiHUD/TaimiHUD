@@ -475,6 +475,7 @@ impl PathingConfig {
                     }
                 },
                 false => {
+                    log::info!("Goggles setup: disabling...");
                     render_goggles::disable();
                 },
             }
