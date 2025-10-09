@@ -360,8 +360,8 @@ fn init() -> Result<(), &'static str> {
         }
     }
 
-    let (controller_sender, controller_receiver) = channel::<ControllerEvent>(32);
-    let (render_sender, render_receiver) = channel::<RenderEvent>(32);
+    let (controller_sender, controller_receiver) = channel::<ControllerEvent>(64);
+    let (render_sender, render_receiver) = channel::<RenderEvent>(48);
 
     let controller_handler = {
         let render_sender = render_sender.clone();
