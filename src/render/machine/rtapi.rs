@@ -17,7 +17,7 @@ pub struct RenderStateRtapi {
     #[cfg(feature = "space")]
     pub camera: (Point3<LocalSpace>, Vector3<LocalSpace>),
     pub player: (Point3<LocalSpace>, Vector3<LocalSpace>),
-    pub gameplay: Option<nexus::rtapi::GameState>,
+    pub gameplay: u32,
 }
 
 /// shhh [rt::RealTimeApi] is fine to share tbh
@@ -71,36 +71,42 @@ impl RenderMachine {
 impl RenderStateRtapi {
     pub const fn new() -> Self {
         Self {
-            gameplay: None,
+            gameplay: GameState::CharacterSelection as u32,
             player: RenderMachine::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
             camera: RenderMachine::POSITIONING_EMPTY,
         }
     }
 
+    const GAMEPLAY_INGAME: u32 = GameState::Gameplay as _;
+    const GAMEPLAY_LOADING: u32 = GameState::LoadingScreen as _;
+    /// Vista viewing...
+    const GAMEPLAY_CINEMATIC: u32 = GameState::Cinematic as _;
+
     pub fn update(&mut self, rtapi: &rt::RealTimeApi, ui_tick: Option<MumblelinkTick>, camera_wanted: bool) -> Option<GameplayState> {
         let prev_gameplay = self.gameplay;
-        self.gameplay = GameState::try_from(unsafe {
+        self.gameplay = unsafe {
             ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state)
-        }).ok();
-        let map_id = self.gameplay.as_ref().map(|_| unsafe {
+        };
+        let map_id = unsafe {
             ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id)
-        });
+        };
         let gameplay_update = match self.gameplay {
-            _ if prev_gameplay == self.gameplay =>
+            state if state == prev_gameplay =>
                 None,
-            None => None,
-            Some(GameState::Gameplay) => Some(GameplayState::new_ingame(map_id.unwrap_or_default())),
-            Some(GameState::CharacterSelection | GameState::CharacterCreation) =>
-                Some(GameplayState::CHARSEL),
-            Some(GameState::LoadingScreen) =>
-                Some(GameplayState::new_loading(map_id.unwrap_or_default(), Default::default())),
-            Some(GameState::Cinematic) =>
-                // TODO: double-check how this interacts...
-                Some(GameplayState::LOADING),
+            Self::GAMEPLAY_INGAME =>
+                Some(GameplayState::new_ingame(map_id)),
+            Self::GAMEPLAY_LOADING =>
+                Some(GameplayState::new_loading(map_id, Default::default())),
+            Self::GAMEPLAY_CINEMATIC =>
+                Some(GameplayState::new_loading(map_id, map_id)),
+            state => {
+                GameState::try_from(state).ok()
+                    .map(GameplayState::from)
+            },
         };
 
-        let rtapi_ingame = self.gameplay == Some(GameState::Gameplay);
+        let rtapi_ingame = self.gameplay == Self::GAMEPLAY_INGAME;
         let rtapi_camera = camera_wanted;
         let player_tick = ui_tick.map(|tick| tick.is_player()).unwrap_or(false);
 
