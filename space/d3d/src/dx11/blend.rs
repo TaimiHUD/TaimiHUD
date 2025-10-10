@@ -1,25 +1,20 @@
 use crate::{
-    dx11::{
-        impl_d3d_ext11,
-        prelude::*,
-    },
+    dx11::prelude::*,
     state::D3dState,
     D3dContextBindable,
 };
 
 pub use crate::dx11::d3d11::{
-    ID3D11BlendState, D3D11_BLEND_DESC, D3D11_RENDER_TARGET_BLEND_DESC,
+    ID3D11BlendState, D3D11_BLEND_DESC,
+    D3D11_BLEND, D3D11_BLEND_OP,
+    D3D11_RENDER_TARGET_BLEND_DESC,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct BlendState {
-    pub state: ID3D11BlendState,
-}
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11BlendState;
 
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11BlendState, @transparent> for BlendState,
-        @field(&this => &this.state);
+    @[transparent(Dx11Child <= ID3D11BlendState)]
+    pub struct BlendState.state;
 }
 
 impl BlendState {
@@ -28,18 +23,18 @@ impl BlendState {
 
     pub const TARGET_DESC_DEFAULT_OFF: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
         BlendEnable: BOOL(0),
-        SrcBlend: d3d11::D3D11_BLEND_ONE,
-        DestBlend: d3d11::D3D11_BLEND_ZERO,
-        BlendOp: d3d11::D3D11_BLEND_OP_ADD,
-        SrcBlendAlpha: d3d11::D3D11_BLEND_ONE,
-        DestBlendAlpha: d3d11::D3D11_BLEND_ZERO,
-        BlendOpAlpha: d3d11::D3D11_BLEND_OP_ADD,
+        SrcBlend: BlendFactor::ONE,
+        DestBlend: BlendFactor::ZERO,
+        BlendOp: BlendOp::ADD,
+        SrcBlendAlpha: BlendFactor::ONE,
+        DestBlendAlpha: BlendFactor::ZERO,
+        BlendOpAlpha: BlendOp::ADD,
         RenderTargetWriteMask: d3d11::D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
     };
     pub const TARGET_DESC_ADDITIVE: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
         BlendEnable: BOOL(1),
-        SrcBlend: d3d11::D3D11_BLEND_SRC_ALPHA,
-        DestBlend: d3d11::D3D11_BLEND_INV_SRC_ALPHA,
+        SrcBlend: BlendFactor::SRC_ALPHA,
+        DestBlend: BlendFactor::INV_SRC_ALPHA,
         .. Self::TARGET_DESC_DEFAULT_OFF
     };
 
@@ -157,4 +152,37 @@ impl<B> From<B> for OMBlendState<B> {
     fn from(state: B) -> Self {
         Self::with_state(state)
     }
+}
+
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum BlendOp: D3D11_BLEND_OP{i32} {
+        #[default]
+        Add(const ADD) = d3d11::D3D11_BLEND_OP_ADD,
+        Sub(const SUBTRACT) = d3d11::D3D11_BLEND_OP_SUBTRACT,
+        ReverseSub(const REV_SUBTRACT) = d3d11::D3D11_BLEND_OP_REV_SUBTRACT,
+        Min(const MIN) = d3d11::D3D11_BLEND_OP_MIN,
+        Max(const MAX) = d3d11::D3D11_BLEND_OP_MAX,
+    },
+    #[derive(Default)]
+    pub enum BlendFactor: D3D11_BLEND{i32} {
+        #[default]
+        Zero(const ZERO) = d3d11::D3D11_BLEND_ZERO,
+        One(const ONE) = d3d11::D3D11_BLEND_ONE,
+        Colour(const SRC_COLOR) = d3d11::D3D11_BLEND_SRC_COLOR,
+        ColourInv(const INV_SRC_COLOR) = d3d11::D3D11_BLEND_INV_SRC_COLOR,
+        Alpha(const SRC_ALPHA) = d3d11::D3D11_BLEND_SRC_ALPHA,
+        AlphaInv(const INV_SRC_ALPHA) = d3d11::D3D11_BLEND_INV_SRC_ALPHA,
+        AlphaDest(const DEST_ALPHA) = d3d11::D3D11_BLEND_DEST_ALPHA,
+        AlphaDestInv(const INV_DEST_ALPHA) = d3d11::D3D11_BLEND_INV_DEST_ALPHA,
+        ColourDest(const DEST_COLOR) = d3d11::D3D11_BLEND_DEST_COLOR,
+        ColourDestInv(const INV_DEST_COLOR) = d3d11::D3D11_BLEND_INV_DEST_COLOR,
+        AlphaSaturated(const SRC_ALPHA_SAT) = d3d11::D3D11_BLEND_SRC_ALPHA_SAT,
+        StateFactor(const BLEND_FACTOR) = d3d11::D3D11_BLEND_BLEND_FACTOR,
+        StateFactorInv(const INV_BLEND_FACTOR) = d3d11::D3D11_BLEND_INV_BLEND_FACTOR,
+        Colour1(const SRC1_COLOR) = d3d11::D3D11_BLEND_SRC1_COLOR,
+        Colour1Inv(const INV_SRC1_COLOR) = d3d11::D3D11_BLEND_INV_SRC1_COLOR,
+        Alpha1(const SRC1_ALPHA) = d3d11::D3D11_BLEND_SRC1_ALPHA,
+        Alpha1Inv(const INV_SRC1_ALPHA) = d3d11::D3D11_BLEND_INV_SRC1_ALPHA,
+    },
 }

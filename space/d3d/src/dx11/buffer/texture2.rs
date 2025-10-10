@@ -1,6 +1,6 @@
 use crate::dx11::{
-    impl_d3d_ext11,
     prelude::*,
+    buffer::Resource,
 };
 
 pub use crate::dx11::d3d11::{
@@ -8,10 +8,15 @@ pub use crate::dx11::d3d11::{
     D3D11_TEXTURE2D_DESC,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Texture2 {
-    pub resource: ID3D11Texture2D,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11Texture2D;
+
+    @[transparent(Dx11Child <= ID3D11Texture2D)]
+    pub struct Texture2 {
+        pub resource: Resource,
+    }
+    @into()
+    @deref(Resource);
 }
 
 impl Texture2 {
@@ -66,7 +71,7 @@ impl Texture2 {
     pub fn desc(&self) -> D3D11_TEXTURE2D_DESC {
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe {
-            self.resource.GetDesc(&mut desc);
+            self.as_d3d().GetDesc(&mut desc);
         }
         desc
     }
@@ -81,7 +86,16 @@ impl Texture2 {
     };
 }
 
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11Texture2D,@transparent> for Texture2,
-        @field(&this => &this.resource);
+impl AsRef<Resource> for ID3D11Texture2D {
+    #[inline]
+    fn as_ref(&self) -> &Resource {
+        let t2: &Texture2 = self.as_ref();
+        t2.as_ref()
+    }
+}
+impl From<ID3D11Texture2D> for Resource {
+    #[inline]
+    fn from(resource: ID3D11Texture2D) -> Self {
+        Texture2::from(resource).into()
+    }
 }

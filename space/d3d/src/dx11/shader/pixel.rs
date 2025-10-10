@@ -1,16 +1,14 @@
 use crate::{
-    dx11::{
-        impl_d3d_ext11,
-        prelude::*,
-    },
+    dx11::prelude::*,
     D3dContextBindable,
 };
 pub use crate::dx11::d3d11::ID3D11PixelShader;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct ShaderP {
-    pub shader: ID3D11PixelShader,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11PixelShader;
+
+    @[transparent(Dx11Child <= ID3D11PixelShader)]
+    pub struct ShaderP.shader;
 }
 
 impl ShaderP {
@@ -46,9 +44,4 @@ impl D3dContextBindable<Dx11Context> for ShaderP {
             context.PSSetShader(&self.shader, None);
         }
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11PixelShader,@transparent> for ShaderP,
-        @field(&this => &this.shader);
 }

@@ -1,25 +1,21 @@
 use crate::{
-    dx11::{
-        impl_d3d_ext11,
-        prelude::*,
-        buffer::{
-            D3D11_TEXTURE_ADDRESS_MODE,
-            Filter, TextureAddressMode,
-        },
-    },
+    dx11::prelude::*,
     state::D3dState,
     D3dContextBindableSlot,
 };
 
 pub use crate::dx11::d3d11::{
     D3D11_SAMPLER_DESC,
+    D3D11_TEXTURE_ADDRESS_MODE,
+    D3D11_FILTER,
     ID3D11SamplerState,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct SamplerState {
-    pub state: ID3D11SamplerState,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11SamplerState;
+
+    @[transparent(Dx11Child <= ID3D11SamplerState)]
+    pub struct SamplerState.state;
 }
 
 impl Unit for TextureAddressMode {
@@ -92,11 +88,6 @@ impl SamplerState {
     }
 }
 
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11SamplerState,@transparent> for SamplerState,
-        @field(&this => &this.state);
-}
-
 impl D3dContextBindableSlot<Dx11Context> for SamplerState {
     fn set(&self, context: &Dx11Context, slot: u32) {
         SamplerState::bind_set(context, slot, self)
@@ -130,5 +121,67 @@ impl<const N: usize> D3dState<Dx11Context> for [Option<SamplerState>; N] {
 
     fn discard_state_mut(&mut self) {
         *self = [const { None }; N];
+    }
+}
+
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum TextureAddressMode: D3D11_TEXTURE_ADDRESS_MODE{i32} {
+        #[default]
+        const CLAMP = d3d11::D3D11_TEXTURE_ADDRESS_CLAMP;
+        const WRAP = d3d11::D3D11_TEXTURE_ADDRESS_WRAP;
+        const BORDER = d3d11::D3D11_TEXTURE_ADDRESS_BORDER;
+        const MIRROR = d3d11::D3D11_TEXTURE_ADDRESS_MIRROR;
+        const MIRROR_ONCE = d3d11::D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
+    },
+    #[derive(Default)]
+    pub enum Filter: D3D11_FILTER{u32} {
+        #[default]
+        const MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MIN_MAG_MIP_POINT;
+        const MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR;
+        const MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+        const MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_POINT_MAG_MIP_LINEAR;
+        const MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT;
+        const MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
+        const MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        const MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+
+        const ANISOTROPIC = d3d11::D3D11_FILTER_ANISOTROPIC;
+
+        const COMPARISON_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
+        const COMPARISON_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_POINT_MIP_LINEAR;
+        const COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT;
+        const COMPARISON_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_POINT_MAG_MIP_LINEAR;
+        const COMPARISON_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT;
+        const COMPARISON_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
+        const COMPARISON_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+        const COMPARISON_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
+        const COMPARISON_ANISOTROPIC = d3d11::D3D11_FILTER_COMPARISON_ANISOTROPIC;
+
+        const MINIMUM_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_MIP_POINT;
+        const MINIMUM_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_POINT_MIP_LINEAR;
+        const MINIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT;
+        const MINIMUM_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_POINT_MAG_MIP_LINEAR;
+        const MINIMUM_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_LINEAR_MAG_MIP_POINT;
+        const MINIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
+        const MINIMUM_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT;
+        const MINIMUM_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_MIP_LINEAR;
+        const MINIMUM_ANISOTROPIC = d3d11::D3D11_FILTER_MINIMUM_ANISOTROPIC;
+
+        const MAXIMUM_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_POINT;
+        const MAXIMUM_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_POINT_MIP_LINEAR;
+        const MAXIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT;
+        const MAXIMUM_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_POINT_MAG_MIP_LINEAR;
+        const MAXIMUM_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_LINEAR_MAG_MIP_POINT;
+        const MAXIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
+        const MAXIMUM_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT;
+        const MAXIMUM_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_LINEAR;
+        const MAXIMUM_ANISOTROPIC = d3d11::D3D11_FILTER_MAXIMUM_ANISOTROPIC;
+    },
+}
+
+impl TextureAddressMode {
+    pub const fn to_vec3(self) -> Vector3<Self> {
+        Vector3::new(self.to_raw(), self.to_raw(), self.to_raw())
     }
 }

@@ -12,8 +12,8 @@ use {
     taimi_d3d::dx11::{
         prelude::*,
         buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
-        depth::{DepthState, DepthView, D3D11_DEPTH_STENCIL_DESC},
-        raster::{RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
+        depth::{ClearFlags, ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
+        raster::{CullMode, RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
         viewport::Viewport,
     },
     taimi_meta::ui::MapCalibration,
@@ -93,7 +93,7 @@ impl DepthHandler {
     const STENCIL_REF: u32 = 0x01;
     const STENCIL_CLEAR: u8 = 0x00;
     const DEPTH_DESC_ON: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
-        DepthFunc: d3d11::D3D11_COMPARISON_LESS_EQUAL,
+        DepthFunc: ComparisonFunc::LESS_EQUAL,
         StencilWriteMask: 0,
         //StencilReadMask: 0xff,
         StencilEnable: BOOL(1),
@@ -107,14 +107,14 @@ impl DepthHandler {
     const DEPTH_DESC_IGNORE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthEnable: BOOL(0),
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
-        DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        DepthFunc: ComparisonFunc::ALWAYS,
         StencilReadMask: 0,
         StencilEnable: BOOL(0),
         .. Self::DEPTH_DESC_ON
     };
     const DEPTH_DESC_FILL: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
-        DepthFunc: d3d11::D3D11_COMPARISON_ALWAYS,
+        DepthFunc: ComparisonFunc::ALWAYS,
         DepthEnable: BOOL(1),
         StencilEnable: BOOL(0),
         .. DepthState::DESC_DEFAULT
@@ -132,19 +132,19 @@ impl DepthHandler {
     #[cfg(feature = "goggles")]
     const DEPTH_DESC_OBSCURED: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
-        DepthFunc: d3d11::D3D11_COMPARISON_GREATER,
+        DepthFunc: ComparisonFunc::GREATER,
         StencilEnable: BOOL(1),
         FrontFace: Self::STENCILOP_ON,
         BackFace: Self::STENCILOP_ON,
         .. Self::DEPTH_DESC_ON
     };
     const STENCILOP_ON: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: d3d11::D3D11_COMPARISON_GREATER,
+        StencilFunc: ComparisonFunc::GREATER,
         .. DepthState::STENCILOP_DEFAULT
     };
     const STENCILOP_FILL: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: d3d11::D3D11_COMPARISON_ALWAYS,
-        StencilPassOp: d3d11::D3D11_STENCIL_OP_REPLACE,
+        StencilFunc: ComparisonFunc::ALWAYS,
+        StencilPassOp: StencilOp::REPLACE,
         .. DepthState::STENCILOP_DEFAULT
     };
 
@@ -158,7 +158,7 @@ impl DepthHandler {
         dsview.set(device_context);
         self.depth_stencil_state.set(device_context);
         if let Some(clear_depth) = clear_depth {
-            dsview.clear_depth(device_context, DepthView::CLEAR_DEPTH_STENCIL, clear_depth, Self::STENCIL_CLEAR);
+            dsview.clear_depth(device_context, ClearFlags::DEPTH_STENCIL, clear_depth, Self::STENCIL_CLEAR);
         }
     }
 
@@ -209,7 +209,7 @@ impl DepthHandler {
     }
 
     const RASTER_DESC: D3D11_RASTERIZER_DESC = D3D11_RASTERIZER_DESC {
-        CullMode: d3d11::D3D11_CULL_NONE,
+        CullMode: CullMode::NONE,
         FrontCounterClockwise: BOOL(1),
         DepthClipEnable: BOOL(0),
         ScissorEnable: BOOL(1),

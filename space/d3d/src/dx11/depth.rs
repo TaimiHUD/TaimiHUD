@@ -1,38 +1,74 @@
 use crate::{
     dx11::{
-        buffer::{self, D3D11_TEXTURE2D_DESC, Texture2},
+        buffer::{
+            self,
+            D3D11_TEXTURE2D_DESC,
+            Resource,
+            Texture2,
+        },
         prelude::*,
-        impl_d3d_ext11,
     },
     D3dContextBindable,
 };
 
 pub use crate::dx11::d3d11::{
     ID3D11DepthStencilState, ID3D11DepthStencilView,
-    D3D11_CLEAR_FLAG,
+    D3D11_CLEAR_FLAG, D3D11_COMPARISON_FUNC,
     D3D11_DEPTH_STENCILOP_DESC, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_STENCIL_VIEW_DESC,
     D3D11_DEPTH_STENCIL_VIEW_DESC_0,
+    D3D11_STENCIL_OP,
     D3D11_TEX2D_DSV,
 };
 
-#[derive(Debug, Clone)]
-#[repr(transparent)]
-pub struct DepthState {
-    pub state: ID3D11DepthStencilState,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11DepthStencilState;
+
+    @[transparent(Dx11Child <= ID3D11DepthStencilState)]
+    pub struct DepthState.state;
+}
+
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum StencilOp: D3D11_STENCIL_OP{i32} {
+        #[default]
+        Keep(const KEEP) = d3d11::D3D11_STENCIL_OP_KEEP,
+        Zero(const ZERO) = d3d11::D3D11_STENCIL_OP_ZERO,
+        Replace(const REPLACE) = d3d11::D3D11_STENCIL_OP_REPLACE,
+        IncrementSaturate(const INCR_SAT) = d3d11::D3D11_STENCIL_OP_INCR_SAT,
+        DecrementSaturate(const DECR_SAT) = d3d11::D3D11_STENCIL_OP_DECR_SAT,
+        Invert(const INVERT) = d3d11::D3D11_STENCIL_OP_INVERT,
+        Increment(const INCREMENT) = d3d11::D3D11_STENCIL_OP_INCR,
+        Decrement(const DECREMENT) = d3d11::D3D11_STENCIL_OP_DECR,
+    }
+}
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum ComparisonFunc: D3D11_COMPARISON_FUNC{i32} {
+        Never(const NEVER) = d3d11::D3D11_COMPARISON_NEVER,
+        Lt(const LESS) = d3d11::D3D11_COMPARISON_LESS,
+        Eq(const EQUAL) = d3d11::D3D11_COMPARISON_EQUAL,
+        Le(const LESS_EQUAL) = d3d11::D3D11_COMPARISON_LESS_EQUAL,
+        Gt(const GREATER) = d3d11::D3D11_COMPARISON_GREATER,
+        Ne(const NOT_EQUAL) = d3d11::D3D11_COMPARISON_NOT_EQUAL,
+        Ge(const GREATER_EQUAL) = d3d11::D3D11_COMPARISON_GREATER_EQUAL,
+        #[default]
+        Always(const ALWAYS) = d3d11::D3D11_COMPARISON_ALWAYS,
+    }
 }
 
 impl DepthState {
-    /// func=D3D11_COMPARISON_ALWAYS op=D3D11_STENCIL_OP_KEEP
+    /// func=[D3D11_COMPARISON_ALWAYS](ComparisonFunc::Always) op=[D3D11_STENCIL_OP_KEEP](StencilOp::Keep)
     pub const STENCILOP_DEFAULT: D3D11_DEPTH_STENCILOP_DESC = D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: d3d11::D3D11_COMPARISON_ALWAYS,
-        StencilDepthFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
-        StencilFailOp: d3d11::D3D11_STENCIL_OP_KEEP,
-        StencilPassOp: d3d11::D3D11_STENCIL_OP_KEEP,
+        StencilFunc: ComparisonFunc::ALWAYS,
+        StencilDepthFailOp: StencilOp::KEEP,
+        StencilFailOp: StencilOp::KEEP,
+        StencilPassOp: StencilOp::KEEP,
     };
+    /// depth=[D3D11_COMPARISON_LESS](ComparisonFunc::Less), stencil=[off](Self::STENCILOP_DEFAULT)
     pub const DESC_DEFAULT: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthEnable: BOOL(1),
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
-        DepthFunc: d3d11::D3D11_COMPARISON_LESS,
+        DepthFunc: ComparisonFunc::LESS,
         StencilEnable: BOOL(0),
         StencilReadMask: d3d11::D3D11_DEFAULT_STENCIL_READ_MASK as u8,
         StencilWriteMask: d3d11::D3D11_DEFAULT_STENCIL_WRITE_MASK as u8,
@@ -55,11 +91,6 @@ impl DepthState {
         .context("CreateDepthStencilState")
         .map(Into::into)
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11DepthStencilState, @transparent> for DepthState,
-        @field(&this => &this.state);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,22 +137,31 @@ impl<S> From<S> for OMDepthState<S> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct DepthView {
-    pub view: ID3D11DepthStencilView,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11DepthStencilView;
+
+    @[transparent(Dx11Child <= ID3D11DepthStencilView)]
+    pub struct DepthView.view;
+}
+
+impl_d3d! { impl bitflags for
+    pub struct ClearFlags: D3D11_CLEAR_FLAG{u32} {
+        const DEPTH = d3d11::D3D11_CLEAR_DEPTH.0;
+        const STENCIL = d3d11::D3D11_CLEAR_STENCIL.0;
+    },
+}
+impl ClearFlags {
+    pub const DEPTH_STENCIL: Self = Self::from_bits_retain(
+        Self::DEPTH.bits() | Self::STENCIL.bits()
+    );
 }
 
 impl DepthView {
-    pub const CLEAR_DEPTH: D3D11_CLEAR_FLAG = d3d11::D3D11_CLEAR_DEPTH;
-    pub const CLEAR_STENCIL: D3D11_CLEAR_FLAG = d3d11::D3D11_CLEAR_STENCIL;
-    pub const CLEAR_DEPTH_STENCIL: D3D11_CLEAR_FLAG = D3D11_CLEAR_FLAG(Self::CLEAR_DEPTH.0 | Self::CLEAR_STENCIL.0);
-
-    pub fn clear(&self, context: &Dx11Context, flags: D3D11_CLEAR_FLAG, depth: f32, stencil: u8) {
+    pub fn clear(&self, context: &Dx11Context, flags: ClearFlags, depth: f32, stencil: u8) {
         unsafe {
             context.ClearDepthStencilView(
                 &self.view,
-                flags.0,
+                flags.to_raw(),
                 depth,
                 stencil,
             )
@@ -169,18 +209,19 @@ impl DepthView {
     ) -> anyhow::Result<Self> {
         let format = buffer.dxgi_format();
         let desc = Self::desc_for_texture2(desc, format, flags);
-        Self::new_with_buffer(device, &buffer.resource, &desc)
+        Self::new_with_buffer(device, buffer.as_d3d(), &desc)
     }
 
-    pub fn new_with_buffer(
+    pub fn new_with_buffer<R: AsRef<Resource>>(
         device: &Dx11Device,
-        buffer: &Dx11Resource,
+        buffer: R,
         desc: &D3D11_DEPTH_STENCIL_VIEW_DESC,
     ) -> anyhow::Result<Self> {
+        let buffer = buffer.as_ref();
         let mut out: Option<ID3D11DepthStencilView> = None;
         unsafe {
             device.CreateDepthStencilView(
-                buffer,
+                buffer.as_d3d(),
                 Some(desc),
                 Some(&mut out),
             )
@@ -190,14 +231,17 @@ impl DepthView {
         .map(Into::into)
     }
 
+    pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_VIEW_DESC {
+        let mut out = Default::default();
+        unsafe {
+            self.view.GetDesc(&mut out);
+        }
+        out
+    }
+
     pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
         unsafe {
             self.view.GetResource()
         }.context("ID3D11DepthStencilView::GetResource")
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11DepthStencilView,@transparent> for DepthView,
-        @field(&this => &this.view);
 }

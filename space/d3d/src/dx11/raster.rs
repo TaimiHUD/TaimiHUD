@@ -2,9 +2,8 @@ use crate::{
     dx11::{
         prelude::*,
         buffer::Texture2,
-        d3d11::{D3D11_CLEAR_FLAG, ID3D11Texture2D},
-        depth::DepthView,
-        impl_d3d_ext11,
+        d3d11::ID3D11Texture2D,
+        depth::{ClearFlags, DepthView},
     },
     D3dContextBindable,
 };
@@ -13,6 +12,7 @@ pub use crate::dx11::d3d11::{
     ID3D11RasterizerState,
     ID3D11RenderTargetView,
     D3D11_RASTERIZER_DESC,
+    D3D11_CULL_MODE, D3D11_FILL_MODE,
 };
 
 pub fn get_swap_chain_framebuffer(swap_chain: &IDXGISwapChain) -> anyhow::Result<ID3D11Texture2D> {
@@ -20,10 +20,11 @@ pub fn get_swap_chain_framebuffer(swap_chain: &IDXGISwapChain) -> anyhow::Result
     fb.context("IDXGISwapChain::GetBuffer")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct RasterizerState {
-    pub state: ID3D11RasterizerState,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11RasterizerState;
+
+    @[transparent(Dx11Child <= ID3D11RasterizerState)]
+    pub struct RasterizerState.state;
 }
 
 impl RasterizerState {
@@ -41,8 +42,8 @@ impl RasterizerState {
     }
 
     pub const DESC_DEFAULT: D3D11_RASTERIZER_DESC = D3D11_RASTERIZER_DESC {
-        FillMode: d3d11::D3D11_FILL_SOLID,
-        CullMode: d3d11::D3D11_CULL_BACK,
+        FillMode: FillMode::SOLID,
+        CullMode: CullMode::BACK,
         FrontCounterClockwise: BOOL(0),
         DepthBias: 0,
         DepthBiasClamp: 0.0,
@@ -62,11 +63,6 @@ impl RasterizerState {
         .context("CreateRasterizerState")
         .map(Self::with_state)
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11RasterizerState, @transparent> for RasterizerState,
-        @field(&this => &this.state);
 }
 
 impl D3dContextBindable<Dx11Context> for RasterizerState {
@@ -145,7 +141,7 @@ impl<V, D> RenderTargetViews<V, D> {
         }
     }
 
-    pub fn clear_depth(&self, context: &Dx11Context, flags: D3D11_CLEAR_FLAG, depth: f32, stencil: u8) where
+    pub fn clear_depth(&self, context: &Dx11Context, flags: ClearFlags, depth: f32, stencil: u8) where
         D: AsRef<DepthView>,
     {
         if let Some(depth_view) = &self.depth {
@@ -183,10 +179,11 @@ impl<V, D> D3dContextBindable<Dx11Context> for RenderTargetViews<V, D> where
 
 pub const MAX_RENDER_TARGETS: usize = d3d11::D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT as usize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct RenderTargetView {
-    pub view: ID3D11RenderTargetView,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11RenderTargetView;
+
+    @[transparent(Dx11Child <= ID3D11RenderTargetView)]
+    pub struct RenderTargetView.view;
 }
 
 impl RenderTargetView {
@@ -204,7 +201,18 @@ impl RenderTargetView {
     }
 }
 
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11RenderTargetView, @transparent> for RenderTargetView,
-        @field(&this => &this.view);
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum CullMode: D3D11_CULL_MODE{i32} {
+        None(const NONE) = d3d11::D3D11_CULL_NONE,
+        Front(const FRONT) = d3d11::D3D11_CULL_FRONT,
+        #[default]
+        Back(const BACK) = d3d11::D3D11_CULL_BACK,
+    },
+    #[derive(Default)]
+    pub enum FillMode: D3D11_FILL_MODE{i32} {
+        Wireframe(const WIREFRAME) = d3d11::D3D11_FILL_WIREFRAME,
+        #[default]
+        Solid(const SOLID) = d3d11::D3D11_FILL_SOLID,
+    },
 }

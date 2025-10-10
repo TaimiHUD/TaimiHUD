@@ -11,6 +11,8 @@ use {
     },
 };
 
+pub mod dxgi;
+
 pub unsafe trait D3dContextBindableVertexBuffer<D3DC: D3dContext>: D3dContextBindableSlot<D3DC> {
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void;
     fn vertex_buffer_stride(&self) -> u32;
