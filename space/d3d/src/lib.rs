@@ -1,7 +1,9 @@
 pub mod blob;
+pub mod buffer;
+pub mod device;
 #[cfg(feature = "dx11")]
 pub mod dx11;
-pub mod buffer;
+pub(crate) mod macros;
 pub mod shader;
 pub mod state;
 
@@ -38,7 +40,10 @@ pub mod prelude {
     #[allow(unused_imports)]
     pub(crate) use {
         anyhow::{anyhow, Context},
-        crate::D3dInterfacePtr,
+        crate::{
+            impl_d3d,
+            D3dInterfacePtr,
+        },
         glamour::{
             Box2, Box3,
             Contains as _,
@@ -74,46 +79,10 @@ pub use windows::Win32::Graphics::{
     },
 };
 
-use windows::core::Interface;
-
-pub trait D3dContext: Interface {
-    type IDevice: D3dDevice;
-}
-pub trait D3dDevice: Interface {
-    type IBuffer: Interface;
-}
-
-#[cfg(todo)]
-impl<D3DC: D3dContext> D3dContext for &'_ D3DC {
-    type IDevice = D3DC::IDevice;
-}
-#[cfg(todo)]
-impl<D3DD: D3dDevice> D3dDevice for &'_ D3DD {
-    type IBuffer = D3DD::IBuffer;
-}
-
-pub trait D3dContextBindable<D3DC> {
-    fn set(&self, device_context: &D3DC);
-}
-
-pub trait D3dContextBindableSlot<D3DC> {
-    fn set(&self, device_context: &D3DC, slot: u32);
-}
-
-impl<T: ?Sized, D3DC: D3dContext> D3dContextBindable<D3DC> for &'_ T where
-    T: D3dContextBindable<D3DC>,
-{
-    fn set(&self, device_context: &D3DC) {
-        D3dContextBindable::set(*self, device_context)
-    }
-}
-impl<T: ?Sized, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for &'_ T where
-    T: D3dContextBindableSlot<D3DC>,
-{
-    fn set(&self, device_context: &D3DC, slot: u32) {
-        D3dContextBindableSlot::set(*self, device_context, slot)
-    }
-}
+pub use self::device::{
+    D3dContext, D3dDevice,
+    D3dContextBindable, D3dContextBindableSlot,
+};
 
 pub unsafe trait D3dInterfacePtr: Clone {
     #[cfg(feature = "windows")]

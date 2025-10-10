@@ -3,7 +3,6 @@ pub mod buffer;
 pub mod depth;
 pub mod raster;
 pub mod shader;
-pub mod swapchain;
 pub mod viewport;
 
 pub mod prelude {
@@ -31,7 +30,6 @@ pub use {
         depth::{DepthState, DepthView, OMDepthState},
         raster::{RasterizerState, RenderTargetView, RenderTargetViews},
         shader::{ShaderV, ShaderP},
-        swapchain::SwapChain11,
         viewport::Viewport,
     },
     windows::Win32::Graphics::Direct3D11 as d3d11,
@@ -89,188 +87,8 @@ macro_rules! impl_d3d_ext11 {
         @field(&$this:ident => &$field:expr)
         ; $($rest:tt)*
     ) => {
-        impl $ty {
-            #[inline]
-            pub const fn from_d3d(v: $out) -> $ty {
-                unsafe {
-                    ::core::mem::transmute(v)
-                }
-            }
-
-            #[inline]
-            pub const fn from_d3d_ref(v: &$out) -> &$ty {
-                unsafe {
-                    ::core::mem::transmute(v)
-                }
-            }
-
-            #[inline]
-            pub fn from_d3d_mut(v: &mut $out) -> &mut $ty {
-                unsafe {
-                    ::core::mem::transmute(v)
-                }
-            }
-
-            #[inline]
-            pub fn to_ref(&self) -> windows::core::InterfaceRef<'_, $out> {
-                let $this = self;
-                windows::core::Interface::to_ref(&$field)
-            }
-
-            #[inline]
-            pub const fn from_ref_opt(v: &Option<$out>) -> &Option<$ty> {
-                unsafe {
-                    ::core::mem::transmute(v)
-                }
-            }
-
-            #[inline]
-            pub const fn into_ref_opt(v: &Option<$ty>) -> &Option<$out> {
-                unsafe {
-                    ::core::mem::transmute(v)
-                }
-            }
-        }
-        unsafe impl $crate::D3dInterfacePtr for $ty {
-            type Interface = $out;
-
-            #[inline]
-            fn as_d3d_param(&self) -> &Option<$out> {
-                let this: &Option<$ty> = unsafe {
-                    ::core::mem::transmute(self)
-                };
-                <$ty>::into_ref_opt(this)
-            }
-
-            #[inline]
-            fn into_d3d_param(self) -> Option<$out> {
-                let $this = self;
-                Some($field)
-            }
-
-            #[inline]
-            fn from_d3d_param(param: &$out) -> &$ty {
-                <$ty>::from_d3d_ref(param)
-            }
-        }
-        unsafe impl $crate::D3dInterfacePtr for Option<$ty> {
-            type Interface = $out;
-
-            #[inline]
-            fn as_d3d_param(&self) -> &Option<$out> {
-                <$ty>::into_ref_opt(self)
-            }
-
-            #[inline]
-            fn into_d3d_param(self) -> Option<$out> {
-                unsafe {
-                    ::core::mem::transmute(self)
-                }
-            }
-
-            #[inline]
-            fn from_d3d_param(param: &$out) -> &Option<$ty> {
-                let param: &Option<$out> = unsafe {
-                    ::core::mem::transmute(param)
-                };
-                <$ty>::from_ref_opt(param)
-            }
-        }
-
-        impl ::windows::core::Param<$out> for &'_ $ty {
-            unsafe fn param(self) -> windows::core::ParamValue<$out> {
-                let $this = self;
-                windows::core::Param::<$out>::param(&$field)
-            }
-        }
-
-        impl<'a> From<&'a $out> for &'a $ty {
-            #[inline]
-            fn from(v: &'a $out) -> Self {
-                <$ty>::from_d3d_ref(v)
-            }
-        }
-        impl From<$out> for $ty {
-            #[inline]
-            fn from(v: $out) -> Self {
-                <$ty>::from_d3d(v)
-            }
-        }
-        impl From<$ty> for $out {
-            #[inline]
-            fn from($this: $ty) -> Self {
-                $field
-            }
-        }
-        impl<'a> Into<&'a $out> for &'a $ty {
-            #[inline]
-            fn into(self) -> &'a $out {
-                let $this = self;
-                &$field
-            }
-        }
-
-        impl AsRef<$ty> for $ty {
-            #[inline]
-            fn as_ref(&self) -> &$ty {
-                self
-            }
-        }
-        impl AsRef<Option<$ty>> for $ty {
-            #[inline]
-            fn as_ref(&self) -> &Option<$ty> {
-                unsafe {
-                    ::core::mem::transmute(self)
-                }
-            }
-        }
-        impl AsRef<$ty> for $out {
-            #[inline]
-            fn as_ref(&self) -> &$ty {
-                <$ty>::from_d3d_ref(self)
-            }
-        }
-        impl AsRef<$ty> for InterfaceRef<'_, $out> {
-            #[inline]
-            fn as_ref(&self) -> &$ty {
-                <$ty>::from_d3d_ref(&**self)
-            }
-        }
-        impl AsRef<$out> for $ty {
-            #[inline]
-            fn as_ref(&self) -> &$out {
-                let $this = self;
-                &$field
-            }
-        }
-        impl AsMut<$ty> for $ty {
-            #[inline]
-            fn as_mut(&mut self) -> &mut $ty {
-                self
-            }
-        }
-        impl AsMut<$out> for $ty {
-            #[inline]
-            fn as_mut(&mut self) -> &mut $out {
-                let $this = self;
-                &mut $field
-            }
-        }
-        impl AsMut<$ty> for $out {
-            #[inline]
-            fn as_mut(&mut self) -> &mut $ty {
-                <$ty>::from_d3d_mut(self)
-            }
-        }
-
-        #[cfg(todo)]
-        impl ::core::ops::Deref for $ty {
-            type Target = $out;
-            #[inline]
-            fn deref(&self) -> &$out {
-                let $this = self;
-                &$field
-            }
+        $crate::impl_d3d! {
+            unsafe impl D3dInterfacePtr<Interface=$out,@transparent> for $ty;
         }
     };
     (unsafe impl ID3D11ResourceExt<Output=$out:ty, @transparent> for $ty:ty,

@@ -3,6 +3,7 @@ use {
         render::machine::RenderMachine,
         resources::Model,
         space::{
+            dx11::SwapChain,
             MAX_DEPTH, ScreenSpace,
         },
     },
@@ -14,7 +15,6 @@ use {
         depth::{DepthState, DepthView, D3D11_DEPTH_STENCIL_DESC},
         raster::{RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
         viewport::Viewport,
-        SwapChain11,
     },
     taimi_meta::ui::MapCalibration,
 };
@@ -43,7 +43,7 @@ impl DepthHandler {
     pub fn create(
         display_size: Size2<ScreenSpace>,
         device: &Dx11Device,
-        swap_chain: &SwapChain11,
+        swap_chain: &SwapChain,
     ) -> anyhow::Result<Self> {
         log::debug!(
             "Setting up viewport with dimensions ({},{})",
@@ -52,7 +52,7 @@ impl DepthHandler {
         );
         let viewport = Viewport::with_size(display_size.extend(1.0));
 
-        let framebuffer = swap_chain.get_framebuffer11()?;
+        let framebuffer = swap_chain.get_framebuffer11(0)?;
         let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
         let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
         let depth_stencil_state_mask = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;

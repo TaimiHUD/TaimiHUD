@@ -10,7 +10,10 @@ pub mod prelude {
 }
 
 pub use {
-    backend::RenderBackend, depth_handler::DepthHandler,
-    instance_buffer_data::InstanceBufferData,
-    perspective_handler::PerspectiveHandler,
+    self::{
+        backend::RenderBackend, depth_handler::DepthHandler,
+        instance_buffer_data::InstanceBufferData,
+        perspective_handler::PerspectiveHandler,
+    },
+    taimi_d3d::device::SwapChain0 as SwapChain,
 };
