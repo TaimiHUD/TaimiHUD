@@ -466,6 +466,9 @@ impl PathingConfig {
         }))).flatten()?;
 
         let (mut enabled, needs_setup) = render_goggles::get_state();
+
+        ui.text_wrapped("This currently requires setting Render Sampling to Native under Graphics Options.");
+
         if ui.checkbox(&fl!("enable"), &mut enabled) {
             Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));
             match enabled {
@@ -481,7 +484,7 @@ impl PathingConfig {
             }
         }
 
-        {
+        if !needs_setup {
             let _font = RenderState::push_font("big", ui);
             ui.text_wrapped("For good goggles, you will need to adjust the \"near\" slider for each new map you visit.");
             drop(_font);
