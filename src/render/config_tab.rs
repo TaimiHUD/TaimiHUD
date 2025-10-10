@@ -10,7 +10,7 @@ use {
         settings::{MarkerAutoPlaceSettings, Settings, SquadCondition},
         ControllerEvent, Controller,
     },
-    nexus::imgui::{self, ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
+    nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
 };
 
@@ -35,7 +35,7 @@ impl ConfigTabState {
         ui.text_wrapped(&fl!("keybind-triggers"));
         ui.dummy([4.0, 4.0]);
 
-        if ui.button("Quit") {
+        if ui.button(&fl!("quit")) {
             // XXX: this will wipe all of render state, rather than just katrender
             let mut render_sender = crate::RENDER_SENDER.write().unwrap();
             let render_quit = render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit));
@@ -45,6 +45,10 @@ impl ConfigTabState {
                 crate::TEXTURES.quit();
             }
             Controller::try_send(ControllerEvent::UnloadAll);
+        }
+        ui.same_line();
+        if ui.button(&fl!("save")) {
+            Controller::try_send(ControllerEvent::SaveSettings);
         }
         ui.dummy([4.0, 4.0]);
 
