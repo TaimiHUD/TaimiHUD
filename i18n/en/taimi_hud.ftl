@@ -5,6 +5,7 @@ font = Font
 okay = OK
 delete = Delete
 save = Save
+quit = Quit
 delete-item = { delete } "{ $item }"?
 save-item = { save } "{ $item }"?
 save-standalone = { save } as a new file

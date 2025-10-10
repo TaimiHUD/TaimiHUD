@@ -52,15 +52,19 @@ impl PathingConfig {
 
         let opts_primary = || {
             let active = self.draw_pathing_opts(ui, machine);
-            if let None = active {
-                Self::draw_space_error(ui, None);
-            } else if self.katrender {
-                ui.separator();
-                let label = fl!("pathing-window");
-                if ui.button(&label) {
-                    crate::control_window(crate::WINDOW_PATHING, None);
-                }
+            match (&active, self.katrender) {
+                (None, true) =>
+                    Self::draw_space_error(ui, None),
+                (Some(..), true) => {
+                    ui.separator();
+                    let label = fl!("pathing-window");
+                    if ui.button(&label) {
+                        crate::control_window(crate::WINDOW_PATHING, None);
+                    }
+                },
+                _ => (),
             }
+            ui.text_wrapped(&fl!("experimental-notice"));
 
             active
         };
@@ -95,7 +99,11 @@ impl PathingConfig {
         let _font = RenderState::push_font("big", ui);
         let e = match e {
             None if !Settings::try_read().map(|s| s.enable_katrender).unwrap_or(true) => {
-                if ui.button("Enable Pathing") {
+                {
+                    let _notice = RenderState::push_font("ui", ui);
+                    ui.text_wrapped(&fl!("experimental-notice"));
+                }
+                if ui.button(&fl!("enable")) {
                     Controller::try_send(ControllerEvent::ToggleKatRender);
                 }
                 None
