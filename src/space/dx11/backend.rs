@@ -3,6 +3,7 @@ use {
     crate::{
         exports::runtime as rt,
         space::{
+            dx11::SwapChain,
             resources::ShaderLoader,
             ScreenSpace,
         },
@@ -13,7 +14,6 @@ use {
         prelude::*,
         buffer::{D3D11_SAMPLER_DESC, SamplerState, TextureAddressMode},
         blend::{BlendState, D3D11_RENDER_TARGET_BLEND_DESC, OMBlendState},
-        SwapChain11,
     },
 };
 
@@ -26,7 +26,7 @@ pub struct RenderBackend {
     pub shaders: ShaderLoader,
     pub sampler_state: SamplerState,
     pub device: Dx11Device,
-    pub swap_chain: SwapChain11,
+    pub swap_chain: SwapChain,
     pub display_size: Size2<ScreenSpace>,
 }
 
@@ -35,7 +35,7 @@ impl RenderBackend {
         log::info!("Getting d3d11 device swap chain");
         let swap_chain = rt::dxgi_swap_chain()
             .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))
-            .and_then(|sc| sc.map(SwapChain11::from)
+            .and_then(|sc| sc.map(SwapChain::from)
                 .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))
             )?;
         let device = swap_chain.get_device11()?;
