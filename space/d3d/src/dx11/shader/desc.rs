@@ -1,9 +1,7 @@
 use {
+    arcffi::cstr::CStrBox,
     crate::{
-        dx11::{
-            impl_d3d_ext11,
-            prelude::*,
-        },
+        dx11::prelude::*,
         D3dContextBindable,
     },
     std::ffi::CStr,
@@ -13,10 +11,20 @@ pub use crate::dx11::d3d11::{
     ID3D11InputLayout,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct InputLayout {
-    pub layout: ID3D11InputLayout,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11InputLayout;
+
+    @[transparent(Dx11Child <= ID3D11InputLayout)]
+    pub struct InputLayout.layout;
+}
+
+impl_d3d! { impl enum for
+    #[derive(Default)]
+    pub enum InputClassification: D3D11_INPUT_CLASSIFICATION{i32} {
+        #[default]
+        Vertex(const PER_VERTEX) = d3d11::D3D11_INPUT_PER_VERTEX_DATA,
+        Instance(const PER_INSTANCE) = d3d11::D3D11_INPUT_PER_INSTANCE_DATA,
+    }
 }
 
 impl InputLayout {
@@ -29,10 +37,11 @@ impl InputLayout {
 
     pub fn new_with_desc<B: AsRef<[u8]>>(
         device: &Dx11Device,
-        desc: &[D3D11_INPUT_ELEMENT_DESC],
+        desc: impl AsRef<[D3D11_INPUT_ELEMENT_DESC]>,
         bytecode: B,
     ) -> anyhow::Result<Self> {
         let bytecode = bytecode.as_ref();
+        let desc = desc.as_ref();
         let mut out: Option<ID3D11InputLayout> = None;
         unsafe {
             device.CreateInputLayout(desc, bytecode, Some(&mut out))
@@ -42,8 +51,6 @@ impl InputLayout {
         .map(Into::into)
     }
 
-    pub const INPUT_PER_INSTANCE: D3D11_INPUT_CLASSIFICATION = d3d11::D3D11_INPUT_PER_INSTANCE_DATA;
-    pub const INPUT_PER_VERTEX: D3D11_INPUT_CLASSIFICATION = d3d11::D3D11_INPUT_PER_VERTEX_DATA;
     pub const OFFSET_ALIGNED: u32 = d3d11::D3D11_APPEND_ALIGNED_ELEMENT;
 
     pub const fn offset_or_aligned(offset: Option<usize>) -> u32 {
@@ -56,7 +63,7 @@ impl InputLayout {
     pub const fn for_instance(slot: u32, name: &CStr, index: u32, format: dxgi::DXGI_FORMAT, offset: Option<usize>) -> D3D11_INPUT_ELEMENT_DESC {
         D3D11_INPUT_ELEMENT_DESC {
             InstanceDataStepRate: 1,
-            InputSlotClass: Self::INPUT_PER_INSTANCE,
+            InputSlotClass: InputClassification::PER_INSTANCE,
             InputSlot: slot,
             SemanticName: PCSTR(name.as_ptr() as *const _),
             SemanticIndex: index,
@@ -68,7 +75,7 @@ impl InputLayout {
     pub const fn for_vertex(slot: u32, name: &CStr, index: u32, format: dxgi::DXGI_FORMAT, offset: Option<usize>) -> D3D11_INPUT_ELEMENT_DESC {
         D3D11_INPUT_ELEMENT_DESC {
             InstanceDataStepRate: 0,
-            InputSlotClass: Self::INPUT_PER_VERTEX,
+            InputSlotClass: InputClassification::PER_VERTEX,
             InputSlot: slot,
             SemanticName: PCSTR(name.as_ptr() as *const _),
             SemanticIndex: index,
@@ -86,7 +93,189 @@ impl D3dContextBindable<Dx11Context> for InputLayout {
     }
 }
 
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11InputLayout,@transparent> for InputLayout,
-        @field(&this => &this.layout);
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub struct InputLayoutElement {
+    pub semantic_name: CStrBox,
+    pub semantic_index: u32,
+    pub format: dxgi::DXGI_FORMAT,
+    pub input_slot: u32,
+    pub aligned_byte_offset: u32,
+    pub class: D3D11_INPUT_CLASSIFICATION,
+    pub instance_step: u32,
+}
+
+impl InputLayoutElement {
+    pub fn byte_offset(&self) -> Option<usize> {
+        match self.aligned_byte_offset {
+            InputLayout::OFFSET_ALIGNED => None,
+            offset => Some(offset as _),
+        }
+    }
+
+    pub fn format(&self) -> DxgiFormat {
+        DxgiFormat::try_from(self.format)
+            .unwrap_or(DxgiFormat::Unknown)
+    }
+
+    pub fn class(&self) -> InputClassification {
+        InputClassification::try_from(self.class)
+            .unwrap_or(InputClassification::Vertex)
+    }
+
+    pub fn slice_as_desc(inputs: &[Self]) -> &[D3D11_INPUT_ELEMENT_DESC] {
+        unsafe {
+            mem::transmute(inputs)
+        }
+    }
+}
+
+impl_d3d! {
+    unsafe impl AsD3d<Interface = D3D11_INPUT_ELEMENT_DESC, @transparent> for InputLayoutElement;
+}
+
+#[cfg(feature = "serde")]
+pub(crate) mod serde_imp {
+    use {
+        crate::{dxgi, DxgiFormat},
+        super::{InputClassification, D3D11_INPUT_CLASSIFICATION},
+    };
+
+    pub(crate) fn default_dxgi() -> dxgi::DXGI_FORMAT {
+        DxgiFormat::R32G32B32A32_FLOAT
+    }
+    pub(crate) fn is_default_dxgi(f: &dxgi::DXGI_FORMAT) -> bool {
+        *f == DxgiFormat::R32G32B32A32_FLOAT
+    }
+
+    pub(crate) fn is_zero(v: &u32) -> bool {
+        *v == 0
+    }
+
+    pub(crate) fn default_instance_step(class: D3D11_INPUT_CLASSIFICATION) -> u32 {
+        match class {
+            InputClassification::PER_INSTANCE => 1,
+            InputClassification::PER_VERTEX | _ => 0,
+        }
+    }
+
+    pub mod input_classification {
+        use {
+            serde::{
+                Deserialize, Deserializer,
+                Serialize, Serializer,
+            },
+            super::super::{InputClassification, D3D11_INPUT_CLASSIFICATION},
+        };
+
+        pub fn serialize<S: Serializer>(class: &D3D11_INPUT_CLASSIFICATION, serializer: S) -> Result<S::Ok, S::Error> {
+            match InputClassification::try_from_d3d(*class) {
+                Ok(class) => class.serialize(serializer),
+                Err(..) => class.0.serialize(serializer),
+            }
+        }
+        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<D3D11_INPUT_CLASSIFICATION, D::Error> {
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum InputClassificationDe {
+                Class(InputClassification),
+                Raw(i32),
+            }
+            InputClassificationDe::deserialize(deserializer).map(|c| match c {
+                InputClassificationDe::Class(class) => class.to_d3d(),
+                InputClassificationDe::Raw(class) => D3D11_INPUT_CLASSIFICATION(class),
+            })
+        }
+
+        pub fn is_default_d3d(c: &D3D11_INPUT_CLASSIFICATION) -> bool {
+            *c == InputClassification::PER_VERTEX
+        }
+    }
+
+    pub mod input_layout_element {
+        use {
+            crate::prelude::*,
+            arcffi::cstr::{CStrBox, CStrRef},
+            serde::{
+                Deserialize, Deserializer,
+                Serialize, Serializer,
+            },
+            std::borrow::Cow,
+            super::super::{InputLayout, InputLayoutElement as InputLayoutElementDesc, D3D11_INPUT_CLASSIFICATION},
+        };
+
+        #[derive(Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[serde(bound(deserialize = "'de: 'c"))]
+        struct InputLayoutElement<'c> {
+            #[serde(rename = "name", default = "crate::macros::serde::cstr_box::cow::empty", skip_serializing_if = "crate::macros::serde::cstr_box::cow::is_empty", with = "crate::macros::serde::cstr_box::cow")]
+            semantic_name: Cow<'c, CStrRef>,
+            #[serde(rename = "index", default, skip_serializing_if = "super::is_zero")]
+            semantic_index: u32,
+            #[serde(default = "super::default_dxgi", skip_serializing_if = "super::is_default_dxgi", with = "crate::macros::serde::dxgi_format")]
+            format: dxgi::DXGI_FORMAT,
+            #[serde(rename = "slot", default, skip_serializing_if = "super::is_zero")]
+            input_slot: u32,
+            #[serde(rename = "offset", default, skip_serializing_if = "Option::is_none")]
+            aligned_byte_offset: Option<u32>,
+            #[serde(default, skip_serializing_if = "super::input_classification::is_default_d3d", with = "crate::macros::serde::dx11::input_classification")]
+            class: D3D11_INPUT_CLASSIFICATION,
+            #[serde(rename = "step", default, skip_serializing_if = "Option::is_none")]
+            instance_step: Option<u32>,
+        }
+
+        impl Serialize for InputLayoutElementDesc {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error> {
+                self::serialize(self, serializer)
+            }
+        }
+        impl<'de> serde::Deserialize<'de> for InputLayoutElementDesc {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> ::core::result::Result<Self, D::Error> {
+                self::deserialize(deserializer)
+            }
+        }
+
+        #[inline]
+        pub fn serialize<S: Serializer>(v: &InputLayoutElementDesc, serializer: S) -> Result<S::Ok, S::Error> {
+            self::InputLayoutElement::serialize(&v.into(), serializer)
+        }
+        #[inline]
+        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<InputLayoutElementDesc, D::Error> {
+            self::InputLayoutElement::deserialize(deserializer).map(Into::into)
+        }
+
+        impl From<InputLayoutElement<'_>> for InputLayoutElementDesc {
+            fn from(input: InputLayoutElement) -> Self {
+                InputLayoutElementDesc {
+                    semantic_name: CStrBox::with_cstring(input.semantic_name.into_owned()),
+                    semantic_index: input.semantic_index,
+                    format: input.format,
+                    input_slot: input.input_slot,
+                    aligned_byte_offset: input.aligned_byte_offset.unwrap_or(InputLayout::OFFSET_ALIGNED),
+                    instance_step: input.instance_step.unwrap_or(super::default_instance_step(input.class)),
+                    class: input.class,
+                }
+            }
+        }
+        impl<'s> From<&'s InputLayoutElementDesc> for InputLayoutElement<'s> {
+            fn from(input: &'s InputLayoutElementDesc) -> Self {
+                InputLayoutElement {
+                    semantic_name: Cow::Borrowed(input.semantic_name.as_c_ref()),
+                    semantic_index: input.semantic_index,
+                    format: input.format,
+                    input_slot: input.input_slot,
+                    aligned_byte_offset: match input.aligned_byte_offset{
+                        InputLayout::OFFSET_ALIGNED => None,
+                        o => Some(o),
+                    },
+                    instance_step: match input.instance_step {
+                        step if step == super::default_instance_step(input.class) =>
+                            None,
+                        step => Some(step),
+                    },
+                    class: input.class,
+                }
+            }
+        }
+    }
 }

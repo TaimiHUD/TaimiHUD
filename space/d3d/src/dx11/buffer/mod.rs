@@ -1,21 +1,17 @@
 mod buffer;
 mod constant;
 mod texture2;
+mod resource;
 mod sampler;
 mod vertex;
 mod view;
 
 pub use {
-    crate::{
-        d3d::D3D_SRV_DIMENSION,
-        dx11::d3d11::{
-            D3D11_BIND_FLAG,
-            D3D11_CPU_ACCESS_FLAG,
-            D3D11_FILTER,
-            D3D11_RESOURCE_MISC_FLAG,
-            D3D11_TEXTURE_ADDRESS_MODE,
-            D3D11_USAGE,
-        },
+    crate::dx11::d3d11::{
+        D3D11_BIND_FLAG,
+        D3D11_CPU_ACCESS_FLAG,
+        D3D11_RESOURCE_MISC_FLAG,
+        D3D11_USAGE,
     },
     self::{
         buffer::{
@@ -29,9 +25,19 @@ pub use {
             ConstantBufferV,
         },
         sampler::{
+            D3D11_FILTER,
             D3D11_SAMPLER_DESC,
+            D3D11_TEXTURE_ADDRESS_MODE,
+            Filter,
             ID3D11SamplerState,
             SamplerState,
+            TextureAddressMode,
+        },
+        resource::{
+            D3D11_RESOURCE_DIMENSION,
+            ID3D11Resource,
+            Resource,
+            ResourceDimension,
         },
         texture2::{
             D3D11_TEXTURE2D_DESC,
@@ -40,19 +46,18 @@ pub use {
         },
         vertex::{D3d11ContextBindableVertexBuffer, VertexBuffer},
         view::{
+            ID3D11ShaderResourceView, ID3D11View,
+            D3D_SRV_DIMENSION,
             D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0,
             D3D11_TEX2D_SRV,
-            ShaderResourceView, TextureView2,
+            ShaderResourceView, TextureView2, View,
         },
     },
 };
 
 use crate::{
-    d3d,
-    dx11::{
-        d3d11,
-        impl_d3d_ext11,
-    },
+    dx11::d3d11,
+    impl_d3d,
 };
 
 impl AccessFlags {
@@ -64,13 +69,7 @@ impl BindFlags {
     pub const SHADER_UNORDERED: Self = Self::from_bits_retain(Self::SHADER.bits() | Self::UNORDERED.bits());
 }
 
-impl TextureAddressMode {
-    pub const fn to_vec3(self) -> glamour::Vector3<Self> {
-        glamour::Vector3::new(self.to_raw(), self.to_raw(), self.to_raw())
-    }
-}
-
-impl_d3d_ext11! { impl bitflags for
+impl_d3d! { impl bitflags for
     pub struct BindFlags: D3D11_BIND_FLAG{u32} {
         const VERTEX = d3d11::D3D11_BIND_VERTEX_BUFFER.0;
         const INDEX = d3d11::D3D11_BIND_INDEX_BUFFER.0;
@@ -105,72 +104,7 @@ impl_d3d_ext11! { impl bitflags for
         const SHARED_EXCLUSIVE_WRITER = d3d11::D3D11_RESOURCE_MISC_SHARED_EXCLUSIVE_WRITER.0;
     },
 }
-impl_d3d_ext11! { impl enum for
-    #[derive(Default)]
-    pub enum TextureAddressMode: D3D11_TEXTURE_ADDRESS_MODE{i32} {
-        #[default]
-        const CLAMP = d3d11::D3D11_TEXTURE_ADDRESS_CLAMP;
-        const WRAP = d3d11::D3D11_TEXTURE_ADDRESS_WRAP;
-        const BORDER = d3d11::D3D11_TEXTURE_ADDRESS_BORDER;
-        const MIRROR = d3d11::D3D11_TEXTURE_ADDRESS_MIRROR;
-        const MIRROR_ONCE = d3d11::D3D11_TEXTURE_ADDRESS_MIRROR_ONCE;
-    },
-    #[derive(Default)]
-    pub enum Filter: D3D11_FILTER{u32} {
-        #[default]
-        const MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MIN_MAG_MIP_POINT;
-        const MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR;
-        const MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
-        const MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_POINT_MAG_MIP_LINEAR;
-        const MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT;
-        const MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
-        const MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
-        const MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-
-        const ANISOTROPIC = d3d11::D3D11_FILTER_ANISOTROPIC;
-
-        const COMPARISON_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT;
-        const COMPARISON_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_POINT_MIP_LINEAR;
-        const COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT;
-        const COMPARISON_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_POINT_MAG_MIP_LINEAR;
-        const COMPARISON_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT;
-        const COMPARISON_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
-        const COMPARISON_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-        const COMPARISON_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR;
-        const COMPARISON_ANISOTROPIC = d3d11::D3D11_FILTER_COMPARISON_ANISOTROPIC;
-
-        const MINIMUM_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_MIP_POINT;
-        const MINIMUM_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_POINT_MIP_LINEAR;
-        const MINIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT;
-        const MINIMUM_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_POINT_MAG_MIP_LINEAR;
-        const MINIMUM_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_LINEAR_MAG_MIP_POINT;
-        const MINIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
-        const MINIMUM_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT;
-        const MINIMUM_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MINIMUM_MIN_MAG_MIP_LINEAR;
-        const MINIMUM_ANISOTROPIC = d3d11::D3D11_FILTER_MINIMUM_ANISOTROPIC;
-
-        const MAXIMUM_MIN_MAG_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_POINT;
-        const MAXIMUM_MIN_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_POINT_MIP_LINEAR;
-        const MAXIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_POINT_MAG_LINEAR_MIP_POINT;
-        const MAXIMUM_MIN_POINT_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_POINT_MAG_MIP_LINEAR;
-        const MAXIMUM_MIN_LINEAR_MAG_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_LINEAR_MAG_MIP_POINT;
-        const MAXIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
-        const MAXIMUM_MIN_MAG_LINEAR_MIP_POINT = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT;
-        const MAXIMUM_MIN_MAG_MIP_LINEAR = d3d11::D3D11_FILTER_MAXIMUM_MIN_MAG_MIP_LINEAR;
-        const MAXIMUM_ANISOTROPIC = d3d11::D3D11_FILTER_MAXIMUM_ANISOTROPIC;
-    },
-    #[derive(Default)]
-    pub enum ViewDimension: D3D_SRV_DIMENSION{u32} {
-        #[default]
-        const UNKNOWN = d3d::D3D11_SRV_DIMENSION_UNKNOWN;
-        const BUFFER = d3d::D3D11_SRV_DIMENSION_BUFFER;
-        const BUFFEREX = d3d::D3D11_SRV_DIMENSION_BUFFEREX;
-        const TEXTURE1 = d3d::D3D11_SRV_DIMENSION_TEXTURE1D;
-        const TEXTURE1_ARRAY = d3d::D3D11_SRV_DIMENSION_TEXTURE1DARRAY;
-        const TEXTURE2 = d3d::D3D11_SRV_DIMENSION_TEXTURE2D;
-        const TEXTURE2_ARRAY = d3d::D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-        const TEXTURE3 = d3d::D3D11_SRV_DIMENSION_TEXTURE3D;
-    },
+impl_d3d! { impl enum for
     #[derive(Default)]
     pub enum Usage: D3D11_USAGE{u32} {
         #[default]

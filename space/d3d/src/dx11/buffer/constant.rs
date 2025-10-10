@@ -4,16 +4,19 @@ use {
         D3dContextBindableSlot,
         dx11::{
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
-            impl_d3d_ext11,
             prelude::*,
         },
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct ConstantBufferV {
-    pub buffer: Buffer,
+impl_d3d! {
+    @[transparent(Dx11Child <= ID3D11Buffer)]
+    pub struct ConstantBufferV {
+        pub buffer: Buffer,
+    }
+    @from()
+    @into()
+    @deref(Buffer);
 }
 
 impl ConstantBufferV {
@@ -88,10 +91,14 @@ impl ConstantBufferV {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct ConstantBufferP {
-    pub buffer: Buffer,
+impl_d3d! {
+    @[transparent(Dx11Child <= ID3D11Buffer)]
+    pub struct ConstantBufferP {
+        pub buffer: Buffer,
+    }
+    @from()
+    @into()
+    @deref(Buffer);
 }
 
 impl ConstantBufferP {
@@ -178,29 +185,9 @@ impl From<ConstantBufferP> for ConstantBufferV {
         Self::from_buffer(buffer.into())
     }
 }
-impl From<Buffer> for ConstantBufferV {
-    fn from(buffer: Buffer) -> Self {
-        Self::from_buffer(buffer)
-    }
-}
-impl From<ConstantBufferV> for Buffer {
-    fn from(buffer: ConstantBufferV) -> Self {
-        buffer.buffer
-    }
-}
 impl From<ConstantBufferV> for ConstantBufferP {
     fn from(buffer: ConstantBufferV) -> Self {
         Self::from_buffer(buffer.into())
-    }
-}
-impl AsRef<Buffer> for ConstantBufferV {
-    fn as_ref(&self) -> &Buffer {
-        &self.buffer
-    }
-}
-impl AsMut<Buffer> for ConstantBufferV {
-    fn as_mut(&mut self) -> &mut Buffer {
-        &mut self.buffer
     }
 }
 impl AsRef<ConstantBufferP> for ConstantBufferV {
@@ -210,65 +197,12 @@ impl AsRef<ConstantBufferP> for ConstantBufferV {
         }
     }
 }
-impl ops::Deref for ConstantBufferV {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Buffer {
-        &self.buffer
-    }
-}
-impl ops::DerefMut for ConstantBufferV {
-    fn deref_mut(&mut self) -> &mut Buffer {
-        &mut self.buffer
-    }
-}
 impl AsRef<ConstantBufferV> for ConstantBufferP {
     fn as_ref(&self) -> &ConstantBufferV {
         unsafe {
             mem::transmute(self)
         }
     }
-}
-impl From<Buffer> for ConstantBufferP {
-    fn from(buffer: Buffer) -> Self {
-        Self::from_buffer(buffer)
-    }
-}
-impl From<ConstantBufferP> for Buffer {
-    fn from(buffer: ConstantBufferP) -> Self {
-        buffer.buffer
-    }
-}
-impl AsRef<Buffer> for ConstantBufferP {
-    fn as_ref(&self) -> &Buffer {
-        &self.buffer
-    }
-}
-impl AsMut<Buffer> for ConstantBufferP {
-    fn as_mut(&mut self) -> &mut Buffer {
-        &mut self.buffer
-    }
-}
-impl ops::Deref for ConstantBufferP {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Buffer {
-        &self.buffer
-    }
-}
-impl ops::DerefMut for ConstantBufferP {
-    fn deref_mut(&mut self) -> &mut Buffer {
-        &mut self.buffer
-    }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=Dx11Buffer,@transparent> for ConstantBufferV,
-        @field(&this => &this.buffer.buffer);
-}
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=Dx11Buffer,@transparent> for ConstantBufferP,
-        @field(&this => &this.buffer.buffer);
 }
 
 // TODO: ConstantBufferG and ConstantBufferC

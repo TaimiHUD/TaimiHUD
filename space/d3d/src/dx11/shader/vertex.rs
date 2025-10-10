@@ -1,16 +1,14 @@
 use crate::{
-    dx11::{
-        impl_d3d_ext11,
-        prelude::*,
-    },
+    dx11::prelude::*,
     D3dContextBindable,
 };
 pub use crate::dx11::d3d11::ID3D11VertexShader;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct ShaderV {
-    pub shader: ID3D11VertexShader,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11VertexShader;
+
+    @[transparent(Dx11Child <= ID3D11VertexShader)]
+    pub struct ShaderV.shader;
 }
 
 impl ShaderV {
@@ -46,9 +44,4 @@ impl D3dContextBindable<Dx11Context> for ShaderV {
             context.VSSetShader(&self.shader, None);
         }
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11VertexShader,@transparent> for ShaderV,
-        @field(&this => &this.shader);
 }

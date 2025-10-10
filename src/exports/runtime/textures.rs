@@ -356,7 +356,7 @@ impl TextureSlot {
 
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
         let id = self.resource_view()
-            .map(|resource| TextureId::new(resource.view.view.as_raw() as usize));
+            .map(|resource| TextureId::new(resource.to_ref().as_raw() as usize));
         let id = id.unwrap_or(TextureId::new(0));
 
         Some(match self {

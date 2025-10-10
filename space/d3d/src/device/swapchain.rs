@@ -26,7 +26,9 @@ pub use crate::{
 // TODO: DXGI_PRESENT bitflags
 
 impl_d3d! {
-    @[transparent(Interface <= IDXGISwapChain)]
+    unsafe impl D3dInterfacePtr for IDXGISwapChain;
+
+    @[transparent(D3dInterfacePtr <= IDXGISwapChain)]
     pub struct SwapChain0.chain;
 }
 
@@ -110,7 +112,7 @@ impl SwapChain0 {
 }
 
 impl_d3d! {
-    @[transparent(Interface <= IDXGISwapChain1)]
+    @[transparent(D3dInterfacePtr <= IDXGISwapChain1)]
     pub struct SwapChain1 {
         pub chain0: SwapChain0,
     }
@@ -155,7 +157,7 @@ impl SwapChain1 {
 }
 
 impl_d3d! {
-    @[transparent(Interface <= IDXGISwapChain2)]
+    @[transparent(D3dInterfacePtr <= IDXGISwapChain2)]
     pub struct SwapChain2 {
         pub chain1: SwapChain1,
     }
@@ -180,7 +182,7 @@ impl SwapChain2 {
 }
 
 impl_d3d! {
-    @[transparent(Interface <= IDXGISwapChain3)]
+    @[transparent(D3dInterfacePtr <= IDXGISwapChain3)]
     pub struct SwapChain3 {
         pub chain2: SwapChain2,
     }
@@ -196,7 +198,7 @@ impl SwapChain3 {
 }
 
 impl_d3d! {
-    @[transparent(Interface <= IDXGISwapChain4)]
+    @[transparent(D3dInterfacePtr <= IDXGISwapChain4)]
     pub struct SwapChain4 {
         pub chain3: SwapChain3,
     }

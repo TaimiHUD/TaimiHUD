@@ -11,7 +11,7 @@ use {
     taimi_d3d::{
         dx11::{
             prelude::*,
-            shader::{D3D11_INPUT_ELEMENT_DESC, InputLayout},
+            shader::{D3D11_INPUT_ELEMENT_DESC, InputLayout, InputLayoutElement},
         },
         blob::Blob,
         shader::{compile, ShaderDefinitions, ShaderTarget},
@@ -31,10 +31,12 @@ pub struct ShaderDescription {
     pub layout_type: Option<ShaderLayout>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ShaderLayout {
     JustVertex,
     VertexInstance,
+    #[serde(rename = "inputs")]
+    Inputs(Vec<InputLayoutElement>),
 }
 
 impl ShaderDescription {
@@ -69,6 +71,7 @@ impl ShaderDescription {
         match &self.layout_type {
             None | Some(ShaderLayout::VertexInstance) => &Self::INPUT_LAYOUT_INSTANCED,
             Some(ShaderLayout::JustVertex) => &Self::INPUT_LAYOUT_JUST_VERTEX,
+            Some(ShaderLayout::Inputs(layout)) => InputLayoutElement::slice_as_desc(layout),
         }
     }
 

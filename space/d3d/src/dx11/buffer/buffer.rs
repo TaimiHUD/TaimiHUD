@@ -1,8 +1,10 @@
 use crate::{
     dx11::{
-        impl_d3d_ext11,
         prelude::*,
-        buffer::{BindFlags, BufferFlags, Usage},
+        buffer::{
+            BindFlags, BufferFlags, Usage,
+            Resource,
+        },
     },
     buffer::D3dContextBindableVertexBuffer,
     D3dContextBindableSlot,
@@ -14,10 +16,15 @@ pub use crate::dx11::d3d11::{
     D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(transparent)]
-pub struct Buffer {
-    pub buffer: ID3D11Buffer,
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11Buffer;
+
+    @[transparent(Dx11Child <= ID3D11Buffer)]
+    pub struct Buffer {
+        pub buffer: Resource,
+    }
+    @into()
+    @deref(Resource);
 }
 
 impl Buffer {
@@ -26,7 +33,7 @@ impl Buffer {
     pub fn desc(&self) -> D3D11_BUFFER_DESC {
         let mut desc = D3D11_BUFFER_DESC::default();
         unsafe {
-            self.buffer.GetDesc(&mut desc);
+            self.as_d3d().GetDesc(&mut desc);
         }
         desc
     }
@@ -337,11 +344,6 @@ impl Buffer {
             );
         }
     }
-}
-
-impl_d3d_ext11! {
-    unsafe impl ID3D11ResourceExt<Output=ID3D11Buffer,@transparent> for Buffer,
-        @field(&this => &this.buffer);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,7 +3,7 @@ use {
     crate::prelude::*,
     std::{
         collections::{BTreeMap, HashMap},
-        ffi::{CStr, CString, NulError},
+        ffi::{CStr, CString},
     },
 };
 pub use {
@@ -270,4 +270,8 @@ impl<'de> serde::Deserialize<'de> for ShaderDefinitions {
                 &"C-compatible string",
             ))
     }
+}
+
+impl_d3d! {
+    unsafe impl D3dInterfacePtr for ID3DInclude;
 }

@@ -3,7 +3,8 @@ pub mod buffer;
 pub mod device;
 #[cfg(feature = "dx11")]
 pub mod dx11;
-pub(crate) mod macros;
+#[doc(hidden)]
+pub mod macros;
 pub mod shader;
 pub mod state;
 
@@ -13,6 +14,7 @@ pub mod prelude {
         crate::{
             blob::Blob,
             buffer::{
+                dxgi::DxgiFormat,
                 D3dContextBindableVertexBuffer as _,
                 D3dBufferData,
             },
@@ -79,9 +81,12 @@ pub use windows::Win32::Graphics::{
     },
 };
 
-pub use self::device::{
-    D3dContext, D3dDevice,
-    D3dContextBindable, D3dContextBindableSlot,
+pub use self::{
+    buffer::dxgi::DxgiFormat,
+    device::{
+        D3dContext, D3dDevice,
+        D3dContextBindable, D3dContextBindableSlot,
+    },
 };
 
 pub unsafe trait D3dInterfacePtr: Clone {
