@@ -49,7 +49,7 @@ taimi_mumblelink = []
 
 [dependencies]
 anyhow = "1"
-async-compression = { version = "0.4", optional = true }
+async-compression = { version = "0.4.29", optional = true }
 bitflags = { workspace = true }
 log = "0.4"
 tokio = { version = "1", default-features = false }
@@ -63,3 +63,7 @@ arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-fe
 # keep version in sync with nexus dependency
 gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false, optional = true }
 nexus = { git = "https://github.com/zerthox/nexus-rs", optional = true }
+
+[build-dependencies]
+compression-codecs = { version = "0.4", features = ["gzip"] }
+compression-core = "0.4"
