@@ -141,6 +141,17 @@ impl GameplayState {
         }
     }
 
+    pub const fn latest_map(&self) -> Option<NonZero<MapID>> {
+        match self {
+            &Self::Gameplay { map_id } =>
+                map_id,
+            &Self::Intermission { next_map_id: Some(map_id), .. } =>
+                Some(map_id),
+            &Self::Intermission { next_map_id: None, prev_map_id, .. } =>
+                prev_map_id,
+        }
+    }
+
     pub const fn latest_transition(&self) -> GameplayTransition {
         match self {
             &GameplayState::Intermission { prev_map_id: None, next_map_id, .. } =>

@@ -167,10 +167,13 @@ impl RenderMachine {
             #[cfg(feature = "space")]
             {
                 self.map_sign.update(playpos, self.map.player_pos);
-                self.map.calibration.set_offset(self.map_sign.bounds.center(), self.map_sign.global.center());
-                match self.map_sign.get_scale() {
-                    Some(scale) if SignObtainer::is_significant(scale) =>
-                        self.map.calibration.local_space = Some(scale),
+                if self.map_info.is_none() {
+                    self.map.calibration.set_offset(self.map_sign.bounds.center(), self.map_sign.global.center());
+                }
+                match (self.map_sign.get_scale(), &self.map_info) {
+                    (Some(scale), None) => {
+                        self.map.calibration.local_space = SignObtainer::is_significant(scale).then_some(scale);
+                    },
                     _ => (),
                 }
             }

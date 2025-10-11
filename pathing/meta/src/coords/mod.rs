@@ -543,7 +543,7 @@ fn billboard_model_view() {
         let front = (Vector3::<LocalSpace>::new(0.2, 0.3, 0.4) * sign).normalize();
         let pos = Point3::<LocalSpace>::ONE;
         let up = Vector3::<LocalSpace>::Y;
-        let mut look = camera_view(pos, front, up);
+        let look = camera_view(pos, front, up);
         let billy = {
             let cam_right = front.cross(up).normalize();
             // XXX: avoid normalizing cam_up if using glam::look_to_lh...

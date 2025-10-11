@@ -33,8 +33,10 @@ use core::ops::Range;
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     arcloader_mumblelink::identity::MumbleIdentity,
+    std::borrow::Cow,
     taimi_meta::{
         coords::SignObtainer,
+        map::{Map, MapCache},
         ui::{MapOpen, UiMap},
     },
 };
@@ -65,6 +67,8 @@ pub struct RenderMachine {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub map: UiMap,
     pub map_users: RenderUsers,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub map_info: Option<Cow<'static, Map>>,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub map_open: bool,
     #[cfg(any(feature = "markers", feature = "space"))]
@@ -121,6 +125,8 @@ impl RenderMachine {
                 map
             },
             map_users: Self::USERS,
+            #[cfg(any(feature = "markers", feature = "space"))]
+            map_info: None,
             #[cfg(any(feature = "markers", feature = "space"))]
             map_open: MapOpen::DEFAULT.is_open(),
             #[cfg(any(feature = "markers", feature = "space"))]
@@ -210,13 +216,31 @@ impl RenderMachine {
     }
 
     pub fn act_gameplay_transition(&mut self, trans: GameplayTransition) {
+        let gameplay = self.gameplay.clone();
+        #[cfg(any(feature = "markers", feature = "space"))]
+        {
+            self.map_info = match self.gameplay.latest_map() {
+                None => None,
+                Some(map_id) => match MapCache.lookup_map(map_id.get()) {
+                    Some(map) => {
+                        if matches!(trans, GameplayTransition::Loaded { .. }) {
+                            self.map.calibration.local_space = None;
+                            self.map.calibration.local_offset = None;
+                        }
+                        self.map.calibration.update_from_map(&map);
+                        Some(map)
+                    },
+                    None => None,
+                },
+            };
+        }
         #[cfg(feature = "space")]
         Engine::try_send(SpaceEvent::GameplayStatus {
-            gameplay: self.gameplay.clone(),
+            gameplay: gameplay.clone(),
             trans: trans.clone(),
         });
         Controller::try_send(ControllerEvent::GameplayStatus {
-            gameplay: self.gameplay.clone(),
+            gameplay,
             trans,
         });
     }
@@ -285,20 +309,16 @@ impl RenderMachine {
         let gameplay_transition = gameplay_change
             .and_then(|gameplay| match gameplay {
                 GameplayState::Intermission { next_map_id: map_id @ Some(..), .. } => {
-                    if let Some(map_id) = map_id {
-                        self.map.calibration.update_from_map_id(map_id.get());
-                    }
                     self.gameplay.commit_loading(map_id)
                 },
                 GameplayState::Intermission { next_map_id: None, .. } => {
-                    //self.map.calibration.update_from_map_id(0);
+                    //self.map.calibration.clear_map();
                     self.gameplay.commit_intermission()
                 },
                 GameplayState::Gameplay { map_id } => {
-                    if let Some(map_id) = map_id {
-                        self.map.calibration.update_from_map_id(map_id.get());
-                        //self.map.calibration.local_offset = None;
+                    if let Some(_map_id) = map_id {
                         // TODO: only if prev map was different!
+                        //self.map.calibration.clear_map();
                         self.map_sign.clear();
                     }
                     self.gameplay.commit_ingame(map_id.map(|id| id.get()).unwrap_or_default())
