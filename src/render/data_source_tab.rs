@@ -143,7 +143,7 @@ impl DataSourceTabState {
                                 state_errors,
                                 ui,
                                 fl!("open-button", kind = "folder"),
-                                path.to_string(),
+                                path,
                             );
                         }
                         self.draw_uninstall(ui, download_data);

@@ -278,13 +278,13 @@ impl RenderState {
         Image::new(icon.id, size).build(ui);
         ui.same_line();
     }
-    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Debug>(
+    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Display>(
         state_errors: &mut HashMap<String, anyhow::Error>,
         ui: &Ui,
         text: S,
         openable: O,
     ) {
-        let openable_display = format!("{:?}", openable);
+        let openable_display = openable.to_string();
         let text_display = text.to_string();
         let entry_name = fl!(
             "open-error",
@@ -292,7 +292,7 @@ impl RenderState {
             path = openable_display.clone()
         );
         if ui.button(&text) {
-            log::info!("Triggered open {openable:?} for {text}");
+            log::debug!("Triggered open {openable} for {text}");
             Controller::try_send(ControllerEvent::OpenOpenable(
                 entry_name.clone(),
                 openable.into(),
