@@ -20,7 +20,9 @@ impl_d3d! {
     unsafe impl D3dInterfacePtr for ID3D11Device;
 
     @[transparent(D3dInterfacePtr <= ID3D11Device)]
-    pub struct Device0.device;
+    pub struct Device0.device
+        @deref(ID3D11Device)
+    ;
 }
 
 impl Device0 {

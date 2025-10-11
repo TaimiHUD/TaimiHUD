@@ -49,6 +49,11 @@ pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
 pub type NexusLink = ();
 #[cfg(not(feature = "extension-nexus"))]
 pub type RealTimeApi = ();
+#[cfg(any(feature = "space", feature = "texture-loader"))]
+pub use taimi_d3d::{
+    device::SwapChain0 as SwapChain,
+    dx11::device::Device0 as Device,
+};
 
 pub type RuntimeError = &'static str;
 pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
@@ -285,7 +290,7 @@ pub async fn invoke_marker_bind(marker: MarkerType, target: bool, duration: Dura
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
+pub fn dxgi_swap_chain() -> RuntimeResult<Option<SwapChain>> {
     #[cfg(feature = "extension-nexus")]
     if let Some(swap_chain) = exports::nexus::dxgi_swap_chain()? {
         return Ok(Some(swap_chain))
@@ -300,22 +305,22 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi:
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn d3d11_device() -> anyhow::Result<windows::Win32::Graphics::Direct3D11::ID3D11Device> {
+pub fn d3d11_device() -> anyhow::Result<(Device, SwapChain)> {
     #[cfg(feature = "extension-nexus")]
+    #[cfg(todo = "unnecessary")]
     if let Ok(Some(device)) = exports::nexus::d3d11_device() {
         return Ok(device)
     }
 
-    let res = match dxgi_swap_chain() {
-        Ok(Some(swap_chain)) => unsafe {
-            let device = swap_chain.GetDevice()?;
-            Ok(Some(device))
-        },
-        Ok(None) => Ok(None),
-        Err(msg) => Err(msg),
-    }.transpose().unwrap_or(Err(RT_UNAVAILABLE));
+    let sc = dxgi_swap_chain()
+        .transpose().unwrap_or(Err(RT_UNAVAILABLE))
+        .map_err(anyhow::Error::msg)
+        .context("DXGI swap chain unavailable");
 
-    res.map_err(|msg| anyhow::anyhow!("d3d11 device unavailable: {msg}"))
+    sc.and_then(|sc| sc.get_device11()
+        .map(|d| (d, sc))
+        .context("D3D11 device unavailable")
+    )
 }
 
 pub async fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
@@ -374,9 +379,8 @@ pub fn window_handle() -> RuntimeResult<HWND> {
     let sc = dxgi_swap_chain()?
         .ok_or("swap chain unavailable")?;
 
-    let desc = unsafe {
-        sc.GetDesc()
-    }.map_err(|_| "swap chain descriptor missing")?;
+    let desc = sc.get_desc0()
+        .map_err(|_| "swap chain descriptor missing")?;
 
     match desc.OutputWindow.is_invalid() {
         false => Ok(desc.OutputWindow),

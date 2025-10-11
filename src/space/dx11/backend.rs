@@ -1,14 +1,16 @@
 use {
     super::{DepthHandler, PerspectiveHandler},
     crate::{
-        exports::runtime as rt,
+        exports::runtime::{
+            self as rt,
+            Device, SwapChain,
+        },
         space::{
-            dx11::SwapChain,
             resources::ShaderLoader,
             ScreenSpace,
         },
     },
-    anyhow::{anyhow, Context},
+    anyhow::Context,
     glamour::Size2,
     taimi_d3d::dx11::{
         prelude::*,
@@ -25,7 +27,7 @@ pub struct RenderBackend {
 
     pub shaders: ShaderLoader,
     pub sampler_state: SamplerState,
-    pub device: Dx11Device,
+    pub device: Device,
     pub swap_chain: SwapChain,
     pub display_size: Size2<ScreenSpace>,
 }
@@ -33,12 +35,7 @@ pub struct RenderBackend {
 impl RenderBackend {
     pub fn setup(display_size: Size2<ScreenSpace>) -> anyhow::Result<RenderBackend> {
         log::info!("Getting d3d11 device swap chain");
-        let swap_chain = rt::dxgi_swap_chain()
-            .map_err(|e| anyhow!("DXGI swap chain unavailable: {e}"))
-            .and_then(|sc| sc.map(SwapChain::from)
-                .ok_or_else(|| anyhow!("you will not reach heaven today, how are you here?"))
-            )?;
-        let device = swap_chain.get_device11()?;
+        let (device, swap_chain) = rt::d3d11_device()?;
 
         let shaders = ShaderLoader::load_bundled(&device)
             .context("Shaders failed to load")?;

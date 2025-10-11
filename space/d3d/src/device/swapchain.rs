@@ -101,8 +101,9 @@ impl SwapChain0 {
 
 #[cfg(feature = "dx11")]
 impl SwapChain0 {
-    pub fn get_device11(&self) -> anyhow::Result<crate::dx11::Dx11Device> {
+    pub fn get_device11(&self) -> anyhow::Result<crate::dx11::device::Device0> {
         self.get_device()
+            .map(crate::dx11::device::Device0::from_d3d)
     }
 
     pub fn get_framebuffer11(&self, index: u32) -> anyhow::Result<crate::dx11::Texture2> {

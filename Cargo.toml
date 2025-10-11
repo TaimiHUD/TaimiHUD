@@ -130,6 +130,7 @@ image = [
   "dep:image",
 ]
 texture-loader = [
+  "dep:taimi_d3d",
   "image",
   "windows/Win32_Graphics_Direct3D11",
   "windows/Win32_Graphics_Dxgi",

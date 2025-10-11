@@ -25,8 +25,6 @@ use {
         TEXTURES,
     },
 };
-#[cfg(any(feature = "space", feature = "texture-loader"))]
-use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 
 /// raidcore addon id or NEGATIVE random unique signature
@@ -192,18 +190,22 @@ pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>
     Ok(Some(()))
 }
 
+/// just a utility that calls dxgi_swap_chain().GetDevice()...
+#[cfg(todo = "unnecessary")]
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn d3d11_device() -> RuntimeResult<Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>> {
+pub fn d3d11_device() -> RuntimeResult<Option<rt::Device>> {
     if !available() {
         return Ok(None)
     }
 
     let api = AddonApi::get();
-    Ok(api.get_d3d11_device())
+    Ok(api.get_d3d11_device().map(Into::into))
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain() -> RuntimeResult<Option<IDXGISwapChain>> {
+pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
+    use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
+
     if !available() {
         return Ok(None)
     }
@@ -217,7 +219,7 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<IDXGISwapChain>> {
         return Err("DXGI swap chain unavailable")
     }
 
-    Ok(swap_chain.clone())
+    Ok(swap_chain.clone().map(Into::into))
 }
 
 pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
