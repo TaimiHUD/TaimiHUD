@@ -3,9 +3,7 @@ use {
     std::time::Instant,
     super::{RenderMachine, RenderUsers},
     taimi_meta::ui::{
-        gameplay::{GameplayState, GameplayTransition},
         MapContext, MapOpen,
-        UiState,
     },
 };
 #[cfg(feature = "space")]

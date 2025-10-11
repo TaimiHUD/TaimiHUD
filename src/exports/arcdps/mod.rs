@@ -15,7 +15,6 @@ use {
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
     std::{
-        cell::RefCell,
         collections::BTreeMap,
         ffi::{c_void, CStr, OsStr},
         fmt::{self, Write},
