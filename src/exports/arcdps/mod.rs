@@ -1110,8 +1110,6 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
         kb.get(&control).cloned()
     }.ok_or("unknown keybind")?;
 
-    let hwnd = rt::window_handle()?;
-
     let mut mods = KeyState::from(&binding);
     match binding.key {
         Key::Key(keycode) => {
