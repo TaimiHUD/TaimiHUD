@@ -875,7 +875,7 @@ fn process_textures() {
                     let device = match &mut device {
                         Some(d) => d,
                         device => {
-                            let d3d11 = rt::d3d11_device()
+                            let (d3d11, _) = rt::d3d11_device()
                                 .context("d3d11 device required to load textures")?;
                             device.insert(d3d11)
                         },

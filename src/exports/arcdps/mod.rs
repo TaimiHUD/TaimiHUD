@@ -1222,7 +1222,7 @@ pub fn ui_modifiers() -> ModifierKeys {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
+pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
     if !available() {
         return Ok(None)
     }
@@ -1232,5 +1232,5 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<windows::Win32::Graphics::Dxgi:
         () => r#extern::dxgi_swap_chain().map(|sc| sc.to_owned()),
         #[cfg(feature = "extension-arcdps-codegen")]
         () => cb::dxgi_swap_chain(),
-    })
+    }.map(Into::into))
 }

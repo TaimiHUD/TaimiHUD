@@ -70,10 +70,7 @@ pub fn get_state() -> (bool, bool) {
 pub fn enable(needs_setup: bool) {
     let vtbl = if needs_setup {
         let ctx = rt::d3d11_device()
-            .context("GetDevice")
-            .and_then(|dev| unsafe {
-                dev.GetImmediateContext()
-            }.context("GetImmediateContext"))
+            .and_then(|(dev, _)| dev.get_immediate_context())
             .context("goggles requires device context");
 
         let ctx = match ctx {

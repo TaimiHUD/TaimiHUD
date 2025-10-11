@@ -23,7 +23,9 @@ impl_d3d! {
     unsafe impl Dx11Child for ID3D11DeviceContext;
 
     @[transparent(D3dInterfacePtr <= ID3D11DeviceContext)]
-    pub struct DeviceContext0.context;
+    pub struct DeviceContext0.context
+        @deref(ID3D11DeviceContext)
+    ;
 }
 
 impl_d3d! {
