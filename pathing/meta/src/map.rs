@@ -78,6 +78,7 @@ pub type MapType = String;
 #[cfg(feature = "map-cache")]
 mod cache {
     use {
+        anyhow::Context,
         crate::map::{Map, MapID},
         std::{
             borrow::Cow,
@@ -91,19 +92,69 @@ mod cache {
 
     impl MapCache {
         pub fn lookup_map(&self, map_id: MapID) -> Option<Cow<'_, Map>> {
-            #[cfg(not(feature = "gzip"))]
-            const MAPS_SIGN_JSON: &'static str = include_str!("../data/maps-sign.json");
-            static MAPS_SIGN: LazyLock<BTreeMap<MapID, Map>> = LazyLock::new(|| {
-                let maps = serde_json::from_str::<BTreeMap<MapID, Map>>(MAPS_SIGN_JSON);
+            static MAPS_CACHE: LazyLock<BTreeMap<MapID, Map>> = LazyLock::new(|| {
+                let maps: Result<BTreeMap<MapID, Map>, _> = match () {
+                    #[cfg(not(feature = "gzip"))]
+                    () => serde_json::from_str(MapCache::maps_json()),
+                    #[cfg(feature = "gzip")]
+                    () => match MapCache::maps_json_gz().context("couldn't inflate map cache") {
+                        Ok(json) => serde_json::from_str(&json),
+                        Err(e) => Err(serde::de::Error::custom(e)),
+                    },
+                }.context("failed to deserialize map cache");
                 if let Err(_e) = &maps {
-                    log::error!("failed to deserialize map cache: {_e}");
+                    log::error!("{_e:#}");
                 }
                 maps.unwrap_or_default()
             });
 
-            let map = MAPS_SIGN.get(&map_id)?;
+            let map = MAPS_CACHE.get(&map_id)?;
 
             Some(Cow::Borrowed(map))
+        }
+
+        #[cfg(not(feature = "gzip"))]
+        pub(crate) fn maps_json() -> &'static str {
+            const MAPS_JSON: &'static str = include_str!(env!("INC_MAP_CACHE"));
+            MAPS_JSON
+        }
+
+        #[cfg(feature = "gzip")]
+        pub(crate) fn maps_json_gz() -> anyhow::Result<String> {
+            use async_compression::{
+                core::util::PartialBuffer,
+                codecs::{Decode, gzip::GzipDecoder},
+            };
+
+            const MAPS_JSON_GZ: &'static [u8] = include_bytes!(env!("INC_MAP_CACHE_GZ"));
+            /// TODO: build script could export this as env var?
+            const MAPS_JSON_LEN: usize = 0x64000;
+            let mut input = PartialBuffer::new(MAPS_JSON_GZ);
+            let mut out = PartialBuffer::new(vec![0u8; MAPS_JSON_LEN]);
+            let mut decoder = GzipDecoder::new();
+            while !input.unwritten().is_empty() {
+                let res = decoder.decode(&mut input, &mut out)
+                    .context("GZIP decode failure");
+                if res? {
+                    break
+                }
+            }
+            loop {
+                let res = decoder.finish(&mut out)
+                    .context("GZIP failed to finalize");
+                if res? {
+                    break
+                }
+                if out.unwritten().is_empty() {
+                    anyhow::bail!("BUG: buffer ran out of room for map cache!");
+                }
+            }
+
+            let len = out.written().len();
+            let mut out = out.into_inner();
+            out.truncate(len);
+            String::from_utf8(out)
+                .context("decoded data not stringy enough")
         }
     }
 }
@@ -115,10 +166,18 @@ pub use self::cache::MapCache;
 fn map_decode() {
     use std::collections::BTreeMap;
 
-    const MAPS_SIGN: &'static str = include_str!("../data/maps-sign.json");
-    let maps: BTreeMap<crate::map::MapID, Map> = serde_json::from_str(MAPS_SIGN).unwrap();
+    let maps_json = match () {
+        #[cfg(not(feature = "map-cache"))]
+        () => include_str!("../data/maps-sign.json"),
+        #[cfg(all(feature = "map-cache", not(feature = "gzip")))]
+        () => MapCache::maps_json(),
+        #[cfg(all(feature = "map-cache", feature = "gzip"))]
+        () => MapCache::maps_json_gz().unwrap(),
+    };
+    let maps: BTreeMap<crate::map::MapID, Map> = serde_json::from_str(&maps_json).unwrap();
 
-    for (id, map) in &maps {
+    const LIMIT: usize = 48;
+    for (id, map) in maps.iter().take(LIMIT) {
         eprintln!("map#{id}: {map:#?}");
         let local_rect = map.map_rect();
         let global_rect = map.continent_rect();
