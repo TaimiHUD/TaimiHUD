@@ -9,7 +9,7 @@ use {
             ScreenSpace,
             WorldmapSpace,
         },
-        map::MapID,
+        map::{Map, MapID},
         ui::{MapContext, MinimapState, MinimapPlacement, UiSize, UiState},
     },
     glamour::{
@@ -107,12 +107,14 @@ impl MapCalibration {
         self.compass_position = ui_state.into();
     }
 
-    #[cfg(feature = "map-cache")]
-    pub fn update_from_map_id(&mut self, map_id: MapID) {
-        self.local_space = match map_id {
-            0 => None,
-            map_id => MapLocalScale::for_map(map_id),
-        };
+    pub fn update_from_map(&mut self, map: &Map) {
+        if self.local_space.is_none() {
+            self.local_space = Some(map.map_scale());
+        }
+        if self.local_offset.is_none() {
+            let offset = map.continent_map_origin();
+            self.local_offset = Some(Point2::new(offset.x, offset.y).extend(0.0));
+        }
     }
 
     pub fn bounds_for(&self, ctx: MapContext) -> Rect<FakeSpace> {
@@ -158,6 +160,11 @@ impl MapCalibration {
             Some(Point3::new(global.x, global.y, local.y / self.z_scale()))
         };
     }
+
+    pub fn clear_map(&mut self) {
+        self.local_space = None;
+        self.local_offset = None;
+    }
 }
 
 #[cfg(feature = "taimi_mumblelink")]
@@ -173,22 +180,27 @@ impl MapCalibration {
 
         let ui_state = UiState::from(read_volatile(&raw const (*context).ui_state));
         self.update_from_mumblelink_state(ui_state);
-        #[cfg(feature = "map-cache")]
-        if self.local_space.is_none() {
-            let map_id = read_volatile(&raw const (*context).map_id);
-            self.update_from_map_id(map_id);
-        }
+        // TODO: try to get map translation from map id rect lookup!
+        #[cfg(todo)]
+        {
+            use super::mumblelink::MumbleLink;
+            let player_map = Point2::<MapSpace>::new(
+                read_volatile(&raw const (*context).player_x),
+                read_volatile(&raw const (*context).player_y),
+            );
+            let link = context.byte_sub(core::mem::offset_of!(MumbleLink, context)) as *const MumbleLink;
+            let player_local = Point3::<LocalSpace>::new(
+                read_volatile(&raw const (*link).avatar.position[0]),
+                read_volatile(&raw const (*link).avatar.position[1]),
+                read_volatile(&raw const (*link).avatar.position[2]),
+            );
+            self.set_offset(player_local, player_map);
+        };
     }
 
     pub fn update_from_mumblelink_identity_data(&mut self, ui_size: UiSize, _map_id: MapID) -> bool {
         let changed = self.ui_size != ui_size;
         self.ui_size = ui_size;
-
-        #[cfg(feature = "map-cache")]
-        let changed = changed || if self.local_space.is_none() {
-            self.update_from_map_id(_map_id);
-            self.local_space.is_some()
-        } else { false };
 
         changed
     }

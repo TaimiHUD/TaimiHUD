@@ -16,6 +16,8 @@ use {
 /// we have to convert ft to m
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct MapLocalScale {
+    /// scale stored as m/global,
+    /// where global is typically normalized as 2ft
     pub scale: Vector2<LocalSpace>,
 }
 
@@ -59,34 +61,24 @@ impl MapLocalScale {
     pub fn with_game_size(map_size: Size2<GameSpace>, continent_size: Size2<MapSpace>) -> Self {
         let scale = Vector2::new(
             map_size.width / continent_size.width,
-            map_size.height / continent_size.height,
+            -map_size.height / continent_size.height,
         );
         Self::with_game_scale(scale)
     }
 
+    /// inches per global unit
+    pub const fn scale_local(&self) -> Vector2<GameSpace> {
+        Vector2::new(
+            self.scale.x / Self::METRES_PER_INCH,
+            self.scale.y / Self::METRES_PER_INCH,
+        )
+    }
+
     #[cfg(feature = "map-cache")]
     pub fn for_map(map_id: crate::map::MapID) -> Option<Self> {
-        use {
-            crate::map::{Map, MapID},
-            std::{
-                collections::BTreeMap,
-                sync::LazyLock,
-            },
-        };
-
-        #[cfg(not(feature = "gzip"))]
-        const MAPS_SIGN_JSON: &'static str = include_str!("../../data/maps-sign.json");
-        static MAPS_SIGN: LazyLock<BTreeMap<MapID, Map>> = LazyLock::new(|| {
-            let maps = serde_json::from_str::<BTreeMap<MapID, Map>>(MAPS_SIGN_JSON);
-            if let Err(_e) = &maps {
-                log::error!("failed to deserialize map cache: {_e}");
-            }
-            maps.unwrap_or_default()
-        });
-
-        let map = MAPS_SIGN.get(&map_id)?;
-
-        Some(Self::with_game_bounds(map.map_rect(), map.continent_rect()))
+        use crate::map::MapCache;
+        let map = MapCache.lookup_map(map_id)?;
+        Some(map.map_scale())
     }
 }
 
@@ -99,6 +91,11 @@ coord_newtype! {
     impl TransformMap<LocalSpace, Output = Vector2<MapSpace>> for MapLocalScale {
         fn map(&self, v) {
             (v / self.scale).as_()
+        }
+    }
+    impl TransformMap<GameSpace, Output = Vector2<MapSpace>> for MapLocalScale {
+        fn map(&self, v) {
+            (v / self.scale_local()).as_()
         }
     }
     // TODO: Vector3!
