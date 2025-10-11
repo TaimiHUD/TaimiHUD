@@ -31,6 +31,8 @@ pub fn compile(
     let filename = PCSTR(filename.as_ptr() as *const _);
     let defines = match defines {
         defs if defs.is_empty() => None,
+        defs if !defs.last().map(|d| d.is_empty()).unwrap_or(false) =>
+            anyhow::bail!("defs must be null-terminated"),
         defines => Some(ShaderDefinition::slice_as_d3d_macros(defines)),
     };
     let target_name = PCSTR(target.c_name().as_ptr() as *const _);
@@ -71,13 +73,21 @@ pub fn compile(
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShaderDefinition {
-    pub name: CStrBox,
-    pub definition: CStrBox,
+    pub name: Option<CStrBox>,
+    pub definition: Option<CStrBox>,
 }
 
 impl ShaderDefinition {
-    pub fn as_ptr_tuple(&self) -> (CStrPtr<'_>, CStrPtr<'_>) {
-        (self.name.as_c_ptr(), self.definition.as_c_ptr())
+    pub const EMPTY: Self = Self {
+        name: None,
+        definition: None,
+    };
+
+    pub fn as_ptr_tuple(&self) -> (Option<CStrPtr<'_>>, Option<CStrPtr<'_>>) {
+        (
+            self.name.as_ref().map(|s| s.as_c_ptr()),
+            self.definition.as_ref().map(|s| s.as_c_ptr()),
+        )
     }
 
     #[inline]
@@ -101,15 +111,31 @@ impl ShaderDefinition {
         }
     }
 
-    pub fn try_from_str<N, D>(n: N, d: D) -> Result<Self, NulError> where
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self { name: None, definition: None })
+    }
+
+    pub fn try_from_str<N, D>(n: N, d: D) -> anyhow::Result<Self> where
         N: Into<Vec<u8>>,
         D: Into<Vec<u8>>,
     {
-        let n = CString::new(n)?;
-        let d = CString::new(d)?;
+        let n = {
+            let n = n.into();
+            match n.last().copied() {
+                Some(0u8) => CString::from_vec_with_nul(n)?,
+                _ => CString::new(n)?,
+            }
+        };
+        let d = {
+            let d = d.into();
+            match d.last().copied() {
+                Some(0u8) => CString::from_vec_with_nul(d)?,
+                _ => CString::new(d)?,
+            }
+        };
         Ok(Self {
-            name: CStrBox::with_cstring(n),
-            definition: CStrBox::with_cstring(d),
+            name: Some(CStrBox::with_cstring(n)),
+            definition: Some(CStrBox::with_cstring(d)),
         })
     }
 }
@@ -120,8 +146,8 @@ impl<N, D> From<(N, D)> for ShaderDefinition where
 {
     fn from((name, def): (N, D)) -> Self {
         Self {
-            name: name.into(),
-            definition: def.into(),
+            name: Some(name.into()),
+            definition: Some(def.into()),
         }
     }
 }
@@ -130,8 +156,8 @@ impl Into<(String, String)> for ShaderDefinition {
     fn into(self) -> (String, String) {
         let Self { name, definition } = self;
         (
-            name.into_cstring().to_string_lossy().into_owned(),
-            definition.into_cstring().to_string_lossy().into_owned(),
+            name.map(|n| n.into_cstring().to_string_lossy().into_owned()).unwrap_or_default(),
+            definition.map(|d| d.into_cstring().to_string_lossy().into_owned()).unwrap_or_default(),
         )
     }
 }
@@ -140,8 +166,8 @@ impl Into<(CStrBox, CStrBox)> for ShaderDefinition {
     fn into(self) -> (CStrBox, CStrBox) {
         let Self { name, definition } = self;
         (
-            name,
-            definition,
+            name.unwrap_or_else(|| CStrBox::with_cstring(CString::default())),
+            definition.unwrap_or_else(|| CStrBox::with_cstring(CString::default())),
         )
     }
 }
@@ -150,8 +176,8 @@ impl Into<(CString, CString)> for ShaderDefinition {
     fn into(self) -> (CString, CString) {
         let Self { name, definition } = self;
         (
-            name.into_cstring(),
-            definition.into_cstring(),
+            name.map(|n| n.into_cstring()).unwrap_or_default(),
+            definition.map(|d| d.into_cstring()).unwrap_or_default(),
         )
     }
 }
@@ -178,7 +204,11 @@ impl ShaderDefinitions {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.defs.is_empty()
+        match &self.defs[..] {
+            &[] => true,
+            &[ref def] if def.is_empty() => true,
+            _ => false,
+        }
     }
 
     #[inline]
@@ -186,12 +216,24 @@ impl ShaderDefinitions {
         &self.defs
     }
 
+    pub fn terminate(&mut self) {
+        if !self.defs.is_empty() && !self.defs.last().map(|d| d.is_empty()).unwrap_or(false) {
+            self.defs.push(ShaderDefinition::EMPTY);
+        }
+    }
+
+    #[inline]
+    pub fn terminate_d3d_macros(&mut self) -> &[D3D_SHADER_MACRO] {
+        self.terminate();
+        self.as_d3d_macros()
+    }
+
     #[inline]
     pub fn as_d3d_macros(&self) -> &[D3D_SHADER_MACRO] {
         ShaderDefinition::slice_as_d3d_macros(&self.defs)
     }
 
-    pub fn try_from_str<N, D, I>(defs: I) -> Result<Self, NulError> where
+    pub fn try_from_str<N, D, I>(defs: I) -> anyhow::Result<Self> where
         N: Into<Vec<u8>>,
         D: Into<Vec<u8>>,
         I: IntoIterator<Item = (N, D)>,

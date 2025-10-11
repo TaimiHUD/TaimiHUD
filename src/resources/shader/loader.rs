@@ -81,8 +81,21 @@ impl ShaderLoader {
         for shader_description_path in shader_description_paths {
             if let Some(file) = shader_description_path.as_file() {
                 if let Some(content) = file.contents_utf8() {
-                    let shader_description =
+                    let mut shader_description =
                         ShaderDescription::load_from_str(content.to_string())?;
+
+                    // copy to all shaders sharing the same source path...
+                    let mut defs = None::<taimi_d3d::shader::ShaderDefinitions>;
+                    for desc in &mut shader_description {
+                        if desc.defs.is_empty() {
+                            if let Some(defs) = &defs {
+                                desc.defs = defs.clone();
+                            }
+                        } else {
+                            defs = Some(desc.defs.clone());
+                        }
+                    }
+
                     shader_descriptions.extend(shader_description);
                 }
             }
@@ -101,7 +114,8 @@ impl ShaderLoader {
     {
         log::debug!("Beginning shader setup!");
         let mut shaders: ShaderLoader = Self::default();
-        for shader_description in shader_descriptions {
+        for mut shader_description in shader_descriptions {
+            shader_description.defs.terminate();
             let context = || format!("loading shader {}", shader_description.identifier);
             let bytecode = Self::get_file_contents(&shader_description.path)
                 .and_then(|source| shader_description.compile(&source))
