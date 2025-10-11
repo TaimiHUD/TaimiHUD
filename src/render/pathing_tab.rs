@@ -109,7 +109,7 @@ impl PathingConfig {
                 None
             },
             None if rt::mumble_link_ptr().map(|ml| ml.read_map_id()).ok() == Some(0) => {
-                ui.text("Select a character to get started");
+                ui.text_wrapped("Select a character to get started");
                 None
             },
             None => {
@@ -121,7 +121,7 @@ impl PathingConfig {
                     );
                 match res {
                     Some(Err(e)) => {
-                        ui.text("Error! See log in Nexus or Taimi addon folder for more details");
+                        ui.text_wrapped("Error! See log in Nexus or Taimi addon folder for more details");
                         match e {
                             () => None,
                             #[cfg(todo)]
@@ -129,7 +129,7 @@ impl PathingConfig {
                         }
                     },
                     None => {
-                        ui.text("Load in to the game to get started");
+                        ui.text_wrapped("Load in to the game to get started");
                         None
                     },
                     Some(Ok(())) => {
@@ -141,7 +141,7 @@ impl PathingConfig {
             Some(e) => Some(e),
         };
         if let Some(e) = e {
-            ui.text(format!("{e:#}"));
+            ui.text_wrapped(format!("{e:#}"));
         }
     }
 
