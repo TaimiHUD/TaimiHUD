@@ -242,6 +242,8 @@ impl Engine {
                     res = Some(e);
                     ()
                 });
+
+            machine.active_festivals.insert(taimi_pack::attributes::Festival::Halloween);
             #[cfg(feature = "extension-nexus")]
             if res.is_ok() {
                 machine.rtapi_setup();
