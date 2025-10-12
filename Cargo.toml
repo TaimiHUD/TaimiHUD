@@ -10,7 +10,7 @@ members = [
 [package]
 name = "taimi_hud"
 authors = [ "kittywitch" ]
-description = "Timers, commander's markers and eventually much more for RaidcoreGG Nexus"
+description = "Pathing, encounter timers and markers"
 version = "0.2.26"
 edition = "2021"
 build = "build.rs"
@@ -184,10 +184,10 @@ glamour = { workspace = true, features = ["mint"] }
 palette = { version = "0.7.6", features = [ "serde" ] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 glob = "0.3.2"
-serde_json = "1.0.140"
-serde_jsonrc = { version = "0.1.0", features = [ "preserve_order"] }
-serde_with = "3.12.0"
-json-strip-comments = "1.0.4"
+serde_json = "1"
+#serde_jsonrc = { version = "0.1.0", features = [ "preserve_order"] }
+#serde_with = "3"
+json-strip-comments = "1"
 strum = "0.27.1"
 strum_macros = "0.27.1"
 reqwest = { version = "0.12.15", default-features = false, features = [ "stream", "rustls-tls-native-roots" ] }
