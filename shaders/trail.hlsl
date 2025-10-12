@@ -1,4 +1,15 @@
-#define FEATHER_OFFSET float2(1.0, 0.945)
+#ifndef DISCARD_ALPHA
+#define DISCARD_ALPHA 0.01
+#define DISCARD_Z 0.01
+#endif
+#ifndef INTENSITY_PARAM_2
+#define INTENSITY_PARAM_2 1.3
+#define INTENSITY_PARAM_1 0.2
+#define INTENSITY_PARAM_0 0.2
+#endif
+#ifndef FEATHER_OFFSET
+#define FEATHER_OFFSET float3(1.0, 1.0, 1.0)
+#endif
 
 struct VSInput
 {
@@ -66,7 +77,7 @@ PSOutput PSMain(VSOutput input)
     PSOutput output;
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
-    if (textureColour.w < 0.01) { discard; }
+    if (textureColour.w < DISCARD_ALPHA || input.position.z < DISCARD_Z) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
@@ -75,10 +86,10 @@ PSOutput PSMain(VSOutput input)
 
     float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
     float2 feather_scale = float2(DistanceParam.z, DistanceParam.w);
-    float2 feather2 = saturate((float2(1.0, 1.0) - abs(FEATHER_OFFSET - input.position.xy * viewport_size_1)) * feather_scale);
+    float2 feather2 = saturate((float1(1.0).xx - abs(FEATHER_OFFSET.xy - input.position.xy * viewport_size_1)) * feather_scale);
     float feather = feather2.x * feather2.y;
 
-    float intensity = 1.3 * distance_intensity * distance_intensity + 0.2 * distance_intensity + 0.2;
+    float intensity = INTENSITY_PARAM_2 * distance_intensity * distance_intensity + INTENSITY_PARAM_1 * distance_intensity + INTENSITY_PARAM_0;
 
     // fade out when close to the player
     float overlap_threshold = DistanceParam.x;

@@ -25,7 +25,7 @@ use {
         coords::ScreenSpace,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
-            MapContext, MapOpen,
+            MapContext,
         },
     },
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},

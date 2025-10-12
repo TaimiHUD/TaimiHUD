@@ -4,6 +4,13 @@
     "kind": "Vertex",
     "path": "poi.hlsl",
     "entrypoint": "VSMain",
+    "defs": {
+      "DISCARD_ALPHA": "0.01",
+      "DISCARD_Z": "0.175",
+      "FEATHER_OFFSET": "float3(1.0, 0.945, 0.52)",
+      "FEATHER_SIZE_Z": "3.5",
+      "FEATHER_SCALE_Z": "DistanceParam.w / 3.8",
+    },
   },
   {
     "identifier": "poi",

@@ -5,6 +5,11 @@
     "path": "trail.hlsl",
     "entrypoint": "VSMain",
     "layout_type": "JustVertex",
+    "defs": {
+      "DISCARD_ALPHA": "0.01",
+      "DISCARD_Z": "0.08",
+      "FEATHER_OFFSET": "float3(1.0, 0.945, 1.0)",
+    },
   },
   {
     "identifier": "trail",
