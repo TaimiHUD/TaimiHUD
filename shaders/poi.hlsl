@@ -1,6 +1,8 @@
 #ifndef DISCARD_ALPHA
 #define DISCARD_ALPHA 0.01
-#define DISCARD_Z 0.1
+#endif
+#ifndef DISCARD_Z
+#define DISCARD_Z 1.0
 #endif
 #ifndef INTENSITY_PARAM_2
 #define INTENSITY_PARAM_2 1.3
@@ -8,10 +10,10 @@
 #define INTENSITY_PARAM_0 0.2
 #endif
 #ifndef FEATHER_OFFSET
-#define FEATHER_OFFSET float3(1.0, 1.0, 1.0)
+#define FEATHER_OFFSET float3(1.0, 1.0, 0.1)
 #endif
 #ifndef FEATHER_SIZE_Z
-#define FEATHER_SIZE_Z 5.5
+#define FEATHER_SIZE_Z 1.0
 #define FEATHER_SCALE_Z 5.0
 #endif
 
@@ -77,22 +79,28 @@ struct PSOutput
     float4 color: SV_Target0;
 };
 
+static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
+static const float3 FeatherOffset = float3(FEATHER_OFFSET.xy, 1.0 + FEATHER_OFFSET.z * FEATHER_SIZE_Z);
 PSOutput PSMain(VSOutput input)
 {
     PSOutput output;
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
     // TODO: just enable depth clipping?
-    if (textureColour.w < DISCARD_ALPHA || input.position.z < DISCARD_Z) { discard; }
+    if (textureColour.w < DISCARD_ALPHA || input.position.z < DiscardZ) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
     float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
     float intensity = INTENSITY_PARAM_2 * distance_intensity * distance_intensity + INTENSITY_PARAM_1 * distance_intensity + INTENSITY_PARAM_0;
 
-    float3 viewport_size_1 = float3(ViewportParam.x, ViewportParam.y, FEATHER_SIZE_Z / input.position.w);
+    float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
     float3 feather_scale = float3(DistanceParam.z, DistanceParam.w, FEATHER_SCALE_Z);
-    float3 feather3 = saturate((float1(1.0).xxx - abs(FEATHER_OFFSET - input.position.xyz * viewport_size_1)) * feather_scale);
+    float3 feather_offset = float3(
+        abs(FeatherOffset.xy - input.position.xy * viewport_size_1),
+        FeatherOffset.z - input.position.z * FEATHER_SIZE_Z /* / input.position.w */
+    );
+    float3 feather3 = saturate((float1(1.0).xxx - feather_offset) * feather_scale);
     float feather = feather3.x * feather3.y;
 
     float alpha = textureColour.w * saturate(intensity) * feather*feather * feather3.z;

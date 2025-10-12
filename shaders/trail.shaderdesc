@@ -7,8 +7,10 @@
     "layout_type": "JustVertex",
     "defs": {
       "DISCARD_ALPHA": "0.01",
-      "DISCARD_Z": "0.08",
-      "FEATHER_OFFSET": "float3(1.0, 0.945, 1.0)",
+      "DISCARD_Z": "1.1",
+      "FEATHER_OFFSET": "float3(1.0, 0.945, 0.42)",
+      "FEATHER_SIZE_Z": "2.8",
+      "FEATHER_SCALE_Z": "DistanceParam.w / 6.9",
     },
   },
   {
