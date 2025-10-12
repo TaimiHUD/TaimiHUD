@@ -16,7 +16,7 @@ use {
     xml::{common::Position, name::OwnedName, reader::XmlEvent},
 };
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Pack {
     pub name: String,
 
@@ -68,7 +68,7 @@ impl Pack {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CategoryCollection {
     /// Map full_id -> Category
     pub all_categories: IndexMap<String, Category>,

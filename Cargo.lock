@@ -3761,6 +3761,7 @@ dependencies = [
  "md5",
  "regex",
  "relative-path",
+ "serde",
  "uuid",
  "xml-rs",
  "zip",

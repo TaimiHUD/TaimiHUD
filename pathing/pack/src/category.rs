@@ -6,12 +6,10 @@ use {
     },
     bitvec::vec::BitVec,
     indexmap::IndexMap,
-    std::{
-        collections::HashMap,
-        sync::Arc,
-    },
+    std::sync::Arc,
 };
 
+#[derive(Debug, Clone, Default)]
 pub struct Category {
     pub id: String,
     pub full_id: String,
@@ -149,6 +147,7 @@ impl Category {
         }
     }
 
+    #[cfg(todo = "unused")]
     pub fn attain_state(
         &self,
         all_categories: &IndexMap<String, Category>,

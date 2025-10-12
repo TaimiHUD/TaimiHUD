@@ -2,27 +2,29 @@ use {
     croner::Cron,
     anyhow::Context,
     glamour::{Box3, Point3, Vector3},
-    crate::space::{LocalContext, MapContext},
+    crate::space::MapContext,
 };
 
 pub mod poi;
 pub mod trail;
 
 pub(crate) mod pack;
+mod festivals;
 
 pub use {
     taimi_pack::{
         attributes::MarkerAttributes,
-        category::Category,
-        loader,
         poi::Poi,
         trail::TrailSection,
         pack::Pack,
     },
-    self::pack::{
-        ActivePack,
-        PackCollection,
-        LoaderBox,
+    self::{
+        festivals::FestivalFixup,
+        pack::{
+            ActivePack,
+            PackCollection,
+            LoaderBox,
+        },
     },
 };
 
@@ -31,7 +33,9 @@ pub type PackSpace = taimi_meta::coords::LocalSpace;
 pub trait MarkerAttributesExt {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>>;
     fn visibility_for_map(&self, map: MapContext) -> Option<bool>;
+    #[cfg(todo = "unused")]
     fn visibility_for(&self, ctx: LocalContext) -> Option<bool>;
+    #[cfg(todo = "unused")]
     fn is_visible_for(&self, ctx: LocalContext) -> bool {
         self.visibility_for(ctx).unwrap_or(true)
     }
@@ -50,6 +54,7 @@ impl MarkerAttributesExt for MarkerAttributes {
         }
     }
 
+    #[cfg(todo = "unused")]
     fn visibility_for(&self, ctx: LocalContext) -> Option<bool> {
         match ctx {
             LocalContext::World => self.in_game_visibility,

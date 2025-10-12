@@ -10,7 +10,7 @@ use {
             pathing_window::{PathingFilterState, PathingSearchState},
         },
         space::{
-            pack::{Pack, MarkerAttributesExt},
+            pack::{FestivalFixup, Pack, MarkerAttributesExt},
             dx11::{InstanceBufferData, RenderBackend},
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
@@ -31,7 +31,7 @@ use {
         trail::{ActiveTrail, TrailParams},
     },
     std::{
-        collections::HashSet,
+        collections::{HashSet, BTreeMap, BTreeSet},
         fs::{create_dir_all, read_dir},
         path::Path,
         sync::{atomic::{AtomicUsize, Ordering}, Arc},
@@ -41,6 +41,7 @@ use {
         buffer::BufferOf,
     },
     taimi_pack::{
+        attributes::Festival,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category, Poi,
     },
@@ -238,7 +239,7 @@ impl ActivePack {
         push_token.pop();
     }
 
-    pub fn disable_paths(&mut self, paths: &HashSet<String>) {
+    pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
         for path in paths {
             if let Some(idx) = self.pack.categories.all_categories.get_index_of(path) {
                 if let Some(mut state) = self.user_category_state.get_mut(idx) {
@@ -246,14 +247,21 @@ impl ActivePack {
                 }
             }
         }
-        self.recompute_enabled();
+        self.recompute_enabled(festivals);
     }
 
-    pub fn recompute_enabled(&mut self) {
+    pub fn recompute_enabled(&mut self, festivals: &BTreeSet<Festival>) {
         let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
                 root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
+            }
+        }
+        for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
+            if category.marker_attributes.festivals.as_ref().map(|f| !f.iter().any(|f|
+                festivals.contains(f)
+            )).unwrap_or(false) {
+                self.enabled_categories.set(i, false)
             }
         }
         // in response to update(...), moving update_filters down here where it should actually be
@@ -454,7 +462,7 @@ impl ActivePack {
 
         self.cleanup_textures();
 
-        self.recompute_enabled();
+        //self.recompute_enabled();
 
         Ok(())
     }
@@ -512,6 +520,9 @@ pub struct PackCollection {
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
     pub trail_params: TrailParams,
+
+    festival_categories: BTreeMap<&'static str, Festival>,
+    pub active_festivals: BTreeSet<Festival>,
 }
 
 impl PackCollection {
@@ -524,12 +535,14 @@ impl PackCollection {
             render_list: RenderListBuilder::default().build(),
             trail_params: TrailParams::default(),
             poi_common,
+            festival_categories: FestivalFixup::festival_categories(),
+            active_festivals: Default::default(),
         })
     }
 
     pub fn disable_paths(&mut self, disabled_paths: HashSet<String>) {
         for (_pn, pack) in &mut self.loaded_packs {
-            pack.disable_paths(&disabled_paths);
+            pack.disable_paths(&disabled_paths, &self.active_festivals);
         }
     }
 
@@ -582,7 +595,8 @@ impl PackCollection {
 
     pub fn add_pack(&mut self, pack: Arc<Pack>, loader: LoaderBox) -> usize {
         let name = pack.name.clone();
-        let active = ActivePack::new(pack, loader);
+        let mut active = ActivePack::new(pack, loader);
+        self.fixup_pack(&mut active);
         let (idx, old) = self.loaded_packs.insert_full(name, active);
         if let Some(pack) = old {
             log::info!("Pack {} reloaded", pack.pack.name);
@@ -595,6 +609,27 @@ impl PackCollection {
             drop(pack);
         }
         idx
+    }
+
+    pub fn fixup_pack(&mut self, pack: &mut ActivePack) {
+        for (_name, category) in &mut Arc::make_mut(&mut pack.pack).categories.all_categories {
+            let is_festival = FestivalFixup::FESTIVAL_PREFIXES.iter().copied().find(|prefix|
+                category.full_id.starts_with(prefix)
+            );
+            match is_festival {
+                Some(prefix) if category.full_id != prefix =>
+                    (),
+                _ => continue,
+            }
+            let festival = self.festival_categories.iter().find_map(|(&prefix, &fest)|
+                category.full_id.starts_with(prefix).then_some(fest)
+            );
+            if let Some(festival) = festival {
+                Arc::make_mut(&mut category.marker_attributes).festivals = Some(vec![festival]);
+            } else {
+                log::info!("unrecognized festival category: `{}`", category.full_id);
+            }
+        }
     }
 
     pub fn load_pack(&mut self, device: &Dx11Device, pack_idx: usize) -> anyhow::Result<()> {
@@ -641,6 +676,8 @@ impl PackCollection {
             }
             pack.clear();
             pack.cleanup_textures();
+        } else {
+            pack.recompute_enabled(&self.active_festivals);
         }
         if inplace {
             self.render_list.entities_mut_end();

@@ -3,13 +3,19 @@ use {
     std::{collections::BTreeMap, fmt, sync::Arc},
     strum::{VariantArray, IntoStaticStr},
     serde::{Serialize, Deserialize},
+};
+#[cfg(feature = "space")]
+use {
     taimi_meta::ui::MapContext,
+    taimi_pack::attributes::Festival,
 };
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct PathingSettings {
     #[serde(default, skip_serializing_if = "SpaceSettings::is_empty")]
     pub space: SpaceSettings,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub festival_filter: Arc<BTreeMap<String, FestivalPreference>>,
 }
 
 impl PathingSettings {
@@ -22,7 +28,32 @@ impl PathingSettings {
         }
         let _ = settings.save().await;
     }
+
+    #[cfg(feature = "space")]
+    pub fn get_festival_preference(&self, festival: Festival) -> Option<FestivalPreference> {
+        self.festival_filter.get(festival.as_str()).copied()
+    }
+    #[cfg(feature = "space")]
+    pub fn set_festival_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
+        let festival_filter = self.festival_filter_mut();
+        match pref {
+            None => {
+                festival_filter.remove(festival.as_str());
+            },
+            Some(pref) => {
+                festival_filter.insert(festival.into(), pref);
+            },
+        }
+    }
+    #[cfg(feature = "space")]
+    pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {
+        Arc::make_mut(&mut self.festival_filter)
+    }
 }
+
+/// TODO: enum that can distinguish ignore forever vs dismissed
+/// vs enable forever vs listen to api/calendar etc
+pub type FestivalPreference = bool;
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct SpaceSettings {
@@ -168,6 +199,7 @@ impl SpaceSettings {
     pub fn visible_worldmap(&self) -> bool {
         self.visible_map_world.unwrap_or(Self::DEFAULT_VISIBLE_MAP)
     }
+    #[cfg(feature = "space")]
     pub fn visible_map(&self, ctx: MapContext) -> bool {
         match ctx {
             MapContext::Global => self.visible_worldmap(),
@@ -178,6 +210,7 @@ impl SpaceSettings {
         self.map_open.unwrap_or(Self::DEFAULT_MAP_OPEN)
     }
 
+    #[cfg(feature = "space")]
     pub fn trail_textured_map(&self, ctx: MapContext) -> bool {
         match ctx {
             MapContext::Global => self.trail_textured_worldmap(),
@@ -233,12 +266,14 @@ impl SpaceSettings {
     pub fn poi_alpha_minimap(&self) -> f32 {
         self.map_poi_alpha_mini.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
+    #[cfg(feature = "space")]
     pub fn trail_alpha_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.trail_alpha_worldmap(),
             MapContext::Minimap => self.trail_alpha_minimap(),
         }
     }
+    #[cfg(feature = "space")]
     pub fn poi_alpha_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.poi_alpha_worldmap(),
@@ -255,6 +290,7 @@ impl SpaceSettings {
     pub fn poi_scale_minimap(&self) -> f32 {
         self.scale_poi_mini.unwrap_or(Self::DEFAULT_POI_SCALE_MAP)
     }
+    #[cfg(feature = "space")]
     pub fn poi_scale_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.poi_scale_worldmap(),
@@ -271,6 +307,7 @@ impl SpaceSettings {
     pub fn trail_scale_minimap(&self) -> f32 {
         self.scale_trail_mini.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
+    #[cfg(feature = "space")]
     pub fn trail_scale_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.trail_scale_worldmap(),

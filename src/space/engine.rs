@@ -28,6 +28,7 @@ use {
             MapContext,
         },
     },
+    taimi_pack::attributes::Festival,
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 #[cfg(feature = "space-ecs")]
@@ -242,6 +243,7 @@ impl Engine {
                     res = Some(e);
                     ()
                 });
+
             #[cfg(feature = "extension-nexus")]
             if res.is_ok() {
                 machine.rtapi_setup();
@@ -331,7 +333,7 @@ impl Engine {
         self.packs.clear();
     }
 
-    pub fn process_event(&mut self) -> anyhow::Result<bool> {
+    pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<bool> {
         let ev = self.receiver.try_recv();
         if let Ok(ev) = &ev {
             log::trace!("recv SpaceEvent::{}", <&str>::from(ev));
@@ -341,6 +343,10 @@ impl Engine {
                 use SpaceEvent::*;
                 match event {
                     DisabledPaths(disabled_paths) => {
+                        self.packs.active_festivals = self.map_settings(|s| Festival::all()
+                            .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
+                            .collect()
+                        );
                         self.packs.disable_paths(disabled_paths);
                     }
                     PathingToggle => {
@@ -471,7 +477,7 @@ impl Engine {
         for _ in 0..5 {
             // try to get a couple events out of the way at a time
             // (would be nice to batch pack loads)
-            let processed = self.process_event()
+            let processed = self.process_event(machine)
                 .context("render engine event processing failure")?;
             if !processed {
                 break

@@ -15,6 +15,7 @@ use {
     uuid::Uuid,
 };
 
+#[derive(Debug, Clone)]
 pub struct Trail {
     pub category: String,
     pub guid: Uuid,
@@ -114,11 +115,13 @@ impl Trail {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct TrailData {
     pub map_id: i32,
     pub sections: Vec<TrailSection>,
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct TrailSection {
     pub points: Vec<Point3>,
     pub bounds: Box3,
