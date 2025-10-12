@@ -86,6 +86,13 @@ pub struct SpaceSettings {
     pub scale_trail_mini: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_trail_world: Option<f32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trail_y_offset: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trail_resolution: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trail_width: Option<f32>,
 }
 
 impl SpaceSettings {
@@ -95,6 +102,9 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_TEXTURED: bool = true;
     pub const DEFAULT_TRAIL_TEXTURED_MAP_MINI: bool = false;
     pub const DEFAULT_TRAIL_TEXTURED_MAP_WORLD: bool = true;
+    pub const DEFAULT_TRAIL_Y_OFFSET: f32 = 0.001;
+    pub const DEFAULT_TRAIL_RESOLUTION: f32 = 1.0 / 20.0;
+    pub const DEFAULT_TRAIL_WIDTH: f32 = 1.016;
     pub const DEFAULT_DISTANCE_MAX: f32 = 700.0;
     pub const DEFAULT_POI_ALPHA: f32 = 1.0;
     pub const DEFAULT_POI_SCALE: f32 = 1.0;
@@ -137,6 +147,7 @@ impl SpaceSettings {
                 map_poi_alpha_world: None, map_trail_alpha_world: None,
                 scale_poi_space: None, scale_poi_mini: None, scale_poi_world: None,
                 scale_trail_space: None, scale_trail_mini: None, scale_trail_world: None,
+                trail_y_offset: None, trail_resolution: None, trail_width: None,
                 goggles,
             } if goggles.is_empty() =>
                 true,
@@ -266,6 +277,24 @@ impl SpaceSettings {
             MapContext::Minimap => self.trail_scale_minimap(),
         }
     }
+
+    pub fn trail_y_offset(&self) -> Option<f32> {
+        self.trail_y_offset
+            .map(Self::optional_f32)
+            .unwrap_or(match self.goggles.enabled() {
+                #[cfg(feature = "goggles")]
+                true => Some(GogglesSettings::DEFAULT_TRAIL_Y_OFFSET),
+                _ =>  Some(Self::DEFAULT_TRAIL_Y_OFFSET),
+            })
+    }
+    pub fn trail_resolution(&self) -> f32 {
+        self.trail_resolution
+            .unwrap_or(Self::DEFAULT_TRAIL_RESOLUTION)
+    }
+    pub fn trail_width(&self) -> f32 {
+        self.trail_width
+            .unwrap_or(Self::DEFAULT_TRAIL_WIDTH)
+    }
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -322,6 +351,7 @@ impl GogglesSettings {
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
     pub const DEFAULT_EDGE_SCALE: Option<f32> = Some(0.5f32);
+    pub const DEFAULT_TRAIL_Y_OFFSET: f32 = 0.025;
 
     pub fn is_empty(&self) -> bool {
         match self {

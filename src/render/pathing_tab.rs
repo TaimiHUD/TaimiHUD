@@ -260,6 +260,7 @@ impl PathingConfig {
             player_overlap_threshold,
             distance_fade_intensity,
             distance_max,
+            trail_y_offset, trail_resolution, trail_width,
             mut trail_textured_space,
             trail_alpha,
             scale_trail_space, scale_poi_space,
@@ -271,6 +272,7 @@ impl PathingConfig {
             s.space.player_overlap_threshold(),
             s.space.distance_fade_intensity(),
             s.space.distance_max(),
+            s.space.trail_y_offset(), s.space.trail_resolution(), s.space.trail_width(),
             s.space.trail_textured_space(),
             s.space.trail_alpha(), // s.space.poi_alpha(),
             s.space.trail_scale_space(), s.space.poi_scale_space(),
@@ -367,6 +369,24 @@ impl PathingConfig {
                 );
             },
         }
+
+        let advanced = || {
+            ui.text_wrapped(&fl!("pathing-config-trail-notice"));
+            if let Some(value) = Self::slider_opt_setting(ui, &fl!("pathing-config-trail-y-offset"), trail_y_offset, (-1.0, 1.0)) {
+                Self::set_pathing(|s| s.space.trail_y_offset = value);
+            }
+            if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-trail-resolution"), trail_resolution, (0.001, 5.0)) {
+                Self::set_pathing(|s| s.space.trail_resolution = value);
+            }
+            if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-trail-width"), trail_width, (0.01, 25.0)) {
+                Self::set_pathing(|s| s.space.trail_width = value);
+            }
+        };
+        let _trail_advanced = TreeNode::new(&fl!("pathing-config-advanced"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, advanced);
 
         Some(())
     }

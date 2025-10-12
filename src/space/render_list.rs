@@ -223,17 +223,24 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(next) = self.bvh_iter.next() {
             let entity = &self.entities[next];
-            if !entity.draw_ordered {
-                return Some(entity);
-            } else {
-                let cam_dist = (entity.position - self.cam_origin).dot(self.cam_dir);
-                let cam_dist = f32::to_bits(cam_dist) as i32;
-                let cam_dist = cam_dist ^ ((cam_dist >> 30) as u32 >> 1) as i32;
-                self.draw_order_heap.push(HeapEntity {
-                    cam_dist,
-                    idx: next,
-                });
-            }
+            let cam_dist = match entity.draw_ordered {
+                false =>
+                    return Some(entity),
+                #[cfg(todo)]
+                true => {
+                    // TODO: broken or inaccurate idk
+                    let cam_dist = (entity.position - self.cam_origin).dot(self.cam_dir);
+                    let cam_dist = f32::to_bits(cam_dist) as i32;
+                    let cam_dist = cam_dist ^ ((cam_dist >> 30) as u32 >> 1) as i32;
+                    cam_dist
+                },
+                true => (entity.position.distance_squared(self.cam_origin) * 1_000_000.0)
+                    .min(0x40000000i32 as f32) as i32,
+            };
+            self.draw_order_heap.push(HeapEntity {
+                cam_dist,
+                idx: next,
+            });
         }
 
         self.draw_order_heap.pop().map(|he| &self.entities[he.idx])
