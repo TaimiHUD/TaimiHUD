@@ -28,6 +28,7 @@ use {
     },
     std::collections::HashMap,
     strum::VariantArray,
+    taimi_pack::attributes::Festival,
 };
 
 pub struct PathingConfig {
@@ -253,7 +254,7 @@ impl PathingConfig {
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
     const RANGE_SCALE_POI: (f32, f32) = (0.0, 5.0);
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
-    fn draw_pathing_opts(&mut self, ui: &Ui, _machine: &mut RenderMachine) -> Option<()> {
+    fn draw_pathing_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) -> Option<()> {
         let (
             camera_source,
             mut visible_space,
@@ -344,7 +345,7 @@ impl PathingConfig {
         if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
             if value == Some(CameraSource::RealTimeAPI) {
-                match _machine.rtapi_init() {
+                match machine.rtapi_init() {
                     Err(e) =>
                         log::warn!("{e:#}"),
                     Ok(false) =>
@@ -359,7 +360,7 @@ impl PathingConfig {
                 "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
             ),
             CameraSource::RealTimeAPI => {
-                if _machine.rtapi.is_none() {
+                if machine.rtapi.is_none() {
                     ui.text_wrapped(
                         "RTAPI is a separate addon that must be installed via Nexus"
                     );
@@ -387,6 +388,11 @@ impl PathingConfig {
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, advanced);
+        let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, || self.draw_festival_opts(ui, machine));
 
         Some(())
     }
@@ -472,6 +478,45 @@ impl PathingConfig {
             .build(ui, worldmap_opts);
 
         Some(())
+    }
+
+    fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+        let change = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| {
+            let mut change = None;
+            for &festival in Festival::ALL {
+                let active = machine.festival_active(festival);
+                let selected = s.get_festival_preference(festival);
+                let name = crate::LANGUAGE_LOADER.get(festival.as_str());
+                let title = match active {
+                    true => fl!("pathing-config-festival-active", festival = name),
+                    false => name,
+                };
+                let selection = Selectable::new(title)
+                    .selected(selected.unwrap_or(active));
+                if selection.build(ui) {
+                    change = Some((festival, match (selected, active) {
+                        (Some(selected), active) if active == !selected =>
+                            None,
+                        (Some(selected), ..) => Some(!selected),
+                        (None, active) => Some(!active),
+                    }));
+                }
+            }
+            change
+        })));
+        if let Some(Some(Some((festival, change)))) = change {
+            Self::set_pathing(|s| s.set_festival_preference(festival, change));
+            match change {
+                Some(true) => {
+                    machine.active_festivals.insert(festival);
+                },
+                Some(false) => {
+                    machine.active_festivals.remove(&festival);
+                },
+                None => (),
+            }
+            Controller::try_send(ControllerEvent::RequestDisabledPaths);
+        }
     }
 
     #[cfg(feature = "goggles")]

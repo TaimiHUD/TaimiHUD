@@ -81,6 +81,8 @@ pub struct RenderMachine {
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
+    #[cfg(feature = "space")]
+    pub active_festivals: std::collections::BTreeSet<taimi_pack::attributes::Festival>,
     #[cfg(feature = "extension-nexus")]
     pub rtapi: Option<rt::RealTimeApi>,
     #[cfg(feature = "extension-nexus")]
@@ -137,6 +139,8 @@ impl RenderMachine {
             fov: Vector2::ZERO,
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
+            #[cfg(feature = "space")]
+            active_festivals: Default::default(),
             #[cfg(feature = "space")]
             depth_range: None,
             #[cfg(feature = "extension-nexus")]

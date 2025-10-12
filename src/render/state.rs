@@ -208,7 +208,7 @@ impl RenderState {
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
         #[cfg(feature = "space")]
-        self.pathing_window.draw(ui);
+        self.pathing_window.draw(ui, &mut self.machine);
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);

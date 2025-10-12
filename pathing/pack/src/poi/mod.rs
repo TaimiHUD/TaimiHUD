@@ -10,7 +10,7 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Poi {
     pub category: String,
     pub guid: Uuid,

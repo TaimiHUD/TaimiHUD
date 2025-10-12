@@ -19,6 +19,7 @@ use {
         },
         ui::MapOpen,
     },
+    taimi_pack::attributes::Festival,
 };
 
 impl RenderMachine {
@@ -156,5 +157,10 @@ impl RenderMachine {
                 self.act_map_open();
             }
         }
+    }
+
+    #[inline]
+    pub fn festival_active(&self, festival: Festival) -> bool {
+        self.active_festivals.contains(&festival)
     }
 }

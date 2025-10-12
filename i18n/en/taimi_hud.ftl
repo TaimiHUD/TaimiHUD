@@ -262,5 +262,16 @@ pathing-config-trail-y-offset = Vertical Offset
 pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
+pathing-config-festivals = {festival}s
+pathing-config-festival-active = {$festival} (active)
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
+
+## Festivals
+festival = Festival
+halloween = Halloween
+wintersday = Wintersday
+superadventurefestival = Super Adventure Box
+lunarnewyear = Lunar New Year
+festivalofthefourwinds = Festival Of The Four Winds
+dragonbash = Dragon Bash

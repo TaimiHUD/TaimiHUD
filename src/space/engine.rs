@@ -331,7 +331,7 @@ impl Engine {
         self.packs.clear();
     }
 
-    pub fn process_event(&mut self) -> anyhow::Result<bool> {
+    pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<bool> {
         let ev = self.receiver.try_recv();
         if let Ok(ev) = &ev {
             log::trace!("recv SpaceEvent::{}", <&str>::from(ev));
@@ -341,6 +341,7 @@ impl Engine {
                 use SpaceEvent::*;
                 match event {
                     DisabledPaths(disabled_paths) => {
+                        self.packs.active_festivals = machine.active_festivals.clone();
                         self.packs.disable_paths(disabled_paths);
                     }
                     PathingToggle => {
@@ -471,7 +472,7 @@ impl Engine {
         for _ in 0..5 {
             // try to get a couple events out of the way at a time
             // (would be nice to batch pack loads)
-            let processed = self.process_event()
+            let processed = self.process_event(machine)
                 .context("render engine event processing failure")?;
             if !processed {
                 break

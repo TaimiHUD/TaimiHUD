@@ -1,7 +1,7 @@
 use {
     crate::{
         fl,
-        render::{PathingConfig, RenderState},
+        render::{machine::RenderMachine, PathingConfig, RenderState},
         space::pack::ActivePack,
         settings::Settings,
         ControllerEvent,
@@ -150,7 +150,7 @@ impl PathingWindowState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let mut state_errors = Default::default();
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
@@ -272,7 +272,7 @@ impl PathingWindowState {
                                                 &self.search_state
                                             );
                                             if recompute {
-                                                pack.recompute_enabled();
+                                                pack.recompute_enabled(&engine.packs.active_festivals);
                                             }
                                         }
                                         if let Some(token) = table_token {

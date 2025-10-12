@@ -6,7 +6,7 @@ use {
     xml::name::Name,
 };
 
-#[derive(Default, Clone)]
+#[derive(Debug, Clone, Default)]
 /// Attributes for markers. Inherits up the category stack.
 pub struct MarkerAttributes {
     // Common.
@@ -520,14 +520,39 @@ impl FromStr for CullDirection {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum Festival {
     Halloween,
     Wintersday,
+    #[cfg_attr(feature = "serde", serde(rename = "superadventurefestival"))]
     SuperAdventureBox,
     LunarNewYear,
     FestivalOfTheFourWinds,
     DragonBash,
+}
+
+impl Festival {
+    pub const ALL: &'static [Self] = &[
+        Self::LunarNewYear,
+        Self::SuperAdventureBox,
+        Self::DragonBash,
+        Self::FestivalOfTheFourWinds,
+        Self::Halloween,
+        Self::Wintersday,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Halloween => "halloween",
+            Self::Wintersday => "wintersday",
+            Self::SuperAdventureBox => "superadventurefestival",
+            Self::LunarNewYear => "lunarnewyear",
+            Self::FestivalOfTheFourWinds => "festivalofthefourwinds",
+            Self::DragonBash => "dragonbash",
+        }
+    }
 }
 
 impl FromStr for Festival {
@@ -550,6 +575,17 @@ impl FromStr for Festival {
         } else {
             Err(anyhow!("unexpected festival `{s}`"))
         }
+    }
+}
+
+impl AsRef<str> for Festival {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl Into<String> for Festival {
+    fn into(self) -> String {
+        self.as_str().into()
     }
 }
 

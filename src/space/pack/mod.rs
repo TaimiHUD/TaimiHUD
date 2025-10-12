@@ -9,6 +9,7 @@ pub mod poi;
 pub mod trail;
 
 pub(crate) mod pack;
+mod festivals;
 
 pub use {
     taimi_pack::{
@@ -19,10 +20,13 @@ pub use {
         trail::TrailSection,
         pack::Pack,
     },
-    self::pack::{
-        ActivePack,
-        PackCollection,
-        LoaderBox,
+    self::{
+        festivals::FestivalFixup,
+        pack::{
+            ActivePack,
+            PackCollection,
+            LoaderBox,
+        },
     },
 };
 
