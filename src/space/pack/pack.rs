@@ -28,7 +28,7 @@ use {
     indexmap::IndexMap,
     super::{
         poi::{ActivePoi, PoiCommonRenderData},
-        trail::ActiveTrail,
+        trail::{ActiveTrail, TrailParams},
     },
     std::{
         collections::HashSet,
@@ -338,6 +338,7 @@ impl ActivePack {
         map_id: i32,
         device: &Dx11Device,
         render_entities: &mut Vec<RenderEntity>,
+        trail_params: &TrailParams,
     ) -> anyhow::Result<()> {
         self.clear();
         self.render_list_bookmark = Some(render_entities.len());
@@ -365,7 +366,7 @@ impl ActivePack {
             let category_idx = pack.categories.all_categories
                 .get_index_of(&pack_trail.category)
                 .unwrap_or(0);
-            let trail = ActiveTrail::build(self, pack_trail, i_trail, category_idx, render_entities.len(), device)
+            let trail = ActiveTrail::build(self, pack_trail, i_trail, category_idx, trail_params, render_entities.len(), device)
                 .with_context(|| format!("Error loading trail {pack_trail}"));
             let trail = match trail {
                 Ok(trail) => trail,
@@ -379,7 +380,14 @@ impl ActivePack {
             for i_section in 0..trail.section_bounds.len() {
                 let entity = RenderEntity {
                     bounds: trail.section_bounds[i_section],
-                    position: trail.section_bounds[i_section].center(),
+                    position: {
+                        let mut pos = trail.section_bounds[i_section].center();
+                        pos.y += trail.y_offset;
+                        pos
+                    },
+                    // TODO: just sort by y and reverse draw order if camera dir.y is negative? :p
+                    // then only intersecting paths are an issue...
+                    //draw_ordered: true,
                     draw_ordered: false,
                     render_id: Some(RenderId::TrailSection {
                         pack_idx,
@@ -503,6 +511,7 @@ pub struct PackCollection {
     pub current_map: Option<i32>,
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
+    pub trail_params: TrailParams,
 }
 
 impl PackCollection {
@@ -513,6 +522,7 @@ impl PackCollection {
             unloaded_packs: IndexMap::new(),
             current_map: None,
             render_list: RenderListBuilder::default().build(),
+            trail_params: TrailParams::default(),
             poi_common,
         })
     }
@@ -619,7 +629,7 @@ impl PackCollection {
             Some(e) => (e, false),
             None => (self.render_list.entities_mut(), true),
         };
-        let res = pack.prepare_new_map(pack_idx, map_id, device, entities)
+        let res = pack.prepare_new_map(pack_idx, map_id, device, entities, &self.trail_params)
             .with_context(|| format!("loading pack {} for map {map_id}", pack.pack.name));
         if res.is_err() {
             log::info!("pack {} failed to load for map {map_id}, disabling...", pack.pack.name);

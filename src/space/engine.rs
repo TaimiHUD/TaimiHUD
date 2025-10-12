@@ -451,6 +451,7 @@ impl Engine {
             visible_map,
             camera_source,
             edge_feather_scale,
+            trail_y_offset, trail_resolution, trail_width,
             (edge_scale, _obscured_alpha),
         ) = self.map_settings(|s| (
             (
@@ -458,6 +459,7 @@ impl Engine {
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
                 s.space.edge_feather_scale(),
+                s.space.trail_y_offset(), s.space.trail_resolution(), s.space.trail_width(),
                 match () {
                     #[cfg(feature = "goggles")]
                     _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
@@ -484,6 +486,10 @@ impl Engine {
         if map_id.is_none() {
             return Ok(())
         }
+
+        self.packs.trail_params.y_offset = trail_y_offset.unwrap_or(0.0);
+        self.packs.trail_params.resolution = Some(trail_resolution);
+        self.packs.trail_params.width = trail_width;
 
         self.packs.prepare(&self.render_backend.device, machine)?;
         self.packs.update();
