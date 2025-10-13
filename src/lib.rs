@@ -157,7 +157,7 @@ macro_rules! with_i18n {
                 break 'with_i18n_ res;
                 // still check ID at compile time...
                 #[cfg(debug_assertions)]
-                let _ = fl!($message_id);
+                let _ = $crate::fl!($message_id);
             }
         }
     };
