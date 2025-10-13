@@ -268,6 +268,7 @@ pathing-config-goggles = X-ray Goggles Experiment
 pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
+pathing-config-reset-notice = Right-click any slider below to restore its default setting.
 pathing-notice-space = {space} is required for pathing functionality.
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API

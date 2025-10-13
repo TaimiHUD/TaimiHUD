@@ -314,6 +314,9 @@ impl PathingConfig {
         if ui.checkbox(&fl!("pathing-config-textured"), &mut trail_textured_space) {
             Self::set_pathing(|s| s.space.trail_textured_space = Some(trail_textured_space));
         }
+
+        with_i18n!("pathing-config-reset-notice", |msg| ui.text_wrapped(&msg));
+
         if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-trail-alpha"), trail_alpha, Self::RANGE_ALPHA) {
             Self::set_pathing(|s| s.space.trail_alpha = value);
         }
