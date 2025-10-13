@@ -144,14 +144,16 @@ impl RenderMachine {
             }),
         };
         let playpos_ticked = match rt::vec_eq(self.mumblelink_player.0, playpos) {
+            // meaningless unless UI tick signifies we're actually ingame...
+            false if self.mumblelink_frame_skip > 0 => false,
             false if rt::vec_eq(playpos, Point3::INFINITY) => {
                 log::debug!("ML lost playpos?");
                 true
             },
             eq => !eq,
         };
-        self.mumblelink_player = (playpos, front);
         if playpos_ticked {
+            self.mumblelink_player = (playpos, front);
             self.mumblelink_frame_player = Some((self.mumblelink_frame, Instant::now()));
         }
 
@@ -201,11 +203,13 @@ impl RenderMachine {
 
         let map_id_update = match map_id {
             0 => None,
-            map_id if self.mumblelink_map != map_id || (playpos_ticked && matches!(self.gameplay, GameplayState::Intermission { initial: false, .. }))  =>
+            map_id if playpos_ticked && (self.mumblelink_map != map_id || matches!(self.gameplay, GameplayState::Intermission { initial: false, .. }))  =>
                 Some(self.mumblelink_map),
             _ => None,
         };
-        self.mumblelink_map = map_id;
+        if let Some(map_id) = map_id_update {
+            self.mumblelink_map = map_id;
+        }
 
         let tick_notable = ui_state_changes.intersects(Controller::MARKERS_NOTABLE_STATE | Controller::TIMERS_NOTABLE_STATE)
             || map_id_update.is_some();
@@ -247,9 +251,14 @@ impl RenderMachine {
 
     pub(crate) fn next_mumblelink_frame(&mut self) -> (Option<MumblePtr>, Option<GameplayState>) {
         let mut gameplay_change = None;
+        let prev_frame = self.mumblelink_frame;
         let ml = match self.next_mumblelink_tick() {
             Ok(Some(ml)) => {
-                self.mumblelink_frame_skip = 0;
+                self.mumblelink_frame_skip = match prev_frame {
+                    // on early load, we don't know if this "new" frame is stale or not...
+                    0 => 1,
+                    _ => 0,
+                };
                 Some(ml)
             },
             Ok(None) if self.mumblelink_frame == 0 => {
