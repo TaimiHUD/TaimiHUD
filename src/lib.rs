@@ -802,15 +802,32 @@ fn load_nexus() {
         .revert_on_unload();
 
     WINDOW_RESIZED.subscribe(event_consume!(<()> |_| {
-        reload_render(true);
-        match RENDER_STATE.try_lock() {
-            Ok(mut state) => if let Some(ref mut state) = *state {
-                // TODO: do this on all reloads (move reload to method on RenderState or machine)
-                state.machine.reset_display_size();
-            },
-            _ => (),
-        }
+        resize_render(None);
     })).revert_on_unload();
+}
+
+pub fn resize_render(newsize: Option<[f32; 2]>) {
+    match RENDER_STATE.try_lock() {
+        Ok(mut state) => if let Some(ref mut state) = *state {
+            // TODO: do this on most reloads (move reload/resize to method on RenderState or machine)
+            match newsize {
+                Some(newsize) if newsize == state.machine.display_size_ref().to_array() => {
+                    log::trace!("Ignoring redundant resize to {newsize:?}");
+                    return
+                },
+                Some(newsize) => {
+                    log::debug!("Resizing to {newsize:?}");
+                    //*state.machine.display_size_mut() = newsize.into();
+                    state.machine.reset_display_size();
+                },
+                None => {
+                    state.machine.reset_display_size();
+                },
+            }
+        },
+        _ => (),
+    }
+    reload_render(true);
 }
 
 #[cfg(feature = "extension-arcdps")]

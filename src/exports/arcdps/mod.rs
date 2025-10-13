@@ -506,6 +506,18 @@ fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(feature = "extension-nexus")]
     if rt::nexus_available() { return msg }
 
+    match msg {
+        _ if !available() => (),
+        WindowsAndMessaging::WM_SIZE if matches!(w as u32, WindowsAndMessaging::SIZE_RESTORED | WindowsAndMessaging::SIZE_MAXIMIZED) => {
+            // TODO: does DPI scaling mess with this?
+            let w = l as u16;
+            let h = (l as u32) >> 16;
+            let newsize =[w as f32, h as f32];
+            crate::resize_render(Some(newsize));
+        },
+        _ => (),
+    }
+
     rt::handle_wnd_event(HWND(hwnd), msg, w, l)
 }
 
