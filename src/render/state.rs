@@ -90,8 +90,6 @@ pub struct RenderState {
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
     pub state_errors: HashMap<String, anyhow::Error>,
-    #[cfg(feature = "extension-arcdps")]
-    pub arc: super::ArcRenderState,
     pub task_queue: RenderTaskQueue,
     pub machine: RenderMachine,
 }
@@ -112,8 +110,6 @@ impl RenderState {
             #[cfg(feature = "space")]
             pathing_window: PathingWindowState::new(),
             state_errors: Default::default(),
-            #[cfg(feature = "extension-arcdps")]
-            arc: Default::default(),
         }
     }
 
@@ -478,6 +474,16 @@ impl RenderState {
             state.shutdown();
             lock.take();
         }
+    }
+
+    pub fn render_options(ui: &Ui) {
+        let mut lock = Self::lock();
+        let state = match &mut *lock {
+            None => return,
+            Some(state) => state,
+        };
+        let mut state_errors = Default::default();
+        state.primary_window.draw_tabs(ui, &mut state.machine, &mut state.timer_window, &mut state_errors, false);
     }
 
     pub fn is_render_thread() -> bool {
