@@ -641,16 +641,19 @@ impl PackCollection {
             },
         };
 
-        log::info!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
+        log::debug!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
         self.build_active_pack(pack_idx, device, None, map_id)?;
 
         if log::log_enabled!(log::Level::Info) {
             let pack = &self.loaded_packs[pack_idx];
-            log::info!(
-                "Loaded {} trails and {} POIs for pack #{pack_idx}",
-                pack.active_trails.len(),
-                pack.active_pois.len()
-            );
+            if !pack.active_trails.is_empty() || !pack.active_pois.is_empty() {
+                log::info!(
+                    "Loaded {} trails and {} POIs for pack #{pack_idx} {}",
+                    pack.pack.name,
+                    pack.active_trails.len(),
+                    pack.active_pois.len()
+                );
+            }
         }
 
 

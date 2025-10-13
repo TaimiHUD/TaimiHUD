@@ -1156,7 +1156,7 @@ impl Controller {
             };
             let name = entry.file_name().to_string_lossy().into_owned();
             let context = format!("Loading pathing pack {name}");
-            log::info!("{context}...");
+            log::debug!("{context}...");
             let path = entry.path();
             let is_taco = path.extension().map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
             let loader = move || {
