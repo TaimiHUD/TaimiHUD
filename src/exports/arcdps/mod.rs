@@ -947,6 +947,9 @@ pub fn log_window_filter(metadata: &log::Metadata) -> bool {
         Level::Trace | Level::Debug | Level::Info if !available() && exports::nexus::available() => false,
         #[cfg(not(debug_assertions))]
         Level::Trace | Level::Debug => false,
+        _ if metadata.target().starts_with("taimi_pack::") =>
+            // avoid visual spam since most packs are full of missing or broken data...
+            false,
         _ => true,
     }
 }

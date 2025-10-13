@@ -54,7 +54,6 @@ impl RenderMachine {
                 now => now.checked_sub(e).unwrap_or(now),
                 now => now - e,
             });
-            log::warn!("MAP OPEN CHANGED TO: {open:?}");
             true
         } else {
             #[cfg(todo = "unnecessary")]

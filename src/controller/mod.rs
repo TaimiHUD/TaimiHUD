@@ -326,12 +326,12 @@ impl Controller {
         }
         drop(settings_lock);
         let timers_len = timers.len();
-        log::info!("Total loaded timers: {}", timers_len,);
+        log::trace!("Total loaded timers: {}", timers_len);
         timers
     }
 
     async fn setup_timers(&mut self) {
-        log::info!("Preparing to setup timers");
+        log::debug!("Preparing to setup timers");
         self.timers = self.load_timer_files().await;
         if exists(&*TIMERS_DIR).expect("oh no i cant access my own addon dir") {
             let adhoc_timers = TimerFile::load_many_sourceless(&*TIMERS_DIR, 100)
@@ -1156,7 +1156,7 @@ impl Controller {
             };
             let name = entry.file_name().to_string_lossy().into_owned();
             let context = format!("Loading pathing pack {name}");
-            log::info!("{context}...");
+            log::debug!("{context}...");
             let path = entry.path();
             let is_taco = path.extension().map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
             let loader = move || {
