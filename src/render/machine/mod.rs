@@ -164,6 +164,10 @@ impl RenderMachine {
         }
     }
 
+    pub fn reset_display_size(&mut self) {
+        *self.display_size_mut() = Size2::ZERO;
+    }
+
     pub fn display_size_mut(&mut self) -> &mut Size2<ScreenSpace> {
         match () {
             #[cfg(any(feature = "markers", feature = "space"))]
