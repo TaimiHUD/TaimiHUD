@@ -444,6 +444,7 @@ impl Controller {
     async fn handle_map_event(&mut self, gameplay: GameplayState, _trans: GameplayTransition) {
         let new_map_id = match gameplay.gameplay_map() {
             None => {
+                log::debug!("TODO: clear timers on loading screen? {_trans:?}");
                 //self.map_id = None;
                 return
             },
@@ -1334,7 +1335,13 @@ impl Controller {
             GameplayStatus {
                 gameplay,
                 trans,
-            } => self.handle_map_event(gameplay, trans).await,
+            } => {
+                self.handle_map_event(gameplay, trans).await;
+                if gameplay.gameplay_map().is_some() {
+                    // force immediate state update
+                    self.mumblelink_tick().await?;
+                }
+            },
             Quit => {
                 if let Err(e) = self.save_on_quit().await {
                     log::error!("{e:#}");
