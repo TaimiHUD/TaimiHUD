@@ -287,8 +287,25 @@ impl ActivePack {
                                 }
                             }
                             if ui.is_item_hovered() {
-                                if let Some(copy_message) = &copyable.attributes.copy_message {
+                                let copy_message = copyable.attributes.copy_message.as_ref()
+                                    .map(|m| &m[..]);
+                                let preview;
+                                let copy_message = match &copyable.attributes.copy_value {
+                                    Some(copy_value) if !copy_value.starts_with('[') || !copy_value.ends_with(']') => {
+                                        // since these aren't intended to be displayed, there's no canon name to use...
+                                        // if it looks like more than just a location link, try to preview it:
+                                        let sep = copy_message.is_some().then_some("\n").unwrap_or("");
+                                        preview = format!("\"{copy_value}\"{sep}{}", copy_message.unwrap_or_default());
+                                        Some(&preview[..])
+                                    },
+                                    _ => copy_message,
+                                };
+                                if let Some(copy_message) = copy_message {
                                     ui.tooltip_text(copy_message);
+                                    #[cfg(todo)]
+                                    ui.tooltip(|| {
+                                        ui.text_wrapped(copy_message);
+                                    });
                                 }
                             }
                         }
