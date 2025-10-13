@@ -147,8 +147,8 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_MAP_ALPHA: f32 = Self::DEFAULT_TRAIL_ALPHA;
     pub const DEFAULT_DISTANCE_FADE_INTENSITY: f32 = 84.0;
     pub const DEFAULT_PLAYER_OVERLAP_THRESHOLD: f32 = 38.0;
-    pub const DEFAULT_EDGE_FEATHER_SCALE: Option<f32> = Some(0.8f32);
-    pub const DEFAULT_MAP_OPEN: bool = true;
+    pub const DEFAULT_EDGE_FEATHER_SCALE: f32 = 0.8f32;
+    pub const DEFAULT_MAP_OPEN: bool = false;
 
     pub const NONE_F32: f32 = f32::MIN;
 
@@ -168,7 +168,7 @@ impl SpaceSettings {
                 map_open: None | Some(Self::DEFAULT_MAP_OPEN),
                 distance_max: None,
                 distance_fade_intensity: None, player_overlap_threshold: None,
-                edge_feather_scale: None | Self::DEFAULT_EDGE_FEATHER_SCALE,
+                edge_feather_scale: None | Some(Self::DEFAULT_EDGE_FEATHER_SCALE),
                 trail_alpha: None,
                 poi_alpha: None,
                 trail_textured_space: None | Some(Self::DEFAULT_TRAIL_TEXTURED),
@@ -243,8 +243,8 @@ impl SpaceSettings {
     }
     pub fn edge_feather_scale(&self) -> Option<f32> {
         self.edge_feather_scale
-            .map(SpaceSettings::optional_f32)
-            .unwrap_or(Self::DEFAULT_EDGE_FEATHER_SCALE)
+            .or(Some(Self::DEFAULT_EDGE_FEATHER_SCALE))
+            .and_then(Self::optional_f32)
     }
 
     pub fn trail_alpha(&self) -> f32 {
@@ -387,7 +387,9 @@ impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
-    pub const DEFAULT_EDGE_SCALE: Option<f32> = Some(0.5f32);
+    #[cfg(todo)]
+    pub const DEFAULT_EDGE_SCALE: f32 = 0.5f32;
+    pub const DEFAULT_EDGE_SCALE: f32 = SpaceSettings::NONE_F32;
     pub const DEFAULT_TRAIL_Y_OFFSET: f32 = 0.025;
 
     pub fn is_empty(&self) -> bool {
@@ -395,7 +397,7 @@ impl GogglesSettings {
             Self {
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 obscured_alpha: None,
-                edge_scale: None | Self::DEFAULT_EDGE_SCALE,
+                edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
                 map_depth_calibration,
             } if map_depth_calibration.is_empty() =>
                 true,
@@ -413,8 +415,8 @@ impl GogglesSettings {
 
     pub fn edge_scale(&self) -> Option<f32> {
         self.edge_scale
-            .map(SpaceSettings::optional_f32)
-            .unwrap_or(Self::DEFAULT_EDGE_SCALE)
+            .or(Some(Self::DEFAULT_EDGE_SCALE))
+            .and_then(SpaceSettings::optional_f32)
     }
 
     pub fn map_depth_calibration(&self, map_id: u32) -> (f32, f32) {

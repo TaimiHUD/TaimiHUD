@@ -84,7 +84,7 @@ impl PathingConfig {
             #[cfg(feature = "goggles")]
             let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
                 .flags(TreeNodeFlags::FRAMED)
-                .opened(true, Condition::Once)
+                .opened(false, Condition::Once)
                 .tree_push_on_open(true)
                 .build(ui, || Self::draw_goggles_opts(ui, machine));
         };
@@ -221,6 +221,14 @@ impl PathingConfig {
     }
 
     fn slider_opt_setting(ui: &Ui, label: &str, value: Option<f32>, range: (f32, f32)) -> Option<Option<f32>> {
+        Self::slider_opt_setting_with_initial(ui, label, value, range, None)
+    }
+
+    fn slider_opt_setting_or_min(ui: &Ui, label: &str, value: Option<f32>, range: (f32, f32)) -> Option<Option<f32>> {
+        Self::slider_opt_setting_with_initial(ui, label, value, range, Some(range.0))
+    }
+
+    fn slider_opt_setting_with_initial(ui: &Ui, label: &str, value: Option<f32>, range: (f32, f32), initial: Option<f32>) -> Option<Option<f32>> {
         let mut enabled = value.is_some();
         let _token = ui.push_id(label);
         let res = if let Some(value) = value {
@@ -233,8 +241,9 @@ impl PathingConfig {
         ui.same_line();
         if ui.checkbox("", &mut enabled) {
             return Some(match enabled {
+                false if initial.is_some() => None,
                 false => Some(SpaceSettings::NONE_F32),
-                true => None,
+                true => initial,
             })
         }
         res
@@ -327,7 +336,7 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.edge_feather_scale = value);
         }
         #[cfg(feature = "goggles")]
-        if let Some(value) = Self::slider_opt_setting(ui, "corner boundary scale", edge_scale, (0.1f32, 5.0)) {
+        if let Some(value) = Self::slider_opt_setting_or_min(ui, "corner boundary scale", edge_scale, (0.1f32, 5.0)) {
             let mut edge_scale = value;
             Self::set_pathing(|s| {
                 s.space.goggles.edge_scale = value;
