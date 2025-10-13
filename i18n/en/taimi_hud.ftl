@@ -222,6 +222,7 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
+space = KatRender
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
 show-filter = Show filter options
@@ -233,7 +234,7 @@ ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
 toggle = Toggle
 pathing-config = Pathing Options
-pathing-config-enable = KatRender Pathing (Experimental)
+pathing-config-enable = {space} Pathing (Experimental)
 pathing-config-minimap = Minimap Options
 pathing-config-worldmap = Map Options
 pathing-config-trail-alpha = Opacity
@@ -262,10 +263,20 @@ pathing-config-trail-y-offset = Vertical Offset
 pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
+pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
+pathing-notice-space = {space} is required for pathing functionality.
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
+
+## Space
+
+render-unload = Unload Render
+render-reload = Reload Render
+render-notice-gameplay = Load in to the game to get started
+render-notice-gameplay-initial = Select a character to get started
+render-notice-error = Error! See log in Nexus or Taimi addon folder for more details"
 
 ## Festivals
 

@@ -3657,6 +3657,7 @@ dependencies = [
  "croner",
  "dpsapi",
  "fluent",
+ "fluent-syntax",
  "function_name",
  "futures",
  "futures-core",

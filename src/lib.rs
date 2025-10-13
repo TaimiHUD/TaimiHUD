@@ -42,6 +42,7 @@ use {
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
+        borrow::Cow,
         ffi::{c_char, CStr},
         mem,
         panic,
@@ -112,6 +113,54 @@ macro_rules! fl {
     ($message_id:literal, $($args:expr),*) => {{
         i18n_embed_fl::fl!($crate::LANGUAGE_LOADER, $message_id, $($args), *)
     }};
+}
+
+pub fn with_i18n<R, F>(message_id: &str, f: F) -> R where
+    F: FnOnce(Cow<str>) -> R,
+{
+    use {
+        core::cell::RefCell,
+        fluent_syntax::ast::PatternElement,
+    };
+
+    // XXX: why does this not take an FnOnce...
+    let mut f = RefCell::new(Some(f));
+    let res = LANGUAGE_LOADER.with_fluent_message(message_id, |m| {
+        let msg = m.value().and_then(|m| match &m.elements[..] {
+            &[PatternElement::TextElement { value: one }] =>
+                Some(one),
+            _ => None,
+        })?;
+        let f = f.try_borrow_mut().ok()?.take()?;
+        Some(f(Cow::Borrowed(msg)))
+    });
+    match (res, f.get_mut().take()) {
+        (Some(Some(r)), _) =>
+            r,
+        (Some(None), Some(f)) =>
+            f(LANGUAGE_LOADER.get(message_id).into()),
+        (None, Some(f)) => {
+            log::debug!("missing static i18n message {message_id}");
+            f(Cow::Borrowed(message_id))
+        },
+        (_, None) =>
+            unreachable!("with_message calls once"),
+    }
+}
+#[macro_export]
+macro_rules! with_i18n {
+    ($message_id:literal, $closure:expr) => {
+        {
+            'with_i18n_: {
+                #![allow(unreachable_code)]
+                let res = $crate::with_i18n($message_id, $closure);
+                break 'with_i18n_ res;
+                // still check ID at compile time...
+                #[cfg(debug_assertions)]
+                let _ = $crate::fl!($message_id);
+            }
+        }
+    };
 }
 
 pub fn localizer() -> DefaultLocalizer<'static> {

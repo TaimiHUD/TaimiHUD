@@ -281,7 +281,7 @@ impl PathingWindowState {
                                     });
                     });
                     if rendered.is_none() {
-                        PathingConfig::draw_space_error(ui, None);
+                        PathingConfig::draw_space_error(ui, machine, None);
                     }
                 });
         }

@@ -1,7 +1,6 @@
 use {
     crate::{
         controller::ControllerEvent,
-        exports::runtime as rt,
         fl,
         render::{
             machine::RenderMachine,
@@ -16,6 +15,7 @@ use {
             Settings,
         },
         space,
+        with_i18n,
         Controller,
         LANGUAGE_LOADER,
     },
@@ -55,7 +55,7 @@ impl PathingConfig {
             let active = self.draw_pathing_opts(ui, machine);
             match (&active, self.katrender) {
                 (None, true) =>
-                    Self::draw_space_error(ui, None),
+                    Self::draw_space_error(ui, machine, None),
                 (Some(..), true) => {
                     ui.separator();
                     let label = fl!("pathing-window");
@@ -65,7 +65,8 @@ impl PathingConfig {
                 },
                 _ => (),
             }
-            ui.text_wrapped(&fl!("experimental-notice"));
+
+            with_i18n!("experimental-notice", |msg| ui.text_wrapped(&msg));
 
             active
         };
@@ -96,7 +97,7 @@ impl PathingConfig {
         ui.columns(1, "pathing_tab_end", false)
     }
 
-    pub fn draw_space_error(ui: &Ui, e: Option<anyhow::Error>) {
+    pub fn draw_space_error(ui: &Ui, machine: &RenderMachine, e: Option<anyhow::Error>) {
         let _font = RenderState::push_font("big", ui);
         let e = match e {
             None if !Settings::try_read().map(|s| s.enable_katrender).unwrap_or(true) => {
@@ -109,8 +110,8 @@ impl PathingConfig {
                 }
                 None
             },
-            None if rt::mumble_link_ptr().map(|ml| ml.read_map_id()).ok() == Some(0) => {
-                ui.text_wrapped("Select a character to get started");
+            None if machine.gameplay.is_initial() => {
+                ui.text_wrapped(&fl!("render-notice-gameplay"));
                 None
             },
             None => {
@@ -122,7 +123,7 @@ impl PathingConfig {
                     );
                 match res {
                     Some(Err(e)) => {
-                        ui.text_wrapped("Error! See log in Nexus or Taimi addon folder for more details");
+                        ui.text_wrapped(&fl!("render-notice-error"));
                         match e {
                             () => None,
                             #[cfg(todo)]
@@ -156,7 +157,7 @@ impl PathingConfig {
 
         if self.katrender {
             ui.same_line();
-            if ui.button("Unload Render") {
+            if ui.button(&fl!("render-unload")) {
                 let _disabled = Settings::write_with_blocking(|settings| {
                     settings.enable_katrender = false;
                 });
@@ -166,12 +167,12 @@ impl PathingConfig {
             }
 
             ui.same_line();
-            if ui.button("Reload Render") {
+            if ui.button(&fl!("render-reload")) {
                 crate::reload_render(false);
             }
         } else {
             //RenderState::font_text("ui", ui, &fl!("pathing-config"));
-            ui.text_disabled("KatRender is required for pathing");
+            ui.text_disabled(&fl!("pathing-notice-space"));
         }
     }
 
@@ -380,6 +381,12 @@ impl PathingConfig {
             },
         }
 
+        let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, || self.draw_festival_opts(ui, machine));
+
         let advanced = || {
             ui.text_wrapped(&fl!("pathing-config-trail-notice"));
             if let Some(value) = Self::slider_opt_setting(ui, &fl!("pathing-config-trail-y-offset"), trail_y_offset, (-1.0, 1.0)) {
@@ -397,11 +404,6 @@ impl PathingConfig {
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, advanced);
-        let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
-            .flags(TreeNodeFlags::FRAMED)
-            .opened(false, Condition::Once)
-            .tree_push_on_open(true)
-            .build(ui, || self.draw_festival_opts(ui, machine));
 
         Some(())
     }
@@ -540,7 +542,7 @@ impl PathingConfig {
 
         let (mut enabled, needs_setup) = render_goggles::get_state();
 
-        ui.text_wrapped("This currently requires setting Render Sampling to Native under Graphics Options.");
+        ui.text_wrapped(&fl!("pathing-config-goggles-notice"));
 
         if ui.checkbox(&fl!("enable"), &mut enabled) {
             Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));

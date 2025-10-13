@@ -219,6 +219,7 @@ toml = "0.8.22"
 serde_repr = "0.1.20"
 i18n-embed = { version = "0.15.4", features = ["autoreload", "fluent-system"] }
 fluent = "0.16.1"
+fluent-syntax = "0.11"
 rust-embed = { version = "8.7.1", features = [ "debug-embed" ] }
 i18n-embed-fl = "0.9.4"
 unic-langid-impl = "0.9.6"
