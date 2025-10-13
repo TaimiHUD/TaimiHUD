@@ -99,9 +99,12 @@ autoplace-warning = If you do not have RTAPI installed, we will not be able to d
 ## Windows
 
 primary-window = TaimiHUD
-timer-window = Encounter Timers
-marker-window = Squad Markers
+timers-window = Encounter Timers
+markers-window = Squad Markers
 pathing-window = Pathing Packs
+# deprecated(?) aliases
+timer-window = { timers-window }
+marker-window = { markers-window }
 
 ## Modals
 

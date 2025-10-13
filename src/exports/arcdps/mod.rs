@@ -11,6 +11,7 @@ use {
         marker::format::MarkerType,
         render::{machine::RenderMachine, RenderState},
         settings::{ArcSettings, ArcUpdatePreference, GitHubSource, GitHubLatestRelease, Settings},
+        with_i18n,
     },
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
@@ -381,8 +382,25 @@ fn imgui_options_tab(ui: &imgui::Ui) {
     }
 }
 
-fn imgui_options_windows(_ui: &imgui::Ui, _window_name: Option<&str>) -> bool {
+fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
     let hide_checkbox = false;
+    if window_name.is_some() || !RenderState::is_running() {
+        return hide_checkbox
+    }
+
+    let mut settings = match crate::SETTINGS.get().and_then(|s| s.try_write().ok()) {
+        Some(s) => s,
+        None => return hide_checkbox,
+    };
+    for &binding in ArcSettings::VK_WINDOWS {
+        let Some(window) = binding.window_name() else { continue };
+        let window_id = format!("{window}-window");
+        let Some(state) = settings.get_window_state_mut(window) else { continue };
+        if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
+            // just mutating settings is enough?
+        }
+    }
+
     hide_checkbox
 }
 

@@ -89,7 +89,7 @@ impl ArcRenderState {
             }));
         }
         #[cfg(feature = "space")]
-        if Engine::is_available() {
+        {
             ui.separator();
             self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::PathingToggle)));
             ui.separator();

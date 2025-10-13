@@ -220,16 +220,9 @@ impl Settings {
     }
 
     pub fn set_window_state(&mut self, window: &str, state: Option<bool>) {
-        let window_open = match window {
-            crate::WINDOW_PRIMARY => &mut self.primary_window_open,
-            crate::WINDOW_TIMERS => &mut self.timers_window_open,
-            crate::WINDOW_MARKERS => &mut self.markers_window_open,
-            crate::WINDOW_PATHING => &mut self.pathing_window_open,
-            _ => {
-                // consider an enum...
-                log::error!("unsupported window: {window}");
-                return
-            },
+        let Some(window_open) = self.get_window_state_mut(window) else {
+            log::error!("unsupported window: {window}");
+            return
         };
 
         match state {
@@ -240,6 +233,17 @@ impl Settings {
                 *window_open = !*window_open;
             }
         }
+    }
+
+    /// consider an enum...
+    pub fn get_window_state_mut(&mut self, window: &str) -> Option<&mut bool> {
+        Some(match window {
+            crate::WINDOW_PRIMARY => &mut self.primary_window_open,
+            crate::WINDOW_TIMERS => &mut self.timers_window_open,
+            crate::WINDOW_MARKERS => &mut self.markers_window_open,
+            crate::WINDOW_PATHING => &mut self.pathing_window_open,
+            _ => return None,
+        })
     }
 
     pub fn toggle_timer(&mut self, timer: String) -> bool {
