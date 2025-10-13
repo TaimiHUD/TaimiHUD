@@ -85,7 +85,7 @@ impl PathingConfig {
             #[cfg(feature = "goggles")]
             let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
                 .flags(TreeNodeFlags::FRAMED)
-                .opened(true, Condition::Once)
+                .opened(false, Condition::Once)
                 .tree_push_on_open(true)
                 .build(ui, || Self::draw_goggles_opts(ui, machine));
         };
