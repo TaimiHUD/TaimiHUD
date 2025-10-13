@@ -1,6 +1,6 @@
 use core::{
     num::{NonZeroU32, NonZeroUsize},
-    mem::{self, ManuallyDrop},
+    mem,
     ptr::{self, NonNull},
 };
 use std::panic;
