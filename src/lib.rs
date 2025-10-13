@@ -1140,6 +1140,7 @@ fn unload() {
 
     *loaded = false;
 
+    #[cfg(todo = "unnecessary")]
     #[cfg(not(debug_assertions))] {
         drop(panic::take_hook());
     }
