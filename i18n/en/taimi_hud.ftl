@@ -142,7 +142,7 @@ settings-unloaded = Settings have not yet loaded!
 ## Info tab
 
 info-tab = Info
-keybind-triggers = If you need keybind-based timer triggers, please bind the appropriate keys in the Nexus settings.
+keybind-triggers = If you need keybind-based timer triggers, please bind the appropriate keys in the loader settings.
 active-timer-phases = Active timer phases
 phase = Phase
 # As in, like, "game engine" or "rendering engine" :o
