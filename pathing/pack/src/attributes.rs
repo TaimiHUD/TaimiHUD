@@ -401,7 +401,9 @@ impl MarkerAttributes {
         {
             self.toggle_category = Some(value);
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
-            self.reset_guids = Some(value.split(',').map(|g| taco_xml_to_guid(g)).collect());
+            let guids = value.split(',')
+                .map(|g| taco_xml_to_guid(g.trim_ascii()));
+            self.reset_guids = Some(guids.collect());
         } else if attr_name.eq_ignore_ascii_case("show") {
             self.show_category = Some(value);
         } else if attr_name.eq_ignore_ascii_case("hide") {
@@ -465,6 +467,7 @@ fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>> where
     let mut err = None;
     let list: Vec<T> = value
         .split(',')
+        .map(|f| f.trim_ascii())
         .filter_map(|f| match f.parse() {
             Ok(v) => Some(v),
             Err(e) => {
@@ -488,7 +491,9 @@ fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]
 {
     let mut list = [T::default(); N];
 
-    let values = value.split(',').map(FromStr::from_str);
+    let values = value.split(',')
+        .map(|f| f.trim_ascii())
+        .map(FromStr::from_str);
     for (dest, item) in list.iter_mut().zip(values) {
         *dest = item.map_err(Into::into)
             .with_context(|| format!("parsing list `{value}`"))?;
