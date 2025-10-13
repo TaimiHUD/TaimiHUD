@@ -648,10 +648,10 @@ impl PackCollection {
             let pack = &self.loaded_packs[pack_idx];
             if !pack.active_trails.is_empty() || !pack.active_pois.is_empty() {
                 log::info!(
-                    "Loaded {} trails and {} POIs for pack #{pack_idx} {}",
-                    pack.pack.name,
+                    "Loaded {} trails and {} POIs from pack #{pack_idx} {}",
                     pack.active_trails.len(),
-                    pack.active_pois.len()
+                    pack.active_pois.len(),
+                    pack.pack.name,
                 );
             }
         }
