@@ -326,12 +326,12 @@ impl Controller {
         }
         drop(settings_lock);
         let timers_len = timers.len();
-        log::info!("Total loaded timers: {}", timers_len,);
+        log::trace!("Total loaded timers: {}", timers_len);
         timers
     }
 
     async fn setup_timers(&mut self) {
-        log::info!("Preparing to setup timers");
+        log::debug!("Preparing to setup timers");
         self.timers = self.load_timer_files().await;
         if exists(&*TIMERS_DIR).expect("oh no i cant access my own addon dir") {
             let adhoc_timers = TimerFile::load_many_sourceless(&*TIMERS_DIR, 100)

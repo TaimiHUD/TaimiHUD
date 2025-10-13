@@ -940,7 +940,7 @@ impl Engine {
 
         if let Some((true, depth)) = settings {
             if let (false, needs_setup) = render_goggles::get_state() {
-                log::info!("Goggles setup: {}...", if needs_setup { "initializing" } else { "restarting" });
+                log::debug!("Goggles setup: {}...", if needs_setup { "initializing" } else { "restarting" });
                 render_goggles::enable(needs_setup);
             }
 

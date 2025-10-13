@@ -265,7 +265,7 @@ impl RenderMachine {
                     MapCalibration::DPI_REFERENCE
                 },
             });
-            log::warn!("resize to: {_size:?} @ {}", self.map.calibration.dpi);
+            log::trace!("resize to: {_size:?} @ {}", self.map.calibration.dpi);
             self.act_map_recalibrate(true);
         }
     }

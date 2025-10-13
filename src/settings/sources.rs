@@ -63,10 +63,10 @@ impl SourcesFile {
             log::info!("Sources file doesn't exist! Creating sources file at {sources_path:?}.");
             Self::create_stock().await?;
         }
-        log::info!("Attempting to load the sources file at \"{sources_path:?}\".");
+        log::trace!("Attempting to load the sources file at \"{sources_path:?}\".");
         let file_data = read_to_string(&sources_path).await?;
         let data: Self = toml::from_str(&file_data)?;
-        log::info!("Loaded the sources file at \"{sources_path:?}\".");
+        log::trace!("Loaded the sources file at \"{sources_path:?}\".");
         Ok(data)
     }
 

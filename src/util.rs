@@ -82,7 +82,7 @@ impl ComboInput {
     }
 
     pub fn update(&mut self, data: Vec<String>) {
-        log::info!("Categories updated: {:?}", data);
+        log::trace!("Categories updated: {:?}", data);
         self.data = data;
     }
 

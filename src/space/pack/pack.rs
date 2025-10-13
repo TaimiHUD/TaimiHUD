@@ -454,12 +454,6 @@ impl ActivePack {
             self.dirty_pois.push(false);
         }
 
-        log::info!(
-            "Loaded {} trails and {} POIs",
-            self.active_trails.len(),
-            self.active_pois.len()
-        );
-
         self.cleanup_textures();
 
         //self.recompute_enabled();
@@ -650,6 +644,16 @@ impl PackCollection {
         log::info!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
         self.build_active_pack(pack_idx, device, None, map_id)?;
 
+        if log::log_enabled!(log::Level::Info) {
+            let pack = &self.loaded_packs[pack_idx];
+            log::info!(
+                "Loaded {} trails and {} POIs for pack #{pack_idx}",
+                pack.active_trails.len(),
+                pack.active_pois.len()
+            );
+        }
+
+
         //self.recreate_buffers(device)?;
         self.mark_buffers_dirty();
 
@@ -710,6 +714,13 @@ impl PackCollection {
                 return Err(e.into()),
             _ => (),
         }
+
+        log::info!(
+            "Loaded {} trails and {} POIs",
+            self.loaded_packs.values().map(|p| p.active_trails.len()).sum::<usize>(),
+            self.loaded_packs.values().map(|p| p.active_pois.len()).sum::<usize>(),
+        );
+
 
         //let res = self.recreate_buffers(device);
         self.mark_buffers_dirty();

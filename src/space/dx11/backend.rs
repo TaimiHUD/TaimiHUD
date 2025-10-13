@@ -34,7 +34,7 @@ pub struct RenderBackend {
 
 impl RenderBackend {
     pub fn setup(display_size: Size2<ScreenSpace>) -> anyhow::Result<RenderBackend> {
-        log::info!("Getting d3d11 device swap chain");
+        log::debug!("Getting d3d11 device swap chain");
         let (device, swap_chain) = rt::d3d11_device()?;
 
         let shaders = ShaderLoader::load_bundled(&device)
