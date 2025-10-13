@@ -74,6 +74,7 @@ impl FestivalFixup {
     ];
     pub const FESTIVAL_PREFIXES: &'static [&'static str] = &[
         "tw_guides.tw_festivals",
+        "tw_guides.tw_festivals.separatormenu05",
         "reactif.festivals.hidden",
         "reactif.festivals",
     ];
