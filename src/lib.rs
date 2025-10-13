@@ -161,6 +161,11 @@ macro_rules! with_i18n {
             }
         }
     };
+    ($message_id:expr, $closure:expr) => {
+        {
+            $crate::with_i18n($message_id, $closure)
+        }
+    };
 }
 
 pub fn localizer() -> DefaultLocalizer<'static> {
