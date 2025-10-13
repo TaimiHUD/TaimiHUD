@@ -12,7 +12,7 @@ use {
     },
 };
 #[cfg(feature = "arcdps-extras")]
-use arcdps::extras::{self, KeybindChange, KeyCode, MouseCode};
+use arcdps::extras::{self, keybinds::RawKeybindChange, KeybindChange, KeyCode, MouseCode};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq/*, PartialOrd, Ord, Hash*/)]
 pub struct KeyInput {
@@ -133,6 +133,28 @@ impl TryFrom<KeybindChange> for KeyInput {
         };
         input.mods = mods;
         Ok(input)
+    }
+}
+#[cfg(feature = "arcdps-extras")]
+impl TryFrom<RawKeybindChange> for KeyInput {
+    type Error = anyhow::Error;
+
+    fn try_from(key: RawKeybindChange) -> Result<Self, Self::Error> {
+        Self::try_from(keybind_change_from_raw(&key))
+    }
+}
+
+/// Work around incorrect conversion in arcdps-rs (as of 2025-10)
+#[cfg(feature = "arcdps-extras")]
+pub fn keybind_change_from_raw(key: &RawKeybindChange) -> KeybindChange {
+    use arcdps::extras::keybinds::Modifier;
+    KeybindChange {
+        control: key.control,
+        index: key.index,
+        key: key.key.clone().into(),
+        mod_alt: key.key.modifier & Modifier::Alt as i32 != 0,
+        mod_ctrl: key.key.modifier & Modifier::Ctrl as i32 != 0,
+        mod_shift: key.key.modifier & Modifier::Shift as i32 != 0,
     }
 }
 
