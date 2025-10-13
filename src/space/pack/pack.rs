@@ -5,9 +5,14 @@ use {
             Controller,
             ControllerEvent,
         },
+        exports::runtime::{
+            self as rt,
+            imgui::{self, Ui, Condition, TreeNode},
+        },
         render::{
             machine::{RenderMachine, RenderPosition},
             pathing_window::{PathingFilterState, PathingSearchState},
+            RenderState,
         },
         space::{
             pack::{FestivalFixup, Pack, MarkerAttributesExt},
@@ -17,10 +22,7 @@ use {
             DrawSpace,
             LocalContext, MapContext,
         },
-    },
-    nexus::{
-        imgui::{Ui, Condition, TreeNode},
-        alert::send_alert,
+        fl, with_i18n,
     },
     anyhow::Context,
     bitvec::vec::BitVec,
@@ -41,7 +43,7 @@ use {
         buffer::BufferOf,
     },
     taimi_pack::{
-        attributes::Festival,
+        attributes::{Festival, MarkerAttributes},
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category, Poi,
     },
@@ -66,8 +68,10 @@ pub struct ActivePack {
     pub user_category_state: BitVec,
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
     pub active_pois: IndexMap<Uuid, ActivePoi>,
-    // Search filter state
+    // UI and filter state
     pub available_categories: BitVec,
+    pub copyable_categories: BTreeSet<usize>,
+    pub copyable_pois: BTreeSet<usize>,
 
     // Internal rendering data.
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
@@ -98,6 +102,8 @@ impl ActivePack {
             active_trails: Default::default(),
             texture_list: Default::default(),
             available_categories: Default::default(),
+            copyable_categories: Default::default(),
+            copyable_pois: Default::default(),
             loaded_textures: Default::default(),
             unused_textures: Default::default(),
             dirty_pois: Default::default(),
@@ -153,6 +159,7 @@ impl ActivePack {
                 recompute,
                 search_state,
                 map_filter,
+                (&self.copyable_categories, &self.copyable_pois, &self.pack.pois),
             );
         }
     }
@@ -204,6 +211,7 @@ impl ActivePack {
         recompute: &mut bool,
         search_state: &PathingSearchState,
         category_filter: Option<&BitVec>,
+        copyable: (&BTreeSet<usize>, &BTreeSet<usize>, &[Poi]),
     ) {
         let push_token = ui.push_id(&category.full_id);
         if category.is_hidden {
@@ -211,7 +219,8 @@ impl ActivePack {
             return;
         }
         let mut display = true;
-        if let Some(idx) = all_categories.get_index_of(&category.full_id) {
+        let category_idx = all_categories.get_index_of(&category.full_id);
+        if let Some(idx) = category_idx {
             if let Some(substate) = state.get(idx) {
                 let enabled_filter = *substate && filter_state.contains(PathingFilterState::Enabled);
                 let disabled_filter = !*substate && filter_state.contains(PathingFilterState::Disabled);
@@ -229,21 +238,35 @@ impl ActivePack {
             }
         }
         if display {
-            if category.marker_attributes.copy_value.is_some() {
+            let is_copyable = match &category.marker_attributes.copy_value {
+                Some(value) if category.sub_categories.is_empty() && !category.is_separator =>
+                    Some(value),
+                _ => None,
+            };
+            if let Some(..) = is_copyable {
                 ui.indent();
-                if let Some(copy_value) = &category.marker_attributes.copy_value {
-                    if ui.small_button(&category.display_name) {
-                        ui.set_clipboard_text(copy_value);
-                        if let Some(copy_message) = &category.marker_attributes.copy_message {
-                            send_alert(copy_message);
-                        }
-                    }
+                if ui.small_button(&fl!("copy-arg", arg = (&category.display_name[..]))) {
+                    Self::copy_copyable(ui, &category.marker_attributes);
+                }
+                if ui.is_item_hovered() {
+                    Self::draw_tooltip(ui, &category.display_name, || {
+                        Self::draw_tooltip_category(ui, category);
+                        Self::draw_tooltip_copyable(ui, &category.marker_attributes, Some(&category.display_name));
+                    });
                 }
                 ui.unindent();
                 ui.table_next_column();
                 ui.table_next_column();
             } else {
-                let mut unbuilt = TreeNode::new(&category.display_name)
+                let (copyable_categories, copyable_pois, pois) = copyable;
+                let has_copyable_pois = category_idx.map(|idx| copyable_categories.contains(&idx))
+                    .unwrap_or(false);
+
+                let mut unbuilt = TreeNode::new(&category.display_name);
+                if (category.is_separator || category.sub_categories.is_empty()) && category.marker_attributes.copy_value.is_none() && !has_copyable_pois {
+                    unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
+                }
+                unbuilt = unbuilt
                     .frame_padding(true)
                     .tree_push_on_open(false)
                     .opened(open_items.contains(&category.full_id), Condition::Always);
@@ -255,6 +278,50 @@ impl ActivePack {
                     unbuilt = unbuilt.framed(true);
                 }
                 let tree_token = unbuilt.push(ui);
+                if ui.is_item_hovered() && Self::category_has_tooltip(category) {
+                    Self::draw_tooltip(ui, &category.display_name, || {
+                        Self::draw_tooltip_category(ui, category);
+                    });
+                }
+                if category.marker_attributes.copy_value.is_some() {
+                    ui.same_line();
+                    if with_i18n!("copy", |copy| ui.small_button(copy)) {
+                        Self::copy_copyable(ui, &category.marker_attributes);
+                    }
+                    if ui.is_item_hovered() {
+                        Self::draw_tooltip(ui, &category.display_name, || {
+                            Self::draw_tooltip_copyable(ui, &category.marker_attributes, Some(&category.display_name));
+                        });
+                    }
+                }
+                if has_copyable_pois {
+                    // TODO: revisit or remove once trigger radius and interaction is working
+                    let pois = copyable_pois.iter()
+                        .filter_map(|&poi_idx| pois.get(poi_idx))
+                        //.filter(|poi| poi.category_idx == idx);
+                        .filter(|poi| poi.category == category.full_id);
+                    for (i, copyable) in pois.enumerate() {
+                        if i % 4 != 3 {
+                            ui.same_line();
+                        }
+                        let copied = match &copyable.attributes.tip_name {
+                            Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
+                            None => with_i18n!("copy", |copy| ui.small_button(copy)),
+                        };
+                        if copied {
+                            Self::copy_copyable(ui, &copyable.attributes);
+                        }
+                        if ui.is_item_hovered() {
+                            let template = copyable.attributes.tip_name.as_ref()
+                                .map(|n| &n[..])
+                                .unwrap_or("Generic Copyable Marker Name");
+                            Self::draw_tooltip(ui, template, || {
+                                Self::draw_tooltip_poi(ui, &copyable.attributes);
+                                Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
+                            });
+                        }
+                    }
+                }
                 ui.table_next_column();
                 if !category.is_separator {
                     if let Some(idx) = all_categories.get_index_of(&category.full_id) {
@@ -284,6 +351,7 @@ impl ActivePack {
                             recompute,
                             search_state,
                             category_filter,
+                            copyable,
                         );
                     }
                     if !category.sub_categories.is_empty() {
@@ -302,6 +370,107 @@ impl ActivePack {
             }
         }
         push_token.pop();
+    }
+
+    fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
+        let Some(copy_value) = &attributes.copy_value else { return };
+        ui.set_clipboard_text(copy_value);
+        if let Some(copy_message) = &attributes.copy_message {
+            let _ = rt::send_alert(ui, copy_message);
+        }
+    }
+
+    fn draw_tooltip_category(ui: &Ui, category: &Category) {
+        let desc = match &category.marker_attributes.tip_description {
+            Some(desc) if !desc.is_empty() => Some(&desc[..]),
+            _ => None,
+        };
+        let title = match &category.marker_attributes.tip_name {
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+                Some(&title[..]),
+            _ => None,
+        };
+
+        if let Some(title) = title {
+            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            ui.text(title);
+        }
+
+        if let Some(tip) = desc {
+            ui.text_wrapped(tip);
+        }
+    }
+
+    fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
+        let desc = match &attributes.tip_description {
+            Some(desc) if !desc.is_empty() => Some(&desc[..]),
+            _ => None,
+        };
+
+        if let Some(title) = &attributes.tip_name {
+            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            ui.text(title);
+        }
+        if let Some(desc) = &attributes.tip_description {
+            ui.text_wrapped(desc);
+        }
+    }
+
+    fn category_has_tooltip(category: &Category) -> bool {
+        match &category.marker_attributes.tip_description {
+            Some(desc) if !desc.is_empty() =>
+                return true,
+            _ => (),
+        }
+        match &category.marker_attributes.tip_name {
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+                return true,
+            _ => (),
+        }
+
+        false
+    }
+
+    /// since these aren't intended to be displayed, there's no canon name to use...
+    /// if it looks like more than just a location link, we'll try to preview it
+    fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
+        let Some(copy_value) = attributes.copy_value.as_ref() else {
+            return false
+        };
+        if !copy_value.starts_with('[') || !copy_value.ends_with(']') {
+            return true
+        }
+        false
+    }
+
+    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+        use imgui::StyleVar;
+
+        let _id = ui.push_id("category_tooltip");
+        let [minwidth, lineheight] = ui.calc_text_size(title_template);
+        unsafe {
+            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
+        };
+        let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
+        ui.tooltip(|| {
+            {
+                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                ui.dummy([minwidth, f32::EPSILON]);
+            }
+            f()
+        })
+    }
+
+    fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
+        let copy_message = attributes.copy_message.as_ref().map(|m| &m[..]);
+        match &attributes.copy_value {
+            Some(copy_value) if (display_name.is_none() || copy_message.is_none()) && Self::copyable_value_has_message(attributes) =>
+                ui.text_wrapped(&format!("\"{copy_value}\"")),
+            _ => (),
+        }
+        if let Some(copy_message) = copy_message {
+            ui.text_wrapped(copy_message);
+        }
     }
 
     pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
@@ -507,6 +676,11 @@ impl ActivePack {
                 }
             };
 
+            if pack_poi.attributes.copy_value.is_some() {
+                self.copyable_pois.insert(i_poi);
+                self.copyable_categories.insert(category_idx);
+            }
+
             let poi_idx = self.active_pois.len();
             let entity = RenderEntity {
                 bounds: poi.bounds,
@@ -553,6 +727,8 @@ impl ActivePack {
         self.dirty_trails.clear();
         self.dirty_pois.clear();
         self.available_categories.clear();
+        self.copyable_categories.clear();
+        self.copyable_pois.clear();
         self.render_list_bookmark = None;
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
