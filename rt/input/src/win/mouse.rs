@@ -82,7 +82,7 @@ impl MousePosition {
         })
     }
 
-    pub fn to_screen(mut self, wnd: HWND) -> anyhow::Result<MousePosition> {
+    pub fn to_window(mut self, wnd: HWND) -> anyhow::Result<MousePosition> {
         let res = unsafe {
             SetLastError(ERROR_SUCCESS);
             // or Gdi::ClientToScreen?
@@ -98,7 +98,7 @@ impl MousePosition {
         }.context("MapWindowPoints")
     }
 
-    pub fn to_window(mut self, wnd: HWND) -> anyhow::Result<MousePosition> {
+    pub fn to_screen(mut self, wnd: HWND) -> anyhow::Result<MousePosition> {
         let res = unsafe {
             SetLastError(ERROR_SUCCESS);
             Gdi::MapWindowPoints(Some(wnd), Some(WindowsAndMessaging::HWND_DESKTOP), slice::from_mut(self.as_point_mut()))
