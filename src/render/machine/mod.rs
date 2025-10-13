@@ -140,7 +140,7 @@ impl RenderMachine {
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
             #[cfg(feature = "space")]
-            active_festivals: Default::default(),
+            active_festivals: Self::initial_festivals().collect(),
             #[cfg(feature = "space")]
             depth_range: None,
             #[cfg(feature = "extension-nexus")]

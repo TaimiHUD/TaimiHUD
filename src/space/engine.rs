@@ -28,6 +28,7 @@ use {
             MapContext,
         },
     },
+    taimi_pack::attributes::Festival,
     tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
 };
 #[cfg(feature = "space-ecs")]
@@ -243,7 +244,6 @@ impl Engine {
                     ()
                 });
 
-            machine.active_festivals.insert(taimi_pack::attributes::Festival::Halloween);
             #[cfg(feature = "extension-nexus")]
             if res.is_ok() {
                 machine.rtapi_setup();
@@ -343,7 +343,10 @@ impl Engine {
                 use SpaceEvent::*;
                 match event {
                     DisabledPaths(disabled_paths) => {
-                        self.packs.active_festivals = machine.active_festivals.clone();
+                        self.packs.active_festivals = self.map_settings(|s| Festival::all()
+                            .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
+                            .collect()
+                        );
                         self.packs.disable_paths(disabled_paths);
                     }
                     PathingToggle => {

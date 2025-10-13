@@ -3,7 +3,10 @@ use {
     crate::{
         render::machine::{RenderMachine, RenderPosition, RenderPositioning},
         settings::pathing::CameraSource,
-        space::DrawSpace,
+        space::{
+            pack::FestivalFixup,
+            DrawSpace,
+        },
     },
     glamour::{
         Angle,
@@ -11,6 +14,10 @@ use {
         Point3,
         Transform3,
         Vector2, Vector3,
+    },
+    std::{
+        collections::BTreeSet,
+        time::SystemTime,
     },
     taimi_meta::{
         coords::{
@@ -157,6 +164,13 @@ impl RenderMachine {
                 self.act_map_open();
             }
         }
+    }
+
+    pub fn initial_festivals() -> impl Iterator<Item = Festival> {
+        let now = SystemTime::now();
+        FestivalFixup::FESTIVAL_WINDOWS.iter()
+            .filter(move |(_f, window)| window.is_active(now))
+            .map(|&(festival, ..)| festival)
     }
 
     #[inline]

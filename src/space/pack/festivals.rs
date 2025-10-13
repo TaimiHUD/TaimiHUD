@@ -1,5 +1,8 @@
 use {
-    std::collections::BTreeMap,
+    std::{
+        collections::BTreeMap,
+        time::{Duration, SystemTime},
+    },
     taimi_pack::attributes::Festival,
 };
 
@@ -15,7 +18,7 @@ impl FestivalFixup {
         ("tw_guides.tw_festivals.tw_sab", Festival::SuperAdventureBox),
         ("tw_guides.tw_festivals.tw_festival_halloween", Festival::Halloween),
         ("tw_guides.tw_festivals.tw_festival_dragonbash", Festival::DragonBash),
-        ("tw_guides.tw_festivals.tw_festival_fourwinds", Festival::FestivalOfTheFourWinds),
+        ("tw_guides.tw_festivals.tw_festival_fourwinds", Festival::FourWinds),
         ("tw_guides.tw_festivals.tw_festival_lunarnewyear", Festival::LunarNewYear),
         ("reactif.festivals.super_adventure_box", Festival::SuperAdventureBox),
         ("reactif.festivals.tribulation", Festival::SuperAdventureBox),
@@ -59,19 +62,89 @@ impl FestivalFixup {
         ("reactif.festivals.adventure.pinata_bashing", Festival::DragonBash),
         ("reactif.festivals.adventure.time_trial", Festival::DragonBash),
         ("reactif.festivals.dragon_bash", Festival::DragonBash),
-        ("reactif.festivals.aspect_gatherer", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.dolyak_flyer", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.man_overboard", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.master_aspect_gatherer", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.master_of_ceremony", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.no_one_likes_a_wet_charr", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.rise_and_fall_of_kookoochoo", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.slalom_skimmer", Festival::FestivalOfTheFourWinds),
-        ("reactif.festivals.four_winds", Festival::FestivalOfTheFourWinds),
+        ("reactif.festivals.aspect_gatherer", Festival::FourWinds),
+        ("reactif.festivals.dolyak_flyer", Festival::FourWinds),
+        ("reactif.festivals.man_overboard", Festival::FourWinds),
+        ("reactif.festivals.master_aspect_gatherer", Festival::FourWinds),
+        ("reactif.festivals.master_of_ceremony", Festival::FourWinds),
+        ("reactif.festivals.no_one_likes_a_wet_charr", Festival::FourWinds),
+        ("reactif.festivals.rise_and_fall_of_kookoochoo", Festival::FourWinds),
+        ("reactif.festivals.slalom_skimmer", Festival::FourWinds),
+        ("reactif.festivals.four_winds", Festival::FourWinds),
     ];
     pub const FESTIVAL_PREFIXES: &'static [&'static str] = &[
         "tw_guides.tw_festivals",
         "reactif.festivals.hidden",
         "reactif.festivals",
     ];
+
+    /// Generally Tuesdays from $(date +%s -d '20??-??-??T09:00:00-07:00')
+    /// to $(date +%s -d '20??-??-??T12:00:00-07:00')
+    pub const FESTIVAL_WINDOWS: &'static [(Festival, FestivalWindow)] = &[
+        // Shadow of the Mad King 2025: 2025-10-07 — 2025-11-04
+        (Festival::Halloween, FestivalWindow::with_timestamp(
+            1759852800,
+            1762282800,
+        )),
+    ];
+}
+
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct FestivalWindow {
+    pub start_timestamp: u64,
+    pub end_timestamp: u64,
+}
+
+impl FestivalWindow {
+    pub const fn with_timestamp(start_timestamp: u64, end_timestamp: u64) -> Self {
+        match Self::try_with_timestamp(start_timestamp, end_timestamp) {
+            Some(window) => window,
+            None => panic!("festival duration cannot be negative"),
+        }
+    }
+
+    pub const fn try_with_timestamp(start_timestamp: u64, end_timestamp: u64) -> Option<Self> {
+        match end_timestamp > start_timestamp {
+            true => Some(Self {
+                start_timestamp,
+                end_timestamp,
+            }),
+            false => None,
+        }
+    }
+
+    pub fn duration(&self) -> Duration {
+        Duration::from_secs(self.end_timestamp - self.start_timestamp)
+    }
+
+    pub fn start(&self) -> Option<SystemTime> {
+        let start = Duration::from_secs(self.start_timestamp);
+        SystemTime::UNIX_EPOCH.checked_add(start)
+    }
+
+        #[cfg(todo = "unused")]
+    pub fn end(&self) -> Option<SystemTime> {
+        let end = Duration::from_secs(self.end_timestamp);
+        SystemTime::UNIX_EPOCH.checked_add(end)
+    }
+
+    pub fn is_active(&self, now: SystemTime) -> bool {
+        let Some(start) = self.start() else {
+            return false
+        };
+
+        #[cfg(todo = "unnecessary")]
+        if now < start {
+            return false
+        } else {
+            start.checked_add(self.duration())
+                .map(|end| end > now)
+                .unwrap_or(true)
+        }
+
+        match now.duration_since(start) {
+            Ok(d) => d <= self.duration(),
+            _ => false,
+        }
+    }
 }

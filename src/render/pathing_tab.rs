@@ -483,7 +483,7 @@ impl PathingConfig {
     fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let change = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| {
             let mut change = None;
-            for &festival in Festival::ALL {
+            for festival in Festival::all() {
                 let active = machine.festival_active(festival);
                 let selected = s.get_festival_preference(festival);
                 let name = crate::LANGUAGE_LOADER.get(festival.as_str());
@@ -506,15 +506,6 @@ impl PathingConfig {
         })));
         if let Some(Some(Some((festival, change)))) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
-            match change {
-                Some(true) => {
-                    machine.active_festivals.insert(festival);
-                },
-                Some(false) => {
-                    machine.active_festivals.remove(&festival);
-                },
-                None => (),
-            }
             Controller::try_send(ControllerEvent::RequestDisabledPaths);
         }
     }
