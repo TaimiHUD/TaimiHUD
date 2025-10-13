@@ -1254,8 +1254,10 @@ impl Controller {
             // omit the worst spam offenders
             ControllerEvent::LoadTextureIntegrated(id, data) =>
                 log::trace!("Controller received event: Load texture {id} from {} bytes", data.len()),
-            ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated { .. } | ControllerEvent::UiTick(..) =>
-                log::trace!("Controller received event: {}", event),
+            ControllerEvent::CombatEvent { .. } | ControllerEvent::MumbleIdentityUpdated { .. }
+            | ControllerEvent::WindowState(..)
+            | ControllerEvent::UiTick(..)
+                => log::trace!("Controller received event: {}", event),
             event =>
                 log::debug!("Controller received event: {}", event),
         }

@@ -724,6 +724,13 @@ fn load_nexus() {
 
     WINDOW_RESIZED.subscribe(event_consume!(<()> |_| {
         reload_render(true);
+        match RENDER_STATE.try_lock() {
+            Ok(mut state) => if let Some(ref mut state) = *state {
+                // TODO: do this on all reloads (move reload to method on RenderState or machine)
+                state.machine.reset_display_size();
+            },
+            _ => (),
+        }
     })).revert_on_unload();
 }
 

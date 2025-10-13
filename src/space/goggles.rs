@@ -353,6 +353,7 @@ pub fn shutdown() -> anyhow::Result<()> {
     }
 }*/
 
+#[cfg(todo = "unused")]
 pub fn has_classification(cls: LensClass) -> Option<bool> {
     LENSES.try_read().ok()
         .map(|lenses| lenses.values().any(|&c| c == cls))
