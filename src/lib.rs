@@ -449,6 +449,11 @@ fn load_nexus() {
         *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
     }
 
+    let taimi_settings = render!(|ui| {
+        RenderState::render_options(ui);
+    });
+    register_render(RenderType::OptionsRender, taimi_settings).revert_on_unload();
+
     register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
     // Handle window toggling with keybind and button

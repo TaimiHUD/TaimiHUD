@@ -151,6 +151,11 @@ model-files = { model } Files
 vertices = Vertices
 textures = Textures: { $count }
 
+## Arc
+
+arcdps = ArcDPS
+arcdps-tab = { arcdps }
+
 ## Markers tab
 
 reload-markers = Reload { markers }

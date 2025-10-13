@@ -376,7 +376,7 @@ fn imgui_options_tab(ui: &imgui::Ui) {
     if RenderState::is_running() {
         let mut state = RenderState::lock();
         if let Some(ref mut state) = *state {
-            state.arc.ui_options(ui);
+            state.primary_window.arc_tab.ui_options(ui);
         }
     }
 }

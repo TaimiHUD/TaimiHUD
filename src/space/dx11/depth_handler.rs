@@ -45,7 +45,7 @@ impl DepthHandler {
         device: &Dx11Device,
         swap_chain: &SwapChain,
     ) -> anyhow::Result<Self> {
-        log::debug!(
+        log::trace!(
             "Setting up viewport with dimensions ({},{})",
             display_size.width,
             display_size.height,
