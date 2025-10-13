@@ -2,6 +2,7 @@ use {
     arcdps::extras::{self, ExtrasSubscriberInfo},
     crate::exports::{arcdps as exports, runtime as rt},
     std::{ffi::CStr, panic, str},
+    taimi_input::win::keyboard::keybind_change_from_raw,
 };
 
 pub(crate) unsafe fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut ExtrasSubscriberInfo) {
@@ -120,7 +121,7 @@ pub(crate) unsafe extern "C-unwind" fn cb_language_changed_raw(language: arcdps:
 
 #[inline(never)]
 pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
-    exports::extras_keybind(keybind.into())
+    exports::extras_keybind(keybind_change_from_raw(&keybind))
 }
 
 #[cfg(feature = "closure-ffi")]
