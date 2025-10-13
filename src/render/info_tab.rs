@@ -1,7 +1,7 @@
 use {
     super::TimerWindowState,
-    crate::{built_info, fl, render::RenderState, TEXTURES},
-    nexus::imgui::{TableColumnSetup, Ui},
+    crate::{built_info, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
+    nexus::imgui::{TableColumnSetup, Ui, StyleColor},
 };
 
 #[cfg(feature = "space")]
@@ -40,6 +40,25 @@ impl InfoTabState {
             build.push_str(&format!(", in profile \"{profile}\""));
             build.push('.');
             ui.text_wrapped(build);
+        }
+        ui.dummy([4.0, 4.0]);
+        ui.text_wrapped(fl!("having-issues"));
+        ui.dummy([4.0, 4.0]);
+        let path = fl!("discord-link");
+        let color_token = ui.push_style_color(
+            StyleColor::Button,
+            [0.0, 0.5, 0.8, 1.0]
+        );
+        if ui.button(fl!("join-discord")) {
+            log::debug!("Triggered open Discord join");
+            Controller::try_send(ControllerEvent::OpenOpenable(
+                fl!("join-discord"),
+                fl!("discord-link").into(),
+            ));
+        }
+        color_token.pop();
+        if ui.is_item_hovered() {
+            ui.tooltip_text(fl!("location", path = "https://discord.gg/dKpaphTMGS"));
         }
         ui.dummy([4.0, 4.0]);
         let description = env!("CARGO_PKG_DESCRIPTION");
