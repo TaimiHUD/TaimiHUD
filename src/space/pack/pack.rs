@@ -66,6 +66,8 @@ pub struct ActivePack {
     pub user_category_state: BitVec,
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
     pub active_pois: IndexMap<Uuid, ActivePoi>,
+    // Search filter state
+    pub available_categories: BitVec,
 
     // Internal rendering data.
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
@@ -95,6 +97,7 @@ impl ActivePack {
             active_pois: Default::default(),
             active_trails: Default::default(),
             texture_list: Default::default(),
+            available_categories: Default::default(),
             loaded_textures: Default::default(),
             unused_textures: Default::default(),
             dirty_pois: Default::default(),
@@ -126,6 +129,15 @@ impl ActivePack {
     }
 
     pub fn draw_categories(&mut self, ui: &Ui, filter_state: PathingFilterState, open_items: &mut HashSet<String>, recompute: &mut bool, search_state: &PathingSearchState) {
+        let map_filter = match filter_state.contains(PathingFilterState::CurrentMap) {
+            true => {
+                if self.available_categories.is_empty() {
+                    self.update_available_categories();
+                }
+                Some(&self.available_categories)
+            },
+            false => None,
+        };
         let root = &self.pack.categories.root_categories;
         let is_root = true;
         let all_categories = &self.pack.categories.all_categories;
@@ -139,12 +151,60 @@ impl ActivePack {
                 open_items,
                 is_root,
                 recompute,
-                search_state
+                search_state,
+                map_filter,
             );
         }
     }
 
-    pub fn draw_category(ui: &Ui, category: &Category, all_categories: &IndexMap<String, Category>, state: &mut BitVec, filter_state: PathingFilterState, open_items: &mut HashSet<String>, is_root: bool, recompute: &mut bool, search_state: &PathingSearchState) {
+    /// All categories relevant to the current map
+    pub fn update_available_categories(&mut self) {
+        let category_count = self.pack.categories.all_categories.len();
+        let available = &mut self.available_categories;
+        available.clear();
+        available.reserve(category_count);
+        available.set_uninitialized(false);
+        unsafe {
+            available.set_len(category_count);
+        }
+        for trail in self.active_trails.values() {
+            available.set(trail.category_idx, true);
+        }
+        for poi in self.active_pois.values() {
+            available.set(poi.category_idx, true);
+        }
+        let leaves = available.clone();
+        'leafies: for leaf in leaves.iter_ones() {
+            // a real tree would probably make this more sane,
+            // but it's run once per map so who cares really...
+            let Some((_, category)) = self.pack.categories.all_categories.get_index(leaf) else { continue 'leafies };
+            let seps = category.full_id.rmatch_indices(".");
+            'parents: for (idx, _) in seps {
+                if let Some(parent) = category.full_id.get(..idx) {
+                    if let Some(parent_idx) = self.pack.categories.all_categories.get_index_of(parent) {
+                        if available[parent_idx] {
+                            // we've already been here before
+                            break 'parents
+                        }
+                        available.set(parent_idx, true)
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn draw_category(
+        ui: &Ui,
+        category: &Category,
+        all_categories: &IndexMap<String, Category>,
+        state: &mut BitVec,
+        filter_state: PathingFilterState,
+        open_items: &mut HashSet<String>,
+        is_root: bool,
+        recompute: &mut bool,
+        search_state: &PathingSearchState,
+        category_filter: Option<&BitVec>,
+    ) {
         let push_token = ui.push_id(&category.full_id);
         if category.is_hidden {
             push_token.pop();
@@ -161,7 +221,11 @@ impl ActivePack {
                 let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
                 let is_branch_filter = is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
                 let search_filter = search_state.matches_id(&category.full_id);
-                display = search_filter && (enabled_filter || disabled_filter || is_root_filter || is_leaf_filter || is_branch_filter);
+                let category_filter = category_filter.and_then(|f|
+                    f.get(idx).map(|b| *b)
+                ).unwrap_or(true);
+                let filter = enabled_filter || disabled_filter || is_root_filter || is_leaf_filter || is_branch_filter;
+                display = search_filter && category_filter && filter;
             }
         }
         if display {
@@ -218,7 +282,8 @@ impl ActivePack {
                             open_items,
                             false,
                             recompute,
-                            search_state
+                            search_state,
+                            category_filter,
                         );
                     }
                     if !category.sub_categories.is_empty() {
@@ -487,6 +552,7 @@ impl ActivePack {
         self.active_pois.clear();
         self.dirty_trails.clear();
         self.dirty_pois.clear();
+        self.available_categories.clear();
         self.render_list_bookmark = None;
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
