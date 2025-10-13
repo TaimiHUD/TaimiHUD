@@ -1,6 +1,6 @@
 use core::{
     num::{NonZeroU32, NonZeroUsize},
-    mem::{self, ManuallyDrop},
+    mem,
     ptr::{self, NonNull},
 };
 use std::panic;
@@ -135,6 +135,7 @@ pub unsafe fn arc_imgui_ui<'u>() -> Option<&'u Ui<'static>> {
     }
 }
 
+#[cfg(todo = "unnecessary")]
 pub unsafe fn new_imgui_frame() {
     let ui_global = unsafe {
         mem::replace(&mut *ARC_IMGUI_UI.get(), None)
@@ -152,6 +153,7 @@ pub unsafe fn new_imgui_frame() {
     }
     drop(Box::from_raw(ptr));
 }
+pub unsafe fn new_imgui_frame() {}
 
 pub unsafe fn with_imgui<R, F: FnOnce(&'_ Ui<'_>) -> R>(f: F) -> Option<R> {
     match unsafe { arc_imgui_ui() } {
