@@ -58,7 +58,6 @@ enabled = { enable }d
 disabled = { disable }d
 author-arg = { author }: { $author }
 reset = Reset
-reset-timers = { reset } { timers }
 timer = Timer
 timers = { timer }s
 experimental-notice = Hi! This feature is (mostly) experimental. Some things may be confusing and it might require more thought and effort to use than the less experimental features. My apologies to any problems you have; feel free to reach out on Discord. - Kat
@@ -128,7 +127,6 @@ reload-data-sources-tooltip = Reload items from currently installed data sources
 
 remote = Remote
 update-status = Update Status
-actions = Actions
 version-installed = Installed version: { $version }
 version-not-installed = Not installed
 update-unknown = Update status unknown; check for updates?
@@ -143,7 +141,6 @@ settings-unloaded = Settings have not yet loaded!
 info-tab = Info
 keybind-triggers = If you need keybind-based timer triggers, please bind the appropriate keys in the Nexus settings.
 active-timer-phases = Active timer phases
-timer = Timer
 phase = Phase
 # As in, like, "game engine" or "rendering engine" :o
 engine = Engine
