@@ -15,7 +15,10 @@ use {
     dpsapi::combat::{CombatArgs, CombatEvent},
     log::Level,
     std::{
-        collections::BTreeMap,
+        collections::{
+            btree_map,
+            BTreeMap,
+        },
         ffi::{c_void, CStr, OsStr},
         fmt::{self, Write},
         ops,
@@ -186,40 +189,41 @@ fn init() -> Result<(), &'static str> {
     }
 
     let mut keybinds = KEYBINDS.write().unwrap_or_else(|e| e.into_inner());
-    if keybinds.is_empty() {
-        macro_rules! default_keybind {
-            () => {};
-            ($control:ident => KeyCode::$key:ident, $mods:expr; $($rest:tt)*) => {
+    macro_rules! default_keybind {
+        () => {};
+        ($control:ident => KeyCode::$key:ident, $mods:expr; $($rest:tt)*) => {
+            if !keybinds.contains_key(&Control::$control) {
                 keybinds.insert(Control::$control, KeybindChange {
                     control: Control::$control,
-                    index: Control::$control as _,
+                    index: i32::MAX,
                     mod_alt: $mods.contains(KeyState::ALT),
                     mod_ctrl: $mods.contains(KeyState::CTRL),
                     mod_shift: $mods.contains(KeyState::SHIFT),
                     key: Key::Key(arcdps::extras::KeyCode::$key)
                 });
-                default_keybind! {
-                    $($rest)*
-                }
-            };
-        }
-
-        #[cfg(feature = "markers")]
-        default_keybind! {
-            Squad_Location_Arrow => KeyCode::Number1, KeyState::ALT;
-            Squad_Location_Circle => KeyCode::Number2, KeyState::ALT;
-            Squad_Location_Square => KeyCode::Number3, KeyState::ALT;
-            Squad_Location_Heart => KeyCode::Number4, KeyState::ALT;
-            Squad_Location_Star => KeyCode::Number5, KeyState::ALT;
-            Squad_Location_Spiral => KeyCode::Number6, KeyState::ALT;
-            Squad_Location_Triangle => KeyCode::Number7, KeyState::ALT;
-            Squad_Location_X => KeyCode::Number8, KeyState::ALT;
-            Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
-            Miscellaneous_Interact => KeyCode::F, KeyState::empty();
-            // TODO: settarget, setpersonaltarget, setjadebotwaypoint
-            // TODO: setpersonalwaypoint, draw-on-map
-        }
+            }
+            default_keybind! {
+                $($rest)*
+            }
+        };
     }
+
+    #[cfg(feature = "markers")]
+    default_keybind! {
+        Squad_Location_Arrow => KeyCode::Number1, KeyState::ALT;
+        Squad_Location_Circle => KeyCode::Number2, KeyState::ALT;
+        Squad_Location_Square => KeyCode::Number3, KeyState::ALT;
+        Squad_Location_Heart => KeyCode::Number4, KeyState::ALT;
+        Squad_Location_Star => KeyCode::Number5, KeyState::ALT;
+        Squad_Location_Spiral => KeyCode::Number6, KeyState::ALT;
+        Squad_Location_Triangle => KeyCode::Number7, KeyState::ALT;
+        Squad_Location_X => KeyCode::Number8, KeyState::ALT;
+        Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
+        Miscellaneous_Interact => KeyCode::F, KeyState::empty();
+        // TODO: settarget, setpersonaltarget, setjadebotwaypoint
+        // TODO: setpersonalwaypoint, draw-on-map
+    }
+    // TODO: restore from stashed memory, since we won't be told a second time!
     drop(keybinds);
 
     #[cfg(feature = "extension-arcdps-extras")]
@@ -813,7 +817,7 @@ fn extras_language(language: Language) {
     }
 }
 
-const INTERESTING_BINDS: [Control; 18] = [
+const INTERESTING_BINDS: [Control; 19] = [
     MarkerType::Arrow.control_location(), MarkerType::Arrow.control_object(),
     MarkerType::Circle.control_location(), MarkerType::Circle.control_object(),
     MarkerType::Heart.control_location(), MarkerType::Heart.control_object(),
@@ -824,13 +828,15 @@ const INTERESTING_BINDS: [Control; 18] = [
     MarkerType::Triangle.control_location(), MarkerType::Triangle.control_object(),
     MarkerType::Cross.control_location(), MarkerType::Cross.control_object(),
     MarkerType::ClearMarkers.control_location(), MarkerType::ClearMarkers.control_object(),
+
+    Control::Miscellaneous_Interact,
 ];
 
 static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap::new());
 
 #[cfg(feature = "extension-arcdps-extras")]
 fn extras_keybind(changed: KeybindChange) {
-    if !available() { return }
+    if !loaded() { return }
 
     if !INTERESTING_BINDS.contains(&changed.control) {
         return
@@ -843,7 +849,26 @@ fn extras_keybind(changed: KeybindChange) {
             return
         },
     };
-    kb.insert(changed.control, changed);
+
+    let unbound = matches!(&changed.key, Key::Unknown(0));
+    match kb.entry(changed.control.clone()) {
+        // maybe we should store the unbound state idk
+        btree_map::Entry::Vacant(..) if unbound => (),
+        btree_map::Entry::Vacant(e) => {
+            e.insert(changed);
+        },
+        btree_map::Entry::Occupied(e) if e.get().index < changed.index => {
+            log::trace!("Keeping {:?}; higher prio than {changed:?}", e.get());
+        },
+        btree_map::Entry::Occupied(mut e) => {
+            log::trace!("Overwrite {:?}; lower prio than {changed:?}", e.get());
+            if unbound {
+                e.remove();
+            } else {
+                e.insert(changed);
+            }
+        },
+    }
 }
 
 #[cfg(feature = "extension-arcdps-extras")]
@@ -1159,7 +1184,8 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
                 false => rt::keyboard::do_key_combo(invoke, KeyInput::empty_with_mods(mods, down)),
             }
         },
-        Key::Unknown(..) => {
+        Key::Unknown(key) => {
+            log::error!("cannot invoke keycode {key}");
             Err("unrecognized bind")
         },
     }.map(Some)
