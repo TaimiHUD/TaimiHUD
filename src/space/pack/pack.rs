@@ -17,6 +17,7 @@ use {
             DrawSpace,
             LocalContext, MapContext,
         },
+        with_i18n,
     },
     nexus::{
         imgui::{Ui, Condition, TreeNode},
@@ -66,8 +67,10 @@ pub struct ActivePack {
     pub user_category_state: BitVec,
     pub active_trails: IndexMap<Uuid, ActiveTrail>,
     pub active_pois: IndexMap<Uuid, ActivePoi>,
-    // Search filter state
+    // UI and filter state
     pub available_categories: BitVec,
+    pub copyable_categories: BTreeSet<usize>,
+    pub copyable_pois: BTreeSet<usize>,
 
     // Internal rendering data.
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
@@ -98,6 +101,8 @@ impl ActivePack {
             active_trails: Default::default(),
             texture_list: Default::default(),
             available_categories: Default::default(),
+            copyable_categories: Default::default(),
+            copyable_pois: Default::default(),
             loaded_textures: Default::default(),
             unused_textures: Default::default(),
             dirty_pois: Default::default(),
@@ -153,6 +158,7 @@ impl ActivePack {
                 recompute,
                 search_state,
                 map_filter,
+                (&self.copyable_categories, &self.copyable_pois, &self.pack.pois),
             );
         }
     }
@@ -204,6 +210,7 @@ impl ActivePack {
         recompute: &mut bool,
         search_state: &PathingSearchState,
         category_filter: Option<&BitVec>,
+        copyable: (&BTreeSet<usize>, &BTreeSet<usize>, &[Poi]),
     ) {
         let push_token = ui.push_id(&category.full_id);
         if category.is_hidden {
@@ -211,7 +218,8 @@ impl ActivePack {
             return;
         }
         let mut display = true;
-        if let Some(idx) = all_categories.get_index_of(&category.full_id) {
+        let category_idx = all_categories.get_index_of(&category.full_id);
+        if let Some(idx) = category_idx {
             if let Some(substate) = state.get(idx) {
                 let enabled_filter = *substate && filter_state.contains(PathingFilterState::Enabled);
                 let disabled_filter = !*substate && filter_state.contains(PathingFilterState::Disabled);
@@ -229,13 +237,16 @@ impl ActivePack {
             }
         }
         if display {
-            if category.marker_attributes.copy_value.is_some() {
+            if let Some(copy_value) = &category.marker_attributes.copy_value {
                 ui.indent();
-                if let Some(copy_value) = &category.marker_attributes.copy_value {
-                    if ui.small_button(&category.display_name) {
-                        ui.set_clipboard_text(copy_value);
+                if ui.small_button(&category.display_name) {
+                    ui.set_clipboard_text(copy_value);
+                    if let Some(copy_message) = &category.marker_attributes.copy_message {
+                        send_alert(copy_message);
+                    }
+                    if ui.is_item_hovered() {
                         if let Some(copy_message) = &category.marker_attributes.copy_message {
-                            send_alert(copy_message);
+                            ui.tooltip_text(copy_message);
                         }
                     }
                 }
@@ -255,6 +266,34 @@ impl ActivePack {
                     unbuilt = unbuilt.framed(true);
                 }
                 let tree_token = unbuilt.push(ui);
+                if let Some(idx) = category_idx {
+                    let (copyable_categories, copyable_pois, pois) = copyable;
+                    if copyable_categories.contains(&idx) {
+                        // TODO: revisit or remove once trigger radius and interaction is working
+                        let pois = copyable_pois.iter()
+                            .filter_map(|&poi_idx| pois.get(poi_idx))
+                            //.filter(|poi| poi.category_idx == idx);
+                            .filter(|poi| poi.category == category.full_id);
+                        for (i, copyable) in pois.enumerate() {
+                            if i % 4 != 3 {
+                                ui.same_line();
+                            }
+                            if with_i18n!("copy", |copy| ui.small_button(copy)) {
+                                if let Some(copy_value) = &copyable.attributes.copy_value {
+                                    ui.set_clipboard_text(copy_value);
+                                    if let Some(copy_message) = &copyable.attributes.copy_message {
+                                        send_alert(copy_message);
+                                    }
+                                }
+                            }
+                            if ui.is_item_hovered() {
+                                if let Some(copy_message) = &copyable.attributes.copy_message {
+                                    ui.tooltip_text(copy_message);
+                                }
+                            }
+                        }
+                    }
+                }
                 ui.table_next_column();
                 if !category.is_separator {
                     if let Some(idx) = all_categories.get_index_of(&category.full_id) {
@@ -284,6 +323,7 @@ impl ActivePack {
                             recompute,
                             search_state,
                             category_filter,
+                            copyable,
                         );
                     }
                     if !category.sub_categories.is_empty() {
@@ -507,6 +547,11 @@ impl ActivePack {
                 }
             };
 
+            if pack_poi.attributes.copy_value.is_some() {
+                self.copyable_pois.insert(i_poi);
+                self.copyable_categories.insert(category_idx);
+            }
+
             let poi_idx = self.active_pois.len();
             let entity = RenderEntity {
                 bounds: poi.bounds,
@@ -553,6 +598,8 @@ impl ActivePack {
         self.dirty_trails.clear();
         self.dirty_pois.clear();
         self.available_categories.clear();
+        self.copyable_categories.clear();
+        self.copyable_pois.clear();
         self.render_list_bookmark = None;
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
