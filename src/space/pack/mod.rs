@@ -2,7 +2,7 @@ use {
     croner::Cron,
     anyhow::Context,
     glamour::{Box3, Point3, Vector3},
-    crate::space::{LocalContext, MapContext},
+    crate::space::MapContext,
 };
 
 pub mod poi;

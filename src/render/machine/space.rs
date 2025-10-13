@@ -15,10 +15,7 @@ use {
         Transform3,
         Vector2, Vector3,
     },
-    std::{
-        collections::BTreeSet,
-        time::SystemTime,
-    },
+    std::time::SystemTime,
     taimi_meta::{
         coords::{
             camera_view,
