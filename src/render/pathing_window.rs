@@ -4,11 +4,11 @@ use {
         render::{machine::RenderMachine, PathingConfig, RenderState},
         space::pack::ActivePack,
         settings::Settings,
+        with_i18n,
         ControllerEvent,
         Controller,
     },
     bitflags::bitflags,
-    indexmap::IndexMap,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
     regex::{Regex, RegexBuilder},
     std::{collections::HashSet, str::FromStr},
@@ -19,9 +19,10 @@ bitflags! {
     pub struct PathingFilterState: u8 {
         const Enabled = 1;
         const Disabled = 1 << 1;
-        const IgnoreRoot = 1 << 2;
-        const IgnoreLeaves = 1 << 3;
-        const IgnoreBranches = 1 << 4;
+        const CurrentMap = 1 << 2;
+        const IgnoreRoot = 1 << 3;
+        const IgnoreLeaves = 1 << 4;
+        const IgnoreBranches = 1 << 5;
     }
 }
 
@@ -41,7 +42,22 @@ impl FromStr for PathingFilterState {
             "ignore-root" => Self::IgnoreRoot,
             "ignore-leaf" => Self::IgnoreLeaves,
             "ignore-branch" => Self::IgnoreBranches,
+            "current-map" => Self::CurrentMap,
             _ => anyhow::bail!("unsupported filter option `{s}`"),
+        })
+    }
+}
+
+impl PathingFilterState {
+    pub fn bit_as_str(self) -> Option<&'static str> {
+        Some(match self.into_iter().next()? {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+            Self::CurrentMap => "current-map",
+            Self::IgnoreRoot => "ignore-root",
+            Self::IgnoreLeaves => "ignore-leaf",
+            Self::IgnoreBranches => "ignore-branch",
+            _ => return None,
         })
     }
 }
@@ -129,24 +145,16 @@ pub struct PathingWindowState {
     pub filter_state: PathingFilterState,
     pub open_items: HashSet<String>,
     pub search_state: PathingSearchState,
-    pub filter_options: IndexMap<String, String>,
 }
 
 impl PathingWindowState {
     pub fn new() -> Self {
-        let mut filter_options: IndexMap<String, String> = IndexMap::new();
-        filter_options.insert("enabled".to_string(),fl!("enabled"));
-        filter_options.insert("disabled".to_string(), fl!("disabled"));
-        filter_options.insert("ignore-root".to_string(), fl!("ignore-root"));
-        filter_options.insert("ignore-leaf".to_string(), fl!("ignore-leaf"));
-        filter_options.insert("ignore-branch".to_string(), fl!("ignore-branch"));
         Self {
             open: false,
             filter_open: false,
             filter_state: Default::default(),
             open_items: Default::default(),
             search_state: Default::default(),
-            filter_options,
         }
     }
 
@@ -202,11 +210,9 @@ impl PathingWindowState {
                                         if self.filter_open {
                                             ui.separator();
                                             let pushy = ui.push_id("pathing-search");
-                                            if ui.input_text("", &mut self.search_state.buffer)
+                                            let mut search_dirty = ui.input_text("", &mut self.search_state.buffer)
                                                 .hint("Search")
-                                                .build() {
-                                                self.search_state.commit(engine.packs.loaded_packs.values());
-                                            }
+                                                .build();
                                             ui.same_line();
                                             if ui.button("X") {
                                                 self.search_state.clear();
@@ -215,25 +221,29 @@ impl PathingWindowState {
                                                 ui.tooltip_text(fl!("searchbar-clear"));
                                             }
                                             ui.same_line();
-                                            ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
+                                            search_dirty |= ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
                                             ui.same_line();
-                                            ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
+                                            search_dirty |= ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
                                             pushy.pop();
                                             ui.dummy([4.0; 2]);
                                             ui.text(fl!("filter-options"));
-                                            let filters = self.filter_options.iter()
-                                                .filter_map(|(filter, name)|
-                                                    filter.parse().map(|flag| (flag, name)).ok()
-                                                );
+                                            let filters = PathingFilterState::all().iter()
+                                                .filter_map(|filter| filter.bit_as_str().map(|name| (filter, name)));
                                             for (i, (flag, filter_name)) in filters.enumerate() {
-                                                if i > 0 && (i + 1) % 3 != 0 {
+                                                if i > 0 && i % 3 != 0 {
                                                     ui.same_line();
                                                 }
-                                                ui.checkbox_flags(filter_name, &mut self.filter_state, flag);
+                                                with_i18n!(filter_name, |name|
+                                                    ui.checkbox_flags(name, &mut self.filter_state, flag)
+                                                );
                                             }
                                             ui.dummy([4.0; 2]);
                                             ui.separator();
                                             ui.dummy([4.0; 2]);
+
+                                            if search_dirty {
+                                                self.search_state.commit(engine.packs.loaded_packs.values());
+                                            }
                                         }
                                     ChildWindow::new("pathing_subwindow")
                                         .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)

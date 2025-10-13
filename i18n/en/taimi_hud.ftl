@@ -232,6 +232,7 @@ filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
 show-filter = Show filter options
 hide-filter = Hide filter options
+current-map = Current map
 ignore-root = Ignore root state
 ignore-leaf = Ignore leaf state
 ignore-branch = Ignore branch state
