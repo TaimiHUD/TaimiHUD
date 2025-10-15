@@ -156,56 +156,6 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn handle_sources_changes(&mut self) {
-        log::debug!("Preparing to handle sources changes for settings");
-        let sources = SOURCES.get().unwrap();
-        let sources_lock = sources.read().unwrap();
-        if let Some(timer_sources) = sources_lock.0.get(&SourceKind::Timers) {
-            let sources_hashset: HashSet<&RemoteSource> = HashSet::from_iter(timer_sources.iter());
-            let mut found_sources = HashSet::new();
-            for source in timer_sources {
-                let inner_source_local = source.source();
-                if let Some(matching_remote) = self.remotes.iter_mut().find(|r| {
-                    found_sources.insert(source);
-                    let inner_source_remote = r.source();
-                    inner_source_local.owner == inner_source_remote.owner
-                        && inner_source_local.repository == inner_source_remote.repository
-                }) {
-                    if inner_source_local != matching_remote.source() {
-                        matching_remote.update(Arc::new(source.clone()));
-                    }
-                }
-            }
-            let remaining = sources_hashset.symmetric_difference(&found_sources);
-            let remaining_vec: Vec<_> = remaining
-                .into_iter()
-                .map(|s| RemoteState::new_from_source(s))
-                .collect();
-            self.remotes.extend(remaining_vec);
-        }
-        drop(sources_lock);
-    }
-
-    #[allow(dead_code)]
-    pub fn update_sources_data(&mut self) {
-        let all_sources = RemoteState::hardcoded_sources();
-        let mut all_sources_data = RemoteState::hardcoded_sources();
-        for (owner, repository, description) in all_sources {
-            for remote in &mut self.remotes {
-                let source = remote.source.source();
-                if owner == source.owner && repository == source.repository {
-                    //*remote = remote.clone().update(description);
-                    all_sources_data.retain(|x| *x != (owner, repository, description));
-                    //description));
-                }
-            }
-        }
-        for (owner, repository, description) in all_sources_data {
-            self.remotes
-                .push(RemoteState::new(owner, repository, description))
-        }
-    }
-
     #[allow(dead_code)]
     pub fn count_disabled_timers(&self) -> usize {
         self.timers.values().filter(|x| x.disabled).count()
@@ -292,15 +242,15 @@ impl Settings {
 
     #[allow(dead_code)]
     pub fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
-        self.remotes.iter().find(|dd| *dd.source == *source)
+        self.remotes.iter().find(|dd| dd.source().name() == source.name())
     }
 
     pub fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
-        self.remotes.iter_mut().find(|dd| *dd.source == *source)
+        self.remotes.iter_mut().find(|dd| dd.source().name() == source.name())
     }
 
     pub async fn uninstall_remote(&mut self, source: &RemoteSource) -> anyhow::Result<()> {
-        if let Some(remote) = self.remotes.iter_mut().find(|dd| *dd.source == *source) {
+        if let Some(remote) = self.remotes.iter_mut().find(|dd| dd.source().name() == source.name()) {
             remote.uninstall().await?;
         }
         Ok(())
@@ -314,8 +264,8 @@ impl Settings {
         Ok(())
     }
 
-    pub async fn download_latest(source: &RemoteSource) -> anyhow::Result<()> {
-        let underlying_source = source.source();
+    pub async fn download_latest(state: RemoteState) -> anyhow::Result<()> {
+        let source = state.remote_source();
         let settings_arc = SETTINGS
             .get()
             .expect("SettingsLock should've been initialized by now!");
@@ -323,12 +273,12 @@ impl Settings {
             let settings_read_lock = settings_arc.read().await;
             settings_read_lock
                 .addon_dir
-                .join(underlying_source.install_dir())
+                .join(source.install_dir())
         };
-        let tag_name = underlying_source.download_latest().await?;
+        let tag_name = source.download_latest(state.kind).await?;
         {
             let mut settings_write_lock = settings_arc.write().await;
-            if let Some(dd_mut) = settings_write_lock.get_status_for_mut(source) {
+            if let Some(dd_mut) = settings_write_lock.get_status_for_mut(&source) {
                 let res = dd_mut.commit_downloaded(tag_name, install_dir).await;
                 let _ = settings_write_lock
                     .save()
@@ -361,10 +311,10 @@ impl Settings {
         let settings_arc = SETTINGS
             .get()
             .expect("SettingsLock should've been initialized by now!");
-        let sources: Vec<(Arc<RemoteSource>, NeedsUpdate)> = {
+        let sources: Vec<(RemoteSource, NeedsUpdate)> = {
             let settings_read_lock = settings_arc.read().await;
             tokio_stream::iter(settings_read_lock.remotes.iter())
-                .then(|r| async move { (r.source.clone(), r.needs_update().await) })
+                .then(|r| async move { (r.remote_source(), r.needs_update().await) })
                 .collect()
                 .await
         };
@@ -373,7 +323,7 @@ impl Settings {
             for (source, nu) in sources {
                 log::debug!("{} update state: {:?}", source, nu);
                 if let Some(dd) = settings_write_lock.get_status_for_mut(&source) {
-                    log::debug!("Found dd {} update state: {:?}", dd.source, nu);
+                    log::debug!("Found dd {} update state: {:?}", dd.source(), nu);
                     dd.needs_update = nu;
                 }
             }
@@ -392,7 +342,7 @@ impl Settings {
             dirty: Arc::new(AtomicBool::new(false)),
             timers: Default::default(),
             markers: Default::default(),
-            remotes: RemoteState::suggested_sources().collect(),
+            remotes: RemoteState::suggested_sources().unwrap_or_default(),
             progress_bar: Default::default(),
             timers_window_open: false,
             pathing_window_open: false,
@@ -412,7 +362,6 @@ impl Settings {
             let file_data = read_to_string(settings_path).await?;
             let mut settings = serde_json::from_str::<Self>(&file_data)?;
             settings.addon_dir = addon_dir.to_path_buf();
-            settings.handle_sources_changes();
             return Ok(settings);
         }
         Ok(Self::new(addon_dir))

@@ -1,16 +1,18 @@
 use {
     crate::{
-        settings::{source::Source, GitHubSource, NeedsUpdate, RemoteSource},
+        settings::{source::Source, SourceKind, GitHubSource, DeserializedSource, NeedsUpdate, RemoteSource, SourcesFile},
         timer::TimerFile,
+
     },
     serde::{Deserialize, Serialize},
     std::{path::PathBuf, sync::Arc},
     tokio::fs::remove_dir_all,
 };
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RemoteState {
-    pub source: Arc<RemoteSource>,
+    pub source: DeserializedSource,
+    pub kind: SourceKind,
     pub installed_tag: Option<String>,
     pub installed_path: Option<PathBuf>,
     #[serde(skip)]
@@ -18,35 +20,36 @@ pub struct RemoteState {
 }
 
 impl RemoteState {
-    pub fn new(owner: &str, repository: &str, description: &str) -> Self {
-        Self {
-            source: Arc::new(RemoteSource::GitHub(GitHubSource {
-                owner: owner.to_string(),
-                repository: repository.to_string(),
-                description: Some(description.to_string()),
-            })),
-            installed_tag: Default::default(),
-            installed_path: Default::default(),
-            needs_update: Default::default(),
-        }
-    }
-
-    pub fn new_from_source(source: &RemoteSource) -> Self {
-        let source = Arc::new(source.clone());
+    pub fn new_from_source(kind: SourceKind, source: DeserializedSource) -> Self {
         Self {
             source,
+            kind,
             installed_tag: Default::default(),
             installed_path: Default::default(),
             needs_update: Default::default(),
         }
     }
 
-    pub fn source(&self) -> GitHubSource {
-        self.source.source()
+    pub fn source(&self) -> &dyn Source {
+        match &self.source {
+            DeserializedSource::GitHub(s) => s,
+            DeserializedSource::Direct(s) => s,
+        }
+    }
+    
+    pub fn remote_source(&self) -> RemoteSource {
+        match &self.source {
+            DeserializedSource::GitHub(s) => Arc::new(s.clone()),
+            DeserializedSource::Direct(s) => Arc::new(s.clone()),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        self.source().name()
     }
 
     pub async fn load(&self) -> Vec<Arc<TimerFile>> {
-        let association = self.source.clone();
+        let association = self.remote_source();
         if let Some(path) = &self.installed_path {
             TimerFile::load_many(path, association, 100)
                 .await
@@ -56,7 +59,7 @@ impl RemoteState {
         }
     }
 
-    pub fn update(&mut self, source: Arc<RemoteSource>) {
+    pub fn update(&mut self, source: DeserializedSource) {
         self.source = source;
     }
 
@@ -78,15 +81,15 @@ impl RemoteState {
 
     pub fn hardcoded_sources() -> Vec<(&'static str, &'static str, &'static str)> {
         let hardcoded_sources = [
-            ("kittywitch", "Hero-Timers", "The author of this mod's fork of the below; changes such as Sabetha markers and others planned, specific to this addon."),
             ("QuitarHero", "Hero-Timers", "The OG timer pack for BlishHUD!")
         ];
         hardcoded_sources.into()
     }
-    pub fn suggested_sources() -> impl Iterator<Item = Self> {
-        Self::hardcoded_sources()
-            .into_iter()
-            .map(|(owner, repository, description)| Self::new(owner, repository, description))
+    pub fn suggested_sources() -> Result<Vec<Self>, anyhow::Error> {
+        let sources = SourcesFile::downloadless_load()?;
+        Ok(sources.0.into_iter().flat_map(|(kind, ssources)| ssources.into_iter().map(move |ssource| {
+            Self::new_from_source(kind, ssource)
+    })).collect())
     }
 
     pub async fn needs_update(&self) -> NeedsUpdate {

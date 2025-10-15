@@ -16,7 +16,7 @@ pub use {
         Settings, SettingsLock, SettingsSave,
         SquadCondition,
     },
-    source::{GitHubSource, GitHubLatestRelease, RemoteSource, Source},
-    sources::{SourceKind, SourcesFile},
+    source::{GitHubSource, GitHubLatestRelease, RemoteSource, DirectSource, Source},
+    sources::{SourceKind, SourcesFile, DeserializedSource},
     v1::{RemoteState, TimerSettings},
 };
