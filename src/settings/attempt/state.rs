@@ -86,7 +86,7 @@ pub struct UpdateState {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct SourceState {
-    pub source: RemoteSource,
+    pub source: DeserializeSource,
     // This isn't an Option<T> because if it's not installed,
     // we shouldn't keep track of it as state but instead consider it from the
     // sources file, not the state file.

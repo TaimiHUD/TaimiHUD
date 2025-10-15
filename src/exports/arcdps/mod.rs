@@ -1,21 +1,15 @@
 use {
-    anyhow::Context,
-    arcdps::{
-        extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
-        Language,
-    },
-    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
     crate::{
         exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}},
         game_language_id,
         marker::format::MarkerType,
         render::{machine::RenderMachine, RenderState},
-        settings::{ArcSettings, ArcUpdatePreference, GitHubSource, GitHubLatestRelease, Settings},
+        settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings, SourceKind},
         with_i18n,
-    },
-    dpsapi::combat::{CombatArgs, CombatEvent},
-    log::Level,
-    std::{
+    }, anyhow::Context, arcdps::{
+        extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
+        Language,
+    }, arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink}, dpsapi::combat::{CombatArgs, CombatEvent}, log::Level, std::{
         collections::{
             btree_map,
             BTreeMap,
@@ -26,17 +20,15 @@ use {
         panic,
         path::PathBuf,
         ptr::{self, NonNull},
-        sync::{atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicPtr, Ordering}, Mutex, RwLock},
+        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering}, Mutex, RwLock},
         thread,
         time::Duration,
-    },
-    windows::Win32::{
+    }, windows::Win32::{
         Foundation::{HMODULE, HWND},
         UI::{
-            WindowsAndMessaging,
-            Input::KeyboardAndMouse,
+            Input::KeyboardAndMouse, WindowsAndMessaging
         },
-    },
+    }
 };
 #[cfg(feature = "space")]
 use {

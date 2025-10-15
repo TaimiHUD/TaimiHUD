@@ -10,6 +10,7 @@ use {
     std::{
         path::{Path, PathBuf},
         sync::Arc,
+        future::Future,
     },
     tokio::{fs::read_to_string, sync::Semaphore, task::JoinSet},
 };
@@ -18,7 +19,7 @@ use {
 #[serde(rename_all = "camelCase")]
 pub struct TimerFile {
     #[serde(default, skip)]
-    pub association: Option<Arc<RemoteSource>>,
+    pub association: Option<String>,
     pub path: Option<PathBuf>,
     pub id: String,
     pub name: String,
@@ -53,14 +54,14 @@ impl TimerFile {
 
     pub async fn load(
         path: &PathBuf,
-        source: Option<Arc<RemoteSource>>,
+        source: Option<RemoteSource>,
     ) -> anyhow::Result<Arc<Self>> {
         log::trace!("Attempting to load the timer file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let mut data: Self = serde_json::from_str(&file_data)?;
         data.path = Some(path.to_path_buf());
-        data.association = source;
+        data.association = source.map(|x| x.name());
         log::trace!("Successfully loaded the timer file at \"{path:?}\".");
         Ok(Arc::new(data))
     }
@@ -110,7 +111,7 @@ impl TimerFile {
 
     pub async fn load_many(
         load_dir: &Path,
-        source: Arc<RemoteSource>,
+        source: RemoteSource,
         simultaneous_limit: usize,
     ) -> anyhow::Result<Vec<Arc<Self>>> {
         log::debug!("Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}.");
@@ -163,10 +164,7 @@ impl TimerFile {
         Some(self.name.split_once('\n')?.1.replace("\n", " - "))
     }
     pub fn source(&self) -> String {
-        match &self.association {
-            Some(s) => s.source().to_string(),
-            None => "".to_string(),
-        }
+        self.association.clone().unwrap_or_default()
     }
     pub fn combined(&self) -> String {
         match self.subtitle() {
