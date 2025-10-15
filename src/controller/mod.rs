@@ -32,7 +32,7 @@ use {
             machine::MumblelinkTick,
             TextFont,
         },
-        settings::{MarkerAutoPlaceSettings, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
+        settings::{MarkerAutoPlaceSettings, RemoteState, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
         timer::{CombatState, Position, TimerFile, TimerMachine},
         RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
     },
@@ -105,7 +105,7 @@ pub struct Controller {
     alert_sem: Arc<Mutex<()>>,
     pub timers: Vec<Arc<TimerFile>>,
     pub current_timers: Vec<TimerMachine>,
-    pub sources_to_timers: HashMap<Arc<RemoteSource>, Vec<Arc<TimerFile>>>,
+    pub sources_to_timers: HashMap<String, Vec<Arc<TimerFile>>>,
     pub map_id_to_timers: HashMap<u32, Vec<Arc<TimerFile>>>,
     settings: SettingsLock,
     save_interval: tokio::time::Interval,
@@ -158,9 +158,6 @@ impl Controller {
             };
             let _ = SETTINGS.set(state.settings.clone());
             let settings = SETTINGS.get().unwrap();
-            let mut settings_lock = settings.write().await;
-            settings_lock.handle_sources_changes();
-            drop(settings_lock);
             let settings_lock = settings.read().await;
             state.marker_autoplace = Some(settings_lock.marker_autoplace.clone());
             drop(settings_lock);
@@ -234,6 +231,17 @@ impl Controller {
         let mut settings_lock = self.settings_write().await;
         settings_lock.set_window_state("markers", Some(true));
         drop(settings_lock);
+    }
+
+    async fn check_sources(&self) -> anyhow::Result<()> {
+        SourcesFile::get_sources().await?;
+        let mut settings_lock = self.settings_write().await;
+        settings_lock.remotes = RemoteState::suggested_sources().unwrap_or_default();
+        drop(settings_lock);
+        let sources = SourcesFile::load()
+            .await?;
+        let _ = SOURCES.set(Arc::new(RwLock::new(sources)));
+        Ok(())
     }
 
     #[cfg(feature = "markers")]
@@ -899,10 +907,11 @@ impl Controller {
         Ok(())
     }
 
-    async fn do_update(&mut self, source: &RemoteSource) {
-        match Settings::download_latest(source).await {
+    async fn do_update(&mut self, state: RemoteState) {
+        let name = state.name();
+        match Settings::download_latest(state).await {
             Ok(_) => (),
-            Err(err) => log::error!("Controller.do_update() error for \"{}\": {}", source, err),
+            Err(err) => log::error!("Controller.do_update() error for \"{}\": {}", name, err),
         };
         self.reload_timers().await;
     }
@@ -1301,12 +1310,13 @@ impl Controller {
             TimerToggle(id) => self.toggle_timer(&id).await,
             TimerReset => self.reset_timers().await,
             CheckDataSourceUpdates => self.check_updates().await,
+            CheckUpdateSources => self.check_sources().await?,
             #[cfg(feature = "markers")]
             SetMarker(t) => {
                 self.set_marker(&t);
             }
             TimerKeyTrigger(id, is_release) => self.timer_key_trigger(id, is_release).await,
-            DoDataSourceUpdate { source } => self.do_update(&source).await,
+            DoDataSourceUpdate { state } => self.do_update(state).await,
             ProgressBarStyle(style) => self.progress_bar_style(style).await,
             WindowState(window, state) => self.set_window_state(window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
@@ -1448,7 +1458,7 @@ pub enum ControllerEvent {
     },
     #[cfg(feature = "markers-edit")]
     GetMarkerPaths,
-    UninstallAddon(Arc<RemoteSource>),
+    UninstallAddon(RemoteSource),
     MumbleIdentityUpdated {
         role: SquadRank,
     },
@@ -1458,7 +1468,7 @@ pub enum ControllerEvent {
         evt: arcEvent,
     },
     DoDataSourceUpdate {
-        source: Arc<RemoteSource>,
+        state: RemoteState,
     },
     ProgressBarStyle(ProgressBarStyleChange),
     WindowState(String, Option<bool>),
@@ -1501,6 +1511,7 @@ pub enum ControllerEvent {
     TimerReset,
     #[strum(to_string = "Toggled {0}")]
     TimerToggle(String),
+    CheckUpdateSources,
     Quit,
     /// Like quit but will also request addon release
     /// (if possible)

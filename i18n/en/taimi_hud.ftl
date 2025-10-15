@@ -75,6 +75,7 @@ validation-fail = Validation failed due to:
 filename-empty = No filename provided.
 count = Count
 actions = Actions
+module = Module
 
 ## Addon
 
@@ -125,7 +126,10 @@ open-error = { error } opening { $kind }: { $path }
 
 ## Data sources
 
+intro-to-data-sources = Please make sure you fetch the repository before checking for updates.
 data-sources-tab = Data Sources
+data-source-repo-update = Fetch repository
+data-source-repo-update-tooltip = Fetch the upstream data sources repository to see downloadable items.
 checking-for-updates = Checking for updates!
 check-for-updates = Check for updates
 check-for-updates-tooltip = Check for updates to any data sources. We don't do this automatically to respect your choice on whether or not to make network requests.

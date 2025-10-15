@@ -14,5 +14,14 @@ macro_rules! gh_repo_url {
 }
 pub use gh_repo_url;
 
+#[macro_export]
+macro_rules! taimihud_addon_name {
+    () => {
+        "TaimiHUD"
+    };
+}
+
+pub use taimihud_addon_name;
+
 pub const SIG: i32 = 0x7331BABD;
 pub const ADDON_DIR_NAME: &'static str = "Taimi";

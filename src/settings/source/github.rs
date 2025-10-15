@@ -1,11 +1,8 @@
 use {
-    crate::{settings::Source, ADDON_DIR},
-    chrono::{DateTime, Utc},
-    serde::{Deserialize, Serialize},
-    serde_json::Value,
-    std::fmt,
-    tokio::fs::create_dir_all,
-    url::Url,
+    super::super::SourceKind, crate::{settings::Source, ADDON_DIR}, chrono::{DateTime, Utc}, serde::{Deserialize, Serialize}, serde_json::Value, std::{fmt,
+    pin::Pin,
+    future::Future,
+}, tokio::fs::create_dir_all, url::Url
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -71,16 +68,12 @@ impl fmt::Display for GitHubSource {
 }
 
 impl GitHubSource {
-    pub fn repo_string(&self) -> String {
-        format!("{}", self)
-    }
-
     pub async fn latest_release(&self) -> anyhow::Result<GitHubLatestRelease> {
         let url = format!(
             "https://api.github.com/repos/{}/releases/latest",
-            self.repo_string()
+            self.name()
         );
-        let response = Self::get(url).await?;
+        let response = super::get(url).await?;
         let json_data = response.text().await?;
         let data = serde_json::from_str::<GitHubLatestRelease>(&json_data)?;
         Ok(data)
@@ -88,24 +81,38 @@ impl GitHubSource {
 }
 
 impl Source for GitHubSource {
+    fn name(&self) -> String {
+        format!("{}/{}", self.owner, self.repository)
+    }
+
+    fn description(&self) -> Option<String> {
+        self.description.clone()
+    }
+
     fn install_dir(&self) -> String {
         format!("{}_{}", self.owner, self.repository)
     }
+
     fn view_url(&self) -> String {
-        format!("https://github.com/{}", self.repo_string())
-    }
-    async fn download_latest(&self) -> anyhow::Result<String> {
-        let install_dir = ADDON_DIR.join(self.install_dir());
-        create_dir_all(&install_dir).await?;
-        let latest = self.latest_release().await?;
-        if let Some(tarball_url) = latest.tarball_url {
-            Self::get_and_extract_tar(&install_dir, tarball_url).await?;
-        }
-        Ok(latest.tag_name)
+        format!("https://github.com/{}", self.name())
     }
 
-    async fn latest_id(&self) -> anyhow::Result<String> {
-        let release = self.latest_release().await?;
-        Ok(release.tag_name)
+    fn download_latest(&self, kind: SourceKind) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+        Box::pin(async move {
+            let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
+            create_dir_all(&install_dir).await?;
+            let latest = self.latest_release().await?;
+            if let Some(tarball_url) = latest.tarball_url {
+                super::get_and_extract_tar(&install_dir, tarball_url).await?;
+            }
+            Ok(latest.tag_name)
+        })
+    }
+
+    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+        Box::pin(async move {
+            let release = self.latest_release().await?;
+            Ok(release.tag_name)
+        })
     }
 }

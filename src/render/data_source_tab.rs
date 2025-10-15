@@ -22,7 +22,7 @@ impl DataSourceTabState {
     }
 
     pub fn draw_uninstall(&self, ui: &Ui, rs: &RemoteState) {
-        let source_text = &rs.source.source().repo_string();
+        let source_text = &rs.source().name();
         let modal_name = fl!("addon-uninstall-modal-title", source = source_text);
         if ui.button(&fl!("addon-uninstall-modal-button")) {
             ui.open_popup(&modal_name);
@@ -49,7 +49,7 @@ impl DataSourceTabState {
             token.pop();
             ui.dummy([4.0, 4.0]);
             if ui.button(fl!("addon-uninstall-modal-button")) {
-                Controller::try_send(ControllerEvent::UninstallAddon(rs.source.clone()));
+                Controller::try_send(ControllerEvent::UninstallAddon(rs.remote_source()));
                 ui.close_current_popup();
             }
             ui.same_line();
@@ -64,6 +64,17 @@ impl DataSourceTabState {
             if self.checking_for_updates {
                 ui.text(fl!("checking-for-updates"))
             } else {
+                ui.text(fl!("intro-to-data-sources"));
+                // kat don't you think the naming of this event is a little insane?
+                // plus it's right next to CheckDataSourceUpdates, no? that's weird
+                // SHIP IT :^))))))
+                if ui.button(fl!("data-source-repo-update")) {
+                    Controller::try_send(ControllerEvent::CheckUpdateSources);
+                }
+                if ui.is_item_hovered() {
+                    ui.tooltip_text(fl!("data-source-repo-update-tooltip"));
+                }
+                ui.same_line();
                 if ui.button(fl!("check-for-updates")) {
                     Controller::try_send(ControllerEvent::CheckDataSourceUpdates);
                 }
@@ -90,6 +101,7 @@ impl DataSourceTabState {
                     "remotes",
                     [
                         TableColumnSetup::new(fl!("remote")),
+                        TableColumnSetup::new(fl!("module")),
                         TableColumnSetup::new(fl!("description")),
                         TableColumnSetup::new(fl!("update-status")),
                         TableColumnSetup::new(fl!("actions")),
@@ -98,13 +110,15 @@ impl DataSourceTabState {
                 );
                 ui.table_next_column();
                 for download_data in &settings.remotes {
-                    let source_arc = download_data.source.clone();
-                    let source = source_arc.source();
+                    let source = download_data.remote_source();
+                    let source_url = source.view_url();
                     let source_text = source.to_string();
                     let pushy = ui.push_id(&source_text);
                     ui.text(format!("{}", source));
                     ui.table_next_column();
-                    if let Some(description) = &source.description {
+                    ui.text(format!("{}", download_data.kind));
+                    ui.table_next_column();
+                    if let Some(description) = &source.description() {
                         ui.text_wrapped(description);
                     } else {
                         ui.text_wrapped(fl!("no-description"));
@@ -127,7 +141,7 @@ impl DataSourceTabState {
                     if let Some(button_text) = button_text {
                         if ui.button(button_text) {
                             Controller::try_send(ControllerEvent::DoDataSourceUpdate {
-                                source: source_arc,
+                                state: download_data.clone(),
                             });
                         }
                     }
@@ -135,7 +149,7 @@ impl DataSourceTabState {
                         state_errors,
                         ui,
                         fl!("open-button", kind = "repository"),
-                        source.view_url(),
+                        source_url,
                     );
                     if let Some(path) = &download_data.installed_path {
                         if let Some(path) = path.to_str() {
