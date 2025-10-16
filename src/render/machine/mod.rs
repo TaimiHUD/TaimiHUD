@@ -33,6 +33,7 @@ use core::ops::Range;
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     arcloader_mumblelink::identity::MumbleIdentity,
+    crate::exports::runtime::bindings::{CONTROLS, ControlsReceiver},
     std::borrow::Cow,
     taimi_meta::{
         coords::SignObtainer,
@@ -75,6 +76,10 @@ pub struct RenderMachine {
     pub map_open_timestamp: Option<Instant>,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub map_sign: SignObtainer,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub map_hidden: bool,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub controls: ControlsReceiver,
     #[cfg(feature = "space")]
     pub depth_range: Option<Range<f32>>,
     #[cfg(feature = "space")]
@@ -135,6 +140,10 @@ impl RenderMachine {
             map_open_timestamp: None,
             #[cfg(any(feature = "markers", feature = "space"))]
             map_sign: SignObtainer::DEFAULT,
+            #[cfg(any(feature = "markers", feature = "space"))]
+            map_hidden: false,
+            #[cfg(any(feature = "markers", feature = "space"))]
+            controls: CONTROLS.subscribe_controls(),
             #[cfg(feature = "space")]
             fov: Vector2::ZERO,
             #[cfg(feature = "space")]
@@ -228,7 +237,13 @@ impl RenderMachine {
         #[cfg(any(feature = "markers", feature = "space"))]
         {
             self.map_info = match self.gameplay.latest_map() {
-                None => None,
+                None => {
+                    if self.map_hidden {
+                        log::info!("UI toggle escape hatch - resetting hidden state due to loading screen");
+                        self.map_hidden = false;
+                    }
+                    None
+                },
                 Some(map_id) => match MapCache.lookup_map(map_id.get()) {
                     Some(map) => {
                         if matches!(trans, GameplayTransition::Loaded { .. }) {
@@ -294,6 +309,10 @@ impl RenderMachine {
     }
 
     pub fn turn_render(&mut self) {
+        #[cfg(any(feature = "markers", feature = "space"))]
+        let controls_changed = self.controls.update()
+            .map(|(&state, changes)| (state, changes));
+
         let (ml, frameskip_gameplay) = self.next_mumblelink_frame();
 
         let mut gameplay_change = if let Some(ml) = ml {
@@ -335,6 +354,11 @@ impl RenderMachine {
 
         if let Some(trans) = gameplay_transition {
             self.act_gameplay_transition(trans);
+        }
+
+        #[cfg(any(feature = "markers", feature = "space"))]
+        if let Some((controls_state, controls_changed)) = controls_changed {
+            self.act_controls_changed(controls_state, controls_changed);
         }
 
         if let Some(_ui_tick) = ui_tick {

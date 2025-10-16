@@ -488,25 +488,6 @@ fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(todo)]
     if !available() { return msg }
 
-    match msg {
-        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN
-        | WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP if KeyIntercept::intercept_ready() => {
-            // TODO: let repeat = l & 0xff; ignore non-zero?
-
-            let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
-
-            KeyIntercept::intercept_report(KeyInput {
-                vk: KeyboardAndMouse::VIRTUAL_KEY(w as u16),
-                down: !is_up,
-                // TODO?
-                mods: KeyState::empty(),
-            });
-
-            return 0;
-        },
-        _ => (),
-    }
-
     // ignore duplicates since arcdps proxies these from nexus
     #[cfg(feature = "extension-nexus")]
     if rt::nexus_available() { return msg }
@@ -524,85 +505,6 @@ fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     }
 
     rt::handle_wnd_event(HWND(hwnd), msg, w, l)
-}
-
-pub enum KeyIntercept {
-    Pending,
-    Intercepted {
-        key: KeyInput,
-    },
-}
-
-static KEY_INTERCEPT: AtomicU64 = AtomicU64::new(KeyIntercept::NONE);
-impl KeyIntercept {
-    const NONE: u64 = 0;
-    const PENDING: u64 = u64::MAX;
-    const DOWN: u64 = 0x1_00000000_0000;
-
-    pub fn raw(&self) -> u64 {
-        match self {
-            Self::Pending => Self::PENDING,
-            Self::Intercepted { key } => {
-                let vk = key.vk.0 as u64;
-                let mods = (key.mods.bits() as u64) << 16;
-                let down = match key.down {
-                    true => Self::DOWN,
-                    false => 0,
-                };
-                vk as u64 | mods | down
-            },
-        }
-    }
-
-    pub fn from_raw(raw: u64) -> Option<Self> {
-        Some(match raw {
-            0 => return None,
-            Self::PENDING => Self::Pending,
-            raw => Self::Intercepted {
-                key: KeyInput {
-                    vk: KeyboardAndMouse::VIRTUAL_KEY(raw as u16),
-                    mods: KeyState::from_bits_retain((raw >> 16) as u32),
-                    down: raw & Self::DOWN != 0,
-                },
-            },
-        })
-    }
-
-    pub fn intercept_restart() {
-        KEY_INTERCEPT.store(Self::PENDING, Ordering::SeqCst);
-    }
-
-    pub fn intercept_take() -> Option<Self> {
-        let mut raw = KEY_INTERCEPT.load(Ordering::SeqCst);
-        loop {
-            let int = match Self::from_raw(raw) {
-                res @ (None | Some(Self::Pending)) => return res,
-                int => int,
-            };
-            match KEY_INTERCEPT.compare_exchange_weak(raw, Self::NONE, Ordering::SeqCst, Ordering::SeqCst) {
-                Ok(..) => break int,
-                Err(current) => {
-                    raw = current;
-                },
-            }
-        }
-    }
-
-    pub fn intercept_ready() -> bool {
-        KEY_INTERCEPT.load(Ordering::Relaxed) == Self::PENDING
-    }
-
-    #[cfg(todo)]
-    pub fn intercept_read() -> Option<Self> {
-        Self::from_raw(KEY_INTERCEPT.load(Ordering::Relaxed))
-    }
-
-    pub fn intercept_report(key: KeyInput) {
-        let int = Self::Intercepted {
-            key,
-        };
-        KEY_INTERCEPT.store(int.raw(), Ordering::SeqCst);
-    }
 }
 
 const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(4);
@@ -853,39 +755,10 @@ static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap
 
 #[cfg(feature = "extension-arcdps-extras")]
 pub fn extras_keybind(changed: KeybindChange) {
+    #[cfg(todo)]
     if !loaded() { return }
 
-    if !INTERESTING_BINDS.contains(&changed.control) {
-        return
-    }
-
-    let mut kb = match KEYBINDS.write() {
-        Ok(kb) => kb,
-        Err(_) => {
-            log::warn!("Keybinds poisoned?");
-            return
-        },
-    };
-
-    let unbound = matches!(&changed.key, Key::Unknown(0));
-    match kb.entry(changed.control.clone()) {
-        // maybe we should store the unbound state idk
-        btree_map::Entry::Vacant(..) if unbound => (),
-        btree_map::Entry::Vacant(e) => {
-            e.insert(changed);
-        },
-        btree_map::Entry::Occupied(e) if e.get().index < changed.index => {
-            log::trace!("Keeping {:?}; higher prio than {changed:?}", e.get());
-        },
-        btree_map::Entry::Occupied(mut e) => {
-            log::trace!("Overwrite {:?}; lower prio than {changed:?}", e.get());
-            if unbound {
-                e.remove();
-            } else {
-                e.insert(changed);
-            }
-        },
-    }
+    rt::bindings::process_key_bound(changed);
 }
 
 #[cfg(feature = "extension-arcdps-extras")]

@@ -1,6 +1,9 @@
 use {
     crate::{
-        exports::runtime as rt,
+        exports::runtime::{
+            self as rt,
+            bindings::{ControlsReceiver, CONTROLS, TaimiControls, TaimiReceiver},
+        },
         marker::format::{MarkerEntry, MarkerFiletype},
         render::{
             machine::MumblelinkTick,
@@ -82,6 +85,8 @@ pub struct Controller {
     alert_sem: Arc<Mutex<()>>,
     settings: SettingsLock,
     save_interval: tokio::time::Interval,
+    controls: ControlsReceiver,
+    keybinds: TaimiReceiver,
 
     timers: TimersController,
     markers: MarkersController,
@@ -108,6 +113,8 @@ impl Controller {
             player_position: Default::default(),
             alert_sem: Default::default(),
             save_interval: interval(Duration::from_secs(60 * 10)),
+            controls: CONTROLS.subscribe_controls(),
+            keybinds: CONTROLS.subscribe_taimi(),
 
             timers: Default::default(),
             markers: Default::default(),
@@ -169,8 +176,46 @@ impl Controller {
                     _ = state.save_interval.tick() => {
                         state.commit_settings().await;
                     },
+                    controls = state.controls.wait() => match controls {
+                        Err(e) => log::error!("Control bindings error! {e:#}"),
+                        Ok((&controls_state, controls_changed)) => {
+                            #[cfg(feature = "space")]
+                            state.pathing.handle_presses(controls_state, controls_changed).await;
+                        },
+                    },
+                    keybinds = state.keybinds.wait() => match keybinds {
+                        Err(e) => log::error!("Keybind receive error! {e:#}"),
+                        Ok((binds_state, binds_changed)) => {
+                            state.handle_keybinds(binds_state, binds_changed).await;
+                        },
+                    },
                 }
             }
+    }
+
+    async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+        let pressed = state & changed;
+
+        if pressed.intersects(TaimiControls::WINDOW_PRIMARY) {
+            self.set_window_state(crate::WINDOW_PRIMARY, None).await;
+        }
+        #[cfg(feature = "markers")]
+        if pressed.intersects(TaimiControls::WINDOW_MARKERS) {
+            self.set_window_state(crate::WINDOW_MARKERS, None).await;
+        }
+        #[cfg(feature = "timers")]
+        if pressed.intersects(TaimiControls::WINDOW_TIMERS) {
+            self.set_window_state(crate::WINDOW_TIMERS, None).await;
+        }
+        #[cfg(feature = "space")]
+        if pressed.intersects(TaimiControls::WINDOW_PATHING) {
+            self.set_window_state(crate::WINDOW_PATHING, None).await;
+        }
+
+        #[cfg(feature = "timers")]
+        self.timers.handle_keybinds(state, changed).await;
+        #[cfg(feature = "space")]
+        self.pathing.handle_keybinds(state, changed).await;
     }
 
     /*async fn load_markers_file(&mut self) -> anyhow::Result<()> {
@@ -367,9 +412,9 @@ impl Controller {
         self.timers.reload(self.settings.clone(), self.rt_sender.clone()).await;
     }
 
-    async fn set_window_state(&mut self, window: String, state: Option<bool>) {
+    async fn set_window_state(&mut self, window: &str, state: Option<bool>) {
         let mut settings_lock = self.settings_write().await;
-        settings_lock.set_window_state(&window, state);
+        settings_lock.set_window_state(window, state);
         drop(settings_lock);
     }
 
@@ -441,7 +486,7 @@ impl Controller {
             CheckDataSourceUpdates => self.check_updates().await,
             CheckUpdateSources => self.check_sources().await?,
             DoDataSourceUpdate { state } => self.do_update(state).await,
-            WindowState(window, state) => self.set_window_state(window, state).await,
+            WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
             LoadTextureIntegrated(identifier, data) => {
                 self.load_texture_integrated(identifier, data).await

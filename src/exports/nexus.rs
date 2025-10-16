@@ -2,10 +2,14 @@ use {
     anyhow::anyhow,
     arcdps::Language,
     std::{
-        ffi::CStr,
+        collections::BTreeMap,
+        ffi::{c_char, CStr, CString},
         path::{Path, PathBuf},
         ptr::{self, NonNull},
-        sync::atomic::{AtomicBool, Ordering},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            RwLock,
+        },
         time::Duration,
     },
     nexus::{
@@ -19,10 +23,18 @@ use {
         AddonApi,
     },
     crate::{
-        exports::{self, runtime::{self as rt, RuntimeResult}},
+        exports::{
+            self,
+            runtime::{
+                self as rt,
+                bindings::{CONTROLS, TaimiControls},
+                RuntimeResult,
+            },
+        },
         game_language_id as lang_id,
         marker::format::MarkerType,
         unload,
+        with_i18n,
         TEXTURES,
     },
 };
@@ -277,4 +289,215 @@ pub fn texture_schedule_bytes(key: &str, data: &[u8]) -> RuntimeResult<Option<()
     }
 
     Ok(Some(load_texture_from_memory(key, data, Some(IMGUI_TEXTURE_CALLBACK))))
+}
+
+static KEYBIND_IDS: RwLock<BTreeMap<CString, TaimiControls>> = RwLock::new(BTreeMap::new());
+extern "C-unwind" fn unsafe_keybind_cb(identifier: *const c_char, is_release: bool) {
+    let id = unsafe {
+        CStr::from_ptr(identifier as *const _)
+    };
+    let kb = KEYBIND_IDS.read().ok().and_then(|kb| kb.get(id).copied());
+    match kb {
+        Some(control) => match is_release {
+            true => CONTROLS.notify_release(control.to_vk_dummy()),
+            false => CONTROLS.notify_press(control.to_vk_dummy(), control),
+        },
+        None => {
+            log::warn!("unexpected nexus event(release={is_release:?}) for keybind {id:?}");
+        },
+    }
+}
+
+pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default_keybind: &CStr) {
+    use {
+        crate::fl,
+        i18n_embed::LanguageLoader,
+        nexus::localization::set_translation,
+    };
+
+    let id = id.into();
+    if let Ok(id) = id.to_str() {
+        let language = crate::LANGUAGE_LOADER.current_language().language;
+        if let Some(timer_trigger) = id.strip_prefix("timer-key-trigger-") {
+            // ew special cased...
+            set_translation(
+                id,
+                language.as_str(),
+                fl!("timer-key-trigger", id = timer_trigger),
+            )
+        } else {
+            with_i18n(id, |msg| set_translation(
+                id,
+                language.as_str(),
+                msg,
+            ));
+        }
+    }
+    let id = if let Ok(mut keybinds) = KEYBIND_IDS.write() {
+        // UNSAFE: but probably fine so I won't get into the nuance :3
+        let ptr = id.as_ptr();
+        keybinds.insert(id, control);
+        ptr
+    } else {
+        log::error!("keybind map poisoned?");
+        return
+    };
+    unsafe {
+        (AddonApi::get().input_binds.register_with_string)(id, unsafe_keybind_cb, default_keybind.as_ptr());
+    }
+}
+
+pub fn unregister_keybinds() {
+    let Ok(mut keybinds) = KEYBIND_IDS.write() else {
+        log::error!("keybind map poisoned?");
+        return
+    };
+    for kb in keybinds.keys() {
+        unsafe {
+            (AddonApi::get().input_binds.deregister)(kb.as_ptr())
+        }
+    }
+    keybinds.clear();
+}
+
+pub fn quick_access_add(icon: TaimiControls) {
+    use nexus::quick_access::{add_quick_access, add_quick_access_context_menu};
+
+    let Some((identifier, (neutral, neutral_png), (hover, hover_png), keybind)) = quick_access_button_id(icon) else { return };
+
+    load_texture_from_memory(neutral, neutral_png, None);
+    load_texture_from_memory(hover, hover_png, None);
+    let tooltip_id = match icon {
+        TaimiControls::WINDOW_PRIMARY => "primary-window-toggle-text",
+        _ => keybind,
+    };
+    with_i18n(tooltip_id, |tooltip_text| {
+        add_quick_access(
+            identifier,
+            neutral,
+            hover,
+            keybind,
+            tooltip_text,
+        );
+    });
+
+    if let TaimiControls::WINDOW_PRIMARY = icon {
+        use crate::{
+            control_window,
+            fl,
+        };
+
+        add_quick_access_context_menu(
+            "TAIMI_MENU",
+            Some(identifier), // maybe some day
+            //None::<&str>,
+            nexus::render!(|ui| {
+                #[cfg(feature = "timers")]
+                if ui.button(fl!("timer-window")) {
+                    control_window(crate::WINDOW_TIMERS, None);
+                }
+                #[cfg(feature = "space")]
+                {
+                    use {
+                        crate::space::engine::{Engine, SpaceEvent},
+                        taimi_meta::ui::MapContext,
+                    };
+                    if ui.button(fl!("pathing-render-toggle")) {
+                        Engine::try_send(SpaceEvent::PathingToggle);
+                    }
+                    if ui.button(fl!("pathing-render-minimap-toggle")) {
+                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+                    }
+                    if ui.button(fl!("pathing-render-map-toggle")) {
+                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+                    }
+                    if ui.button(fl!("pathing-window")) {
+                        control_window(crate::WINDOW_PATHING, None);
+                    }
+                }
+                #[cfg(feature = "markers")]
+                if ui.button(fl!("marker-window")) {
+                    control_window(crate::WINDOW_MARKERS, None);
+                }
+                if ui.button(fl!("primary-window")) {
+                    control_window(crate::WINDOW_PRIMARY, None);
+                }
+            }),
+        );
+    }
+}
+
+pub fn quick_access_remove_all() {
+    // TODO: filter by visible icons or don't bother?
+    let icons = TaimiControls::QUICK_ACCESS_ICONS;
+    for icon in icons {
+        quick_access_remove(icon);
+    }
+}
+
+pub fn quick_access_remove(icon: TaimiControls) {
+    use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
+
+    let Some((identifier, ..)) = quick_access_button_id(icon) else { return };
+    if let TaimiControls::WINDOW_PRIMARY = icon {
+        remove_quick_access_context_menu("TAIMI_MENU");
+    }
+    remove_quick_access(identifier);
+}
+
+/// ("BUTTON", "ICON", "HOVER", "keybind")
+pub(crate) fn quick_access_button_id(icon: TaimiControls) -> Option<(
+    &'static str,
+    (&'static str, &'static [u8]),
+    (&'static str, &'static [u8]),
+    &'static str,
+    )> {
+    Some(match icon {
+        TaimiControls::WINDOW_PRIMARY => (
+            "TAIMI_BUTTON",
+            ("TAIMI_ICON", include_bytes!("../../icons/taimi.png")),
+            ("TAIMI_ICON_HOVER", include_bytes!("../../icons/taimi-hover.png")),
+            "primary-window-toggle",
+        ),
+        #[cfg(feature = "markers")]
+        TaimiControls::WINDOW_MARKERS => (
+            "TAIMI_MARKERS_BUTTON",
+            ("TAIMI_MARKERS_ICON", include_bytes!("../../icons/markers.png")),
+            ("TAIMI_MARKERS_ICON_HOVER", include_bytes!("../../icons/markers-hover.png")),
+            "marker-window-toggle",
+        ),
+        #[cfg(feature = "timers")]
+        TaimiControls::WINDOW_TIMERS => (
+            "TAIMI_TIMER_BUTTON",
+            ("TAIMI_TIMERS_ICON", include_bytes!("../../icons/timers.png")),
+            ("TAIMI_TIMERS_ICON_HOVER", include_bytes!("../../icons/timers-hover.png")),
+            "timer-window-toggle",
+        ),
+        #[cfg(feature = "space")]
+        TaimiControls::WINDOW_PATHING => (
+            "TAIMI_PATHING_BUTTON",
+            ("TAIMI_PATHING_ICON", include_bytes!("../../icons/pathing.png")),
+            ("TAIMI_PATHING_ICON_HOVER", include_bytes!("../../icons/pathing-hover.png")),
+            "pathing-window-toggle",
+        ),
+        #[cfg(feature = "space")]
+        TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MINIMAP | TaimiControls::PATHING_MAP => (
+            match icon {
+                TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_BUTTON",
+                TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_BUTTON",
+                _ => "TAIMI_PATHING_RENDER_BUTTON",
+            },
+            ("TAIMI_PATHING_RENDER_ICON", include_bytes!("../../icons/pathing-toggle.png")),
+            ("TAIMI_PATHING_RENDER_ICON_HOVER", include_bytes!("../../icons/pathing-toggle-hover.png")),
+            match icon {
+                TaimiControls::PATHING_MINIMAP => "pathing-render-minimap-toggle",
+                TaimiControls::PATHING_MAP => "pathing-render-map-toggle",
+                _ => "pathing-render-toggle",
+            },
+        ),
+        icon => {
+            log::warn!("unrecognized quick access icon {icon:?}");
+            return None
+        },
+    })
 }

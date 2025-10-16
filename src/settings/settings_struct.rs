@@ -1,6 +1,10 @@
 use {
     super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
-    crate::{controller::timers::ProgressBarStyleChange, SETTINGS, SOURCES},
+    crate::{
+        controller::timers::ProgressBarStyleChange,
+        exports::runtime::bindings::TaimiControls,
+        SETTINGS, SOURCES,
+    },
     anyhow::{anyhow, Context},
     chrono::{DateTime, Utc},
     futures::stream::StreamExt,
@@ -145,6 +149,8 @@ pub struct Settings {
     pub enable_katrender: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dpi_scaling: Option<f32>,
+    #[serde(default = "TaimiControls::default_quick_access", skip_serializing_if = "TaimiControls::is_default_quick_access")]
+    pub quick_access_visible: TaimiControls,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
@@ -350,6 +356,7 @@ impl Settings {
             primary_window_open: false,
             enable_katrender: false,
             dpi_scaling: None,
+            quick_access_visible: TaimiControls::default_quick_access(),
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
             pathing: Default::default(),

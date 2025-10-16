@@ -88,6 +88,7 @@ pathing-render-minimap-toggle = Toggle minimap pathing
 pathing-render-map-toggle = Toggle map pathing
 primary-window-toggle-text = Show/hide taimi primary window
 timer-key-trigger = Timer Key Trigger { $id }
+timer-key-reset = Reset Timers
 
 ## Config
 
@@ -101,6 +102,7 @@ dpi-notice = Ensure this matches the {dpi-scaling} setting under the game's Grap
 marker-trigger = Marker set position trigger behaviour
 marker-condition = Behaviour condition
 autoplace-warning = If you do not have RTAPI installed, we will not be able to detect whether you are a lieutenant instead of just a commander.
+nexus-quick-access = Quick Access Icons
 
 ## Windows
 
@@ -167,6 +169,7 @@ textures = Textures: { $count }
 
 arcdps = ArcDPS
 arcdps-tab = { arcdps }
+nexus = Nexus
 
 ## Markers tab
 
