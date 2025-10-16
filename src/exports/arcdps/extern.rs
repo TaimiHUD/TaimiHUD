@@ -16,10 +16,7 @@ use dpsapi::api::header::{
 };
 use crate::exports::{
     arcdps as exports,
-    runtime::{
-        self as rt,
-        imgui::{self, sys as imgui_sys, Ui},
-    },
+    runtime::imgui::{self, sys as imgui_sys, Ui},
 };
 use sync_unsafe_cell::SyncUnsafeCell;
 
@@ -33,7 +30,7 @@ static ARC_IMGUI_UI: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(
 //pub const ARC_CB_COMBAT: ExtensionFnCombat = ExtensionExports::wrap_combat_fn_item(&arc_cb_combat);
 pub const ARC_CB_COMBAT_LOCAL: ExtensionFnCombat = ExtensionExports::wrap_combat_fn_item(&arc_cb_combat_local);
 pub const ARC_BUILD: CStrPtr<'static> = cstr!(&env!("CARGO_PKG_VERSION"));
-pub const ARC_NAME: CStrPtr<'static> = CStrPtr::with_cstr(rt::NAME_C);
+pub const ARC_NAME: CStrPtr<'static> = CStrPtr::with_cstr(crate::exports::ADDON_TITLE_C);
 #[cfg(feature = "extension-nexus")]
 pub const ARC_IMGUI_VERSION: u32 = nexus::gui::IMGUI_VERSION;
 #[cfg(not(feature = "extension-nexus"))]
@@ -171,7 +168,7 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
     exports::pre_init();
 
     #[cfg(feature = "extension-nexus")]
-    if rt::nexus_available() || exports::check_for_nexus() {
+    if crate::exports::runtime::nexus_available() || exports::check_for_nexus() {
         log::info!("ignoring arcdps, nexus is available");
         exports::disable_load();
         return None

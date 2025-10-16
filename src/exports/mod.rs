@@ -15,13 +15,18 @@ macro_rules! gh_repo_url {
 pub use gh_repo_url;
 
 #[macro_export]
-macro_rules! taimihud_addon_name {
-    () => {
-        "TaimiHUD"
-    };
+#[cfg(taimi_has = "title")]
+macro_rules! addon_title {
+    () => { env!("ADDON_TITLE") };
 }
-
-pub use taimihud_addon_name;
+#[macro_export]
+#[cfg(not(taimi_has = "title"))]
+macro_rules! addon_title {
+    () => { "TaimiHUD" };
+}
+pub use addon_title;
+#[cfg(feature = "extension-arcdps-extern")]
+pub const ADDON_TITLE_C: &'static std::ffi::CStr = arcffi::cstr!(addon_title!());
 
 pub const SIG: i32 = 0x7331BABD;
 pub const ADDON_DIR_NAME: &'static str = "Taimi";
