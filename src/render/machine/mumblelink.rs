@@ -1,22 +1,18 @@
 use {
-    core::{
-        num::NonZero,
-        ptr,
-    },
     crate::{
-        controller::{Controller, ControllerEvent},
+        controller::{timers::TimersController, Controller, ControllerEvent},
         exports::runtime::{
             self as rt,
             MumblePtr,
         },
-        render::machine::{RenderMachine, RenderPositioning, RenderUsers},
-    },
-    glamour::{
+        render::machine::{RenderMachine, RenderPositioning, RenderUsers}, MarkersController,
+    }, core::{
+        num::NonZero,
+        ptr,
+    }, glamour::{
         Point3,
         Vector2, Vector3,
-    },
-    std::time::{Duration, Instant},
-    taimi_meta::{
+    }, std::time::{Duration, Instant}, taimi_meta::{
         coords::{
             LocalSpace,
             SignObtainer,
@@ -25,7 +21,7 @@ use {
             gameplay::GameplayState,
             UiState,
         },
-    },
+    }
 };
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
@@ -94,7 +90,7 @@ impl RenderMachine {
 
             #[cfg(feature = "markers")]
             if let (true, Some(update)) = (self.identity_users.contains(RenderUsers::MARKERS), update) {
-                Controller::receive_mumble_identity(update)
+                MarkersController::receive_mumble_identity(update)
             }
 
             update
@@ -211,7 +207,7 @@ impl RenderMachine {
             self.mumblelink_map = map_id;
         }
 
-        let tick_notable = ui_state_changes.intersects(Controller::MARKERS_NOTABLE_STATE | Controller::TIMERS_NOTABLE_STATE)
+        let tick_notable = ui_state_changes.intersects(MarkersController::MARKERS_NOTABLE_STATE | TimersController::TIMERS_NOTABLE_STATE)
             || map_id_update.is_some();
         if tick_notable || playpos_ticked {
             Controller::try_send(ControllerEvent::UiTick(self.last_ui_tick()));

@@ -1,9 +1,6 @@
 use {
     crate::{
-        fl,
-        marker::format::MarkerSet,
-        settings::Settings,
-        ControllerEvent, Controller,
+        fl, marker::format::MarkerSet, settings::Settings, Controller, ControllerEvent, MarkersController, MarkersEvent
     },
     nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::sync::Arc,
@@ -37,11 +34,11 @@ impl MarkerWindowState {
                 .opened(&mut open)
                 .build(ui, || {
                     if ui.button(&fl!("clear-markers")) {
-                        Controller::try_send(ControllerEvent::ClearMarkers);
+                        MarkersController::try_send(MarkersEvent::ClearMarkers);
                     }
                     ui.same_line();
                     if ui.button(&fl!("clear-spent-autoplace")) {
-                        Controller::try_send(ControllerEvent::ClearSpentAutoplace);
+                        MarkersController::try_send(MarkersEvent::ClearSpentAutoplace);
                     }
                     if !self.markers_for_map.is_empty() {
                         let table_flags =
@@ -94,7 +91,7 @@ impl MarkerWindowState {
                             ui.text_wrapped(format!("{}", marker.description));
                             ui.table_next_column();
                             if ui.button(&fl!("markers-place")) {
-                                Controller::try_send(ControllerEvent::SetMarker(marker.clone()));
+                                MarkersController::try_send(MarkersEvent::SetMarker(marker.clone()));
                             }
                             ui.table_next_column();
                             id_token.end();
