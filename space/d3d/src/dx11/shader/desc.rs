@@ -1,5 +1,4 @@
 use {
-    arcffi::cstr::CStrBox,
     crate::{
         dx11::prelude::*,
         D3dContextBindable,
@@ -93,10 +92,11 @@ impl D3dContextBindable<Dx11Context> for InputLayout {
     }
 }
 
+#[cfg(feature = "arcffi")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub struct InputLayoutElement {
-    pub semantic_name: CStrBox,
+    pub semantic_name: cstr::CStrBox,
     pub semantic_index: u32,
     pub format: dxgi::DXGI_FORMAT,
     pub input_slot: u32,
@@ -105,6 +105,7 @@ pub struct InputLayoutElement {
     pub instance_step: u32,
 }
 
+#[cfg(feature = "arcffi")]
 impl InputLayoutElement {
     pub fn byte_offset(&self) -> Option<usize> {
         match self.aligned_byte_offset {
@@ -130,6 +131,7 @@ impl InputLayoutElement {
     }
 }
 
+#[cfg(feature = "arcffi")]
 impl_d3d! {
     unsafe impl AsD3d<Interface = D3D11_INPUT_ELEMENT_DESC, @transparent> for InputLayoutElement;
 }

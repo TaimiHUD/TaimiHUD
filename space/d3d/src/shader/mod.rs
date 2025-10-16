@@ -1,10 +1,9 @@
+use crate::impl_d3d;
+#[cfg(feature = "arcffi")]
 use {
-    arcffi::cstr::{CStrBox, CStrPtr, CStrRef},
+    arcffi::cstr::CStrRef,
     crate::prelude::*,
-    std::{
-        collections::{BTreeMap, HashMap},
-        ffi::{CStr, CString},
-    },
+    std::ffi::{CStr, CString},
 };
 pub use {
     crate::d3d::{
@@ -13,9 +12,12 @@ pub use {
     },
     self::target::{ShaderTarget, ShaderKind},
 };
+#[cfg(feature = "arcffi")]
+pub use self::defs::{ShaderDefinition, ShaderDefinitions};
 
 mod target;
 
+#[cfg(feature = "arcffi")]
 pub fn compile(
     filename: &CStr,
     source: &[u8],
@@ -70,6 +72,17 @@ pub fn compile(
     }
 }
 
+#[cfg(feature = "arcffi")]
+mod defs {
+    use {
+        arcffi::cstr::{CStrBox, CStrPtr},
+        crate::prelude::*,
+        crate::shader::D3D_SHADER_MACRO,
+        std::{
+            ffi::CString,
+            collections::{BTreeMap, HashMap},
+        },
+    };
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ShaderDefinition {
@@ -77,6 +90,7 @@ pub struct ShaderDefinition {
     pub definition: Option<CStrBox>,
 }
 
+#[cfg(feature = "arcffi")]
 impl ShaderDefinition {
     pub const EMPTY: Self = Self {
         name: None,
@@ -312,6 +326,7 @@ impl<'de> serde::Deserialize<'de> for ShaderDefinitions {
                 &"C-compatible string",
             ))
     }
+}
 }
 
 impl_d3d! {

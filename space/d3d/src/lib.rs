@@ -10,7 +10,6 @@ pub mod state;
 
 pub mod prelude {
     pub use {
-        arcffi::cstr,
         crate::{
             blob::Blob,
             buffer::{
@@ -39,6 +38,8 @@ pub mod prelude {
             },
         },
     };
+    #[cfg(feature = "arcffi")]
+    pub use arcffi::cstr;
     #[allow(unused_imports)]
     pub(crate) use {
         anyhow::{anyhow, Context},

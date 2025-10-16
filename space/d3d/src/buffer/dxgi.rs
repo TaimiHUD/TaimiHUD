@@ -256,6 +256,7 @@ impl_d3d! { impl enum for
 }
 
 #[doc(hidden)]
+#[cfg(feature = "serde")]
 pub mod serde_imp {
     pub mod format {
         use {

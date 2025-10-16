@@ -18,6 +18,7 @@ dx11 = [
 ]
 serde = [
   "dep:serde",
+  "arcffi",
 ]
 windows = [
   "dep:windows",
@@ -33,7 +34,7 @@ glam = { workspace = true }
 glamour = { workspace = true }
 indexmap = { workspace = true }
 bitvec = { workspace = true }
-arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, features = ["std"], optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [target.'cfg(windows)'.dependencies.windows]
