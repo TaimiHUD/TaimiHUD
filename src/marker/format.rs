@@ -56,7 +56,7 @@ pub struct RuntimeMarkers {
 }
 impl RuntimeMarkers {
     pub fn glob() -> String {
-        "**/*.markers".to_string()
+        "**/*".to_string()
     }
 
     pub fn path_glob(path: &Path) -> PathBuf {
