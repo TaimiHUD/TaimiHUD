@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::ControllerEvent,
+        controller::{pathing::{PathingController, PathingEvent}, ControllerEvent},
         fl,
         render::{
             machine::RenderMachine,
@@ -106,7 +106,7 @@ impl PathingConfig {
                     ui.text_wrapped(&fl!("experimental-notice"));
                 }
                 if ui.button(&fl!("enable")) {
-                    Controller::try_send(ControllerEvent::ToggleKatRender);
+                    PathingController::try_send(PathingEvent::ToggleKatRender);
                 }
                 None
             },
@@ -151,7 +151,7 @@ impl PathingConfig {
         {
             let _font = (!self.katrender).then(|| RenderState::push_font("big", ui));
             if ui.checkbox(&fl!("pathing-config-enable"), &mut self.katrender) {
-                Controller::try_send(ControllerEvent::ToggleKatRender);
+                PathingController::try_send(PathingEvent::ToggleKatRender);
             }
         }
 
@@ -520,7 +520,7 @@ impl PathingConfig {
         })));
         if let Some(Some(Some((festival, change)))) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
-            Controller::try_send(ControllerEvent::RequestDisabledPaths);
+            PathingController::try_send(PathingEvent::RequestDisabledPaths);
         }
     }
 

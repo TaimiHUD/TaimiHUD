@@ -1,53 +1,32 @@
 use {
-    anyhow::anyhow,
-    crate::{
-        controller::{
-            Controller,
-            ControllerEvent,
-        },
-        exports::runtime::{
-            self as rt,
-            imgui::{self, Ui, Condition, TreeNode},
-        },
-        render::{
-            machine::{RenderMachine, RenderPosition},
-            pathing_window::{PathingFilterState, PathingSearchState},
-            RenderState,
-        },
-        space::{
-            pack::{FestivalFixup, Pack, MarkerAttributesExt},
-            dx11::{InstanceBufferData, RenderBackend},
-            render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
-            resources::Texture,
-            DrawSpace,
-            LocalContext, MapContext,
-        },
-        fl, with_i18n,
-    },
-    anyhow::Context,
-    bitvec::vec::BitVec,
-    glamour::Box3,
-    indexmap::IndexMap,
     super::{
         poi::{ActivePoi, PoiCommonRenderData},
         trail::{ActiveTrail, TrailParams},
-    },
-    std::{
-        collections::{HashSet, BTreeMap, BTreeSet},
+    }, crate::{
+        controller::{
+            pathing::{PathingController, PathingEvent}, Controller, ControllerEvent
+        }, exports::runtime::{
+            self as rt,
+            imgui::{self, Condition, TreeNode, Ui},
+        }, fl, render::{
+            machine::{RenderMachine, RenderPosition},
+            pathing_window::{PathingFilterState, PathingSearchState},
+            RenderState,
+        }, space::{
+            dx11::{InstanceBufferData, RenderBackend}, pack::{FestivalFixup, MarkerAttributesExt, Pack}, render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder}, resources::Texture, DrawSpace, LocalContext, MapContext
+        }, with_i18n
+    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, glamour::Box3, indexmap::IndexMap, std::{
+        collections::{BTreeMap, BTreeSet, HashSet},
         fs::{create_dir_all, read_dir},
         path::Path,
         sync::{atomic::{AtomicUsize, Ordering}, Arc},
-    },
-    taimi_d3d::dx11::{
-        prelude::*,
-        buffer::BufferOf,
-    },
-    taimi_pack::{
+    }, taimi_d3d::dx11::{
+        buffer::BufferOf, prelude::*
+    }, taimi_pack::{
         attributes::{Festival, MarkerAttributes},
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category, Poi,
-    },
-    uuid::Uuid,
+    }, uuid::Uuid
 };
 
 #[derive(Debug)]
@@ -328,7 +307,7 @@ impl ActivePack {
                         if let Some(mut substate) = state.get_mut(idx) {
                             if ui.checkbox("", &mut substate) {
                                 *recompute = true;
-                                Controller::try_send(ControllerEvent::PathingStateUpdate(category.full_id.clone(), *substate));
+                                PathingController::try_send(PathingEvent::PathingStateUpdate(category.full_id.clone(), *substate));
                             };
                         }
                     }
