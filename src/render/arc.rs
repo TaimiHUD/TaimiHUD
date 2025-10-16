@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::{Controller, ControllerEvent},
+        controller::{timers::{TimersController, TimersEvent}, Controller, ControllerEvent},
         exports::{
             arcdps::{self as exports, KeyIntercept},
             runtime::{self as rt, imgui},
@@ -99,7 +99,7 @@ impl ArcRenderState {
         }
         ui.separator();
         for binding in &ArcSettings::VK_TIMER_TRIGGERS {
-            self.keybind_ui(ui, binding, Some(|vk: &ArcVk| Controller::try_send(ControllerEvent::TimerKeyTrigger(vk.id.into(), false))));
+            self.keybind_ui(ui, binding, Some(|vk: &ArcVk| TimersController::try_send(TimersEvent::TimerKeyTrigger(vk.id.into(), false))));
         }
     }
 

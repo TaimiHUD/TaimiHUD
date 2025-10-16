@@ -14,6 +14,7 @@ use {
     },
 };
 
+use crate::controller::RtSender;
 #[cfg(feature = "space")]
 use crate::space::engine::{Engine, SpaceEvent};
 
@@ -173,7 +174,7 @@ pub struct TimerMachine {
     state: TimerMachineState,
     pub timer: Arc<TimerFile>,
     alert_sem: Arc<Mutex<()>>,
-    sender: Sender<RenderEvent>,
+    sender: RtSender,
     combat_state: CombatState,
     tasks: Vec<Arc<JoinHandle<()>>>,
     key_pressed: TimerKeybinds,
@@ -198,7 +199,7 @@ impl TimerMachine {
     pub fn new(
         timer: Arc<TimerFile>,
         alert_sem: Arc<Mutex<()>>,
-        sender: Sender<RenderEvent>,
+        sender: RtSender,
     ) -> Self {
         TimerMachine {
             state: TimerMachineState::AwakeUnaware,
@@ -212,7 +213,7 @@ impl TimerMachine {
     }
 
     async fn send_alerender(
-        sender: Sender<RenderEvent>,
+        sender: RtSender,
         lock: Arc<Mutex<()>>,
         timer: Arc<TimerFile>,
         message: String,

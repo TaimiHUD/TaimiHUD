@@ -78,9 +78,24 @@ pub use self::markers::{
 };
 use SquadRank as SquadRoleState;
 
+mod generic;
+
+#[cfg(feature = "timers")]
+pub(crate) mod timers;
+
+#[cfg(feature = "timers")]
+use timers::{TimersController, TimersEvent};
+
 #[cfg(feature = "markers")]
 mod markers;
+
+#[cfg(feature = "space")]
+mod pathing;
+
 mod runtime;
+
+pub(crate) type MapId = Option<u32>;
+pub(crate) type RtSender = Arc<Sender<RenderEvent>>;
 
 #[derive(Debug)]
 pub struct Controller {
@@ -99,18 +114,17 @@ pub struct Controller {
     pub map_id_to_markers: HashMap<u32, HashSet<Arc<MarkerSet>>>,
     #[cfg(feature = "markers")]
     pub marker_autoplace: Option<MarkerAutoPlaceSettings>,
-    pub rt_sender: Sender<RenderEvent>,
+    pub rt_sender: RtSender,
     #[cfg(feature = "markers")]
     pub mumble_role: Option<SquadRank>,
-    pub map_id: Option<u32>,
+    pub map_id: MapId,
     pub player_position: Option<Vec3>,
+    // TODO: remove!
     alert_sem: Arc<Mutex<()>>,
-    pub timers: Vec<Arc<TimerFile>>,
-    pub current_timers: Vec<TimerMachine>,
-    pub sources_to_timers: HashMap<String, Vec<Arc<TimerFile>>>,
-    pub map_id_to_timers: HashMap<u32, Vec<Arc<TimerFile>>>,
     settings: SettingsLock,
     save_interval: tokio::time::Interval,
+
+    timers: TimersController,
 }
 
 impl Controller {
@@ -132,7 +146,7 @@ impl Controller {
             #[cfg(feature = "markers")]
             marker_autoplace: Default::default(),
             previous_combat_state: Default::default(),
-            rt_sender,
+            rt_sender: Arc::new(rt_sender),
             settings,
             #[cfg(feature = "markers")]
             markers: Default::default(),
@@ -146,11 +160,9 @@ impl Controller {
             map_id: Default::default(),
             player_position: Default::default(),
             alert_sem: Default::default(),
-            timers: Default::default(),
-            current_timers: Default::default(),
-            sources_to_timers: Default::default(),
-            map_id_to_timers: Default::default(),
             save_interval: interval(Duration::from_secs(60 * 10)),
+
+            timers: Default::default(),
         }
     }
 
@@ -187,10 +199,10 @@ impl Controller {
             let settings_lock = settings.read().await;
             state.marker_autoplace = Some(settings_lock.marker_autoplace.clone());
             drop(settings_lock);
-            state.setup_timers().await;
+            #[cfg(feature = "timers")]
+            state.timers.setup(state.settings.clone(), state.rt_sender.clone()).await;
             #[cfg(feature = "markers")]
             state.setup_markers().await;
-            let mut taimi_interval = interval(Duration::from_millis(125));
 
             loop {
                 select! {
@@ -207,9 +219,6 @@ impl Controller {
                         None => {
                             break
                         },
-                    },
-                    _ = taimi_interval.tick() => {
-                        let _ = state.tick().await;
                     },
                     _ = state.save_interval.tick() => {
                         state.commit_settings().await;
@@ -335,69 +344,6 @@ impl Controller {
         self.map_id_to_markers = map_id_to_markers;
     }
 
-    async fn load_timer_files(&self) -> Vec<Arc<TimerFile>> {
-        let settings_lock = self.settings.read().await;
-        let mut timers = Vec::new();
-        for remote in settings_lock.remotes.iter() {
-            timers.extend(remote.load().await);
-        }
-        drop(settings_lock);
-        let timers_len = timers.len();
-        log::trace!("Total loaded timers: {}", timers_len);
-        timers
-    }
-
-    async fn setup_timers(&mut self) {
-        log::debug!("Preparing to setup timers");
-        self.timers = self.load_timer_files().await;
-        if exists(&*TIMERS_DIR).expect("oh no i cant access my own addon dir") {
-            let adhoc_timers = TimerFile::load_many_sourceless(&*TIMERS_DIR, 100)
-                .await
-                .expect("wah");
-            self.timers.extend(adhoc_timers);
-        } else {
-            create_dir_all(&*TIMERS_DIR)
-                .await
-                .expect("Can't create timers dir");
-        }
-        for timer in &self.timers {
-            if let Some(association) = &timer.association {
-                self.sources_to_timers
-                    .entry(association.clone())
-                    .or_default();
-                if let Some(val) = self.sources_to_timers.get_mut(association) {
-                    val.push(timer.clone());
-                };
-            }
-            // Handle map to timers
-            self.map_id_to_timers.entry(timer.map_id).or_default();
-            if let Some(val) = self.map_id_to_timers.get_mut(&timer.map_id) {
-                val.push(timer.clone());
-            };
-            let association = match &timer.association {
-                Some(s) => format!("{}", s),
-                None => "unassociated".to_string(),
-            };
-            // Handle id to timer file allocation
-            log::trace!(
-                "Set up {4} {0}: {3} for map {1}, category {2}",
-                timer.id,
-                timer.name.replace("\n", " "),
-                timer.map_id,
-                timer.category,
-                association,
-            );
-        }
-        log::info!("Set up {} timers.", self.timers.len());
-        let _ = self
-            .rt_sender
-            .send(RenderEvent::TimerData(self.timers.clone()))
-            .await;
-    }
-
-    async fn tick(&mut self) -> anyhow::Result<()> {
-        Ok(())
-    }
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
         let Ok(mumble) = rt::mumble_link_ptr() else {
@@ -429,23 +375,21 @@ impl Controller {
             self.player_position = Some(playpos);
             let combat_state = ui_state.contains(rt::UiState::IS_IN_COMBAT);
             if combat_state != self.previous_combat_state {
-                if combat_state {
-                    log::info!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
-                    for machine in &mut self.current_timers {
-                        machine.set_combat_state(CombatState::Entered);
-                    }
-                } else {
-                    log::info!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
-                    for machine in &mut self.current_timers {
-                        machine.set_combat_state(CombatState::Exited);
-                    }
-                }
+                let cbt = match combat_state {
+                    true => {
+                        log::info!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
+                        CombatState::Entered
+                    },
+                    false => {
+                        log::info!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
+                        CombatState::Exited
+                    },
+                };
+                self.timers.handle_combat_event(cbt).await;
                 self.previous_combat_state = combat_state;
             }
-            if let Some(pos) = self.player_position() {
-                for machine in &mut self.current_timers {
-                    machine.tick(pos).await
-                }
+            if let Some(position) = self.player_position() {
+                self.timers.handle_position(position).await;
             }
 
             Ok(())
@@ -468,6 +412,7 @@ impl Controller {
             Some(map_id) => map_id.get(),
         };
         if Some(new_map_id) != self.map_id {
+            log::info!("Map changed from {:?} to {}", self.map_id, new_map_id);
             #[cfg(feature = "markers")]
             {
                 let markers_for_map = self.map_id_to_markers.get(&new_map_id);
@@ -482,32 +427,8 @@ impl Controller {
                     .await;
                 self.spent_markers = Default::default();
             }
-            for timer in &mut self.current_timers {
-                timer.cleanup().await;
-            }
-            self.current_timers.clear();
-            if self.map_id_to_timers.contains_key(&new_map_id) {
-                let map_timers = &self.map_id_to_timers[&new_map_id];
-                for timer in map_timers {
-                    let settings_lock = self.settings.read().await;
-                    let settings_for_timer = settings_lock.timers.get(&timer.id);
-                    let timer_enabled = match settings_for_timer {
-                        Some(setting) => !setting.disabled,
-                        None => true,
-                    };
-                    if timer_enabled {
-                        self.current_timers.push(TimerMachine::new(
-                            timer.clone(),
-                            self.alert_sem.clone(),
-                            self.rt_sender.clone(),
-                        ));
-                    }
-                    drop(settings_lock);
-                }
-                for machine in &mut self.current_timers {
-                    machine.update_on_map(new_map_id)
-                }
-            }
+            #[cfg(feature = "timers")]
+            self.timers.handle_map_event(self.settings.clone(), self.alert_sem.clone(), new_map_id, self.rt_sender.clone()).await;
             if self.map_id != None {
                 self.commit_settings().await;
             }
@@ -531,21 +452,21 @@ impl Controller {
             };
         }
         use arcdps::StateChange;
-        match evt.get_statechange() {
-            StateChange::None => {}
+        let propagate = match evt.get_statechange() {
+            StateChange::None => None,
             StateChange::EnterCombat => {
                 log::info!("ArcDPS: Combat begins at {}!", evt.time);
-                for machine in &mut self.current_timers {
-                    machine.set_combat_state(CombatState::Entered);
-                }
-            }
+                Some(CombatState::Entered)
+            },
             StateChange::ExitCombat => {
                 log::info!("ArcDPS: Combat ends at {}!", evt.time);
-                for machine in &mut self.current_timers {
-                    machine.set_combat_state(CombatState::Exited);
-                }
-            }
-            _ => (),
+                Some(CombatState::Exited)
+            },
+            _ => None,
+        };
+        match propagate {
+            Some(cbt) => self.timers.handle_combat_event(cbt).await,
+            None => (),
         }
     }
 
@@ -565,73 +486,6 @@ impl Controller {
         let mut settings_lock = self.settings_write().await;
         settings_lock.disable_marker(id.to_string());
         drop(settings_lock);
-    }
-
-    async fn toggle_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings_write().await;
-        let disabled = settings_lock.toggle_timer(id.to_string());
-        drop(settings_lock);
-        match disabled {
-            false => {
-                if let Some(map_id) = self.map_id {
-                    if let Some(timers_for_map) = &self.map_id_to_timers.get(&map_id) {
-                        let timers = timers_for_map.iter().filter(|t| t.id == id);
-                        for timer in timers {
-                            log::debug!(
-                                "Creating timer machine for {} as it has been enabled.",
-                                timer.id
-                            );
-                            self.current_timers.push(TimerMachine::new(
-                                timer.clone(),
-                                self.alert_sem.clone(),
-                                self.rt_sender.clone(),
-                            ));
-                        }
-                    }
-                }
-            }
-            true => {
-                let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
-                for timer in timers_to_remove {
-                    log::debug!(
-                        "Starting cleanup for timer {} as it has been disabled.",
-                        timer.timer.id
-                    );
-                    timer.cleanup().await;
-                }
-            }
-        }
-    }
-
-    async fn enable_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings_write().await;
-        settings_lock.enable_timer(id.to_string());
-        drop(settings_lock);
-        if let Some(map_id) = self.map_id {
-            if let Some(timers_for_map) = &self.map_id_to_timers.get(&map_id) {
-                let timers = timers_for_map.iter().filter(|t| t.id == id);
-                for timer in timers {
-                    log::debug!("Creating timer machine for {}", timer.id);
-                    self.current_timers.push(TimerMachine::new(
-                        timer.clone(),
-                        self.alert_sem.clone(),
-                        self.rt_sender.clone(),
-                    ));
-                }
-            }
-        }
-    }
-
-    async fn disable_timer(&mut self, id: &str) {
-        let mut settings_lock = self.settings_write().await;
-        settings_lock.disable_timer(id.to_string());
-        drop(settings_lock);
-        let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
-        for timer in timers_to_remove {
-            log::debug!("Starting cleanup for timer {}", timer.timer.id);
-            timer.cleanup().await;
-        }
-        self.current_timers.retain(|t| t.timer.id != id);
     }
 
     async fn check_updates(&mut self) {
@@ -692,18 +546,11 @@ impl Controller {
     }
 
     async fn reload_data(&mut self) {
-        self.reload_timers().await;
+        self.timers.reload(self.settings.clone(), self.rt_sender.clone()).await;
         #[cfg(feature = "markers")]
         self.reload_markers().await;
     }
 
-    async fn reload_timers(&mut self) {
-        self.timers.clear();
-        self.sources_to_timers.clear();
-        self.map_id_to_timers.clear();
-        self.setup_timers().await;
-        self.reset_timers().await;
-    }
 
     pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(50);
 
@@ -774,7 +621,7 @@ impl Controller {
     #[cfg(feature = "markers")]
     async fn set_marker_task(
         markers: MarkerSet,
-        rt_sender: Sender<crate::RenderEvent>,
+        rt_sender: RtSender,
     ) -> anyhow::Result<()> {
         use {
             anyhow::anyhow,
@@ -922,18 +769,7 @@ impl Controller {
             Ok(_) => (),
             Err(err) => log::error!("Controller.do_update() error for \"{}\": {}", name, err),
         };
-        self.reload_timers().await;
-    }
-
-    async fn progress_bar_style(&mut self, style: ProgressBarStyleChange) {
-        let mut settings_lock = self.settings_write().await;
-        let settings = settings_lock.set_progress_bar(style);
-        let _ = self
-            .rt_sender
-            .send(RenderEvent::ProgressBarUpdate(settings))
-            .await;
-
-        drop(settings_lock);
+        self.timers.reload(self.settings.clone(), self.rt_sender.clone()).await;
     }
 
     async fn set_window_state(&mut self, window: String, state: Option<bool>) {
@@ -966,22 +802,9 @@ impl Controller {
         Ok(())
     }
 
-    async fn timer_key_trigger(&mut self, id: String, is_release: bool) {
-        let idx = id.chars().last().unwrap().to_digit(10).unwrap();
-        for timer in &mut self.current_timers {
-            timer.key_event(idx, is_release);
-        }
-    }
-
     async fn load_texture(&self, rel: RelativePathBuf, base: PathBuf) {
         if let Err(e) = rt::texture_schedule_path(rel.as_str(), &base).await {
             log::warn!("Cannot load texture {rel:?}: {e}");
-        }
-    }
-
-    async fn reset_timers(&mut self) {
-        for timer in &mut self.current_timers {
-            timer.do_reset().await;
         }
     }
 
@@ -1282,6 +1105,8 @@ impl Controller {
         }
 
         match event {
+            #[cfg(feature = "timers")]
+            Timers(evt) => self.timers.handle_event(evt, &self.settings, &self.alert_sem, self.map_id, &self.rt_sender).await,
             #[cfg(feature = "space")]
             PathingLoadAll => self.pathing_load_all().await,
             #[cfg(feature = "space")]
@@ -1304,7 +1129,6 @@ impl Controller {
             ClearMarkers => self.clear_markers().await,
             ReloadData => self.reload_data().await,
             SaveSettings => self.save_settings().await,
-            ReloadTimers => self.reload_timers().await,
             #[cfg(feature = "markers")]
             MarkerAutoPlaceSettings(maps) => self.set_marker_autoplace_settings(maps).await?,
             #[cfg(feature = "markers")]
@@ -1314,19 +1138,13 @@ impl Controller {
             UninstallAddon(dd) => self.uninstall_addon(&dd).await?,
             MumbleIdentityUpdated { role } => self.handle_mumble_identity(role).await,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
-            TimerEnable(id) => self.enable_timer(&id).await,
-            TimerDisable(id) => self.disable_timer(&id).await,
-            TimerToggle(id) => self.toggle_timer(&id).await,
-            TimerReset => self.reset_timers().await,
             CheckDataSourceUpdates => self.check_updates().await,
             CheckUpdateSources => self.check_sources().await?,
             #[cfg(feature = "markers")]
             SetMarker(t) => {
                 self.set_marker(&t);
             }
-            TimerKeyTrigger(id, is_release) => self.timer_key_trigger(id, is_release).await,
             DoDataSourceUpdate { state } => self.do_update(state).await,
-            ProgressBarStyle(style) => self.progress_bar_style(style).await,
             WindowState(window, state) => self.set_window_state(window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
             LoadTextureIntegrated(identifier, data) => {
@@ -1422,36 +1240,21 @@ impl Controller {
 }
 
 #[derive(Debug, Clone, Display)]
-pub enum ProgressBarStyleChange {
-    Centre(bool),
-    Stock(bool),
-    Shadow(bool),
-    Height(f32),
-    Font(TextFont),
-}
-
-#[derive(Debug, Clone, Display)]
 pub enum MarkerSaveEvent {
     Append(MarkerSet, PathBuf),
     Create(MarkerSet, PathBuf, MarkerFiletype),
     Edit(MarkerSet, PathBuf, Option<String>, usize),
 }
 
-#[derive(Debug, Clone, Display)]
-pub enum ControllerEvent {
-    #[cfg(feature = "space")]
-    PathingLoadAll,
-    #[cfg(feature = "space")]
-    RequestDisabledPaths,
-    #[cfg(feature = "space")]
-    PathingStateUpdate(String, bool),
+/*
+#[cfg(feature = "markers")]
+enum MarkersEvent {
+    #[cfg(feature = "extension-nexus")]
+    RTAPISquadUpdate(SquadState, GroupMemberOwned),
     #[cfg(feature = "markers")]
     ClearSpentAutoplace,
     #[cfg(feature = "markers")]
     ExtrasSquadUpdate(Vec<UserInfoOwned>),
-    #[cfg(all(feature = "markers", feature = "extension-nexus"))]
-    RTAPISquadUpdate(SquadState, GroupMemberOwned),
-    OpenOpenable(String, String),
     #[cfg(feature = "markers")]
     ClearMarkers,
     #[cfg(feature = "markers")]
@@ -1468,32 +1271,8 @@ pub enum ControllerEvent {
     },
     #[cfg(feature = "markers-edit")]
     GetMarkerPaths,
-    UninstallAddon(RemoteSource),
-    MumbleIdentityUpdated {
-        role: SquadRank,
-    },
-    ToggleKatRender,
-    CombatEvent {
-        src: arcdps::AgentOwned,
-        evt: arcEvent,
-    },
-    DoDataSourceUpdate {
-        state: RemoteState,
-    },
-    ProgressBarStyle(ProgressBarStyleChange),
-    WindowState(String, Option<bool>),
-    #[strum(to_string = "Id {0}, pressed {1}")]
-    TimerKeyTrigger(String, bool),
-    LoadTextureIntegrated(String, Vec<u8>),
-    #[strum(to_string = "Load texture {0} from {1:?}")]
-    LoadTexture(RelativePathBuf, PathBuf),
-    CheckDataSourceUpdates,
-    ReloadTimers,
     #[cfg(feature = "markers")]
     ReloadMarkers,
-    ReloadData,
-    SaveSettings,
-
     #[cfg(feature = "markers")]
     #[strum(to_string = "Toggled {0}")]
     MarkerToggle(String),
@@ -1503,24 +1282,135 @@ pub enum ControllerEvent {
     #[cfg(feature = "markers")]
     #[allow(dead_code)]
     MarkerDisable(String),
-
-    UiTick(MumblelinkTick),
     #[cfg(feature = "markers")]
     UiResize(MapCalibration),
     #[cfg(feature = "markers")]
     UiMapOpened(MapOpen),
+}
+*/
+
+/*
+#[cfg(feature = "space")]
+enum PathingEvent {
+    PathingLoadAll,
+    RequestDisabledPaths,
+    PathingStateUpdate(String, bool),
+    ToggleKatRender,
+}
+*/
+
+/*
+enum GenericEvent {
+    WindowState(String, Option<bool>),
+    OpenOpenable(String, String),
+    UninstallAddon(RemoteSource),
+    MumbleIdentityUpdated {
+        role: SquadRank,
+    },
+    CombatEvent {
+        src: arcdps::AgentOwned,
+        evt: arcEvent,
+    },
+    DoDataSourceUpdate {
+        state: RemoteState,
+    },
+    LoadTextureIntegrated(String, Vec<u8>),
+    #[strum(to_string = "Load texture {0} from {1:?}")]
+    LoadTexture(RelativePathBuf, PathBuf),
+    CheckDataSourceUpdates,
+    ReloadData,
+    SaveSettings,
+    UiTick(MumblelinkTick),
     GameplayStatus {
         gameplay: GameplayState,
         trans: GameplayTransition,
     },
+    CheckUpdateSources,
+    Quit,
+    /// Like quit but will also request addon release
+    /// (if possible)
+    UnloadAll,
+}
+*/
 
-    #[allow(dead_code)]
-    TimerEnable(String),
-    #[allow(dead_code)]
-    TimerDisable(String),
-    TimerReset,
+#[derive(Debug, Clone, Display)]
+pub enum ControllerEvent {
+    /*Generic(GenericEvent),*/
+    #[cfg(feature = "timers")]
+    Timers(TimersEvent),
+    /*#[cfg(feature = "markers")]
+    Markers(MarkersEvent),
+    #[cfg(feature = "space")]
+    Pathing(PathingEvent),*/
+
+    // TODO: remove as porting happens - Pathing
+    PathingLoadAll,
+    RequestDisabledPaths,
+    PathingStateUpdate(String, bool),
+    ToggleKatRender,
+    // TODO: remove as porting happens - Markers
+    #[cfg(feature = "extension-nexus")]
+    RTAPISquadUpdate(SquadState, GroupMemberOwned),
+    #[cfg(feature = "markers")]
+    ClearSpentAutoplace,
+    #[cfg(feature = "markers")]
+    ExtrasSquadUpdate(Vec<UserInfoOwned>),
+    #[cfg(feature = "markers")]
+    ClearMarkers,
+    #[cfg(feature = "markers")]
+    MarkerAutoPlaceSettings(MarkerAutoPlaceSettings),
+    #[cfg(feature = "markers")]
+    SetMarker(Arc<MarkerSet>),
+    #[cfg(feature = "markers-edit")]
+    SaveMarker(MarkerSaveEvent),
+    #[cfg(feature = "markers-edit")]
+    DeleteMarker {
+        path: PathBuf,
+        category: Option<String>,
+        idx: usize,
+    },
+    #[cfg(feature = "markers-edit")]
+    GetMarkerPaths,
+    #[cfg(feature = "markers")]
+    ReloadMarkers,
+    #[cfg(feature = "markers")]
     #[strum(to_string = "Toggled {0}")]
-    TimerToggle(String),
+    MarkerToggle(String),
+    #[cfg(feature = "markers")]
+    #[allow(dead_code)]
+    MarkerEnable(String),
+    #[cfg(feature = "markers")]
+    #[allow(dead_code)]
+    MarkerDisable(String),
+    #[cfg(feature = "markers")]
+    UiResize(MapCalibration),
+    #[cfg(feature = "markers")]
+    UiMapOpened(MapOpen),
+    // TODO: remove as porting happens - Generic
+    WindowState(String, Option<bool>),
+    OpenOpenable(String, String),
+    UninstallAddon(RemoteSource),
+    MumbleIdentityUpdated {
+        role: SquadRank,
+    },
+    CombatEvent {
+        src: arcdps::AgentOwned,
+        evt: arcEvent,
+    },
+    DoDataSourceUpdate {
+        state: RemoteState,
+    },
+    LoadTextureIntegrated(String, Vec<u8>),
+    #[strum(to_string = "Load texture {0} from {1:?}")]
+    LoadTexture(RelativePathBuf, PathBuf),
+    CheckDataSourceUpdates,
+    ReloadData,
+    SaveSettings,
+    UiTick(MumblelinkTick),
+    GameplayStatus {
+        gameplay: GameplayState,
+        trans: GameplayTransition,
+    },
     CheckUpdateSources,
     Quit,
     /// Like quit but will also request addon release

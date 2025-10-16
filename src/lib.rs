@@ -355,7 +355,7 @@ fn crate_init() {
     let _ = rt::log::TaimiLog::setup();
 
     // XXX: could consider calling this from a DllMain (or CRT TLS hook fn?),
-    // but defining explicit entry points is kinder anyway...
+    // but defining, self.rt_sender.clone() explicit entry points is kinder anyway...
     // but contention over who "owns" the global panic hook or logger will only
     // ever matter if we switch to dynamic linking std anyway, so...
 }
@@ -438,6 +438,8 @@ fn init() -> Result<(), &'static str> {
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
     // Rendering setup
+
+    use controller::timers::{TimersController, TimersEvent};
     let taimi_window = render!(|ui| {
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
@@ -567,7 +569,7 @@ fn load_nexus() {
     .revert_on_unload();
 
     let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
-        Controller::try_send(ControllerEvent::TimerKeyTrigger(id.to_string(), is_release));
+        TimersController::try_send(TimersEvent::TimerKeyTrigger(id.to_string(), is_release));
     });
 
     for i in 0..5 {

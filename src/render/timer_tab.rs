@@ -1,7 +1,7 @@
 use {
     super::Alignment,
     crate::{
-        controller::{ControllerEvent, Controller},
+        controller::{timers::{TimersController, TimersEvent}, Controller, ControllerEvent},
         fl,
         render::RenderState,
         settings::{RemoteSource, Settings, TimerSettings},
@@ -59,7 +59,7 @@ impl TimerTabState {
         );
         ui.same_line();
         if ui.button(fl!("reload-timers")) {
-            Controller::try_send(ControllerEvent::ReloadTimers);
+            TimersController::try_send(TimersEvent::ReloadTimers);
         }
         /*let button_text = match timer_window_state.open {
             true => "Close Timers",
@@ -250,7 +250,7 @@ impl TimerTabState {
                             _ => &fl!("disable"),
                         };
                         if ui.button(button_text) {
-                            Controller::try_send(ControllerEvent::TimerToggle(selected_timer.id.clone()));
+                            TimersController::try_send(TimersEvent::TimerToggle(selected_timer.id.clone()));
                         }
                     }
                 } else {

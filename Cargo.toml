@@ -22,12 +22,15 @@ workspace = true
 default = [
   "windows",
   "built-info",
+  "timers",
   "markers",
   "markers-edit",
   "meta-cache",
   "space",
   "extension-arcdps",
   "extension-nexus",
+]
+timers = [
 ]
 built-info = [
   #"built/chrono",
