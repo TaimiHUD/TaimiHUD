@@ -73,8 +73,8 @@ impl FestivalFixup {
         ("reactif.festivals.four_winds", Festival::FourWinds),
     ];
     pub const FESTIVAL_PREFIXES: &'static [&'static str] = &[
-        "tw_guides.tw_festivals",
         "tw_guides.tw_festivals.separatormenu05",
+        "tw_guides.tw_festivals",
         "reactif.festivals.hidden",
         "reactif.festivals",
     ];
