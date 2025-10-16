@@ -1383,6 +1383,7 @@ impl Controller {
                                 // wait a tiny bit to give render thread cleanup a chance
                                 thread::sleep(Duration::from_millis(84));
                             }
+                            // TODO: synchronize with controller shutdown in case it takes a while...
                             let res = exports::ExitHandle::try_exit()
                                 .and_then(|exit| exit.ok_or("unloaded/unaware?"));
                             match res {

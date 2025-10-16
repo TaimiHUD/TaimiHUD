@@ -875,6 +875,7 @@ fn load_language(detected_language: &str) -> rt::RuntimeResult {
         .parse()
         .map_err(|_| "Cannot parse detected language")?;
     let get_language = vec![detected_language_identifier];
+    // TODO: this may happen twice at startup and can be skipped if no change detected?
     i18n_embed::select(&*LANGUAGE_LOADER, &*LOCALIZATIONS, get_language.as_slice())
         .map_err(|_| "Couldn't load language!")?;
     (&*LANGUAGE_LOADER).set_use_isolating(false);

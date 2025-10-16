@@ -286,6 +286,7 @@ num-traits = { version = "0.2", default-features = false }
 indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
+# TODO: macro_rules_attribute = "0.2"
 
 [patch."https://github.com/zerthox/arcdps-rs"]
 # some fixes need to be contributed back upstream
