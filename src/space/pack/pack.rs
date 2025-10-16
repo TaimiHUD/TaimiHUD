@@ -284,6 +284,7 @@ impl ActivePack {
                     });
                 }
                 if category.marker_attributes.copy_value.is_some() {
+                    ui.same_line();
                     if with_i18n!("copy", |copy| ui.small_button(copy)) {
                         Self::copy_copyable(ui, &category.marker_attributes);
                     }
