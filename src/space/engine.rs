@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::ControllerEvent,
+        controller::{pathing::{PathingController, PathingEvent}, ControllerEvent},
         render::machine::RenderMachine,
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
@@ -168,7 +168,7 @@ impl Engine {
 
         let packs = PackCollection::new(&render_backend)
             .context("Initializing packs")?;
-        Controller::try_send(ControllerEvent::PathingLoadAll);
+        PathingController::try_send(PathingEvent::PathingLoadAll);
 
         let engine = Engine {
             #[cfg(feature = "space-ecs")]
