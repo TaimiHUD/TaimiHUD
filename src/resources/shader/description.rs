@@ -100,33 +100,33 @@ impl ShaderDescription {
         Self::INPUT_LAYOUT_JUST_VERTEX[1], // COLOR0
         Self::INPUT_LAYOUT_JUST_VERTEX[2], // NORMAL0
         Self::INPUT_LAYOUT_JUST_VERTEX[3], // TEXCOORD0
-        InputLayout::for_instance(1, cstr!("MODEL"), 0,
+        InputLayout::for_instance(1, c"MODEL", 0,
             dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
         ),
-        InputLayout::for_instance(1, cstr!("MODEL"), 1,
+        InputLayout::for_instance(1, c"MODEL", 1,
             dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
         ),
-        InputLayout::for_instance(1, cstr!("MODEL"), 2,
+        InputLayout::for_instance(1, c"MODEL", 2,
             dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
         ),
-        InputLayout::for_instance(1, cstr!("MODEL"), 3,
+        InputLayout::for_instance(1, c"MODEL", 3,
             dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
         ),
-        InputLayout::for_instance(1, cstr!("COLOUR"), 0,
+        InputLayout::for_instance(1, c"COLOUR", 0,
             dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
         ),
     ];
     const INPUT_LAYOUT_JUST_VERTEX: [D3D11_INPUT_ELEMENT_DESC; 4] = [
-        InputLayout::for_vertex(0, cstr!("POSITION"), 0,
+        InputLayout::for_vertex(0, c"POSITION", 0,
             dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, position))
         ),
-        InputLayout::for_vertex(0, cstr!("COLOR"), 0,
+        InputLayout::for_vertex(0, c"COLOR", 0,
             dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, colour))
         ),
-        InputLayout::for_vertex(0, cstr!("NORMAL"), 0,
+        InputLayout::for_vertex(0, c"NORMAL", 0,
             dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, normal))
         ),
-        InputLayout::for_vertex(0, cstr!("TEXCOORD"), 0,
+        InputLayout::for_vertex(0, c"TEXCOORD", 0,
             dxgi::DXGI_FORMAT_R32G32_FLOAT, Some(offset_of!(Vertex, texture))
         ),
     ];

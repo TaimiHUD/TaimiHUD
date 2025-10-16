@@ -7,11 +7,13 @@ pub use self::{
         D3D11_INPUT_CLASSIFICATION, D3D11_INPUT_ELEMENT_DESC,
         ID3D11InputLayout,
         InputClassification,
-        InputLayout, InputLayoutElement,
+        InputLayout,
     },
     pixel::{ShaderP, ID3D11PixelShader},
     vertex::{ShaderV, ID3D11VertexShader},
 };
+#[cfg(feature = "arcffi")]
+pub use self::desc::InputLayoutElement;
 
 #[cfg(feature = "serde")]
 pub(crate) mod serde_imp {

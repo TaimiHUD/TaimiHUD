@@ -80,8 +80,16 @@ pub trait ID3D11ResourceExt {
 
     fn as_params(&self) -> &[Option<Self::Output>];
     fn as_param(&self) -> &Option<Self::Output> where Self: Sized {
-        self.as_params().get(0)
-            .unwrap_or(arcffi::nn::opt_ref_none::<_>())
+        match self.as_params().get(0) {
+            Some(p) => p,
+            #[cfg(todo = "unnecessary")]
+            #[cfg(feature = "arcffi")]
+            None => arcffi::nn::opt_ref_none::<_>(),
+            #[cfg(todo = "unnecessary")]
+            #[cfg(not(feature = "arcffi"))]
+            None => unimplemented!("empty params require arcffi"),
+            None => &None,
+        }
     }
 }
 impl<T: ?Sized + ID3D11ResourceExt> ID3D11ResourceExt for &'_ T {

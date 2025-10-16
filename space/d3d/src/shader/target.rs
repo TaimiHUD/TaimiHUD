@@ -1,7 +1,4 @@
-use {
-    arcffi::cstr::cstr,
-    std::{ffi::CStr, fmt},
-};
+use std::{ffi::CStr, fmt};
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -66,19 +63,19 @@ impl ShaderTarget {
 
     pub fn c_name(&self) -> &'static CStr {
         match self {
-            Self::VertexShader_5_1 => cstr!("vs_5_1"),
-            Self::VertexShader_5_0 => cstr!("vs_5_0"),
-            Self::VertexShader_4_1 => cstr!("vs_4_1"),
-            Self::VertexShader_4_0 => cstr!("vs_4_0"),
-            Self::VertexShader_3_0 => cstr!("vs_3_0"),
-            Self::VertexShader_2_0 => cstr!("vs_2_0"),
+            Self::VertexShader_5_1 => c"vs_5_1",
+            Self::VertexShader_5_0 => c"vs_5_0",
+            Self::VertexShader_4_1 => c"vs_4_1",
+            Self::VertexShader_4_0 => c"vs_4_0",
+            Self::VertexShader_3_0 => c"vs_3_0",
+            Self::VertexShader_2_0 => c"vs_2_0",
 
-            Self::PixelShader_5_1 => cstr!("ps_5_1"),
-            Self::PixelShader_5_0 => cstr!("ps_5_0"),
-            Self::PixelShader_4_1 => cstr!("ps_4_1"),
-            Self::PixelShader_4_0 => cstr!("ps_4_0"),
-            Self::PixelShader_3_0 => cstr!("ps_3_0"),
-            Self::PixelShader_2_0 => cstr!("ps_2_0"),
+            Self::PixelShader_5_1 => c"ps_5_1",
+            Self::PixelShader_5_0 => c"ps_5_0",
+            Self::PixelShader_4_1 => c"ps_4_1",
+            Self::PixelShader_4_0 => c"ps_4_0",
+            Self::PixelShader_3_0 => c"ps_3_0",
+            Self::PixelShader_2_0 => c"ps_2_0",
         }
     }
 
