@@ -258,7 +258,15 @@ impl ActivePack {
                 ui.table_next_column();
                 ui.table_next_column();
             } else {
-                let mut unbuilt = TreeNode::new(&category.display_name)
+                let (copyable_categories, copyable_pois, pois) = copyable;
+                let has_copyable_pois = category_idx.map(|idx| copyable_categories.contains(&idx))
+                    .unwrap_or(false);
+
+                let mut unbuilt = TreeNode::new(&category.display_name);
+                if (category.is_separator || category.sub_categories.is_empty()) && category.marker_attributes.copy_value.is_none() && !has_copyable_pois {
+                    unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
+                }
+                unbuilt = unbuilt
                     .frame_padding(true)
                     .tree_push_on_open(false)
                     .opened(open_items.contains(&category.full_id), Condition::Always);
@@ -285,34 +293,31 @@ impl ActivePack {
                         });
                     }
                 }
-                if let Some(idx) = category_idx {
-                    let (copyable_categories, copyable_pois, pois) = copyable;
-                    if copyable_categories.contains(&idx) {
-                        // TODO: revisit or remove once trigger radius and interaction is working
-                        let pois = copyable_pois.iter()
-                            .filter_map(|&poi_idx| pois.get(poi_idx))
-                            //.filter(|poi| poi.category_idx == idx);
-                            .filter(|poi| poi.category == category.full_id);
-                        for (i, copyable) in pois.enumerate() {
-                            if i % 4 != 3 {
-                                ui.same_line();
-                            }
-                            let copied = match &copyable.attributes.tip_name {
-                                Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
-                                None => with_i18n!("copy", |copy| ui.small_button(copy)),
-                            };
-                            if copied {
-                                Self::copy_copyable(ui, &copyable.attributes);
-                            }
-                            if ui.is_item_hovered() {
-                                let template = copyable.attributes.tip_name.as_ref()
-                                    .map(|n| &n[..])
-                                    .unwrap_or("Generic Copyable Marker Name");
-                                Self::draw_tooltip(ui, template, || {
-                                    Self::draw_tooltip_poi(ui, &copyable.attributes);
-                                    Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
-                                });
-                            }
+                if has_copyable_pois {
+                    // TODO: revisit or remove once trigger radius and interaction is working
+                    let pois = copyable_pois.iter()
+                        .filter_map(|&poi_idx| pois.get(poi_idx))
+                        //.filter(|poi| poi.category_idx == idx);
+                        .filter(|poi| poi.category == category.full_id);
+                    for (i, copyable) in pois.enumerate() {
+                        if i % 4 != 3 {
+                            ui.same_line();
+                        }
+                        let copied = match &copyable.attributes.tip_name {
+                            Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
+                            None => with_i18n!("copy", |copy| ui.small_button(copy)),
+                        };
+                        if copied {
+                            Self::copy_copyable(ui, &copyable.attributes);
+                        }
+                        if ui.is_item_hovered() {
+                            let template = copyable.attributes.tip_name.as_ref()
+                                .map(|n| &n[..])
+                                .unwrap_or("Generic Copyable Marker Name");
+                            Self::draw_tooltip(ui, template, || {
+                                Self::draw_tooltip_poi(ui, &copyable.attributes);
+                                Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
+                            });
                         }
                     }
                 }
