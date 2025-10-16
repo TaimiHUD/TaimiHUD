@@ -1,11 +1,7 @@
 use {
     super::RenderState,
     crate::{
-        control_window,
-        fl,
-        settings::{ProgressBarSettings, Settings},
-        timer::{PhaseState, TimerAlert, TimerFile},
-        ControllerEvent, Controller,
+        control_window, controller::timers::{TimersController, TimersEvent}, fl, settings::{ProgressBarSettings, Settings}, timer::{PhaseState, TimerAlert, TimerFile}, Controller, ControllerEvent
     },
     glam::Vec2,
     nexus::imgui::{ProgressBar, StyleColor, Ui, Window},
@@ -40,7 +36,7 @@ impl TimerWindowState {
                 .build(ui, || {
                     if !self.phase_states.is_empty() {
                         if ui.button(fl!("reset-timers")) {
-                            Controller::try_send(ControllerEvent::TimerReset);
+                            TimersController::try_send(TimersEvent::TimerReset);
                             self.reset_phases();
                         }
                         ui.dummy([2.0; 2]);
