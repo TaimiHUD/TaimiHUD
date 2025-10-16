@@ -267,7 +267,7 @@ static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 #[cfg(feature = "extension-nexus")]
 nexus::export! {
-    name: exports::taimihud_addon_name!(),
+    name: exports::addon_title!(),
     signature: exports::nexus::SIG,
     load: exports::nexus::cb_load,
     unload: exports::nexus::cb_unload,
@@ -278,7 +278,7 @@ nexus::export! {
 
 #[cfg(feature = "extension-arcdps-codegen")]
 arcdps::export! {
-    name: exports::taimihud_addon_name!(),
+    name: exports::addon_title!(),
     sig: exports::arcdps::SIG,
     init: exports::arcdps::cb::init,
     release: exports::arcdps::cb::release,

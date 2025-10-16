@@ -24,7 +24,7 @@
   #TARGET_CC = "${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc";
   #TARGET_CC = "${stdenv.cc.targetPrefix}cc";
   builtInfo' = let
-    platform = builtInfo.platform or null;
+    platform = builtInfo.platform or (if source ? sourceInfo then "flake" else "nix");
     ref = builtInfo.ref or null;
     rev = builtInfo.rev or source.sourceInfo.rev or source.sourceInfo.dirtyRev or null;
     shortRev = builtInfo.shortRev or source.sourceInfo.shortRev or source.sourceInfo.dirtyShortRev or (mapNullable (builtins.substring 0 8));
