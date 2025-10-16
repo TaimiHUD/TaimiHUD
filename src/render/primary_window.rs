@@ -109,6 +109,8 @@ impl PrimaryWindowState {
             }
             if let Some(_token) = ui.tab_item(&fl!("info-tab")) {
                 self.info_tab.draw(ui, timer_window_state);
+            } else {
+                self.info_tab.regen_authors();
             }
             if !standalone {
                 #[cfg(feature = "extension-arcdps")]

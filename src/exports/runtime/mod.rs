@@ -1,4 +1,5 @@
 use anyhow::Context;
+use rand::{rng, seq::SliceRandom};
 use std::{
     borrow::Cow,
     ffi::CStr,
@@ -70,6 +71,12 @@ pub const NAME: &'static str = "TaimiHUD";
 pub const NAME_C: &'static CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(b"TaimiHUD\0")
 };
+pub fn crate_authors() -> String {
+    let mut rng = rng();
+    let mut authors: Vec<_> = env!("CARGO_PKG_AUTHORS").split(":").collect();
+    authors.shuffle(&mut rng);
+    authors.join(", ")
+}
 
 pub static LOADER_LOCK: Mutex<bool> = Mutex::new(false);
 
