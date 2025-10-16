@@ -18,6 +18,19 @@
       url = "github:oxalica/rust-overlay/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+      };
+    };
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs = {
+        flake-compat.follows = "flake-compat";
+        nixpkgs.follows = "nixpkgs";
+      };
+    };
   };
 
   outputs = { self, fenix, flake-utils, crane, nixpkgs, rust-overlay, ... }@inputs:
@@ -27,7 +40,7 @@
         packages = self.packages.${system};
         devShells = self.devShells.${system};
         inherit (legacyPackages) pkgs callPackage fenixPackages;
-
+        treefmtEval = inputs.treefmt-nix.lib.evalModule inputs.nixpkgs.legacyPackages.${system} ./treefmt.nix;
       in
       {
         # TaimiHUD Package
@@ -95,6 +108,24 @@
           craneLib = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchain);
           craneLibBuild = (crane.mkLib pkgs.buildPackages).overrideToolchain (p: legacyPackages.fenixToolchainBuild);
           craneLibShell = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchainShell);
+        };
+        formatter = treefmtEval.config.build.wrapper;
+        checks = let
+          git-hooks = system:
+          inputs.git-hooks.lib.${system}.run {
+            src = ./.;
+            hooks = {
+              treefmt = {
+                enable = true;
+                packageOverrides = {treefmt = inputs.self.formatter.${system};};
+              };
+              flake-checker.enable = true;
+              ripsecrets.enable = true;
+            };
+          };
+        in {
+          formatting = treefmtEval.config.build.check inputs.self;
+          git-hooks = git-hooks system;
         };
       });
 }

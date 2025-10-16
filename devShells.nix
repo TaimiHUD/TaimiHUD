@@ -3,6 +3,8 @@
 , system ? builtins.currentSystem
 , callPackage ? legacyPackages.callPackage or legacyPackages.pkgs.callPackage
 }: let
+  systemless-git-hooks = system: inputs.self.checks.${system}.git-hooks;
+  git-hooks = systemless-git-hooks system;
   taimiShell = { mkShell
   , lib
   , taimiHUD
@@ -19,7 +21,8 @@
   in mkShell {
     buildInputs = [
       stdenv.cc
-    ] ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
+    ] ++ git-hooks.buildInputs
+      ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
 
     depsBuildBuild = [
       pkg-config
@@ -32,6 +35,7 @@
     ];
 
     shellHook = ''
+      ${git-hooks.shellHook}
       export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH-}:${LD_LIBRARY_PATH}";
     '';
 
