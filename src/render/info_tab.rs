@@ -2,21 +2,37 @@ use {
     super::TimerWindowState,
     crate::{built_info, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
     nexus::imgui::{TableColumnSetup, Ui, StyleColor},
+    rand::{thread_rng, seq::SliceRandom},
+    itertools::Itertools,
 };
 
 #[cfg(feature = "space")]
 use crate::engine_ref;
 
-pub struct InfoTabState {}
+pub struct InfoTabState {
+    authors: String,
+}
 
 impl InfoTabState {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            authors: Self::authors(),
+        }
+    }
+
+    pub fn authors() -> String {
+        let mut rng = thread_rng();
+        let mut authors= env!("CARGO_PKG_AUTHORS").split(":").collect::<Vec<&str>>();
+        authors.shuffle(&mut rng);
+        authors.join(", ")
+    }
+
+    pub fn regen_authors(&mut self) {
+        self.authors = Self::authors();
     }
 
     pub fn draw(&self, ui: &Ui, timer_window_state: &TimerWindowState) {
         let name = env!("CARGO_PKG_NAME");
-        let authors = env!("CARGO_PKG_AUTHORS");
         let version = env!("CARGO_PKG_VERSION");
         let profile = match () {
             #[cfg(debug_assertions)]
@@ -25,7 +41,7 @@ impl InfoTabState {
             _ => "release",
         };
 
-        let project_heading = format!("{}, {} by {}", name, version, authors);
+        let project_heading = format!("{}, {} by {}", name, version, self.authors);
         RenderState::font_text("big", ui, &project_heading);
 
         let in_ci = match built_info::CI_PLATFORM {

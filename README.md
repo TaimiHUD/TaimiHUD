@@ -2,6 +2,8 @@
 
 A cross-platform Timers, Commander's Markers and Pathing addon, leveraging [Raidcore Nexus](https://raidcore.gg/Nexus) or [ArcDPS](https://www.deltaconnected.com/arcdps/).
 
+[Join our Discord!](https://discord.gg/dKpaphTMGS)
+
 ## References
 
 ### Nexus
