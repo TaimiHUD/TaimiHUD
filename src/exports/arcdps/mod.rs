@@ -1,11 +1,6 @@
 use {
     crate::{
-        exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}},
-        game_language_id,
-        marker::format::MarkerType,
-        render::{machine::RenderMachine, RenderState},
-        settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings, SourceKind},
-        with_i18n,
+        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}}, game_language_id, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings, SourceKind}, with_i18n
     }, anyhow::Context, arcdps::{
         extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
         Language,
@@ -472,7 +467,7 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 if arc.binding_matches(binding, vk) {
                     bound = true;
                     if is_release == is_up {
-                        crate::Controller::try_send(crate::ControllerEvent::TimerKeyTrigger(binding.id.into(), is_release));
+                        TimersController::try_send(TimersEvent::TimerKeyTrigger(binding.id.into(), is_release));
                     }
                 }
             }

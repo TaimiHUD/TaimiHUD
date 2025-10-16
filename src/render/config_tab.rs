@@ -1,14 +1,10 @@
 use {
     super::TimerWindowState,
     crate::{
-        controller::ProgressBarStyleChange,
-        fl,
-        render::{
+        controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent}, fl, render::{
             machine::RenderMachine,
             RenderEvent, TextFont,
-        },
-        settings::{MarkerAutoPlaceSettings, Settings, SquadCondition},
-        ControllerEvent, Controller,
+        }, settings::{MarkerAutoPlaceSettings, Settings, SquadCondition}, Controller, ControllerEvent
     },
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
@@ -140,12 +136,12 @@ impl ConfigTabState {
                 &fl!("stock-imgui-progress-bar"),
                 &mut timer_window_state.progress_bar.stock,
             ) {
-                Controller::try_send(ControllerEvent::ProgressBarStyle(
+                TimersController::try_send(TimersEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Stock(timer_window_state.progress_bar.stock),
                 ));
             };
             if ui.checkbox(&fl!("shadow"), &mut timer_window_state.progress_bar.shadow) {
-                Controller::try_send(ControllerEvent::ProgressBarStyle(
+                TimersController::try_send(TimersEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Shadow(timer_window_state.progress_bar.shadow),
                 ));
             }
@@ -153,7 +149,7 @@ impl ConfigTabState {
                 &fl!("centre-text-after-icon"),
                 &mut timer_window_state.progress_bar.centre_after,
             ) {
-                Controller::try_send(ControllerEvent::ProgressBarStyle(
+                TimersController::try_send(TimersEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Centre(timer_window_state.progress_bar.centre_after),
                 ));
             }
@@ -161,7 +157,7 @@ impl ConfigTabState {
                 .display_format("%.0f")
                 .build(ui, &mut timer_window_state.progress_bar.height)
             {
-                Controller::try_send(ControllerEvent::ProgressBarStyle(
+                TimersController::try_send(TimersEvent::ProgressBarStyle(
                     ProgressBarStyleChange::Height(timer_window_state.progress_bar.height),
                 ));
             }
@@ -172,7 +168,7 @@ impl ConfigTabState {
                         .selected(font == selected)
                         .build(ui)
                     {
-                        Controller::try_send(ControllerEvent::ProgressBarStyle(
+                        TimersController::try_send(TimersEvent::ProgressBarStyle(
                             ProgressBarStyleChange::Font(font.clone()),
                         ));
                         selected = font;

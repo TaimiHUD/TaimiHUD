@@ -1,6 +1,6 @@
 use {
     super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
-    crate::{controller::ProgressBarStyleChange, SETTINGS, SOURCES},
+    crate::{controller::timers::ProgressBarStyleChange, SETTINGS, SOURCES},
     anyhow::{anyhow, Context},
     chrono::{DateTime, Utc},
     futures::stream::StreamExt,
