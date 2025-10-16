@@ -225,6 +225,7 @@ impl ActivePoi {
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
         let size = Vector2::splat(self.scale_map / 2.0);
 
+        // TODO: DPI/UI scaling is irrelevant here right?
         let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
             world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(scale.extend(scale.y).into()),

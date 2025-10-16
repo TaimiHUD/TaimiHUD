@@ -155,6 +155,7 @@ impl ShaderLoader {
         let pixel = self.pixel.get(name)
             .map(|s| s.as_ref()).flatten();
         if vertex.is_none() && pixel.is_none() {
+            // TODO: insert stub shader after warning once...
             log::warn!("shader {name} unavailable!");
         }
         if let Some((shader, layout)) = vertex {
