@@ -11,6 +11,7 @@
 , enableBuilt ? builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev)
 , enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0"
 , enableCache ? true
+, enableTimers ? true
 , enableMarkers ? true
 , enableSpace ? true
 , enableNexus ? true
@@ -36,6 +37,7 @@
     ${mapNullable (_: "BUILT_OVERRIDE_taimi_hud_GIT_COMMIT_HASH_SHORT") shortRev} = shortRev + revSuffix;
   };
   cargoBuildFeatures = features
+    ++ optional enableTimers "timers"
     ++ optionals enableMarkers [
       "markers"
       "markers-edit"
