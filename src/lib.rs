@@ -20,14 +20,17 @@ use {
 };
 use {
     crate::{
-        controller::{Controller, ControllerEvent},
+        controller::{
+            Controller, ControllerEvent,
+            markers::{MarkersController, MarkersEvent},
+        },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
         settings::SettingsLock,
     },
     anyhow::Context,
     arcdps::{extras::UserInfo, AgentOwned, Language},
-    controller::SquadState,
+    controller::markers::SquadState,
     i18n_embed::{
         fluent::{fluent_language_loader, FluentLanguageLoader},
         DefaultLocalizer, LanguageLoader, RustEmbedNotifyAssets,
@@ -714,7 +717,7 @@ fn load_nexus() {
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
             if let Some(mumble_identity) = mumble_identity {
-                Controller::receive_mumble_identity(mumble_identity);
+                MarkersController::receive_mumble_identity(mumble_identity);
             }
         }))
         .revert_on_unload();
@@ -957,16 +960,16 @@ fn receive_evtc_local(combat_data: &CombatData) {
 #[cfg(all(feature = "markers", feature = "extension-nexus"))]
 fn receive_group_update(state: SquadState, group_member: &GroupMember) {
     let group_member: GroupMemberOwned = group_member.into();
-    let event = ControllerEvent::RTAPISquadUpdate(state, group_member);
-    Controller::try_send(event);
+    let event = MarkersEvent::RTAPISquadUpdate(state, group_member);
+    MarkersController::try_send(event);
 }
 
 fn receive_squad_update<'u>(update: impl IntoIterator<Item = &'u UserInfo>) {
     let update: Vec<_> = update.into_iter()
         .map(|x| unsafe { ptr::read(x) }.into())
         .collect();
-    let event = ControllerEvent::ExtrasSquadUpdate(update);
-    Controller::try_send(event);
+    let event = MarkersEvent::ExtrasSquadUpdate(update);
+    MarkersController::try_send(event);
 }
 
 fn process_textures() {
