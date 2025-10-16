@@ -49,7 +49,7 @@ pub struct SourcesFile(pub HashMap<SourceKind, Vec<DeserializedSource>>);
 
 impl SourcesFile {
     pub async fn download_sources() -> anyhow::Result<Self> {
-        let response: Response = super::source::get("https://raw.githubusercontent.com/TaimiHUD/DataSources/refs/heads/main/sources.toml").await?;
+        let response: Response = super::source::get("https://github.com/TaimiHUD/DataSources/releases/latest/download/sources.toml").await?;
         let text = response.text().await?;
         let sources: HashMap<SourceKind, Vec<DeserializedSource>> = toml::from_str(&text)?;
         Ok(Self(sources))
