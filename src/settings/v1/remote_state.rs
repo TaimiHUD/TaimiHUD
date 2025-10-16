@@ -1,6 +1,6 @@
 use {
     crate::{
-        settings::{source::Source, SourceKind, GitHubSource, DeserializedSource, NeedsUpdate, RemoteSource, SourcesFile},
+        settings::{source::Source, SourceKind, DeserializedSource, NeedsUpdate, RemoteSource, SourcesFile},
         timer::TimerFile,
 
     },
@@ -12,6 +12,7 @@ use {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RemoteState {
     pub source: DeserializedSource,
+    #[serde(default)]
     pub kind: SourceKind,
     pub installed_tag: Option<String>,
     pub installed_path: Option<PathBuf>,
