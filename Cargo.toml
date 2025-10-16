@@ -9,7 +9,11 @@ members = [
 
 [package]
 name = "taimi_hud"
-authors = [ "kittywitch" ]
+authors = [
+  "kittywitch",
+  "Connicpu",
+  "arcnmx"
+]
 description = "Pathing, encounter timers and markers"
 version = "0.2.26"
 edition = "2021"
