@@ -1,12 +1,7 @@
 use {
     super::Alignment,
     crate::{
-        controller::ControllerEvent,
-        fl,
-        marker::format::MarkerSet,
-        render::{machine::RenderMachine, RenderState},
-        settings::{MarkerSettings, Settings},
-        RenderEvent, Controller,
+        controller::ControllerEvent, fl, marker::format::MarkerSet, render::{machine::RenderMachine, RenderState}, settings::{MarkerSettings, Settings}, Controller, MarkersController, MarkersEvent, RenderEvent
     },
     glam::Vec2,
     glamour::TransformMap,
@@ -69,7 +64,7 @@ impl MarkerTabState {
         }
         ui.same_line();
         if ui.button(fl!("reload-markers")) {
-            Controller::try_send(ControllerEvent::ReloadMarkers);
+            MarkersController::try_send(MarkersEvent::ReloadMarkers);
         }
         #[allow(clippy::collapsible_if)]
         if self.category_status.len() != self.markers.keys().len() {
@@ -252,7 +247,7 @@ impl MarkerTabState {
                     {
                         ui.text_colored([1.0, 0.0, 0.0, 1.0], fl!("delete-markerset-warning"));
                         if ui.button(fl!("delete")) {
-                            Controller::try_send(ControllerEvent::DeleteMarker {
+                            MarkersController::try_send(MarkersEvent::DeleteMarker {
                                 path: selected_marker_set.path.clone().unwrap(),
                                 category: selected_marker_set.category.clone(),
                                 idx: selected_marker_set.idx.unwrap(),
@@ -352,11 +347,11 @@ impl MarkerTabState {
                         false => fl!("autoplacement-enable"),
                     };
                     if ui.button(button_text) {
-                        Controller::try_send(ControllerEvent::MarkerToggle(selected_marker_set.id()));
+                        MarkersController::try_send(MarkersEvent::MarkerToggle(selected_marker_set.id()));
                     }
                     ui.dummy([4.0; 2]);
                     if ui.button(&fl!("markers-place")) {
-                        Controller::try_send(ControllerEvent::SetMarker(selected_marker_set.clone()));
+                        MarkersController::try_send(MarkersEvent::SetMarker(selected_marker_set.clone()));
                     }
                     pushy.pop();
                 } else {

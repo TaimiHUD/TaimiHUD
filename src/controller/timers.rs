@@ -1,3 +1,5 @@
+use taimi_meta::ui::UiState;
+
 use crate::{
     render::{
         RenderEvent,
@@ -61,6 +63,10 @@ pub(crate) enum ProgressBarStyleChange {
 
 
 impl TimersController {
+    pub const TIMERS_NOTABLE_STATE: UiState = UiState::from_bits_retain(
+        UiState::InCombat.bits()
+    );
+
     async fn load(&self, settings: SettingsLock) -> Vec<Arc<TimerFile>> {
         let settings_lock = settings.read().await;
         let mut timers = Vec::new();

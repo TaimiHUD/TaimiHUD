@@ -4,7 +4,7 @@ use {
         controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent}, fl, render::{
             machine::RenderMachine,
             RenderEvent, TextFont,
-        }, settings::{MarkerAutoPlaceSettings, Settings, SquadCondition}, Controller, ControllerEvent
+        }, settings::{MarkerAutoPlaceSettings, Settings, SquadCondition}, Controller, ControllerEvent, MarkersController, MarkersEvent
     },
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
@@ -78,7 +78,7 @@ impl ConfigTabState {
                 .build(ui, autoplace_closure)
             {
                 self.marker_autoplace = selection;
-                Controller::try_send(ControllerEvent::MarkerAutoPlaceSettings(
+                MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
                     self.marker_autoplace.clone(),
                 ));
             }
@@ -108,7 +108,7 @@ impl ConfigTabState {
                         }
                         _ => (),
                     };
-                    Controller::try_send(ControllerEvent::MarkerAutoPlaceSettings(
+                    MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
                         self.marker_autoplace.clone(),
                     ));
                 }

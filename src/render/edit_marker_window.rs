@@ -1,11 +1,6 @@
 use {
     crate::{
-        controller::MarkerSaveEvent,
-        exports::runtime as rt,
-        fl,
-        marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
-        util::{ComboInput, PositionInput, UiExt},
-        ControllerEvent, Controller, ACCOUNT_NAME_CELL,
+        controller::markers::MarkerSaveEvent, exports::runtime as rt, fl, marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType}, util::{ComboInput, PositionInput, UiExt}, Controller, ControllerEvent, MarkersController, MarkersEvent, ACCOUNT_NAME_CELL
     },
     glam::Vec3,
     nexus::imgui::{
@@ -171,7 +166,7 @@ impl EditMarkerWindowState {
     }
 
     pub fn request_filenames(&self) {
-        Controller::try_send(ControllerEvent::GetMarkerPaths);
+        MarkersController::try_send(MarkersEvent::GetMarkerPaths);
     }
 
     pub fn save_file(&mut self) {
@@ -191,7 +186,7 @@ impl EditMarkerWindowState {
                             self.idx.unwrap(),
                         ),
                     };
-                    Controller::try_send(ControllerEvent::SaveMarker(evt));
+                    MarkersController::try_send(MarkersEvent::SaveMarker(evt));
                 }
             }
         }

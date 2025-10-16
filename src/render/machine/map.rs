@@ -1,5 +1,8 @@
 use {
-    crate::controller::{Controller, ControllerEvent},
+
+    crate::controller::{Controller, ControllerEvent,
+        markers::{MarkersController, MarkersEvent},
+    },
     std::time::Instant,
     super::{RenderMachine, RenderUsers},
     taimi_meta::ui::{
@@ -78,7 +81,7 @@ impl RenderMachine {
     pub fn act_map_open(&mut self) {
         #[cfg(feature = "markers")]
         if self.map_users.contains(RenderUsers::MARKERS) {
-            Controller::try_send(ControllerEvent::UiMapOpened(self.get_map_open_state()));
+            MarkersController::try_send(MarkersEvent::UiMapOpened(self.get_map_open_state()));
         }
     }
 
@@ -97,6 +100,6 @@ impl RenderMachine {
         if display_changed && self.mumblelink_users.contains(RenderUsers::SPACE) {
             Engine::try_send(SpaceEvent::UiResize(self.display_size()));
         }
-        Controller::try_send(ControllerEvent::UiResize(self.map.calibration.clone()));
+        MarkersController::try_send(MarkersEvent::UiResize(self.map.calibration.clone()));
     }
 }
