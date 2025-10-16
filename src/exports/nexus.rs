@@ -9,6 +9,7 @@ use {
         time::Duration,
     },
     nexus::{
+        alert,
         data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
         gamebind,
         localization::translate,
@@ -173,6 +174,15 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
         true => gamebind::press_gamebind(bind),
         false => gamebind::release_gamebind(bind),
     }))
+}
+
+pub fn send_alert(_ui: &rt::imgui::Ui, message: &str) -> RuntimeResult<Option<()>> {
+    if !available() {
+        return Ok(None)
+    }
+
+    alert::send_alert(message);
+    Ok(Some(()))
 }
 
 pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {

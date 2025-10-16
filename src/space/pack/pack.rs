@@ -5,9 +5,14 @@ use {
             Controller,
             ControllerEvent,
         },
+        exports::runtime::{
+            self as rt,
+            imgui::{self, Ui, Condition, TreeNode},
+        },
         render::{
             machine::{RenderMachine, RenderPosition},
             pathing_window::{PathingFilterState, PathingSearchState},
+            RenderState,
         },
         space::{
             pack::{FestivalFixup, Pack, MarkerAttributesExt},
@@ -17,11 +22,7 @@ use {
             DrawSpace,
             LocalContext, MapContext,
         },
-        with_i18n,
-    },
-    nexus::{
-        imgui::{Ui, Condition, TreeNode},
-        alert::send_alert,
+        fl, with_i18n,
     },
     anyhow::Context,
     bitvec::vec::BitVec,
@@ -42,7 +43,7 @@ use {
         buffer::BufferOf,
     },
     taimi_pack::{
-        attributes::Festival,
+        attributes::{Festival, MarkerAttributes},
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category, Poi,
     },
@@ -237,18 +238,21 @@ impl ActivePack {
             }
         }
         if display {
-            if let Some(copy_value) = &category.marker_attributes.copy_value {
+            let is_copyable = match &category.marker_attributes.copy_value {
+                Some(value) if category.sub_categories.is_empty() && !category.is_separator =>
+                    Some(value),
+                _ => None,
+            };
+            if let Some(..) = is_copyable {
                 ui.indent();
-                if ui.small_button(&category.display_name) {
-                    ui.set_clipboard_text(copy_value);
-                    if let Some(copy_message) = &category.marker_attributes.copy_message {
-                        send_alert(copy_message);
-                    }
-                    if ui.is_item_hovered() {
-                        if let Some(copy_message) = &category.marker_attributes.copy_message {
-                            ui.tooltip_text(copy_message);
-                        }
-                    }
+                if ui.small_button(&fl!("copy-arg", arg = (&category.display_name[..]))) {
+                    Self::copy_copyable(ui, &category.marker_attributes);
+                }
+                if ui.is_item_hovered() {
+                    Self::draw_tooltip(ui, &category.display_name, || {
+                        Self::draw_tooltip_category(ui, category);
+                        Self::draw_tooltip_copyable(ui, &category.marker_attributes, Some(&category.display_name));
+                    });
                 }
                 ui.unindent();
                 ui.table_next_column();
@@ -266,6 +270,21 @@ impl ActivePack {
                     unbuilt = unbuilt.framed(true);
                 }
                 let tree_token = unbuilt.push(ui);
+                if ui.is_item_hovered() && Self::category_has_tooltip(category) {
+                    Self::draw_tooltip(ui, &category.display_name, || {
+                        Self::draw_tooltip_category(ui, category);
+                    });
+                }
+                if category.marker_attributes.copy_value.is_some() {
+                    if with_i18n!("copy", |copy| ui.small_button(copy)) {
+                        Self::copy_copyable(ui, &category.marker_attributes);
+                    }
+                    if ui.is_item_hovered() {
+                        Self::draw_tooltip(ui, &category.display_name, || {
+                            Self::draw_tooltip_copyable(ui, &category.marker_attributes, Some(&category.display_name));
+                        });
+                    }
+                }
                 if let Some(idx) = category_idx {
                     let (copyable_categories, copyable_pois, pois) = copyable;
                     if copyable_categories.contains(&idx) {
@@ -278,35 +297,21 @@ impl ActivePack {
                             if i % 4 != 3 {
                                 ui.same_line();
                             }
-                            if with_i18n!("copy", |copy| ui.small_button(copy)) {
-                                if let Some(copy_value) = &copyable.attributes.copy_value {
-                                    ui.set_clipboard_text(copy_value);
-                                    if let Some(copy_message) = &copyable.attributes.copy_message {
-                                        send_alert(copy_message);
-                                    }
-                                }
+                            let copied = match &copyable.attributes.tip_name {
+                                Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
+                                None => with_i18n!("copy", |copy| ui.small_button(copy)),
+                            };
+                            if copied {
+                                Self::copy_copyable(ui, &copyable.attributes);
                             }
                             if ui.is_item_hovered() {
-                                let copy_message = copyable.attributes.copy_message.as_ref()
-                                    .map(|m| &m[..]);
-                                let preview;
-                                let copy_message = match &copyable.attributes.copy_value {
-                                    Some(copy_value) if !copy_value.starts_with('[') || !copy_value.ends_with(']') => {
-                                        // since these aren't intended to be displayed, there's no canon name to use...
-                                        // if it looks like more than just a location link, try to preview it:
-                                        let sep = copy_message.is_some().then_some("\n").unwrap_or("");
-                                        preview = format!("\"{copy_value}\"{sep}{}", copy_message.unwrap_or_default());
-                                        Some(&preview[..])
-                                    },
-                                    _ => copy_message,
-                                };
-                                if let Some(copy_message) = copy_message {
-                                    ui.tooltip_text(copy_message);
-                                    #[cfg(todo)]
-                                    ui.tooltip(|| {
-                                        ui.text_wrapped(copy_message);
-                                    });
-                                }
+                                let template = copyable.attributes.tip_name.as_ref()
+                                    .map(|n| &n[..])
+                                    .unwrap_or("Generic Copyable Marker Name");
+                                Self::draw_tooltip(ui, template, || {
+                                    Self::draw_tooltip_poi(ui, &copyable.attributes);
+                                    Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
+                                });
                             }
                         }
                     }
@@ -359,6 +364,107 @@ impl ActivePack {
             }
         }
         push_token.pop();
+    }
+
+    fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
+        let Some(copy_value) = &attributes.copy_value else { return };
+        ui.set_clipboard_text(copy_value);
+        if let Some(copy_message) = &attributes.copy_message {
+            let _ = rt::send_alert(ui, copy_message);
+        }
+    }
+
+    fn draw_tooltip_category(ui: &Ui, category: &Category) {
+        let desc = match &category.marker_attributes.tip_description {
+            Some(desc) if !desc.is_empty() => Some(&desc[..]),
+            _ => None,
+        };
+        let title = match &category.marker_attributes.tip_name {
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+                Some(&title[..]),
+            _ => None,
+        };
+
+        if let Some(title) = title {
+            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            ui.text(title);
+        }
+
+        if let Some(tip) = desc {
+            ui.text_wrapped(tip);
+        }
+    }
+
+    fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
+        let desc = match &attributes.tip_description {
+            Some(desc) if !desc.is_empty() => Some(&desc[..]),
+            _ => None,
+        };
+
+        if let Some(title) = &attributes.tip_name {
+            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            ui.text(title);
+        }
+        if let Some(desc) = &attributes.tip_description {
+            ui.text_wrapped(desc);
+        }
+    }
+
+    fn category_has_tooltip(category: &Category) -> bool {
+        match &category.marker_attributes.tip_description {
+            Some(desc) if !desc.is_empty() =>
+                return true,
+            _ => (),
+        }
+        match &category.marker_attributes.tip_name {
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+                return true,
+            _ => (),
+        }
+
+        false
+    }
+
+    /// since these aren't intended to be displayed, there's no canon name to use...
+    /// if it looks like more than just a location link, we'll try to preview it
+    fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
+        let Some(copy_value) = attributes.copy_value.as_ref() else {
+            return false
+        };
+        if !copy_value.starts_with('[') || !copy_value.ends_with(']') {
+            return true
+        }
+        false
+    }
+
+    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+        use imgui::StyleVar;
+
+        let _id = ui.push_id("category_tooltip");
+        let [minwidth, lineheight] = ui.calc_text_size(title_template);
+        unsafe {
+            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
+        };
+        let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
+        ui.tooltip(|| {
+            {
+                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                ui.dummy([minwidth, f32::EPSILON]);
+            }
+            f()
+        })
+    }
+
+    fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
+        let copy_message = attributes.copy_message.as_ref().map(|m| &m[..]);
+        match &attributes.copy_value {
+            Some(copy_value) if (display_name.is_none() || copy_message.is_none()) && Self::copyable_value_has_message(attributes) =>
+                ui.text_wrapped(&format!("\"{copy_value}\"")),
+            _ => (),
+        }
+        if let Some(copy_message) = copy_message {
+            ui.text_wrapped(copy_message);
+        }
     }
 
     pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {

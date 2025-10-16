@@ -289,6 +289,21 @@ pub async fn invoke_marker_bind(marker: MarkerType, target: bool, duration: Dura
     press_marker_bind(marker, target, false, position).await
 }
 
+/// TODO: push to controller alert queue or something...
+pub fn send_alert(ui: &imgui::Ui, message: &str) -> RuntimeResult<()> {
+    #[cfg(feature = "extension-nexus")]
+    if let Some(res) = exports::nexus::send_alert(ui, message)? {
+        return Ok(res)
+    }
+
+    #[cfg(feature = "extension-arcdps")]
+    if let Some(res) = exports::arcdps::send_alert(ui, message)? {
+        return Ok(res)
+    }
+
+    Err(RT_UNAVAILABLE)
+}
+
 #[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<SwapChain>> {
     #[cfg(feature = "extension-nexus")]

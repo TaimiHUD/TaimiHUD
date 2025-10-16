@@ -14,7 +14,7 @@ use {
             btree_map,
             BTreeMap,
         },
-        ffi::{c_void, CStr, OsStr},
+        ffi::{c_void, CStr, CString, OsStr},
         fmt::{self, Write},
         ops,
         panic,
@@ -1039,6 +1039,10 @@ pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Opt
         return Ok(Some(()))
     }
 
+    log_window_message(message).map(Some)
+}
+
+fn log_window_message(message: &CStr) -> RuntimeResult<()> {
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_e8_log_window() => None,
@@ -1065,7 +1069,7 @@ pub fn log_window(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Opt
                 e(Some(message.into()))
             })
         }),
-    }.ok_or(NO_EXPORT).map(Some)
+    }.ok_or(NO_EXPORT)
 }
 
 pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
@@ -1214,6 +1218,19 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
             Err("unrecognized bind")
         },
     }.map(Some)
+}
+
+pub fn send_alert(ui: &imgui::Ui, message: &str) -> RuntimeResult<Option<()>> {
+    if !available() {
+        return Ok(None)
+    }
+
+    let [r, g, b, _] = ui.style_color(imgui::StyleColor::NavHighlight);
+    let (r, g, b) = ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8);
+    let msg = format!("TaimiHUD Alert: <c=#{r:02x}{g:02x}{b:02x}>{message}</c>");
+    let msg = unsafe { CString::from_vec_unchecked(msg.into_bytes()) };
+
+    log_window_message(&msg).map(Some)
 }
 
 #[cfg(todo)]

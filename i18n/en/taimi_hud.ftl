@@ -8,6 +8,7 @@ font = Font
 okay = OK
 delete = Delete
 copy = Copy
+copy-arg = Copy { $arg }
 save = Save
 quit = Quit
 delete-item = { delete } "{ $item }"?
