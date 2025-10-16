@@ -2,8 +2,8 @@ use {
     crate::{
         controller::{timers::{TimersController, TimersEvent}, Controller, ControllerEvent},
         exports::{
-            arcdps::{self as exports, KeyIntercept},
-            runtime::{self as rt, imgui},
+            arcdps as exports,
+            runtime::{self as rt, bindings::KeyIntercept, imgui},
         },
         game_language_id,
         settings::{ArcSettings, ArcUpdatePreference, ArcVk, Settings},

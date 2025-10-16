@@ -11,6 +11,8 @@ use {
 };
 #[cfg(feature = "space")]
 use crate::space::engine::{Engine, SpaceEvent};
+#[cfg(any(feature = "markers", feature = "space"))]
+use crate::exports::runtime::bindings::{GameControls, GameControl};
 
 impl RenderMachine {
     pub fn get_map_open(&self) -> MapOpen {
@@ -79,6 +81,12 @@ impl RenderMachine {
 
     #[cfg(any(feature = "markers", feature = "space"))]
     pub fn act_map_open(&mut self) {
+        if self.map_open && self.map_hidden {
+            // TODO: move this to require pressing UI toggle while world map is open maybe?
+            log::info!("UI toggle escape hatch - resetting hidden state due to world map");
+            self.map_hidden = false;
+        }
+
         #[cfg(feature = "markers")]
         if self.map_users.contains(RenderUsers::MARKERS) {
             MarkersController::try_send(MarkersEvent::UiMapOpened(self.get_map_open_state()));
@@ -87,11 +95,15 @@ impl RenderMachine {
 
     #[cfg(any(feature = "markers", feature = "space"))]
     pub fn is_map_visible(&self) -> Option<MapContext> {
-        self.is_ingame().map(|_|
-            self.get_map_open_state()
+        self.is_ingame().and_then(|_| {
+            let context = self.get_map_open_state()
                 // TODO: .primary_context() if no anims enabled
-                .visible_context()
-        )
+                .visible_context();
+            match (context, self.map_hidden) {
+                (MapContext::Minimap, true) => None,
+                (context, _) => Some(context),
+            }
+        })
     }
 
     #[cfg(any(feature = "markers", feature = "space"))]
@@ -101,5 +113,36 @@ impl RenderMachine {
             Engine::try_send(SpaceEvent::UiResize(self.display_size()));
         }
         MarkersController::try_send(MarkersEvent::UiResize(self.map.calibration.clone()));
+    }
+
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub fn act_controls_changed(&mut self, controls_state: GameControls, controls_changed: GameControls) {
+        let pressed = controls_state & controls_changed;
+        if controls_changed.contains(GameControl::Map_OpenClose) {
+            self.act_press_map_toggle(controls_state.contains(GameControl::Map_OpenClose));
+        }
+        if pressed.contains(GameControl::UI_ShowHideUI) {
+            self.map_hidden ^= true;
+        }
+    }
+
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub fn act_press_map_toggle(&mut self, down: bool) {
+        if !down {
+            // ignore release event
+            return
+        }
+
+        let changed = match self.get_map_open_state() {
+            MapOpen::Open =>
+                self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
+            // TODO: reconsider in case we're wrong?
+            MapOpen::Opening { elapsed } if elapsed > 0.5 =>
+                self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
+            _ => false,
+        };
+        if changed {
+            self.act_map_open();
+        }
     }
 }

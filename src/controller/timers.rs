@@ -1,6 +1,7 @@
 use taimi_meta::ui::UiState;
 
 use crate::{
+    exports::runtime::bindings::TaimiControls,
     render::{
         RenderEvent,
         TextFont,
@@ -139,6 +140,18 @@ impl TimersController {
         }
     }
 
+    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+        let pressed = state & changed;
+        if pressed.intersects(TaimiControls::TIMER_RESET) {
+            self.reset().await;
+        }
+        let triggers = changed & TaimiControls::TIMER_TRIGGERS;
+        for trigger in triggers {
+            let idx = trigger.index() - TaimiControls::TIMER_TRIGGER_0.index();
+            self.timer_key_trigger_idx(idx.into(), !state.intersects(trigger))
+        }
+    }
+
     pub(crate) async fn reload(&mut self, settings: SettingsLock, rt_sender: RtSender) {
         self.timers.clear();
         self.sources_to_timers.clear();
@@ -223,6 +236,10 @@ impl TimersController {
 
     async fn timer_key_trigger(&mut self, id: String, is_release: bool) {
         let idx = id.chars().last().unwrap().to_digit(10).unwrap();
+        self.timer_key_trigger_idx(idx, is_release);
+    }
+
+    fn timer_key_trigger_idx(&mut self, idx: u32, is_release: bool) {
         for timer in &mut self.current_timers {
             timer.key_event(idx, is_release);
         }

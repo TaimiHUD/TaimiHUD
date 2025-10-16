@@ -67,6 +67,7 @@ use nexus::{
         Event, MUMBLE_IDENTITY_UPDATED,
         WINDOW_RESIZED,
     },
+    on_unload,
     texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
     gui::{register_render, render, RenderType},
     keybind::{keybind_handler, register_keybind_with_string},
@@ -440,9 +441,13 @@ fn init() -> Result<(), &'static str> {
 
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
+    use crate::exports::{
+        nexus::{register_keybind, unregister_keybinds, quick_access_add, quick_access_remove_all},
+        runtime::bindings::TaimiControls,
+    };
+
     // Rendering setup
 
-    use controller::timers::{TimersController, TimersEvent};
     let taimi_window = render!(|ui| {
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
@@ -466,123 +471,36 @@ fn load_nexus() {
 
     register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
+    on_unload(unregister_keybinds);
     // Handle window toggling with keybind and button
-    let main_window_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            control_window(WINDOW_PRIMARY, None);
-        }
-    });
-
-    register_keybind_with_string(
-        fl!("primary-window-toggle"),
-        main_window_keybind_handler,
-        "ALT+SHIFT+M",
-    )
-    .revert_on_unload();
+    register_keybind(TaimiControls::WINDOW_PRIMARY, c"primary-window-toggle", c"ALT+SHIFT+M");
 
     // Handle window toggling with keybind and button
     #[cfg(feature = "markers")]
-    let marker_window_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            control_window(WINDOW_MARKERS, None);
-        }
-    });
-
-    #[cfg(feature = "markers")]
-    register_keybind_with_string(
-        fl!("marker-window-toggle"),
-        marker_window_keybind_handler,
-        "ALT+SHIFT+L",
-    )
-    .revert_on_unload();
+    register_keybind(TaimiControls::WINDOW_MARKERS, c"marker-window-toggle", c"ALT+SHIFT+L");
 
     // Handle window toggling with keybind and button
-    let timer_window_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            control_window(WINDOW_TIMERS, None);
-        }
-    });
-
-    register_keybind_with_string(
-        fl!("timer-window-toggle"),
-        timer_window_keybind_handler,
-        "ALT+SHIFT+K",
-    )
-    .revert_on_unload();
-
-    // Handle window toggling with keybind and button
-    #[cfg(feature = "space")]
-    let pathing_window_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            control_window(WINDOW_PATHING, None);
-        }
-    });
+    #[cfg(feature = "timers")]
+    register_keybind(TaimiControls::WINDOW_TIMERS, c"timer-window-toggle", c"ALT+SHIFT+K");
 
     #[cfg(feature = "space")]
-    register_keybind_with_string(
-        fl!("pathing-window-toggle"),
-        pathing_window_keybind_handler,
-        "ALT+SHIFT+N",
-    )
-    .revert_on_unload();
-
-    #[cfg(feature = "space")]
-    let pathing_render_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            Engine::try_send(SpaceEvent::PathingToggle);
-        }
-    });
-
-    #[cfg(feature = "space")]
-    register_keybind_with_string(
-        fl!("pathing-render-toggle"),
-        pathing_render_keybind_handler,
-        "ALT+SHIFT+N",
-    )
-    .revert_on_unload();
-
-    #[cfg(feature = "space")]
-    let pathing_render_minimap_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
-        }
-    });
-
-    #[cfg(feature = "space")]
-    register_keybind_with_string(
-        fl!("pathing-render-minimap-toggle"),
-        pathing_render_minimap_keybind_handler,
-        "ALT+SHIFT+F1",
-    )
-    .revert_on_unload();
-
-    #[cfg(feature = "space")]
-    let pathing_render_map_keybind_handler = keybind_handler!(|_id, is_release| {
-        if !is_release {
-            Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
-        }
-    });
-
-    #[cfg(feature = "space")]
-    register_keybind_with_string(
-        fl!("pathing-render-map-toggle"),
-        pathing_render_map_keybind_handler,
-        "ALT+SHIFT+F2",
-    )
-    .revert_on_unload();
-
-    let event_trigger_keybind_handler = keybind_handler!(|id, is_release| {
-        TimersController::try_send(TimersEvent::TimerKeyTrigger(id.to_string(), is_release));
-    });
-
-    for i in 0..5 {
-        register_keybind_with_string(
-            fl!("timer-key-trigger", id = format!("{}", i)),
-            event_trigger_keybind_handler,
-            "",
-        )
-        .revert_on_unload();
+    {
+        register_keybind(TaimiControls::WINDOW_PATHING, c"pathing-window-toggle", c"ALT+SHIFT+N");
+        register_keybind(TaimiControls::PATHING_SPACE, c"pathing-render-toggle", c"(null)");
+        register_keybind(TaimiControls::PATHING_MINIMAP, c"pathing-render-minimap-toggle", c"ALT+SHIFT+F1");
+        register_keybind(TaimiControls::PATHING_MAP, c"pathing-render-map-toggle", c"ALT+SHIFT+F2");
     }
+
+    #[cfg(feature = "timers")]
+    for control in TaimiControls::TIMER_TRIGGERS {
+        use std::ffi::CString;
+
+        let id = control.index() - TaimiControls::TIMER_TRIGGER_0.index();
+        let id = format!("timer-key-trigger-{id}");
+        register_keybind(control, CString::new(id).unwrap_or_default(), c"(null)");
+    }
+    #[cfg(feature = "timers")]
+    register_keybind(TaimiControls::TIMER_RESET, c"timer-key-reset", c"(null)");
 
     // Disused currently, icon loading for quick access
     /*
@@ -594,107 +512,14 @@ fn load_nexus() {
     );
     */
 
-    let taimi_icon = include_bytes!("../icons/taimi.png");
-    let taimi_hover_icon = include_bytes!("../icons/taimi-hover.png");
-    let markers_icon = include_bytes!("../icons/markers.png");
-    let markers_hover_icon = include_bytes!("../icons/markers-hover.png");
-    let timers_icon = include_bytes!("../icons/timers.png");
-    let timers_hover_icon = include_bytes!("../icons/timers-hover.png");
-    let pathing_icon = include_bytes!("../icons/pathing.png");
-    let pathing_hover_icon = include_bytes!("../icons/pathing-hover.png");
-    let pathing_toggle_icon = include_bytes!("../icons/pathing-toggle.png");
-    let pathing_toggle_hover_icon = include_bytes!("../icons/pathing-toggle-hover.png");
-
-    let receive_texture =
-        texture_receive!(|id: &str, _texture: Option<&NexusTexture>| log::info!("texture {id} loaded"));
-
-    load_texture_from_memory("TAIMI_ICON", taimi_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_ICON_HOVER", taimi_hover_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_MARKERS_ICON", markers_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_MARKERS_ICON_HOVER", markers_hover_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_TIMERS_ICON", timers_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_TIMERS_ICON_HOVER", timers_hover_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_PATHING_ICON", pathing_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_PATHING_ICON_HOVER", pathing_hover_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON", pathing_toggle_icon, Some(receive_texture));
-    load_texture_from_memory("TAIMI_PATHING_RENDER_ICON_HOVER", pathing_toggle_hover_icon, Some(receive_texture));
-
-    let same_identifier = "TAIMI_BUTTON";
-
-    add_quick_access(
-        same_identifier,
-        "TAIMI_ICON",
-        "TAIMI_ICON_HOVER",
-        fl!("primary-window-toggle"),
-        fl!("primary-window-toggle-text"),
-    )
-    .revert_on_unload();
-    add_quick_access(
-        "TAIMI_PATHING_BUTTON",
-        "TAIMI_PATHING_ICON",
-        "TAIMI_PATHING_ICON_HOVER",
-        fl!("pathing-window-toggle"),
-        fl!("pathing-window-toggle"),
-    )
-    .revert_on_unload();
-    add_quick_access(
-        "TAIMI_PATHING_RENDER_BUTTON",
-        "TAIMI_PATHING_RENDER_ICON",
-        "TAIMI_PATHING_RENDER_ICON_HOVER",
-        fl!("pathing-render-toggle"),
-        fl!("pathing-render-toggle"),
-    )
-    .revert_on_unload();
-    add_quick_access(
-        "TAIMI_TIMER_BUTTON",
-        "TAIMI_TIMERS_ICON",
-        "TAIMI_TIMERS_ICON_HOVER",
-        fl!("timer-window-toggle"),
-        fl!("timer-window-toggle"),
-    )
-    .revert_on_unload();
-    add_quick_access(
-        "TAIMI_MARKERS_BUTTON",
-        "TAIMI_MARKERS_ICON",
-        "TAIMI_MARKERS_ICON_HOVER",
-        fl!("marker-window-toggle"),
-        fl!("marker-window-toggle"),
-    )
-    .revert_on_unload();
-
-    add_quick_access_context_menu(
-        "TAIMI_MENU",
-        Some(same_identifier), // maybe some day
-        //None::<&str>,
-        render!(|ui| {
-            if ui.button(fl!("timer-window")) {
-                control_window(WINDOW_TIMERS, None);
-            }
-            #[cfg(feature = "space")]
-            {
-                if ui.button(fl!("pathing-render-toggle")) {
-                    Engine::try_send(SpaceEvent::PathingToggle);
-                }
-                if ui.button(fl!("pathing-render-minimap-toggle")) {
-                    Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
-                }
-                if ui.button(fl!("pathing-render-map-toggle")) {
-                    Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
-                }
-                if ui.button(fl!("pathing-window")) {
-                    control_window(WINDOW_PATHING, None);
-                }
-            }
-            #[cfg(feature = "markers")]
-            if ui.button(fl!("marker-window")) {
-                control_window(WINDOW_MARKERS, None);
-            }
-            if ui.button(fl!("primary-window")) {
-                control_window(WINDOW_PRIMARY, None);
-            }
-        }),
-    )
-    .revert_on_unload();
+    on_unload(quick_access_remove_all);
+    let quick_access_icons = settings::Settings::try_read().map(|s| s.quick_access_visible)
+        .unwrap_or(TaimiControls::default_quick_access());
+    let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS.into_iter()
+        .filter(|&icon| quick_access_icons.intersects(icon));
+    for icon in quick_access_icons_visible {
+        quick_access_add(icon);
+    }
 
     ACCOUNT_NAME
         .subscribe(event_consume!(<c_char> |name| {
@@ -768,13 +593,12 @@ fn load_nexus() {
         )
     ).revert_on_unload();
 
-    #[cfg(feature = "extension-arcdps-extras")]
     nexus::event::extras::KEYBIND_CHANGED.subscribe({
         let cb = event_consume!(
             <arcdps::extras::keybinds::RawKeybindChange> | keybind | {
                 if let Some(keybind) = keybind {
                     let keybind = taimi_input::win::keyboard::keybind_change_from_raw(keybind);
-                    exports::arcdps::extras_keybind(keybind)
+                    rt::bindings::process_key_bound(keybind);
                 }
             }
         );

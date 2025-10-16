@@ -24,6 +24,7 @@ use windows::Win32::{
 #[cfg(feature = "texture-loader")]
 use crate::TEXTURES;
 
+pub mod bindings;
 pub mod keyboard;
 pub mod log;
 pub mod mouse;
@@ -459,8 +460,18 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(inputs: impl IntoIte
     Ok(())
 }
 
-pub fn handle_wnd_event(_hwnd: HWND, msg: u32, _w: usize, _l: isize) -> u32 {
+pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
     match msg {
+        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN
+        | WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP => {
+            return bindings::process_key_event(msg, w, l)
+        },
+        WindowsAndMessaging::WM_LBUTTONUP | WindowsAndMessaging::WM_LBUTTONDOWN
+        | WindowsAndMessaging::WM_RBUTTONUP | WindowsAndMessaging::WM_RBUTTONDOWN
+        | WindowsAndMessaging::WM_MBUTTONUP | WindowsAndMessaging::WM_MBUTTONDOWN
+        | WindowsAndMessaging::WM_XBUTTONUP | WindowsAndMessaging::WM_XBUTTONDOWN => {
+            return bindings::process_button_event(msg, w, l)
+        },
         WindowsAndMessaging::WM_DESTROY | WindowsAndMessaging::WM_QUIT | WindowsAndMessaging::WM_CLOSE => {
             // nexus will unload you immediately after, and need to make a point not to take too long waiting for a render cb that won't come
             notify_quit();

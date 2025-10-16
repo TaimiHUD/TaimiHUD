@@ -1,6 +1,6 @@
 use {
     super::ControllerEvent, crate::{
-        exports::runtime as rt, marker::format::{MarkerEntry, MarkerFiletype}, render::{
+        exports::runtime::{self as rt, bindings::{GameControl, GameControls, TaimiControls}}, marker::format::{MarkerEntry, MarkerFiletype}, render::{
             machine::MumblelinkTick,
             TextFont,
         }, settings::{MarkerAutoPlaceSettings, RemoteSource, RemoteState, Settings, SettingsLock, SettingsSave, SourcesFile}, space::{
@@ -13,7 +13,7 @@ use {
         path::PathBuf,
         sync::{Arc, RwLock},
         time::SystemTime,
-    }, strum_macros::Display, taimi_pack::Pack, tokio::{
+    }, strum_macros::Display, taimi_meta::ui::MapContext, taimi_pack::Pack, tokio::{
         fs::create_dir_all,
         select,
         sync::{
@@ -194,6 +194,30 @@ impl PathingController {
             ToggleKatRender => self.toggle_katrender().await,
         }
         
+    }
+
+    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+        let pressed = state & changed;
+        if pressed.intersects(TaimiControls::PATHING_SPACE) {
+            Engine::try_send(SpaceEvent::PathingToggle);
+        }
+        if pressed.intersects(TaimiControls::PATHING_MAP) {
+            Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+        }
+        if pressed.intersects(TaimiControls::PATHING_MINIMAP) {
+            Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+        }
+    }
+
+    pub(crate) async fn handle_presses(&mut self, state: GameControls, changed: GameControls) {
+        let pressed = state & changed;
+        if pressed.contains(GameControl::Miscellaneous_Interact) {
+            self.handle_press_interact().await;
+        }
+    }
+
+    pub(crate) async fn handle_press_interact(&mut self) {
+        log::debug!("TODO: player interaction");
     }
     
     pub fn try_send(e: PathingEvent) {

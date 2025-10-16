@@ -9,11 +9,18 @@ use {
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
 };
+#[cfg(feature = "extension-nexus")]
+use crate::{
+    exports::runtime::bindings::TaimiControls,
+    with_i18n,
+};
 
 pub struct ConfigTabState {
     pub marker_autoplace: MarkerAutoPlaceSettings,
     pub marker_autoplace_inner: Option<SquadCondition>,
     pub dpi_scaling: Option<f32>,
+    #[cfg(feature = "extension-nexus")]
+    pub quick_access_icons_visible: TaimiControls,
 }
 
 impl ConfigTabState {
@@ -22,6 +29,8 @@ impl ConfigTabState {
             dpi_scaling: Default::default(),
             marker_autoplace: Default::default(),
             marker_autoplace_inner: Default::default(),
+            #[cfg(feature = "extension-nexus")]
+            quick_access_icons_visible: TaimiControls::default_quick_access(),
         }
     }
 
@@ -47,6 +56,43 @@ impl ConfigTabState {
             Controller::try_send(ControllerEvent::SaveSettings);
         }
         ui.dummy([4.0, 4.0]);
+
+        #[cfg(feature = "extension-nexus")]
+        let nexus_ui = || {
+            use crate::exports::nexus::{quick_access_button_id, quick_access_add, quick_access_remove};
+
+            if let Some(settings) = Settings::try_read() {
+                self.quick_access_icons_visible = settings.quick_access_visible.clone();
+            }
+
+            with_i18n("nexus-quick-access", |msg| ui.text(msg));
+            let prior_visible = self.quick_access_icons_visible;
+            let mut changed = false;
+            for (i, icon) in TaimiControls::QUICK_ACCESS_ICONS.into_iter().enumerate() {
+                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else { continue };
+                if i > 0 && i % 4 != 0 { ui.same_line(); }
+                changed |= with_i18n!(keybind, |name|
+                    ui.checkbox_flags(name, &mut self.quick_access_icons_visible, icon)
+                );
+            }
+
+            if changed {
+                let _ = Settings::write_with_blocking(|settings| {
+                    settings.quick_access_visible = self.quick_access_icons_visible;
+                });
+                for icon in prior_visible ^ self.quick_access_icons_visible {
+                    match self.quick_access_icons_visible.intersects(icon) {
+                        true => quick_access_add(icon),
+                        false => quick_access_remove(icon),
+                    }
+                }
+            }
+        };
+        let _nexus_ui = TreeNode::new(&fl!("nexus"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(true, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, nexus_ui);
 
         let markers_window_closure = || {
             if let Some(settings) = Settings::try_read() {

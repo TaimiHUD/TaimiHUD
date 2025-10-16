@@ -4,6 +4,7 @@ use {
     crate::{
         account_name_canon,
         exports::runtime::{
+            bindings::TaimiControls,
             mouse::{send_input, MouseInput},
             keyboard::KeyState,
         },
