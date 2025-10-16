@@ -51,7 +51,7 @@ use {
     strum_macros::Display,
     tokio::{
         fs::create_dir_all,
-        runtime, select,
+        select,
         sync::{
             mpsc::{Receiver, Sender},
             Mutex,
@@ -80,9 +80,11 @@ use SquadRank as SquadRoleState;
 
 #[cfg(feature = "markers")]
 mod markers;
+mod runtime;
 
 #[derive(Debug)]
 pub struct Controller {
+    receiver: Receiver<ControllerEvent>,
     #[cfg(all(feature = "markers", feature = "extension-nexus"))]
     pub rtapi_squad: HashMap<String, GroupMemberOwned>,
     #[cfg(feature = "markers")]
@@ -116,46 +118,70 @@ impl Controller {
         self.player_position.map(Position::Vec3)
     }
 
+    pub fn new(
+        receiver: Receiver<ControllerEvent>,
+        rt_sender: Sender<crate::RenderEvent>,
+        settings: SettingsLock,
+    ) -> Self {
+        Self {
+            receiver,
+            #[cfg(all(feature = "markers", feature = "extension-nexus"))]
+            rtapi_squad: Default::default(),
+            #[cfg(feature = "markers")]
+            extras_squad: Default::default(),
+            #[cfg(feature = "markers")]
+            marker_autoplace: Default::default(),
+            previous_combat_state: Default::default(),
+            rt_sender,
+            settings,
+            #[cfg(feature = "markers")]
+            markers: Default::default(),
+            #[cfg(feature = "markers")]
+            map_id_to_markers: Default::default(),
+            #[cfg(feature = "markers")]
+            spent_markers: Default::default(),
+            #[cfg(feature = "markers")]
+            mumble_role: Default::default(),
+            agent: Default::default(),
+            map_id: Default::default(),
+            player_position: Default::default(),
+            alert_sem: Default::default(),
+            timers: Default::default(),
+            current_timers: Default::default(),
+            sources_to_timers: Default::default(),
+            map_id_to_timers: Default::default(),
+            save_interval: interval(Duration::from_secs(60 * 10)),
+        }
+    }
+
     pub fn load(
-        mut controller_receiver: Receiver<ControllerEvent>,
+        receiver: Receiver<ControllerEvent>,
         rt_sender: Sender<crate::RenderEvent>,
         addon_dir: PathBuf,
     ) {
+        let rt = match Self::new_runtime() {
+            Ok(rt) => rt,
+            Err(error) => {
+                log::error!("Error! {}", error);
+                return;
+            }
+        };
         let evt_loop = async move {
+            let settings = Settings::load_access(&addon_dir.clone()).await;
+            let mut state = Self::new(receiver, rt_sender, settings);
+            state.run().await;
+        };
+        rt.block_on(evt_loop);
+        Self::shutdown(rt);
+    }
+
+    pub async fn run(&mut self) {
             let sources = SourcesFile::load()
                 .await
                 .expect("Couldn't load sources file");
             let sources = Arc::new(RwLock::new(sources));
             let _ = SOURCES.set(sources);
-            let settings = Settings::load_access(&addon_dir.clone()).await;
-            let mut state = Controller {
-                #[cfg(all(feature = "markers", feature = "extension-nexus"))]
-                rtapi_squad: Default::default(),
-                #[cfg(feature = "markers")]
-                extras_squad: Default::default(),
-                #[cfg(feature = "markers")]
-                marker_autoplace: Default::default(),
-                previous_combat_state: Default::default(),
-                rt_sender,
-                settings,
-                #[cfg(feature = "markers")]
-                markers: Default::default(),
-                #[cfg(feature = "markers")]
-                map_id_to_markers: Default::default(),
-                #[cfg(feature = "markers")]
-                spent_markers: Default::default(),
-                #[cfg(feature = "markers")]
-                mumble_role: Default::default(),
-                agent: Default::default(),
-                map_id: Default::default(),
-                player_position: Default::default(),
-                alert_sem: Default::default(),
-                timers: Default::default(),
-                current_timers: Default::default(),
-                sources_to_timers: Default::default(),
-                map_id_to_timers: Default::default(),
-                save_interval: interval(Duration::from_secs(60 * 10)),
-            };
+            let state = self;
             let _ = SETTINGS.set(state.settings.clone());
             let settings = SETTINGS.get().unwrap();
             let settings_lock = settings.read().await;
@@ -168,7 +194,7 @@ impl Controller {
 
             loop {
                 select! {
-                    evt = controller_receiver.recv() => match evt {
+                    evt = state.receiver.recv() => match evt {
                         Some(evt) => {
                             match state.handle_event(evt).await {
                                 Ok(true) => (),
@@ -190,23 +216,6 @@ impl Controller {
                     },
                 }
             }
-        };
-        let rt = runtime::Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .max_blocking_threads(12)
-            .thread_keep_alive(Duration::from_secs(12))
-            .thread_name("taimi-controller")
-            .build();
-        let rt = match rt {
-            Ok(rt) => rt,
-            Err(error) => {
-                log::error!("Error! {}", error);
-                return;
-            }
-        };
-        rt.block_on(evt_loop);
-        rt.shutdown_timeout(Duration::from_secs(8));
     }
 
     /*async fn load_markers_file(&mut self) -> anyhow::Result<()> {
