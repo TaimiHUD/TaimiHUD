@@ -1,12 +1,6 @@
 use {
     crate::{
-        fl,
-        render::{machine::RenderMachine, PathingConfig, RenderState},
-        space::pack::ActivePack,
-        settings::Settings,
-        with_i18n,
-        ControllerEvent,
-        Controller,
+        controller::pathing::{PathingController, PathingEvent}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::pack::ActivePack, with_i18n, Controller, ControllerEvent
     },
     bitflags::bitflags,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
@@ -201,7 +195,7 @@ impl PathingWindowState {
                                     // TODO? Engine::try_send(SpaceEvent::PackUnloadAll); instead of inline here...
                                     if ui.button("Reload All") {
                                         engine.packs.clear();
-                                        Controller::try_send(ControllerEvent::PathingLoadAll);
+                                        PathingController::try_send(PathingEvent::PathingLoadAll);
                                     }
                                     ui.same_line();
                                     if ui.button("Unload All") {

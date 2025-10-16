@@ -60,7 +60,10 @@ pub(crate) mod markers;
 use markers::{MarkersController, MarkersEvent};
 
 #[cfg(feature = "space")]
-mod pathing;
+pub(crate) mod pathing;
+
+#[cfg(feature = "space")]
+use pathing::{PathingController, PathingEvent};
 
 mod runtime;
 
@@ -82,6 +85,7 @@ pub struct Controller {
 
     timers: TimersController,
     markers: MarkersController,
+    pathing: PathingController,
 }
 
 impl Controller {
@@ -107,6 +111,7 @@ impl Controller {
 
             timers: Default::default(),
             markers: Default::default(),
+            pathing: Default::default(),
         }
     }
 
@@ -406,148 +411,6 @@ impl Controller {
         }
     }
 
-    #[cfg(feature = "space")]
-    async fn pathing_state_update(&mut self, path: String, state: bool) {
-        let mut settings_lock = self.settings_write().await;
-        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
-        drop(settings_lock);
-
-    }
-    #[cfg(feature = "space")]
-    async fn provide_disabled_paths(&self) {
-        let settings_lock = self.settings.read().await;
-        let disabled_paths = settings_lock.disabled_paths.clone();
-        drop(settings_lock);
-        if let Some(sender) = Engine::sender() {
-            let _event_send = sender.send(SpaceEvent::DisabledPaths(disabled_paths)).await;
-        }
-    }
-    #[cfg(feature = "space")]
-    async fn pathing_load_all(&self) {
-        let res = self.pathing_load_all_inner().await
-            .context("Loading all paths");
-        if let Err(e) = res {
-            log::error!("{e}");
-        }
-    }
-
-    #[cfg(feature = "space")]
-    async fn pathing_load_all_inner(&self) -> anyhow::Result<()> {
-        use tokio::fs::read_dir;
-
-        let pathing_dir = crate::ADDON_DIR.join("pathing");
-        if !exists(&pathing_dir).unwrap_or(false) {
-            create_dir_all(&pathing_dir).await?;
-        }
-
-        let mut path_loads = tokio::task::JoinSet::new();
-
-        log::info!("Pre-loading all paths...");
-        let mut dir = read_dir(pathing_dir).await?;
-        loop {
-            let entry = match dir.next_entry().await {
-                Ok(Some(e)) => e,
-                Ok(None) => break,
-                Err(e) => {
-                    log::error!("Failed to list pathing files: {e}");
-                    continue
-                },
-            };
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let context = format!("Loading pathing pack {name}");
-            log::debug!("{context}...");
-            let path = entry.path();
-            let is_taco = path.extension().map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
-            let loader = move || {
-                let res = if path.is_file() || is_taco.unwrap_or(false) {
-                    Self::pathing_load_taco(name, path)
-                } else {
-                    Self::pathing_load_dir(name, path)
-                }.context(context);
-
-                if let Err(e) = &res {
-                    log::error!("Path load failed: {e:#}");
-                }
-                res.is_ok()
-            };
-            path_loads.spawn_blocking(loader);
-        }
-
-        tokio::spawn(async move {
-            let mut disabled_paths_dirty = false;
-            loop {
-                let pack_load = path_loads.join_next();
-                let res = if disabled_paths_dirty {
-                    // throttle repeated state event if packs load quickly enough...
-                    let timeout = sleep(Duration::from_millis(174)).fuse();
-                    tokio::pin!(timeout);
-                    tokio::pin!(pack_load);
-                    loop {
-                        select! {
-                            res = &mut pack_load => break res,
-                            _ = &mut timeout => {
-                                // this will take a while, so emit the pending update
-                                Self::try_send(ControllerEvent::RequestDisabledPaths);
-                                disabled_paths_dirty = false;
-                            },
-                        }
-                    }
-                } else {
-                    pack_load.await
-                };
-                match res {
-                    None => break,
-                    Some(Err(e)) =>
-                        log::error!("Path load panicked: {e}"),
-                    Some(Ok(true)) =>
-                        disabled_paths_dirty = true,
-                    Some(Ok(..)) => (),
-                }
-            }
-
-            // TODO: sender+await, or ideally just make this unnecessary
-
-            if disabled_paths_dirty {
-                Self::try_send(ControllerEvent::RequestDisabledPaths);
-            }
-        });
-
-        Ok(())
-    }
-
-    #[cfg(feature = "space")]
-    fn pathing_load_taco(name: String, path: PathBuf) -> anyhow::Result<()> {
-        use taimi_pack::loader::ZipLoader;
-        let mut loader = ZipLoader::new(&path)?;
-        let pack = Pack::load(&mut loader)?;
-        Self::pathing_load_pack(pack, Box::new(loader), name);
-        Ok(())
-    }
-
-    #[cfg(feature = "space")]
-    fn pathing_load_dir(name: String, path: PathBuf) -> anyhow::Result<()> {
-        use taimi_pack::loader::DirectoryLoader;
-        let mut loader = DirectoryLoader::new(path);
-        let pack = Pack::load(&mut loader)?;
-        Self::pathing_load_pack(pack, Box::new(loader), name);
-        Ok(())
-    }
-
-    #[cfg(feature = "space")]
-    fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
-        if pack.name.is_empty() {
-            pack.name = name;
-        }
-        let event = SpaceEvent::PackLoad {
-            pack: Arc::new(pack),
-            loader,
-        };
-        // TODO: await!
-        if let Some(sender) = Engine::sender() {
-            let _ = sender.blocking_send(event);
-        }
-    }
-
     async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
         use ControllerEvent::*;
         match &event {
@@ -567,15 +430,11 @@ impl Controller {
             Timers(evt) => self.timers.handle_event(evt, &self.settings, &self.alert_sem, self.map_id, &self.rt_sender).await,
             #[cfg(feature = "markers")]
             Markers(evt) => self.markers.handle_event(evt, &self.rt_sender).await?,
-            #[cfg(feature = "space")]
-            PathingLoadAll => self.pathing_load_all().await,
-            #[cfg(feature = "space")]
-            RequestDisabledPaths => self.provide_disabled_paths().await,
-            #[cfg(feature = "space")]
-            PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
+            #[cfg(feature = "markers")]
+            Pathing(evt) => self.pathing.handle_event(evt, &self.settings).await,
+
             ReloadData => self.reload_data().await,
             SaveSettings => self.save_settings().await,
-            ToggleKatRender => self.toggle_katrender().await,
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
             UninstallAddon(dd) => self.uninstall_addon(&dd).await?,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
@@ -664,13 +523,6 @@ impl Controller {
 
 
 /*
-#[cfg(feature = "space")]
-enum PathingEvent {
-    PathingLoadAll,
-    RequestDisabledPaths,
-    PathingStateUpdate(String, bool),
-    ToggleKatRender,
-}
 */
 
 /*
@@ -711,14 +563,9 @@ pub enum ControllerEvent {
     Timers(TimersEvent),
     #[cfg(feature = "markers")]
     Markers(MarkersEvent),
-    /*#[cfg(feature = "space")]
-    Pathing(PathingEvent),*/
+    #[cfg(feature = "space")]
+    Pathing(PathingEvent),
 
-    // TODO: remove as porting happens - Pathing
-    PathingLoadAll,
-    RequestDisabledPaths,
-    PathingStateUpdate(String, bool),
-    ToggleKatRender,
     // TODO: remove as porting happens - Generic
     WindowState(String, Option<bool>),
     OpenOpenable(String, String),
