@@ -2,11 +2,11 @@ use {
     crate::space::{
         pack::{ActivePack, TrailSectionExt},
         resources::{Model, Texture, Vertex},
-        DrawSpace, LocalContext,
+        DrawSpace, LocalContext, TextureSpace,
     },
     anyhow::Context,
     core::f32,
-    glamour::{Box3, Vector3, Vec3Swizzles},
+    glamour::{Box3, Point2, Vector3, Vec3Swizzles},
     std::sync::Arc,
     taimi_d3d::dx11::{
         buffer::VertexBuffer,
@@ -276,6 +276,97 @@ impl TrailParams {
 }
 
 impl Default for TrailParams {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+/// Expansion outward from trail edges
+///
+/// Pair with [TrailTextureMap::set_scale_from_expansion] for it to look
+/// remotely natural.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[repr(transparent)]
+pub struct TrailScale {
+    pub normal_expansion: f32,
+}
+
+impl TrailScale {
+    /// No expansion, standard sizing
+    pub const DEFAULT: Self = Self::new(0.0);
+    /// Invalid setting that will always require refreshing parameters
+    pub const DIRTY: Self = Self::new(f32::NAN);
+
+    pub const fn new(normal_expansion: f32) -> Self {
+        Self {
+            normal_expansion,
+        }
+    }
+
+    /// Convert from settings
+    pub const fn with_scale(trail_scale: f32) -> Self {
+        Self::new((trail_scale - 1.0) / 2.0)
+    }
+
+    pub const fn scale(&self) -> f32 {
+        self.normal_expansion * 2.0 + 1.0
+    }
+}
+
+impl Default for TrailScale {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[repr(C)]
+pub struct TrailTextureMap {
+    /// V coordinate offset
+    pub v_offset: f32,
+    /// V coordinate scaling
+    pub v_scale: f32,
+}
+
+impl TrailTextureMap {
+    pub const DEFAULT: Self = Self::new(1.0, 0.0);
+    pub const UNTEXTURED: Self = Self::new(0.0, Self::UNTEXTURED_ANCHOR.y);
+    pub const UNTEXTURED_ANCHOR: Point2<TextureSpace> = Point2::new(0.0, 0.39);
+
+    pub const fn new(v_scale: f32, v_offset: f32) -> Self {
+        Self {
+            v_scale,
+            v_offset,
+        }
+    }
+
+    pub const fn with_tex_scale(v_scale: f32) -> Self {
+        Self {
+            v_scale,
+            .. Self::DEFAULT
+        }
+    }
+
+    pub fn set_scale_from_expansion(&mut self, scale: TrailScale) {
+        let TrailScale { normal_expansion } = scale;
+        let scale_trail_norm = match () {
+            #[cfg(todo)]
+            _ => (normal_expansion + 10.0/5.2) * -0.52 + 2.0,
+            () => {
+                let (e0, e1) = match () {
+                    #[cfg(todo)]
+                    _ => (2.38206f32,  -0.45979f32),
+                    _ => (2.22149f32, -0.388849f32),
+                };
+                let scalex = normal_expansion * 1.5;
+                (e1 * (scalex + 2.0)).exp() * e0
+            },
+        };
+        self.v_scale = scale_trail_norm.clamp(0.04, 0.99);
+    }
+}
+
+impl Default for TrailTextureMap {
     fn default() -> Self {
         Self::DEFAULT
     }

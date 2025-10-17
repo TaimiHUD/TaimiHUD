@@ -25,6 +25,8 @@ pub use {
             PackCollection,
             LoaderBox,
         },
+        poi::PoiScale,
+        trail::{TrailScale, TrailTextureMap},
     },
 };
 
