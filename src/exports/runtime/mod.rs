@@ -24,16 +24,20 @@ use windows::Win32::{
 #[cfg(feature = "texture-loader")]
 use crate::TEXTURES;
 
+#[cfg(feature = "allocator")]
+pub mod allocator;
 pub mod bindings;
 pub mod keyboard;
 pub mod log;
 pub mod mouse;
+pub mod statistics;
 pub mod textures;
 pub mod update;
 pub use {
     nexus::imgui,
     self::{
         mouse::MousePosition,
+        statistics::Counter,
         textures::TextureLoader,
     },
     taimi_meta::coords::vec_eq,

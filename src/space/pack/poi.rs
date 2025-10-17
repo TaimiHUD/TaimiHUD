@@ -1,6 +1,7 @@
 use {
     super::{ActivePack, PoiExt},
     crate::{
+        exports::runtime::Counter,
         render::machine::RenderMachine,
         space::{
             dx11::{RenderBackend, InstanceBufferData},
@@ -253,6 +254,8 @@ impl ActivePoi {
         }*/
     }
 }
+
+pub static STATS_POI_INSTANCE_SIZE: Counter = Counter::DEFAULT;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 #[repr(transparent)]
