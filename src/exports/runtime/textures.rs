@@ -383,14 +383,8 @@ impl TextureSlot {
             Self::Loaded(t) => Some(t.clone()),
             #[cfg(feature = "extension-nexus")]
             Self::Nexus(t) => Some({
-                let [w, h] = t.size();
-                let view = TextureView2::from_d3d(t.resource.clone());
-                let texture = view.get_resource().ok()?;
-                Arc::new(Texture {
-                    dimensions: [w as u32, h as u32],
-                    view,
-                    texture,
-                })
+                let texture = Texture::with_nexus(t.clone()).ok()?;
+                Arc::new(texture)
             }),
             _ => None
         }

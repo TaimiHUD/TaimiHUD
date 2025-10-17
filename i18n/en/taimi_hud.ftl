@@ -164,6 +164,12 @@ object-kind = { object } Kind
 model-files = { model } Files
 vertices = Vertices
 textures = Textures: { $count }
+alloc-size = Allocations: { $size }
+d3d-textures = D3D Textures: { $count }
+size-frag = { $size } { $suffix }
+#size-frag-mb = { size-frag(suffix: "MB", size: "$size") }
+size-frag-mb = { $size } MB
+size-frag-kb = { $size } KB
 
 ## Arc
 
@@ -239,6 +245,8 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
+trail = Trail
+poi = POI
 space = KatRender
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.

@@ -971,6 +971,7 @@ impl PackCollection {
             pack.render_poi_bookmark = render_poi_bookmark;
             render_poi_bookmark += pack.active_pois.len();
         }
+        super::poi::STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(&data_map) + size_of_val(&data_world)) as _);
         let (poi_ib_world, poi_ib_map) = (
                 Some(BufferOf::new_with_data(device, Ok(&data_world[..]), ())?),
                 Some(BufferOf::new_with_data(device, Ok(&data_map[..]), ())?),

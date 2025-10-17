@@ -27,10 +27,13 @@ default = [
   "markers-edit",
   "meta-cache",
   "space",
+  "statistics",
   "extension-arcdps",
   "extension-nexus",
 ]
 timers = [
+]
+allocator = [
 ]
 built-info = [
   #"built/chrono",
@@ -56,6 +59,9 @@ space = [
   "dep:taimi_meta",
   "dep:taimi_pack",
   "dep:taimi_d3d",
+]
+statistics = [
+  "allocator",
 ]
 space-ecs = [
 ]

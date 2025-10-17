@@ -1,5 +1,6 @@
 use {
     anyhow::{anyhow, Context as _},
+    crate::exports::runtime::Counter,
     glam::Vec4,
     std::{fmt, path::Path, sync::Arc},
     nexus::texture::Texture as NexusTexture,
@@ -13,8 +14,10 @@ use {
 };
 #[cfg(feature = "image")]
 use image::{ImageReader, FlatSamples};
+#[cfg(feature = "statistics")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Texture {
     pub texture: Texture2,
     pub dimensions: [u32; 2],
@@ -105,6 +108,22 @@ impl Texture {
         })
     }
 
+    #[cfg(feature = "extension-nexus")]
+    pub fn with_nexus(texture: NexusTexture) -> anyhow::Result<Self> {
+        let [w, h] = texture.size();
+        let view = TextureView2::from_d3d(texture.resource);
+        let texture = view.get_resource()?;
+        let texture = Self {
+            dimensions: [w as u32, h as u32],
+            texture,
+            view,
+        };
+        STATS_TEXTURE_COUNT.increment(1);
+        let _size = STATS_TEXTURE_SIZE.increment_by(|| texture.texture_byte_size());
+        STATS_TEXTURE_SIZE_CLONED.increment(_size);
+        Ok(texture)
+    }
+
     pub fn to_nexus(&self) -> Option<NexusTexture> {
         let resource = self.view.clone().into();
         Some(NexusTexture {
@@ -170,6 +189,8 @@ impl Texture {
             view,
             dimensions,
         };
+        STATS_TEXTURE_COUNT.increment(1);
+        STATS_TEXTURE_SIZE.increment_by(|| texture.texture_byte_size());
 
         // let device_context =
         //     unsafe { device.GetImmediateContext() }.expect("Should always succeed.");
@@ -182,6 +203,29 @@ impl Texture {
         self.view.generate_mips(device_context);
     }
 
+    /// TODO: this is implemented by arcffi, defer to that once it's used more
+    fn format_bpp(format: dxgi::DXGI_FORMAT) -> usize {
+        match DxgiFormat::try_from_d3d(format).map_err(|_| format) {
+            Ok(DxgiFormat::R32G32B32A32Float)
+                => 16,
+            Ok(DxgiFormat::R32G32B32Float)
+                => 12,
+            Ok(DxgiFormat::R32G32Float)
+                => 8,
+            Ok(DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm)
+                => 4,
+            _f => {
+                log::debug!("unrecognized texture DXGI_FORMAT {_f:?}");
+                4
+            },
+        }
+    }
+
+    fn texture_byte_size(&self) -> usize {
+        let bpp = Self::format_bpp(self.view.get_desc().Format);
+        let [w, h] = self.dimensions;
+        bpp * w as usize * h as usize
+    }
 }
 
 impl D3dContextBindableSlot<Dx11Context> for Texture {
@@ -189,3 +233,28 @@ impl D3dContextBindableSlot<Dx11Context> for Texture {
         self.view.set(device_context, slot)
     }
 }
+
+impl Clone for Texture {
+    fn clone(&self) -> Self {
+        STATS_TEXTURE_COUNT.increment(1);
+        let _size = STATS_TEXTURE_SIZE.increment_by(|| self.texture_byte_size());
+        STATS_TEXTURE_SIZE_CLONED.increment(_size);
+        Self {
+            texture: self.texture.clone(),
+            view: self.view.clone(),
+            dimensions: self.dimensions,
+        }
+    }
+}
+
+#[cfg(feature = "statistics")]
+impl Drop for Texture {
+    fn drop(&mut self) {
+        STATS_TEXTURE_COUNT.decrement(1);
+        STATS_TEXTURE_SIZE.decrement_by(|| self.texture_byte_size());
+    }
+}
+
+pub static STATS_TEXTURE_COUNT: Counter = Counter::DEFAULT;
+pub static STATS_TEXTURE_SIZE: Counter = Counter::DEFAULT;
+pub static STATS_TEXTURE_SIZE_CLONED: Counter = Counter::DEFAULT;

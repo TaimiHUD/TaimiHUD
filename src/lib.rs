@@ -103,10 +103,21 @@ static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     loader
         .load_available_languages(&*LOCALIZATIONS)
         .expect("Error while loading fallback language");
-    loader.set_use_isolating(false);
-
+    language_loader_setup(&loader);
     loader
 });
+fn language_loader_setup(loader: &FluentLanguageLoader) {
+    loader.set_use_isolating(false);
+    #[cfg(todo)]
+    loader.with_bundles_mut(|b| {
+        // might be needed for fluent 0.17..
+        let res = b.add_builtins()
+            .context("Failed to add i18n/fluent builtins");
+        if let Err(e) = res {
+            log::warn!("{e:#}");
+        }
+    });
+}
 
 #[macro_export]
 macro_rules! fl {
@@ -710,7 +721,7 @@ fn load_language(detected_language: &str) -> rt::RuntimeResult {
     // TODO: this may happen twice at startup and can be skipped if no change detected?
     i18n_embed::select(&*LANGUAGE_LOADER, &*LOCALIZATIONS, get_language.as_slice())
         .map_err(|_| "Couldn't load language!")?;
-    (&*LANGUAGE_LOADER).set_use_isolating(false);
+    language_loader_setup(&LANGUAGE_LOADER);
     Ok(())
 }
 

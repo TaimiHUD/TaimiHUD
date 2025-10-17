@@ -1,8 +1,11 @@
 use {
-    crate::space::{
-        pack::{ActivePack, TrailSectionExt},
-        resources::{Model, Texture, Vertex},
-        DrawSpace, LocalContext, TextureSpace,
+    crate::{
+        exports::runtime::Counter,
+        space::{
+            pack::{ActivePack, TrailSectionExt},
+            resources::{Model, Texture, Vertex},
+            DrawSpace, LocalContext, TextureSpace,
+        },
     },
     anyhow::Context,
     core::f32,
@@ -28,9 +31,6 @@ pub struct ActiveTrail {
     pub texture: Arc<Texture>,
     pub section_vbuffer: VertexBuffer,
     pub section_bookmarks: Vec<u32>,
-
-    // Map render data.
-    pub map_vbuffer: Option<VertexBuffer>,
 
     pub y_offset: f32,
 }
@@ -188,6 +188,7 @@ impl ActiveTrail {
 
         let model = Model::from_vertices(vertices);
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer")?;
+        STATS_TRAIL_VERTEX_SIZE.increment_by(|| section_vbuffer.size());
 
         Ok(ActiveTrail {
             trail_idx,
@@ -197,7 +198,6 @@ impl ActiveTrail {
             texture: texture.clone(),
             section_vbuffer,
             section_bookmarks,
-            map_vbuffer: None,
             render_bookmark,
             y_offset,
         })
@@ -231,6 +231,15 @@ impl ActiveTrail {
         }
     }
 }
+
+#[cfg(feature = "statistics")]
+impl Drop for ActiveTrail {
+    fn drop(&mut self) {
+        STATS_TRAIL_VERTEX_SIZE.decrement_by(|| self.section_vbuffer.size());
+    }
+}
+
+pub static STATS_TRAIL_VERTEX_SIZE: Counter = Counter::DEFAULT;
 
 pub struct TrailParams {
     pub resolution: Option<f32>,
