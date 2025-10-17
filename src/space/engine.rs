@@ -5,7 +5,7 @@ use {
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::PackCollection,
+            pack::{PackCollection, PoiScale, TrailScale, TrailTextureMap},
             render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
@@ -139,8 +139,10 @@ impl Engine {
         let display_size = machine.display_size()
             .ok_or_else(|| anyhow!("display size unknown"))?;
 
-        let render_backend = RenderBackend::setup(display_size)
+        let mut render_backend = RenderBackend::setup(display_size)
             .context("Failed to set up render backend")?;
+        render_backend.perspective_handler.constant_buffer_data.trail_expansion = TrailScale::DIRTY;
+        render_backend.perspective_handler.constant_buffer_mapv_data.trail_expansion = TrailScale::DIRTY;
 
         #[cfg(feature = "space-ecs")]
         let object_kinds = {
@@ -544,9 +546,7 @@ impl Engine {
             }),
         };
 
-        let distance_max = visible_space
-            .unwrap_or(SpaceSettings::DEFAULT_DISTANCE_MAX);
-        self.render_backend.depth_handler.setup(&device_context, machine, distance_max);
+        self.render_backend.depth_handler.setup(&device_context);
 
         if let Some(minimap_bounds) = &minimap_bounds {
             self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
@@ -570,7 +570,18 @@ impl Engine {
             ));
             {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_mapv_data;
-                vdata.expand = Self::scale_expand(trail_scale, trail_textured, poi_scale);
+                vdata.poi_expansion = PoiScale::with_scale(poi_scale);
+                let trail_expansion = TrailScale::with_scale(trail_scale);
+                match trail_textured {
+                    true if vdata.trail_expansion == trail_expansion && vdata.trail_texture != TrailTextureMap::UNTEXTURED => (),
+                    true => {
+                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
+                        vdata.trail_texture.v_offset = 0.0;
+                    },
+                    false =>
+                        vdata.trail_texture = TrailTextureMap::UNTEXTURED,
+                }
+                vdata.trail_expansion = trail_expansion;
             }
             {
                 // TODO: cpbuffer per type? just mixing them together for now...
@@ -617,7 +628,7 @@ impl Engine {
                 layout.set(&device_context);
                 shader.set(&device_context);
             }
-            backend.depth_handler.setup_fill(&device_context, &mut backend.perspective_handler);
+            backend.depth_handler.setup_fill(&device_context);
         }
 
         if let Some(..) = &minimap_bounds {
@@ -695,18 +706,35 @@ impl Engine {
             ));
             // TODO: cpbuffer per type? just mixing them together for now...
             let alpha = trail_alpha * poi_alpha;
-            let expand = Self::scale_expand(trail_scale, trail_textured, poi_scale);
-            {
+            let poi_scale = {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
-                vdata.expand = expand;
-            }
+                #[cfg(todo = "unused")] {
+                    vdata._poi_expansion = PoiScale::with_scale(poi_scale);
+                }
+                let trail_expansion = TrailScale::with_scale(trail_scale);
+                match trail_textured {
+                    true if vdata.trail_expansion == trail_expansion && vdata.trail_texture != TrailTextureMap::UNTEXTURED => (),
+                    true => {
+                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
+                        vdata.trail_texture.v_offset = 0.0;
+                    },
+                    false =>
+                        vdata.trail_texture = TrailTextureMap::UNTEXTURED,
+                }
+                vdata.trail_expansion = trail_expansion;
+                Vec3::splat(match () {
+                    #[cfg(todo = "unnecessary")]
+                    _ => vdata._poi_expansion.scale(),
+                    _ => poi_scale,
+                })
+            };
             {
                 let pdata = &mut self.render_backend.perspective_handler.constant_buffer_pixel_data;
                 pdata.set_overlap_threshold(overlap_threshold);
                 pdata.set_intensity(distance_intensity);
             }
 
-            self.render_backend.perspective_handler.update_perspective(machine, camera, Vec3::splat(expand.y + 1.0));
+            self.render_backend.perspective_handler.update_perspective(machine, camera, poi_scale);
             self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale, display_size);
 
             #[cfg(feature = "goggles")]
@@ -887,28 +915,6 @@ impl Engine {
                 self.settings_dirty = true;
                 res
             }),
-        }
-    }
-
-    fn scale_factor(trail_scale: f32, poi_scale: f32) -> Vec3 {
-        let trail_scale = (trail_scale - 1.0) / 2.0;
-        let poi_scale = poi_scale - 1.0;
-        Vec3::new(trail_scale, poi_scale, 0.0)
-    }
-
-    fn scale_expand(trail_scale: f32, trail_textured: bool, poi_scale: f32) -> Vec4 {
-        let scale = Self::scale_factor(trail_scale, poi_scale);
-        match trail_textured {
-            true => {
-                let scalex = scale.x * 1.5;
-                let e = (2.22149f32, -0.388849f32);
-                let scale_trail_norm = (e.1 * (scalex + 2.0)).exp() * e.0;
-                let scale_trail_tex = scale_trail_norm.clamp(0.04, 0.99);
-                scale.extend(scale_trail_tex)
-            },
-            false => {
-                scale.with_z(0.39).extend(0.0)
-            },
         }
     }
 

@@ -2,7 +2,10 @@ use {
     crate::{
         render::machine::{RenderMachine, RenderPosition},
         settings::pathing::SpaceSettings,
-        space::ScreenSpace,
+        space::{
+            pack::{PoiScale, TrailScale, TrailTextureMap},
+            ScreenSpace,
+        },
     },
     glam::{Mat4, Vec2, Vec3, Vec4, Quat},
     glamour::{Box2, Box3, Point3, Size2, TransformMap},
@@ -27,7 +30,10 @@ pub struct PerspectiveData {
     /// Billboard transform for current camera.
     pub billboard: Mat4,
     pub player: Vec4,
-    pub expand: Vec4,
+    pub trail_expansion: TrailScale,
+    /// unused?
+    pub _poi_expansion: PoiScale,
+    pub trail_texture: TrailTextureMap,
 }
 
 #[repr(C, align(16))]
@@ -254,7 +260,9 @@ impl PerspectiveData {
         projection: Mat4::IDENTITY,
         player: Vec4::ZERO,
         billboard: Mat4::IDENTITY,
-        expand: Vec4::ZERO,
+        _poi_expansion: PoiScale::DEFAULT,
+        trail_expansion: TrailScale::DEFAULT,
+        trail_texture: TrailTextureMap::DEFAULT,
     };
 }
 
@@ -323,7 +331,9 @@ pub struct MapDataV {
     pub model: Mat4,
     pub world: Mat4,
     pub view: Mat4,
-    pub expand: Vec4,
+    pub trail_expansion: TrailScale,
+    pub poi_expansion: PoiScale,
+    pub trail_texture: TrailTextureMap,
 }
 
 impl MapDataV {
@@ -331,7 +341,9 @@ impl MapDataV {
         model: Mat4::IDENTITY,
         world: Mat4::IDENTITY,
         view: Mat4::IDENTITY,
-        expand: Vec4::ZERO,
+        poi_expansion: PoiScale::DEFAULT,
+        trail_expansion: TrailScale::DEFAULT,
+        trail_texture: TrailTextureMap::DEFAULT,
     };
 }
 

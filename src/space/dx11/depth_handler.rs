@@ -150,11 +150,10 @@ impl DepthHandler {
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
 
-    pub fn setup(&self, device_context: &Dx11Context, machine: &RenderMachine, distance_max: f32) {
+    pub fn setup(&self, device_context: &Dx11Context) {
         let (dsview, clear_depth) = self.depth_stencil_view();
         self.rasterizer_state.set(device_context);
-        let viewport = self.viewport(machine, distance_max);
-        viewport.set(device_context);
+        self.viewport.set(device_context);
         dsview.set(device_context);
         self.depth_stencil_state.set(device_context);
         if let Some(clear_depth) = clear_depth {
@@ -185,20 +184,6 @@ impl DepthHandler {
             .view.to_ref()
     }
 
-    pub fn viewport(&self, machine: &RenderMachine, distance_max: f32) -> Cow<'_, Viewport> {
-        let far = machine.get_depth_range().map(|r| r.end)
-            .unwrap_or(MAX_DEPTH);
-        match distance_max / far {
-            d if d >= 1.0 =>
-                Cow::Borrowed(&self.viewport),
-            d => {
-                let mut viewport = self.viewport;
-                viewport.viewport.MaxDepth *= d;
-                Cow::Owned(viewport)
-            },
-        }
-    }
-
     #[cfg(feature = "goggles")]
     pub fn set_state_obscured(&self, device_context: &Dx11Context, obscured: bool) {
         let state = match obscured {
@@ -221,7 +206,6 @@ impl DepthHandler {
 
     pub fn setup_map(&self, device_context: &Dx11Context) {
         self.rasterizer_state.set(device_context);
-        self.viewport.set(device_context);
         //self.render_target_view.to_ref().without_depth().set(device_context);
         //self.render_target_view.set(device_context);
         self.depth_stencil_view().0.set(device_context);
@@ -260,11 +244,7 @@ impl DepthHandler {
         }
     }
 
-    pub fn setup_fill(&self, device_context: &Dx11Context, perspective_handler: &mut super::PerspectiveHandler) {
-        // TODO: simplify vertex shader so this is unnecessary
-        perspective_handler.constant_buffer_mapv_data = Default::default();
-        perspective_handler.update_map_cb(device_context);
-        perspective_handler.set_map_cb(device_context, 0);
+    pub fn setup_fill(&self, device_context: &Dx11Context) {
         self.depth_stencil_state_mask.set(device_context);
         unsafe {
             device_context.PSSetShader(None, None);
