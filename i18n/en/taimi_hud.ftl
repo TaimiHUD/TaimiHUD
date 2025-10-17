@@ -303,7 +303,7 @@ render-unload = Unload Render
 render-reload = Reload Render
 render-notice-gameplay = Load in to the game to get started
 render-notice-gameplay-initial = Select a character to get started
-render-notice-error = Error! See log in Nexus or Taimi addon folder for more details"
+render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 
 ## Festivals
 
