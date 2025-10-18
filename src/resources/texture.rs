@@ -14,8 +14,6 @@ use {
 };
 #[cfg(feature = "image")]
 use image::{ImageReader, FlatSamples};
-#[cfg(feature = "statistics")]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, PartialEq)]
 pub struct Texture {
