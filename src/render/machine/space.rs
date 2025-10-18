@@ -23,6 +23,7 @@ use {
         },
         ui::MapOpen,
     },
+    taimi_meta::coords::MapLocalScale,
     taimi_pack::attributes::Festival,
 };
 
@@ -58,15 +59,28 @@ impl RenderMachine {
     }
 
     pub const DEFAULT_DEPTH_RANGE: Range<f32> = {
-        use taimi_meta::coords::MapLocalScale;
-
-        let near = 2.0 / MapLocalScale::METRES_PER_FEET;
-        let far = 2000.0 / MapLocalScale::METRES_PER_FEET;
+        let near = 0.5 / MapLocalScale::METRES_PER_FEET;
+        let far = 700.0 / MapLocalScale::METRES_PER_FEET;
+        near..far
+    };
+    #[cfg(feature = "goggles")]
+    pub const GOGGLES_DEPTH_RANGE: Range<f32> = {
+        pub const M_TO_UNIT: f32 = 2.0 / MapLocalScale::METRES_PER_FEET;
+        let near = M_TO_UNIT / 10.0;
+        let far = 10_000.0 / M_TO_UNIT;
         near..far
     };
 
     pub fn get_depth_range(&self) -> Option<Range<f32>> {
         self.depth_range.clone()
+    }
+
+    pub fn depth_range(&self) -> Range<f32> {
+        self.get_depth_range().unwrap_or_else(|| match () {
+            #[cfg(feature = "goggles")]
+            _ if crate::space::goggles::is_enabled() => Self::GOGGLES_DEPTH_RANGE,
+            _ => Self::DEFAULT_DEPTH_RANGE,
+        })
     }
 
     /// 50 degrees vertical field of view

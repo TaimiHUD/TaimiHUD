@@ -234,7 +234,6 @@ impl PerspectiveHandler {
             anim_rot,
             Vec3::ZERO,
         );
-        self.constant_buffer_pixel_data.set_viewport_size(None);
     }
 
     pub fn update_map_cb(&self, device_context: &Dx11Context) {

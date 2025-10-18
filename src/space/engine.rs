@@ -13,8 +13,8 @@ use {
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
-    glam::{Vec3, Vec4},
-    glamour::Size2,
+    glam::Vec3,
+    glamour::{Size2, Box2, TransformMap},
     std::{
         collections::{HashMap, HashSet},
         num::NonZeroU32,
@@ -449,9 +449,6 @@ impl Engine {
     }
 
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
-        let display_size = machine.display_size()
-            .ok_or_else(|| anyhow!("display size unknown"))?;
-
         let map_ctx = machine.is_map_visible();
         let map_id = machine.is_ingame();
         let (
@@ -521,8 +518,7 @@ impl Engine {
             Some(..) if machine.get_map_open_state().is_visible() =>
                 None,
             Some(distance_max) => {
-                let depth = machine.get_depth_range()
-                    .unwrap_or(RenderMachine::DEFAULT_DEPTH_RANGE);
+                let depth = machine.depth_range();
                 let camera = machine.get_camera(camera_source);
                 let cull = MapFrustum::from_camera_data(
                     camera,
@@ -533,20 +529,23 @@ impl Engine {
             },
         };
 
+        let is_rendering = render_map.is_some() || render_world.is_some();
+
         let perspective_slot = 0;
-        self.render_backend.blend_state.set(&device_context);
+        if is_rendering {
+            self.render_backend.blend_state.set(&device_context);
+            self.render_backend.depth_handler.setup(&device_context);
+            self.render_backend.viewport.set(&device_context);
+        }
 
         let minimap_bounds = match &render_map {
             Some((map_ctx, ..)) if matches!(map_ctx, MapContext::Global) => None,
+            None if !is_rendering => None,
             _ => Some({
-                use glamour::{Box2, TransformMap};
-
                 let bounds = machine.map.calibration.compass_bounds();
                 Box2::from(machine.map.calibration.map(bounds))
             }),
         };
-
-        self.render_backend.depth_handler.setup(&device_context);
 
         if let Some(minimap_bounds) = &minimap_bounds {
             self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
@@ -613,7 +612,7 @@ impl Engine {
         #[cfg(feature = "goggles")]
         let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
-        let masking = minimap_bounds.is_some() || edge_scale.is_some();
+        let masking = minimap_bounds.is_some() || (is_rendering && edge_scale.is_some());
         let masking = match render_world.is_some() && masking {
             #[cfg(feature = "goggles")]
             true if goggles_2pass => Some(true),
@@ -635,7 +634,7 @@ impl Engine {
             if masking.is_some() {
                 self.render_backend.depth_handler.fill_clipped(&device_context);
             }
-            self.render_backend.depth_handler.clear_scissor(&device_context);
+            self.render_backend.depth_handler.set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
         }
 
         if let Some(depth_fill) = masking {
@@ -644,7 +643,9 @@ impl Engine {
             self.render_backend.depth_handler.setup_depth_write(&device_context, None);
         }
 
-        self.render_backend.perspective_handler.set(&device_context, perspective_slot);
+        if is_rendering {
+            self.render_backend.perspective_handler.set(&device_context, perspective_slot);
+        }
 
         #[cfg(feature = "space-ecs")]
         let mut query = self.world.query::<(&mut Render, &Position)>();
@@ -735,7 +736,7 @@ impl Engine {
             }
 
             self.render_backend.perspective_handler.update_perspective(machine, camera, poi_scale);
-            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale, display_size);
+            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale, self.render_backend.display_size);
 
             #[cfg(feature = "goggles")]
             if goggles_2pass {
@@ -759,7 +760,9 @@ impl Engine {
             }
         }
 
-        self.render_backend.shaders.unset(&device_context);
+        if is_rendering {
+            self.render_backend.shaders.unset(&device_context);
+        }
 
         #[cfg(feature = "goggles")]
         if let Some(map_id) = map_id {
@@ -953,7 +956,8 @@ impl Engine {
             goggles::pick_lens(force);
 
             if let Some((min, max)) = depth {
-                machine.depth_range = Some(space::MIN_DEPTH*min..space::MAX_DEPTH*max);
+                let reference = RenderMachine::GOGGLES_DEPTH_RANGE;
+                machine.depth_range = Some(reference.start*min..reference.end*max);
             }
         }
     }
