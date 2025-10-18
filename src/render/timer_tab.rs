@@ -1,10 +1,10 @@
 use {
     super::Alignment,
     crate::{
-        controller::{timers::{TimersController, TimersEvent}, Controller, ControllerEvent},
+        controller::timers::{TimersController, TimersEvent},
         fl,
         render::RenderState,
-        settings::{RemoteSource, Settings, TimerSettings},
+        settings::{Settings, TimerSettings},
         timer::TimerFile,
         TIMERS_DIR,
     },

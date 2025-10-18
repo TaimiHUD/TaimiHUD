@@ -8,7 +8,7 @@ use {
     bitflags::bitflags,
     std::{fmt::Display, ops::Deref, sync::Arc},
     tokio::{
-        sync::{mpsc::Sender, Mutex},
+        sync::Mutex,
         task::JoinHandle,
         time::{sleep, Duration, Instant},
     },

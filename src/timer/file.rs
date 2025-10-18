@@ -10,7 +10,6 @@ use {
     std::{
         path::{Path, PathBuf},
         sync::Arc,
-        future::Future,
     },
     tokio::{fs::read_to_string, sync::Semaphore, task::JoinSet},
 };

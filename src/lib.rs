@@ -14,10 +14,7 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use {
-    crate::space::engine::{Engine, SpaceEvent},
-    taimi_meta::ui::MapContext,
-};
+use crate::space::engine::{Engine, SpaceEvent};
 use {
     crate::{
         controller::{
@@ -68,10 +65,7 @@ use nexus::{
         WINDOW_RESIZED,
     },
     on_unload,
-    texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
-    gui::{register_render, render, RenderType},
-    keybind::{keybind_handler, register_keybind_with_string},
-    quick_access::{add_quick_access, add_quick_access_context_menu},
+    gui::{register_render, RenderType},
     rtapi::{
         event::{
             RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
@@ -459,7 +453,7 @@ fn load_nexus() {
 
     // Rendering setup
 
-    let taimi_window = render!(|ui| {
+    let taimi_window = nexus::gui::render!(|ui| {
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
     });
@@ -475,7 +469,7 @@ fn load_nexus() {
         *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
     }
 
-    let taimi_settings = render!(|ui| {
+    let taimi_settings = nexus::gui::render!(|ui| {
         RenderState::render_options(ui);
     });
     register_render(RenderType::OptionsRender, taimi_settings).revert_on_unload();

@@ -2,11 +2,10 @@ use {
     async_compression::tokio::bufread::GzipDecoder,
     futures::stream::{StreamExt, TryStreamExt},
     reqwest::{Client, IntoUrl, Response},
-    serde::{Deserialize, Serialize},
     crate::settings::SourceKind,
     std::{
         sync::Arc,
-        fmt::{self, Display, Debug},
+        fmt::{Display, Debug},
         io,
         path::{Path, PathBuf},
         future::Future,
@@ -56,7 +55,7 @@ pub async fn download_file<U: IntoUrl>(dir: &Path, url: U) -> anyhow::Result<Str
         .path()
         .split("/")
         .last().ok_or_else(|| anyhow!("Should've had a filename, blegh!"))?;
-    let meep = response.headers().get(LAST_MODIFIED).ok_or_else(|| anyhow!("I can't believe you've done this"))?.to_str()?.to_string();;
+    let meep = response.headers().get(LAST_MODIFIED).ok_or_else(|| anyhow!("I can't believe you've done this"))?.to_str()?.to_string();
     let bitey = response.bytes().await?;
     let final_path = dir.join(filename);
     let mut file = File::create(final_path).await?;

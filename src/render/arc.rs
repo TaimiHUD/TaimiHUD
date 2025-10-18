@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::{timers::{TimersController, TimersEvent}, Controller, ControllerEvent},
+        controller::timers::{TimersController, TimersEvent},
         exports::{
             arcdps as exports,
             runtime::{self as rt, bindings::KeyIntercept, imgui},

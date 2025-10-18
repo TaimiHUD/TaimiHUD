@@ -1,9 +1,9 @@
 use {
-    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, Source, SourceKind, TimerSettings},
+    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, TimerSettings},
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::bindings::TaimiControls,
-        SETTINGS, SOURCES,
+        SETTINGS,
     },
     anyhow::{anyhow, Context},
     chrono::{DateTime, Utc},

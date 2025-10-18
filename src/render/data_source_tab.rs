@@ -3,7 +3,7 @@ use {
         controller::ControllerEvent,
         fl,
         render::RenderState,
-        settings::{NeedsUpdate, RemoteState, Settings, Source},
+        settings::{NeedsUpdate, RemoteState, Settings},
         Controller,
     },
     nexus::imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},

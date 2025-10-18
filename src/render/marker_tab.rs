@@ -1,7 +1,7 @@
 use {
     super::Alignment,
     crate::{
-        controller::ControllerEvent, fl, marker::format::MarkerSet, render::{machine::RenderMachine, RenderState}, settings::{MarkerSettings, Settings}, Controller, MarkersController, MarkersEvent, RenderEvent
+        fl, marker::format::MarkerSet, render::{machine::RenderMachine, RenderState}, settings::{MarkerSettings, Settings}, MarkersController, MarkersEvent, RenderEvent
     },
     glam::Vec2,
     glamour::TransformMap,

@@ -4,47 +4,30 @@ use {
             self as rt,
             bindings::{ControlsReceiver, CONTROLS, TaimiControls, TaimiReceiver},
         },
-        marker::format::{MarkerEntry, MarkerFiletype},
-        render::{
-            machine::MumblelinkTick,
-            TextFont,
-        },
-        settings::{MarkerAutoPlaceSettings, RemoteState, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
-        timer::{CombatState, Position, TimerFile, TimerMachine},
-        RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
+        render::machine::MumblelinkTick,
+        settings::{RemoteState, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
+        timer::{CombatState, Position},
+        RenderEvent, SETTINGS, SOURCES,
     },
     anyhow::{anyhow, Context},
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::f32::Vec3,
     relative_path::RelativePathBuf,
     std::{
-        collections::{HashMap, HashSet},
         ffi::OsStr,
-        fs::exists,
         path::PathBuf,
         sync::{Arc, RwLock},
         time::SystemTime,
     },
     strum_macros::Display,
     tokio::{
-        fs::create_dir_all,
         select,
         sync::{
             mpsc::{Receiver, Sender},
             Mutex,
         },
-        time::{interval, sleep, Duration, timeout},
+        time::{interval, Duration, timeout},
     },
-    futures::FutureExt,
-};
-
-#[cfg(feature = "space")]
-use {
-    crate::space::{
-        pack::LoaderBox,
-        Engine, engine::SpaceEvent,
-    },
-    taimi_pack::Pack,
 };
 
 mod generic;
@@ -151,7 +134,6 @@ impl Controller {
             let _ = SOURCES.set(sources);
             let state = self;
             let _ = SETTINGS.set(state.settings.clone());
-            let settings = SETTINGS.get().unwrap();
             #[cfg(feature = "timers")]
             state.timers.setup(state.settings.clone(), state.rt_sender.clone()).await;
             #[cfg(feature = "markers")]
@@ -262,11 +244,11 @@ impl Controller {
         if combat_state != self.previous_combat_state {
             let cbt = match combat_state {
                 true => {
-                    log::info!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
+                    log::debug!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
                     CombatState::Entered
                 },
                 false => {
-                    log::info!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
+                    log::debug!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
                     CombatState::Exited
                 },
             };
@@ -323,11 +305,11 @@ impl Controller {
         let propagate = match evt.get_statechange() {
             StateChange::None => None,
             StateChange::EnterCombat => {
-                log::info!("ArcDPS: Combat begins at {}!", evt.time);
+                log::debug!("ArcDPS: Combat begins at {}!", evt.time);
                 Some(CombatState::Entered)
             },
             StateChange::ExitCombat => {
-                log::info!("ArcDPS: Combat ends at {}!", evt.time);
+                log::debug!("ArcDPS: Combat ends at {}!", evt.time);
                 Some(CombatState::Exited)
             },
             _ => None,

@@ -1,6 +1,6 @@
 use {
-    super::Source, crate::{
-        settings::{GitHubSource, RemoteSource, DirectSource},
+    crate::{
+        settings::{GitHubSource, DirectSource},
         ADDON_DIR,
     }, serde::{Deserialize, Serialize}, std::collections::HashMap, tokio::{
         fs::{create_dir_all, read_to_string, File},
