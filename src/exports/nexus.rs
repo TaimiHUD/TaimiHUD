@@ -378,7 +378,7 @@ pub fn quick_access_add(icon: TaimiControls) {
             hover,
             keybind,
             tooltip_text,
-        );
+        ).leak();
     });
 
     if let TaimiControls::WINDOW_PRIMARY = icon {
@@ -423,7 +423,7 @@ pub fn quick_access_add(icon: TaimiControls) {
                     control_window(crate::WINDOW_PRIMARY, None);
                 }
             }),
-        );
+        ).leak();
     }
 }
 

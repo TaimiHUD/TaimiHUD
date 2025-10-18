@@ -452,12 +452,9 @@ fn init() -> Result<(), &'static str> {
 
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
-    use crate::{
-        controller::timers::{TimersController, TimersEvent},
-        exports::{
-            nexus::{register_keybind, unregister_keybinds, quick_access_add, quick_access_remove_all},
-            runtime::bindings::TaimiControls,
-        },
+    use crate::exports::{
+        nexus::{register_keybind, unregister_keybinds, quick_access_add, quick_access_remove_all},
+        runtime::bindings::TaimiControls,
     };
 
     // Rendering setup
