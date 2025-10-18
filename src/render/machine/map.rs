@@ -1,8 +1,5 @@
 use {
-
-    crate::controller::{Controller, ControllerEvent,
-        markers::{MarkersController, MarkersEvent},
-    },
+    crate::controller::markers::{MarkersController, MarkersEvent},
     std::time::Instant,
     super::{RenderMachine, RenderUsers},
     taimi_meta::ui::{

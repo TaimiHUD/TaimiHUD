@@ -1,6 +1,6 @@
 use {
-    super::super::SourceKind, crate::{settings::Source, ADDON_DIR}, chrono::{DateTime, Utc}, reqwest::{header::LAST_MODIFIED, IntoUrl}, serde::{Deserialize, Serialize}, serde_json::Value, std::{fmt, future::Future, pin::Pin
-}, tokio::fs::create_dir_all, url::Url, anyhow::anyhow,
+    super::super::SourceKind, crate::{settings::Source, ADDON_DIR}, reqwest::header::LAST_MODIFIED, serde::{Deserialize, Serialize}, std::{fmt, future::Future, pin::Pin
+}, tokio::fs::create_dir_all, anyhow::anyhow,
 };
 
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, Clone, PartialEq)]

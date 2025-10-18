@@ -2,8 +2,7 @@ use {
     super::TimerWindowState,
     crate::{built_info, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
     nexus::imgui::{TableColumnSetup, Ui, StyleColor},
-    rand::{thread_rng, seq::SliceRandom},
-    itertools::Itertools,
+    rand::{rng, seq::SliceRandom},
 };
 
 #[cfg(feature = "space")]
@@ -21,7 +20,7 @@ impl InfoTabState {
     }
 
     pub fn authors() -> String {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut authors= env!("CARGO_PKG_AUTHORS").split(":").collect::<Vec<&str>>();
         authors.shuffle(&mut rng);
         authors.join(", ")

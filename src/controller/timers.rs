@@ -1,34 +1,29 @@
-use taimi_meta::ui::UiState;
-
-use crate::{
-    exports::runtime::bindings::TaimiControls,
-    render::{
-        RenderEvent,
-        TextFont,
-    }, settings::{Settings, SettingsLock}, timer::{
-        CombatState,
-        Position,
-        TimerFile,
-        TimerMachine,
-    }, TIMERS_DIR
-};
-
-use std::{
-    sync::Arc,
-    fs::exists,
-    collections::HashMap,
-};
-
 use {
+    crate::{
+        controller::{ControllerEvent, MapId, RtSender},
+        exports::runtime::bindings::TaimiControls,
+        render::{
+            RenderEvent,
+            TextFont,
+        }, settings::{Settings, SettingsLock}, timer::{
+            CombatState,
+            Position,
+            TimerFile,
+            TimerMachine,
+        }, TIMERS_DIR
+    },
+    std::{
+        sync::Arc,
+        fs::exists,
+        collections::HashMap,
+    },
+    strum_macros::Display,
+    taimi_meta::ui::UiState,
     tokio::{
         sync::Mutex,
         fs::create_dir_all,
     },
-    strum,
-    strum_macros::Display,
 };
-
-use super::{Controller, ControllerEvent, MapId, RtSender};
 
 #[derive(Default,Debug)]
 pub(crate) struct TimersController {

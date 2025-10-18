@@ -4,7 +4,7 @@ use {
         trail::{ActiveTrail, TrailParams},
     }, crate::{
         controller::{
-            pathing::{PathingController, PathingEvent}, Controller, ControllerEvent
+            pathing::{PathingController, PathingEvent},
         }, exports::runtime::{
             self as rt,
             imgui::{self, Condition, TreeNode, Ui},

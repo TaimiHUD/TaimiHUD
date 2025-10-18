@@ -1,78 +1,44 @@
-use super::RtSender;
-
 use {
     crate::{
         account_name_canon,
+        controller::{ControllerEvent, MapId, RtSender},
         exports::runtime::{
-            bindings::TaimiControls,
+            self as rt,
             mouse::{send_input, MouseInput},
             keyboard::KeyState,
         },
-        marker::format::{MarkerSet, RuntimeMarkers},
+        marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, RuntimeMarkers},
+        render::machine::RenderMachine,
+        settings::{MarkerAutoPlaceSettings, Settings, SettingsLock},
+        MumbleIdentityUpdate,
+        RenderEvent,
         ACCOUNT_NAME_CELL,
     },
-    arcdps::extras::{UserInfoOwned, UserRole},
-    taimi_meta::{
-        coords::{LocalSpace, ScreenPoint},
-        ui::{
-            gameplay::{GameplayState, GameplayTransition},
-            MapCalibration, MapOpen,
-        },
-    },
-    tokio::{
-        task::JoinHandle,
-        time::timeout,
-    },
-    futures::FutureExt,
-};
-use {
-    crate::{
-        exports::runtime as rt,
-        marker::format::{MarkerEntry, MarkerFiletype},
-        render::{
-            machine::MumblelinkTick,
-            TextFont,
-        },
-        settings::{MarkerAutoPlaceSettings, RemoteState, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
-        timer::{CombatState, Position, TimerFile, TimerMachine},
-        RenderEvent, SETTINGS, SOURCES, TIMERS_DIR,
-    },
     anyhow::{anyhow, Context},
-    arcdps::{evtc::event::Event as arcEvent, AgentOwned},
-    glam::f32::Vec3,
-    relative_path::RelativePathBuf,
-    std::{
-        collections::{HashMap, HashSet},
-        ffi::OsStr,
-        fs::exists,
-        path::PathBuf,
-        sync::{Arc, RwLock},
-        time::SystemTime,
-    },
-    tokio::{
-        fs::create_dir_all,
-        select,
-        sync::{
-            mpsc::{Receiver, Sender},
-            Mutex,
-        },
-        time::{interval, sleep, Duration},
-    },
-};
-
-use {
-    super::MapId, crate::{
-        controller::{
-            Controller, ControllerEvent,
-        }, render::machine::RenderMachine, MumbleIdentityUpdate
-    }, glamour::{
+    arcdps::extras::{UserInfoOwned, UserRole},
+    glam::Vec3,
+    glamour::{
         Box2,
         Point2, Point3,
         TransformMap,
-    }, rand::Rng, strum_macros::{Display, FromRepr}, taimi_meta::{
-        coords::{FakeSpace, ScreenSpace},
-        ui::{UiMap, UiState},
-    }
+    },
+    rand::Rng,
+    strum_macros::{Display, FromRepr},
+    std::{
+        collections::{HashMap, HashSet},
+        fs::exists,
+        path::PathBuf,
+        sync::Arc,
+    },
+    taimi_meta::{
+        coords::{FakeSpace, LocalSpace, ScreenPoint, ScreenSpace},
+        ui::{MapCalibration, MapOpen, UiMap, UiState},
+    },
+    tokio::{
+        fs::create_dir_all,
+        task::JoinHandle,
+        time::{sleep, Duration},
+    },
 };
 
 #[cfg(feature = "extension-nexus")]

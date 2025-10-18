@@ -14,10 +14,7 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "space")]
-use {
-    crate::space::engine::{Engine, SpaceEvent},
-    taimi_meta::ui::MapContext,
-};
+use crate::space::engine::{Engine, SpaceEvent};
 use {
     crate::{
         controller::{
@@ -68,10 +65,7 @@ use nexus::{
         WINDOW_RESIZED,
     },
     on_unload,
-    texture::{load_texture_from_memory, texture_receive, Texture as NexusTexture},
-    gui::{register_render, render, RenderType},
-    keybind::{keybind_handler, register_keybind_with_string},
-    quick_access::{add_quick_access, add_quick_access_context_menu},
+    gui::{register_render, RenderType},
     rtapi::{
         event::{
             RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,

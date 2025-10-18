@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::{pathing::{PathingController, PathingEvent}, ControllerEvent},
+        controller::pathing::{PathingController, PathingEvent},
         fl,
         render::{
             machine::RenderMachine,
@@ -15,7 +15,6 @@ use {
             Settings,
         },
         with_i18n,
-        Controller,
         LANGUAGE_LOADER,
     },
     anyhow::Context,

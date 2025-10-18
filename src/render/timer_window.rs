@@ -1,7 +1,7 @@
 use {
     super::RenderState,
     crate::{
-        control_window, controller::timers::{TimersController, TimersEvent}, fl, settings::{ProgressBarSettings, Settings}, timer::{PhaseState, TimerAlert, TimerFile}, Controller, ControllerEvent
+        control_window, controller::timers::{TimersController, TimersEvent}, fl, settings::{ProgressBarSettings, Settings}, timer::{PhaseState, TimerAlert, TimerFile},
     },
     glam::Vec2,
     nexus::imgui::{ProgressBar, StyleColor, Ui, Window},

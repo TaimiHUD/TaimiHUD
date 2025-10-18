@@ -1,21 +1,18 @@
 use {
     crate::{
-        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}}, game_language_id, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings, SourceKind}, with_i18n
+        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}}, game_language_id, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings}, with_i18n
     }, anyhow::Context, arcdps::{
         extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
         Language,
     }, arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink}, dpsapi::combat::{CombatArgs, CombatEvent}, log::Level, std::{
-        collections::{
-            btree_map,
-            BTreeMap,
-        },
+        collections::BTreeMap,
         ffi::{c_void, CStr, CString, OsStr},
         fmt::{self, Write},
         ops,
         panic,
         path::PathBuf,
         ptr::{self, NonNull},
-        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering}, Mutex, RwLock},
+        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
         thread,
         time::Duration,
     }, windows::Win32::{

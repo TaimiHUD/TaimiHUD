@@ -1,15 +1,14 @@
 use {
     crate::{
-        controller::{pathing::{PathingController, PathingEvent}, ControllerEvent},
+        controller::pathing::{PathingController, PathingEvent},
         render::machine::RenderMachine,
-        settings::{pathing::SpaceSettings, PathingSettings, Settings},
+        settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
             pack::{PackCollection, PoiScale, TrailScale, TrailTextureMap},
             render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
-        Controller,
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
