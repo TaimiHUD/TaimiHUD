@@ -937,10 +937,7 @@ impl Engine {
 
     #[cfg(feature = "goggles")]
     fn goggles_start(&mut self, machine: &mut RenderMachine, force: bool, map_id: Option<NonZeroU32>) {
-        use crate::{
-            render::goggles as render_goggles,
-            space,
-        };
+        use crate::render::goggles as render_goggles;
 
         let settings = self.map_settings_ref(|s| s.map(|s| (
             s.space.goggles.enabled(),

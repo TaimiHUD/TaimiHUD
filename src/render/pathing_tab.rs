@@ -577,7 +577,7 @@ impl PathingConfig {
         }
 
         if let Some(map_id) = map_id {
-            use crate::{settings::pathing::GogglesSettings, space};
+            use crate::settings::pathing::GogglesSettings;
 
             //RenderState::font_text("ui", ui, "Goggles");
             if let Some(Some(value)) = Self::slider_setting(ui, "near", _near, (0.15, 1.2)) {
