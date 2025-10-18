@@ -16,6 +16,7 @@ use {
         prelude::*,
         buffer::{D3D11_SAMPLER_DESC, SamplerState, TextureAddressMode},
         blend::{BlendState, D3D11_RENDER_TARGET_BLEND_DESC, OMBlendState},
+        viewport::Viewport,
     },
 };
 
@@ -30,12 +31,15 @@ pub struct RenderBackend {
     pub device: Device,
     pub swap_chain: SwapChain,
     pub display_size: Size2<ScreenSpace>,
+    pub viewport: Viewport,
 }
 
 impl RenderBackend {
     pub fn setup(display_size: Size2<ScreenSpace>) -> anyhow::Result<RenderBackend> {
         log::debug!("Getting d3d11 device swap chain");
         let (device, swap_chain) = rt::d3d11_device()?;
+
+        let viewport = Viewport::with_size(display_size.extend(1.0));
 
         let shaders = ShaderLoader::load_bundled(&device)
             .context("Shaders failed to load")?;
@@ -73,6 +77,7 @@ impl RenderBackend {
             shaders,
             sampler_state,
             display_size,
+            viewport,
         })
     }
 

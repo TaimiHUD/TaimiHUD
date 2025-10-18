@@ -63,7 +63,3 @@ impl From<LocalContext> for Option<MapContext> {
         value.as_map()
     }
 }
-
-pub const M_TO_UNIT: f32 = 2.0 / taimi_meta::coords::MapLocalScale::METRES_PER_FEET;
-pub const MAX_DEPTH: f32 = 10_000.0 / M_TO_UNIT;
-pub const MIN_DEPTH: f32 = M_TO_UNIT / 10.0;

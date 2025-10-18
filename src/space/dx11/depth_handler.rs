@@ -1,20 +1,17 @@
 use {
     crate::{
-        render::machine::RenderMachine,
         resources::Model,
         space::{
             dx11::SwapChain,
-            MAX_DEPTH, ScreenSpace,
+            ScreenSpace,
         },
     },
-    glamour::{Box2, Size2},
-    std::borrow::Cow,
+    glamour::{Box2, Point2, Size2},
     taimi_d3d::dx11::{
         prelude::*,
         buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
         depth::{ClearFlags, ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
         raster::{CullMode, RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
-        viewport::Viewport,
     },
     taimi_meta::ui::MapCalibration,
 };
@@ -25,7 +22,6 @@ type OMDepthState = taimi_d3d::dx11::OMDepthState<DepthState>;
 
 #[allow(unused)]
 pub struct DepthHandler {
-    viewport: Viewport,
     pub render_target_view: RenderTargetViews<RenderTargetView>,
     pub depth_stencil_state: OMDepthState,
     pub depth_stencil_state_map: OMDepthState,
@@ -45,13 +41,6 @@ impl DepthHandler {
         device: &Dx11Device,
         swap_chain: &SwapChain,
     ) -> anyhow::Result<Self> {
-        log::trace!(
-            "Setting up viewport with dimensions ({},{})",
-            display_size.width,
-            display_size.height,
-        );
-        let viewport = Viewport::with_size(display_size.extend(1.0));
-
         let framebuffer = swap_chain.get_framebuffer11(0)?;
         let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
         let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
@@ -74,7 +63,6 @@ impl DepthHandler {
         let render_target_view = RenderTargetView::new_with_buffer2(device, &framebuffer)?;
         let render_target_view = RenderTargetViews::with_views(render_target_view, Some(depth_stencil_view));
         Ok(Self {
-            viewport,
             render_target_view,
             depth_stencil_state: OMDepthState::with_state(depth_stencil_state, Self::STENCIL_REF),
             depth_stencil_state_map: OMDepthState::with_state(depth_stencil_state_map, Self::STENCIL_REF),
@@ -153,7 +141,6 @@ impl DepthHandler {
     pub fn setup(&self, device_context: &Dx11Context) {
         let (dsview, clear_depth) = self.depth_stencil_view();
         self.rasterizer_state.set(device_context);
-        self.viewport.set(device_context);
         dsview.set(device_context);
         self.depth_stencil_state.set(device_context);
         if let Some(clear_depth) = clear_depth {
@@ -220,24 +207,19 @@ impl DepthHandler {
     }
 
     pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
-        let minimap_bounds = windows::Win32::Foundation::RECT {
-            left: bounds.min.x.round_ties_even() as i32,
-            top: bounds.min.y.round_ties_even() as i32,
-            right: bounds.max.x.round_ties_even() as i32,
-            bottom: bounds.max.y.round_ties_even() as i32,
-        };
-        unsafe {
-            device_context.RSSetScissorRects(Some(&[minimap_bounds]));
-        }
+        let minimap_bounds = Box2::new(
+            Point2::new(bounds.min.x.round_ties_even(), bounds.min.y.round_ties_even()),
+            Point2::new(bounds.max.x.round_ties_even(), bounds.max.y.round_ties_even()),
+        );
+        self.set_scissor(device_context, minimap_bounds)
     }
 
-    pub fn clear_scissor(&self, device_context: &Dx11Context) {
-        let size = self.viewport.size2();
+    pub fn set_scissor(&self, device_context: &Dx11Context, bounds: Box2<ScreenSpace>) {
         let bounds = windows::Win32::Foundation::RECT {
-            left: 0,
-            top: 0,
-            right: size.width as i32,
-            bottom: size.height as i32,
+            left: bounds.min.x as i32,
+            top: bounds.min.y as i32,
+            right: bounds.max.x as i32,
+            bottom: bounds.max.y as i32,
         };
         unsafe {
             device_context.RSSetScissorRects(Some(&[bounds]));

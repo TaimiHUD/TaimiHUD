@@ -14,7 +14,6 @@ use {
             },
             Settings,
         },
-        space,
         with_i18n,
         Controller,
         LANGUAGE_LOADER,
@@ -539,7 +538,7 @@ impl PathingConfig {
             map_id = e.packs.current_map.map(|id| id as _);
             (
                 s.space.goggles.obscured_alpha(),
-                machine.get_depth_range().unwrap_or(space::MIN_DEPTH..space::MAX_DEPTH)
+                machine.depth_range(),
             )
         }))).flatten()?;
 
@@ -578,7 +577,7 @@ impl PathingConfig {
         }
 
         if let Some(map_id) = map_id {
-            use crate::{settings::pathing::GogglesSettings, space};
+            use crate::settings::pathing::GogglesSettings;
 
             //RenderState::font_text("ui", ui, "Goggles");
             if let Some(Some(value)) = Self::slider_setting(ui, "near", _near, (0.15, 1.2)) {
@@ -587,12 +586,12 @@ impl PathingConfig {
                     let e = map_depth_calibration.entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                     let prev = e.0;
-                    e.0 = value / space::MIN_DEPTH;
+                    e.0 = value / RenderMachine::GOGGLES_DEPTH_RANGE.start;
                     let near = value;
                     let mut far = _far;
                     if e.1 == 1.0 || e.1 == prev {
                         e.1 = e.0;
-                        far = e.1 * space::MAX_DEPTH;
+                        far = e.1 * RenderMachine::GOGGLES_DEPTH_RANGE.end;
                     }
                     machine.depth_range = Some(near..far);
                 });
@@ -602,7 +601,7 @@ impl PathingConfig {
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
                     let e = map_depth_calibration.entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
-                    e.1 = value / space::MAX_DEPTH;
+                    e.1 = value / RenderMachine::GOGGLES_DEPTH_RANGE.end;
                     machine.depth_range = Some(_near..value);
                 });
             }
