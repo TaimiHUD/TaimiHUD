@@ -79,11 +79,14 @@ pub enum SpaceEvent {
     PathingToggle,
     #[cfg(deleteme)]
     MapToggle(MapContext),
+    #[cfg(deleteme)]
     DisabledPaths(HashSet<String>),
+    #[cfg(deleteme)]
     PackLoad {
         pack: Arc<taimi_pack::Pack>,
         loader: super::pack::LoaderBox,
     },
+    #[cfg(deleteme)]
     PackUnloadAll,
     GameplayStatus {
         gameplay: GameplayState,
@@ -388,6 +391,7 @@ impl Engine {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
+                    #[cfg(deleteme)]
                     DisabledPaths(disabled_paths) => {
                         self.packs.active_festivals = self.map_settings(|s| Festival::all()
                             .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
@@ -429,12 +433,14 @@ impl Engine {
                             log::warn!("{e:#}");
                         }
                     },
+                    #[cfg(deleteme)]
                     PackLoad { pack, loader } => {
                         let pack_idx = self.packs.add_pack(pack, loader);
                         if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
                             log::error!("{e:#}");
                         }
                     },
+                    #[cfg(deleteme)]
                     PackUnloadAll => {
                         log::info!("Unloading all paths...");
                         self.packs.clear();
@@ -515,6 +521,14 @@ impl Engine {
             }
             Err(_error) => Ok(false),
         }
+    }
+
+    pub fn disable_paths(&mut self, machine: &RenderMachine, disabled_paths: HashSet<String>) {
+        self.packs.active_festivals = self.map_settings(|s| Festival::all()
+            .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
+            .collect()
+        );
+        self.packs.disable_paths(disabled_paths);
     }
 
     #[allow(dead_code)]

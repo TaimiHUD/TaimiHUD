@@ -197,14 +197,13 @@ impl PathingWindowState {
                                         ui.dummy([4.0; 2]);
                                     }
                                     ui.same_line();
-                                    // TODO? Engine::try_send(SpaceEvent::PackUnloadAll); instead of inline here...
                                     if ui.button("Reload All") {
-                                        engine.packs.clear();
+                                        PathingEvent::PathingUnloadAll.try_send();
                                         PathingEvent::PathingLoadAll.try_send();
                                     }
                                     ui.same_line();
                                     if ui.button("Unload All") {
-                                        engine.packs.clear();
+                                        PathingEvent::PathingUnloadAll.try_send();
                                     }
                                         if self.filter_open {
                                             ui.separator();

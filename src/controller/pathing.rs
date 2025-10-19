@@ -2,12 +2,13 @@ use {
     crate::{
         controller::{Controller, ControllerEvent},
         exports::runtime::bindings::{GameControl, GameControls, TaimiControls},
+        render::machine::RenderTaskPriority,
         settings::{Settings, SettingsLock},
         space::{
             engine::SpaceEvent, pack::LoaderBox, Engine
         },
     },
-    anyhow::Context,
+    anyhow::{anyhow, Context},
     futures::FutureExt,
     std::{
         fs::exists,
@@ -28,6 +29,7 @@ pub(crate) enum PathingEvent {
         set: Option<bool>,
     },
     PathingLoadAll,
+    PathingUnloadAll,
     RequestDisabledPaths,
     PathingStateUpdate(String, bool),
     ToggleKatRender,
@@ -43,15 +45,6 @@ impl PathingController {
         crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
         drop(settings_lock);
 
-    }
-
-    async fn provide_disabled_paths(&self, settings: SettingsLock) {
-        let settings_lock = settings.read().await;
-        let disabled_paths = settings_lock.disabled_paths.clone();
-        drop(settings_lock);
-        if let Some(sender) = Engine::sender() {
-            let _event_send = sender.send(SpaceEvent::DisabledPaths(disabled_paths)).await;
-        }
     }
 
     async fn pathing_load_all(&self) {
@@ -171,15 +164,66 @@ impl PathingController {
     }
 
     async fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
+        let context = format!("Loading pack {name} onto engine");
         if pack.name.is_empty() {
             pack.name = name;
         }
-        let event = SpaceEvent::PackLoad {
-            pack: Arc::new(pack),
-            loader,
-        };
-        if let Some(sender) = Engine::sender() {
-            let _ = sender.send(event).await;
+        let res = Controller::run_render(RenderTaskPriority::High, move |state| {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut()
+                    .map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.packs.fixup_pack(&mut pack);
+            let pack = Arc::new(pack);
+            let pack_idx = engine.packs.add_pack(pack, loader);
+            engine.packs.load_pack(&engine.render_backend.device, pack_idx)
+        }).await;
+        let res = res.map(|res| res.context(context))
+            .context("Submitting pack to engine");
+        if let Err(e) | Ok(Err(e)) = res {
+            log::error!("{e:#}");
+        }
+    }
+
+    async fn pathing_unload_all(&self) {
+        log::info!("Unloading all paths...");
+        let context = "Unloading packs from engine";
+        let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut()
+                    .map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.packs.clear();
+            Ok(())
+        }).await;
+        let res = res.map(|res| res.context(context))
+            .context(context);
+        if let Err(e) | Ok(Err(e)) = res {
+            log::error!("{e:#}");
+        }
+    }
+
+    async fn provide_disabled_paths(&self, settings: SettingsLock) {
+        let settings_lock = settings.read().await;
+        let disabled_paths = settings_lock.disabled_paths.clone();
+        drop(settings_lock);
+
+        let context = "Providing disabled paths to engine";
+        let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut()
+                    .map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.disable_paths(&state.machine, disabled_paths);
+            Ok(())
+        }).await;
+        let res = res.map(|res| res.context(context))
+            .context(context);
+        if let Err(e) | Ok(Err(e)) = res {
+            log::error!("{e:#}");
         }
     }
 
@@ -187,6 +231,7 @@ impl PathingController {
         use PathingEvent::*;
         match event {
             PathingLoadAll => self.pathing_load_all().await,
+            PathingUnloadAll => self.pathing_unload_all().await,
             RequestDisabledPaths => self.provide_disabled_paths(settings.clone()).await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,

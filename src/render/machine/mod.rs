@@ -46,7 +46,7 @@ use crate::space::engine::{Engine, SpaceEvent};
 
 pub use self::{
     mumblelink::MumblelinkTick,
-    tasks::{RenderTask, RenderTaskQueue},
+    tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
