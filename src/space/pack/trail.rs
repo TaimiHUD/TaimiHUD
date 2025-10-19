@@ -57,6 +57,8 @@ impl ActiveTrail {
         let texture_handle = trail.texture_name()
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
         let texture_handle = loader.register_texture(texture_handle);
+        let trail_data = trail.read_trl_data(loader.loader())
+            .context("Loading trail vertices")?;
         let texture = loader
             .get_or_load_texture(texture_handle, device)
             .context("Loading trail texture")?;
@@ -65,7 +67,7 @@ impl ActiveTrail {
         let mut section_bookmarks: Vec<u32> = vec![0];
         let mut section_bounds = Vec::new();
 
-        for (isec, section) in trail.data.sections.iter().enumerate() {
+        for (isec, section) in trail_data.sections.iter().enumerate() {
             y_offset = (y_offset - f32::EPSILON * 40.0).max(0.0);
 
             if section.points.is_empty() {

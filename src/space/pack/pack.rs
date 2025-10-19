@@ -520,6 +520,11 @@ impl ActivePack {
         PackTextureHandle(idx)
     }
 
+    pub fn loader(&mut self) -> &mut dyn PackLoaderContext {
+        let loader: &mut (dyn PackLoaderContext + Send) = &mut self.loader;
+        loader
+    }
+
     pub fn get_or_load_texture<'t>(
         &'t mut self,
         handle: PackTextureHandle,
@@ -567,11 +572,8 @@ impl ActivePack {
         let pack = self.pack.clone();
 
         let trails = pack.trails.iter().enumerate()
-            .filter(|(_, t)| t.data.map_id == map_id);
+            .filter(|(_, t)| t.map_id == Some(map_id));
         for (i_trail, pack_trail, ..) in trails {
-            if pack_trail.data.map_id != map_id {
-                continue;
-            }
             let mut id = pack_trail.guid;
             if self.active_trails.contains_key(&id) {
                 log::trace!(

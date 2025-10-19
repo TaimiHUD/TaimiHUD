@@ -1,15 +1,16 @@
 use {
     crate::{
         attributes::MarkerAttributes,
-        loader::PackLoaderContext,
+        loader::{PackLoaderContext, LoaderAssetReader},
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
     core::f32,
-    glamour::{point3, Box3, Point3, Size3},
+    glamour::{Box3, Point3, Size3},
     std::{
         fmt,
-        io::{self, BufReader, Read},
+        io::{self, BufRead, Read},
+        mem,
         path::Path,
     },
     uuid::Uuid,
@@ -19,14 +20,14 @@ use {
 pub struct Trail {
     pub category: String,
     pub guid: Uuid,
-    pub data: TrailData,
     pub attributes: MarkerAttributes,
     pub parent_path: Option<String>,
+    pub trail_path: Option<String>,
+    pub map_id: Option<i32>,
 }
 
 impl Trail {
     pub fn from_xml(
-        ctx: &mut impl PackLoaderContext,
         asset: &str,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Trail> {
@@ -72,31 +73,60 @@ impl Trail {
             anyhow::bail!("No 'type' specified for Trail");
         }
 
-        let Some(trail_path) = trail_path else {
-            anyhow::bail!("No 'trailData' specified for Trail '{category}'");
-        };
-
-        let data = read_trl_file(BufReader::new(ctx.find_asset_near(asset, &trail_path)?), &trail_path)?;
-        if let Some(map_id) = map_id {
-            if map_id != data.map_id {
-                log::warn!("trail MapID mismatch on {trail_path}: {map_id} vs {} from trl", data.map_id);
-            }
-        }
         let guid = guid.unwrap_or_default();
 
         let parent_path = Path::new(asset).parent()
-            .map(|p| p.to_string_lossy().into());
+            .map(|p| {
+                let mut parent = p.to_string_lossy().into_owned();
+                parent.push_str("/");
+                parent
+            });
 
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh);
 
-        Ok(Trail {
+        Ok(Self {
             category,
             guid,
-            data,
             attributes,
             parent_path,
+            trail_path,
+            map_id,
         })
+    }
+
+    /// Populate ID from [trail data](Self::read_trl_data)
+    pub fn update_map_id(&mut self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<()> {
+        let mut asset = self.open_trl_data(ctx)?;
+        let header = TrailHeader::read_from_trl(&mut asset)
+            .with_context(|| format!("Reading trail header from {self}"))?;
+        self.map_id = Some(header.map_id);
+        Ok(())
+    }
+
+    pub fn open_trl_data<'l>(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        let Some(trail_path) = &self.trail_path else {
+            anyhow::bail!("No 'trailData' specified for Trail '{self}'");
+        };
+        match &self.parent_path {
+            Some(parent) => ctx.find_asset_near(parent, trail_path),
+            None => ctx.load_asset_dyn(trail_path),
+        }
+    }
+
+    pub fn read_trl_data(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<TrailData> {
+        let mut asset = self.open_trl_data(ctx)?;
+        let data = TrailData::read_from_trl(&mut asset)
+            .with_context(|| format!("Reading trail data from {self}"));
+
+        match (self.map_id, &data) {
+            (Some(map_id), Ok(data)) if data.header.map_id != map_id => {
+                log::warn!("MapID mismatch on {self}: expected {map_id} but read {} from trl", data.header.map_id);
+            },
+            _ => (),
+        }
+
+        data
     }
 
     #[inline]
@@ -115,106 +145,195 @@ impl Trail {
     }
 }
 
+impl fmt::Display for Trail {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let category = &self.category;
+        let guid = &self.guid;
+        match &self.parent_path {
+            Some(parent) =>
+                write!(f, "{parent}{category}/{guid}"),
+            None =>
+                write!(f, "{category}/{guid}"),
+        }
+    }
+}
+
+/// Version '0' is the only known .trl format
+pub type TrailHeader = TrailHeader0;
+
+/// trl file format [version 0](Self::VERSION)
+#[derive(Debug, Clone, Default)]
+pub struct TrailHeader0 {
+    pub map_id: i32,
+}
+
+impl TrailHeader0 {
+    pub const VERSION: u32 = 0;
+    pub const SIZE: usize = 8;
+
+    pub const fn with_map_id(map_id: i32) -> Self {
+        Self {
+            map_id,
+        }
+    }
+
+    pub fn read_from_trl<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf = [0u8; Self::SIZE];
+        reader.read_exact(&mut buf)?;
+
+        let [v0, v1, v2, v3, m0, m1, m2, m3] = buf;
+        let version = u32::from_le_bytes([v0, v1, v2, v3]);
+        let map_id = i32::from_le_bytes([m0, m1, m2, m3]);
+
+        match version {
+            Self::VERSION => Ok(Self::with_map_id(map_id)),
+            version => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Unsupported .trl version {version}, expected version 0"),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TrailData {
-    pub map_id: i32,
-    pub sections: Vec<TrailSection>,
+    pub header: TrailHeader,
+    pub sections: Box<[TrailSection]>,
+}
+
+impl TrailData {
+    const POINT_BUFFER_LEN: usize = 256;
+    const AVERAGE_SECTION_LEN: usize = 32;
+
+    pub fn read_from_trl<R: Read>(read: &mut R) -> anyhow::Result<Self> {
+        let mut read = io::BufReader::with_capacity(TrailSection::POINT_SIZE * Self::POINT_BUFFER_LEN, read);
+        let header = TrailHeader::read_from_trl(&mut read)
+            .context("Reading trail header")?;
+        let read_ahead_points = read.fill_buf()?.len() / TrailSection::POINT_SIZE;
+        let mut points_buf = Vec::with_capacity(Self::AVERAGE_SECTION_LEN.min(read_ahead_points));
+        let mut sections = Vec::with_capacity((read_ahead_points + Self::AVERAGE_SECTION_LEN - 1) / Self::AVERAGE_SECTION_LEN);
+        TrailSection::read_all_from_trl(&mut read, &mut sections, &mut points_buf)
+            .context("Reading trail sections")?;
+
+        Ok(Self {
+            header,
+            sections: sections.into_boxed_slice(),
+        })
+    }
+
+    pub fn map_id(&self) -> i32 {
+        self.header.map_id
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct TrailSection {
-    pub points: Vec<Point3>,
+    pub points: Box<[Point3]>,
     pub bounds: Box3,
 }
 
-pub fn read_trl_file(mut reader: impl Read, name: &str) -> anyhow::Result<TrailData> {
-    let mut buf32 = [0u8; 4];
-    reader
-        .read_exact(&mut buf32)
-        .context("Reading trail version")?;
-    if i32::from_le_bytes(buf32) != 0 {
-        anyhow::bail!("Trl version '0' is the only known valid format version");
-    }
-
-    reader
-        .read_exact(&mut buf32)
-        .context("Reading trail map_id")?;
-    let map_id = i32::from_le_bytes(buf32);
-
-    let mut sections = vec![];
-    let mut current_section = vec![];
-
-    const NEG_BOX: Box3 = glamour::Box3 {
+impl TrailSection {
+    pub const BOUNDS_EMPTY: Box3 = Box3::ZERO;
+    #[cfg(todo)]
+    pub const BOUNDS_EMPTY: Box3 = glamour::Box3 {
         min: point3!(f32::INFINITY, f32::INFINITY, f32::INFINITY),
         max: point3!(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
     };
 
-    let mut read_more = true;
-    while read_more {
-        let point_data = match read_point(&mut reader) {
-            Ok(point_data) => point_data,
-            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                read_more = false;
-                EMPTY_POINT
-            }
-            Err(e) => return Err(e).context("Reading trail sections"),
-        };
+    /// Zero-height trail bounds are common, but empty boxes are invalid...
+    pub const BOUNDS_MIN_SIZE: Size3 = Size3::new(
+        f32::EPSILON,
+        f32::EPSILON,
+        f32::EPSILON,
+    );
 
-        if point_data == EMPTY_POINT {
-            if !current_section.is_empty() {
-                sections.push(TrailSection {
-                    bounds: match current_section.is_empty() {
-                        true => NEG_BOX,
-                        false => {
-                            let mut bounds = Box3::<f32>::from_points(current_section.iter().copied());
-                            if bounds.is_empty() {
-                                // empty boxes are invalid...
-                                let size = bounds.size();
-                                let size = Size3::new(
-                                    size.width.max(f32::EPSILON),
-                                    size.height.max(f32::EPSILON),
-                                    size.depth.max(f32::EPSILON),
-                                );
-                                bounds.max = bounds.min + size.to_vector();
-                            }
-                            bounds
-                        },
-                    },
-                    points: std::mem::take(&mut current_section),
-                });
-            } else {
-                log::debug!("Empty trail section in {name}");
-            }
-        } else {
-            let x = f32::from_le_bytes(point_data[0]);
-            let y = f32::from_le_bytes(point_data[1]);
-            let z = f32::from_le_bytes(point_data[2]);
-            let point = point3!(x, y, z);
-            current_section.push(point);
+    pub fn with_points<P: Into<Box<[Point3]>>>(points: P) -> Self {
+        let points = points.into();
+        let bounds = match points.is_empty() {
+            true => Self::BOUNDS_EMPTY,
+            false => match Box3::from_points(points.iter().copied()) {
+                mut bounds if bounds.is_empty() => {
+                    let size = bounds.size();
+                    bounds.max = bounds.min + size.max(Self::BOUNDS_MIN_SIZE).to_vector();
+                    bounds
+                },
+                bounds => bounds,
+            },
+        };
+        Self {
+            bounds,
+            points,
         }
     }
 
-    Ok(TrailData { map_id, sections })
-}
-
-const EMPTY_POINT: [[u8; 4]; 3] = [[0; 4]; 3];
-
-fn read_point(reader: &mut impl Read) -> io::Result<[[u8; 4]; 3]> {
-    let mut point_data = [[0; 4]; 3];
-    reader.read_exact(&mut point_data[0])?;
-    reader.read_exact(&mut point_data[1])?;
-    reader.read_exact(&mut point_data[2])?;
-    Ok(point_data)
-}
-
-impl fmt::Display for Trail {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let guid = &self.guid;
-        match &self.parent_path {
-            Some(parent) =>
-                write!(f, "{parent}/{guid}"),
-            None =>
-                write!(f, "{guid}"),
+    /// Read a section from a .trl file
+    ///
+    /// Ensure `points_buf` is empty prior to reading, unless you intend to prepend points to the section!
+    pub fn read_from_trl<R: io::Read>(reader: &mut R, points_buf: &mut Vec<Point3>) -> io::Result<Option<Self>> {
+        let mut next_point = match Self::read_point(reader) {
+            Err(e) => return Err(e),
+            Ok(None) => return Ok(None),
+            Ok(Some(p)) => p,
+        };
+        while let Some(point) = next_point {
+            points_buf.push(point);
+            next_point = match Self::read_point(reader)? {
+                #[cfg(todo)]
+                None => return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "unterminated trail section",
+                )),
+                None => {
+                    log::warn!("unterminated trail section after {} points", points_buf.len());
+                    None
+                },
+                Some(p) => p,
+            };
         }
+
+        let section = Self::with_points(&points_buf[..]);
+        Ok(Some(section))
+    }
+
+    pub fn read_all_from_trl<R: io::Read>(reader: &mut R, out: &mut Vec<Self>, points_buf: &mut Vec<Point3>) -> io::Result<()> {
+        points_buf.clear();
+        while let Some(section) = TrailSection::read_from_trl(&mut *reader, points_buf)? {
+            out.push(section);
+            points_buf.clear();
+        }
+
+        Ok(())
+    }
+
+    pub const POINT_SIZE: usize = mem::size_of::<f32>() * 3;
+    const POINT_EMPTY_DATA: [u8; Self::POINT_SIZE] = [0u8; Self::POINT_SIZE];
+    pub fn read_point<R: Read>(reader: &mut R) -> io::Result<Option<Option<Point3<f32>>>> {
+        let point_data = {
+            let mut buf = Self::POINT_EMPTY_DATA;
+            let rest = match reader.read(&mut buf) {
+                Err(e) => return Err(e),
+                Ok(0) => return Ok(None),
+                Ok(amt) => buf.get_mut(amt..).expect("io::Read::read amount invalid"),
+            };
+            reader.read_exact(rest)?;
+            buf
+        };
+
+        Ok(Some(match point_data {
+            Self::POINT_EMPTY_DATA => None,
+            [
+                x0, x1, x2, x3,
+                y0, y1, y2, y3,
+                z0, z1, z2, z3,
+            ] => Some(Point3::new(
+                f32::from_le_bytes([x0, x1, x2, x3]),
+                f32::from_le_bytes([y0, y1, y2, y3]),
+                f32::from_le_bytes([z0, z1, z2, z3]),
+            )),
+        }))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
     }
 }

@@ -240,11 +240,20 @@ fn inner_parse_pack_def(
                             parse_stack.push(PartialItem::PoisonElem);
                         }
                     },
-                    "trail" => match Trail::from_xml(ctx, asset, attributes) {
-                        Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
-                        Err(e) => {
-                            log::warn!("Trail parse failed in {asset}: {e:#}");
-                            parse_stack.push(PartialItem::PoisonElem);
+                    "trail" => {
+                        let trail = Trail::from_xml(asset, attributes)
+                            .and_then(|mut trail| {
+                                if trail.map_id.is_none() {
+                                    trail.update_map_id(ctx)?
+                                }
+                                Ok(trail)
+                            });
+                        match trail {
+                            Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
+                            Err(e) => {
+                                log::warn!("Trail parse failed in {asset}: {e:#}");
+                                parse_stack.push(PartialItem::PoisonElem);
+                            }
                         }
                     },
                     _ => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),

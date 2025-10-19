@@ -19,24 +19,6 @@ impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
 pub type PackFilenameIter<'a> = Box<dyn Iterator<Item = anyhow::Result<Cow<'a, Path>>> + 'a>;
 
 pub trait PackLoaderContext {
-    fn find_asset_near(&mut self, relative: &str, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> where
-        Self: Sized,
-    {
-        let e = match self.load_asset_dyn(name) {
-            Ok(a) => return Ok(a),
-            Err(e) => e,
-        };
-
-        if let Some(parent) = Path::new(relative).parent() {
-            let fallback = format!("{}/{}", parent.display(), name);
-            if let Ok(a) = self.load_asset_dyn(&fallback) {
-                return Ok(a)
-            }
-        }
-
-        Err(e)
-    }
-
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader>
     where
         Self: Sized;
@@ -52,6 +34,31 @@ pub trait PackLoaderContext {
             .map(|def| def.map(|asset| asset.into_owned()))
             .collect()
     }
+
+    fn as_dyn(&mut self) -> &mut dyn PackLoaderContext where
+        Self: Sized,
+    {
+        self
+    }
+}
+
+impl<'l> dyn PackLoaderContext + 'l {
+    pub fn find_asset_near(&mut self, relative: &str, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        let e = match self.load_asset_dyn(name) {
+            Ok(a) => return Ok(a),
+            Err(e) => e,
+        };
+
+        if let Some(parent) = Path::new(relative).parent() {
+            let fallback = format!("{}/{}", parent.display(), name);
+            if let Ok(a) = self.load_asset_dyn(&fallback) {
+                return Ok(a)
+            }
+        }
+
+        Err(e)
+    }
+
 }
 
 impl PackLoaderContext for &mut dyn PackLoaderContext {
@@ -67,16 +74,49 @@ impl PackLoaderContext for &mut dyn PackLoaderContext {
         PackLoaderContext::all_files_with_ext(*self, ext)
     }
 }
-
-impl PackLoaderContext for Box<dyn PackLoaderContext> {
+impl<L: PackLoaderContext> PackLoaderContext for &mut L {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
-        self.load_asset_dyn(name)
+        L::load_asset(self, name)
     }
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
-        PackLoaderContext::load_asset_dyn(&mut **self, name)
+        PackLoaderContext::load_asset_dyn(*self, name)
     }
 
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
+        PackLoaderContext::all_files_with_ext(*self, ext)
+    }
+}
+
+impl PackLoaderContext for Box<dyn PackLoaderContext + '_> {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        self.load_asset_dyn(name)
+    }
+    fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        PackLoaderContext::load_asset_dyn(&mut **self, name)
+    }
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
+        PackLoaderContext::all_files_with_ext(&**self, ext)
+    }
+}
+impl PackLoaderContext for Box<dyn PackLoaderContext + Send + '_> {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        self.load_asset_dyn(name)
+    }
+    fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        PackLoaderContext::load_asset_dyn(&mut **self, name)
+    }
+    fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
+        PackLoaderContext::all_files_with_ext(&**self, ext)
+    }
+}
+impl PackLoaderContext for Box<dyn PackLoaderContext + Send + Sync + '_> {
+    fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
+        self.load_asset_dyn(name)
+    }
+    fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        PackLoaderContext::load_asset_dyn(&mut **self, name)
+    }
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(&**self, ext)
     }
