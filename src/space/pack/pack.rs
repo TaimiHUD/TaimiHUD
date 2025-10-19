@@ -813,8 +813,7 @@ impl PackCollection {
 
     pub fn add_pack(&mut self, pack: Arc<Pack>, loader: LoaderBox) -> usize {
         let name = pack.name.clone();
-        let mut active = ActivePack::new(pack, loader);
-        self.fixup_pack(&mut active);
+        let active = ActivePack::new(pack, loader);
         let (idx, old) = self.loaded_packs.insert_full(name, active);
         if let Some(pack) = old {
             log::info!("Pack {} reloaded", pack.pack.name);
@@ -829,8 +828,12 @@ impl PackCollection {
         idx
     }
 
-    pub fn fixup_pack(&mut self, pack: &mut ActivePack) {
-        for (_name, category) in &mut Arc::make_mut(&mut pack.pack).categories.all_categories {
+    #[cfg(todo = "unnecessary")]
+    pub fn fixup_active_pack(&self, pack: &mut ActivePack) {
+        self.fixup_pack(&mut Arc::make_mut(&mut pack.pack))
+    }
+    pub fn fixup_pack(&self, pack: &mut Pack) {
+        for (_name, category) in &mut pack.categories.all_categories {
             let is_festival = FestivalFixup::FESTIVAL_PREFIXES.iter().copied().find(|prefix|
                 category.full_id.starts_with(prefix)
             );
