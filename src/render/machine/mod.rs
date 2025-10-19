@@ -304,11 +304,19 @@ impl RenderMachine {
         if let Some(state) = state.as_mut() {
             Self::run_tasks(state);
 
-            state.machine.turn_render();
+            let render_slot = (
+                match () {
+                    #[cfg(feature = "space")]
+                    () => &mut state.engine,
+                    #[cfg(not(feature = "space"))]
+                    () => (),
+                },
+            );
+            state.machine.turn_render(render_slot);
         }
     }
 
-    pub fn turn_render(&mut self) {
+    pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]
         let controls_changed = self.controls.update()
             .map(|(&state, changes)| (state, changes));
@@ -367,9 +375,10 @@ impl RenderMachine {
 
         #[cfg(feature = "space")]
         if self.mumblelink_users.contains(RenderUsers::SPACE) && self.display_size().is_some() && RenderState::is_running() {
+            let (engine_slot,) = _render_slot;
             // TODO: !game_is_shutting_down
             let mut init = false;
-            let res = Engine::init_mut(self, |e, machine| {
+            let res = Engine::init_mut(self, engine_slot, |e, machine| {
                 init = true;
                 let res = e.render(machine).context("Space engine render");
                 if res.is_err() {
@@ -413,3 +422,10 @@ bitflags::bitflags! {
         const MARKERS = 0x04;
     }
 }
+
+#[cfg(feature = "space")]
+pub type RenderSlot<'r> = (
+    &'r mut Option<anyhow::Result<crate::space::engine::Engine>>,
+);
+#[cfg(not(feature = "space"))]
+pub type RenderSlot<'r> = ();

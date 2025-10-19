@@ -16,6 +16,7 @@ use {
     glamour::{Size2, Box2, TransformMap},
     std::{
         collections::{HashMap, HashSet},
+        mem,
         num::NonZeroU32,
         sync::Arc,
     },
@@ -73,7 +74,10 @@ struct MarkerBundle {
 pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
+    SettingsDirty,
+    #[cfg(deleteme)]
     PathingToggle,
+    #[cfg(deleteme)]
     MapToggle(MapContext),
     DisabledPaths(HashSet<String>),
     PackLoad {
@@ -86,6 +90,15 @@ pub enum SpaceEvent {
         trans: GameplayTransition,
     },
     UiResize(Option<Size2<ScreenSpace>>),
+    #[cfg(feature = "goggles")]
+    GogglesRefreshLens {
+        delay_override: Option<u32>,
+        force: bool,
+    },
+    #[cfg(feature = "goggles")]
+    GogglesClearLens,
+    #[cfg(feature = "goggles")]
+    RefreshEdgeScale,
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -130,6 +143,7 @@ pub struct Engine {
     pub packs: PackCollection,
 
     settings: Option<PathingSettings>,
+    #[cfg(deleteme)]
     settings_dirty: bool,
 }
 
@@ -186,6 +200,7 @@ impl Engine {
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
+            #[cfg(deleteme)]
             settings_dirty: false,
         };
 
@@ -206,19 +221,19 @@ impl Engine {
         Ok(engine)
     }
 
-    pub fn init_mut<F>(machine: &mut RenderMachine, f: F) -> anyhow::Result<()> where
+    pub fn init_mut<F>(machine: &mut RenderMachine, slot: &mut Option<anyhow::Result<Self>>, f: F) -> anyhow::Result<()> where
         F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
     {
         let enabled = Settings::try_read()
             .map(|s| s.enable_katrender);
 
-        let mut engine = match crate::ENGINE.try_lock() {
-            Ok(e) if e.is_none() && (machine.gameplay.is_initial() || !enabled.unwrap_or(false)) => {
+        let mut engine = match slot {
+            None if machine.gameplay.is_initial() || !enabled.unwrap_or(false) => {
                 // if early game loading or charsel, delay init
                 // TODO: make this an option, but have fallback plan if you cause crashes...
                 return Ok(())
             },
-            Ok(e) => e,
+            e => e,
             _ => return Ok(()),
         };
         let mut res = None;
@@ -230,30 +245,30 @@ impl Engine {
                 gameplay: machine.gameplay,
                 trans: machine.gameplay.latest_transition(),
             });
+            #[cfg(feature = "goggles")]
+            let _ = tx.try_send(SpaceEvent::RefreshEdgeScale);
             match crate::SPACE_SENDER.write().map_err(|_| anyhow!("space sender poisoned?")) {
                 Ok(mut sender) =>
                     *sender = Some(tx),
                 Err(e) => {
-                    res = Some(e);
-                    return Err(())
+                    res = Some(anyhow!("{e:#}"));
+                    return Err(e)
                 },
             }
-            let res = Self::initialise(machine, rx)
-                .context("Space engine setup failed")
-                .map_err(|e| {
-                    res = Some(e);
-                    ()
-                });
+            match Self::initialise(machine, rx) {
+                Err(e) => {
+                    res = Some(anyhow!("{e:#}"));
+                    Err(e)
+                },
+                Ok(e) => {
+                    #[cfg(feature = "extension-nexus")]
+                    machine.rtapi_setup();
+                    #[cfg(feature = "goggles")]
+                    goggles::classify_space_lens(&e);
 
-            #[cfg(feature = "extension-nexus")]
-            if res.is_ok() {
-                machine.rtapi_setup();
-            }
-            #[cfg(feature = "goggles")]
-            if let Ok(e) = &res {
-                goggles::classify_space_lens(e);
-            }
-            res
+                    Ok(e)
+                },
+            }.context("Space engine setup failed")
         });
         if let Some(e) = res {
             return Err(e)
@@ -263,6 +278,36 @@ impl Engine {
             Ok(e) => f(e, machine),
             Err(..) => Ok(())
         }
+    }
+
+    /// TODO: revisit, avoid, etc
+    pub fn cleanup_background(self) {
+        let Self {
+            render_backend,
+            #[cfg(feature = "space-ecs")]
+            model_files,
+            #[cfg(feature = "space-ecs")]
+            object_kinds,
+            #[cfg(feature = "space-ecs")]
+            phase_states,
+            associated_entities,
+            world,
+            packs,
+            ..
+        } = self;
+        render_backend.cleanup_background();
+        packs.cleanup_background();
+        log::debug!("skipping engine drop()");
+        mem::forget((
+            #[cfg(feature = "space-ecs")]
+            model_files,
+            #[cfg(feature = "space-ecs")]
+            object_kinds,
+            #[cfg(feature = "space-ecs")]
+            phase_states,
+            associated_entities,
+            world,
+        ));
     }
 
     pub fn new_phase(&mut self, phase_state: PhaseState) -> anyhow::Result<()> {
@@ -349,7 +394,11 @@ impl Engine {
                             .collect()
                         );
                         self.packs.disable_paths(disabled_paths);
-                    }
+                    },
+                    SettingsDirty => {
+                        self.settings = None;
+                    },
+                    #[cfg(deleteme)]
                     PathingToggle => {
                         let res = self.map_settings_mut(|s| {
                             let visible = !s.space.visible_space();
@@ -369,6 +418,7 @@ impl Engine {
                             log::warn!("{e:#}");
                         }
                     },
+                    #[cfg(deleteme)]
                     MapToggle(cx) => {
                         if let Err(e) = self.map_settings_mut(|s| match cx {
                             MapContext::Minimap =>
@@ -431,6 +481,31 @@ impl Engine {
                             log::debug!("TODO: resize event to {sz:?}");
                         },
                     },
+                    #[cfg(feature = "goggles")]
+                    RefreshEdgeScale => {
+                        let edge_scale = self.map_settings(|s|
+                            s.space.goggles.edge_scale()
+                        );
+                        let edge_scale = edge_scale.map(|s| (s, &machine.map.calibration));
+                        let res = self.render_backend.depth_handler.regen_edge(&self.render_backend.device, edge_scale)
+                            .context("generating fill geometry");
+                        if let Err(e) = res {
+                            log::error!("{e:#}");
+                        }
+                    },
+                    #[cfg(feature = "goggles")]
+                    GogglesRefreshLens { .. } | GogglesClearLens if !goggles::is_enabled() => (),
+                    #[cfg(feature = "goggles")]
+                    GogglesRefreshLens { force, delay_override } => {
+                        self.goggles_enter(force);
+                        if let (Some(delay_override), Some((delay, ..))) = (delay_override, &mut self.goggles_select_lens_delay) {
+                            *delay = 8 * delay_override;
+                        }
+                    },
+                    #[cfg(feature = "goggles")]
+                    GogglesClearLens => {
+                        goggles::clear_lens();
+                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state)
                         .context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer)
@@ -456,7 +531,7 @@ impl Engine {
             camera_source,
             edge_feather_scale,
             trail_y_offset, trail_resolution, trail_width,
-            (edge_scale, _obscured_alpha),
+            (_obscured_alpha,),
         ) = self.map_settings(|s| (
             (
                 map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
@@ -466,9 +541,9 @@ impl Engine {
                 s.space.trail_y_offset(), s.space.trail_resolution(), s.space.trail_width(),
                 match () {
                     #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.edge_scale(), s.space.goggles.obscured_alpha()),
+                    _ => (s.space.goggles.obscured_alpha(),),
                     #[cfg(not(feature = "goggles"))]
-                    _ => (None::<f32>, ()),
+                    _ => ((),),
                 },
             )
         ));
@@ -497,16 +572,6 @@ impl Engine {
 
         self.packs.prepare(&self.render_backend.device, machine)?;
         self.packs.update();
-
-        match (edge_scale, self.render_backend.depth_handler.fill_edge.is_none()) {
-            (None, false) => {
-                let _ = self.render_backend.depth_handler.fill_edge.take();
-            },
-            (Some(edge_scale), true) => {
-                self.render_backend.depth_handler.regen_edge(&self.render_backend.device, Some((edge_scale, &machine.map.calibration)));
-            },
-            _ => (),
-        }
 
         let render_map = match visible_map {
             Some(true) => map_ctx.map(|ctx| (ctx, super::dx11::PerspectiveHandler::map_local_bounds(machine))),
@@ -611,7 +676,7 @@ impl Engine {
         #[cfg(feature = "goggles")]
         let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
-        let masking = minimap_bounds.is_some() || (is_rendering && edge_scale.is_some());
+        let masking = minimap_bounds.is_some() || (is_rendering && self.render_backend.depth_handler.fill_edge.is_some());
         let masking = match render_world.is_some() && masking {
             #[cfg(feature = "goggles")]
             true if goggles_2pass => Some(true),
@@ -781,6 +846,7 @@ impl Engine {
             }
         }
 
+        #[cfg(deleteme)]
         match self.settings_dirty.then(Settings::try_write) {
             Some(Some(mut settings)) => {
                 if let Some(pathing) = &self.settings {
@@ -892,6 +958,7 @@ impl Engine {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(&mut self, f: F) -> anyhow::Result<R> {
         let mut fail = None;
         let s = self.settings.get_or_insert_with(|| {

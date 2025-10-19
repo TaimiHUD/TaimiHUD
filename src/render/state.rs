@@ -37,7 +37,10 @@ use {
 use super::edit_marker_window::EditMarkerWindowState;
 
 #[cfg(feature = "space")]
-use super::PathingWindowState;
+use crate::{
+    render::PathingWindowState,
+    space::Engine,
+};
 
 pub enum RenderEvent {
     TimerData(Vec<Arc<TimerFile>>),
@@ -57,6 +60,8 @@ pub enum RenderEvent {
     #[cfg(feature = "markers-edit")]
     GiveMarkerPaths(Vec<PathBuf>),
     ProgressBarUpdate(ProgressBarSettings),
+    Reload,
+    ReloadAll,
     Quit,
     #[cfg(any(feature = "markers", feature = "space"))]
     UiMapOpen(taimi_meta::ui::MapOpen),
@@ -92,6 +97,8 @@ pub struct RenderState {
     pub state_errors: HashMap<String, anyhow::Error>,
     pub task_queue: RenderTaskQueue,
     pub machine: RenderMachine,
+    #[cfg(feature = "space")]
+    pub engine: Option<anyhow::Result<Engine>>,
 }
 
 impl RenderState {
@@ -99,6 +106,8 @@ impl RenderState {
         Self {
             receiver,
             machine: RenderMachine::new(),
+            #[cfg(feature = "space")]
+            engine: None,
             task_queue: Default::default(),
             alert: Default::default(),
             primary_window: PrimaryWindowState::new(),
@@ -187,6 +196,8 @@ impl RenderState {
                     UiDepthAcquired() => {
                         self.machine.turn_depth_event(true);
                     },
+                    event @ (Reload | ReloadAll) =>
+                        self.reload(matches!(event, Reload)),
                     Quit => {
                         self.quit();
                         return false;
@@ -204,7 +215,7 @@ impl RenderState {
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
         #[cfg(feature = "space")]
-        self.pathing_window.draw(ui, &mut self.machine);
+        self.pathing_window.draw(ui, &mut self.machine, self.engine.as_mut());
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);
@@ -404,7 +415,44 @@ impl RenderState {
     }
 
     fn quit(&mut self) {
+        self.cleanup();
         crate::unload_render();
+    }
+    pub fn cleanup(&mut self) {
+        #[cfg(feature = "space")]
+        if let Some(Ok(mut engine)) = self.engine.take() {
+            log::debug!("unloading space engine");
+            engine.cleanup();
+        }
+    }
+    pub fn cleanup_background(mut self) {
+        #[cfg(feature = "space")]
+        if let Some(Ok(engine)) = self.engine.take() {
+            engine.cleanup_background();
+        }
+    }
+    pub fn reload(&mut self, superficial: bool) {
+        log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
+
+        #[cfg(feature = "goggles")]
+        let _ = crate::space::goggles::shutdown();
+
+        #[cfg(feature = "space")]
+        if let Some(Ok(mut engine)) = self.engine.take() {
+            log::debug!("reloading space engine");
+            if Self::is_render_thread() {
+                engine.cleanup();
+            } else {
+                log::warn!("TODO: reloading outside of render thread");
+                engine.cleanup_background();
+            }
+            // ... and let it reinit on its own next render frame
+        }
+
+        if !superficial {
+            // probably no need to reload textures/etc unless we've lost the entire d3d device or something?
+            TEXTURES.cleanup(RenderState::is_render_thread());
+        }
     }
 
     fn shutdown(&mut self) {
@@ -421,8 +469,8 @@ impl RenderState {
         }
     }
 
-    pub fn unload(self) {
-        //self.quit();
+    pub fn unload(mut self) {
+        self.cleanup();
         drop(self);
         crate::unload_render();
     }

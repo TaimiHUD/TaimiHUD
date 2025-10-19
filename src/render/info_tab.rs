@@ -4,9 +4,6 @@ use {
     nexus::imgui::{TableColumnSetup, Ui, StyleColor},
 };
 
-#[cfg(feature = "space")]
-use crate::engine_ref;
-
 pub struct InfoTabState {
     authors: String,
 }
@@ -156,8 +153,9 @@ impl InfoTabState {
             std::sync::atomic::Ordering,
         };
 
-        RenderState::font_text("big", ui, &fl!("engine"));
+        #[cfg(todo)]
         engine_ref(|engine| {
+            RenderState::font_text("big", ui, &fl!("engine"));
             RenderState::font_text("ui", ui, &fl!("ecs-data"));
             let entities = engine.world.entities();
             let used_entities = entities.used_count();
@@ -200,6 +198,7 @@ impl InfoTabState {
                 }
                 drop(table_token);
             }
+        });
 
             RenderState::font_text("ui", ui, "Pathing Stats");
             let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
@@ -220,6 +219,5 @@ impl InfoTabState {
                 let size = fl!("alloc-size", size = size);
                 ui.text(&format!("POI Instance Buffer {size}"));
             }
-        });
     }
 }

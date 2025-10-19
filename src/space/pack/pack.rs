@@ -18,6 +18,7 @@ use {
     }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, glamour::Box3, indexmap::IndexMap, std::{
         collections::{BTreeMap, BTreeSet, HashSet},
         fs::{create_dir_all, read_dir},
+        mem,
         path::Path,
         sync::{atomic::{AtomicUsize, Ordering}, Arc},
     }, taimi_d3d::dx11::{
@@ -1246,6 +1247,18 @@ impl PackCollection {
         for pack in self.loaded_packs.values_mut() {
             pack.cleanup_textures();
         }
+    }
+
+    /// See [crate::space::engine::Engine::cleanup_background]
+    ///
+    /// TODO: revisit, avoid, etc
+    pub fn cleanup_background(self) {
+        let Self {
+            loaded_packs,
+            poi_common,
+            ..
+        } = self;
+        mem::forget((loaded_packs, poi_common));
     }
 }
 

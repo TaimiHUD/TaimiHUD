@@ -399,17 +399,17 @@ pub fn quick_access_add(icon: TaimiControls) {
                 #[cfg(feature = "space")]
                 {
                     use {
-                        crate::space::engine::{Engine, SpaceEvent},
+                        crate::controller::pathing::PathingEvent,
                         taimi_meta::ui::MapContext,
                     };
                     if ui.button(fl!("pathing-render-toggle")) {
-                        Engine::try_send(SpaceEvent::PathingToggle);
+                        PathingEvent::VISIBLE_TOGGLE_SPACE.try_send();
                     }
                     if ui.button(fl!("pathing-render-minimap-toggle")) {
-                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+                        PathingEvent::visible_toggle(MapContext::Minimap).try_send();
                     }
                     if ui.button(fl!("pathing-render-map-toggle")) {
-                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+                        PathingEvent::visible_toggle(MapContext::Global).try_send();
                     }
                     if ui.button(fl!("pathing-window")) {
                         control_window(crate::WINDOW_PATHING, None);
