@@ -84,19 +84,25 @@ impl PathingController {
             log::debug!("{context}...");
             let path = entry.path();
             let is_taco = path.extension().map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
-            let loader = move || {
-                let res = if path.is_file() || is_taco.unwrap_or(false) {
-                    Self::pathing_load_taco(name, path)
-                } else {
-                    Self::pathing_load_dir(name, path)
-                }.context(context);
-
-                if let Err(e) = &res {
-                    log::error!("Path load failed: {e:#}");
+            let is_taco = path.is_file() || is_taco.unwrap_or(false);
+            let loader = move || match is_taco {
+                true => Self::pathing_load_taco(path),
+                false => Self::pathing_load_dir(path),
+            }.context(context);
+            let loader = async move {
+                let res = tokio::task::spawn_blocking(loader).await
+                    .context("Path load panicked");
+                match res {
+                    Ok(Ok((pack, loader))) => {
+                        Self::pathing_load_pack(pack, loader, name).await;
+                        Ok(())
+                    },
+                    Err(e) | Ok(Err(e)) => {
+                        Err(e)
+                    },
                 }
-                res.is_ok()
             };
-            path_loads.spawn_blocking(loader);
+            path_loads.spawn(loader);
         }
 
         tokio::spawn(async move {
@@ -120,14 +126,13 @@ impl PathingController {
                     }
                 } else {
                     pack_load.await
-                };
+                }.map(|r| r.context("Path load panicked"));
                 match res {
                     None => break,
-                    Some(Err(e)) =>
-                        log::error!("Path load panicked: {e}"),
-                    Some(Ok(true)) =>
+                    Some(Err(e) | Ok(Err(e))) =>
+                        log::error!("{e:#}"),
+                    Some(Ok(Ok(()))) =>
                         disabled_paths_dirty = true,
-                    Some(Ok(..)) => (),
                 }
             }
 
@@ -147,23 +152,21 @@ impl PathingController {
         drop(settings_lock);
     }
 
-    fn pathing_load_taco(name: String, path: PathBuf) -> anyhow::Result<()> {
+    fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
         use taimi_pack::loader::ZipLoader;
         let mut loader = ZipLoader::new(&path)?;
         let pack = Pack::load(&mut loader)?;
-        Self::pathing_load_pack(pack, Box::new(loader), name);
-        Ok(())
+        Ok((pack, Box::new(loader)))
     }
 
-    fn pathing_load_dir(name: String, path: PathBuf) -> anyhow::Result<()> {
+    fn pathing_load_dir(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
         use taimi_pack::loader::DirectoryLoader;
         let mut loader = DirectoryLoader::new(path);
         let pack = Pack::load(&mut loader)?;
-        Self::pathing_load_pack(pack, Box::new(loader), name);
-        Ok(())
+        Ok((pack, Box::new(loader)))
     }
 
-    fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
+    async fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
         if pack.name.is_empty() {
             pack.name = name;
         }
@@ -171,9 +174,8 @@ impl PathingController {
             pack: Arc::new(pack),
             loader,
         };
-        // TODO: await!
         if let Some(sender) = Engine::sender() {
-            let _ = sender.blocking_send(event);
+            let _ = sender.send(event).await;
         }
     }
 
