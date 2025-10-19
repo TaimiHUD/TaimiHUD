@@ -13,7 +13,7 @@ use {
 };
 #[cfg(feature = "space")]
 use {
-    crate::space::engine::{Engine, SpaceEvent},
+    crate::controller::pathing::PathingEvent,
     taimi_meta::ui::MapContext,
 };
 
@@ -91,11 +91,11 @@ impl ArcRenderState {
         #[cfg(feature = "space")]
         {
             ui.separator();
-            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::PathingToggle)));
+            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING, Some(|_vk: &ArcVk| PathingEvent::VISIBLE_TOGGLE_SPACE.try_send()));
             ui.separator();
-            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap))));
+            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP, Some(|_vk: &ArcVk| PathingEvent::visible_toggle(MapContext::Minimap).try_send()));
             ui.separator();
-            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, Some(|_vk: &ArcVk| Engine::try_send(SpaceEvent::MapToggle(MapContext::Global))));
+            self.keybind_ui(ui, &ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, Some(|_vk: &ArcVk| PathingEvent::visible_toggle(MapContext::Global).try_send()));
         }
         ui.separator();
         for binding in &ArcSettings::VK_TIMER_TRIGGERS {

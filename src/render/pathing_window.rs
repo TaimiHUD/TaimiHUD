@@ -1,6 +1,11 @@
 use {
     crate::{
-        controller::pathing::{PathingController, PathingEvent}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::pack::ActivePack, with_i18n, Controller, ControllerEvent
+        controller::pathing::PathingEvent,
+        fl,
+        render::{machine::RenderMachine, PathingConfig, RenderState},
+        settings::Settings,
+        space::{engine::Engine, pack::ActivePack},
+        with_i18n, Controller, ControllerEvent
     },
     bitflags::bitflags,
     nexus::imgui::{ChildWindow, Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window, WindowFlags},
@@ -152,7 +157,7 @@ impl PathingWindowState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, engine: Option<&mut anyhow::Result<Engine>>) {
         let mut state_errors = Default::default();
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
@@ -169,7 +174,7 @@ impl PathingWindowState {
                         fl!("open-button", kind = "folder"),
                         pathing_dir.to_string_lossy(),
                     );
-                    let rendered = crate::engine_mut(|engine| {
+                    let rendered_err = if let Some(Ok(engine)) = engine {
                                         ui.same_line();
                                         let button_text = match self.filter_open {
                                             true => fl!("hide-filter"),
@@ -195,7 +200,7 @@ impl PathingWindowState {
                                     // TODO? Engine::try_send(SpaceEvent::PackUnloadAll); instead of inline here...
                                     if ui.button("Reload All") {
                                         engine.packs.clear();
-                                        PathingController::try_send(PathingEvent::PathingLoadAll);
+                                        PathingEvent::PathingLoadAll.try_send();
                                     }
                                     ui.same_line();
                                     if ui.button("Unload All") {
@@ -283,9 +288,10 @@ impl PathingWindowState {
                                             token.end();
                                         }
                                     });
-                    });
-                    if rendered.is_none() {
-                        PathingConfig::draw_space_error(ui, machine, None);
+                        None
+                    } else { engine.map(|e| e.as_ref().err()) };
+                    if let Some(e) = rendered_err {
+                        PathingConfig::draw_space_error(ui, machine, e);
                     }
                 });
         }

@@ -7,7 +7,7 @@ use core::{ffi::c_void, mem::transmute, ptr::{self, NonNull}};
 use std::{collections::BTreeMap, sync::{OnceLock, RwLock, atomic::{AtomicPtr, Ordering}}};
 use retour::GenericDetour;
 #[cfg(feature = "space")]
-use crate::{space::Engine, ENGINE};
+use crate::space::Engine;
 use crate::render::{RenderState, RenderEvent};
 
 pub type Lenses = BTreeMap<usize, LensClass>;
@@ -275,13 +275,9 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
     let clear_depth: ClearDepth = unsafe { transmute(clear_depth) };*/
     let set_targets: unsafe extern "system" fn (*mut c_void, u32, *const *mut c_void, *mut c_void) = vtable.OMSetRenderTargets;
     let set_targets: SetTargets = unsafe { transmute(set_targets) };
-    let release_depth_view: unsafe extern "system" fn (*mut c_void) -> u32 = match ENGINE.lock().as_ref() {
-        Ok(e) => match e.as_ref() {
-            Some(Ok(e)) => Some(e.render_backend.depth_handler.depth_stencil_view_ptr().vtable().base__.base__.base__.Release),
-            _ => None,
-        },
-        _ => None,
-    }.ok_or_else(|| anyhow!("can't find ID3D11DepthStencilView template"))?;
+    let release_depth_view: unsafe extern "system" fn (*mut c_void) -> u32 =
+        crate::space::dx11::DepthHandler::depth_stencil_view_vtbl().map(|vtbl| vtbl.base__.base__.base__.Release)
+        .ok_or_else(|| anyhow!("can't find ID3D11DepthStencilView template"))?;
     let release_depth_view: Release = unsafe { transmute(release_depth_view) };
 
     let orig = unsafe {
@@ -345,7 +341,7 @@ pub fn shutdown() -> anyhow::Result<()> {
 
 /*pub fn needs_classification(cls: LensClass) -> bool {
     match cls {
-        LensClass::Space if engine_ref(|_| ()).is_some() =>
+        LensClass::Space if Engine::is_available() =>
             false,
         LensClass::Imgui =>
             false,
@@ -381,6 +377,8 @@ pub fn classify_current_lens(cls: LensClass) {
 
 #[cfg(feature = "space")]
 pub fn classify_space_lens(engine: &Engine) {
-    let dsview = engine.render_backend.depth_handler.depth_stencil_view_ptr().as_raw();
-    classify_lens(dsview as *mut _, LensClass::Space);
+    if let Some(view) = &engine.render_backend.depth_handler.render_target_view.depth {
+        let dsview = view.view.as_raw();
+        classify_lens(dsview as *mut _, LensClass::Space);
+    }
 }

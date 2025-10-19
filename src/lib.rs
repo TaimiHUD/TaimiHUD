@@ -306,29 +306,6 @@ static RENDER_UNLOAD: Condvar = Condvar::new();
 
 static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
-#[cfg(feature = "space")]
-static ENGINE: Mutex<Option<Result<Engine, ()>>> = Mutex::new(None);
-#[cfg(feature = "space")]
-pub fn engine_mut<R, F: FnOnce(&mut Engine) -> R>(f: F) -> Option<R> {
-    if !RenderState::is_render_thread() || !RenderState::is_running() {
-        return None
-    }
-
-    if let Ok(Some(Ok(engine))) = ENGINE.lock().as_mut().map(|e| &mut **e) {
-        Some(f(engine))
-    } else {
-        None
-    }
-}
-#[cfg(feature = "space")]
-pub fn engine_ref<R, F: FnOnce(&Engine) -> R>(f: F) -> Option<R> {
-    //engine_mut(|e| f(e))
-    if let Ok(Some(Ok(engine))) = ENGINE.try_lock().as_ref().map(|e| &**e) {
-        Some(f(engine))
-    } else {
-        None
-    }
-}
 
 pub const WINDOW_PRIMARY: &'static str = "primary";
 pub const WINDOW_TIMERS: &'static str = "timers";
@@ -668,10 +645,12 @@ pub fn resize_render(newsize: Option<[f32; 2]>) {
                     state.machine.reset_display_size();
                 },
             }
+            state.reload(true);
         },
-        _ => (),
+        _ => {
+            RenderState::try_send(RenderEvent::Reload);
+        },
     }
-    reload_render(true);
 }
 
 #[cfg(feature = "extension-arcdps")]
@@ -1047,12 +1026,6 @@ fn unload_render() {
 
     TEXTURES.cleanup(true);
 
-    #[cfg(feature = "space")]
-    if let Some(Ok(mut engine)) = ENGINE.lock().unwrap().take() {
-        log::debug!("unloading space engine");
-        engine.cleanup();
-    }
-
     log::debug!("render unload complete");
     RENDER_UNLOAD.notify_all();
 }
@@ -1062,42 +1035,14 @@ fn unload_render() {
 fn unload_render_background() {
     log::warn!("Unloading render state from a background thread");
 
-    #[cfg(feature = "space")]
-    if let Some(Ok(engine)) = ENGINE.lock().unwrap().take() {
-        log::debug!("skipping engine drop()");
-        mem::forget(engine);
+    if let Some(state) = RENDER_STATE.lock().unwrap().take() {
+        state.cleanup_background();
     }
-
-    let _state = RENDER_STATE.lock().unwrap().take();
 
     TEXTURES.cleanup(false);
     RENDER_UNLOAD.notify_all();
 
     log::logger().flush();
-}
-
-fn reload_render(superficial: bool) {
-    log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
-
-    #[cfg(feature = "goggles")]
-    let _ = goggles::shutdown();
-
-    #[cfg(feature = "space")]
-    if let Some(Ok(mut engine)) = ENGINE.lock().unwrap().take() {
-        log::debug!("reloading space engine");
-        if RenderState::is_render_thread() {
-            engine.cleanup();
-        } else {
-            mem::forget(engine);
-            log::warn!("TODO: reloading outside of render thread");
-        }
-        // ... and let it reinit on its own next render frame
-    }
-
-    if !superficial {
-        // probably no need to reload textures/etc unless we've lost the entire d3d device or something?
-        TEXTURES.cleanup(RenderState::is_render_thread());
-    }
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {

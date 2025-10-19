@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::ControllerEvent,
+        controller::{Controller, ControllerEvent},
         exports::runtime::bindings::{GameControl, GameControls, TaimiControls},
         settings::{Settings, SettingsLock},
         space::{
@@ -23,6 +23,10 @@ use {
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
+    VisibleToggle {
+        context: Option<MapContext>,
+        set: Option<bool>,
+    },
     PathingLoadAll,
     RequestDisabledPaths,
     PathingStateUpdate(String, bool),
@@ -186,20 +190,43 @@ impl PathingController {
             RequestDisabledPaths => self.provide_disabled_paths(settings.clone()).await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
+            VisibleToggle { context, set } => self.set_visible(context, set).await,
         }
-        
+    }
+
+    pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
+        let Ok(mut settings) = Settings::async_write().await else {
+            return
+        };
+
+        let pathing = settings.pathing_mut();
+        let (is_visible, out) = match context {
+            Some(MapContext::Global) => (pathing.space.visible_worldmap(), &mut pathing.space.visible_map_world),
+            Some(MapContext::Minimap) =>(pathing.space.visible_minimap(),  &mut pathing.space.visible_map_mini),
+            None => (pathing.space.visible_space(), &mut pathing.space.visible_space),
+        };
+        let set = set.unwrap_or(!is_visible);
+        *out = Some(set);
+
+        #[cfg(feature = "goggles")]
+        match (context, set) {
+            (None, true) => Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) }),
+            (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
+            _ => (),
+        }
+        Engine::try_send(SpaceEvent::SettingsDirty);
     }
 
     pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::PATHING_SPACE) {
-            Engine::try_send(SpaceEvent::PathingToggle);
+            self.set_visible(None, None).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MAP) {
-            Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+            self.set_visible(Some(MapContext::Global), None).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MINIMAP) {
-            Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+            self.set_visible(Some(MapContext::Minimap), None).await;
         }
     }
 
@@ -214,12 +241,29 @@ impl PathingController {
         log::debug!("TODO: player interaction");
     }
     
+    #[inline]
     pub fn try_send(e: PathingEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        let full_e = ControllerEvent::Pathing(e);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(full_e);
-        }
+        Controller::try_send(e.into())
+    }
+}
+
+impl From<PathingEvent> for ControllerEvent {
+    fn from(e: PathingEvent) -> Self {
+        ControllerEvent::Pathing(e)
+    }
+}
+
+impl PathingEvent {
+    #[inline]
+    pub fn try_send(self) {
+        PathingController::try_send(self);
+    }
+
+    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle {
+        context: None,
+        set: None,
+    };
+    pub const fn visible_toggle(context: MapContext) -> Self {
+        Self::VisibleToggle { context: Some(context), set: None }
     }
 }

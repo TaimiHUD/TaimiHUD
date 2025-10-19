@@ -57,6 +57,11 @@ impl DepthHandler {
         };
         let depth_stencil_buffer = Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
         let depth_stencil_view = DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
+        #[cfg(feature = "goggles")]
+        let _ = DEPTH_STENCIL_VIEW_VTABLE.set(unsafe {
+            &*(depth_stencil_view.view.vtable() as *const _)
+        });
+
         let fill_quad = Self::new_fill_quad(device, None)?;
         let rasterizer_state = RasterizerState::new_with_desc(device, &Self::RASTER_DESC)?;
 
@@ -166,9 +171,8 @@ impl DepthHandler {
     }
 
     #[cfg(feature = "goggles")]
-    pub fn depth_stencil_view_ptr(&self) -> InterfaceRef<'_, d3d11::ID3D11DepthStencilView> {
-        self.render_target_view.depth.as_ref().unwrap()
-            .view.to_ref()
+    pub fn depth_stencil_view_vtbl() -> Option<&'static d3d11::ID3D11DepthStencilView_Vtbl> {
+        DEPTH_STENCIL_VIEW_VTABLE.get().copied()
     }
 
     #[cfg(feature = "goggles")]
@@ -362,3 +366,6 @@ impl DepthHandler {
         Model::from_vertices(verts).to_buffer(device)
     }
 }
+
+#[cfg(feature = "goggles")]
+static DEPTH_STENCIL_VIEW_VTABLE: std::sync::OnceLock<&'static d3d11::ID3D11DepthStencilView_Vtbl> = std::sync::OnceLock::new();

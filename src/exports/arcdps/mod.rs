@@ -24,7 +24,10 @@ use {
 };
 #[cfg(feature = "space")]
 use {
-    crate::space::engine::{Engine, SpaceEvent},
+    crate::{
+        controller::pathing::PathingEvent,
+        space::Engine,
+    },
     taimi_meta::ui::MapContext,
 };
 #[cfg(feature = "extension-arcdps-extern")]
@@ -443,19 +446,19 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING, vk) {
                     bound = true;
                     if is_trigger {
-                        Engine::try_send(SpaceEvent::PathingToggle);
+                        PathingEvent::VISIBLE_TOGGLE_SPACE.try_send();
                     }
                 }
                 if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP, vk) {
                     bound = true;
                     if is_trigger {
-                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Minimap));
+                        PathingEvent::visible_toggle(MapContext::Minimap).try_send();
                     }
                 }
                 if arc.binding_matches(&ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP, vk) {
                     bound = true;
                     if is_trigger {
-                        Engine::try_send(SpaceEvent::MapToggle(MapContext::Global));
+                        PathingEvent::visible_toggle(MapContext::Global).try_send();
                     }
                 }
             }

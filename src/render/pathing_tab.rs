@@ -4,7 +4,7 @@ use {
         fl,
         render::{
             machine::RenderMachine,
-            RenderState,
+            RenderState, RenderEvent,
         },
         settings::{
             pathing::{
@@ -28,6 +28,8 @@ use {
     strum::VariantArray,
     taimi_pack::attributes::Festival,
 };
+#[cfg(feature = "goggles")]
+use crate::space::engine::{Engine, SpaceEvent};
 
 pub struct PathingConfig {
     katrender: bool,
@@ -50,42 +52,44 @@ impl PathingConfig {
         self.draw_header(ui);
 
         let opts_primary = || {
-            let active = self.draw_pathing_opts(ui, machine);
-            match (&active, self.katrender) {
-                (None, true) =>
-                    Self::draw_space_error(ui, machine, None),
-                (Some(..), true) => {
-                    ui.separator();
-                    let label = fl!("pathing-window");
-                    if ui.button(&label) {
-                        crate::control_window(crate::WINDOW_PATHING, None);
-                    }
-                },
-                _ => (),
+            let available = Engine::is_available();
+            if !available && self.katrender {
+                Self::draw_space_error(ui, machine, None);
+            }
+
+            self.draw_pathing_opts(ui, machine);
+            if available && self.katrender {
+                ui.separator();
+                let label = fl!("pathing-window");
+                if ui.button(&label) {
+                    crate::control_window(crate::WINDOW_PATHING, None);
+                }
             }
 
             with_i18n!("experimental-notice", |msg| ui.text_wrapped(&msg));
 
-            active
+            available.then_some(())
         };
 
         let child_window_flags = WindowFlags::HORIZONTAL_SCROLLBAR;
-        let active = ChildWindow::new("pathing_main")
+        let _active = ChildWindow::new("pathing_main")
             .flags(child_window_flags)
             .size([0.0, 0.0])
             .build(ui, opts_primary);
 
         ui.next_column();
 
-        let opts_secondary = || if let Some(Some(..)) = active {
+        let opts_secondary = || {
             self.draw_map_opts(ui);
 
             #[cfg(feature = "goggles")]
-            let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
-                .flags(TreeNodeFlags::FRAMED)
-                .opened(false, Condition::Once)
-                .tree_push_on_open(true)
-                .build(ui, || Self::draw_goggles_opts(ui, machine));
+            if let Some(Some(..)) = _active {
+                let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
+                    .flags(TreeNodeFlags::FRAMED)
+                    .opened(false, Condition::Once)
+                    .tree_push_on_open(true)
+                    .build(ui, || Self::draw_goggles_opts(ui, machine));
+            }
         };
 
         ChildWindow::new("pathing_secondary")
@@ -95,7 +99,7 @@ impl PathingConfig {
         ui.columns(1, "pathing_tab_end", false)
     }
 
-    pub fn draw_space_error(ui: &Ui, machine: &RenderMachine, e: Option<anyhow::Error>) {
+    pub fn draw_space_error(ui: &Ui, machine: &RenderMachine, e: Option<&anyhow::Error>) {
         let _font = RenderState::push_font("big", ui);
         let e = match e {
             None if !Settings::try_read().map(|s| s.enable_katrender).unwrap_or(true) => {
@@ -113,32 +117,30 @@ impl PathingConfig {
                 None
             },
             None => {
+                #[cfg(deleteme)]
                 let res = crate::ENGINE.try_lock().ok()
                     .and_then(|e| e.as_ref()
                         .map(|e| e.as_ref().map(drop)
                             .map_err(Clone::clone)
                         )
                     );
-                match res {
-                    Some(Err(e)) => {
-                        ui.text_wrapped(&fl!("render-notice-error"));
-                        match e {
-                            () => None,
-                            #[cfg(todo)]
-                            e => Some(e),
-                        }
-                    },
-                    None => {
+                match Engine::is_available() {
+                    false => {
                         ui.text_wrapped("Load in to the game to get started");
                         None
                     },
-                    Some(Ok(())) => {
+                    true => {
                         // shouldn't happen?
                         None
                     },
                 }
             },
-            Some(e) => Some(e),
+            Some(e) => {
+                if !Engine::is_available() {
+                    ui.text_wrapped(&fl!("render-notice-error"));
+                }
+                Some(e)
+            },
         };
         if let Some(e) = e {
             ui.text_wrapped(format!("{e:#}"));
@@ -160,13 +162,13 @@ impl PathingConfig {
                     settings.enable_katrender = false;
                 });
                 if _disabled.is_ok() {
-                    crate::reload_render(false);
+                    RenderState::try_send(RenderEvent::ReloadAll);
                 }
             }
 
             ui.same_line();
             if ui.button(&fl!("render-reload")) {
-                crate::reload_render(false);
+                RenderState::try_send(RenderEvent::ReloadAll);
             }
         } else {
             //RenderState::font_text("ui", ui, &fl!("pathing-config"));
@@ -249,12 +251,21 @@ impl PathingConfig {
     }
 
     fn set_pathing<F: FnOnce(&mut PathingSettings)>(f: F) {
-        let res = crate::engine_mut(|e|
-            e.map_settings_mut(|s| f(s))
-        ).transpose().context("failed to save pathing settings");
-        if let Err(e) = res {
-            log::warn!("{e:#}");
+        let res = Settings::write_with_blocking(|s|
+            f(s.pathing_mut())
+        ).context("failed to save pathing settings");
+        match res {
+            Ok(()) =>
+                Engine::try_send(SpaceEvent::SettingsDirty),
+            Err(e) =>
+                log::warn!("{e:#}"),
         }
+    }
+    fn get_pathing<R, F: FnOnce(&PathingSettings) -> R>(f: F) -> Option<R> {
+        //Settings::try_read().map(|s|
+        Settings::read_with_blocking(|s|
+            f(&s.pathing())
+        ).ok()
     }
 
     const RANGE_ALPHA: (f32, f32) = (0.0, 1.0);
@@ -275,7 +286,7 @@ impl PathingConfig {
             scale_trail_space, scale_poi_space,
             edge_feather_scale,
             (edge_scale, ),
-        ) = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| (
+        ) = Self::get_pathing(|s| (
             s.space.camera_source(),
             s.space.visible_space(),
             s.space.player_overlap_threshold(),
@@ -294,19 +305,15 @@ impl PathingConfig {
                 #[cfg(not(feature = "goggles"))]
                 _ => ((),),
             },
-        )))).flatten()?;
+        ))?;
 
         if ui.checkbox(&fl!("pathing-render-toggle"), &mut visible_space) {
             Self::set_pathing(|s| s.space.visible_space = Some(visible_space));
             #[cfg(feature = "goggles")]
-            match visible_space {
-                _ if !crate::space::goggles::is_enabled() => (),
-                false =>
-                    crate::space::goggles::clear_lens(),
-                true => {
-                    let _ = crate::engine_mut(|e| e.goggles_enter(false));
-                },
-            }
+            Engine::try_send(match visible_space {
+                true => SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) },
+                false => SpaceEvent::GogglesClearLens,
+            });
         }
         ui.same_line();
         if ui.checkbox(&fl!("pathing-config-textured"), &mut trail_textured_space) {
@@ -344,10 +351,7 @@ impl PathingConfig {
                 s.space.goggles.edge_scale = value;
                 edge_scale = s.space.goggles.edge_scale();
             });
-            let _ = crate::engine_mut(|e| {
-                //e.render_backend.depth_handler.regen_edge(&e.render_backend.device, edge_scale);
-                e.render_backend.depth_handler.fill_edge.take();
-            });
+            Engine::try_send(SpaceEvent::RefreshEdgeScale);
         }
         if let Some(value) = Self::slider_setting(ui, &fl!("pathing-config-distance-max"), distance_max, (1.0, 2000.0)) {
             Self::set_pathing(|s| s.space.distance_max = value);
@@ -417,7 +421,7 @@ impl PathingConfig {
             map_trail_alpha_mini, map_trail_alpha_world,
             scale_trail_mini, scale_trail_world,
             scale_poi_mini, scale_poi_world,
-        ) = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| (
+        ) = Self::get_pathing(|s| (
             s.space.visible_minimap(), s.space.visible_worldmap(),
             s.space.map_open(),
             s.space.trail_textured_minimap(), s.space.trail_textured_worldmap(),
@@ -425,7 +429,7 @@ impl PathingConfig {
             //s.space.poi_alpha_minimap(), s.space.poi_alpha_worldmap(),
             s.space.trail_scale_minimap(), s.space.trail_scale_worldmap(),
             s.space.poi_scale_minimap(), s.space.poi_scale_worldmap(),
-        )))).flatten()?;
+        ))?;
 
         let minimap_opts = || {
             //RenderState::font_text("ui", ui, &fl!("pathing-config-minimap"));
@@ -493,7 +497,7 @@ impl PathingConfig {
     }
 
     fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let change = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| {
+        let change = Self::get_pathing(|s| {
             let mut change = None;
             for festival in Festival::all() {
                 let active = machine.festival_active(festival);
@@ -515,8 +519,8 @@ impl PathingConfig {
                 }
             }
             change
-        })));
-        if let Some(Some(Some((festival, change)))) = change {
+        });
+        if let Some(Some((festival, change))) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
             PathingController::try_send(PathingEvent::RequestDisabledPaths);
         }
@@ -529,30 +533,28 @@ impl PathingConfig {
             crate::render::goggles as render_goggles,
         };
 
-        let mut map_id = None;
+        let map_id = machine.gameplay.gameplay_map();
+        let Range { start: near, end: far } = machine.depth_range();
         let (
+            mut is_enabled,
             obscured_alpha,
-            Range { start: _near, end: _far },
-        ) = crate::engine_ref(|e| e.map_settings_ref(|s| s.map(|s| {
-            map_id = e.packs.current_map.map(|id| id as _);
-            (
-                s.space.goggles.obscured_alpha(),
-                machine.depth_range(),
-            )
-        }))).flatten()?;
+        ) = Self::get_pathing(|s| (
+            s.space.goggles.enabled(),
+            s.space.goggles.obscured_alpha(),
+        ))?;
 
-        let (mut enabled, needs_setup) = render_goggles::get_state();
+        let (enabled, needs_setup) = render_goggles::get_state();
 
         ui.text_wrapped(&fl!("pathing-config-goggles-notice"));
 
-        if ui.checkbox(&fl!("enable"), &mut enabled) {
-            Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(enabled));
-            match enabled {
+        if ui.checkbox(&fl!("enable"), &mut is_enabled) {
+            Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(is_enabled));
+            match is_enabled {
+                true if !Engine::is_available() => (),
                 true => {
-                    if crate::engine_mut(|e| e.goggles_enter(false)).is_none() {
-                        render_goggles::enable(needs_setup);
-                    }
+                    Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) });
                 },
+                false if !enabled => (),
                 false => {
                     log::debug!("Goggles setup: disabling...");
                     render_goggles::disable();
@@ -577,9 +579,10 @@ impl PathingConfig {
 
         if let Some(map_id) = map_id {
             use crate::settings::pathing::GogglesSettings;
+            let map_id = map_id.get();
 
             //RenderState::font_text("ui", ui, "Goggles");
-            if let Some(Some(value)) = Self::slider_setting(ui, "near", _near, (0.15, 1.2)) {
+            if let Some(Some(value)) = Self::slider_setting(ui, "near", near, (0.15, 1.2)) {
                 Self::set_pathing(|s| {
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
                     let e = map_depth_calibration.entry(map_id)
@@ -587,7 +590,7 @@ impl PathingConfig {
                     let prev = e.0;
                     e.0 = value / RenderMachine::GOGGLES_DEPTH_RANGE.start;
                     let near = value;
-                    let mut far = _far;
+                    let mut far = far;
                     if e.1 == 1.0 || e.1 == prev {
                         e.1 = e.0;
                         far = e.1 * RenderMachine::GOGGLES_DEPTH_RANGE.end;
@@ -595,13 +598,13 @@ impl PathingConfig {
                     machine.depth_range = Some(near..far);
                 });
             }
-            if let Some(Some(value)) = Self::slider_setting(ui, "far", _far, (500.0, 2500.0)) {
+            if let Some(Some(value)) = Self::slider_setting(ui, "far", far, (500.0, 2500.0)) {
                 Self::set_pathing(|s| {
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
                     let e = map_depth_calibration.entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
                     e.1 = value / RenderMachine::GOGGLES_DEPTH_RANGE.end;
-                    machine.depth_range = Some(_near..value);
+                    machine.depth_range = Some(near..value);
                 });
             }
             if ui.button("distance reset") {

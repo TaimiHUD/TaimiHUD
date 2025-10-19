@@ -124,6 +124,13 @@ impl RenderBackend {
         }
     }*/
 
+    /// See [crate::space::engine::Engine::cleanup_background]
+    ///
+    /// TODO: revisit, avoid, etc
+    pub fn cleanup_background(self) {
+        std::mem::forget(self)
+    }
+
     const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
         .. BlendState::TARGET_DESC_ADDITIVE
     };
