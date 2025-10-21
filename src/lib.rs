@@ -453,7 +453,7 @@ fn load_nexus() {
 
     // Rendering setup
 
-    let taimi_window = render!(|ui| {
+    let taimi_window = nexus::gui::render!(|ui| {
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
     });
@@ -469,7 +469,7 @@ fn load_nexus() {
         *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
     }
 
-    let taimi_settings = render!(|ui| {
+    let taimi_settings = nexus::gui::render!(|ui| {
         RenderState::render_options(ui);
     });
     register_render(RenderType::OptionsRender, taimi_settings).revert_on_unload();
