@@ -1,8 +1,7 @@
 use {
     super::TimerWindowState,
-    crate::{built_info, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
+    crate::{built_info, exports::runtime as rt, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
     nexus::imgui::{TableColumnSetup, Ui, StyleColor},
-    rand::{rng, seq::SliceRandom},
 };
 
 #[cfg(feature = "space")]
@@ -15,19 +14,12 @@ pub struct InfoTabState {
 impl InfoTabState {
     pub fn new() -> Self {
         Self {
-            authors: Self::authors(),
+            authors: rt::crate_authors(),
         }
     }
 
-    pub fn authors() -> String {
-        let mut rng = rng();
-        let mut authors= env!("CARGO_PKG_AUTHORS").split(":").collect::<Vec<&str>>();
-        authors.shuffle(&mut rng);
-        authors.join(", ")
-    }
-
     pub fn regen_authors(&mut self) {
-        self.authors = Self::authors();
+        self.authors = rt::crate_authors();
     }
 
     pub fn draw(&self, ui: &Ui, timer_window_state: &TimerWindowState) {

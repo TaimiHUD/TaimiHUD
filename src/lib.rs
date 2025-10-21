@@ -387,7 +387,7 @@ fn init() -> Result<(), &'static str> {
     // Say hi to the world :o
     let name = rt::CRATE_NAME;
     let version = rt::CRATE_VERSION;
-    let authors = env!("CARGO_PKG_AUTHORS");
+    let authors = rt::crate_authors();
     log::info!("Loading {name} {version} by {authors}");
     match (built_info::git_ref_name(), built_info::GIT_COMMIT_HASH_SHORT) {
         (Ok(_), _) if built_info::is_release() => (),
