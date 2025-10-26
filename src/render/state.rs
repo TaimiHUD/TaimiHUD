@@ -97,6 +97,7 @@ pub struct RenderState {
     pub state_errors: HashMap<String, anyhow::Error>,
     pub task_queue: RenderTaskQueue,
     pub machine: RenderMachine,
+    pub runtime: Option<crate::controller::runtime::RemoteContext>,
     #[cfg(feature = "space")]
     pub engine: Option<anyhow::Result<Engine>>,
 }
@@ -106,6 +107,7 @@ impl RenderState {
         Self {
             receiver,
             machine: RenderMachine::new(),
+            runtime: None,
             #[cfg(feature = "space")]
             engine: None,
             task_queue: Default::default(),

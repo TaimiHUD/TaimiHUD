@@ -10,9 +10,7 @@ pub struct ArcSettings {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub bind_vks: HashMap<String, u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub update_preference: Option<ArcUpdatePreference>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub update_remote_version: Option<String>,
+    pub gamebind_invoke: Option<InvokeMethod>,
 }
 
 impl ArcSettings {
@@ -23,6 +21,7 @@ impl ArcSettings {
     pub const VK_RENDER_TOGGLE_PATHING: ArcVk = ArcVk::new("pathing-render-toggle", vk::VK_OEM_COMMA);
     pub const VK_RENDER_TOGGLE_PATHING_MINIMAP: ArcVk = ArcVk::new("pathing-render-minimap-toggle", vk::VK_F2);
     pub const VK_RENDER_TOGGLE_PATHING_MAP: ArcVk = ArcVk::new("pathing-render-map-toggle", vk::VK_F1);
+    pub const VK_TIMER_RESET: ArcVk = ArcVk::empty("timer-key-reset");
     pub const VK_TIMER_TRIGGERS: [ArcVk; 5] = [
         ArcVk::empty("timer-key-trigger-0"),
         ArcVk::empty("timer-key-trigger-1"),
@@ -134,10 +133,26 @@ impl ArcVk {
     }
 
     pub fn set_vkeycode(&self, new: VIRTUAL_KEY) -> anyhow::Result<()> {
-        Settings::write_with_blocking(|settings|
-            settings.arc_mut().bind_vks.insert(self.id.into(), new.0)
-        ).map(drop)
+        Settings::write_with_blocking(|settings| {
+            let bind_vks = &mut settings.arc_mut().bind_vks;
+            match new.0 {
+                0 => bind_vks.remove(self.id),
+                v => bind_vks.insert(self.id.into(), v),
+            }
+        }).map(drop)
     }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub enum InvokeMethod {
+    /// SendInput
+    Input,
+    /// PostMessage
+    #[default]
+    Message,
+    /// Hybrid hack requires moving the mouse in a way that Nexus can detect
+    /// prior to invoking
+    Nexus,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -203,6 +218,13 @@ impl ArcUpdatePreference {
             Self::Once { authorized } | Self::Ask { authorized: Some(Ok(authorized)) } if authorized == version => Some(true),
             Self::Once { .. } => Some(false),
             Self::Ask { authorized: Some(Err(unauthorized)) } if unauthorized == version => Some(false),
+            _ => self.blanket_authorization(),
+        }
+    }
+
+    pub fn will_authorize(&self) -> Option<bool> {
+        match self {
+            Self::Once { .. } | Self::Ask { authorized: Some(Ok(..)) } => Some(true),
             _ => self.blanket_authorization(),
         }
     }

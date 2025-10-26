@@ -1,4 +1,5 @@
 mod arc;
+pub mod state;
 pub mod pathing;
 mod needs_update;
 mod progress_bar_config;
@@ -8,7 +9,7 @@ mod sources;
 mod v1;
 
 pub use {
-    arc::{ArcSettings, ArcUpdatePreference, ArcVk},
+    arc::{ArcSettings, ArcUpdatePreference, ArcVk, InvokeMethod},
     pathing::PathingSettings,
     progress_bar_config::ProgressBarSettings,
     settings_struct::{

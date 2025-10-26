@@ -43,6 +43,10 @@ built-info = [
   #"built/chrono",
   "built/git2",
 ]
+updates = [
+  "dep:semver",
+]
+render-rt = []
 space = [
   "dep:itertools",
   "dep:tobj",
@@ -241,6 +245,7 @@ rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
 bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
+semver = { version = "1", optional = true }
 uuid = "1"
 regex = "1"
 croner = "3"

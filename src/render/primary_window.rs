@@ -43,7 +43,7 @@ impl PrimaryWindowState {
             #[cfg(feature = "space")]
             pathing_tab: PathingConfig::new(),
             #[cfg(feature = "extension-arcdps")]
-            arc_tab: Default::default(),
+            arc_tab: super::ArcRenderState::new(),
             open: false,
         }
     }
@@ -89,7 +89,8 @@ impl PrimaryWindowState {
         state_errors: &mut HashMap<String, anyhow::Error>,
         standalone: bool,
     ) {
-        if let Some(_token) = ui.tab_bar("modules") {
+        let Some(_tabs) = ui.tab_bar(if standalone { "modules" } else { "modules-settings" }) else { return };
+        if standalone {
             if let Some(_token) = ui.tab_item(&fl!("timer-tab")) {
                 self.timer_tab.draw(ui, state_errors);
             };
@@ -112,11 +113,23 @@ impl PrimaryWindowState {
             } else {
                 self.info_tab.regen_authors();
             }
-            if !standalone {
-                #[cfg(feature = "extension-arcdps")]
-                if let Some(_token) = ui.tab_item(&fl!("arcdps-tab")) {
-                    self.arc_tab.ui_options(ui);
-                }
+        } else {
+            if let Some(_token) = ui.tab_item(&fl!("config-tab")) {
+                self.config_tab.draw(ui, machine, timer_window_state);
+            }
+            if let Some(_token) = ui.tab_item(&fl!("data-sources-tab")) {
+                self.data_sources_tab.draw(ui, state_errors);
+            }
+            #[cfg(feature = "space")]
+            if let Some(_token) = ui.tab_item(&fl!("pathing-tab")) {
+                self.pathing_tab.draw(ui, machine, state_errors);
+            }
+            #[cfg(feature = "extension-arcdps")]
+            if let Some(_token) = ui.tab_item(&fl!("arcdps-tab")) {
+                self.arc_tab.ui_options(ui);
+            }
+            if let Some(_token) = ui.tab_item(&fl!("info-tab")) {
+                self.info_tab.draw(ui, timer_window_state);
             }
         }
     }

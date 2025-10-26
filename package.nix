@@ -10,6 +10,7 @@
 , buildType ? "release"
 , enableBuilt ? builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev)
 , enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0"
+, enableUpdates ? builtInfo != {} || (enableBuilt && (! source ? sourceInfo.dirtyRev))
 , enableCache ? true
 , enableTimers ? true
 , enableMarkers ? true
@@ -46,6 +47,7 @@
     ++ optional enableArcdps "extension-arcdps"
     ++ optional enableCache "meta-cache"
     ++ optional enableSpace "space"
+    ++ optional enableUpdates "updates"
     ++ optional enableLibgit "built-info";
 in craneLib.buildPackage ({
   src = source;

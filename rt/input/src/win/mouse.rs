@@ -228,16 +228,16 @@ impl From<MousePosition> for POINT {
 impl From<LPARAM> for MousePosition {
     fn from(l: LPARAM) -> Self {
         Self {
-            y: l.0 as i16 as i32,
-            x: ((l.0 as usize & 0xffff0000) >> 16) as i16 as i32
+            x: l.0 as i16 as i32,
+            y: ((l.0 as usize & 0xffff0000) >> 16) as i16 as i32
         }
     }
 }
 
 impl From<MousePosition> for LPARAM {
     fn from(pos: MousePosition) -> Self {
-        let x = (pos.x << 16) as u32;
-        let y = pos.y as u16;
+        let x = pos.x as u16;
+        let y = (pos.y << 16) as u32;
         LPARAM(x as isize | y as isize)
     }
 }
@@ -440,15 +440,23 @@ impl MouseInput {
     }
 
     pub fn to_events(self, prior: Option<Self>) -> impl Iterator<Item = (u32, usize, isize)> {
-        let movement = match (self.is_movement(), &prior) {
-            (_, Some(prior)) if self.position == prior.position => None,
-            (false, None) => None,
-            //(false, Some(prior)) => None,
-            /*(true_, _)*/ _ => self.to_event(),
-        };
         let mut before = prior.as_ref().map(|p| p.button_after()).unwrap_or_else(|| self.button_before());
         let after = self.button_after();
         let changes = after ^ before;
+
+        let movement = match (self.is_movement(), &prior) {
+            (_, Some(prior)) if self.position == prior.position => None,
+            (true, _) if !changes.is_empty() => None,
+            (false, Some(prior)) => {
+                let mut movement = self.to_movement();
+                movement.button = prior.button;
+                movement.to_event()
+            },
+            (false, None) => None,
+            //(false, Some(prior)) => None,
+            (true, _) => self.to_event(),
+        };
+
         let events = changes.iter_keys()
             .filter_map(move |button| {
                 if !button.intersects(KeyState::BUTTON) {

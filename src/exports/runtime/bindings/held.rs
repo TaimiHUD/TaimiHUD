@@ -1,7 +1,6 @@
 use {
     crate::exports::runtime::bindings::{
-        ControlSlot,
-        GameControl, GameControls,
+        controls::{ControlIndex, ControlSlot, Control, GameControls},
         KeyPresses,
         TaimiControls,
     },
@@ -15,12 +14,11 @@ use {
     windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
 };
 
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WatcherSlot {
     Control {
-        control: GameControl,
-        index: u8,
+        control: Control,
+        index: ControlIndex,
     },
     Taimi {
         index: u8,
@@ -28,7 +26,7 @@ pub enum WatcherSlot {
 }
 
 impl WatcherSlot {
-    pub fn control(&self) -> Option<GameControl> {
+    pub fn control(&self) -> Option<Control> {
         match self {
             &Self::Control { control, .. } => Some(control),
             _ => None,
@@ -77,7 +75,7 @@ impl HeldControls {
         }
     }
 
-    pub fn is_interested_in_control(&self, control: GameControl) -> bool {
+    pub fn is_interested_in_control(&self, control: Control) -> bool {
         self.interesting_controls.contains(control)
     }
 
@@ -108,7 +106,7 @@ impl HeldControls {
     }
 
     pub fn held_controls(controls: &HeldControlsState) -> GameControls {
-        Self::collect_controls(controls.keys().filter_map(|&slot| slot.control()))
+        controls.keys().filter_map(|&slot| slot.control()).collect()
     }
 
     pub fn taimi_controls(controls: &HeldControlsState) -> TaimiControls {
@@ -127,16 +125,6 @@ impl HeldControls {
             }
         }
         interesting_binds
-    }
-
-    pub fn collect_controls<C>(controls: C) -> GameControls where
-        C: IntoIterator<Item = GameControl>,
-    {
-        let mut interesting_controls = GameControls::default();
-        for control in controls {
-            interesting_controls.set(control, true);
-        }
-        interesting_controls
     }
 
     pub fn set_interesting_keys(&self, interesting_keys: KeyPresses) {

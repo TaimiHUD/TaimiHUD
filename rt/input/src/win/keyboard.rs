@@ -1,6 +1,6 @@
 use {
-    anyhow::anyhow,
-    core::{convert::identity, iter, mem::size_of, num::NonZeroU16},
+    anyhow::{anyhow, Context},
+    core::{convert::identity, fmt, ffi::CStr, iter, mem::size_of, num::NonZeroU16},
     crate::win::{window_message, window_send_inputs},
     windows::Win32::{
         Foundation::{HWND, LPARAM},
@@ -52,6 +52,13 @@ impl KeyInput {
         }
     }
 
+    pub const fn any(self) -> Option<Self> {
+        match self.is_empty() {
+            true => None,
+            false => Some(self),
+        }
+    }
+
     pub const fn mods_unused(&self) -> KeyState {
         KeyState::from_bits_retain(!self.mods.bits() & KeyState::MODS.bits())
     }
@@ -61,6 +68,7 @@ impl KeyInput {
     }
 
     pub fn to_event(self) -> (u32, usize, isize) {
+        #[cfg(deleteme)]
         let msg = {
             let as_mod = self.vk_as_mod();
             // a dummy so it isn't unrecognized isn't necessary, but is more correct...
@@ -68,10 +76,23 @@ impl KeyInput {
             let as_mod = as_mod.any().unwrap_or(KeyState::SHIFT);
             as_mod.event_msg(self.down)
         };
+        let msg = {
+            let as_mod = self.vk_as_mod();
+            match as_mod.intersects(KeyState::BUTTON) {
+                true => as_mod,
+                false => self.mods & KeyState::MODS,
+            }.event_msg(self.down)
+        };
+        let repeat = 1u16;
         let prev_state = ((!self.down) as isize) << 30;
         let trans_state = ((!self.down) as isize) << 31;
+        let sc = match scan_code(self.vk).map(|sc| sc.get()).unwrap_or(0) {
+            sc @ 0..=0xff => sc as isize,
+            sc =>
+                sc as u8 as isize | (sc as isize & 0x8000) >> 7
+        } << 16;
         let w = self.vk.0 as _;
-        let l = prev_state | trans_state;
+        let l = prev_state | trans_state | sc | repeat as isize;
         (msg, w, l)
     }
 
@@ -93,6 +114,183 @@ impl KeyInput {
                 }
             },
         }
+    }
+
+    #[cfg(feature = "arcdps-extras")]
+    pub fn vk_from_extras(key: KeyCode) -> VIRTUAL_KEY {
+        match key {
+            KeyCode::LeftAlt => KeyboardAndMouse::VK_LMENU,
+            KeyCode::LeftCtrl => KeyboardAndMouse::VK_LCONTROL,
+            KeyCode::LeftShift => KeyboardAndMouse::VK_LSHIFT,
+            KeyCode::LeftWin => KeyboardAndMouse::VK_LWIN,
+            KeyCode::RightAlt => KeyboardAndMouse::VK_RMENU,
+            KeyCode::RightCtrl => KeyboardAndMouse::VK_RCONTROL,
+            KeyCode::RightShift => KeyboardAndMouse::VK_RSHIFT,
+            KeyCode::RightWin => KeyboardAndMouse::VK_RWIN,
+            KeyCode::Menu => KeyboardAndMouse::VK_APPS,
+            KeyCode::Minus => KeyboardAndMouse::VK_OEM_MINUS,
+            KeyCode::Equals => KeyboardAndMouse::VK_OEM_PLUS,
+            KeyCode::CapsLock => KeyboardAndMouse::VK_CAPITAL,
+            KeyCode::NumLock => KeyboardAndMouse::VK_NUMLOCK,
+            KeyCode::Enter => KeyboardAndMouse::VK_RETURN,
+            KeyCode::ArrowDown => KeyboardAndMouse::VK_DOWN,
+            KeyCode::ArrowLeft => KeyboardAndMouse::VK_LEFT,
+            KeyCode::ArrowRight => KeyboardAndMouse::VK_RIGHT,
+            KeyCode::ArrowUp => KeyboardAndMouse::VK_UP,
+            KeyCode::Tab => KeyboardAndMouse::VK_TAB,
+            KeyCode::Home => KeyboardAndMouse::VK_HOME,
+            KeyCode::End => KeyboardAndMouse::VK_END,
+            KeyCode::Insert => KeyboardAndMouse::VK_INSERT,
+            KeyCode::Next => KeyboardAndMouse::VK_NEXT,
+            KeyCode::Prior => KeyboardAndMouse::VK_PRIOR,
+            KeyCode::Delete => KeyboardAndMouse::VK_DELETE,
+            KeyCode::Backspace => KeyboardAndMouse::VK_BACK,
+            // TODO: colon vs semicolon?
+            KeyCode::Colon => KeyboardAndMouse::VK_OEM_1,
+            KeyCode::Semicolon => KeyboardAndMouse::VK_OEM_1,
+            KeyCode::Slash => KeyboardAndMouse::VK_OEM_2,
+            KeyCode::Tilde => KeyboardAndMouse::VK_OEM_3,
+            KeyCode::OpenBracket => KeyboardAndMouse::VK_OEM_4,
+            KeyCode::Backslash => KeyboardAndMouse::VK_OEM_5,
+            KeyCode::CloseBracket => KeyboardAndMouse::VK_OEM_6,
+            KeyCode::Quote => KeyboardAndMouse::VK_OEM_7,
+            // TODO: dunno where this one goes .-.
+            KeyCode::Hash => KeyboardAndMouse::VK_OEM_102,
+            KeyCode::Period => KeyboardAndMouse::VK_OEM_PERIOD,
+            KeyCode::Print => KeyboardAndMouse::VK_PRINT,
+            KeyCode::Escape => KeyboardAndMouse::VK_ESCAPE,
+            KeyCode::PlusNum => KeyboardAndMouse::VK_ADD,
+            KeyCode::DivideNum => KeyboardAndMouse::VK_DIVIDE,
+            KeyCode::MinusNum => KeyboardAndMouse::VK_SUBTRACT,
+            KeyCode::MultiplyNum => KeyboardAndMouse::VK_MULTIPLY,
+            KeyCode::DecimalNum => KeyboardAndMouse::VK_DECIMAL,
+            KeyCode::Space => KeyboardAndMouse::VK_SPACE,
+            KeyCode::ImeKey1 => KeyboardAndMouse::VK_IME_ON,
+            KeyCode::ImeKey2 => KeyboardAndMouse::VK_IME_OFF,
+            // TODO: KeyCode::EnterNum => VIRTUAL_KEY(0xe01c)?
+            KeyCode::EnterNum => KeyboardAndMouse::VK_RETURN,
+            k if k >= KeyCode::Number0Num && k <= KeyCode::Number9Num =>
+                VIRTUAL_KEY(KeyboardAndMouse::VK_NUMPAD0.0 + (
+                    k as i32 - KeyCode::Number0Num as i32
+                ) as u16),
+            k if k >= KeyCode::F1 && k <= KeyCode::F12 =>
+                VIRTUAL_KEY(KeyboardAndMouse::VK_F1.0 + (
+                    k as i32 - KeyCode::F1 as i32
+                ) as u16),
+            k => VIRTUAL_KEY(k as i32 as u16),
+        }
+    }
+
+    #[cfg(feature = "arcdps-extras")]
+    pub fn vk_from_extras_button(button: MouseCode) -> VIRTUAL_KEY {
+        match button {
+            MouseCode::Mouse1 => KeyboardAndMouse::VK_LBUTTON,
+            // yes 2 and 3 are inverted
+            MouseCode::Mouse2 => KeyboardAndMouse::VK_MBUTTON,
+            MouseCode::Mouse3 => KeyboardAndMouse::VK_RBUTTON,
+            // unsure of any of this mapping tbh...
+            MouseCode::Mouse4 => KeyboardAndMouse::VK_XBUTTON1,
+            MouseCode::Mouse5 => KeyboardAndMouse::VK_XBUTTON2,
+            MouseCode::Mouse6 => KeyboardAndMouse::VK_GAMEPAD_A,
+            MouseCode::Mouse7 => KeyboardAndMouse::VK_GAMEPAD_B,
+            MouseCode::Mouse8 => KeyboardAndMouse::VK_GAMEPAD_X,
+            MouseCode::Mouse9 => KeyboardAndMouse::VK_GAMEPAD_Y,
+            MouseCode::Mouse10 => KeyboardAndMouse::VK_GAMEPAD_RIGHT_SHOULDER,
+            MouseCode::Mouse11 => KeyboardAndMouse::VK_GAMEPAD_LEFT_SHOULDER,
+            MouseCode::Mouse12 => KeyboardAndMouse::VK_GAMEPAD_LEFT_TRIGGER,
+            MouseCode::Mouse13 => KeyboardAndMouse::VK_GAMEPAD_RIGHT_TRIGGER,
+            MouseCode::Mouse14 => KeyboardAndMouse::VK_GAMEPAD_DPAD_UP,
+            MouseCode::Mouse15 => KeyboardAndMouse::VK_GAMEPAD_DPAD_DOWN,
+            MouseCode::Mouse16 => KeyboardAndMouse::VK_GAMEPAD_DPAD_LEFT,
+            MouseCode::Mouse17 => KeyboardAndMouse::VK_GAMEPAD_DPAD_RIGHT,
+            MouseCode::Mouse18 => KeyboardAndMouse::VK_GAMEPAD_MENU,
+            MouseCode::Mouse19 => KeyboardAndMouse::VK_GAMEPAD_VIEW,
+            MouseCode::Mouse20 => KeyboardAndMouse::VK_GAMEPAD_LEFT_THUMBSTICK_BUTTON,
+            #[cfg(todo)]
+            MouseCode::Mouse18 => KeyboardAndMouse::VK_GAMEPAD_LEFT_THUMBSTICK_BUTTON,
+            #[cfg(todo)]
+            MouseCode::Mouse19 => KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_BUTTON,
+        }
+    }
+
+    pub fn vk_is_button(vk: VIRTUAL_KEY) -> bool {
+        match vk {
+            KeyboardAndMouse::VK_LBUTTON | KeyboardAndMouse::VK_MBUTTON | KeyboardAndMouse::VK_RBUTTON
+            | KeyboardAndMouse::VK_XBUTTON1 | KeyboardAndMouse::VK_XBUTTON2
+            => true,
+            vk =>
+                vk.0 >= KeyboardAndMouse::VK_GAMEPAD_A.0
+                //&& vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_BUTTON.0
+                && vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT.0
+            ,
+        }
+    }
+
+    pub fn parse_ascii(s: &[u8]) -> anyhow::Result<Self> {
+        use KeyboardAndMouse as vk;
+
+        let (mods, key) = KeyState::parse_bind_ascii(s)?;
+        let mut bind = Self::empty_with_mods(mods, false);
+
+        if let Some(button) = KeyState::from_ascii(s) {
+            return if button.is_empty() && !bind.mods.is_empty() {
+                Err(anyhow!("nonsensical keybind"))
+            } else if !button.is_empty() && bind.mods.intersects(button) {
+                // would use button_from_ascii but why not parse mods as keys anyway...
+                Err(anyhow!("redundant keybind"))
+            } else {
+                bind.vk = button.vkeycode();
+                Ok(bind)
+            }
+        }
+
+        let key_str = match key.is_ascii() {
+            true => Some(unsafe { str::from_utf8_unchecked(key) }),
+            false => None,
+        };
+        let vk = match key_str.unwrap_or("").as_bytes() {
+            &[] => None,
+            &[c] if c.is_ascii_alphanumeric() => Some(VIRTUAL_KEY(c as u16)),
+            &[b'N' | b'n', _, _, _, _, _, c @ b'1'..=b'9'] if key[..6].eq_ignore_ascii_case(b"numpad") =>
+                Some(VIRTUAL_KEY(vk::VK_NUMPAD0.0 + (c - b'0') as u16)),
+            &[b'F' | b'f', c @ b'1'..=b'9'] => Some(VIRTUAL_KEY(vk::VK_F1.0 + (c - b'1') as u16)),
+            &[b'F' | b'f', b'1', c @ b'0'..=b'9'] => Some(VIRTUAL_KEY(vk::VK_F10.0 + (c - b'0') as u16)),
+            &[b'F' | b'f', b'2', c @ b'0'..=b'4'] => Some(VIRTUAL_KEY(vk::VK_F20.0 + (c - b'0') as u16)),
+            k if k.eq_ignore_ascii_case(b"return") || k.eq_ignore_ascii_case(b"enter") => Some(vk::VK_RETURN),
+            k if k.eq_ignore_ascii_case(b"escape") || k.eq_ignore_ascii_case(b"esc") => Some(vk::VK_ESCAPE),
+            k if k.eq_ignore_ascii_case(b"up") => Some(vk::VK_UP),
+            k if k.eq_ignore_ascii_case(b"down") => Some(vk::VK_DOWN),
+            k if k.eq_ignore_ascii_case(b"left") => Some(vk::VK_LEFT),
+            k if k.eq_ignore_ascii_case(b"right") => Some(vk::VK_RIGHT),
+            k if k.eq_ignore_ascii_case(b"tab") => Some(vk::VK_TAB),
+            #[cfg(todo = "unnecessary")]
+            k if k.eq_ignore_ascii_case(b"alt") => Some(vk::VK_MENU),
+            #[cfg(todo = "unnecessary")]
+            k if k.eq_ignore_ascii_case(b"ctrl") => Some(vk::VK_CONTROL),
+            k if k.eq_ignore_ascii_case(b"control") => Some(vk::VK_CONTROL),
+            #[cfg(todo = "unnecessary")]
+            k if k.eq_ignore_ascii_case(b"shift") => Some(vk::VK_SHIFT),
+            k if k.eq_ignore_ascii_case(b"lwin") || k.eq_ignore_ascii_case(b"win") || k.eq_ignore_ascii_case(b"windows") || k.eq_ignore_ascii_case(b"super") => Some(vk::VK_LWIN),
+            k if k.eq_ignore_ascii_case(b"rwin") => Some(vk::VK_RWIN),
+            _ => None,
+        };
+
+        bind.vk = vk
+            .or_else(|| key_str.and_then(Self::parse_vk_numeric))
+            .ok_or_else(|| anyhow!("unknown key \"{}\"", key.escape_ascii()))?;
+
+        Ok(bind)
+    }
+
+    pub fn parse_vk_numeric(input: &str) -> Option<VIRTUAL_KEY> {
+        match input.strip_prefix("0x") {
+            Some(hex) => u16::from_str_radix(hex, 16).ok(),
+            None => input.parse().ok(),
+        }.map(VIRTUAL_KEY)
+    }
+
+    pub fn display_addonapi(self) -> DisplayAddonApi<Self> {
+        DisplayAddonApi(self)
     }
 }
 
@@ -116,8 +314,14 @@ impl From<u16> for KeyInput {
 
 #[cfg(feature = "arcdps-extras")]
 impl From<KeyCode> for KeyInput {
-    fn from(vk: KeyCode) -> Self {
-        Self::vk_down(VIRTUAL_KEY(vk as _))
+    fn from(k: KeyCode) -> Self {
+        Self::vk_down(Self::vk_from_extras(k))
+    }
+}
+#[cfg(feature = "arcdps-extras")]
+impl From<MouseCode> for KeyInput {
+    fn from(k: MouseCode) -> Self {
+        Self::vk_down(Self::vk_from_extras_button(k))
     }
 }
 
@@ -126,11 +330,24 @@ impl TryFrom<KeybindChange> for KeyInput {
     type Error = anyhow::Error;
 
     fn try_from(key: KeybindChange) -> Result<Self, Self::Error> {
-        let mods = KeyState::from(&key);
-        let mut input = match key.key {
-            extras::Key::Key(code) => Self::from(code),
+        use extras::Key;
+
+        let mut mods = KeyState::from(&key);
+        let code = match key.key {
+            Key::Key(KeyCode::Colon) => {
+                // this must refer to some other keycode but idk .-.
+                mods.insert(KeyState::SHIFT);
+                KeyCode::Semicolon
+            },
+            #[cfg(todo)]
+            Key::Key(KeyCode::Hash) => {
+                mods.insert(KeyState::SHIFT);
+                KeyCode::Number3
+            },
+            Key::Key(code) => code,
             k => anyhow::bail!("not a keyboard binding: {k:?}"),
         };
+        let mut input = Self::from(code);
         input.mods = mods;
         Ok(input)
     }
@@ -214,12 +431,25 @@ impl KeyState {
         }
     }
 
+    pub const fn from_vk(vk: VIRTUAL_KEY) -> Self {
+        Self::from_index(vk.0 as _)
+    }
+    pub const fn try_from_vk(vk: VIRTUAL_KEY) -> Option<Self> {
+        match Self::from_vk(vk) {
+            b if b.is_empty() => None,
+            b => Some(b),
+        }
+    }
+
     pub const fn is_unique(self) -> bool {
         self.bits().count_ones() == 1
     }
 
     pub const fn vkeycode(self) -> VIRTUAL_KEY {
-        VIRTUAL_KEY(self.index() as u16)
+        match self.index() {
+            index @ 0..=31 => VIRTUAL_KEY(index as u16),
+            _ => KeyInput::VK_EMPTY,
+        }
     }
 
     pub const fn modifierkey(self) -> Option<MODIFIERKEYS_FLAGS> {
@@ -240,6 +470,7 @@ impl KeyState {
     }
 
     pub const ALL_BUTTONS: [Self; 5] = [Self::BUTTON_L, Self::BUTTON_R, Self::BUTTON_M, Self::BUTTON_X1, Self::BUTTON_X2];
+    pub const ALL_MODS: [Self; 3] = [Self::SHIFT, Self::CTRL, Self::ALT];
 
     /// [0..=4](Self::ALL_BUTTONS) for L/R/M/X1/X2
     pub const fn button_index(self) -> Option<usize> {
@@ -299,8 +530,10 @@ impl KeyState {
                 Self::BUTTON_M =>  WindowsAndMessaging::WM_MBUTTONUP,
                 _ =>  WindowsAndMessaging::WM_XBUTTONUP,
             },
-            (Self::ALT, true) => WindowsAndMessaging::WM_SYSKEYDOWN,
-            (Self::ALT, false) => WindowsAndMessaging::WM_SYSKEYUP,
+            (k, down) if k.contains(Self::ALT) => match down {
+                true => WindowsAndMessaging::WM_SYSKEYDOWN,
+                false => WindowsAndMessaging::WM_SYSKEYUP,
+            },
             (_, true) => WindowsAndMessaging::WM_KEYDOWN,
             (_, false) => WindowsAndMessaging::WM_KEYUP,
         }
@@ -363,6 +596,114 @@ impl KeyState {
     pub fn to_mouse_flags(self, down: bool) -> MOUSE_EVENT_FLAGS {
         MOUSE_EVENT_FLAGS(self.mouse_flags(down).map(|f| f.0).sum())
     }
+
+    pub const fn as_name(self) -> &'static str {
+        match self {
+            Self::BUTTON_L => "left",
+            Self::BUTTON_R => "right",
+            Self::BUTTON_M => "middle",
+            Self::BUTTON_X1 => "x1",
+            Self::BUTTON_X2 => "x2",
+            Self::SHIFT => "shift",
+            Self::CTRL => "ctrl",
+            Self::ALT => "alt",
+            _ => "",
+        }
+    }
+    pub const fn as_name_addonapi(self) -> &'static str {
+        match self {
+            Self::BUTTON_L => Self::ADDONAPI_LMB_ASCII,
+            Self::BUTTON_R => Self::ADDONAPI_RMB_ASCII,
+            Self::BUTTON_M => Self::ADDONAPI_MMB_ASCII,
+            Self::BUTTON_X1 => Self::ADDONAPI_M4_ASCII,
+            Self::BUTTON_X2 => Self::ADDONAPI_M5_ASCII,
+            Self::SHIFT => Self::ADDONAPI_SHIFT_ASCII,
+            Self::CTRL => Self::ADDONAPI_CTRL_ASCII,
+            Self::ALT => Self::ADDONAPI_ALT_ASCII,
+            Self::EMPTY => Self::ADDONAPI_EMPTY_ASCII,
+            _ => "",
+        }
+    }
+    pub fn display_addonapi(self) -> DisplayAddonApi<Self> {
+        DisplayAddonApi(self)
+    }
+
+    pub const ADDONAPI_EMPTY_C: &'static CStr = c"(null)";
+    pub const ADDONAPI_CTRL_C: &'static CStr = c"CTRL";
+    pub const ADDONAPI_SHIFT_C: &'static CStr = c"SHIFT";
+    pub const ADDONAPI_ALT_C: &'static CStr = c"ALT";
+    pub const ADDONAPI_LMB_C: &'static CStr = c"LMB";
+    pub const ADDONAPI_RMB_C: &'static CStr = c"LMB";
+    pub const ADDONAPI_MMB_C: &'static CStr = c"MMB";
+    pub const ADDONAPI_M4_C: &'static CStr = c"M4";
+    pub const ADDONAPI_M5_C: &'static CStr = c"M5";
+    pub const ADDONAPI_EMPTY_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_EMPTY_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_CTRL_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_CTRL_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_SHIFT_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_SHIFT_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_ALT_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_ALT_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_LMB_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_LMB_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_RMB_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_RMB_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_MMB_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_MMB_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_M4_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_M4_C.to_str() { s } else { unreachable!() };
+    pub const ADDONAPI_M5_ASCII: &'static str = if let Ok(s) = Self::ADDONAPI_M5_C.to_str() { s } else { unreachable!() };
+    pub const MOD_SEP_ASCII: u8 = b'+';
+
+    pub fn parse_bind_ascii(s: &[u8]) -> anyhow::Result<(Self, &[u8])> {
+        let mut mods = Self::EMPTY;
+        let mut split = s.splitn(4, |&b| b == Self::MOD_SEP_ASCII);
+        let key = loop {
+            let seg = match split.next() {
+                Some(seg) if split.size_hint().0 == 0 => break seg,
+                Some(seg) => seg,
+                // should be unreachable...
+                #[cfg(debug_assertions)]
+                None => anyhow::bail!("expected segment"),
+                #[cfg(not(debug_assertions))]
+                None => break b"",
+            };
+            let modifier = Self::try_mod_from_ascii(seg)
+                .with_context(|| format!("interpreting mod \"{}\"", seg.escape_ascii()))?;
+            if mods.intersects(modifier) {
+                log::warn!("redundant keybind \"{}\"", s.escape_ascii());
+            }
+            mods.insert(modifier);
+        };
+
+        Ok((mods, key))
+    }
+
+    pub fn mod_from_ascii(s: &[u8]) -> Option<Self> {
+        match s {
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_ALT_ASCII.as_bytes()) => Some(Self::ALT),
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_CTRL_ASCII.as_bytes()) => Some(Self::CTRL),
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_SHIFT_ASCII.as_bytes()) => Some(Self::SHIFT),
+            _ => None,
+        }
+    }
+    pub fn try_mod_from_ascii(s: &[u8]) -> anyhow::Result<Self> {
+        Self::mod_from_ascii(s)
+            .ok_or_else(|| anyhow!("unknown modifier"))
+    }
+
+    pub fn button_from_ascii(s: &[u8]) -> Option<Self> {
+        match s {
+            s if s.is_empty() || s.eq_ignore_ascii_case(Self::ADDONAPI_EMPTY_ASCII.as_bytes()) =>
+                Some(Self::EMPTY),
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_LMB_ASCII.as_bytes()) =>
+                Some(Self::BUTTON_L),
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_RMB_ASCII.as_bytes()) =>
+                Some(Self::BUTTON_R),
+            s if s.eq_ignore_ascii_case(Self::ADDONAPI_MMB_ASCII.as_bytes()) =>
+                Some(Self::BUTTON_M),
+            [b'M' | b'm', button @ b'1'..=b'5'] =>
+                Self::from_button_index((button - b'1') as usize),
+            _ => None,
+        }
+    }
+
+    pub fn from_ascii(s: &[u8]) -> Option<Self> {
+        Self::button_from_ascii(s).or_else(|| Self::mod_from_ascii(s))
+    }
 }
 
 #[cfg(feature = "arcdps-extras")]
@@ -401,6 +742,60 @@ impl Extend<Option<Self>> for KeyState {
 impl FromIterator<Option<Self>> for KeyState {
     fn from_iter<T: IntoIterator<Item = Option<Self>>>(iter: T) -> Self {
         iter.into_iter().filter_map(identity).collect()
+    }
+}
+impl fmt::Display for KeyState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, key) in self.iter().enumerate() {
+            let prefix = (i > 0).then_some("+").unwrap_or("");
+            let name = key.as_name();
+            write!(f, "{prefix}{name}")?;
+        }
+        Ok(())
+    }
+}
+pub struct DisplayAddonApi<K>(pub K);
+impl fmt::Display for DisplayAddonApi<KeyState> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, key) in self.0.iter().enumerate() {
+            let prefix = (i > 0).then_some("+").unwrap_or("");
+            let name = key.as_name_addonapi();
+            write!(f, "{prefix}{name}")?;
+        }
+        Ok(())
+    }
+}
+impl fmt::Display for DisplayAddonApi<&'_ KeyState> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&DisplayAddonApi(*self.0), f)
+    }
+}
+impl fmt::Display for DisplayAddonApi<KeyInput> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&DisplayAddonApi(&self.0), f)
+    }
+}
+impl fmt::Display for DisplayAddonApi<&'_ KeyInput> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let has_mods = !self.0.mods.is_empty();
+        if has_mods {
+            fmt::Display::fmt(&self.0.mods.display_addonapi(), f)?;
+        }
+        if has_mods {
+            f.write_str("+")?;
+        }
+        let vk = self.0.vk;
+        if vk == KeyInput::VK_EMPTY {
+            return f.write_str(KeyState::ADDONAPI_EMPTY_ASCII)
+        }
+        #[cfg(windows)]
+        if let Ok(name) = vk_name(vk) {
+            return fmt::Display::fmt(&name, f)
+        }
+
+        fmt::Display::fmt(&vk.0, f)
     }
 }
 

@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::{self, NonNull},
     sync::{
-        atomic::{AtomicBool, AtomicPtr, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
         Mutex, Once, OnceLock,
     },
     time::Duration,
@@ -34,12 +34,15 @@ pub mod mouse;
 pub mod statistics;
 pub mod textures;
 pub mod update;
+pub mod watched;
 pub use {
+    arcdps::Language as GameLanguage,
     nexus::imgui,
     self::{
         mouse::MousePosition,
         statistics::Counter,
         textures::TextureLoader,
+        watched::Watched,
     },
     taimi_meta::coords::vec_eq,
     taimi_input::win::keyboard::KeyState,
@@ -80,6 +83,7 @@ pub fn crate_authors() -> String {
 
 pub static LOADER_LOCK: Mutex<bool> = Mutex::new(false);
 
+#[inline]
 pub fn nexus_available() -> bool {
     match () {
         #[cfg(feature = "extension-nexus")]
@@ -89,7 +93,7 @@ pub fn nexus_available() -> bool {
     }
 }
 
-#[cfg(todo)]
+#[inline]
 pub fn arcdps_available() -> bool {
     match () {
         #[cfg(feature = "extension-arcdps")]
@@ -152,18 +156,21 @@ impl ops::Deref for AddonDir {
     }
 }
 
-pub fn detect_language() -> RuntimeResult<String> {
+pub fn detect_language() -> RuntimeResult<Cow<'static, str>> {
     #[cfg(feature = "extension-nexus")]
     if let Some(lang) = exports::nexus::detect_language()? {
-        return Ok(lang)
+        return Ok(lang.into())
     }
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(lang) = exports::arcdps::detect_language()? {
-        return Ok(lang)
+        return Ok(lang.into())
     }
 
-    Err(RT_UNAVAILABLE)
+    game_language()
+        .map(crate::game_language_id)
+        .map(Cow::Borrowed)
+        .ok_or(RT_UNAVAILABLE)
 }
 
 pub fn reload_language() -> RuntimeResult {
@@ -171,6 +178,25 @@ pub fn reload_language() -> RuntimeResult {
     info!("Detected language {language} for internationalization");
 
     load_language(&language)
+}
+
+static GAME_LANGUAGE: AtomicI32 = AtomicI32::new(i32::MIN);
+pub fn game_language() -> Option<GameLanguage> {
+    let id = GAME_LANGUAGE.load(Ordering::Relaxed);
+    GameLanguage::try_from(id).ok()
+}
+
+pub fn notify_game_language(language: GameLanguage) {
+    let id = language.into();
+    let prev = GAME_LANGUAGE.swap(id, Ordering::Relaxed);
+    if prev != id {
+        let res = crate::load_language(crate::game_language_id(language))
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("Failed to change language to {language:?}"));
+        if let Err(e) = res {
+            ::log::warn!("{e:#}");
+        }
+    }
 }
 
 static MUMBLE_LINK_PTR: AtomicPtr<MumbleLink> = AtomicPtr::new(ptr::dangling_mut());
@@ -284,18 +310,30 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
 }
 
 pub async fn invoke_marker_bind(marker: MarkerType, target: bool, duration: Duration, position: Option<MousePosition>) -> RuntimeResult<()> {
+    use crate::settings::{InvokeMethod, Settings};
     if let Ok(false) = mumble_link_ptr().map(|ml| ml.read_ui_state().contains(UiState::GAME_HAS_FOCUS)) {
         return Err("Game unfocused")
     }
 
     press_marker_bind(marker, target, true, position).await?;
 
-    tokio::time::sleep(duration).await;
+    let method = Settings::async_read().await.ok()
+        .and_then(|s| s.arc().gamebind_invoke)
+        .unwrap_or(match nexus_available() {
+            #[cfg(feature = "extension-nexus")]
+            true => InvokeMethod::Nexus,
+            _ => InvokeMethod::default(),
+        });
+
+    match method {
+        InvokeMethod::Message => (),
+        InvokeMethod::Input | InvokeMethod::Nexus => tokio::time::sleep(duration).await,
+    }
 
     #[cfg(feature = "extension-nexus")]
-    let position = match exports::nexus::available() {
-        false => position,
-        true => None,
+    let position = match method {
+        InvokeMethod::Nexus => None,
+        _ => position,
     };
 
     press_marker_bind(marker, target, false, position).await

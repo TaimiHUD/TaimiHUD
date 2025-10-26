@@ -387,12 +387,10 @@ impl MarkersController {
     }
 
     async fn place_marker(
-        wait_duration: Duration,
         place_duration: Duration,
         point: ScreenPoint,
         marker: &MarkerEntry,
     ) {
-        sleep(wait_duration).await;
         let point = rt::mouse::mouse_position_from_screen(point);
         let res = rt::invoke_marker_bind(marker.marker, false, place_duration, Some(point)).await
             .map_err(anyhow::Error::msg)
@@ -446,7 +444,10 @@ impl MarkersController {
         let wait_duration = Duration::from_millis(50);
         let original_position = rt::window_mouse_position()
             .map_err(|e| anyhow!("Getting cursor pos: {e}"))?;
-        for marker in &markers.markers {
+        for (i, marker) in markers.markers.iter().enumerate() {
+            if i > 0 {
+                sleep(wait_duration).await;
+            }
             // check if it is possible to place immediately
             let local_point: LocalPoint = marker.position.into();
             let map = RenderMachine::shared_map_state().lock().await.clone();
@@ -463,7 +464,7 @@ impl MarkersController {
             match screen_point {
                 // if the marker is on the map, that's fine, place it
                 Some(point) => {
-                    Self::place_marker(wait_duration, Self::KEY_INVOKE_DURATION, point, marker).await;
+                    Self::place_marker(Self::KEY_INVOKE_DURATION, point, marker).await;
                 }
                 // if the marker isn't on the map, we need to get our perspective to include
                 // the marker
@@ -535,7 +536,6 @@ impl MarkersController {
                                 ));
                             } else {
                                 Self::place_marker_from_map(
-                                    wait_duration,
                                     Self::KEY_INVOKE_DURATION,
                                     marker.position.into(),
                                     marker,
@@ -569,7 +569,6 @@ impl MarkersController {
     }
 
     pub(crate) async fn place_marker_from_map(
-        wait_duration: Duration,
         place_duration: Duration,
         point: Point3<LocalSpace>,
         marker: &MarkerEntry,
@@ -585,7 +584,7 @@ impl MarkersController {
             .then(map.worldmap_to_fake_for(map.context));
         if let Some(point) = map.clip(trans.map(point)) {
             let point = map.calibration.map(point);
-            Self::place_marker(wait_duration, place_duration, point, marker).await;
+            Self::place_marker(place_duration, point, marker).await;
         } else {
             log::info!("marker out of bounds");
         }

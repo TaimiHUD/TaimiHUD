@@ -2,11 +2,13 @@ use {
     arcdps::extras::keybinds::KeybindChange,
     bitflags::bitflags,
     bitvec::array::BitArray,
+    crate::settings::state::SaveState,
     std::{
+        collections::BTreeMap,
         marker::PhantomData,
         sync::{
             atomic::{AtomicU64, Ordering},
-            LazyLock, RwLock,
+            LazyLock,
         },
     },
     taimi_input::win::keyboard::{KeyState, KeyInput},
@@ -16,10 +18,10 @@ use {
     },
 };
 pub use self::{
-    controls::{ControlSlot, GameControl, GameControls},
+    controls::{ControlSlot, Control, GameControl, GameControls, GameBinds},
     held::{ControlsReceiver, HeldControls, TaimiReceiver},
     intercept::KeyIntercept,
-    keys::{KeyPresses, GameBinds},
+    keys::KeyPresses,
 };
 
 pub mod controls;
@@ -28,7 +30,18 @@ pub mod intercept;
 pub mod keys;
 
 pub static CONTROLS: LazyLock<HeldControls> = LazyLock::new(|| HeldControls::new(interesting_controls()));
+pub(crate) fn read_game_binds<R, F: FnOnce(&GameBinds) -> R>(f: F) -> R {
+    SaveState::read_with(|s| f(&s.game_binds))
+}
+pub(crate) fn write_game_binds<F: FnOnce(&mut GameBinds)>(f: F) {
+    SaveState::write_with(|s| f(&mut s.game_binds_mut()))
+}
+#[cfg(todo)]
 pub static GAME_BINDS: RwLock<GameBinds> = RwLock::new(GameBinds::new());
+/// TODO: any need to bring this back?
+fn try_read_game_binds<R, F: FnOnce(&GameBinds) -> R>(f: F) -> Option<R> {
+    Some(read_game_binds(f))
+}
 
 bitflags! {
     #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -151,30 +164,66 @@ impl<'de> serde::Deserialize<'de> for TaimiControls {
     }
 }
 
-fn is_interesting(control: GameControl) -> bool {
+pub static DEFAULT_GAMEBINDS: LazyLock<BTreeMap<Control, KeyInput>> = LazyLock::new(||
+    self::controls::default_gamebinds()
+);
+
+/// we don't care about detecting these, only simulating them...
+fn is_interesting_bind(control: Control) -> bool {
+    let Some(control) = control.as_control() else {
+        // if we don't know about it then we don't actually care
+        return false
+    };
     match control {
-        // we don't care about detecting these, only simulating them...
-        #[cfg(todo = "unnecessary")]
-        GameControl::Squad_Object_X | GameControl::Squad_Location_X
-        | GameControl::Squad_Object_Star | GameControl::Squad_Location_Star
-        | GameControl::Squad_Object_Arrow | GameControl::Squad_Location_Arrow
-        | GameControl::Squad_Object_Heart | GameControl::Squad_Location_Heart
-        | GameControl::Squad_Object_Circle | GameControl::Squad_Location_Circle
-        | GameControl::Squad_Object_Square | GameControl::Squad_Location_Square
-        | GameControl::Squad_Object_Spiral | GameControl::Squad_Location_Spiral
-        | GameControl::Squad_Object_Triangle | GameControl::Squad_Location_Triangle
+        GameControl::Squad_Location_X
+        | GameControl::Squad_Location_Star
+        | GameControl::Squad_Location_Arrow
+        | GameControl::Squad_Location_Heart
+        | GameControl::Squad_Location_Circle
+        | GameControl::Squad_Location_Square
+        | GameControl::Squad_Location_Spiral
+        | GameControl::Squad_Location_Triangle
         => true,
-        GameControl::Miscellaneous_Interact | GameControl::Map_OpenClose
-        | GameControl::UI_ShowHideUI
-        | GameControl::Map_ZoomIn | GameControl::Map_ZoomOut | GameControl::Map_Recenter
-        | GameControl::Map_FloorUp | GameControl::Map_FloorDown
-        | GameControl::Squad_ClearAllObjectMarkers | GameControl::Squad_ClearAllLocationMarkers
+        #[cfg(todo)]
+        GameControl::Squad_Object_X
+        | GameControl::Squad_Object_Star
+        | GameControl::Squad_Object_Arrow
+        | GameControl::Squad_Object_Heart
+        | GameControl::Squad_Object_Circle
+        | GameControl::Squad_Object_Square
+        | GameControl::Squad_Object_Spiral
+        | GameControl::Squad_Object_Triangle
         => true,
         _ => false,
     }
 }
-fn interesting_controls() -> GameControls {
-    HeldControls::collect_controls(GameControls::all_controls().filter(|&c| is_interesting(c)))
+fn is_interesting(control: Control) -> bool {
+    let Some(control) = control.as_control() else {
+        return false
+    };
+    match control {
+        GameControl::Miscellaneous_Interact | GameControl::Map_OpenClose
+        | GameControl::UI_ShowHideUI
+        | GameControl::Squad_ClearAllObjectMarkers | GameControl::Squad_ClearAllLocationMarkers
+        => true,
+        #[cfg(todo)]
+        GameControl::Map_FloorUp | GameControl::Map_FloorDown
+        | GameControl::Map_ZoomIn | GameControl::Map_ZoomOut | GameControl::Map_Recenter
+        => true,
+        _ => false,
+    }
+}
+pub fn interesting_controls() -> GameControls {
+    GameControls::all_controls()
+        .map(Control::from)
+        .filter(|&c| is_interesting(c))
+        .collect()
+}
+pub fn interesting_keybinds() -> GameControls {
+    GameControls::all_controls()
+        .map(Control::from)
+        .filter(|&c| is_interesting_bind(c))
+        .collect()
 }
 
 fn notify_interesting(keyboard: bool, vk: VIRTUAL_KEY, down: bool) {
@@ -187,13 +236,13 @@ fn notify_interesting(keyboard: bool, vk: VIRTUAL_KEY, down: bool) {
     match down {
         false => CONTROLS.notify_release(vk),
         true => {
-            let bind = if let Ok(binds) = GAME_BINDS.try_read() {
+            let bind = try_read_game_binds(|binds| {
                 let mods = held_mods();
                 match keyboard {
                     true => binds.key_binds.get(&(vk.0, mods)),
                     false => binds.mouse_binds.get(&(vk.0, mods)),
                 }.copied()
-            } else { None };
+            }).flatten();
             if let Some(bind) = bind {
                 CONTROLS.notify_press(vk, bind);
             }
@@ -202,26 +251,27 @@ fn notify_interesting(keyboard: bool, vk: VIRTUAL_KEY, down: bool) {
 }
 
 pub fn process_key_bound(change: KeybindChange) {
-    let interesting = CONTROLS.is_interested_in_control(change.control);
+    let interesting = CONTROLS.is_interested_in_control(change.control.into());
     #[cfg(todo)]
     if !interesting { return }
 
-    let interesting_keys = {
-        let Ok(mut binds) = GAME_BINDS.write() else { return };
+    let mut interesting_keys = None;
+    write_game_binds(|binds| {
         binds.process_update(&change);
         if !interesting { return }
 
-        CONTROLS.collect_interesting_keys(
+        interesting_keys = Some(CONTROLS.collect_interesting_keys(
             // TODO: these should be delayed since we expect to receive a lot of these events at startup...
             binds.key_binds.iter()
                 .chain(binds.mouse_binds.iter())
                 .map(|(&(vk, _), &slot)| (slot, VIRTUAL_KEY(vk)))
-            )
-        };
+        ));
+    });
+    let Some(interesting_keys) = interesting_keys else { return };
     CONTROLS.set_interesting_keys(interesting_keys);
 }
 
-pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64]> = BitArray {
+pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> = BitArray {
     data: [const { AtomicU64::new(0) }; keys::KEY_PRESS_BITS / 64],
     _ord: PhantomData,
 };
@@ -307,21 +357,8 @@ pub fn process_button_event(msg: u32, w: usize, _l: isize) -> u32 {
 }
 
 pub fn held_mods() -> KeyState {
+    // Lsb0 is the default/recommended bitvec ordering
     let bits0 = HELD_KEYS.data[0].load(Ordering::Relaxed);
-    let binds: BitArray<_> = BitArray {
-        data: [bits0],
-        _ord: PhantomData,
-    };
-    let (shift, ctrl, alt) = unsafe {
-        (
-            *binds.get_unchecked(KeyboardAndMouse::VK_SHIFT.0 as usize),
-            *binds.get_unchecked(KeyboardAndMouse::VK_CONTROL.0 as usize),
-            *binds.get_unchecked(KeyboardAndMouse::VK_MENU.0 as usize),
-        )
-    };
-    let mut mods = KeyState::EMPTY;
-    mods.set(KeyState::SHIFT, shift);
-    mods.set(KeyState::CTRL, ctrl);
-    mods.set(KeyState::ALT, alt);
-    mods
+    // TODO: handle or normalize LCTRL vs RCTRL etc
+    KeyState::from_bits_retain(bits0 as u32 & KeyState::MODS.bits())
 }

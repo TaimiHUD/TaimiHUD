@@ -162,8 +162,17 @@ pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
 
 const MOUSE_MOVE_DELAY: Duration = Duration::from_millis(60); // 50 too low?
 pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
+    use crate::settings::{InvokeMethod, Settings};
+
     if !available() {
         return Ok(None)
+    }
+
+    let method = Settings::async_read().await
+        .ok().and_then(|s| s.arc().gamebind_invoke)
+        .unwrap_or(InvokeMethod::Nexus);
+    if method != InvokeMethod::Nexus {
+        return rt::keyboard::press_marker_bind(marker, target, down, position).await
     }
 
     if let Some(position) = position {
@@ -208,6 +217,17 @@ pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>
     unsafe {
         (AddonApi::get().log)(level, channel, message.as_ptr());
     }
+
+    Ok(Some(()))
+}
+
+pub fn perform_update(release: &rt::update::ResolvedVersion) -> RuntimeResult<Option<()>> {
+    if !available() {
+        return Ok(None)
+    }
+
+    let dll_url = release.dll_url().map_err(|_| "DLL URL missing")?;
+    nexus::updater::request_update(SIG, dll_url.as_str());
 
     Ok(Some(()))
 }

@@ -188,6 +188,7 @@ pub mod built_info {
     include!("./built.rs");
 
     pub const IS_TAGGED_VERSION: bool = check_is_release();
+    pub const IS_TAGGED_RELEASE: bool = check_is_plain_release();
 
     /// Official tagged release build
     pub fn is_release() -> bool {
@@ -246,6 +247,14 @@ pub mod built_info {
             true => true,
         }
     }
+    const fn check_is_plain_release() -> bool {
+        let head = match GIT_HEAD_REF {
+            Some(head) if head.len() >= GIT_REF_RELEASE_PREFIX.len() => head.as_bytes(),
+            _ => return false,
+        };
+        check_is_release() &&
+            has_prefix(crate::exports::runtime::CRATE_VERSION.as_bytes(), 0, head, GIT_REF_RELEASE_PREFIX.len())
+    }
     const fn has_prefix(s: &[u8], off: usize, prefix: &[u8], poff: usize) -> bool {
         if s.len() <= off || prefix.len() < poff {
             return false
@@ -281,7 +290,7 @@ nexus::export! {
     load: exports::nexus::cb_load,
     unload: exports::nexus::cb_unload,
     flags: AddonFlags::None,
-    provider: if built_info::IS_TAGGED_VERSION { UpdateProvider::GitHub } else { UpdateProvider::Manual },
+    provider: if built_info::IS_TAGGED_RELEASE { UpdateProvider::GitHub } else { UpdateProvider::Manual },
     update_link: exports::gh_repo_url!(),
 }
 
@@ -403,6 +412,8 @@ fn init() -> Result<(), &'static str> {
     let (controller_sender, controller_receiver) = channel::<ControllerEvent>(64);
     let (render_sender, render_receiver) = channel::<RenderEvent>(48);
 
+    let mut render_state = RENDER_STATE.lock().unwrap();
+
     let controller_handler = {
         let render_sender = render_sender.clone();
         thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir.to_owned()))
@@ -412,7 +423,7 @@ fn init() -> Result<(), &'static str> {
     *CONTROLLER_THREAD.lock().unwrap() = Some(controller_handler);
     *CONTROLLER_SENDER.write().unwrap() = Some(controller_sender);
 
-    *RENDER_STATE.lock().unwrap() = Some(RenderState::new(render_receiver));
+    *render_state = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
 
     log::logger().flush();
@@ -589,12 +600,11 @@ fn load_nexus() {
             mem::transmute(cb as unsafe extern "C-unwind" fn(_))
         }
     }).revert_on_unload();
-    #[cfg(feature = "extension-arcdps-extras")]
     nexus::event::extras::LANGUAGE_CHANGED.subscribe({
         let cb = event_consume!(
             <arcdps::Language> | language | {
                 if let Some(language) = language {
-                    exports::arcdps::extras_language(*language)
+                    rt::notify_game_language(*language)
                 }
             }
         );
