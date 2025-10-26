@@ -1,18 +1,15 @@
 use {
     crate::{
-        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, keyboard::KeyInput, mouse::MouseInput, KeyState, RuntimeResult}}, game_language_id, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{ArcSettings, ArcUpdatePreference, GitHubLatestRelease, GitHubSource, Settings}, with_i18n
-    }, anyhow::Context, arcdps::{
-        extras::{Control, ExtrasVersion, Key, KeybindChange, UserInfoIter},
-        Language,
-    }, arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink}, dpsapi::combat::{CombatArgs, CombatEvent}, log::Level, std::{
-        collections::BTreeMap,
+        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, RuntimeResult}}, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{state::{AddonHostName, BootstrapState}, ArcSettings}, with_i18n
+    }, arcdps::extras::{ExtrasVersion, UserInfoIter},
+    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink}, dpsapi::combat::{CombatArgs, CombatEvent}, log::Level, std::{
         ffi::{c_void, CStr, CString, OsStr},
         fmt::{self, Write},
         ops,
         panic,
         path::PathBuf,
         ptr::{self, NonNull},
-        sync::{atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering}, Mutex, RwLock},
+        sync::{atomic::{AtomicBool, AtomicPtr, Ordering}, Mutex},
         thread,
         time::Duration,
     }, windows::Win32::{
@@ -44,14 +41,6 @@ pub(crate) mod cb;
 pub(crate) mod unofficial_extras;
 
 pub const SIG: u32 = exports::SIG as u32;
-
-pub fn gh_repo_src() -> GitHubSource {
-    GitHubSource {
-        owner: "TaimiHUD".into(),
-        repository: "TaimiHUD".into(),
-        description: None,
-    }
-}
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
 static RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
@@ -127,7 +116,7 @@ fn check_for_nexus_link() -> bool {
 }
 
 #[cfg(feature = "extension-nexus")]
-fn check_for_nexus() -> bool {
+pub(crate) fn check_for_nexus() -> bool {
     check_for_nexus_bridge() || check_for_nexus_link()
 }
 
@@ -175,44 +164,6 @@ fn init() -> Result<(), &'static str> {
     if res.is_err() {
         RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
     }
-
-    let mut keybinds = KEYBINDS.write().unwrap_or_else(|e| e.into_inner());
-    macro_rules! default_keybind {
-        () => {};
-        ($control:ident => KeyCode::$key:ident, $mods:expr; $($rest:tt)*) => {
-            if !keybinds.contains_key(&Control::$control) {
-                keybinds.insert(Control::$control, KeybindChange {
-                    control: Control::$control,
-                    index: i32::MAX,
-                    mod_alt: $mods.contains(KeyState::ALT),
-                    mod_ctrl: $mods.contains(KeyState::CTRL),
-                    mod_shift: $mods.contains(KeyState::SHIFT),
-                    key: Key::Key(arcdps::extras::KeyCode::$key)
-                });
-            }
-            default_keybind! {
-                $($rest)*
-            }
-        };
-    }
-
-    #[cfg(feature = "markers")]
-    default_keybind! {
-        Squad_Location_Arrow => KeyCode::Number1, KeyState::ALT;
-        Squad_Location_Circle => KeyCode::Number2, KeyState::ALT;
-        Squad_Location_Square => KeyCode::Number3, KeyState::ALT;
-        Squad_Location_Heart => KeyCode::Number4, KeyState::ALT;
-        Squad_Location_Star => KeyCode::Number5, KeyState::ALT;
-        Squad_Location_Spiral => KeyCode::Number6, KeyState::ALT;
-        Squad_Location_Triangle => KeyCode::Number7, KeyState::ALT;
-        Squad_Location_X => KeyCode::Number8, KeyState::ALT;
-        Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
-        Miscellaneous_Interact => KeyCode::F, KeyState::empty();
-        // TODO: settarget, setpersonaltarget, setjadebotwaypoint
-        // TODO: setpersonalwaypoint, draw-on-map
-    }
-    // TODO: restore from stashed memory, since we won't be told a second time!
-    drop(keybinds);
 
     #[cfg(feature = "extension-arcdps-extras")]
     if !extras_available() && unofficial_extras::extras_resubscribe() {
@@ -463,6 +414,7 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 }
             }
 
+            #[cfg(feature = "timers")]
             for binding in &ArcSettings::VK_TIMER_TRIGGERS {
                 if arc.binding_matches(binding, vk) {
                     bound = true;
@@ -470,6 +422,10 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                         TimersController::try_send(TimersEvent::TimerKeyTrigger(binding.id.into(), is_release));
                     }
                 }
+            }
+            #[cfg(feature = "timers")]
+            if arc.binding_matches(&ArcSettings::VK_TIMER_RESET, vk) {
+                TimersController::try_send(TimersEvent::TimerReset);
             }
 
             match bound {
@@ -514,10 +470,16 @@ fn get_update_url() -> Option<String> {
         crate::crate_init();
     }
 
-    #[cfg(feature = "extension-nexus")]
-    if rt::nexus_available() || check_for_nexus() {
-        log::info!("skipping get_update_url, nexus is available");
-        return None
+    match BootstrapState::read_with(|state| state.update_host_preference()) {
+        Some(AddonHostName::ArcDPS) => (),
+        Some(pref) => {
+            log::info!("skipping get_update_url, {pref} is preferred");
+            return None
+        },
+        None => {
+            log::info!("skipping get_update_url, updates disabled");
+            return None
+        },
     }
 
     match panic::catch_unwind(|| update_url()) {
@@ -530,161 +492,31 @@ fn get_update_url() -> Option<String> {
 }
 
 pub(crate) fn update_url() -> Option<String> {
-    let authorized = match update_preference() {
-        Err(e) => {
-            log::info!("Skipping update check: {e}");
-            return None
-        },
-        Ok(ArcUpdatePreference::Never) => {
-            log::info!("Auto-update disabled");
-            return None
-        },
-        Ok(ArcUpdatePreference::Always) => {
-            Some(Ok(None))
-        },
-        Ok(ArcUpdatePreference::Ask { authorized }) => {
-            authorized.map(|a| a.map(Some))
-        },
-        Ok(ArcUpdatePreference::Once { authorized }) => {
-            Some(Ok(Some(authorized)))
-        },
-    };
+    let authorized = rt::update::Updater::get_preference();
+    if authorized.will_authorize() == Some(false) {
+        log::info!("Auto-update disabled");
+        return None
+    }
 
-    let release = match rt::update::latest_release_blocking(&gh_repo_src(), UPDATE_CHECK_TIMEOUT) {
+    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT) {
         Err(e) => {
             log::warn!("Update check failed: {e}");
             return None
         },
         Ok(release) => release,
     };
-    log::info!("Latest version is {}", release.name.as_ref().unwrap_or(&release.tag_name));
-    let res = rt::update::release_dll_url(&release)
-        .and_then(|dll| release_is_update(&release).map(|rv|
-            (rv, dll)
-        ));
-    let (release_version, dll_url) = match res {
+    let dll_url = rt::update::Updater::notify_latest(&release)
+        .and_then(|auth| match auth {
+            true => release.dll_url().map(Some),
+            false => Ok(None),
+        });
+    match dll_url {
         Err(e) => {
-            log::warn!("Invalid update found: {e}");
+            log::warn!("{e:#}");
             return None
         },
-        Ok((None, ..)) => return None,
-        Ok((Some(rv), url)) => (rv, url),
-    };
-
-    match release_is_allowed(release_version, &authorized) {
-        None => {
-            log::info!("Update requires user authorization");
-            mark_update_outdated(Some(release_version.into()));
-            None
-        },
-        Some(false) => {
-            log::info!("Update blacklisted, skipping");
-            None
-        },
-        Some(true) => Some(dll_url.as_str().into()),
-    }
-}
-
-pub fn release_is_update(release: &GitHubLatestRelease) -> anyhow::Result<Option<&str>> {
-    let release_version = rt::update::release_version(release)?;
-    // TODO: this is a mess without proper semver
-    if release_version == rt::CRATE_VERSION || Some(&release.tag_name[..]) == crate::built_info::git_tag_name() {
-        log::info!("Up-to-date with latest version {}!", release.name.as_ref().unwrap_or(&release.tag_name));
-        return Ok(None)
-    }
-    let is_dev_build = match crate::built_info::git_release() {
-        #[cfg(not(debug_assertions))]
-        Some(..) => false,
-        _ => true,
-    };
-    if release.prerelease {
-        log::info!("Skipping update to pre-release");
-        return Ok(None)
-    } else if is_dev_build {
-        log::info!("Refusing to update development build");
-        return Ok(None)
-    }
-    Ok(Some(release_version))
-}
-
-pub fn release_is_allowed(release_version: &str, authorized: &Option<Result<Option<String>, String>>) -> Option<bool> {
-    match authorized {
-        Some(Err(unauthorized)) if unauthorized == release_version => {
-            log::info!("Update blacklisted, skipping");
-            Some(false)
-        },
-        Some(Err(..)) =>
-            None,
-        Some(Ok(None)) =>
-            Some(true),
-        Some(Ok(Some(authorized))) if authorized == release_version =>
-            Some(true),
-        Some(Ok(Some(..))) | None =>
-            None,
-    }
-}
-
-fn mark_update_outdated(latest: Option<String>) {
-    log::debug!("Recording latest available update: {latest:?}");
-    let mut settings = match crate::SETTINGS.get() {
-        Some(settings) => settings.blocking_write(),
-        None => {
-            log::warn!("Settings unavailable to record update status");
-            return
-        },
-    };
-    if latest.is_none() && settings.arc.is_none() {
-        // nothing to do...
-        return
-    }
-    let arc = settings.arc_mut();
-    let updated_pref = match arc.update_preference {
-        Some(ArcUpdatePreference::Ask { authorized: Some(..) }) =>
-            Some(ArcUpdatePreference::ASK),
-        Some(ArcUpdatePreference::Once { .. }) =>
-            Some(ArcUpdatePreference::Never),
-        _ => None,
-    };
-    if let Some(pref) = updated_pref {
-        arc.update_preference = Some(pref);
-    }
-    arc.update_remote_version = latest;
-    // TODO: schedule save
-}
-
-pub(crate) fn update_preference() -> anyhow::Result<ArcUpdatePreference> {
-    let mut outdated = false;
-    let pref = Settings::read_with_blocking(|settings| {
-        let arc = settings.arc();
-        match arc.update_preference.as_ref() {
-            Some(ArcUpdatePreference::Ask { authorized: Some(Ok(version) | Err(version)) }) if version == rt::CRATE_VERSION => {
-                outdated = true;
-                ArcUpdatePreference::ASK
-            },
-            Some(ArcUpdatePreference::Once { authorized }) if authorized == rt::CRATE_VERSION => {
-                outdated = true;
-                ArcUpdatePreference::Never
-            },
-            Some(pref) => pref.clone(),
-            None => default_update_preference(),
-        }
-    });
-    if outdated {
-        mark_update_outdated(None);
-    }
-    pref
-}
-
-pub(crate) fn default_update_preference() -> ArcUpdatePreference {
-    #[cfg(feature = "extension-nexus")]
-    if exports::nexus::available() {
-        return ArcUpdatePreference::Never
-    }
-
-    match crate::built_info::is_release() {
-        #[cfg(todo)]
-        true => ArcUpdatePreference::ASK,
-        _ => ArcUpdatePreference::Never,
+        Ok(None) => None,
+        Ok(Some(dll_url)) => Some(dll_url.as_str().into()),
     }
 }
 
@@ -713,52 +545,6 @@ fn extras_init(info: ExtrasVersion) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
 
     log::debug!("arcdps_extras initialized: {info:?}");
-}
-
-static GAME_LANGUAGE: AtomicI32 = AtomicI32::new(Language::English as i32);
-
-pub fn game_language() -> Option<Language> {
-    let id = GAME_LANGUAGE.load(Ordering::Relaxed);
-    Language::try_from(id).ok()
-}
-
-#[cfg(feature = "extension-arcdps-extras")]
-pub fn extras_language(language: Language) {
-    if !available() { return }
-
-    let id = language.into();
-    let prev = GAME_LANGUAGE.swap(id, Ordering::Relaxed);
-    if prev != id {
-        let res = crate::load_language(game_language_id(language));
-        if let Err(e) = res {
-            log::warn!("Failed to change language to {language:?}: {e}");
-        }
-    }
-}
-
-const INTERESTING_BINDS: [Control; 19] = [
-    MarkerType::Arrow.control_location(), MarkerType::Arrow.control_object(),
-    MarkerType::Circle.control_location(), MarkerType::Circle.control_object(),
-    MarkerType::Heart.control_location(), MarkerType::Heart.control_object(),
-    MarkerType::Square.control_location(), MarkerType::Square.control_object(),
-    MarkerType::Star.control_location(), MarkerType::Star.control_object(),
-
-    MarkerType::Spiral.control_location(), MarkerType::Spiral.control_object(),
-    MarkerType::Triangle.control_location(), MarkerType::Triangle.control_object(),
-    MarkerType::Cross.control_location(), MarkerType::Cross.control_object(),
-    MarkerType::ClearMarkers.control_location(), MarkerType::ClearMarkers.control_object(),
-
-    Control::Miscellaneous_Interact,
-];
-
-static KEYBINDS: RwLock<BTreeMap<Control, KeybindChange>> = RwLock::new(BTreeMap::new());
-
-#[cfg(feature = "extension-arcdps-extras")]
-pub fn extras_keybind(changed: KeybindChange) {
-    #[cfg(todo)]
-    if !loaded() { return }
-
-    rt::bindings::process_key_bound(changed);
 }
 
 #[cfg(feature = "extension-arcdps-extras")]
@@ -983,8 +769,8 @@ pub fn detect_language() -> RuntimeResult<Option<String>> {
         return Ok(None)
     }
 
-    let language = game_language().map(game_language_id);
-    Ok(language.map(Into::into))
+    // unimplemented...
+    Ok(None)
 }
 
 pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<LinkedMem>>> {
@@ -1021,71 +807,7 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
         return Ok(None)
     }
 
-    let control = match target {
-        true => marker.control_object(),
-        false => marker.control_location(),
-    };
-
-    let binding = {
-        let kb = KEYBINDS.read()
-            .map_err(|_| "keybinds poisoned")?;
-        kb.get(&control).cloned()
-    }.ok_or("unknown keybind")?;
-
-    let mut mods = KeyState::from(&binding);
-    match binding.key {
-        Key::Key(keycode) => {
-            if let Some(position) = position {
-                // move the mouse into position first...
-                //rt::mouse::send_mouse(MouseInput::with_position(position), None)?;
-                rt::mouse::send_input(MouseInput::with_position(position))?;
-            }
-            let mut input = KeyInput::empty_with_mods(mods, down);
-            input.vk = KeyInput::from(keycode).vk;
-            rt::keyboard::send_key_input(input)
-            //rt::keyboard::send_key_combo(input)
-        },
-        Key::Mouse(button) => {
-            let button = KeyState::try_from(button)
-                .context("Unsupported mouse key")
-                .map_err(|e| {
-                    log::warn!("{e:#}");
-                    "Unsupported mouse key"
-                })?;
-            let pos = match position {
-                Some(p) => p,
-                None => rt::screen_mouse_position()?,
-            };
-            let input = MouseInput::new(pos, button | mods, Some(down));
-            let prior = match position {
-                // ensure the mouse is moved if a position was explicitly requested
-                Some(..) => Some(MouseInput::new(rt::MousePosition::EMPTY, input.button_before(), None)),
-                _ => None,
-            };
-            let mouse_mods = match mods.take(MouseInput::EVENT_MODS) {
-                mouse_mods if !mods.is_empty() => {
-                    // can't eliminate the need to simulate modifier key presses, so just move all mods to that
-                    mods.insert(mouse_mods);
-                    KeyState::EMPTY
-                },
-                mouse_mods =>
-                    mouse_mods,
-            };
-
-            let invoke = || match mouse_mods.is_empty() {
-                true /*if position.is_none()*/ => rt::mouse::send_input(input),
-                _ => rt::mouse::send_mouse(input, prior),
-            };
-            match mods.is_empty() {
-                true => invoke(),
-                false => rt::keyboard::do_key_combo(invoke, KeyInput::empty_with_mods(mods, down)),
-            }
-        },
-        Key::Unknown(key) => {
-            log::error!("cannot invoke keycode {key}");
-            Err("unrecognized bind")
-        },
-    }.map(Some)
+    rt::keyboard::press_marker_bind(marker, target, down, position).await
 }
 
 pub fn send_alert(ui: &imgui::Ui, message: &str) -> RuntimeResult<Option<()>> {

@@ -5,7 +5,11 @@ use {
             bindings::{ControlsReceiver, CONTROLS, TaimiControls, TaimiReceiver},
         },
         render::machine::MumblelinkTick,
-        settings::{RemoteState, RemoteSource, Settings, SettingsSave, SettingsLock, SourcesFile},
+        settings::{
+            state::{BootstrapState, SaveState},
+            RemoteState, RemoteSource,
+            Settings, SettingsSave, SettingsLock, SourcesFile,
+        },
         timer::{CombatState, Position},
         RenderEvent, SETTINGS, SOURCES,
     },
@@ -24,6 +28,7 @@ use {
         select,
         sync::{
             mpsc::{Receiver, Sender},
+            watch,
             Mutex,
         },
         time::{interval, Duration, timeout},
@@ -51,7 +56,7 @@ pub(crate) mod pathing;
 #[cfg(feature = "space")]
 use pathing::{PathingController, PathingEvent};
 
-mod runtime;
+pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
 pub(crate) type RtSender = Arc<Sender<RenderEvent>>;
@@ -67,6 +72,10 @@ pub struct Controller {
     // TODO: remove!
     alert_sem: Arc<Mutex<()>>,
     settings: SettingsLock,
+    state_bootstrap: watch::Receiver<BootstrapState>,
+    state_bootstrap_throttle: rt::watched::WatchThrottleDelay,
+    state_save: watch::Receiver<SaveState>,
+    state_save_throttle: rt::watched::WatchThrottleDelay,
     save_interval: tokio::time::Interval,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,
@@ -91,6 +100,10 @@ impl Controller {
             previous_combat_state: Default::default(),
             rt_sender: Arc::new(rt_sender),
             settings,
+            state_bootstrap: BootstrapState::get().subscribe(),
+            state_bootstrap_throttle: BootstrapState::watch_initial_delay(),
+            state_save: SaveState::get().subscribe(),
+            state_save_throttle: SaveState::watch_initial_delay(),
             agent: Default::default(),
             map_id: Default::default(),
             player_position: Default::default(),
@@ -139,6 +152,8 @@ impl Controller {
             #[cfg(feature = "markers")]
             state.markers.setup(state.settings.clone(), state.rt_sender.clone()).await;
 
+            state.render_inherit();
+
             loop {
                 select! {
                     evt = state.receiver.recv() => match evt {
@@ -157,6 +172,18 @@ impl Controller {
                     },
                     _ = state.save_interval.tick() => {
                         state.commit_settings().await;
+                    },
+                    Ok(()) = BootstrapState::watch_dirty(&mut state.state_bootstrap, &mut state.state_bootstrap_throttle) => {
+                        let state = state.state_bootstrap.borrow_and_update();
+                        if let Err(e) = Self::commit_state_bootstrap(state).await {
+                            log::error!("{e:#}");
+                        }
+                    },
+                    Ok(()) = SaveState::watch_dirty(&mut state.state_save, &mut state.state_save_throttle) => {
+                        let state = state.state_save.borrow_and_update();
+                        if let Err(e) = Self::commit_state_save(state).await {
+                            log::error!("{e:#}");
+                        }
                     },
                     controls = state.controls.wait() => match controls {
                         Err(e) => log::error!("Control bindings error! {e:#}"),
@@ -226,6 +253,28 @@ impl Controller {
             .await?;
         let _ = SOURCES.set(Arc::new(RwLock::new(sources)));
         Ok(())
+    }
+
+    const ADDON_UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+    async fn addon_check_for_updates(&self, proceed: bool) {
+        tokio::spawn(async move {
+            let res = rt::update::ResolvedVersion::latest_release(Self::ADDON_UPDATE_CHECK_TIMEOUT).await
+                .and_then(|release| rt::update::Updater::notify_latest(&release).map(|auth| (release, auth)))
+                .context("Checking for addon updates");
+            match res {
+                Ok((release, auth)) => {
+                    if auth && proceed {
+                        let res = rt::update::Updater::perform(&release).await
+                            .map_err(anyhow::Error::msg)
+                            .context("Updating addon");
+                        if let Err(e) = res {
+                            log::error!("{e:#}");
+                        }
+                    }
+                },
+                Err(e) => log::error!("{e:#}"),
+            }
+        });
     }
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
@@ -342,15 +391,33 @@ impl Controller {
     }
 
     async fn save_on_quit(&self) -> anyhow::Result<()> {
-        let settings = timeout(Duration::from_secs(2), self.settings.read()).await;
-        match settings {
-            Ok(s) if s.is_dirty() => {
-                log::info!("Saving settings on exit...");
-                s.save().await
-            },
-            Ok(_) => Ok(()),
-            Err(..) => Err(anyhow!("Read timeout")),
-        }.context("Failed to save settings")
+        let state_bootstrap = &self.state_bootstrap;
+        let save_state_bootstrap = async move {
+            Self::commit_state_bootstrap(state_bootstrap.borrow()).await
+        };
+        let state_save = &self.state_save;
+        let save_state_save = async move {
+            Self::commit_state_save(state_save.borrow()).await
+        };
+
+        let settings = &self.settings;
+        let save_settings = async move {
+            let settings = timeout(Duration::from_secs(2), settings.read()).await;
+            match settings {
+                Ok(s) if s.is_dirty() => {
+                    log::info!("Saving settings on exit...");
+                    s.save().await
+                },
+                Ok(_) => Ok(()),
+                Err(..) => Err(anyhow!("Read timeout")),
+            }.context("Failed to save settings")
+        };
+
+        tokio::try_join!(
+            save_state_bootstrap,
+            save_state_save,
+            save_settings,
+        ).map(drop)
     }
 
     async fn save_settings_internal(&mut self, settings: anyhow::Result<SettingsSave>) {
@@ -375,6 +442,31 @@ impl Controller {
         };
 
         self.save_settings_internal(settings).await
+    }
+
+    async fn commit_state_bootstrap(state: watch::Ref<'_, BootstrapState>) -> anyhow::Result<()> {
+        let save = match state {
+            state if !state.has_changed() => return Ok(()),
+            state => {
+                let save = state.start_save()?;
+                drop(state);
+                save
+            },
+        };
+        BootstrapState::save_to(&save).await
+            .context("Saving boot state")
+    }
+    async fn commit_state_save(state: watch::Ref<'_, SaveState>) -> anyhow::Result<()> {
+        let save = match state {
+            state if !state.has_changed() => return Ok(()),
+            state => {
+                let save = state.start_save()?;
+                drop(state);
+                save
+            },
+        };
+        SaveState::save_to(&save).await
+            .context("Saving save state")
     }
 
     async fn reload_data(&mut self) {
@@ -467,6 +559,7 @@ impl Controller {
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
             CheckDataSourceUpdates => self.check_updates().await,
             CheckUpdateSources => self.check_sources().await?,
+            CheckAddonUpdate(proceed) => self.addon_check_for_updates(proceed).await,
             DoDataSourceUpdate { state } => self.do_update(state).await,
             WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
@@ -616,6 +709,7 @@ pub enum ControllerEvent {
         trans: GameplayTransition,
     },
     CheckUpdateSources,
+    CheckAddonUpdate(bool),
     Quit,
     /// Like quit but will also request addon release
     /// (if possible)

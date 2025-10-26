@@ -15,7 +15,10 @@ use {
         Point3, Size2,
         Vector2, Vector3,
     },
-    std::time::Instant,
+    std::{
+        cell::RefCell,
+        time::Instant,
+    },
     taimi_meta::{
         coords::{
             LocalSpace, ScreenSpace,
@@ -303,6 +306,8 @@ impl RenderMachine {
         let mut state = RenderState::lock();
         if let Some(state) = state.as_mut() {
             Self::run_tasks(state);
+
+            Self::poll_runtime(state);
 
             let render_slot = (
                 match () {

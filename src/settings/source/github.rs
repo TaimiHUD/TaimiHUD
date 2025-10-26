@@ -1,5 +1,7 @@
 use {
+    anyhow::Context,
     super::super::SourceKind, crate::{settings::Source, ADDON_DIR}, chrono::{DateTime, Utc}, serde::{Deserialize, Serialize}, serde_json::Value, std::{fmt,
+    ops::Range,
     pin::Pin,
     future::Future,
 }, tokio::fs::create_dir_all, url::Url
@@ -54,6 +56,31 @@ pub struct GitHubLatestRelease {
     pub assets: Vec<GitHubReleaseAsset>,
 }
 
+impl GitHubLatestRelease {
+    pub fn empty_with_url(url: Url) -> Self {
+        Self {
+            html_url: url.clone(),
+            assets_url: url.clone(),
+            upload_url: url.clone(),
+            url,
+            tarball_url: None,
+            zipball_url: None,
+            id: 0,
+            node_id: String::new(),
+            tag_name: String::new(),
+            target_commitish: String::new(),
+            name: None,
+            body: None,
+            draft: false,
+            prerelease: false,
+            created_at: DateTime::default(),
+            published_at: DateTime::default(),
+            author: Value::Null,
+            assets: Vec::new(),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, Clone, PartialEq)]
 pub struct GitHubSource {
     pub owner: String,
@@ -75,8 +102,34 @@ impl GitHubSource {
         );
         let response = super::get(url).await?;
         let json_data = response.text().await?;
-        let data = serde_json::from_str::<GitHubLatestRelease>(&json_data)?;
-        Ok(data)
+        serde_json::from_str(&json_data)
+            .context("Deserializing GitHub release")
+    }
+
+    pub const RELEASES_RANGE_DEFAULT: Range<usize> = 0..30;
+    pub async fn latest_releases(&self, range: Range<usize>) -> anyhow::Result<Vec<GitHubLatestRelease>> {
+        let page = match range {
+            range if range == Self::RELEASES_RANGE_DEFAULT =>
+                None,
+            range if range.start == 0 => Some((1, range.end)),
+            range => Some({
+                let len = range.len();
+                let page = range.start / len;
+                (page, len)
+            }),
+        };
+        let url = format!(
+            "https://api.github.com/repos/{}/releases",
+            self.name()
+        );
+        let url = match page {
+            None => url,
+            Some((page, per)) => format!("{url}?page={page}&per_page={per}")
+        };
+        let response = super::get(url).await?;
+        let json_data = response.text().await?;
+        serde_json::from_str(&json_data)
+            .context("Deserializing GitHub releases")
     }
 }
 

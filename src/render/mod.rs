@@ -2,6 +2,7 @@
 pub mod arc;
 pub mod config_tab;
 pub mod data_source_tab;
+pub mod element;
 #[cfg(feature = "markers-edit")]
 pub mod edit_marker_window;
 #[cfg(feature = "goggles")]

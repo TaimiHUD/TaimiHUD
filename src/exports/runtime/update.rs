@@ -1,38 +1,394 @@
-use anyhow::{anyhow, Context};
-use crate::settings::{GitHubSource, GitHubLatestRelease};
-use tokio::{runtime, time::timeout};
-use std::time::Duration;
-use url::Url;
+use {
+    anyhow::{anyhow, Context},
+    crate::{
+        built_info,
+        exports::runtime as rt,
+        settings::{
+            state::{BootstrapState, UpdatePreference},
+            GitHubSource, GitHubLatestRelease,
+        },
+    },
+    tokio::{runtime, time::timeout},
+    std::{
+        fmt,
+        sync::LazyLock,
+        time::Duration,
+    },
+    url::Url,
+};
+#[cfg(feature = "updates")]
+use semver::Version;
 
 pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
 pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
 pub const GIT_REF_RELEASE_PREFIX: &'static str = "refs/tags/v";
+pub const CHANNEL_DEBUG: &'static str = "debug";
+pub const CHANNEL_PRERELEASE: &'static str = "rc";
 
-pub fn latest_release_blocking(src: &GitHubSource, patience: Duration) -> anyhow::Result<GitHubLatestRelease> {
-    log::info!("Checking for updates at {}...", src);
+pub struct ResolvedVersion {
+    pub release: GitHubLatestRelease,
+    #[cfg(feature = "updates")]
+    pub version: Option<Version>,
+}
 
-    let runner = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("Failed to start update check")?;
+#[cfg(feature = "updates")]
+pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
+    let version = match built_info::git_release() {
+        Some(release) if release.starts_with(rt::CRATE_VERSION) =>
+            release,
+        _ => rt::CRATE_VERSION,
+    }.parse::<Version>().context("parsing crate version");
+    let mut version = match version {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("{e:#}");
+            return Version::new(u64::MAX, u64::MAX, u64::MAX)
+        },
+    };
 
-    runner.block_on(async move {
-        let check = src.latest_release();
+    let commit = built_info::GIT_COMMIT_HASH_SHORT.and_then(|commit| semver::BuildMetadata::new(commit).ok());
+    if let Some(build) = commit {
+        version.build = build;
+    }
+
+    #[allow(unreachable_patterns)]
+    if version.pre.is_empty() {
+        let channel = match () {
+            #[cfg(debug_assertions)]
+            _ => Some(CHANNEL_DEBUG.into()),
+            _ if built_info::is_release() => None,
+            _ => Some(if let Some(branch) = built_info::git_branch_name() {
+                format!("dev-{branch}")
+            } else { "dev".into() }),
+        };
+        if let Some(pre) = channel.as_ref().and_then(|c| semver::Prerelease::new(c).ok()) {
+            version.pre = pre;
+        }
+    }
+
+    version
+});
+#[cfg(feature = "updates")]
+pub fn crate_channel() -> Option<&'static str> {
+    version_channel(&CRATE_SEMVER)
+}
+#[cfg(not(feature = "updates"))]
+pub fn crate_channel() -> Option<&'static str> {
+    #[allow(unreachable_patterns)]
+    match built_info::is_release() {
+        #[cfg(debug_assertions)]
+        _ => Some(CHANNEL_DEBUG),
+        true => None,
+        false => Some(if let Some(branch) = built_info::git_branch_name() {
+            static CHANNEL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            &CHANNEL.get_or_init(|| format!("dev-{branch}"))[..]
+        } else { "dev" })
+    }
+}
+
+pub static GH_REPO_SRC: LazyLock<GitHubSource> = LazyLock::new(|| GitHubSource {
+    owner: "TaimiHUD".into(),
+    repository: "TaimiHUD".into(),
+    description: None,
+});
+
+impl ResolvedVersion {
+    pub fn with_gh_release(release: GitHubLatestRelease) -> anyhow::Result<Self> {
+        #[cfg(feature = "updates")]
+        let version = release.tag_name.strip_prefix("v").map(|v|
+            v.parse().with_context(|| format!("Latest version {} unrecognized", release.tag_name))
+        ).transpose()?;
+        Ok(Self {
+            release,
+            #[cfg(feature = "updates")]
+            version,
+        })
+    }
+
+    pub fn with_version_id(id: String) -> anyhow::Result<Self> {
+        #[cfg(feature = "updates")]
+        let version = match id.strip_prefix("v") {
+            Some(release) => release.parse::<Version>().map(Some)
+                .with_context(|| format!("version {id} unrecognized"))?,
+            _ => None,
+        };
+        Ok(Self {
+            #[cfg(feature = "updates")]
+            version,
+            release: GitHubLatestRelease {
+                tag_name: id,
+                .. GitHubLatestRelease::empty_with_url("https://taimihud.com".try_into()?)
+            },
+        })
+    }
+
+    pub async fn latest_release(patience: Duration) -> anyhow::Result<Self> {
+        Self::latest_gh_release(&GH_REPO_SRC, patience).await
+    }
+
+    pub async fn latest_gh_release(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
+        log::debug!("Checking for updates at {}...", src);
+
+        let check = async move {
+            let channel = crate_channel();
+            let latest_release = match channel {
+                Some(..) => Ok(None),
+                None => match src.latest_release().await {
+                    Ok(release) if release.prerelease => Ok(None),
+                    res => res
+                        .and_then(Self::with_gh_release)
+                        .context("Requesting GH release")
+                        .map(Some),
+                },
+            }?;
+            if let Some(release) = latest_release {
+                return Ok(release)
+            }
+            let mut releases: Vec<Self> = src.latest_releases(GitHubSource::RELEASES_RANGE_DEFAULT).await?.into_iter()
+                .map(|r| Self::with_gh_release(r).context("parsing GH release"))
+                .filter_map(|release| {
+                    if let Err(e) = &release {
+                        log::debug!("{e:#}");
+                    }
+                    release.ok()
+                }).filter(|release| release.version_channel() == channel)
+                .collect();
+
+            releases.sort_by(|l, r| {
+                match (&l, &r) {
+                    #[cfg(feature = "updates")]
+                    (Self { version: Some(l), .. }, Self { version: Some(r), .. }) => l.cmp_precedence(r),
+                    _ => l.release.created_at.cmp(&r.release.created_at)
+                }
+            });
+            let channel = channel.unwrap_or("");
+            releases.into_iter().last()
+                .ok_or_else(|| anyhow!("no {channel} releases found at {src}"))
+        };
         timeout(patience, check).await
-    }).context("Timed out while checking for updates").and_then(|res| res)
+            .context("Timed out while checking for updates")
+            .and_then(|res| res)
+    }
+
+    pub fn latest_release_standalone(patience: Duration) -> anyhow::Result<Self> {
+        Self::latest_gh_release_standalone(&GH_REPO_SRC, patience)
+    }
+
+    pub fn latest_gh_release_standalone(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
+        let runner = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("Failed to start update check")?;
+
+        runner.block_on(Self::latest_gh_release(src, patience))
+            //.context("Checking for updates")
+    }
+
+    pub fn dll_url(&self) -> anyhow::Result<&Url> {
+        let dll_asset = self.release.assets.iter()
+            .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
+
+        dll_asset.and_then(|dll_asset|
+            // asset.url can also work as long as Content-Type is set correctly...
+            dll_asset.browser_download_url.as_ref()
+        ).ok_or_else(|| anyhow!("Expected associated dll with release"))
+    }
+
+    pub fn is_update(&self) -> bool {
+        let version_matches = match self {
+            #[cfg(feature = "updates")]
+            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_eq() =>
+                true,
+            #[cfg(feature = "updates")]
+            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
+                log::info!("Ignoring outdated update {self}");
+                return false
+            },
+            _ if Some(&self.release.tag_name[..]) == built_info::git_tag_name() =>
+                true,
+            _ if self.version_tag().ok() == Some(rt::CRATE_VERSION) =>
+                true,
+            _ => false,
+        };
+        if version_matches {
+            log::info!("Up-to-date with latest version {self}!");
+            return false
+        }
+        let is_dev_build = match built_info::git_release() {
+            #[cfg(not(debug_assertions))]
+            Some(..) => false,
+            _ => true,
+        };
+        if self.release.prerelease {
+            log::info!("Skipping update to pre-release");
+            return false
+        } else if is_dev_build {
+            log::info!("Refusing to update development build");
+            return false
+        }
+        true
+    }
+
+    pub fn is_authorized(&self) -> Option<bool> {
+        BootstrapState::read_with(|state| state.update_preference().authorizes_version(self.version_id()))
+    }
+
+    #[cfg(todo)]
+    fn is_allowed_auth(&self, authorized: Option<Result<Option<&str>, &str>>) -> Option<bool> {
+        match authorized {
+            Some(Err(unauthorized)) if unauthorized == self.version_id() => {
+                log::info!("Update to {self} blacklisted, skipping");
+                Some(false)
+            },
+            Some(Err(..)) =>
+                None,
+            Some(Ok(None)) =>
+                Some(true),
+            Some(Ok(Some(authorized))) if authorized == self.version_id() =>
+                Some(true),
+            Some(Ok(Some(..))) | None =>
+                None,
+        }
+    }
+
+    pub fn version_id(&self) -> &str {
+        &self.release.tag_name
+    }
+
+    pub fn version_name(&self) -> &str {
+        self.release.name.as_ref().map(|s| &s[..])
+            //.unwrap_or(self.version_tag().ok().unwrap_or(&self.release.tag_name))
+            .unwrap_or(&self.release.tag_name)
+    }
+
+    pub fn version_tag(&self) -> anyhow::Result<&str> {
+        self.release.tag_name.strip_prefix("v")
+            .ok_or_else(|| anyhow!("Latest version {} unrecognized", self.release.tag_name))
+    }
+
+    pub fn version_channel(&self) -> Option<&str> {
+        match self {
+            // TODO: tag via name idk
+            #[cfg(feature = "updates")]
+            Self { version: Some(v), .. } => version_channel(v),
+            _ if self.release.prerelease || self.release.tag_name.contains("-rc.") => Some(CHANNEL_PRERELEASE),
+            _ => None,
+        }
+    }
 }
 
-pub fn release_version(release: &GitHubLatestRelease) -> anyhow::Result<&str> {
-    release.tag_name.strip_prefix("v")
-        .ok_or_else(|| anyhow!("Latest version {} unrecognized", release.tag_name))
+impl fmt::Display for ResolvedVersion {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            #[cfg(feature = "updates")]
+            Self { version: Some(version), .. } => fmt::Display::fmt(version, f),
+            _ => f.write_str(self.version_name()),
+        }
+    }
 }
 
-pub fn release_dll_url(release: &GitHubLatestRelease) -> anyhow::Result<&Url> {
-    let dll_asset = release.assets.iter()
-        .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
+pub struct Updater;
 
-    dll_asset.and_then(|dll_asset|
-        // asset.url can also work as long as Content-Type is set correctly...
-        dll_asset.browser_download_url.as_ref()
-    ).ok_or_else(|| anyhow!("Expected associated dll with release"))
+impl Updater {
+    pub fn get_preference() -> UpdatePreference {
+        let mut outdated = false;
+        let pref = BootstrapState::read_with(|state| {
+            match state.update_preference() {
+                UpdatePreference::Ask { authorized: Some(Ok(version) | Err(version)) } if version == rt::CRATE_VERSION => {
+                    outdated = true;
+                    UpdatePreference::ASK
+                },
+                UpdatePreference::Once { authorized } if authorized == rt::CRATE_VERSION => {
+                    outdated = true;
+                    UpdatePreference::Never
+                },
+                pref => pref.clone(),
+            }
+        });
+        if outdated {
+            Self::mark_update_outdated(None);
+        }
+        pref
+    }
+
+    pub(crate) fn version_pref_matches_crate(pref: &str) -> bool {
+        if pref == rt::CRATE_VERSION {
+            return true
+        }
+
+        #[cfg(feature = "updates")]
+        if let Ok(version) = pref.parse::<Version>() {
+            if CRATE_SEMVER.cmp_precedence(&version).is_eq() {
+                return true
+            }
+        }
+
+        false
+    }
+
+    /// returns [`release.is_authorized()`](ResolvedVersion::is_authorized)
+    pub fn notify_latest(release: &ResolvedVersion) -> anyhow::Result<bool> {
+        log::info!("Latest version is {}", release);
+        let _ = release.dll_url()
+            .context("Invalid update found")?;
+        if !release.is_update() {
+            return Ok(false)
+        }
+        
+        Ok(match release.is_authorized() {
+            None => {
+                log::info!("Update requires user authorization");
+                Self::mark_update_outdated(Some(release));
+                false
+            },
+            Some(auth) => {
+                if !auth {
+                    log::info!("Update {release} blacklisted, skipping");
+                }
+
+                auth
+            },
+        })
+    }
+
+    pub fn mark_update_outdated(latest: Option<&ResolvedVersion>) {
+        if let Some(latest) = latest {
+            log::debug!("Recording latest available update: {latest}");
+        }
+        BootstrapState::write_with(|state| {
+            if latest.is_none() && state.update_preference.is_none() {
+                // nothing to do...
+                return
+            }
+            let updated_pref = match state.update_preference {
+                Some(UpdatePreference::Ask { authorized: Some(..) }) =>
+                    Some(UpdatePreference::ASK),
+                Some(UpdatePreference::Once { .. }) =>
+                    Some(UpdatePreference::Never),
+                _ => None,
+            };
+            if let Some(pref) = updated_pref {
+                state.update_preference = Some(pref);
+            }
+            state.update_remote_version = latest.map(|r| r.version_id().into());
+        });
+    }
+
+    pub async fn perform(release: &ResolvedVersion) -> rt::RuntimeResult<()> {
+        #[cfg(feature = "extension-nexus")]
+        if let Some(res) = crate::exports::nexus::perform_update(release)? {
+            return Ok(res)
+        }
+
+        Err(rt::RT_UNAVAILABLE)
+    }
+}
+
+#[cfg(feature = "updates")]
+fn version_channel(version: &Version) -> Option<&str> {
+    match version {
+        version if !version.pre.is_empty() =>
+            version.pre.split(".").next(),
+        _ => None,
+    }
 }

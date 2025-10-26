@@ -58,6 +58,7 @@ filename = File Name
 collapse-all = Collapse All
 enable = Enable
 cancel = Cancel
+default = Default
 disable = Disable
 enabled = { enable }d
 disabled = { disable }d
@@ -103,6 +104,13 @@ marker-trigger = Marker set position trigger behaviour
 marker-condition = Behaviour condition
 autoplace-warning = If you do not have RTAPI installed, we will not be able to detect whether you are a lieutenant instead of just a commander.
 nexus-quick-access = Quick Access Icons
+preferred-loader = Loader Preference
+preferred-updater = Update Host Preference
+language = Language
+addonbinds = Shortcuts
+gamebinds = Game Bindings
+keybind = Keybind
+gamebind-notice = Set these to match your Controls settings in-game. These may be automatically detected when arcdps-unofficial-extras is installed.
 
 ## Windows
 

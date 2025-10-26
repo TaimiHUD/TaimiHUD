@@ -116,12 +116,12 @@ pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(users: *const extras:
 
 #[inline(never)]
 pub(crate) unsafe extern "C-unwind" fn cb_language_changed_raw(language: arcdps::Language) {
-    exports::extras_language(language)
+    rt::notify_game_language(language)
 }
 
 #[inline(never)]
 pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
-    exports::extras_keybind(keybind_change_from_raw(&keybind))
+    rt::bindings::process_key_bound(keybind_change_from_raw(&keybind));
 }
 
 #[cfg(feature = "closure-ffi")]

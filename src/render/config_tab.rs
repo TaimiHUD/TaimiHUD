@@ -1,40 +1,71 @@
 use {
     super::TimerWindowState,
     crate::{
-        controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent}, fl, render::{
+        controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent},
+        exports::runtime::{self as rt, bindings},
+        fl, render::{
+            element::{
+                keys::KeyBindSelection,
+                language::LanguageSelection,
+            },
             machine::RenderMachine,
             RenderEvent, TextFont,
-        }, settings::{MarkerAutoPlaceSettings, Settings, SquadCondition}, Controller, ControllerEvent, MarkersController, MarkersEvent
+        },
+        settings::{
+            state::SaveState,
+            MarkerAutoPlaceSettings, Settings, SquadCondition,
+        },
+        with_i18n,
+        Controller, ControllerEvent, MarkersController, MarkersEvent,
     },
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
+    tokio::sync::watch,
 };
 #[cfg(feature = "extension-nexus")]
+use crate::exports::runtime::bindings::TaimiControls;
+#[cfg(feature = "updates")]
 use crate::{
-    exports::runtime::bindings::TaimiControls,
-    with_i18n,
+    exports::runtime::update::ResolvedVersion,
+    settings::state::{AddonHostName, BootstrapState, UpdatePreference},
 };
 
 pub struct ConfigTabState {
+    pub bindings: KeyBindSelection,
+    pub language: LanguageSelection,
+    pub save_changed: watch::Receiver<SaveState>,
     pub marker_autoplace: MarkerAutoPlaceSettings,
     pub marker_autoplace_inner: Option<SquadCondition>,
     pub dpi_scaling: Option<f32>,
+    pub gamebind_invoke: Option<bool>,
     #[cfg(feature = "extension-nexus")]
     pub quick_access_icons_visible: TaimiControls,
+    #[cfg(feature = "updates")]
+    pub update_state: ConfigUpdateState,
 }
 
 impl ConfigTabState {
     pub fn new() -> Self {
         Self {
+            bindings: Default::default(),
+            language: Default::default(),
+            save_changed: SaveState::get().subscribe(),
             dpi_scaling: Default::default(),
             marker_autoplace: Default::default(),
             marker_autoplace_inner: Default::default(),
+            gamebind_invoke: Default::default(),
             #[cfg(feature = "extension-nexus")]
             quick_access_icons_visible: TaimiControls::default_quick_access(),
+            #[cfg(feature = "updates")]
+            update_state: ConfigUpdateState::new(),
         }
     }
 
     pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, timer_window_state: &mut TimerWindowState) {
+        if self.save_changed.has_changed().ok() == Some(true) {
+            self.bindings.clear_dirty();
+        }
+
         ui.text_wrapped(&fl!("imgui-notice"));
         ui.dummy([4.0, 4.0]);
         ui.text_wrapped(&fl!("keybind-triggers"));
@@ -88,11 +119,19 @@ impl ConfigTabState {
                 }
             }
         };
+        #[cfg(feature = "extension-nexus")]
         let _nexus_ui = TreeNode::new(&fl!("nexus"))
             .flags(TreeNodeFlags::FRAMED)
-            .opened(true, Condition::Once)
+            .opened(crate::exports::nexus::available(), Condition::Once)
             .tree_push_on_open(true)
             .build(ui, nexus_ui);
+        #[cfg(feature = "updates")]
+        let _update = TreeNode::new(&fl!("update"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(self.update_state.preference.will_authorize() != Some(false), Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, || self.update_state.draw(ui))
+        ;
 
         let markers_window_closure = || {
             if let Some(settings) = Settings::try_read() {
@@ -237,5 +276,149 @@ impl ConfigTabState {
             .opened(true, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, markers_window_closure);
+        let _language = TreeNode::new(&fl!("language"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(!self.language.is_default(), Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, || self.language.draw(ui));
+        let _gamebinds = with_i18n!("gamebinds", |msg| TreeNode::new(&msg)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(true, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, || self.draw_gamebinds(ui)));
+    }
+
+    pub fn draw_gamebinds(&mut self, ui: &Ui) {
+        with_i18n!("gamebind-notice", |msg| ui.text_wrapped(msg));
+
+        self.bindings.do_gamebinds(ui, bindings::interesting_controls());
+        ui.separator();
+        #[cfg(feature = "extension-nexus")]
+        if self.gamebind_invoke.is_none() {
+            self.gamebind_invoke = Settings::try_read().map(|s| s.arc().gamebind_invoke.is_some());
+        }
+        #[cfg(feature = "extension-nexus")]
+        if let Some(gamebind_invoke) = &mut self.gamebind_invoke {
+            // TODO: InvokeMethod dropdown
+            if crate::exports::runtime::nexus_available() && ui.checkbox("Precise Markers", gamebind_invoke) {
+                let _ = Settings::write_with_blocking(|settings|
+                    settings.arc_mut().gamebind_invoke = gamebind_invoke.then_some(Default::default())
+                );
+            }
+        }
+        if self.gamebind_invoke == Some(true) || !rt::nexus_available() {
+            self.bindings.do_gamebinds(ui, bindings::interesting_keybinds());
+        }
+    }
+}
+
+#[cfg(feature = "updates")]
+pub struct ConfigUpdateState {
+    host_preference: Option<AddonHostName>,
+    preference: UpdatePreference,
+    remote_version: Option<String>,
+    remote_version_release: Option<ResolvedVersion>,
+    changed: watch::Receiver<BootstrapState>,
+}
+
+#[cfg(feature = "updates")]
+impl ConfigUpdateState {
+    pub fn new() -> Self {
+        let mut state = Self {
+            host_preference: None,
+            preference: UpdatePreference::ASK,
+            remote_version: Default::default(),
+            remote_version_release: Default::default(),
+            changed: BootstrapState::get().subscribe(),
+        };
+        state.sync_state();
+        state
+    }
+
+    pub fn sync_state(&mut self) {
+        self.preference = rt::update::Updater::get_preference();
+        let state = self.changed.borrow_and_update();
+        self.host_preference = state.update_host_preference().clone();
+        //self.preference = state.update_preference().clone();
+        self.remote_version = state.update_remote_version.clone();
+        self.remote_version_release = self.remote_version.clone()
+            .and_then(|v| ResolvedVersion::with_version_id(v).ok());
+    }
+
+    fn draw(&mut self, ui: &Ui) {
+        if self.changed.has_changed().ok() == Some(true) {
+            self.sync_state();
+        }
+        let mut index = UpdatePreference::OPTIONS.iter().position(|opt|
+            opt == &self.preference.as_option()
+        ).unwrap_or(0);
+        let auto_update = ui.combo("Auto-update", &mut index, &UpdatePreference::OPTIONS, |option| {
+            option.as_str().into()
+        });
+        let mut new_pref = None;
+        if auto_update {
+            new_pref = UpdatePreference::OPTIONS.get(index).cloned();
+        }
+        if let Some(channel) = rt::update::crate_channel() {
+            ui.text(&fl!("source-arg", source = channel));
+            ui.same_line(); ui.dummy([4.0, 0.0]);
+            ui.same_line();
+        }
+        if with_i18n!("check-for-updates", |msg| ui.button(msg)) {
+            Controller::try_send(ControllerEvent::CheckAddonUpdate(false));
+        }
+        let up_to_date = if let Some(latest) = self.remote_version_release.as_ref() {
+            latest.is_update()
+        } else if let Some(latest) = &self.remote_version {
+            rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
+        } else { false };
+        #[cfg(feature = "extension-nexus")]
+        if !crate::built_info::IS_TAGGED_RELEASE && !up_to_date && rt::nexus_available() {
+            ui.same_line();
+            if with_i18n!("update", |msg| ui.button(msg)) {
+                Controller::try_send(ControllerEvent::CheckAddonUpdate(true));
+            }
+        }
+        let blanket_auth = self.preference.blanket_authorization();
+        let mut authorized = blanket_auth.unwrap_or(false);
+        let auth_toggled = if let Some(latest) = &self.remote_version {
+            ui.same_line();
+            let up_to_date = if let Some(latest) = self.remote_version_release.as_ref() {
+                latest.is_update()
+            } else if let Some(latest) = &self.remote_version {
+                rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
+            } else { false };
+
+            if up_to_date {
+                with_i18n!("update-not-required", |msg| ui.text(msg));
+                false
+            } else {
+                let latest_version = match &self.remote_version_release {
+                    Some(release) => release.to_string(),
+                    _ => latest.clone(),
+                };
+                ui.text(fl!("update-available", version = latest_version));
+                if blanket_auth.is_none() {
+                    authorized = self.preference.authorizes_version(latest).unwrap_or(false);
+                    ui.same_line();
+                    with_i18n!("update", |msg| ui.checkbox(msg, &mut authorized))
+                } else {
+                    false
+                }
+            }
+        } else { false };
+        if auth_toggled || new_pref.is_some() {
+            BootstrapState::write_with(|state| {
+                let pref = match new_pref {
+                    Some(pref) =>
+                        state.update_preference.insert(pref),
+                    None =>
+                        state.update_preference.get_or_insert_with(|| UpdatePreference::ASK),
+                };
+                if let Some(latest) = auth_toggled.then_some(self.remote_version.as_ref()).flatten() {
+                    pref.authorize_update(latest.clone(), authorized);
+                }
+            });
+        }
     }
 }
