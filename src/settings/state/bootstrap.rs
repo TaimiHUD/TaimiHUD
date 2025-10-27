@@ -1,6 +1,9 @@
 use {
     anyhow::Context,
-    crate::exports::runtime as rt,
+    crate::{
+        exports::runtime as rt,
+        settings::state::save_state_backup,
+    },
     serde::{Deserialize, Serialize},
     std::{
         ffi::{OsStr, OsString},
@@ -71,8 +74,8 @@ impl BootstrapState {
         match res {
             Ok(state) => state,
             Err(e) => {
-                // TODO: backup_state(x);
                 log::error!("{e:#}");
+                save_state_backup(Self::file_path());
                 Self::new()
             },
         }
