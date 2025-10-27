@@ -3,6 +3,7 @@ use {
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::bindings::TaimiControls,
+        settings::state::save_state_backup,
         SETTINGS,
     },
     anyhow::{anyhow, Context},
@@ -365,8 +366,11 @@ impl Settings {
             arc: Default::default(),
         }
     }
+    pub fn file_path(addon_dir: &Path) -> PathBuf {
+        addon_dir.join("settings.json")
+    }
     pub async fn load(addon_dir: &Path) -> anyhow::Result<Self> {
-        let settings_path = addon_dir.join("settings.json");
+        let settings_path = Self::file_path(addon_dir);
         if try_exists(&settings_path).await? {
             let file_data = read_to_string(settings_path).await?;
             let mut settings = serde_json::from_str::<Self>(&file_data)?;
@@ -377,7 +381,7 @@ impl Settings {
     }
     pub fn open_blocking(addon_dir: &Path) -> anyhow::Result<Self> {
         use std::fs;
-        let settings_path = addon_dir.join("settings.json");
+        let settings_path = Self::file_path(addon_dir);
         Ok(if fs::exists(&settings_path)? {
             let file_data = fs::read_to_string(settings_path)?;
             let mut settings = serde_json::from_str::<Self>(&file_data)?;
@@ -389,10 +393,13 @@ impl Settings {
     }
 
     pub async fn load_default(addon_dir: &Path) -> Self {
-        match Settings::load(addon_dir).await {
+        let res = Settings::load(addon_dir).await
+            .context("SettingsLock load error");
+        match res {
             Ok(settings) => settings,
             Err(err) => {
-                log::error!("SettingsLock load error: {}", err);
+                log::error!("{err:#}");
+                save_state_backup(&Self::file_path(addon_dir));
                 Self::new(addon_dir)
             }
         }
@@ -405,7 +412,7 @@ impl Settings {
     pub async fn settings_path(&self) -> anyhow::Result<PathBuf> {
         let addon_dir = &self.addon_dir;
         create_dir_all(addon_dir).await?;
-        Ok(addon_dir.join("settings.json"))
+        Ok(Self::file_path(addon_dir))
     }
 
     pub fn settings_str(&self) -> anyhow::Result<String> {

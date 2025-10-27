@@ -1,8 +1,11 @@
 use {
     anyhow::Context,
-    crate::exports::runtime::{
-        self as rt,
-        bindings::GameBinds,
+    crate::{
+        exports::runtime::{
+            self as rt,
+            bindings::GameBinds,
+        },
+        settings::state::save_state_backup,
     },
     serde::{Deserialize, Serialize},
     std::{
@@ -51,6 +54,7 @@ impl SaveState {
                 state,
             Err(e) => {
                 log::error!("{e:#}");
+                save_state_backup(Self::file_path());
                 Self::new()
             },
         }
