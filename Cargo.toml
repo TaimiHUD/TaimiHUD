@@ -15,7 +15,7 @@ authors = [
   "arcnmx"
 ]
 description = "Pathing, encounter timers and markers"
-version = "0.2.26"
+version = "0.3.0"
 edition = "2021"
 build = "build.rs"
 
