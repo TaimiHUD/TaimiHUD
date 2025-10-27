@@ -11,6 +11,7 @@
 , enableBuilt ? builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev)
 , enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0"
 , enableUpdates ? builtInfo != {} || (enableBuilt && (! source ? sourceInfo.dirtyRev))
+, enableStatistics ? false
 , enableCache ? true
 , enableTimers ? true
 , enableMarkers ? true
@@ -45,6 +46,7 @@
     ] ++ optional stdenv.hostPlatform.isWindows "windows"
     ++ optional enableNexus "extension-nexus"
     ++ optional enableArcdps "extension-arcdps"
+    ++ optional enableStatistics "statistics"
     ++ optional enableCache "meta-cache"
     ++ optional enableSpace "space"
     ++ optional enableUpdates "updates"
