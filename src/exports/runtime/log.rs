@@ -1,22 +1,12 @@
-use std::{ffi::CStr, fmt, fs, io, mem::transmute, path::PathBuf, slice, sync::{Mutex, OnceLock, TryLockError}, time};
+#[cfg(not(feature = "log-filter"))]
+use anyhow::Context;
+use std::{ffi::CStr, fmt, fs, io, mem::transmute, path::PathBuf, slice, sync::{Mutex, LazyLock, OnceLock, TryLockError}, time};
 use log::{Log, Metadata, Record, Level, LevelFilter};
-use crate::exports::{self, runtime as rt};
+use crate::{exports::{self, runtime as rt}, settings::state::BootstrapState};
 
-pub const LOG_LEVEL_FILTER: LevelFilter = match () {
-    #[cfg(debug_assertions)]
-    () => LevelFilter::Trace,
-    #[cfg(not(debug_assertions))]
-    () => LevelFilter::Debug,
-};
-
-#[cfg(todo)]
-pub const LOG_FILTER: &'static str = match () {
-    #[cfg(debug_assertions)]
-    () => "all",
-    #[cfg(not(debug_assertions))]
-    () => "debug",
-};
-
+pub static LOG_FILTER: LazyLock<LogFilter> = LazyLock::new(|| BootstrapState::read_with(|s|
+    s.log_filter.as_ref().map(LogFilterDesc::to_filter).unwrap_or_default()
+));
 pub const RT_FORMAT_ERROR: &'static str = "log formatting failure";
 pub const LOG_BUFFER_SIZE: usize = 0x400;
 
@@ -42,7 +32,7 @@ impl TaimiLog {
     /// Setup fails if logging is already set up, but that's usually fine
     pub fn setup() -> Result<(), log::SetLoggerError> {
         log::set_logger(Self::logger())?;
-        log::set_max_level(LOG_LEVEL_FILTER);
+        log::set_max_level(LOG_FILTER.level());
         Ok(())
     }
 
@@ -98,24 +88,33 @@ impl TaimiLog {
         }))
     }
 
-    pub fn with_log_buffer<R, F: FnOnce(&mut LogBuffer) -> R>(&self, f: F) -> R {
+    pub fn with_log_buffer<R, F: FnOnce(&mut LogBuffer, bool) -> R>(&self, f: F) -> R {
         let mut buffer_storage;
         let mut buffer_lock = self.buffer.try_lock().or_else(|e| match e {
             TryLockError::Poisoned(lock) => Ok(lock.into_inner()),
             TryLockError::WouldBlock => Err(()),
         });
+        let persistent = buffer_lock.is_ok();
         let buffer = match &mut buffer_lock {
-            Ok(buffer_lock) => {
-                buffer_lock.clear();
-                buffer_lock.setup_with_capacity(LOG_BUFFER_SIZE);
-                &mut *buffer_lock
+            Ok(buffer_lock) => match buffer_lock.is_empty() {
+                true => {
+                    buffer_lock.setup_with_capacity(LOG_BUFFER_SIZE);
+                    &mut *buffer_lock
+                },
+                #[cfg(todo = "unnecessary")]
+                false => buffer_lock.append(),
+                false => &mut *buffer_lock,
             },
             Err(..) => {
                 buffer_storage = LogBuffer::with_capacity(LOG_BUFFER_SIZE / 4);
                 &mut buffer_storage
             },
         };
-        f(buffer)
+        let res = f(buffer, persistent);
+        if let Ok(buffer) = &mut buffer_lock {
+            buffer.clear();
+        }
+        res
     }
 
     #[allow(unreachable_patterns, dropping_references)]
@@ -155,6 +154,10 @@ impl TaimiLog {
 
 impl Log for TaimiLog {
     fn enabled(&self, _metadata: &Metadata) -> bool {
+        #[cfg(feature = "log-filter")]
+        if let filter @ LogFilter::Env(..) = &*LOG_FILTER {
+            return filter.enabled(_metadata)
+        }
         true
     }
 
@@ -180,7 +183,13 @@ impl Log for TaimiLog {
 pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
     #![allow(unreachable_patterns)]
 
-    let res = logger.with_log_buffer(|buffer| -> rt::RuntimeResult<Option<()>> {
+    let res = logger.with_log_buffer(|buffer, _persistent| -> rt::RuntimeResult<Option<()>> {
+        let buffer = buffer.append();
+        if !buffer.is_empty() {
+            // if anything is left cached from last time, just prepend it to this message
+            // TODO: flush this regardless instead, since it's already passed filters even if current record wouldn't!
+            let _ = fmt::Write::write_str(buffer, "\n");
+        }
         let (message, implicit_target_level) = match () {
             #[cfg(feature = "extension-arcdps")]
             _ if exports::arcdps::log_window_filter(record.metadata()) => {
@@ -309,6 +318,10 @@ impl LogBuffer {
             0 => self.buffer.reserve(cap),
             _ => self.buffer.shrink_to(cap),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
 
     pub fn len(&self) -> usize {
@@ -477,5 +490,131 @@ pub const fn nexus_log_level(level: Level) -> NexusLogLevel {
         Level::Info => NexusLogLevel::Info,
         Level::Warn => NexusLogLevel::Warning,
         Level::Error => NexusLogLevel::Critical,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+pub enum LogFilterDesc {
+    Level(LevelFilter),
+    Env(String),
+}
+
+impl LogFilterDesc {
+    pub const DEFAULT: Self = Self::Level(Self::DEFAULT_LEVEL);
+    pub const DEFAULT_LEVEL: LevelFilter = match () {
+        #[cfg(debug_assertions)]
+        () => LevelFilter::Trace,
+        #[cfg(not(debug_assertions))]
+        () => LevelFilter::Debug,
+    };
+
+    pub fn to_filter(&self) -> LogFilter {
+        match self {
+            Self::Level(level) => LogFilter::Level(*level),
+            Self::Env(env) => match &env[..] {
+                #[cfg(feature = "log-filter")]
+                env => Some(LogFilter::Env(env_logger::Builder::new().parse_filters(env).build())),
+                #[cfg(not(feature = "log-filter"))]
+                e if e.eq_ignore_ascii_case("all") => Some(LogFilter::Level(LevelFilter::max())),
+                #[cfg(not(feature = "log-filter"))]
+                env => match env.parse::<LevelFilter>().context("log-filter feature required") {
+                    Err(e) => {
+                        log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
+                        None
+                    },
+                    Ok(level) => Some(LogFilter::Level(level)),
+                },
+            }.unwrap_or_default(),
+        }
+    }
+}
+
+impl Default for LogFilterDesc {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+#[derive(Debug)]
+pub enum LogFilter {
+    Level(LevelFilter),
+    #[cfg(feature = "log-filter")]
+    Env(env_logger::Logger),
+}
+
+impl LogFilter {
+    pub const DEFAULT: Self = Self::Level(LogFilterDesc::DEFAULT_LEVEL);
+
+    pub fn level(&self) -> LevelFilter {
+        match self {
+            Self::Level(filter) => *filter,
+            #[cfg(feature = "log-filter")]
+            Self::Env(env) => env.filter(),
+        }
+    }
+
+    pub fn enabled(&self, metadata: &Metadata) -> bool {
+        match self {
+            Self::Level(filter) => *filter >= metadata.level(),
+            #[cfg(feature = "log-filter")]
+            Self::Env(env) => env.enabled(metadata),
+        }
+    }
+
+    #[cfg(todo = "unnecessary")]
+    pub fn matches(&self, record: &Record) -> bool {
+        match self {
+            #[cfg(feature = "log-filter")]
+            Self::Env(env) => env.matches(record),
+            _ => self.enabled(record.metadata()),
+        }
+    }
+}
+
+impl Default for LogFilter {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+pub struct DeferredLogger {
+    pub sync: bool,
+}
+
+impl DeferredLogger {
+    pub const BEST_EFFORT: Self = Self {
+        sync: false,
+    };
+    pub const BLOCKING: Self = Self {
+        sync: true,
+    };
+}
+impl Log for DeferredLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        LogFilter::DEFAULT.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record) {
+        if !self.enabled(record.metadata()) {
+            return
+        }
+
+        let buffer = match self.sync {
+            true => TaimiLog::logger().buffer.lock().map_err(drop),
+            false => TaimiLog::logger().buffer.try_lock().map_err(drop),
+        };
+        if let Ok(mut buffer) = buffer {
+            let buffer = &mut *buffer;
+            if !buffer.is_empty() {
+                let _ = fmt::Write::write_str(buffer, "\n");
+            }
+            if let Err(_e) = write_record(buffer, record, false) {
+                let _ = fmt::Write::write_str(buffer, RT_FORMAT_ERROR);
+            }
+        }
+    }
+
+    fn flush(&self) {
+        // TODO: could flush to log file if it happens to be open, but why bother?
     }
 }

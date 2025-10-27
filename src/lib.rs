@@ -23,7 +23,7 @@ use {
         },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
-        settings::SettingsLock,
+        settings::{state::BootstrapState, SettingsLock},
     },
     anyhow::Context,
     arcdps::{extras::UserInfo, AgentOwned, Language},
@@ -48,6 +48,7 @@ use {
         panic,
         path::PathBuf,
         ptr,
+        slice,
         sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
         time::Duration,
@@ -93,10 +94,21 @@ pub static LOCALIZATIONS: LazyLock<RustEmbedNotifyAssets<LocalizationsEmbed>> =
     });
 
 static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
+    let assets = &*LOCALIZATIONS;
     let loader: FluentLanguageLoader = fluent_language_loader!();
     loader
-        .load_available_languages(&*LOCALIZATIONS)
+        .load_available_languages(assets)
         .expect("Error while loading fallback language");
+    let res = BootstrapState::read_with(|state| match state.language.as_ref().and_then(|l| l.parse().ok()) {
+        Some(language) if loader.current_language() != language =>
+            i18n_embed::select(&loader, assets, slice::from_ref(&language))
+                .with_context(|| format!("Failed to select language {language}"))
+                .map(drop),
+        _ => Ok(()),
+    });
+    if let Err(e) = res {
+        log::warn!(logger: rt::log::DeferredLogger::BEST_EFFORT, "{e:#}");
+    }
     language_loader_setup(&loader);
     loader
 });
@@ -347,6 +359,7 @@ fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
 
 fn crate_init() {
     setup_panic_hook();
+    rt::try_init_addon_dir(false, || rt::try_addon_dir().ok());
     let _ = rt::log::TaimiLog::setup();
 
     // XXX: could consider calling this from a DllMain (or CRT TLS hook fn?),
@@ -358,7 +371,8 @@ fn crate_init() {
 fn init() -> Result<(), &'static str> {
     crate_init();
 
-    let mut loaded = match rt::LOADER_LOCK.lock() {
+    let loaded = rt::LOADER_LOCK.lock();
+    let mut loaded = match loaded {
         Ok(loaded) if *loaded => {
             log::info!("already loaded, skipping init");
             return Ok(())
@@ -370,6 +384,10 @@ fn init() -> Result<(), &'static str> {
             return Err(msg)
         },
     };
+    if let Ok(addon_dir) = rt::try_addon_dir() {
+        BootstrapState::init_addon_dir(&addon_dir);
+        rt::init_addon_dir(addon_dir);
+    }
     // Say hi to the world :o
     let name = rt::CRATE_NAME;
     let version = rt::CRATE_VERSION;
@@ -694,6 +712,10 @@ pub fn game_language_id(lang: Language) -> &'static str {
 }
 
 fn load_language(detected_language: &str) -> rt::RuntimeResult {
+    if LANGUAGE_LOADER.current_language().language.as_str() == detected_language {
+        return Ok(())
+    }
+
     let detected_language_identifier: LanguageIdentifier = detected_language
         .parse()
         .map_err(|_| "Cannot parse detected language")?;
@@ -920,6 +942,11 @@ fn unload() {
             return
         },
     };
+    if let Some(host) = BootstrapState::current_addon_host() {
+        BootstrapState::write_with(|state| {
+            state.latest_addon_host = Some(host);
+        });
+    }
 
     log::info!("Unloading addon");
 

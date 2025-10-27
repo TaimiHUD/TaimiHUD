@@ -3,6 +3,7 @@ use {
     crate::exports::runtime as rt,
     serde::{Deserialize, Serialize},
     std::{
+        ffi::{OsStr, OsString},
         fmt,
         fs,
         io,
@@ -23,20 +24,31 @@ pub struct BootstrapState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_host_preference: Option<AddonHostName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_addon_host: Option<AddonHostName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_preference: Option<UpdatePreference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_host_preference: Option<Option<AddonHostName>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_remote_version: Option<String>,
-    // TODO: language selection
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addon_dir: Option<OsString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_filter: Option<rt::log::LogFilterDesc>,
 }
 
 impl BootstrapState {
     pub const EMPTY: Self = Self {
         addon_host_preference: None,
+        latest_addon_host: None,
         update_host_preference: None,
         update_preference: None,
         update_remote_version: None,
+        addon_dir: None,
+        language: None,
+        log_filter: None,
     };
 
     pub fn new() -> Self {
@@ -57,15 +69,16 @@ impl BootstrapState {
             res => res.context("boot state file failed to load"),
         };
         match res {
-            Ok(state) =>
-                state,
+            Ok(state) => state,
             Err(e) => {
+                // TODO: backup_state(x);
                 log::error!("{e:#}");
                 Self::new()
             },
         }
     }
 
+    #[cfg(todo = "unnecessary")]
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
@@ -73,6 +86,9 @@ impl BootstrapState {
                 update_host_preference: None,
                 update_preference: None,
                 update_remote_version: None,
+                addon_dir: None,
+                language: None,
+                log_filter: None,
             } => true,
             _ => false,
         }
@@ -87,6 +103,7 @@ impl BootstrapState {
         serde_json::from_reader(io::BufReader::with_capacity(2048, f))
             .map_err(Into::into)
     }
+    #[cfg(todo = "unnecessary")]
     pub fn write_file(&self, path: &Path) -> anyhow::Result<()> {
         let _ = fs::create_dir_all(rt::addon_dir_fallback());
         let f = fs::File::create(path)?;
@@ -131,6 +148,9 @@ impl BootstrapState {
     pub fn write_with<F: FnOnce(&mut Self)>(f: F) {
         Self::get().send_modify(f)
     }
+    pub fn try_write_with<F: FnOnce(&mut Self) -> bool>(f: F) -> bool {
+        Self::get().send_if_modified(f)
+    }
 
     pub fn addon_host_preference(&self) -> AddonHostName {
         self.addon_host_preference.unwrap_or_else(|| match () {
@@ -158,7 +178,51 @@ impl BootstrapState {
     }
 
     pub fn update_host_preference(&self) -> Option<AddonHostName> {
-        self.update_host_preference.unwrap_or_else(|| Some(self.addon_host_preference()))
+        self.update_host_preference.unwrap_or_else(|| match self.reliable_addon_host() {
+            Some(host) if self.addon_host_preference() == host =>
+                Some(host),
+            _ => None,
+        })
+    }
+
+    pub fn reliable_addon_host(&self) -> Option<AddonHostName> {
+        match self.latest_addon_host {
+            None => Self::current_addon_host(),
+            Some(..) => None,
+        }
+    }
+
+    pub fn current_addon_host() -> Option<AddonHostName> {
+        match () {
+            #[cfg(feature = "extension-nexus")]
+            _ if rt::nexus_available() => Some(AddonHostName::Nexus),
+            #[cfg(feature = "extension-arcdps")]
+            _ if rt::arcdps_available() => Some(AddonHostName::ArcDPS),
+            _ => None,
+        }
+    }
+
+    pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
+        Self::try_write_with(|state| {
+            let mut changed = if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref()) {
+                state.addon_dir = Some(addon_dir.into());
+                true
+            } else {
+                false
+            };
+
+            if let Some(current_host) = Self::current_addon_host() {
+                let host = match state.latest_addon_host {
+                    Some(prev_host) if prev_host != current_host =>
+                        Some(current_host),
+                    _ => None,
+                };
+                changed |= host.is_some();
+                state.latest_addon_host = host;
+            }
+
+            changed
+        })
     }
 }
 

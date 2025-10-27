@@ -2,7 +2,10 @@ use {
     async_compression::tokio::bufread::GzipDecoder,
     futures::stream::{StreamExt, TryStreamExt},
     reqwest::{Client, IntoUrl, Response},
-    crate::settings::SourceKind,
+    crate::{
+        exports::runtime as rt,
+        settings::SourceKind,
+    },
     std::{
         sync::Arc,
         fmt::{Display, Debug},
@@ -28,9 +31,9 @@ use reqwest::header::LAST_MODIFIED;
 pub type RemoteSource = Arc<dyn Source + Send + Sync>;
 
 pub async fn build_client() -> anyhow::Result<Client> {
-    let name = env!("CARGO_PKG_NAME");
-    let authors = env!("CARGO_PKG_AUTHORS");
-    let user_agent = format!("{} by {}", name, authors);
+    let name = rt::CRATE_NAME;
+    let version = rt::CRATE_VERSION;
+    let user_agent = format!("{name}/{version}");
     let client = Client::builder().user_agent(user_agent).build()?;
     Ok(client)
 }

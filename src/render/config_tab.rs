@@ -1,9 +1,11 @@
 use {
     super::TimerWindowState,
+    anyhow::Context,
     crate::{
         controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent},
         exports::runtime::{self as rt, bindings},
-        fl, render::{
+        fl,
+        render::{
             element::{
                 keys::KeyBindSelection,
                 language::LanguageSelection,
@@ -280,12 +282,26 @@ impl ConfigTabState {
             .flags(TreeNodeFlags::FRAMED)
             .opened(!self.language.is_default(), Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || self.language.draw(ui));
+            .build(ui, || self.draw_language(ui));
         let _gamebinds = with_i18n!("gamebinds", |msg| TreeNode::new(&msg)
             .flags(TreeNodeFlags::FRAMED)
             .opened(true, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, || self.draw_gamebinds(ui)));
+    }
+
+    pub fn draw_language(&mut self, ui: &Ui) {
+        if let Some(language_id) = self.language.draw(ui) {
+            let res = crate::load_language(language_id)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| format!("loading i18n for {language_id}"));
+            if let Err(e) = res {
+                log::error!("{e:#}");
+            }
+            BootstrapState::write_with(|state|
+                state.language = Some(language_id.into())
+            );
+        }
     }
 
     pub fn draw_gamebinds(&mut self, ui: &Ui) {

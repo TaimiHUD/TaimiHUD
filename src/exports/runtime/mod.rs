@@ -3,18 +3,19 @@ use rand::{rng, seq::SliceRandom};
 use std::{
     borrow::Cow,
     ffi::CStr,
+    fs,
     mem,
     ops,
     path::{Path, PathBuf},
     ptr::{self, NonNull},
     sync::{
         atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
-        Mutex, Once, OnceLock,
+        Mutex, Once, RwLock,
     },
     time::Duration,
 };
 use ::log::info;
-use crate::{exports, load_language, marker::format::MarkerType, notify_quit};
+use crate::{exports, load_language, marker::format::MarkerType, notify_quit, settings::state::BootstrapState};
 use windows::Win32::{
     Foundation::HWND,
     UI::{
@@ -37,6 +38,7 @@ pub mod update;
 pub mod watched;
 pub use {
     arcdps::Language as GameLanguage,
+    unic_langid_impl::subtags::Language,
     nexus::imgui,
     self::{
         mouse::MousePosition,
@@ -45,7 +47,6 @@ pub use {
         watched::Watched,
     },
     taimi_meta::coords::vec_eq,
-    taimi_input::win::keyboard::KeyState,
 };
 
 #[cfg(feature = "extension-arcdps")]
@@ -121,29 +122,73 @@ pub fn addon_dir_fallback() -> &'static Path {
     Path::new("addons/Taimi")
 }
 
-static ADDON_DIR: OnceLock<Cow<'static, Path>> = OnceLock::new();
+pub(crate) static ADDON_DIR: RwLock<Option<&'static Path>> = RwLock::new(None);
 
 pub fn addon_dir() -> &'static Path {
-    if let Some(path) = ADDON_DIR.get() {
+    if let Ok(Some(path)) = ADDON_DIR.read().map(|p| *p) {
         return path
+    }
+
+    let fallback = addon_dir_fallback();
+    let saved = BootstrapState::read_with(|state| {
+        // as long as what we saved still seems valid, use it...
+        let addon_dir = state.addon_dir.as_ref()
+            .and_then(|addon_dir| fs::metadata(Path::new(addon_dir)).is_ok().then_some(addon_dir));
+        match addon_dir {
+            Some(addon_dir) => try_init_addon_dir(false, move || Some(addon_dir.into())),
+            None => fallback,
+        }
+    });
+    if saved as *const Path as *const () != fallback as *const Path as *const () {
+        // if it didn't fall back due to mutex contention...
+        return saved
     }
 
     match try_addon_dir() {
         Ok(path) =>
-            ADDON_DIR.get_or_init(|| path.into()),
+            init_addon_dir(path),
         Err(e) => {
-            let warn_once = {
-                static WARN_ONCE: Once = Once::new();
-                let mut first_time = false;
-                WARN_ONCE.call_once(|| first_time = true);
-                first_time
-            };
+            static WARN_ONCE: Once = Once::new();
+            let mut warn_once = false;
+            WARN_ONCE.call_once(|| warn_once = true);
             if warn_once {
                 // beware, logging can recurse into here to determine log file path
-                ::log::warn!("falling back to default addon dir due to error: {e}");
+                ::log::warn!(logger: log::DeferredLogger::BEST_EFFORT, "falling back to default addon dir: {e}\n{}", std::backtrace::Backtrace::capture());
             }
-            addon_dir_fallback()
+            saved
         },
+    }
+}
+pub(crate) fn try_init_addon_dir<F: FnOnce() -> Option<PathBuf>>(blocking: bool, addon_dir: F) -> &'static Path {
+    let path = match blocking {
+        true => ADDON_DIR.write().map_err(drop),
+        false => ADDON_DIR.try_write().map_err(drop),
+    };
+    let Ok(mut path) = path else { return addon_dir_fallback() };
+    if let Some(path) = *path {
+        return path
+    }
+
+    if let Some(addon_dir) = addon_dir() {
+        *path.get_or_insert_with(|| &*Box::leak(addon_dir.into_boxed_path()))
+    } else {
+        addon_dir_fallback()
+    }
+}
+pub(crate) fn init_addon_dir<D: Into<Cow<'static, Path>> + AsRef<Path>>(addon_dir: D) -> &'static Path {
+    if let Ok(mut path) = ADDON_DIR.write() {
+        if let Some(path) = *path {
+            if path == addon_dir.as_ref() {
+                return path
+            }
+        }
+        let addon_dir = match addon_dir.into() {
+            Cow::Borrowed(p) => p,
+            Cow::Owned(p) => &*Box::leak(p.into_boxed_path()),
+        };
+        *path.insert(addon_dir)
+    } else {
+        addon_dir_fallback()
     }
 }
 
@@ -174,10 +219,20 @@ pub fn detect_language() -> RuntimeResult<Cow<'static, str>> {
 }
 
 pub fn reload_language() -> RuntimeResult {
-    let language = detect_language()?;
-    info!("Detected language {language} for internationalization");
+    let saved = BootstrapState::read_with(|state: &BootstrapState|
+        state.language.as_ref().and_then(|l| l.parse::<Language>().ok())
+    );
+    let language;
+    let language = match &saved {
+        Some(l) => l.as_str(),
+        _ => {
+            language = detect_language()?;
+            info!("Detected language {language} for internationalization");
+            &language
+        },
+    };
 
-    load_language(&language)
+    load_language(language)
 }
 
 static GAME_LANGUAGE: AtomicI32 = AtomicI32::new(i32::MIN);
@@ -190,9 +245,11 @@ pub fn notify_game_language(language: GameLanguage) {
     let id = language.into();
     let prev = GAME_LANGUAGE.swap(id, Ordering::Relaxed);
     if prev != id {
-        let res = crate::load_language(crate::game_language_id(language))
-            .map_err(anyhow::Error::msg)
-            .with_context(|| format!("Failed to change language to {language:?}"));
+        let res = if BootstrapState::read_with(|state| state.language.is_none()) {
+            reload_language()
+                .map_err(anyhow::Error::msg)
+                .with_context(|| format!("Failed to reload language"))
+        } else { Ok(()) };
         if let Err(e) = res {
             ::log::warn!("{e:#}");
         }
