@@ -369,14 +369,16 @@ impl Controller {
         }
     }
 
-    async fn check_updates(&mut self) {
+    async fn check_updates(&mut self, everything: bool) {
         let _ = self
             .rt_sender
             .send(RenderEvent::CheckingForUpdates(true))
             .await;
-        match Settings::check_for_updates().await {
+        let res = Settings::check_for_updates(everything).await
+            .context("Controller.check_updates");
+        match res {
             Ok(_) => (),
-            Err(err) => log::error!("Controller.check_updates(): {}", err),
+            Err(err) => log::error!("{err:#}"),
         }
         let _ = self
             .rt_sender
@@ -557,7 +559,7 @@ impl Controller {
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
             UninstallAddon(dd) => self.uninstall_addon(&dd).await?,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
-            CheckDataSourceUpdates => self.check_updates().await,
+            CheckDataSourceUpdates(everything) => self.check_updates(everything).await,
             CheckUpdateSources => self.check_sources().await?,
             CheckAddonUpdate(proceed) => self.addon_check_for_updates(proceed).await,
             DoDataSourceUpdate { state } => self.do_update(state).await,
@@ -700,7 +702,7 @@ pub enum ControllerEvent {
     LoadTextureIntegrated(String, Vec<u8>),
     #[strum(to_string = "Load texture {0} from {1:?}")]
     LoadTexture(RelativePathBuf, PathBuf),
-    CheckDataSourceUpdates,
+    CheckDataSourceUpdates(bool),
     ReloadData,
     SaveSettings,
     UiTick(MumblelinkTick),
