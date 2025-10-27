@@ -34,19 +34,26 @@ default = [
   "statistics",
   "extension-arcdps",
   "extension-nexus",
-]
-timers = [
-]
-allocator = [
+  "log-filter",
+  "render-rt",
+  "updates",
 ]
 built-info = [
   #"built/chrono",
   "built/git2",
 ]
+
+allocator = [
+]
+log-filter = ["dep:env_logger"]
+render-rt = []
+statistics = [
+  "allocator",
+]
 updates = [
   "dep:semver",
 ]
-render-rt = []
+
 space = [
   "dep:itertools",
   "dep:tobj",
@@ -68,15 +75,19 @@ space = [
   "dep:taimi_pack",
   "dep:taimi_d3d",
 ]
-statistics = [
-  "allocator",
-]
 space-ecs = [
 ]
 space-list = [
   "dep:bvh",
   "dep:nalgebra",
 ]
+goggles = [
+  "dep:retour",
+]
+
+timers = [
+]
+
 markers = [
   "dep:itertools",
   "dep:arc-atomic",
@@ -92,10 +103,12 @@ markers = [
 markers-edit = [
   "markers"
 ]
+
 meta-cache = [
   "taimi_meta?/map-cache",
   "taimi_meta?/gzip",
 ]
+
 extension-arcdps = [
   #"extension-arcdps-codegen",
   "extension-arcdps-extern",
@@ -140,8 +153,14 @@ extension-nexus = [
   "taimi_meta?/nexus-rtapi",
   "taimi_meta?/mumblelink-nexus",
 ]
-goggles = [
-  "dep:retour",
+dpsapi = [
+  "dep:dpsapi",
+  "dpsapi/nexus",
+]
+
+arcffi = [
+  "dep:arcffi",
+  "taimi_d3d?/arcffi",
 ]
 image = [
   "dep:image",
@@ -152,14 +171,6 @@ texture-loader = [
   "windows/Win32_Graphics_Direct3D11",
   "windows/Win32_Graphics_Dxgi",
   "windows/Win32_Graphics_Dxgi_Common",
-]
-dpsapi = [
-  "dep:dpsapi",
-  "dpsapi/nexus",
-]
-arcffi = [
-  "dep:arcffi",
-  "taimi_d3d?/arcffi",
 ]
 windows = [
   "dep:windows",
@@ -194,7 +205,8 @@ built = { version = "0.7.7", default-features = false }
 
 [dependencies]
 anyhow = "1"
-log = "0.4"
+env_logger = { version = "0.11", default-features = false, optional = true }
+log = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.43.0", features = [ "fs", "macros" ], default-features = false }
 arcdps = { workspace = true, features = ["extras"] }
 glam = { workspace = true, features = [ "serde", "mint" ] }

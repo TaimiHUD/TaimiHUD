@@ -12,6 +12,7 @@
 , enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0"
 , enableUpdates ? builtInfo != {} || (enableBuilt && (! source ? sourceInfo.dirtyRev))
 , enableStatistics ? false
+, enableEnvFilter ? false
 , enableCache ? true
 , enableTimers ? true
 , enableMarkers ? true
@@ -47,6 +48,7 @@
     ++ optional enableNexus "extension-nexus"
     ++ optional enableArcdps "extension-arcdps"
     ++ optional enableStatistics "statistics"
+    ++ optional enableEnvFilter "env-filter"
     ++ optional enableCache "meta-cache"
     ++ optional enableSpace "space"
     ++ optional enableUpdates "updates"

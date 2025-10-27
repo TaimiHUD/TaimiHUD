@@ -16,7 +16,7 @@ pub struct LanguageSelection {
 }
 
 impl LanguageSelection {
-    pub fn draw(&mut self, ui: &imgui::Ui) {
+    pub fn draw(&mut self, ui: &imgui::Ui) -> Option<&'static str> {
         let selected_language = *self.language.insert(Self::get_current_language());
         let selected_language = selected_language.as_str();
 
@@ -46,14 +46,12 @@ impl LanguageSelection {
                     Ok(l) => game_language_id(l),
                     Err(id) => id,
                 };
-                let res = load_language(id)
-                    .map_err(anyhow::Error::msg)
-                    .with_context(|| format!("loading i18n for {id}"));
-                if let Err(e) = res {
-                    log::error!("{e:#}");
-                }
+                self.language = Some(id).try_into().ok();
+                return Some(id)
             }
         }
+
+        None
     }
 
     pub fn get_language(&mut self) -> &mut unic_langid_impl::subtags::Language {
