@@ -313,13 +313,15 @@ impl Settings {
         self.enable_katrender = !self.enable_katrender;
     }
 
-    pub async fn check_for_updates() -> anyhow::Result<()> {
+    pub async fn check_for_updates(everything: bool) -> anyhow::Result<()> {
         let settings_arc = SETTINGS
             .get()
             .expect("SettingsLock should've been initialized by now!");
         let sources: Vec<(RemoteSource, NeedsUpdate)> = {
             let settings_read_lock = settings_arc.read().await;
-            tokio_stream::iter(settings_read_lock.remotes.iter())
+            let remotes = settings_read_lock.remotes.iter()
+                .filter(|r| everything || r.installed_path.is_some());
+            tokio_stream::iter(remotes)
                 .then(|r| async move { (r.remote_source(), r.needs_update().await) })
                 .collect()
                 .await

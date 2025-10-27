@@ -76,7 +76,7 @@ impl DataSourceTabState {
                 }
                 ui.same_line();
                 if ui.button(fl!("check-for-updates")) {
-                    Controller::try_send(ControllerEvent::CheckDataSourceUpdates);
+                    Controller::try_send(ControllerEvent::CheckDataSourceUpdates(false));
                 }
                 if ui.is_item_hovered() {
                     ui.tooltip_text(fl!("check-for-updates-tooltip"));
