@@ -170,8 +170,10 @@ impl BootstrapState {
         match () {
             #[cfg(debug_assertions)]
             _ => &UpdatePreference::Never,
+            #[cfg(feature = "extension-nexus")]
+            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => &UpdatePreference::Never,
             #[cfg(feature = "updates")]
-            _ if crate::built_info::git_tag_name().is_some() => &UpdatePreference::ASK,
+            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => &UpdatePreference::ASK,
             _ => &UpdatePreference::Never,
         }
     }

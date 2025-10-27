@@ -70,14 +70,23 @@ pub type RuntimeResult<T = ()> = Result<T, RuntimeError>;
 pub const RT_UNAVAILABLE: RuntimeError = "extension runtime unavailable";
 
 pub const CRATE_NAME: &'static str = env!("CARGO_PKG_NAME");
-pub const CRATE_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+pub const CRATE_VERSION: &'static str = match option_env!("ADDON_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 pub const NAME: &'static str = "TaimiHUD";
 pub const NAME_C: &'static CStr = unsafe {
     CStr::from_bytes_with_nul_unchecked(b"TaimiHUD\0")
 };
 pub fn crate_authors() -> String {
     let mut rng = rng();
-    let mut authors: Vec<_> = env!("CARGO_PKG_AUTHORS").split(":").collect();
+    let sep = match () {
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ => ", ",
+        #[cfg(not(feature = "extension-nexus-codegen"))]
+        _ => ":",
+    };
+    let mut authors: Vec<_> = env!("CARGO_PKG_AUTHORS").split(sep).collect();
     authors.shuffle(&mut rng);
     authors.join(", ")
 }

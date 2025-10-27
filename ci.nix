@@ -91,9 +91,12 @@ in
             release-upload = {
               order = 1111;
               name = "release";
-              "if" = "startsWith(github.ref, 'refs/tags/')";
+              "if" = "startsWith(github.ref, 'refs/tags/v')";
               uses.path = "softprops/action-gh-release@v1";
-              "with".files = release;
+              "with" = {
+                files = release;
+                prerelease = "\${{ contains(github.ref, '-') }}";
+              };
             };
           };
         };

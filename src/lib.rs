@@ -199,8 +199,19 @@ pub mod built_info {
     #[cfg(not(feature = "built-info"))]
     include!("./built.rs");
 
-    pub const IS_TAGGED_VERSION: bool = check_is_release();
-    pub const IS_TAGGED_RELEASE: bool = check_is_plain_release();
+    pub const IS_TAGGED_VERSION: bool = option_env!("ADDON_VERSION_RELEASE").is_some();
+    /// Broken because nexus makes dumb assumptions...
+    pub const IS_TAGGED_RELEASE_OR_RC: bool = match option_env!("ADDON_VERSION_RELEASE") {
+        Some(r) if r.len() == 0 => false,
+        None => false,
+        Some(..) => true,
+    };
+    #[cfg(todo)]
+    pub const IS_TAGGED_RELEASE_OR_RC: bool = IS_TAGGED_RELEASE;
+    pub const IS_TAGGED_RELEASE: bool = match option_env!("ADDON_VERSION_RELEASE") {
+        Some(r) if r.len() == 1 && r.as_bytes()[0] == b'1' => true,
+        _ => false,
+    };
 
     /// Official tagged release build
     pub fn is_release() -> bool {
@@ -239,46 +250,6 @@ pub mod built_info {
     }
 
     use crate::exports::runtime::update::{GIT_REF_BRANCH_PREFIX, GIT_REF_RELEASE_PREFIX, GIT_REF_TAG_PREFIX};
-    const TAG_STR: [u8; 3] = *b"tag";
-    const fn check_is_release() -> bool {
-        let head = match GIT_HEAD_REF {
-            Some(head) if head.len() >= GIT_REF_RELEASE_PREFIX.len() => head,
-            _ => return false,
-        }.as_bytes();
-        let refs = "refs/".len();
-        let tag = refs + "tags/".len();
-        match [head[refs], head[refs + 1], head[refs + 2]] {
-            self::TAG_STR if head[tag] == b'v' => (),
-            _ => return false,
-        }
-
-        let prefix_matches = has_prefix(head, GIT_REF_RELEASE_PREFIX.len(), crate::exports::runtime::CRATE_VERSION.as_bytes(), 0);
-
-        match prefix_matches {
-            false => panic!("release version mismatch"),
-            true => true,
-        }
-    }
-    const fn check_is_plain_release() -> bool {
-        let head = match GIT_HEAD_REF {
-            Some(head) if head.len() >= GIT_REF_RELEASE_PREFIX.len() => head.as_bytes(),
-            _ => return false,
-        };
-        check_is_release() &&
-            has_prefix(crate::exports::runtime::CRATE_VERSION.as_bytes(), 0, head, GIT_REF_RELEASE_PREFIX.len())
-    }
-    const fn has_prefix(s: &[u8], off: usize, prefix: &[u8], poff: usize) -> bool {
-        if s.len() <= off || prefix.len() < poff {
-            return false
-        } else if prefix.len() == poff {
-            return true
-        }
-
-        match s[off] == prefix[poff] {
-            false => false,
-            true => has_prefix(s, off + 1, prefix, poff + 1),
-        }
-    }
 }
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
@@ -295,15 +266,16 @@ static SPACE_SENDER: RwLock<Option<Sender<SpaceEvent>>> = RwLock::new(None);
 
 static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-#[cfg(feature = "extension-nexus")]
+#[cfg(feature = "extension-nexus-codegen")]
 nexus::export! {
     name: exports::addon_title!(),
     signature: exports::nexus::SIG,
     load: exports::nexus::cb_load,
     unload: exports::nexus::cb_unload,
     flags: AddonFlags::None,
-    provider: if built_info::IS_TAGGED_RELEASE { UpdateProvider::GitHub } else { UpdateProvider::Manual },
+    provider: if built_info::IS_TAGGED_RELEASE_OR_RC { UpdateProvider::GitHub } else { UpdateProvider::Manual },
     update_link: exports::gh_repo_url!(),
+    // TODO: author: env!("ADDON_AUTHOR")
 }
 
 #[cfg(feature = "extension-arcdps-codegen")]
