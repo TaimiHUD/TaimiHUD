@@ -33,56 +33,33 @@ pub struct ResolvedVersion {
 
 #[cfg(feature = "updates")]
 pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
-    let version = match built_info::git_release() {
-        Some(release) if release.starts_with(rt::CRATE_VERSION) =>
-            release,
-        _ => rt::CRATE_VERSION,
-    }.parse::<Version>().context("parsing crate version");
-    let mut version = match version {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("{e:#}");
-            return Version::new(u64::MAX, u64::MAX, u64::MAX)
-        },
-    };
-
-    let commit = built_info::GIT_COMMIT_HASH_SHORT.and_then(|commit| semver::BuildMetadata::new(commit).ok());
-    if let Some(build) = commit {
-        version.build = build;
-    }
-
-    #[allow(unreachable_patterns)]
-    if version.pre.is_empty() {
-        let channel = match () {
-            #[cfg(debug_assertions)]
-            _ => Some(CHANNEL_DEBUG.into()),
-            _ if built_info::is_release() => None,
-            _ => Some(if let Some(branch) = built_info::git_branch_name() {
-                format!("dev-{branch}")
-            } else { "dev".into() }),
-        };
-        if let Some(pre) = channel.as_ref().and_then(|c| semver::Prerelease::new(c).ok()) {
-            version.pre = pre;
-        }
-    }
-
+    let (major, minor, patch, pre, build) = (
+        option_env!("ADDON_VERSION_MAJOR").unwrap_or(env!("CARGO_PKG_VERSION_MAJOR")),
+        option_env!("ADDON_VERSION_MINOR").unwrap_or(env!("CARGO_PKG_VERSION_MINOR")),
+        option_env!("ADDON_VERSION_PATCH").unwrap_or(env!("CARGO_PKG_VERSION_PATCH")),
+        option_env!("ADDON_VERSION_PRE").unwrap_or(env!("CARGO_PKG_VERSION_PRE")),
+        option_env!("ADDON_VERSION_BUILD").unwrap_or(""),
+    );
+    let mut version = Version::new(
+        major.parse().unwrap_or_default(),
+        minor.parse().unwrap_or_default(),
+        patch.parse().unwrap_or_default(),
+    );
+    version.pre = semver::Prerelease::new(pre).unwrap_or_default();
+    version.build = semver::BuildMetadata::new(build).unwrap_or_default();
     version
 });
-#[cfg(feature = "updates")]
-pub fn crate_channel() -> Option<&'static str> {
-    version_channel(&CRATE_SEMVER)
-}
-#[cfg(not(feature = "updates"))]
 pub fn crate_channel() -> Option<&'static str> {
     #[allow(unreachable_patterns)]
-    match built_info::is_release() {
+    match option_env!("ADDON_VERSION_CHANNEL") {
         #[cfg(debug_assertions)]
         _ => Some(CHANNEL_DEBUG),
-        true => None,
-        false => Some(if let Some(branch) = built_info::git_branch_name() {
-            static CHANNEL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            &CHANNEL.get_or_init(|| format!("dev-{branch}"))[..]
-        } else { "dev" })
+        Some("") => None,
+        Some(c) => Some(c),
+        #[cfg(feature = "updates")]
+        None => version_channel(&CRATE_SEMVER),
+        #[cfg(not(feature = "updates"))]
+        None => Some("dev"),
     }
 }
 
@@ -219,7 +196,7 @@ impl ResolvedVersion {
             Some(..) => false,
             _ => true,
         };
-        if self.release.prerelease {
+        if self.release.prerelease && crate_channel().is_none() {
             log::info!("Skipping update to pre-release");
             return false
         } else if is_dev_build {

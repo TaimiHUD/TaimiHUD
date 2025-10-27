@@ -20,20 +20,22 @@ impl InfoTabState {
     }
 
     pub fn draw(&self, ui: &Ui, timer_window_state: &TimerWindowState) {
-        let name = env!("CARGO_PKG_NAME");
-        let version = env!("CARGO_PKG_VERSION");
-        let profile = match () {
-            #[cfg(debug_assertions)]
-            _ => "debug",
-            #[cfg(not(debug_assertions))]
-            _ => "release",
+        let version = match () {
+            #[cfg(feature = "updates")]
+            _ => {
+                let mut version = rt::update::CRATE_SEMVER.clone();
+                version.build = Default::default();
+                version
+            },
+            #[cfg(not(feature = "updates"))]
+            _ => rt::CRATE_VERSION,
         };
 
-        let project_heading = format!("{}, {} by {}", name, version, self.authors);
+        let project_heading = format!("{}, {} by {}", crate::exports::addon_title!(), version, self.authors);
         RenderState::font_text("big", ui, &project_heading);
 
         let in_ci = match built_info::CI_PLATFORM {
-            Some(platform) => format!(" using {platform}"),
+            Some(platform) => format!(" via {platform}"),
             None => "".to_string(),
         };
         if let (Some(git_head_ref), Some(git_hash)) =
@@ -41,7 +43,6 @@ impl InfoTabState {
         {
             let mut build = format!("Built from {}@{}", git_head_ref, git_hash);
             build.push_str(&in_ci);
-            build.push_str(&format!(", in profile \"{profile}\""));
             build.push('.');
             ui.text_wrapped(build);
         }
