@@ -136,7 +136,12 @@ impl PackLoaderContext for DirectoryLoader {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
         let path = self.root.join(name);
         Ok(io::BufReader::new(
-            fs::File::open(&path).with_context(|| format!("Failed to open {path:?}"))?,
+            fs::File::open(&path).with_context(|| {
+                let root = self.root.parent().unwrap_or(&self.root);
+                let path = path.strip_prefix(root)
+                    .unwrap_or(&path);
+                format!("Opening {}", path.display())
+            })?,
         ))
     }
 

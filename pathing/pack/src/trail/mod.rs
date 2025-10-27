@@ -284,7 +284,7 @@ impl TrailSection {
                     "unterminated trail section",
                 )),
                 None => {
-                    log::warn!("unterminated trail section after {} points", points_buf.len());
+                    log::trace!("unterminated trail section after {} points", points_buf.len());
                     None
                 },
                 Some(p) => p,
