@@ -382,7 +382,9 @@ fn init() -> Result<(), &'static str> {
     // Set up the thread
     let addon_dir = &*ADDON_DIR;
 
-    rt::reload_language()?;
+    if let Err(e) = rt::reload_language() {
+        log::debug!("No language detected at init: {e}");
+    }
 
     #[cfg(feature = "texture-loader")]
     if let Err(e) = TEXTURES.setup() {
