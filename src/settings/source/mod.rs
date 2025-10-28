@@ -1,32 +1,33 @@
 use {
+    crate::{exports::runtime as rt, settings::SourceKind},
+    anyhow::anyhow,
     async_compression::tokio::bufread::GzipDecoder,
     futures::stream::{StreamExt, TryStreamExt},
     reqwest::{Client, IntoUrl, Response},
-    crate::{
-        exports::runtime as rt,
-        settings::SourceKind,
-    },
     std::{
-        sync::Arc,
-        fmt::{Display, Debug},
+        fmt::{Debug, Display},
+        future::Future,
         io,
         path::{Path, PathBuf},
-        future::Future,
         pin::Pin,
+        sync::Arc,
     },
-    tokio::fs::{create_dir_all, remove_dir_all, File},
-    tokio::io::AsyncWriteExt,
+    tokio::{
+        fs::{create_dir_all, remove_dir_all, File},
+        io::AsyncWriteExt,
+    },
     tokio_tar::Archive,
-    anyhow::anyhow,
     tokio_util::io::StreamReader,
 };
 
 mod direct;
 mod github;
 
-pub use github::{GitHubSource, GitHubLatestRelease};
-pub use direct::DirectSource;
 use reqwest::header::LAST_MODIFIED;
+pub use {
+    direct::DirectSource,
+    github::{GitHubLatestRelease, GitHubSource},
+};
 
 pub type RemoteSource = Arc<dyn Source + Send + Sync>;
 
@@ -57,8 +58,14 @@ pub async fn download_file<U: IntoUrl>(dir: &Path, url: U) -> anyhow::Result<Str
     let filename = url
         .path()
         .split("/")
-        .last().ok_or_else(|| anyhow!("Should've had a filename, blegh!"))?;
-    let meep = response.headers().get(LAST_MODIFIED).ok_or_else(|| anyhow!("I can't believe you've done this"))?.to_str()?.to_string();
+        .last()
+        .ok_or_else(|| anyhow!("Should've had a filename, blegh!"))?;
+    let meep = response
+        .headers()
+        .get(LAST_MODIFIED)
+        .ok_or_else(|| anyhow!("I can't believe you've done this"))?
+        .to_str()?
+        .to_string();
     let bitey = response.bytes().await?;
     let final_path = dir.join(filename);
     let mut file = File::create(final_path).await?;
@@ -110,6 +117,9 @@ pub trait Source: Display + Debug {
     fn name(&self) -> String;
     fn install_dir(&self) -> String;
     fn view_url(&self) -> String;
-    fn download_latest(&self, kind: SourceKind) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>>;
+    fn download_latest(
+        &self,
+        kind: SourceKind,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>>;
     fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>>;
 }

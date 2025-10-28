@@ -1,6 +1,5 @@
-use crate::prelude::*;
-
 pub use crate::d3d::D3D_PRIMITIVE_TOPOLOGY;
+use crate::prelude::*;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default, Clone, Copy, PartialEq)]

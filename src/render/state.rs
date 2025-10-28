@@ -1,32 +1,41 @@
-#[cfg(feature = "markers")]
-use crate::marker::format::MarkerSet;
 use {
     crate::{
         controller::ControllerEvent,
+        exports::runtime as rt,
         fl,
         marker::format::MarkerType,
         marker_icon_data,
         render::{
             machine::{RenderMachine, RenderTaskQueue},
-            MarkerWindowState, PrimaryWindowState,
+            MarkerWindowState,
+            PrimaryWindowState,
             TimerWindowState,
         },
-        exports::runtime as rt,
         settings::ProgressBarSettings,
         timer::{PhaseState, TextAlert, TimerFile},
-        Controller, RENDER_SENDER, TEXTURES,
+        Controller,
+        RENDER_SENDER,
+        TEXTURES,
     },
     glam::Vec2,
     nexus::imgui::{
-        internal::RawCast, Condition, Font, Image, Io, PopupModal, StyleColor,
-        Ui, Window, WindowFlags,
+        internal::RawCast,
+        Condition,
+        Font,
+        Image,
+        Io,
+        PopupModal,
+        StyleColor,
+        Ui,
+        Window,
+        WindowFlags,
     },
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
     std::{
         cell::Cell,
         collections::HashMap,
-        path::{PathBuf, Path},
+        path::{Path, PathBuf},
         sync::{Arc, MutexGuard},
     },
     strum_macros::{Display, EnumIter},
@@ -35,12 +44,10 @@ use {
 
 #[cfg(feature = "markers-edit")]
 use super::edit_marker_window::EditMarkerWindowState;
-
+#[cfg(feature = "markers")]
+use crate::marker::format::MarkerSet;
 #[cfg(feature = "space")]
-use crate::{
-    render::PathingWindowState,
-    space::Engine,
-};
+use crate::{render::PathingWindowState, space::Engine};
 
 pub enum RenderEvent {
     TimerData(Vec<Arc<TimerFile>>),
@@ -138,28 +145,28 @@ impl RenderState {
                     #[cfg(feature = "markers")]
                     MarkerMap(markers) => {
                         self.marker_window.new_map_markers(markers);
-                    }
+                    },
                     #[cfg(feature = "markers-edit")]
                     GiveMarkerPaths(paths) => {
                         self.edit_marker_window.set_filenames(paths);
-                    }
+                    },
                     OpenableError(key, err) => {
                         self.state_errors.insert(key, err);
-                    }
+                    },
                     RenderKeybindUpdate => {
                         self.primary_window.keybind_handler();
-                    }
+                    },
                     ProgressBarUpdate(settings) => {
                         self.timer_window.progress_bar = settings;
-                    }
+                    },
                     CheckingForUpdates(checking_for_updates) => {
                         self.primary_window.data_sources_tab.checking_for_updates =
                             checking_for_updates;
-                    }
+                    },
                     TimerData(timers) => {
                         self.primary_window.timer_tab.timer_selection = None;
                         self.primary_window.timer_tab.timers_update(timers);
-                    }
+                    },
                     #[cfg(feature = "markers")]
                     MarkerData(markers) => {
                         self.primary_window.marker_tab.marker_selection = None;
@@ -167,23 +174,23 @@ impl RenderState {
                         #[cfg(feature = "markers-edit")]
                         self.edit_marker_window.category_update(categories);
                         self.primary_window.marker_tab.marker_update(markers);
-                    }
+                    },
                     AlertStart(alert) => {
                         self.alert = Some(alert);
-                    }
+                    },
                     AlertEnd(timer_file) => {
                         if let Some(alert) = &self.alert {
                             if Arc::ptr_eq(&alert.timer, &timer_file) {
                                 self.alert = None;
                             }
                         }
-                    }
+                    },
                     AlertFeed(phase_state) => {
                         self.timer_window.new_phase(phase_state);
-                    }
+                    },
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(timer);
-                    }
+                    },
                     #[cfg(any(feature = "markers", feature = "space"))]
                     UiMapOpen(open) => {
                         if self.machine.set_map_open(open) {
@@ -198,26 +205,30 @@ impl RenderState {
                     UiDepthAcquired() => {
                         self.machine.turn_depth_event(true);
                     },
-                    event @ (Reload | ReloadAll) =>
-                        self.reload(matches!(event, Reload)),
+                    event @ (Reload | ReloadAll) => self.reload(matches!(event, Reload)),
                     Quit => {
                         self.quit();
                         return false;
                     },
                 }
-            }
+            },
             Err(_error) => (),
         }
         self.handle_alert(ui, io);
         self.timer_window.draw(ui);
-        self.primary_window
-            .draw(ui, &mut self.machine, &mut self.timer_window, &mut self.state_errors);
+        self.primary_window.draw(
+            ui,
+            &mut self.machine,
+            &mut self.timer_window,
+            &mut self.state_errors,
+        );
         #[cfg(feature = "markers")]
         self.marker_window.draw(ui);
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
         #[cfg(feature = "space")]
-        self.pathing_window.draw(ui, &mut self.machine, self.engine.as_mut());
+        self.pathing_window
+            .draw(ui, &mut self.machine, self.engine.as_mut());
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);
@@ -251,7 +262,8 @@ impl RenderState {
                 }
                 None
             },
-        }.unwrap_or_default();
+        }
+        .unwrap_or_default();
         let size = match height {
             Some(height) => [height, height],
             None => icon.size,
@@ -279,7 +291,8 @@ impl RenderState {
                 }
                 None
             },
-        }.unwrap_or_default();
+        }
+        .unwrap_or_default();
         let size = match height {
             Some(height) => [height, height],
             None => icon.size,
@@ -287,7 +300,10 @@ impl RenderState {
         Image::new(icon.id, size).build(ui);
         ui.same_line();
     }
-    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Display>(
+    pub fn draw_open_button<
+        S: AsRef<str> + std::fmt::Display,
+        O: Into<String> + std::fmt::Display,
+    >(
         state_errors: &mut HashMap<String, anyhow::Error>,
         ui: &Ui,
         text: S,
@@ -313,15 +329,18 @@ impl RenderState {
     }
 
     pub fn push_font<'a>(font: &str, ui: &'a Ui) -> Option<nexus::imgui::FontStackToken<'a>> {
-        let imfont_pointer = rt::read_nexus_link().ok().and_then(|nexus_link| match font {
-            #[cfg(feature = "extension-nexus")]
-            "big" => Some(nexus_link.font_big),
-            #[cfg(feature = "extension-nexus")]
-            "ui" => Some(nexus_link.font_ui),
-            #[cfg(feature = "extension-nexus")]
-            "font" => Some(nexus_link.font),
-            _ => None,
-        }).and_then(|font| unsafe { Self::font_from_raw(font) });
+        let imfont_pointer = rt::read_nexus_link()
+            .ok()
+            .and_then(|nexus_link| match font {
+                #[cfg(feature = "extension-nexus")]
+                "big" => Some(nexus_link.font_big),
+                #[cfg(feature = "extension-nexus")]
+                "ui" => Some(nexus_link.font_ui),
+                #[cfg(feature = "extension-nexus")]
+                "font" => Some(nexus_link.font),
+                _ => None,
+            })
+            .and_then(|font| unsafe { Self::font_from_raw(font) });
         imfont_pointer.map(|font| ui.push_font(font.id()))
     }
     pub fn font_text(font: &str, ui: &Ui, text: &str) {
@@ -369,20 +388,13 @@ impl RenderState {
             let message = &alert.message;
             let imfont = match rt::read_nexus_link() {
                 #[cfg(feature = "extension-nexus")]
-                Ok(nexus_link) => unsafe {
-                    Self::font_from_raw(nexus_link.font_big)
-                },
+                Ok(nexus_link) => unsafe { Self::font_from_raw(nexus_link.font_big) },
                 _ => None,
             };
             Self::render_alert(ui, io, message, imfont);
         }
     }
-    pub fn render_alert(
-        ui: &Ui,
-        io: &nexus::imgui::Io,
-        text: &String,
-        font: Option<&Font>,
-    ) {
+    pub fn render_alert(ui: &Ui, io: &nexus::imgui::Io, text: &String, font: Option<&Font>) {
         use WindowFlags;
         let font_handle = font.map(|font| ui.push_font(font.id()));
         let font_scale = font.map(|f| f.scale).unwrap_or(1.0);
@@ -434,7 +446,10 @@ impl RenderState {
         }
     }
     pub fn reload(&mut self, superficial: bool) {
-        log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
+        log::info!(
+            "{} renderer...",
+            if superficial { "reloading" } else { "reinit" }
+        );
 
         #[cfg(feature = "goggles")]
         let _ = crate::space::goggles::shutdown();
@@ -482,8 +497,10 @@ impl RenderState {
     }
 
     pub fn sender() -> Option<Sender<RenderEvent>> {
-        RENDER_SENDER.try_read()
-            .as_ref().ok()
+        RENDER_SENDER
+            .try_read()
+            .as_ref()
+            .ok()
             .and_then(|s| (*s).clone())
     }
 
@@ -496,7 +513,8 @@ impl RenderState {
     }
 
     pub fn is_running() -> bool {
-        RENDER_SENDER.read()
+        RENDER_SENDER
+            .read()
             .map(|sender| sender.is_some())
             .unwrap_or(false)
     }
@@ -533,7 +551,13 @@ impl RenderState {
             Some(state) => state,
         };
         let mut state_errors = Default::default();
-        state.primary_window.draw_tabs(ui, &mut state.machine, &mut state.timer_window, &mut state_errors, false);
+        state.primary_window.draw_tabs(
+            ui,
+            &mut state.machine,
+            &mut state.timer_window,
+            &mut state_errors,
+            false,
+        );
     }
 
     pub fn is_render_thread() -> bool {

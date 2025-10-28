@@ -1,28 +1,30 @@
+#[cfg(feature = "space")]
+use core::ops::Range;
+
+#[cfg(any(feature = "markers", feature = "space"))]
 use {
-    anyhow::Context,
-    core::num::NonZero,
+    crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
+    arcloader_mumblelink::identity::MumbleIdentity,
+    std::borrow::Cow,
+    taimi_meta::{
+        coords::SignObtainer,
+        map::{Map, MapCache},
+        ui::{MapOpen, UiMap},
+    },
+};
+use {
     crate::{
         controller::{Controller, ControllerEvent},
-        exports::runtime::{
-            self as rt,
-            imgui,
-        },
+        exports::runtime::{self as rt, imgui},
         render::RenderState,
         settings::Settings,
     },
-    glamour::{
-        Angle,
-        Point3, Size2,
-        Vector2, Vector3,
-    },
-    std::{
-        cell::RefCell,
-        time::Instant,
-    },
+    anyhow::Context,
+    core::num::NonZero,
+    glamour::{Angle, Point3, Size2, Vector2, Vector3},
+    std::{cell::RefCell, time::Instant},
     taimi_meta::{
-        coords::{
-            LocalSpace, ScreenSpace,
-        },
+        coords::{LocalSpace, ScreenSpace},
         map::MapID,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
@@ -31,28 +33,15 @@ use {
         },
     },
 };
-#[cfg(feature = "space")]
-use core::ops::Range;
-#[cfg(any(feature = "markers", feature = "space"))]
-use {
-    arcloader_mumblelink::identity::MumbleIdentity,
-    crate::exports::runtime::bindings::{CONTROLS, ControlsReceiver},
-    std::borrow::Cow,
-    taimi_meta::{
-        coords::SignObtainer,
-        map::{Map, MapCache},
-        ui::{MapOpen, UiMap},
-    },
-};
-#[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
 
+#[cfg(feature = "extension-nexus")]
+pub use self::rtapi::RenderStateRtapi;
 pub use self::{
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
-#[cfg(feature = "extension-nexus")]
-pub use self::rtapi::RenderStateRtapi;
+#[cfg(feature = "space")]
+use crate::space::engine::{Engine, SpaceEvent};
 
 mod map;
 #[cfg(feature = "markers")]
@@ -118,10 +107,7 @@ impl RenderMachine {
     /// TODO
     pub const USERS: RenderUsers = RenderUsers::all();
 
-    pub const POSITIONING_EMPTY: RenderPositioning = (
-        Point3::INFINITY,
-        Vector3::INFINITY,
-    );
+    pub const POSITIONING_EMPTY: RenderPositioning = (Point3::INFINITY, Vector3::INFINITY);
 
     pub fn new() -> Self {
         Self {
@@ -200,8 +186,7 @@ impl RenderMachine {
 
     pub fn display_size(&self) -> Option<Size2<ScreenSpace>> {
         let display_size = *self.display_size_ref();
-        (!rt::vec_eq(display_size, Size2::ZERO))
-            .then_some(display_size)
+        (!rt::vec_eq(display_size, Size2::ZERO)).then_some(display_size)
     }
 
     pub const DEFAULT_ASPECT_RATIO: f32 = 16.0f32 / 9.0f32;
@@ -216,22 +201,18 @@ impl RenderMachine {
     pub fn get_player_pos(&self) -> Option<RenderPositioning<LocalSpace>> {
         match self.mumblelink_player.0.x.is_infinite() {
             #[cfg(feature = "extension-nexus")]
-            _ if !self.rtapi_state.player.0.x.is_infinite() =>
-                Some(self.rtapi_state.player),
-            false =>
-                Some(self.mumblelink_player),
-            true =>
-                None,
+            _ if !self.rtapi_state.player.0.x.is_infinite() => Some(self.rtapi_state.player),
+            false => Some(self.mumblelink_player),
+            true => None,
         }
     }
 
     pub fn get_player(&mut self) -> RenderPosition<LocalSpace> {
         // TODO: cache direct ptr each frame
-        let (pos, front) = self.get_player_pos()
-            .map(|(pos, front)| (
-                pos,
-                front,
-            )).unwrap_or((Point3::ZERO, Vector3::ZERO));
+        let (pos, front) = self
+            .get_player_pos()
+            .map(|(pos, front)| (pos, front))
+            .unwrap_or((Point3::ZERO, Vector3::ZERO));
         (pos, front.normalize_or(Self::LOCAL_FORWARD), Self::LOCAL_UP)
     }
 
@@ -242,7 +223,9 @@ impl RenderMachine {
             self.map_info = match self.gameplay.latest_map() {
                 None => {
                     if self.map_hidden {
-                        log::info!("UI toggle escape hatch - resetting hidden state due to loading screen");
+                        log::info!(
+                            "UI toggle escape hatch - resetting hidden state due to loading screen"
+                        );
                         self.map_hidden = false;
                     }
                     None
@@ -265,21 +248,22 @@ impl RenderMachine {
             gameplay: gameplay.clone(),
             trans: trans.clone(),
         });
-        Controller::try_send(ControllerEvent::GameplayStatus {
-            gameplay,
-            trans,
-        });
+        Controller::try_send(ControllerEvent::GameplayStatus { gameplay, trans });
     }
 
     pub fn act_display_size(&mut self) {
         #[cfg(any(feature = "markers", feature = "space"))]
         if let Some(_size) = self.display_size() {
             self.set_fov(self.fov.with_x(0.0));
-            let dpi = Settings::read_with_blocking(|s| s.dpi_scaling.clone()).ok().flatten();
+            let dpi = Settings::read_with_blocking(|s| s.dpi_scaling.clone())
+                .ok()
+                .flatten();
             self.map.calibration.dpi = dpi.unwrap_or_else(|| match rt::window_dpi() {
                 Ok(dpi) => dpi as f32,
                 Err(e) => {
-                    log::warn!("Maps and markers may be incorrect, could not determine DPI due to: {e}");
+                    log::warn!(
+                        "Maps and markers may be incorrect, could not determine DPI due to: {e}"
+                    );
                     MapCalibration::DPI_REFERENCE
                 },
             });
@@ -309,21 +293,21 @@ impl RenderMachine {
 
             Self::poll_runtime(state);
 
-            let render_slot = (
-                match () {
-                    #[cfg(feature = "space")]
-                    () => &mut state.engine,
-                    #[cfg(not(feature = "space"))]
-                    () => (),
-                },
-            );
+            let render_slot = (match () {
+                #[cfg(feature = "space")]
+                () => &mut state.engine,
+                #[cfg(not(feature = "space"))]
+                () => (),
+            },);
             state.machine.turn_render(render_slot);
         }
     }
 
     pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]
-        let controls_changed = self.controls.update()
+        let controls_changed = self
+            .controls
+            .update()
             .map(|(&state, changes)| (state, changes));
 
         let (ml, frameskip_gameplay) = self.next_mumblelink_frame();
@@ -338,7 +322,11 @@ impl RenderMachine {
         let ui_tick = self.ui_tick();
 
         #[cfg(feature = "extension-nexus")]
-        if let Some(rtapi) = self.rtapi.as_ref().and_then(|rtapi| rtapi.is_active().then_some(rtapi)) {
+        if let Some(rtapi) = self
+            .rtapi
+            .as_ref()
+            .and_then(|rtapi| rtapi.is_active().then_some(rtapi))
+        {
             let rtapi_camera = ui_tick.is_none() || !self.rtapi_users.is_empty();
             let rtapi_gameplay = self.rtapi_state.update(rtapi, ui_tick, rtapi_camera);
             if let Some(rtapi_gameplay) = rtapi_gameplay {
@@ -346,24 +334,27 @@ impl RenderMachine {
             }
         }
 
-        let gameplay_transition = gameplay_change
-            .and_then(|gameplay| match gameplay {
-                GameplayState::Intermission { next_map_id: map_id @ Some(..), .. } => {
-                    self.gameplay.commit_loading(map_id)
-                },
-                GameplayState::Intermission { next_map_id: None, .. } => {
+        let gameplay_transition = gameplay_change.and_then(|gameplay| match gameplay {
+            GameplayState::Intermission {
+                next_map_id: map_id @ Some(..),
+                ..
+            } => self.gameplay.commit_loading(map_id),
+            GameplayState::Intermission {
+                next_map_id: None, ..
+            } => {
+                //self.map.calibration.clear_map();
+                self.gameplay.commit_intermission()
+            },
+            GameplayState::Gameplay { map_id } => {
+                if let Some(_map_id) = map_id {
+                    // TODO: only if prev map was different!
                     //self.map.calibration.clear_map();
-                    self.gameplay.commit_intermission()
-                },
-                GameplayState::Gameplay { map_id } => {
-                    if let Some(_map_id) = map_id {
-                        // TODO: only if prev map was different!
-                        //self.map.calibration.clear_map();
-                        self.map_sign.clear();
-                    }
-                    self.gameplay.commit_ingame(map_id.map(|id| id.get()).unwrap_or_default())
-                },
-            });
+                    self.map_sign.clear();
+                }
+                self.gameplay
+                    .commit_ingame(map_id.map(|id| id.get()).unwrap_or_default())
+            },
+        });
 
         if let Some(trans) = gameplay_transition {
             self.act_gameplay_transition(trans);
@@ -379,7 +370,10 @@ impl RenderMachine {
         }
 
         #[cfg(feature = "space")]
-        if self.mumblelink_users.contains(RenderUsers::SPACE) && self.display_size().is_some() && RenderState::is_running() {
+        if self.mumblelink_users.contains(RenderUsers::SPACE)
+            && self.display_size().is_some()
+            && RenderState::is_running()
+        {
             let (engine_slot,) = _render_slot;
             // TODO: !game_is_shutting_down
             let mut init = false;
@@ -429,8 +423,6 @@ bitflags::bitflags! {
 }
 
 #[cfg(feature = "space")]
-pub type RenderSlot<'r> = (
-    &'r mut Option<anyhow::Result<crate::space::engine::Engine>>,
-);
+pub type RenderSlot<'r> = (&'r mut Option<anyhow::Result<crate::space::engine::Engine>>,);
 #[cfg(not(feature = "space"))]
 pub type RenderSlot<'r> = ();

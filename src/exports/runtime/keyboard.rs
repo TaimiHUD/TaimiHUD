@@ -1,12 +1,14 @@
+pub use taimi_input::win::keyboard::*;
 use {
-    anyhow::Context,
     crate::exports::runtime::{self as rt, RuntimeResult},
+    anyhow::Context,
     taimi_input::win::keyboard,
 };
 
-pub use taimi_input::win::keyboard::*;
-
-pub fn do_key_combo<R, F: FnOnce() -> Result<R, rt::RuntimeError>>(f: F, input: KeyInput) -> RuntimeResult<R> {
+pub fn do_key_combo<R, F: FnOnce() -> Result<R, rt::RuntimeError>>(
+    f: F,
+    input: KeyInput,
+) -> RuntimeResult<R> {
     let hwnd = rt::window_handle()?;
     keyboard::do_key_combo(hwnd, || f().map_err(anyhow::Error::msg), input)
         .with_context(|| format!("Sending key combo {input:?}"))
@@ -27,9 +29,7 @@ pub fn send_key_combo(input: KeyInput) -> RuntimeResult<()> {
 
 pub fn send_key(input: KeyInput) -> RuntimeResult<()> {
     let (msg, w, l) = input.to_event();
-    unsafe {
-        rt::window_message(msg, w, l)
-    }
+    unsafe { rt::window_message(msg, w, l) }
 }
 
 pub fn send_key_input<I: Into<KeyInput>>(input: I) -> RuntimeResult<()> {
@@ -43,22 +43,24 @@ pub fn send_key_input<I: Into<KeyInput>>(input: I) -> RuntimeResult<()> {
         })
 }
 
-pub async fn press_bind(control: rt::bindings::Control, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
+pub async fn press_bind(
+    control: rt::bindings::Control,
+    down: bool,
+    position: Option<rt::MousePosition>,
+) -> RuntimeResult<Option<()>> {
     use crate::{
         exports::runtime::mouse::MouseInput,
-        settings::{
-            state::SaveState,
-            InvokeMethod,
-            Settings,
-        },
+        settings::{state::SaveState, InvokeMethod, Settings},
     };
 
-    let method = Settings::async_read().await.ok()
+    let method = Settings::async_read()
+        .await
+        .ok()
         .and_then(|s| s.arc().gamebind_invoke)
         .unwrap_or_default();
 
-    let (vk, mut mods) = SaveState::read_with(|s| s.game_binds.get(control, None))
-        .ok_or("unknown keybind")?;
+    let (vk, mut mods) =
+        SaveState::read_with(|s| s.game_binds.get(control, None)).ok_or("unknown keybind")?;
 
     match rt::bindings::GameBinds::vk_is_button(vk) {
         false => {
@@ -118,7 +120,12 @@ pub async fn press_bind(control: rt::bindings::Control, down: bool, position: Op
     }.map(Some)
 }
 #[cfg(feature = "markers")]
-pub async fn press_marker_bind(marker: crate::marker::format::MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
+pub async fn press_marker_bind(
+    marker: crate::marker::format::MarkerType,
+    target: bool,
+    down: bool,
+    position: Option<rt::MousePosition>,
+) -> RuntimeResult<Option<()>> {
     let control = match target {
         true => marker.control_object(),
         false => marker.control_location(),

@@ -2,8 +2,8 @@ use {
     super::super::texture::Texture,
     glam::Vec3,
     std::{path::PathBuf, sync::Arc},
-    tobj::Material as tobjMaterial,
     taimi_d3d::dx11::prelude::*,
+    tobj::Material as tobjMaterial,
 };
 
 #[allow(unused)]

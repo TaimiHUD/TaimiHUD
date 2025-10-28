@@ -1,13 +1,6 @@
 use {
-    crate::coords::{
-        coord_newtype,
-        GameSpace,
-        LocalSpace,
-        MapSpace,
-    },
-    glamour::{
-        Box2, Size2, Vector2,
-    },
+    crate::coords::{coord_newtype, GameSpace, LocalSpace, MapSpace},
+    glamour::{Box2, Size2, Vector2},
 };
 
 /// [map coordinates](MapSpace) are in ft and inches
@@ -26,30 +19,32 @@ impl MapLocalScale {
     /// 24.0, -24.0 (2 feet per continent unit)
     ///
     /// (local z+ is usually global y-, so for y scale negatively)
-    pub const COMMON: Self = Self::with_game_scale(
-        Vector2::new(24.0, -24.0)
-    );
+    pub const COMMON: Self = Self::with_game_scale(Vector2::new(24.0, -24.0));
 
     /// 0.3048m / ft
     pub const METRES_PER_FEET: f32 = 1.0 / 3.28084;
     pub const METRES_PER_INCH: f32 = Self::METRES_PER_FEET / 12.0;
 
     pub fn with_scale(scale: Vector2<LocalSpace>) -> Self {
-        Self {
-            scale,
-        }
+        Self { scale }
     }
 
     pub const fn with_map_scale(scale: Vector2<MapSpace>) -> Self {
         Self {
-            scale: Vector2::new(scale.x * Self::METRES_PER_FEET, scale.y * Self::METRES_PER_FEET),
+            scale: Vector2::new(
+                scale.x * Self::METRES_PER_FEET,
+                scale.y * Self::METRES_PER_FEET,
+            ),
         }
     }
 
     /// From [game inches](GameSpace)
     pub const fn with_game_scale(scale: Vector2<GameSpace>) -> Self {
         Self {
-            scale: Vector2::new(scale.x * Self::METRES_PER_INCH, scale.y * Self::METRES_PER_INCH),
+            scale: Vector2::new(
+                scale.x * Self::METRES_PER_INCH,
+                scale.y * Self::METRES_PER_INCH,
+            ),
         }
     }
 

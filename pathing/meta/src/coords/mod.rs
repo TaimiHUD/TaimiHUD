@@ -1,12 +1,22 @@
 use {
     crate::ui::MinimapPlacement,
     glamour::{
-        Angle, Box3, Contains,
+        Angle,
+        Box3,
+        Contains,
         Matrix4,
-        Point2, Point3, Rect, Size2,
-        Transform2, Transform3, TransformMap, Unit,
-        Vector2, Vector3, Vector4,
+        Point2,
+        Point3,
+        Rect,
+        Size2,
+        Transform2,
+        Transform3,
+        TransformMap,
+        Unit,
         Vec3Swizzles,
+        Vector2,
+        Vector3,
+        Vector4,
     },
 };
 
@@ -14,11 +24,7 @@ mod macros;
 mod obtainer;
 mod scale;
 
-pub use self::{
-    macros::coord_newtype,
-    obtainer::SignObtainer,
-    scale::MapLocalScale,
-};
+pub use self::{macros::coord_newtype, obtainer::SignObtainer, scale::MapLocalScale};
 
 coord_newtype! {
 /// global coordinates / "continent"
@@ -139,13 +145,11 @@ impl ClipSpace {
     pub const MIDPOINT: Point3<Self> = Point3::new(0.0, 0.0, 0.5);
 
     /// Visible section of space
-    pub const VIEWPORT_BOUNDS: Box3<Self> = Box3::new(
-        Point3::new(-1.0, -1.0, 0.0),
-        Point3::ONE,
-    );
+    pub const VIEWPORT_BOUNDS: Box3<Self> = Box3::new(Point3::new(-1.0, -1.0, 0.0), Point3::ONE);
 
     #[inline]
-    pub fn to_viewport<D>(viewport: Rect<D>) -> Transform2<Self, D> where
+    pub fn to_viewport<D>(viewport: Rect<D>) -> Transform2<Self, D>
+    where
         D: Unit<Scalar = <ClipSpace as Unit>::Scalar>,
     {
         let size_2 = (viewport.size / 2.0).to_vector();
@@ -154,7 +158,8 @@ impl ClipSpace {
     }
 
     #[inline]
-    pub fn to_viewport3<D>(viewport: Rect<D>) -> Transform3<Self, D> where
+    pub fn to_viewport3<D>(viewport: Rect<D>) -> Transform3<Self, D>
+    where
         D: Unit<Scalar = <ClipSpace as Unit>::Scalar>,
     {
         let trans = Self::to_viewport::<D>(viewport).matrix;
@@ -180,9 +185,7 @@ impl FakeSpace {
     }
 
     pub fn screen_size(scaling: f32, size: Size2<ScreenSpace>) -> Size2<FakeSpace> {
-        Self::from_screen(scaling)
-            .map(size.to_vector())
-            .to_size()
+        Self::from_screen(scaling).map(size.to_vector()).to_size()
     }
 
     #[inline]
@@ -210,7 +213,12 @@ impl FakeSpace {
     /// worldmap and minimap both have the same scaling factor of
     /// points (fakespace pixels) to continent coordinates (ft and inches)
     /// there is very little in what differs between their conversion, in reality?
-    pub fn to_map(map_scale: f32, map_rotation: Option<Angle>, map_centre: Point2<MapSpace>, fake_centre: Point2<FakeSpace>) -> Transform2<FakeSpace, MapSpace> {
+    pub fn to_map(
+        map_scale: f32,
+        map_rotation: Option<Angle>,
+        map_centre: Point2<MapSpace>,
+        fake_centre: Point2<FakeSpace>,
+    ) -> Transform2<FakeSpace, MapSpace> {
         // we can regard this as:
         // distance = worldmap_point - worldmap_centre
         // distance_map = distance * map_scale
@@ -261,7 +269,11 @@ impl WorldmapSpace {
     ///
     /// if there are DPI scaling factors, they have already been taken into account
     /// as part of the conversion into fakespace
-    pub fn to_map(map_scale: f32, map_centre: Point2<MapSpace>, worldmap_centre: WorldmapPoint) -> WorldmapToMap {
+    pub fn to_map(
+        map_scale: f32,
+        map_centre: Point2<MapSpace>,
+        worldmap_centre: WorldmapPoint,
+    ) -> WorldmapToMap {
         let fake_centre = worldmap_centre.as_();
         let trans = FakeSpace::to_map(map_scale, None, map_centre, fake_centre);
         Self::fake_then(trans)
@@ -287,7 +299,8 @@ impl WorldmapSpace {
     }
 
     #[inline]
-    pub fn fake_then<D>(trans: Transform2<FakeSpace, D>) -> Transform2<WorldmapSpace, D> where
+    pub fn fake_then<D>(trans: Transform2<FakeSpace, D>) -> Transform2<WorldmapSpace, D>
+    where
         D: Unit<Scalar = <FakeSpace as Unit>::Scalar>,
     {
         //FakeSpace::to_minimap().then(trans);
@@ -308,7 +321,12 @@ impl WorldmapSpace {
 }
 
 impl MinimapSpace {
-    pub fn to_map(map_scale: f32, minimap_rotation: Option<Angle>, map_centre: Point2<MapSpace>, minimap_centre: Point2<MinimapSpace>) -> MinimapToMap {
+    pub fn to_map(
+        map_scale: f32,
+        minimap_rotation: Option<Angle>,
+        map_centre: Point2<MapSpace>,
+        minimap_centre: Point2<MinimapSpace>,
+    ) -> MinimapToMap {
         let fake_centre = minimap_centre.as_();
         let trans = FakeSpace::to_map(map_scale, minimap_rotation, map_centre, fake_centre);
         Self::fake_then(trans)
@@ -341,7 +359,11 @@ impl MinimapSpace {
     ///
     /// this relies upon the fakespace display_size because it is the
     /// boundary *within fakespace* for the minimap
-    pub fn fake_bound_with(minimap_placement: MinimapPlacement, compass_size: Size2<MinimapSpace>, display_size: Size2<FakeSpace>) -> FakeBound {
+    pub fn fake_bound_with(
+        minimap_placement: MinimapPlacement,
+        compass_size: Size2<MinimapSpace>,
+        display_size: Size2<FakeSpace>,
+    ) -> FakeBound {
         // fake means we're already scaled proportionate to the scaling factor,
         // which is the coordinate system that self.compass_size, the worldmap size
         // and the UI offsets live within
@@ -370,7 +392,11 @@ impl MinimapSpace {
         }
     }
 
-    pub fn fake_bound_for_drag(minimap_placement: MinimapPlacement, compass_size: Size2<MinimapSpace>, display_size: Size2<FakeSpace>) -> FakeBound {
+    pub fn fake_bound_for_drag(
+        minimap_placement: MinimapPlacement,
+        compass_size: Size2<MinimapSpace>,
+        display_size: Size2<FakeSpace>,
+    ) -> FakeBound {
         let mut bounds = Self::fake_bound_with(minimap_placement, compass_size, display_size);
         bounds.origin += MinimapPlacement::INSET_DEAD_ZONE.to_vector();
         bounds.size -= MinimapPlacement::DEAD_ZONE_SIZE;
@@ -388,7 +414,8 @@ impl MinimapSpace {
     }
 
     #[inline]
-    pub fn fake_then<D>(trans: Transform2<FakeSpace, D>) -> Transform2<MinimapSpace, D> where
+    pub fn fake_then<D>(trans: Transform2<FakeSpace, D>) -> Transform2<MinimapSpace, D>
+    where
         D: Unit<Scalar = <FakeSpace as Unit>::Scalar>,
     {
         //FakeSpace::to_minimap().then(trans);
@@ -418,7 +445,11 @@ impl LocalSpace {
     ///
     /// continent coordinates are in ft and inches
     /// if we want local, we have to convert ft to m
-    pub fn from_map(signs: MapLocalScale, map_player_pos: MapPoint, local_player_pos_xz: LocalPoint2) -> MapToLocal {
+    pub fn from_map(
+        signs: MapLocalScale,
+        map_player_pos: MapPoint,
+        local_player_pos_xz: LocalPoint2,
+    ) -> MapToLocal {
         // finally, map to local
         // between map and local, the common coordinate is no longer the
         // centre of the map, it is in fact the player themselves.
@@ -461,31 +492,35 @@ pub const fn f32_bits<const N: usize>(f: [f32; N]) -> [u32; N] {
     }
 }
 #[inline]
-pub fn vec_bits<const N: usize, T>(f: T) -> [u32; N] where
+pub fn vec_bits<const N: usize, T>(f: T) -> [u32; N]
+where
     T: Into<[f32; N]>,
 {
     f32_bits(f.into())
 }
-pub fn vec_eq<const N: usize, T>(lhs: T, rhs: T) -> bool where
+pub fn vec_eq<const N: usize, T>(lhs: T, rhs: T) -> bool
+where
     T: Into<[f32; N]>,
 {
     vec_bits(lhs) == vec_bits(rhs)
 }
 
-pub fn transform2_cast<S2, D2, S, D>(trans: Transform2<S, D>) -> Transform2<S2, D2> where
+pub fn transform2_cast<S2, D2, S, D>(trans: Transform2<S, D>) -> Transform2<S2, D2>
+where
     S: Unit,
-    S2: Unit<Scalar=S::Scalar>,
-    D: Unit<Scalar=S::Scalar>,
-    D2: Unit<Scalar=D::Scalar>,
+    S2: Unit<Scalar = S::Scalar>,
+    D: Unit<Scalar = S::Scalar>,
+    D2: Unit<Scalar = D::Scalar>,
     S2::Scalar: glamour::FloatScalar,
 {
     Transform2::from_matrix_unchecked(trans.matrix)
 }
-pub fn transform3_cast<S2, D2, S, D>(trans: Transform3<S, D>) -> Transform3<S2, D2> where
+pub fn transform3_cast<S2, D2, S, D>(trans: Transform3<S, D>) -> Transform3<S2, D2>
+where
     S: Unit,
-    S2: Unit<Scalar=S::Scalar>,
-    D: Unit<Scalar=S::Scalar>,
-    D2: Unit<Scalar=D::Scalar>,
+    S2: Unit<Scalar = S::Scalar>,
+    D: Unit<Scalar = S::Scalar>,
+    D2: Unit<Scalar = D::Scalar>,
     S2::Scalar: glamour::FloatScalar,
 {
     Transform3::from_matrix_unchecked(trans.matrix)
@@ -495,7 +530,8 @@ pub fn transform3_cast<S2, D2, S, D>(trans: Transform3<S, D>) -> Transform3<S2, 
 /// but we do?
 ///
 /// the difference is probably just a rounding error or we're wrong idk
-pub fn camera_view<U: Unit>(pos: Point3<U>, front: Vector3<U>, up: Vector3<U>) -> Matrix4<U::Scalar> where
+pub fn camera_view<U: Unit>(pos: Point3<U>, front: Vector3<U>, up: Vector3<U>) -> Matrix4<U::Scalar>
+where
     U::Scalar: glamour::FloatScalar + glamour::SignedScalar,
 {
     match () {
@@ -511,7 +547,8 @@ pub fn camera_view<U: Unit>(pos: Point3<U>, front: Vector3<U>, up: Vector3<U>) -
                 up.extend(-pos.dot(up)).to_untyped(),
                 front.extend(pos.dot(f)).to_untyped(),
                 Vector4::W,
-            ).transpose()
+            )
+            .transpose()
         },
     }
 }
@@ -534,7 +571,9 @@ fn billboard_model_view() {
     use glamour::*;
     let signs = [
         Vector3::NEG_ONE,
-        Vector3::ONE.with_x(-1.0),  Vector3::ONE.with_y(-1.0), Vector3::ONE.with_z(-1.0),
+        Vector3::ONE.with_x(-1.0),
+        Vector3::ONE.with_y(-1.0),
+        Vector3::ONE.with_z(-1.0),
         Vector3::new(-1.0, 1.0, -1.0),
         Vector3::new(1.0, -1.0, -1.0),
         Vector3::new(-1.0, -1.0, 1.0),
@@ -552,7 +591,7 @@ fn billboard_model_view() {
                 cam_right.extend(0.0).to_untyped(),
                 cam_up.extend(0.0).to_untyped(),
                 (-front).extend(0.0).to_untyped(),
-                Vector4::W
+                Vector4::W,
             )
         };
         assert_eq!(billy, billboard_from_look(look));

@@ -2,7 +2,8 @@ use {
     crate::{
         render::RenderState,
         timer::{BlishVec3, Polytope, Position},
-        ADDON_DIR, SETTINGS,
+        ADDON_DIR,
+        SETTINGS,
     },
     anyhow::anyhow,
     arcdps::extras::Control,
@@ -101,16 +102,16 @@ impl RuntimeMarkers {
                     Ok(res) => match res {
                         Ok(marker_file) => {
                             marker_files.push(marker_file);
-                        }
+                        },
                         Err(err) => {
                             load_errors += 1;
                             log::error!("marker load_many error for {load_dir:?}: {err}");
-                        }
+                        },
                     },
                     Err(err) => {
                         join_errors += 1;
                         log::error!("marker load_many join error for {load_dir:?}: {err}");
-                    }
+                    },
                 }
             }
             log::debug!(
@@ -200,7 +201,7 @@ impl RuntimeMarkers {
                     .find(|c| c.name == category)
                     .ok_or(anyhow!("Couldn't find category {}", category))?;
                 Ok(&mut category.marker_sets[idx])
-            }
+            },
             MarkerFormats::Taimi(t) => Ok(&mut t[idx]),
             MarkerFormats::Integrated(c) => Ok(&mut c.squad_marker_preset[idx]),
         }
@@ -222,7 +223,7 @@ impl RuntimeMarkers {
                     .find(|c| c.name == category)
                     .ok_or(anyhow!("Couldn't find category {}", category))?;
                 Ok(category.marker_sets.remove(idx))
-            }
+            },
             MarkerFormats::Taimi(t) => Ok(t.remove(idx)),
             MarkerFormats::Integrated(c) => Ok(c.squad_marker_preset.remove(idx)),
         }
@@ -250,7 +251,7 @@ impl RuntimeMarkers {
                                     "Can't find the category \"{}\" we should've made",
                                     mscat
                                 ))?
-                        }
+                        },
                     };
                     category.marker_sets.push(ms);
                     f.last_edit = Utc::now();
@@ -269,18 +270,18 @@ impl RuntimeMarkers {
                                 .ok_or(anyhow!(
                                     "Can't find the category \"No category\" we should've made"
                                 ))?
-                        }
+                        },
                     };
                     category.marker_sets.push(ms);
                     f.last_edit = Utc::now();
                 }
-            }
+            },
             MarkerFormats::Taimi(t) => {
                 t.push(ms);
-            }
+            },
             MarkerFormats::Integrated(c) => {
                 c.squad_marker_preset.push(ms);
-            }
+            },
         }
         Ok(())
     }
@@ -317,7 +318,7 @@ impl RuntimeMarkers {
                     file: MarkerFormats::Community(file_data),
                 };
                 file.create_file(&path).await?;
-            }
+            },
             MarkerFiletype::Taimi => {
                 let file_data = vec![ms];
                 let file = RuntimeMarkers {
@@ -325,7 +326,7 @@ impl RuntimeMarkers {
                     file: MarkerFormats::Taimi(file_data),
                 };
                 file.create_file(&path).await?;
-            }
+            },
             MarkerFiletype::Integrated => {
                 let file_data = IntegratedMarkers {
                     version: "2.0.0".to_string(),
@@ -337,7 +338,7 @@ impl RuntimeMarkers {
                     file: MarkerFormats::Integrated(file_data),
                 };
                 file.create_file(&path).await?;
-            }
+            },
         }
         Ok(())
     }
@@ -359,7 +360,7 @@ impl RuntimeMarkers {
                             entry.push(marker_set_arc);
                         }
                     }
-                }
+                },
                 MarkerFormats::Taimi(t) => {
                     for (i, marker_set) in t.iter().enumerate() {
                         let category_name = marker_set
@@ -374,7 +375,7 @@ impl RuntimeMarkers {
                         let marker_set_arc = Arc::new(marker_set_data);
                         entry.push(marker_set_arc);
                     }
-                }
+                },
                 MarkerFormats::Integrated(c) => {
                     for (i, marker_set) in c.squad_marker_preset.iter().enumerate() {
                         // extend their format by allowing the Category :)
@@ -390,7 +391,7 @@ impl RuntimeMarkers {
                         let marker_set_arc = Arc::new(marker_set_data);
                         entry.push(marker_set_arc);
                     }
-                }
+                },
             }
         }
         finalized

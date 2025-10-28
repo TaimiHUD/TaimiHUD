@@ -1,8 +1,5 @@
 use {
-    crate::{
-        dx11::prelude::*,
-        D3dContextBindable,
-    },
+    crate::{dx11::prelude::*, D3dContextBindable},
     std::{mem, slice},
 };
 
@@ -15,7 +12,8 @@ pub struct Viewport {
 }
 
 impl Viewport {
-    pub const MAX_VIEWPORTS: usize = d3d11::D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE as usize;
+    pub const MAX_VIEWPORTS: usize =
+        d3d11::D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE as usize;
 
     pub const EMPTY: Self = Self::with_viewport(D3D11_VIEWPORT {
         TopLeftX: 0.0,
@@ -27,15 +25,11 @@ impl Viewport {
     });
 
     pub const fn with_viewport(viewport: D3D11_VIEWPORT) -> Self {
-        Self {
-            viewport
-        }
+        Self { viewport }
     }
 
     pub const fn from_ref(viewport: &D3D11_VIEWPORT) -> &Self {
-        unsafe {
-            mem::transmute(viewport)
-        }
+        unsafe { mem::transmute(viewport) }
     }
 
     pub fn new_snapshot<const N: usize>(context: &Dx11Context) -> [Viewport; N] {
@@ -48,16 +42,17 @@ impl Viewport {
     }
 
     /// Aligned to top-left origin (0, 0, 0)
-    pub const fn with_size<U: Unit<Scalar=f32>>(size: Size3<U>) -> Self {
+    pub const fn with_size<U: Unit<Scalar = f32>>(size: Size3<U>) -> Self {
         Self::with_viewport(D3D11_VIEWPORT {
             Width: size.width,
             Height: size.height,
             MaxDepth: size.depth,
-            .. Self::EMPTY.viewport
+            ..Self::EMPTY.viewport
         })
     }
 
-    pub fn with_bounds<U: Unit>(bounds: Box3<U>) -> Self where
+    pub fn with_bounds<U: Unit>(bounds: Box3<U>) -> Self
+    where
         U::Scalar: Into<f32>,
     {
         let size = Box2::new(bounds.min.truncate(), bounds.max.truncate()).size();
@@ -69,9 +64,7 @@ impl Viewport {
             MinDepth: bounds.min.z.into(),
             MaxDepth: bounds.max.z.into(),
         };
-        Self {
-            viewport,
-        }
+        Self { viewport }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -87,20 +80,14 @@ impl Viewport {
             Some(len) => len,
             None => return viewports,
         };
-        unsafe {
-            viewports.get_unchecked(..len)
-        }
+        unsafe { viewports.get_unchecked(..len) }
     }
 
     pub fn slice_as_raw(viewports: &[Self]) -> &[D3D11_VIEWPORT] {
-        unsafe {
-            mem::transmute(viewports)
-        }
+        unsafe { mem::transmute(viewports) }
     }
     pub fn slice_from_raw(viewports: &[D3D11_VIEWPORT]) -> &[Self] {
-        unsafe {
-            mem::transmute(viewports)
-        }
+        unsafe { mem::transmute(viewports) }
     }
     pub fn array_to_raw<const N: usize>(viewports: [Self; N]) -> [D3D11_VIEWPORT; N] {
         unsafe {
@@ -109,9 +96,7 @@ impl Viewport {
         }
     }
     pub fn array_from_raw<const N: usize>(viewports: [D3D11_VIEWPORT; N]) -> [Self; N] {
-        unsafe {
-            mem::transmute_copy(&viewports)
-        }
+        unsafe { mem::transmute_copy(&viewports) }
     }
 
     pub fn bind_set<V: AsRef<[D3D11_VIEWPORT]>>(context: &Dx11Context, viewports: V) {
@@ -150,9 +135,7 @@ impl<'a> From<&'a Viewport> for &'a D3D11_VIEWPORT {
 }
 impl From<D3D11_VIEWPORT> for Viewport {
     fn from(viewport: D3D11_VIEWPORT) -> Self {
-        Self {
-            viewport,
-        }
+        Self { viewport }
     }
 }
 impl From<Viewport> for D3D11_VIEWPORT {

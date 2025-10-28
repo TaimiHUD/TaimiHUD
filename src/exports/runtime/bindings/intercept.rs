@@ -1,14 +1,12 @@
 use {
     std::sync::atomic::{AtomicU64, Ordering},
-    taimi_input::win::keyboard::{KeyState, KeyInput},
+    taimi_input::win::keyboard::{KeyInput, KeyState},
     windows::Win32::UI::Input::KeyboardAndMouse,
 };
 
 pub enum KeyIntercept {
     Pending,
-    Intercepted {
-        key: KeyInput,
-    },
+    Intercepted { key: KeyInput },
 }
 
 static KEY_INTERCEPT: AtomicU64 = AtomicU64::new(KeyIntercept::NONE);
@@ -57,7 +55,12 @@ impl KeyIntercept {
                 res @ (None | Some(Self::Pending)) => return res,
                 int => int,
             };
-            match KEY_INTERCEPT.compare_exchange_weak(raw, Self::NONE, Ordering::SeqCst, Ordering::SeqCst) {
+            match KEY_INTERCEPT.compare_exchange_weak(
+                raw,
+                Self::NONE,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
                 Ok(..) => break int,
                 Err(current) => {
                     raw = current;
@@ -76,17 +79,19 @@ impl KeyIntercept {
     }
 
     pub fn intercept_report(key: KeyInput) {
-        let int = Self::Intercepted {
-            key,
-        };
+        let int = Self::Intercepted { key };
         KEY_INTERCEPT.store(int.raw(), Ordering::SeqCst);
     }
 
     pub fn intercept_try_report(key: KeyInput) -> bool {
-        let int = Self::Intercepted {
-            key,
-        };
-        KEY_INTERCEPT.compare_exchange(Self::PENDING, int.raw(), Ordering::SeqCst, Ordering::Relaxed)
+        let int = Self::Intercepted { key };
+        KEY_INTERCEPT
+            .compare_exchange(
+                Self::PENDING,
+                int.raw(),
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+            )
             .is_ok()
     }
 }

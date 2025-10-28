@@ -1,11 +1,25 @@
 use {
     crate::{
-        controller::markers::MarkerSaveEvent, exports::runtime as rt, fl, marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType}, util::{ComboInput, PositionInput, UiExt}, MarkersController, MarkersEvent, ACCOUNT_NAME_CELL
+        controller::markers::MarkerSaveEvent,
+        exports::runtime as rt,
+        fl,
+        marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
+        util::{ComboInput, PositionInput, UiExt},
+        MarkersController,
+        MarkersEvent,
+        ACCOUNT_NAME_CELL,
     },
     glam::Vec3,
     nexus::imgui::{
-            ComboBox, Id, PopupModal, Selectable, TableColumnFlags, TableColumnSetup, TableFlags,
-            Ui, Window,
+        ComboBox,
+        Id,
+        PopupModal,
+        Selectable,
+        TableColumnFlags,
+        TableColumnSetup,
+        TableFlags,
+        Ui,
+        Window,
     },
     std::{f32, mem, path::PathBuf},
     strum::IntoEnumIterator,
@@ -59,7 +73,7 @@ impl IndividualMarkerState {
     }
     pub fn from_marker_entries(mes: Vec<MarkerEntry>) -> [Self; 8] {
         let mut markers: [IndividualMarkerState; 8] = Default::default();
-            for me in mes.iter() {
+        for me in mes.iter() {
             let position: Vec3 = me.position.clone().into();
             let mut position_input = PositionInput::default();
             position_input.position = Some(position);
@@ -177,7 +191,7 @@ impl EditMarkerWindowState {
                     let evt = match save_mode {
                         MarkerSaveMode::Create => {
                             MarkerSaveEvent::Create(ms, path.into(), self.filetype.clone().unwrap())
-                        }
+                        },
                         MarkerSaveMode::Append => MarkerSaveEvent::Append(ms, path.into()),
                         MarkerSaveMode::Edit => MarkerSaveEvent::Edit(
                             ms,
@@ -261,7 +275,7 @@ impl EditMarkerWindowState {
                         } else {
                             "".to_string()
                         }
-                    }
+                    },
                     _ => "".to_string(),
                 },
             };
@@ -303,11 +317,10 @@ impl EditMarkerWindowState {
                     }
                     ui.dummy([4.0; 2]);
                     let description_name = fl!("description");
-                    let description_input = ui.input_text_multiline(
-                        &description_name,
-                        &mut self.description,
-                        [0.0, 0.0],
-                    );
+                    let description_input =
+                        ui.input_text_multiline(&description_name, &mut self.description, [
+                            0.0, 0.0,
+                        ]);
                     description_input.build();
                     self.trigger.draw_display(ui, true);
                     self.trigger.draw_take_current(ui);
@@ -384,7 +397,7 @@ impl EditMarkerWindowState {
                     ui.table_next_column();
                     for (i, value) in MarkerType::iter_real_values().enumerate() {
                         let pushy = ui.push_id(Id::Str(&format!("{}", value)));
-                        if let Some(mt) = MarkerType::from_repr(i as u8+1) {
+                        if let Some(mt) = MarkerType::from_repr(i as u8 + 1) {
                             mt.icon(ui);
                         }
                         ui.table_next_column();
@@ -512,7 +525,7 @@ impl EditMarkerWindowState {
                                     }
                                 }
                                 ui.same_line();
-                            }
+                            },
                             Some(MarkerSaveMode::Append) => {
                                 let filename_closure = || {
                                     let mut selected = self.path.clone();
@@ -549,7 +562,7 @@ impl EditMarkerWindowState {
                                     }
                                 }
                                 ui.same_line();
-                            }
+                            },
                             _ => (),
                         }
                         if ui.button(fl!("close")) {

@@ -9,6 +9,8 @@ pub mod texture;
 #[cfg(feature = "space")]
 pub mod vertex;
 
+#[cfg(feature = "texture-loader")]
+pub use texture::Texture;
 #[cfg(feature = "space")]
 pub use {
     model::{Model, ModelKind},
@@ -16,5 +18,3 @@ pub use {
     shader::{PixelShaders, ShaderLoader, ShaderPair, VertexShaders},
     vertex::Vertex,
 };
-#[cfg(feature = "texture-loader")]
-pub use texture::Texture;

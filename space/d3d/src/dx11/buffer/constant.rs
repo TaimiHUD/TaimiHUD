@@ -1,12 +1,12 @@
 use {
-    std::{slice, mem},
     crate::{
-        D3dContextBindableSlot,
         dx11::{
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
         },
+        D3dContextBindableSlot,
     },
+    std::{mem, slice},
 };
 
 impl_d3d! {
@@ -21,22 +21,21 @@ impl_d3d! {
 
 impl ConstantBufferV {
     pub const fn from_buffer(buffer: Buffer) -> Self {
-        Self {
-            buffer,
-        }
+        Self { buffer }
     }
 
     pub const fn from_buffer_ref(buffer: &Dx11Buffer) -> &Self {
-        unsafe {
-            mem::transmute(buffer)
-        }
+        unsafe { mem::transmute(buffer) }
     }
 
     pub fn new_with_data<D: D3dBufferData>(device: &Dx11Device, data: &D) -> anyhow::Result<Self> {
         Self::new_with_slice(device, slice::from_ref(data))
     }
 
-    pub fn new_with_slice<D: D3dBufferData>(device: &Dx11Device, data: &[D]) -> anyhow::Result<Self> {
+    pub fn new_with_slice<D: D3dBufferData>(
+        device: &Dx11Device,
+        data: &[D],
+    ) -> anyhow::Result<Self> {
         let desc = Self::desc_for::<D>(data.len(), None);
         #[cfg(todo)]
         let data = match data.is_empty() {
@@ -50,14 +49,15 @@ impl ConstantBufferV {
     #[cfg(todo)]
     pub fn new_empty(device: &Dx11Device, flags: Option<BufferFlags>) -> anyhow::Result<Self> {
         let desc = Self::desc_for::<[f32; 4]>(0, flags);
-        Buffer::new_with_desc::<[f32; 4]>(device, &desc, None)
-            .map(Into::into)
+        Buffer::new_with_desc::<[f32; 4]>(device, &desc, None).map(Into::into)
     }
 
-    pub fn new_singleton<D: D3dBufferData>(device: &Dx11Device, flags: Option<BufferFlags>) -> anyhow::Result<Self> {
+    pub fn new_singleton<D: D3dBufferData>(
+        device: &Dx11Device,
+        flags: Option<BufferFlags>,
+    ) -> anyhow::Result<Self> {
         let desc = Self::desc_for::<D>(1, flags);
-        Buffer::new_with_desc::<D>(device, &desc, None)
-            .map(Into::into)
+        Buffer::new_with_desc::<D>(device, &desc, None).map(Into::into)
     }
 
     pub fn desc_for<D: D3dBufferData>(len: usize, flags: Option<BufferFlags>) -> D3D11_BUFFER_DESC {
@@ -72,7 +72,8 @@ impl ConstantBufferV {
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
         unsafe {
-            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
+            let buffers =
+                &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
             context.VSGetConstantBuffers(slot, Some(buffers));
         }
         buffers
@@ -80,14 +81,13 @@ impl ConstantBufferV {
 
     pub fn update_singleton<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &D) {
         unsafe {
-            self.buffer.update_all_unchecked(device_context, slice::from_ref(data), 0)
+            self.buffer
+                .update_all_unchecked(device_context, slice::from_ref(data), 0)
         }
     }
 
     pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
-        unsafe {
-            self.buffer.update_all_unchecked(device_context, data, 0)
-        }
+        unsafe { self.buffer.update_all_unchecked(device_context, data, 0) }
     }
 }
 
@@ -103,35 +103,34 @@ impl_d3d! {
 
 impl ConstantBufferP {
     pub const fn from_buffer(buffer: Buffer) -> Self {
-        Self {
-            buffer,
-        }
+        Self { buffer }
     }
 
     pub const fn from_buffer_ref(buffer: &Buffer) -> &Self {
-        unsafe {
-            mem::transmute(buffer)
-        }
+        unsafe { mem::transmute(buffer) }
     }
 
     pub fn new_with_data<D: D3dBufferData>(device: &Dx11Device, data: &D) -> anyhow::Result<Self> {
         Self::new_with_slice(device, slice::from_ref(data))
     }
 
-    pub fn new_with_slice<D: D3dBufferData>(device: &Dx11Device, data: &[D]) -> anyhow::Result<Self> {
-        ConstantBufferV::new_with_slice::<D>(device, data)
-            .map(Into::into)
+    pub fn new_with_slice<D: D3dBufferData>(
+        device: &Dx11Device,
+        data: &[D],
+    ) -> anyhow::Result<Self> {
+        ConstantBufferV::new_with_slice::<D>(device, data).map(Into::into)
     }
 
     #[cfg(todo)]
     pub fn new_empty(device: &Dx11Device, flags: Option<BufferFlags>) -> anyhow::Result<Self> {
-        ConstantBufferV::new_empty(device, flags)
-            .map(Into::into)
+        ConstantBufferV::new_empty(device, flags).map(Into::into)
     }
 
-    pub fn new_singleton<D: D3dBufferData>(device: &Dx11Device, flags: Option<BufferFlags>) -> anyhow::Result<Self> {
-        ConstantBufferV::new_singleton::<D>(device, flags)
-            .map(Into::into)
+    pub fn new_singleton<D: D3dBufferData>(
+        device: &Dx11Device,
+        flags: Option<BufferFlags>,
+    ) -> anyhow::Result<Self> {
+        ConstantBufferV::new_singleton::<D>(device, flags).map(Into::into)
     }
 
     pub fn desc_for<D: D3dBufferData>(len: usize, flags: Option<BufferFlags>) -> D3D11_BUFFER_DESC {
@@ -141,20 +140,19 @@ impl ConstantBufferP {
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
         unsafe {
-            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
+            let buffers =
+                &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
             context.PSGetConstantBuffers(slot, Some(buffers));
         }
         buffers
     }
 
     pub fn update_singleton<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &D) {
-        ConstantBufferV::from_buffer_ref(self.as_ref())
-            .update_singleton::<D>(device_context, data)
+        ConstantBufferV::from_buffer_ref(self.as_ref()).update_singleton::<D>(device_context, data)
     }
 
     pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
-        ConstantBufferV::from_buffer_ref(self.as_ref())
-            .update_all::<D>(device_context, data)
+        ConstantBufferV::from_buffer_ref(self.as_ref()).update_all::<D>(device_context, data)
     }
 }
 
@@ -192,16 +190,12 @@ impl From<ConstantBufferV> for ConstantBufferP {
 }
 impl AsRef<ConstantBufferP> for ConstantBufferV {
     fn as_ref(&self) -> &ConstantBufferP {
-        unsafe {
-            mem::transmute(self)
-        }
+        unsafe { mem::transmute(self) }
     }
 }
 impl AsRef<ConstantBufferV> for ConstantBufferP {
     fn as_ref(&self) -> &ConstantBufferV {
-        unsafe {
-            mem::transmute(self)
-        }
+        unsafe { mem::transmute(self) }
     }
 }
 

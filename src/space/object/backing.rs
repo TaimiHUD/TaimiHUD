@@ -4,7 +4,9 @@ use {
         space::{
             dx11::RenderBackend,
             resources::{
-                obj_format::material::ColouredMaterialTexture, Model, ObjMaterial,
+                obj_format::material::ColouredMaterialTexture,
+                Model,
+                ObjMaterial,
                 Texture,
             },
         },
@@ -13,10 +15,7 @@ use {
     glam::{Vec3, Vec4},
     std::path::PathBuf,
     taimi_d3d::{
-        dx11::{
-            buffer::BufferOf,
-            prelude::*,
-        },
+        dx11::{buffer::BufferOf, prelude::*},
         state::PrimitiveTopology,
     },
 };
@@ -48,7 +47,13 @@ impl ObjectBacking {
             colour: Vec4::ONE,
         }];
         let render = ObjectRenderBacking {
-            instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(&render_backend.device, Ok(&ibd), ())?.buffer.into(),
+            instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(
+                &render_backend.device,
+                Ok(&ibd),
+                (),
+            )?
+            .buffer
+            .into(),
             vertex_buffer: model.to_buffer(&render_backend.device)?,
             shaders,
             metadata: ObjectRenderMetadata {

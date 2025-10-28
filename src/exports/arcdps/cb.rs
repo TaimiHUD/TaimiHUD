@@ -1,12 +1,14 @@
-use std::{borrow::Cow, num::NonZeroU64, ptr};
-use arcdps::{
-    extras,
-    imgui,
-    __macro::{HWND, LPARAM, WPARAM},
+use {
+    crate::exports::{arcdps as exports, runtime as rt},
+    arcdps::{
+        __macro::{HWND, LPARAM, WPARAM},
+        extras,
+        imgui,
+    },
+    dpsapi::combat::CombatArgs,
+    std::{borrow::Cow, num::NonZeroU64, ptr},
+    windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
 };
-use dpsapi::combat::CombatArgs;
-use crate::exports::{arcdps as exports, runtime as rt};
-use windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY;
 
 #[cfg(any(feature = "extension-nexus", feature = "extension-arcdps-extras"))]
 pub fn has_extension(sig: u32) -> bool {
@@ -18,16 +20,13 @@ pub fn has_extension(sig: u32) -> bool {
 
     extern "C" fn list_cb(exp: &arcdps::callbacks::ArcDpsExport) {
         match HAS_EXT.get() {
-            Err(sig) if exp.sig == sig =>
-                HAS_EXT.set(Ok(true)),
+            Err(sig) if exp.sig == sig => HAS_EXT.set(Ok(true)),
             _ => (),
         }
     }
 
     HAS_EXT.set(Err(sig));
-    unsafe {
-        arcdps::exports::raw::list_extension(list_cb::<SIG> as usize as *mut _)
-    }
+    unsafe { arcdps::exports::raw::list_extension(list_cb::<SIG> as usize as *mut _) }
 
     let res = HAS_EXT.replace(Ok(false));
     res.unwrap_or(false)
@@ -63,7 +62,8 @@ pub fn options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
 
 pub fn wnd_filter(keycode: usize, key_down: bool, prev_key_down: bool) -> bool {
     let vk = VIRTUAL_KEY(keycode as _);
-    let (msg, w, mut l) = rt::keyboard::KeyInput::new(vk, rt::KeyState::default(), key_down).to_event();
+    let (msg, w, mut l) =
+        rt::keyboard::KeyInput::new(vk, rt::KeyState::default(), key_down).to_event();
     let repeat = if key_down && prev_key_down {
         l |= 1 << 30;
         2isize
@@ -83,8 +83,7 @@ pub unsafe extern "C-unwind" fn wnd_raw(hwnd: HWND, msg: u32, w: WPARAM, l: LPAR
 }
 
 pub fn update_url() -> Option<String> {
-    exports::get_update_url()
-        .map(Into::into)
+    exports::get_update_url().map(Into::into)
 }
 
 pub fn combat_local(
@@ -102,12 +101,9 @@ pub fn combat_local(
         _ => Default::default(),
     };
     let event = CombatArgs {
-        ev: ev
-            .map(|e| Cow::Borrowed(e.as_ref())),
-        src: src
-            .map(|a| Cow::Borrowed(a.as_ref())),
-        dst: dst
-            .map(|a| Cow::Borrowed(a.as_ref())),
+        ev: ev.map(|e| Cow::Borrowed(e.as_ref())),
+        src: src.map(|a| Cow::Borrowed(a.as_ref())),
+        dst: dst.map(|a| Cow::Borrowed(a.as_ref())),
         skill_name,
         id: NonZeroU64::new(id),
         revision,
@@ -115,11 +111,13 @@ pub fn combat_local(
     exports::combat_local(event)
 }
 
-pub(crate) unsafe extern "C-unwind" fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut extras::ExtrasSubscriberInfo) {
+pub(crate) unsafe extern "C-unwind" fn extras_init_raw(
+    info: *const extras::RawExtrasAddonInfo,
+    subscriber: *mut extras::ExtrasSubscriberInfo,
+) {
     match (info, subscriber) {
         #[cfg(feature = "extension-arcdps-extras")]
-        (info, subscriber) =>
-            exports::unofficial_extras::extras_init_raw(info, subscriber),
+        (info, subscriber) => exports::unofficial_extras::extras_init_raw(info, subscriber),
         #[cfg(not(feature = "extension-arcdps-extras"))]
         _ => {
             log::debug!("arcdps_unofficial_extras support disabled");
@@ -135,7 +133,5 @@ pub fn available() -> bool {
 pub fn dxgi_swap_chain() -> Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain> {
     let swap_chain: Option<_> = arcdps::dxgi_swap_chain().map(|sc| sc.to_owned());
 
-    unsafe {
-        core::mem::transmute(swap_chain)
-    }
+    unsafe { core::mem::transmute(swap_chain) }
 }

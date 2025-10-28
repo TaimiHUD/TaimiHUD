@@ -1,20 +1,16 @@
-use crate::{
-    dx11::{
-        prelude::*,
-        buffer::{
-            BindFlags, BufferFlags, Usage,
-            Resource,
+use {
+    crate::{
+        buffer::D3dContextBindableVertexBuffer,
+        dx11::{
+            buffer::{BindFlags, BufferFlags, Resource, Usage},
+            prelude::*,
         },
+        D3dContextBindableSlot,
     },
-    buffer::D3dContextBindableVertexBuffer,
-    D3dContextBindableSlot,
+    std::marker::PhantomData,
 };
-use std::marker::PhantomData;
 
-pub use crate::dx11::d3d11::{
-    ID3D11Buffer,
-    D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
-};
+pub use crate::dx11::d3d11::{ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11Buffer;
@@ -46,7 +42,8 @@ impl Buffer {
         self.size() / D::stride()
     }
 
-    pub fn desc_for<D: D3dBufferData, B, M>(len: usize, bind: B, flags: M) -> D3D11_BUFFER_DESC where
+    pub fn desc_for<D: D3dBufferData, B, M>(len: usize, bind: B, flags: M) -> D3D11_BUFFER_DESC
+    where
         B: Into<BindFlags>,
         M: Into<BufferFlags>,
     {
@@ -54,8 +51,7 @@ impl Buffer {
         let bind: BindFlags = bind.into();
         let stride = match flags {
             #[cfg(todo = "unnecessary")]
-            flags if !flags.contains(BufferFlags::BUFFER_STRUCTURED) =>
-                0,
+            flags if !flags.contains(BufferFlags::BUFFER_STRUCTURED) => 0,
             _ => D::stride() as u32,
         };
         let size = D::stride().saturating_mul(len);
@@ -78,7 +74,12 @@ impl Buffer {
             pSysMem: match &initial {
                 &Some(data) => {
                     if desc.ByteWidth as usize > (data.len() * D::stride()).next_multiple_of(16) {
-                        anyhow::bail!("initial buffer {}x{} is too small for size={}", data.len(), D::stride(), desc.ByteWidth);
+                        anyhow::bail!(
+                            "initial buffer {}x{} is too small for size={}",
+                            data.len(),
+                            D::stride(),
+                            desc.ByteWidth
+                        );
                     }
                     data.as_ptr().cast()
                 },
@@ -91,22 +92,27 @@ impl Buffer {
         unsafe {
             device.CreateBuffer(
                 desc,
-                Some(&initial_desc),//.map(|d| d as *const _),
+                Some(&initial_desc), //.map(|d| d as *const _),
                 Some(&mut out),
             )
-        }.map_err(anyhow::Error::from)
+        }
+        .map_err(anyhow::Error::from)
         .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce buffer pointer")))
         .context("CreateBuffer")
         .map(Into::into)
     }
 
-    pub fn default_with_data<D: D3dBufferData>(device: &Dx11Device, initial: Result<&[D], usize>, bind: BindFlags) -> anyhow::Result<Self> {
+    pub fn default_with_data<D: D3dBufferData>(
+        device: &Dx11Device,
+        initial: Result<&[D], usize>,
+        bind: BindFlags,
+    ) -> anyhow::Result<Self> {
         let len = match &initial {
             Ok(initial) => initial.len(),
             &Err(len) => len,
         };
         let desc = D3D11_BUFFER_DESC {
-            .. Self::desc_for::<D, _, _>(len, bind, BufferFlags::empty())
+            ..Self::desc_for::<D, _, _>(len, bind, BufferFlags::empty())
         };
 
         Self::new_with_desc(device, &desc, initial.ok())
@@ -118,8 +124,7 @@ impl Buffer {
         device_context: &Dx11Context,
         data: &[D],
     ) -> anyhow::Result<bool> {
-        let size = mem::size_of_val(data)
-            .next_multiple_of(16) as u32;
+        let size = mem::size_of_val(data).next_multiple_of(16) as u32;
         let mut desc = self.desc();
         if size == desc.ByteWidth {
             unsafe {
@@ -133,22 +138,12 @@ impl Buffer {
         }
     }
 
-    pub fn update_all<D: D3dBufferData>(
-        &self,
-        device_context: &Dx11Context,
-        data: &[D],
-    ) {
+    pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
         debug_assert_eq!(mem::size_of_val(data).next_multiple_of(16), self.size());
-        unsafe {
-            self.update_all_unchecked(device_context, data, 0)
-        }
+        unsafe { self.update_all_unchecked(device_context, data, 0) }
     }
 
-    pub fn update_singleton<D: D3dBufferData>(
-        &self,
-        device_context: &Dx11Context,
-        data: &D,
-    ) {
+    pub fn update_singleton<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &D) {
         self.update_all(device_context, slice::from_ref(data))
     }
 
@@ -159,7 +154,14 @@ impl Buffer {
         subresource: u32,
     ) {
         unsafe {
-            device_context.UpdateSubresource(&self.buffer, subresource, None, data.as_ptr().cast(), 0, 0);
+            device_context.UpdateSubresource(
+                &self.buffer,
+                subresource,
+                None,
+                data.as_ptr().cast(),
+                0,
+                0,
+            );
         }
     }
 
@@ -186,7 +188,13 @@ impl Buffer {
         }
     }
 
-    pub unsafe fn update_element_at<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &D, offset: usize, subresource: u32) {
+    pub unsafe fn update_element_at<D: D3dBufferData>(
+        &self,
+        device_context: &Dx11Context,
+        data: &D,
+        offset: usize,
+        subresource: u32,
+    ) {
         let (dst, row_pitch, depth_pitch) = match offset {
             0 => (None, 0, 0),
             offset => {
@@ -199,7 +207,14 @@ impl Buffer {
         unsafe {
             let dst = dst.as_ref().map(|d| d as *const _);
             let src = data as *const D;
-            device_context.UpdateSubresource(&self.buffer, subresource, dst, src.cast(), row_pitch, depth_pitch);
+            device_context.UpdateSubresource(
+                &self.buffer,
+                subresource,
+                dst,
+                src.cast(),
+                row_pitch,
+                depth_pitch,
+            );
         }
     }
 
@@ -214,42 +229,50 @@ impl Buffer {
             let offset = offset as u32;
             let start = Point2::new(0, offset);
             let end = Point2::new(1, offset + data.len() as u32);
-            (Some(Self::offset_box2(Box2::new(start, end))), D::stride() as u32, self.size() as u32)
+            (
+                Some(Self::offset_box2(Box2::new(start, end))),
+                D::stride() as u32,
+                self.size() as u32,
+            )
         };
         unsafe {
             let dst = dst.as_ref().map(|d| d as *const _);
-            device_context.UpdateSubresource(&self.buffer, subresource, dst, data.as_ptr().cast(), row_pitch, depth_pitch);
-        }
-    }
-
-    pub fn set_all_constant_vertex<B>(buffers: B, device_context: &Dx11Context, slot: u32) where
-        B: ID3D11ResourceOf<ID3D11Buffer>,
-    {
-        let buffers = buffers.as_params_of();
-        unsafe {
-            device_context.VSSetConstantBuffers(
-                slot,
-                Some(buffers)
+            device_context.UpdateSubresource(
+                &self.buffer,
+                subresource,
+                dst,
+                data.as_ptr().cast(),
+                row_pitch,
+                depth_pitch,
             );
         }
     }
 
-    pub fn set_all_constant_pixel<B>(buffers: B, device_context: &Dx11Context, slot: u32) where
+    pub fn set_all_constant_vertex<B>(buffers: B, device_context: &Dx11Context, slot: u32)
+    where
         B: ID3D11ResourceOf<ID3D11Buffer>,
     {
         let buffers = buffers.as_params_of();
         unsafe {
-            device_context.PSSetConstantBuffers(
-                slot,
-                Some(buffers)
-            );
+            device_context.VSSetConstantBuffers(slot, Some(buffers));
+        }
+    }
+
+    pub fn set_all_constant_pixel<B>(buffers: B, device_context: &Dx11Context, slot: u32)
+    where
+        B: ID3D11ResourceOf<ID3D11Buffer>,
+    {
+        let buffers = buffers.as_params_of();
+        unsafe {
+            device_context.PSSetConstantBuffers(slot, Some(buffers));
         }
     }
 
     #[cfg(todo)]
     const SET_VERTEX_LIMIT: usize = Self::VERTEX_SLOT_COUNT;
     const SET_VERTEX_LIMIT: usize = 4;
-    pub fn set_all_vertex_params<B>(buffers: &[B], device_context: &Dx11Context, slot: u32) where
+    pub fn set_all_vertex_params<B>(buffers: &[B], device_context: &Dx11Context, slot: u32)
+    where
         [B]: ID3D11ResourceOf<ID3D11Buffer>,
         B: D3dContextBindableVertexBuffer<Dx11Context>,
     {
@@ -259,9 +282,7 @@ impl Buffer {
         let mut strides_storage;
         let mut offsets_storage;
         let (strides, offsets) = match buffers.len() {
-            count if count <= Self::SET_VERTEX_LIMIT => {
-                (&mut strides[..], &mut offsets[..])
-            },
+            count if count <= Self::SET_VERTEX_LIMIT => (&mut strides[..], &mut offsets[..]),
             count => {
                 log::info!("binding {count} vertex buffer slots, consider reducing!");
                 strides_storage = vec![0u32; count];
@@ -269,8 +290,7 @@ impl Buffer {
                 (&mut strides_storage[..], &mut offsets_storage[..])
             },
         };
-        let outputs = strides.iter_mut()
-            .zip(offsets.iter_mut());
+        let outputs = strides.iter_mut().zip(offsets.iter_mut());
         for (buffer, (stride, offset)) in buffers.iter().zip(outputs) {
             *stride = buffer.vertex_buffer_stride();
             *offset = buffer.vertex_buffer_offset();
@@ -287,7 +307,8 @@ impl Buffer {
         }
     }
 
-    pub fn set_all_vertex<B>(buffers: &[B], device_context: &Dx11Context, slot: u32) where
+    pub fn set_all_vertex<B>(buffers: &[B], device_context: &Dx11Context, slot: u32)
+    where
         B: D3dContextBindableVertexBuffer<Dx11Context>,
     {
         let mut bufs = [ptr::null_mut(); Self::SET_VERTEX_LIMIT];
@@ -305,10 +326,15 @@ impl Buffer {
                 bufs_storage = vec![ptr::null_mut(); count];
                 strides_storage = vec![0u32; count];
                 offsets_storage = vec![0u32; count];
-                (&mut bufs_storage[..], &mut strides_storage[..], &mut offsets_storage[..])
+                (
+                    &mut bufs_storage[..],
+                    &mut strides_storage[..],
+                    &mut offsets_storage[..],
+                )
             },
         };
-        let outputs = bufs.iter_mut()
+        let outputs = bufs
+            .iter_mut()
             .zip(strides.iter_mut())
             .zip(offsets.iter_mut());
         for (buffer, ((ptr, stride), offset)) in buffers.iter().zip(outputs) {
@@ -327,7 +353,8 @@ impl Buffer {
         }
     }
 
-    pub fn set_one_vertex<B>(buffer: &B, device_context: &Dx11Context, slot: u32) where
+    pub fn set_one_vertex<B>(buffer: &B, device_context: &Dx11Context, slot: u32)
+    where
         B: ?Sized + D3dContextBindableVertexBuffer<Dx11Context>,
     {
         let buf = buffer.vertex_buffer_ptr();
@@ -354,7 +381,12 @@ pub struct BufferOf<D: D3dBufferData, const OFF: usize = 0> {
 }
 
 impl<const OFF: usize, D: D3dBufferData> BufferOf<D, OFF> {
-    pub fn new_with_data<M>(device: &Dx11Device, initial: Result<&[D], usize>, flags: M) -> anyhow::Result<Self> where
+    pub fn new_with_data<M>(
+        device: &Dx11Device,
+        initial: Result<&[D], usize>,
+        flags: M,
+    ) -> anyhow::Result<Self>
+    where
         M: Into<BufferFlags>,
     {
         let len = match &initial {
@@ -363,8 +395,7 @@ impl<const OFF: usize, D: D3dBufferData> BufferOf<D, OFF> {
         };
         let desc = Buffer::desc_for::<D, _, _>(len, BindFlags::VERTEX, flags.into());
 
-        Buffer::new_with_desc(device, &desc, initial.ok())
-            .map(Self::with_buffer)
+        Buffer::new_with_desc(device, &desc, initial.ok()).map(Self::with_buffer)
     }
 
     pub const fn with_buffer(buffer: Buffer) -> Self {
@@ -374,9 +405,7 @@ impl<const OFF: usize, D: D3dBufferData> BufferOf<D, OFF> {
         }
     }
     pub const fn with_buffer_ref(buffer: &Buffer) -> &Self {
-        unsafe {
-            mem::transmute(buffer)
-        }
+        unsafe { mem::transmute(buffer) }
     }
     pub const fn from_d3d_ref(buffer: &ID3D11Buffer) -> &Self {
         Self::with_buffer_ref(Buffer::from_d3d_ref(buffer))
@@ -430,9 +459,7 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dInterfacePtr for Option<Buffe
     type Interface = ID3D11Buffer;
 
     fn as_d3d_param(&self) -> &Option<Self::Interface> {
-        let buffer: &Option<Buffer> = unsafe {
-            mem::transmute(self)
-        };
+        let buffer: &Option<Buffer> = unsafe { mem::transmute(self) };
         buffer.as_d3d_param()
     }
 
@@ -441,26 +468,24 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dInterfacePtr for Option<Buffe
     }
 
     fn from_d3d_param(param: &Self::Interface) -> &Self {
-        unsafe {
-            mem::transmute(
-                Option::<Buffer>::from_d3d_param(param)
-            )
-        }
+        unsafe { mem::transmute(Option::<Buffer>::from_d3d_param(param)) }
     }
 }
 
-impl<const OFF: usize, D: D3dBufferData> crate::dx11::ID3D11ResourceExt for Option<BufferOf<D, OFF>> {
+impl<const OFF: usize, D: D3dBufferData> crate::dx11::ID3D11ResourceExt
+    for Option<BufferOf<D, OFF>>
+{
     type Output = ID3D11Buffer;
 
     fn as_params(&self) -> &[Option<Self::Output>] {
-        let buffer: &Option<Buffer> = unsafe {
-            mem::transmute(self)
-        };
+        let buffer: &Option<Buffer> = unsafe { mem::transmute(self) };
         buffer.as_params()
     }
 }
 
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context> for BufferOf<D, OFF> {
+unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
+    for BufferOf<D, OFF>
+{
     fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
         self.buffer.to_ref().as_raw()
     }
@@ -471,7 +496,9 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<D
         OFF as u32
     }
 }
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context> for Option<BufferOf<D, OFF>> {
+unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
+    for Option<BufferOf<D, OFF>>
+{
     fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
         D3dContextBindableVertexBuffer::vertex_buffer_ptr(&self.as_ref())
     }
@@ -482,7 +509,9 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<D
         D3dContextBindableVertexBuffer::vertex_buffer_offset(&self.as_ref())
     }
 }
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context> for Option<&'_ BufferOf<D, OFF>> {
+unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
+    for Option<&'_ BufferOf<D, OFF>>
+{
     fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
         self.map(D3dContextBindableVertexBuffer::vertex_buffer_ptr)
             .unwrap_or(ptr::null_mut())
@@ -501,47 +530,65 @@ impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for
         Buffer::set_one_vertex(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for Option<BufferOf<D, OFF>> {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for Option<BufferOf<D, OFF>>
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_one_vertex(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for Option<&'_ BufferOf<D, OFF>> {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for Option<&'_ BufferOf<D, OFF>>
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_one_vertex(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [BufferOf<D, OFF>] {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [BufferOf<D, OFF>]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex_params(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [Option<BufferOf<D, OFF>>] {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [Option<BufferOf<D, OFF>>]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex_params(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [&'_ BufferOf<D, OFF>] {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [&'_ BufferOf<D, OFF>]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [&'_ Option<BufferOf<D, OFF>>] {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [&'_ Option<BufferOf<D, OFF>>]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
     }
 }
-impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [Option<&'_ BufferOf<D, OFF>>] {
+impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [Option<&'_ BufferOf<D, OFF>>]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
     }
 }
-impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [BufferOf<D, OFF>; N] {
+impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [BufferOf<D, OFF>; N]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         D3dContextBindableSlot::<Dx11Context>::set(&self[..], device_context, slot)
     }
 }
-impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for [Option<BufferOf<D, OFF>>; N] {
+impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
+    for [Option<BufferOf<D, OFF>>; N]
+{
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         D3dContextBindableSlot::<Dx11Context>::set(&self[..], device_context, slot)
     }

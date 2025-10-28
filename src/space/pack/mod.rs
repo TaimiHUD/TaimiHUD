@@ -1,33 +1,24 @@
 use {
-    croner::Cron,
-    anyhow::Context,
-    glamour::{Box3, Point3, Vector3},
     crate::space::MapContext,
+    anyhow::Context,
+    croner::Cron,
+    glamour::{Box3, Point3, Vector3},
 };
 
 pub mod poi;
 pub mod trail;
 
-pub(crate) mod pack;
 mod festivals;
+pub(crate) mod pack;
 
 pub use {
-    taimi_pack::{
-        attributes::MarkerAttributes,
-        poi::Poi,
-        trail::TrailSection,
-        pack::Pack,
-    },
     self::{
         festivals::FestivalFixup,
-        pack::{
-            ActivePack,
-            PackCollection,
-            LoaderBox,
-        },
+        pack::{ActivePack, LoaderBox, PackCollection},
         poi::PoiScale,
         trail::{TrailScale, TrailTextureMap},
     },
+    taimi_pack::{attributes::MarkerAttributes, pack::Pack, poi::Poi, trail::TrailSection},
 };
 
 pub type PackSpace = taimi_meta::coords::LocalSpace;
@@ -49,7 +40,8 @@ pub trait MarkerAttributesExt {
 impl MarkerAttributesExt for MarkerAttributes {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>> {
         match &self.schedule {
-            Some(schedule) => schedule.parse()
+            Some(schedule) => schedule
+                .parse()
                 .context("parsing marker schedule")
                 .map(Some),
             None => Ok(None),
@@ -95,12 +87,10 @@ impl PoiExt for Poi {
 }
 
 #[cfg(todo)]
-pub trait TrailExt {
-}
+pub trait TrailExt {}
 
 #[cfg(todo)]
-impl TrailExt for Trail {
-}
+impl TrailExt for Trail {}
 
 pub trait TrailSectionExt {
     fn bounds(&self) -> Box3<PackSpace>;

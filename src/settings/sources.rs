@@ -1,17 +1,16 @@
 use {
     crate::{
-        settings::{GitHubSource, DirectSource},
+        settings::{DirectSource, GitHubSource},
         ADDON_DIR,
-    }, serde::{Deserialize, Serialize}, std::collections::HashMap, tokio::{
+    },
+    reqwest::Response,
+    serde::{Deserialize, Serialize},
+    std::{collections::HashMap, fs::read_to_string as sync_read_to_string, path::PathBuf},
+    strum_macros::Display,
+    tokio::{
         fs::{create_dir_all, read_to_string, File},
         io::AsyncWriteExt,
     },
-    reqwest::Response,
-    std::{
-        fs::read_to_string as sync_read_to_string,
-        path::PathBuf,
-    },
-    strum_macros::Display,
 };
 
 #[derive(Clone, Copy, Deserialize, Display, Serialize, Hash, Debug, Default, PartialEq, Eq)]
@@ -49,7 +48,10 @@ pub struct SourcesFile(pub HashMap<SourceKind, Vec<DeserializedSource>>);
 
 impl SourcesFile {
     pub async fn download_sources() -> anyhow::Result<Self> {
-        let response: Response = super::source::get("https://github.com/TaimiHUD/DataSources/releases/latest/download/sources.toml").await?;
+        let response: Response = super::source::get(
+            "https://github.com/TaimiHUD/DataSources/releases/latest/download/sources.toml",
+        )
+        .await?;
         let text = response.text().await?;
         let sources: HashMap<SourceKind, Vec<DeserializedSource>> = toml::from_str(&text)?;
         Ok(Self(sources))
@@ -77,7 +79,7 @@ impl SourcesFile {
             Err(e) => {
                 log::error!("{:?}", e);
                 Self::generate_stock()
-            }
+            },
         };
         let sources_str = toml::to_string_pretty(&sources)?;
         let mut file = File::create(sources_path).await?;

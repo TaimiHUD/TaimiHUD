@@ -2,32 +2,24 @@
 pub use crate::buffer::dxgi::serde_imp::format as dxgi_format;
 #[cfg(feature = "dx11")]
 pub mod dx11 {
-    pub use crate::dx11::serde_imp::{
-        input_classification,
-        input_layout_element,
-    };
+    pub use crate::dx11::serde_imp::{input_classification, input_layout_element};
 }
 
 pub mod cstr_box {
     use {
         arcffi::cstr::{CStrBox, CStrRef},
-        std::ffi::CString,
         serde::{Deserialize, Deserializer, Serialize, Serializer},
+        std::ffi::CString,
     };
 
     pub mod cow {
-        use {
-            arcffi::cstr::CStrRef,
-            std::borrow::Cow,
-            serde::Deserializer,
-        };
+        use {arcffi::cstr::CStrRef, serde::Deserializer, std::borrow::Cow};
 
-        pub use super::{
-            is_empty,
-            serialize,
-        };
+        pub use super::{is_empty, serialize};
 
-        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Cow<'de, CStrRef>, D::Error> {
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Cow<'de, CStrRef>, D::Error> {
             // XXX: borrowed bytes are possible but unlikely
             super::deserialize(deserializer)
                 .map(|s| s.into_cstring())
@@ -63,16 +55,16 @@ pub mod cstr_box {
             Bytes(Vec<u8>),
             Str(String),
         }
-        CStrBoxDe::deserialize(deserializer).map(|c| match c {
-            CStrBoxDe::Bytes(v) if v.last().copied() == Some(0u8) =>
-                Err(v),
-            CStrBoxDe::Bytes(v) => Ok(v),
-            CStrBoxDe::Str(v) => Ok(v.into_bytes()),
-        }).and_then(|c| match c {
-            Ok(s) => CString::new(s)
-                .map_err(|e| serde::de::Error::custom(e)),
-            Err(b) => CString::from_vec_with_nul(b)
-                .map_err(|e| serde::de::Error::custom(e)),
-        }).map(CStrBox::new)
+        CStrBoxDe::deserialize(deserializer)
+            .map(|c| match c {
+                CStrBoxDe::Bytes(v) if v.last().copied() == Some(0u8) => Err(v),
+                CStrBoxDe::Bytes(v) => Ok(v),
+                CStrBoxDe::Str(v) => Ok(v.into_bytes()),
+            })
+            .and_then(|c| match c {
+                Ok(s) => CString::new(s).map_err(|e| serde::de::Error::custom(e)),
+                Err(b) => CString::from_vec_with_nul(b).map_err(|e| serde::de::Error::custom(e)),
+            })
+            .map(CStrBox::new)
     }
 }

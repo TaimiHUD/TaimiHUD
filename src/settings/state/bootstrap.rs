@@ -1,9 +1,6 @@
 use {
+    crate::{exports::runtime as rt, settings::state::save_state_backup},
     anyhow::Context,
-    crate::{
-        exports::runtime as rt,
-        settings::state::save_state_backup,
-    },
     serde::{Deserialize, Serialize},
     std::{
         ffi::{OsStr, OsString},
@@ -13,10 +10,7 @@ use {
         path::Path,
         sync::LazyLock,
     },
-    tokio::{
-        sync::watch,
-        time,
-    },
+    tokio::{sync::watch, time},
 };
 
 /// TODO: rename/move here
@@ -59,16 +53,14 @@ impl BootstrapState {
     }
 
     pub fn get() -> &'static watch::Sender<Self> {
-        static LOCK: LazyLock<watch::Sender<BootstrapState>> = LazyLock::new(|| {
-            watch::Sender::new(BootstrapState::initial_load())
-        });
+        static LOCK: LazyLock<watch::Sender<BootstrapState>> =
+            LazyLock::new(|| watch::Sender::new(BootstrapState::initial_load()));
         &LOCK
     }
 
     fn initial_load() -> Self {
         let res = match Self::read_file(Self::file_path()) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound =>
-                return Self::new(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::new(),
             res => res.context("boot state file failed to load"),
         };
         match res {
@@ -103,19 +95,16 @@ impl BootstrapState {
 
     pub fn read_file(path: &Path) -> io::Result<Self> {
         let f = fs::File::open(path)?;
-        serde_json::from_reader(io::BufReader::with_capacity(2048, f))
-            .map_err(Into::into)
+        serde_json::from_reader(io::BufReader::with_capacity(2048, f)).map_err(Into::into)
     }
     #[cfg(todo = "unnecessary")]
     pub fn write_file(&self, path: &Path) -> anyhow::Result<()> {
         let _ = fs::create_dir_all(rt::addon_dir_fallback());
         let f = fs::File::create(path)?;
-        serde_json::to_writer(f, self)
-            .context("writing boot state")
+        serde_json::to_writer(f, self).context("writing boot state")
     }
     pub fn start_save(&self) -> anyhow::Result<(&'static Path, String)> {
-        let s = serde_json::to_string(self)
-            .context("boot state serialization error")?;
+        let s = serde_json::to_string(self).context("boot state serialization error")?;
 
         Ok((Self::file_path(), s))
     }
@@ -123,7 +112,8 @@ impl BootstrapState {
         use tokio::{fs, io::AsyncWriteExt};
         let _ = fs::create_dir_all(rt::addon_dir_fallback()).await;
         let mut f = fs::File::create(path).await?;
-        f.write_all(data.as_bytes()).await
+        f.write_all(data.as_bytes())
+            .await
             .context("writing boot state")
     }
 
@@ -136,7 +126,10 @@ impl BootstrapState {
     pub fn watch_initial_delay() -> rt::watched::WatchThrottleDelay {
         Some(Box::pin(time::sleep(Self::SAVE_THROTTLE_TIMEOUT)))
     }
-    pub async fn watch_dirty(receiver: &mut watch::Receiver<Self>, throttle: &mut rt::watched::WatchThrottleDelay) -> Result<(), watch::error::RecvError> {
+    pub async fn watch_dirty(
+        receiver: &mut watch::Receiver<Self>,
+        throttle: &mut rt::watched::WatchThrottleDelay,
+    ) -> Result<(), watch::error::RecvError> {
         if let Some(throttle) = throttle {
             throttle.await;
         }
@@ -171,23 +164,29 @@ impl BootstrapState {
             #[cfg(debug_assertions)]
             _ => &UpdatePreference::Never,
             #[cfg(feature = "extension-nexus")]
-            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => &UpdatePreference::Never,
+            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => {
+                &UpdatePreference::Never
+            },
             #[cfg(feature = "updates")]
-            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => &UpdatePreference::ASK,
+            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => {
+                &UpdatePreference::ASK
+            },
             _ => &UpdatePreference::Never,
         }
     }
 
     pub fn update_preference(&self) -> &UpdatePreference {
-        self.update_preference.as_ref().unwrap_or(Self::default_update_preference())
+        self.update_preference
+            .as_ref()
+            .unwrap_or(Self::default_update_preference())
     }
 
     pub fn update_host_preference(&self) -> Option<AddonHostName> {
-        self.update_host_preference.unwrap_or_else(|| match self.reliable_addon_host() {
-            Some(host) if self.addon_host_preference() == host =>
-                Some(host),
-            _ => None,
-        })
+        self.update_host_preference
+            .unwrap_or_else(|| match self.reliable_addon_host() {
+                Some(host) if self.addon_host_preference() == host => Some(host),
+                _ => None,
+            })
     }
 
     pub fn reliable_addon_host(&self) -> Option<AddonHostName> {
@@ -209,17 +208,17 @@ impl BootstrapState {
 
     pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
         Self::try_write_with(|state| {
-            let mut changed = if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref()) {
-                state.addon_dir = Some(addon_dir.into());
-                true
-            } else {
-                false
-            };
+            let mut changed =
+                if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref()) {
+                    state.addon_dir = Some(addon_dir.into());
+                    true
+                } else {
+                    false
+                };
 
             if let Some(current_host) = Self::current_addon_host() {
                 let host = match state.latest_addon_host {
-                    Some(prev_host) if prev_host != current_host =>
-                        Some(current_host),
+                    Some(prev_host) if prev_host != current_host => Some(current_host),
                     _ => None,
                 };
                 changed |= host.is_some();

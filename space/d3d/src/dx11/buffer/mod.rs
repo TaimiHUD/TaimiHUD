@@ -1,72 +1,65 @@
 mod buffer;
 mod constant;
-mod texture2;
 mod resource;
 mod sampler;
+mod texture2;
 mod vertex;
 mod view;
 
 pub use {
+    self::{
+        buffer::{
+            Buffer,
+            BufferOf,
+            ID3D11Buffer,
+            D3D11_BOX,
+            D3D11_BUFFER_DESC,
+            D3D11_SUBRESOURCE_DATA,
+        },
+        constant::{ConstantBufferP, ConstantBufferV},
+        resource::{ID3D11Resource, Resource, ResourceDimension, D3D11_RESOURCE_DIMENSION},
+        sampler::{
+            Filter,
+            ID3D11SamplerState,
+            SamplerState,
+            TextureAddressMode,
+            D3D11_FILTER,
+            D3D11_SAMPLER_DESC,
+            D3D11_TEXTURE_ADDRESS_MODE,
+        },
+        texture2::{ID3D11Texture2D, Texture2, D3D11_TEXTURE2D_DESC},
+        vertex::{D3d11ContextBindableVertexBuffer, VertexBuffer},
+        view::{
+            ID3D11ShaderResourceView,
+            ID3D11View,
+            ShaderResourceView,
+            TextureView2,
+            View,
+            D3D11_SHADER_RESOURCE_VIEW_DESC,
+            D3D11_SHADER_RESOURCE_VIEW_DESC_0,
+            D3D11_TEX2D_SRV,
+            D3D_SRV_DIMENSION,
+        },
+    },
     crate::dx11::d3d11::{
         D3D11_BIND_FLAG,
         D3D11_CPU_ACCESS_FLAG,
         D3D11_RESOURCE_MISC_FLAG,
         D3D11_USAGE,
     },
-    self::{
-        buffer::{
-            D3D11_BOX,
-            D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA,
-            ID3D11Buffer,
-            Buffer, BufferOf,
-        },
-        constant::{
-            ConstantBufferP,
-            ConstantBufferV,
-        },
-        sampler::{
-            D3D11_FILTER,
-            D3D11_SAMPLER_DESC,
-            D3D11_TEXTURE_ADDRESS_MODE,
-            Filter,
-            ID3D11SamplerState,
-            SamplerState,
-            TextureAddressMode,
-        },
-        resource::{
-            D3D11_RESOURCE_DIMENSION,
-            ID3D11Resource,
-            Resource,
-            ResourceDimension,
-        },
-        texture2::{
-            D3D11_TEXTURE2D_DESC,
-            ID3D11Texture2D,
-            Texture2,
-        },
-        vertex::{D3d11ContextBindableVertexBuffer, VertexBuffer},
-        view::{
-            ID3D11ShaderResourceView, ID3D11View,
-            D3D_SRV_DIMENSION,
-            D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0,
-            D3D11_TEX2D_SRV,
-            ShaderResourceView, TextureView2, View,
-        },
-    },
 };
 
-use crate::{
-    dx11::d3d11,
-    impl_d3d,
-};
+use crate::{dx11::d3d11, impl_d3d};
 
 impl AccessFlags {
     pub const READ_WRITE: Self = Self::from_bits_retain(Self::READ.bits() | Self::WRITE.bits());
 }
 
 impl BindFlags {
-    pub const SHADER_RENDER: Self = Self::from_bits_retain(Self::SHADER.bits() | Self::RENDER.bits());
-    pub const SHADER_UNORDERED: Self = Self::from_bits_retain(Self::SHADER.bits() | Self::UNORDERED.bits());
+    pub const SHADER_RENDER: Self =
+        Self::from_bits_retain(Self::SHADER.bits() | Self::RENDER.bits());
+    pub const SHADER_UNORDERED: Self =
+        Self::from_bits_retain(Self::SHADER.bits() | Self::UNORDERED.bits());
 }
 
 impl_d3d! { impl bitflags for

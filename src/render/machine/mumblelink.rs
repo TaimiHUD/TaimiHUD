@@ -1,33 +1,20 @@
 use {
     crate::{
         controller::{timers::TimersController, Controller, ControllerEvent},
-        exports::runtime::{
-            self as rt,
-            MumblePtr,
-        },
-        render::machine::{RenderMachine, RenderPositioning, RenderUsers}, MarkersController,
-    }, core::{
-        num::NonZero,
-        ptr,
-    }, glamour::{
-        Point3,
-        Vector2, Vector3,
-    }, std::time::{Duration, Instant}, taimi_meta::{
-        coords::{
-            LocalSpace,
-            SignObtainer,
-        },
-        ui::{
-            gameplay::GameplayState,
-            UiState,
-        },
-    }
+        exports::runtime::{self as rt, MumblePtr},
+        render::machine::{RenderMachine, RenderPositioning, RenderUsers},
+        MarkersController,
+    },
+    core::{num::NonZero, ptr},
+    glamour::{Point3, Vector2, Vector3},
+    std::time::{Duration, Instant},
+    taimi_meta::{
+        coords::{LocalSpace, SignObtainer},
+        ui::{gameplay::GameplayState, UiState},
+    },
 };
 #[cfg(any(feature = "markers", feature = "space"))]
-use {
-    arcloader_mumblelink::identity::MumbleIdentity,
-    taimi_meta::ui::MapOpen,
-};
+use {arcloader_mumblelink::identity::MumbleIdentity, taimi_meta::ui::MapOpen};
 
 impl RenderMachine {
     pub const LOCAL_UP: Vector3<LocalSpace> = Vector3::Y;
@@ -35,8 +22,9 @@ impl RenderMachine {
 
     pub fn last_ui_tick(&self) -> MumblelinkTick {
         match &self.mumblelink_frame_player {
-            &Some((player_tick, ..)) if player_tick == self.mumblelink_frame =>
-                MumblelinkTick::with_player_tick(player_tick),
+            &Some((player_tick, ..)) if player_tick == self.mumblelink_frame => {
+                MumblelinkTick::with_player_tick(player_tick)
+            },
             _ => MumblelinkTick::Ui(self.mumblelink_frame),
         }
     }
@@ -50,7 +38,9 @@ impl RenderMachine {
     }
 
     pub fn get_player_mumblelink(&self) -> Option<RenderPositioning> {
-        match self.mumblelink_player.1.x.is_infinite() || rt::vec_eq(self.mumblelink_player.1, Vector3::ZERO) {
+        match self.mumblelink_player.1.x.is_infinite()
+            || rt::vec_eq(self.mumblelink_player.1, Vector3::ZERO)
+        {
             true => None,
             false => Some(self.mumblelink_player),
         }
@@ -58,7 +48,9 @@ impl RenderMachine {
 
     #[cfg(feature = "space")]
     pub fn get_camera_mumblelink(&self) -> Option<RenderPositioning> {
-        match self.mumblelink_camera.1.x.is_infinite() || rt::vec_eq(self.mumblelink_camera.1, Vector3::ZERO) {
+        match self.mumblelink_camera.1.x.is_infinite()
+            || rt::vec_eq(self.mumblelink_camera.1, Vector3::ZERO)
+        {
             true => None,
             false => Some(self.mumblelink_camera),
         }
@@ -89,18 +81,26 @@ impl RenderMachine {
             };
 
             #[cfg(feature = "markers")]
-            if let (true, Some(update)) = (self.identity_users.contains(RenderUsers::MARKERS), update) {
+            if let (true, Some(update)) =
+                (self.identity_users.contains(RenderUsers::MARKERS), update)
+            {
                 MarkersController::receive_mumble_identity(update)
             }
 
             update
-        } else { None };
+        } else {
+            None
+        };
 
         #[cfg(any(feature = "markers", feature = "space"))]
         if !self.map_users.is_empty() {
             let id_update = if let Some(identity) = identity {
-                self.map.calibration.update_from_mumblelink_identity_nexus(identity)
-            } else { false };
+                self.map
+                    .calibration
+                    .update_from_mumblelink_identity_nexus(identity)
+            } else {
+                false
+            };
             self.map.update_from_mumblelink(ml);
 
             if id_update {
@@ -125,19 +125,13 @@ impl RenderMachine {
             }
         }
 
-        let avatar = unsafe {
-            &raw const (*ml.as_ptr()).avatar
-        };
-        let front = Vector3::from_array(unsafe {
-            ptr::read_volatile(&raw const (*avatar).front)
-        });
+        let avatar = unsafe { &raw const (*ml.as_ptr()).avatar };
+        let front = Vector3::from_array(unsafe { ptr::read_volatile(&raw const (*avatar).front) });
         let playpos = match rt::vec_eq(front, Vector3::ZERO) {
-            true => {
-                Point3::INFINITY
+            true => Point3::INFINITY,
+            false => {
+                Point3::from_array(unsafe { ptr::read_volatile(&raw const (*avatar).position) })
             },
-            false => Point3::from_array(unsafe {
-                ptr::read_volatile(&raw const (*avatar).position)
-            }),
         };
         let playpos_ticked = match rt::vec_eq(self.mumblelink_player.0, playpos) {
             // meaningless unless UI tick signifies we're actually ingame...
@@ -159,18 +153,23 @@ impl RenderMachine {
                     ptr::read_volatile(&raw const (*avatar).top)
                 });
                 if !rt::vec_eq(up, Vector3::ZERO) {
-                    log::info!("Whoa, MumbleLink actually populates player_up ({up:?})? Unthinkable!");
+                    log::info!(
+                        "Whoa, MumbleLink actually populates player_up ({up:?})? Unthinkable!"
+                    );
                 }
             }
             #[cfg(feature = "space")]
             {
                 self.map_sign.update(playpos, self.map.player_pos);
                 if self.map_info.is_none() {
-                    self.map.calibration.set_offset(self.map_sign.bounds.center(), self.map_sign.global.center());
+                    self.map
+                        .calibration
+                        .set_offset(self.map_sign.bounds.center(), self.map_sign.global.center());
                 }
                 match (self.map_sign.get_scale(), &self.map_info) {
                     (Some(scale), None) => {
-                        self.map.calibration.local_space = SignObtainer::is_significant(scale).then_some(scale);
+                        self.map.calibration.local_space =
+                            SignObtainer::is_significant(scale).then_some(scale);
                     },
                     _ => (),
                 }
@@ -180,35 +179,49 @@ impl RenderMachine {
         let _camera_update = if !self.mumblelink_users.is_empty() {
             let (camera_pos, camera_front) = unsafe {
                 let camera = &raw const (*ml.as_ptr()).camera;
-                let camera_pos = Point3::from_array(ptr::read_volatile(&raw const (*camera).position));
-                let camera_front = Vector3::from_array(ptr::read_volatile(&raw const (*camera).front));
+                let camera_pos =
+                    Point3::from_array(ptr::read_volatile(&raw const (*camera).position));
+                let camera_front =
+                    Vector3::from_array(ptr::read_volatile(&raw const (*camera).front));
                 if !crate::built_info::IS_TAGGED_VERSION {
                     let up = ptr::read_volatile(&raw const (*camera).top);
                     if !rt::vec_eq(up, [0.0; 3]) {
-                        log::info!("Whoa, MumbleLink actually populates camera_up ({up:?})? Unthinkable!");
+                        log::info!(
+                            "Whoa, MumbleLink actually populates camera_up ({up:?})? Unthinkable!"
+                        );
                     }
                 }
                 (camera_pos, camera_front)
             };
-            let camera_dirty =
-                !rt::vec_eq(self.mumblelink_camera.0, camera_pos)
+            let camera_dirty = !rt::vec_eq(self.mumblelink_camera.0, camera_pos)
                 || !rt::vec_eq(self.mumblelink_camera.1, camera_front);
             self.mumblelink_camera = (camera_pos, camera_front);
             camera_dirty.then_some(())
-        } else { None };
+        } else {
+            None
+        };
 
         let map_id_update = match map_id {
             0 => None,
-            map_id if playpos_ticked && (self.mumblelink_map != map_id || matches!(self.gameplay, GameplayState::Intermission { initial: false, .. }))  =>
-                Some(self.mumblelink_map),
+            map_id
+                if playpos_ticked
+                    && (self.mumblelink_map != map_id
+                        || matches!(self.gameplay, GameplayState::Intermission {
+                            initial: false,
+                            ..
+                        })) =>
+            {
+                Some(self.mumblelink_map)
+            },
             _ => None,
         };
         if let Some(map_id) = map_id_update {
             self.mumblelink_map = map_id;
         }
 
-        let tick_notable = ui_state_changes.intersects(MarkersController::MARKERS_NOTABLE_STATE | TimersController::TIMERS_NOTABLE_STATE)
-            || map_id_update.is_some();
+        let tick_notable = ui_state_changes.intersects(
+            MarkersController::MARKERS_NOTABLE_STATE | TimersController::TIMERS_NOTABLE_STATE,
+        ) || map_id_update.is_some();
         if tick_notable || playpos_ticked {
             Controller::try_send(ControllerEvent::UiTick(self.last_ui_tick()));
         }
@@ -237,9 +250,11 @@ impl RenderMachine {
     const MUMBLELINK_PLAYER_FPS: u32 = 25;
     const MUMBLELINK_PLAYER_TICK_LOADING: u32 = 3;
     const MUMBLELINK_PLAYER_LOADING: Duration = Duration::from_millis(
-        Self::MUMBLELINK_PLAYER_TICK.as_millis() as u64 * Self::MUMBLELINK_PLAYER_TICK_LOADING as u64
+        Self::MUMBLELINK_PLAYER_TICK.as_millis() as u64
+            * Self::MUMBLELINK_PLAYER_TICK_LOADING as u64,
     );
-    const MUMBLELINK_PLAYER_TICK: Duration = Duration::from_millis(1000 / Self::MUMBLELINK_PLAYER_FPS as u64);
+    const MUMBLELINK_PLAYER_TICK: Duration =
+        Duration::from_millis(1000 / Self::MUMBLELINK_PLAYER_FPS as u64);
     const MUMBLELINK_SKIP_LOADING: u32 = {
         let target_fps = 55;
         target_fps * Self::MUMBLELINK_PLAYER_TICK_LOADING / Self::MUMBLELINK_PLAYER_FPS
@@ -260,17 +275,21 @@ impl RenderMachine {
             Ok(None) if self.mumblelink_frame == 0 => {
                 // pre-loading
                 if !self.gameplay.is_initial() {
-                    log::warn!("MumbleLink went back in time from {:?}? Weird, this is probably a bug!", self.gameplay);
+                    log::warn!(
+                        "MumbleLink went back in time from {:?}? Weird, this is probably a bug!",
+                        self.gameplay
+                    );
                     self.gameplay = GameplayState::INITIAL;
                 }
                 None
             },
             Ok(None) => {
                 let frame_player = (self.mumblelink_frame_skip >= Self::MUMBLELINK_SKIP_LOADING)
-                    .then_some(self.mumblelink_frame_player).flatten();
-                let probably_loading = frame_player.map(|(_tick, when)|
-                    when.elapsed() > Self::MUMBLELINK_PLAYER_LOADING
-                ).unwrap_or(false);
+                    .then_some(self.mumblelink_frame_player)
+                    .flatten();
+                let probably_loading = frame_player
+                    .map(|(_tick, when)| when.elapsed() > Self::MUMBLELINK_PLAYER_LOADING)
+                    .unwrap_or(false);
                 if probably_loading {
                     gameplay_change = Some(GameplayState::LOADING);
                 }
@@ -299,9 +318,7 @@ impl MumblelinkTick {
     }
 
     pub const fn with_player_tick(ui_tick: u32) -> Self {
-        MumblelinkTick::Player {
-            ui_tick,
-        }
+        MumblelinkTick::Player { ui_tick }
     }
 
     pub const fn ui_tick(&self) -> u32 {

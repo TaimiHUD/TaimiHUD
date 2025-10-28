@@ -1,18 +1,14 @@
-use crate::{
-    dx11::{
-        prelude::*,
-        device::ID3D11Device,
-    },
-    device::{D3dContext, D3dContextBindable},
-    state::PrimitiveTopology,
-};
-
 pub use crate::dx11::d3d11::{
     ID3D11DeviceContext,
     ID3D11DeviceContext1,
     ID3D11DeviceContext2,
     ID3D11DeviceContext3,
     ID3D11DeviceContext4,
+};
+use crate::{
+    device::{D3dContext, D3dContextBindable},
+    dx11::{device::ID3D11Device, prelude::*},
+    state::PrimitiveTopology,
 };
 
 impl D3dContext for ID3D11DeviceContext {
@@ -62,8 +58,6 @@ impl_d3d! {
 
 impl D3dContextBindable<Dx11Context> for PrimitiveTopology {
     fn set(&self, device_context: &Dx11Context) {
-        unsafe {
-            device_context.IASetPrimitiveTopology(self.d3d())
-        }
+        unsafe { device_context.IASetPrimitiveTopology(self.d3d()) }
     }
 }

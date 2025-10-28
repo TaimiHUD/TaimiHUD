@@ -4,17 +4,16 @@ use {
         space::{
             pack::{ActivePack, TrailSectionExt},
             resources::{Model, Texture, Vertex},
-            DrawSpace, LocalContext, TextureSpace,
+            DrawSpace,
+            LocalContext,
+            TextureSpace,
         },
     },
     anyhow::Context,
     core::f32,
-    glamour::{Box3, Point2, Vector3, Vec3Swizzles},
+    glamour::{Box3, Point2, Vec3Swizzles, Vector3},
     std::sync::Arc,
-    taimi_d3d::dx11::{
-        buffer::VertexBuffer,
-        prelude::*,
-    },
+    taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
     taimi_pack::Trail,
 };
 
@@ -50,14 +49,18 @@ impl ActiveTrail {
         let smoothing = params.smoothing();
         let mut y_offset = {
             // mitigate z-fighting by fudging y values for (hopefully) unique trails
-            let pack_signature = loader.pack.trails.len() + loader.pack.pois.len() + loader.pack.categories.all_categories.len();
+            let pack_signature = loader.pack.trails.len()
+                + loader.pack.pois.len()
+                + loader.pack.categories.all_categories.len();
             params.y_offset_for(pack_signature ^ (trail_idx.wrapping_mul(73)))
         };
 
-        let texture_handle = trail.texture_name()
+        let texture_handle = trail
+            .texture_name()
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
         let texture_handle = loader.register_texture(texture_handle);
-        let trail_data = trail.read_trl_data(loader.loader())
+        let trail_data = trail
+            .read_trl_data(loader.loader())
             .context("Loading trail vertices")?;
         let texture = loader
             .get_or_load_texture(texture_handle, device)
@@ -139,7 +142,9 @@ impl ActiveTrail {
 
                 mod_distance = offset * normal_offset * flip_over;
                 let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                    glam::vec3(1.0, 0.0, 1.0).normalize().copysign(mod_distance.to_raw())
+                    glam::vec3(1.0, 0.0, 1.0)
+                        .normalize()
+                        .copysign(mod_distance.to_raw()),
                 );
 
                 vertices.push(Vertex {
@@ -161,7 +166,9 @@ impl ActiveTrail {
             }
 
             let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                glam::vec3(1.0, 0.0, 1.0).normalize().copysign(mod_distance.to_raw())
+                glam::vec3(1.0, 0.0, 1.0)
+                    .normalize()
+                    .copysign(mod_distance.to_raw()),
             );
             vertices.push(Vertex {
                 position: (cur_point - mod_distance).into(),
@@ -181,11 +188,7 @@ impl ActiveTrail {
         }
 
         if vertices.is_empty() {
-            log::info!(
-                "Empty trail {}:{}",
-                trail.category,
-                trail.guid,
-            );
+            log::info!("Empty trail {}:{}", trail.category, trail.guid,);
         }
 
         let model = Model::from_vertices(vertices);
@@ -269,13 +272,11 @@ impl TrailParams {
     }
 
     pub fn smoothing(&self) -> Option<f32> {
-        (self.resolution() > Self::DEFAULT_RESOLUTION)
-            .then_some(Self::DEFAULT_SMOOTHING)
+        (self.resolution() > Self::DEFAULT_RESOLUTION).then_some(Self::DEFAULT_SMOOTHING)
     }
 
     pub fn resolution(&self) -> f32 {
-        self.resolution
-            .unwrap_or(Self::WIDTH_FACTOR / self.width())
+        self.resolution.unwrap_or(Self::WIDTH_FACTOR / self.width())
     }
 
     pub fn y_offset_for(&self, idx: usize) -> f32 {
@@ -309,9 +310,7 @@ impl TrailScale {
     pub const DIRTY: Self = Self::new(f32::NAN);
 
     pub const fn new(normal_expansion: f32) -> Self {
-        Self {
-            normal_expansion,
-        }
+        Self { normal_expansion }
     }
 
     /// Convert from settings
@@ -345,16 +344,13 @@ impl TrailTextureMap {
     pub const UNTEXTURED_ANCHOR: Point2<TextureSpace> = Point2::new(0.0, 0.39);
 
     pub const fn new(v_scale: f32, v_offset: f32) -> Self {
-        Self {
-            v_scale,
-            v_offset,
-        }
+        Self { v_scale, v_offset }
     }
 
     pub const fn with_tex_scale(v_scale: f32) -> Self {
         Self {
             v_scale,
-            .. Self::DEFAULT
+            ..Self::DEFAULT
         }
     }
 
@@ -362,11 +358,11 @@ impl TrailTextureMap {
         let TrailScale { normal_expansion } = scale;
         let scale_trail_norm = match () {
             #[cfg(todo)]
-            _ => (normal_expansion + 10.0/5.2) * -0.52 + 2.0,
+            _ => (normal_expansion + 10.0 / 5.2) * -0.52 + 2.0,
             () => {
                 let (e0, e1) = match () {
                     #[cfg(todo)]
-                    _ => (2.38206f32,  -0.45979f32),
+                    _ => (2.38206f32, -0.45979f32),
                     _ => (2.22149f32, -0.388849f32),
                 };
                 let scalex = normal_expansion * 1.5;

@@ -1,6 +1,5 @@
-use crate::prelude::*;
-
 pub use crate::dxgi::DXGI_FORMAT;
+use crate::prelude::*;
 
 const DXGI_FORMAT_FORCE_UINT: DXGI_FORMAT = DXGI_FORMAT(-1i32);
 impl_d3d! { impl enum for
@@ -260,20 +259,22 @@ impl_d3d! { impl enum for
 pub mod serde_imp {
     pub mod format {
         use {
-            serde::{
-                Deserialize, Deserializer,
-                Serialize, Serializer,
-            },
             super::super::{DxgiFormat, DXGI_FORMAT},
+            serde::{Deserialize, Deserializer, Serialize, Serializer},
         };
 
-        pub fn serialize<S: Serializer>(class: &DXGI_FORMAT, serializer: S) -> Result<S::Ok, S::Error> {
+        pub fn serialize<S: Serializer>(
+            class: &DXGI_FORMAT,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
             match DxgiFormat::try_from_d3d(*class) {
                 Ok(class) => class.serialize(serializer),
                 Err(..) => class.0.serialize(serializer),
             }
         }
-        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<DXGI_FORMAT, D::Error> {
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<DXGI_FORMAT, D::Error> {
             #[derive(Deserialize)]
             #[serde(untagged)]
             enum DxgiFormat {

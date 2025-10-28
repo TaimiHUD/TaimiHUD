@@ -1,25 +1,18 @@
+#[cfg(feature = "arcdps-extras")]
+use arcdps::extras::{self, KeybindChange, MouseCode};
 use {
+    crate::win::{keyboard::KeyState, window_message, window_send_inputs},
     anyhow::{anyhow, Context},
-    crate::win::{
-        keyboard::KeyState,
-        window_message, window_send_inputs,
-    },
     core::{iter, mem::transmute, num::NonZeroI32, ops, slice},
     windows::{
         core::Error as WinError,
         Win32::{
-            Foundation::{HWND, LPARAM, POINT, ERROR_SUCCESS, SetLastError},
+            Foundation::{SetLastError, ERROR_SUCCESS, HWND, LPARAM, POINT},
             Graphics::Gdi,
-            UI::{
-                HiDpi,
-                Input::KeyboardAndMouse,
-                WindowsAndMessaging,
-            },
+            UI::{HiDpi, Input::KeyboardAndMouse, WindowsAndMessaging},
         },
     },
 };
-#[cfg(feature = "arcdps-extras")]
-use arcdps::extras::{self, KeybindChange, MouseCode};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(C)]
@@ -33,10 +26,7 @@ impl MousePosition {
     pub const EMPTY: Self = Self::new(0, 0);
 
     pub const fn new(x: i32, y: i32) -> Self {
-        Self {
-            x,
-            y
-        }
+        Self { x, y }
     }
 
     pub const fn is_empty(&self) -> bool {
@@ -44,21 +34,15 @@ impl MousePosition {
     }
 
     pub const fn to_point(self) -> POINT {
-        unsafe {
-            transmute(self)
-        }
+        unsafe { transmute(self) }
     }
 
     pub const fn as_point(&self) -> &POINT {
-        unsafe {
-            transmute(self)
-        }
+        unsafe { transmute(self) }
     }
 
     pub fn as_point_mut(&mut self) -> &mut POINT {
-        unsafe {
-            transmute(self)
-        }
+        unsafe { transmute(self) }
     }
 
     /// Normalize screen coordinate
@@ -71,7 +55,14 @@ impl MousePosition {
             }
         };
         Ok(match self * 0x10000i32 {
-            normalized => (normalized + MousePosition { x: bounds.x / 2 - 1, y: bounds.y / 2 - 1 }) / bounds,
+            normalized => {
+                (normalized
+                    + MousePosition {
+                        x: bounds.x / 2 - 1,
+                        y: bounds.y / 2 - 1,
+                    })
+                    / bounds
+            },
             #[cfg(todo)]
             normalized => normalized / bounds,
             #[cfg(todo)]
@@ -86,31 +77,39 @@ impl MousePosition {
         let res = unsafe {
             SetLastError(ERROR_SUCCESS);
             // or Gdi::ClientToScreen?
-            Gdi::MapWindowPoints(Some(WindowsAndMessaging::HWND_DESKTOP), Some(wnd), slice::from_mut(self.as_point_mut()))
+            Gdi::MapWindowPoints(
+                Some(WindowsAndMessaging::HWND_DESKTOP),
+                Some(wnd),
+                slice::from_mut(self.as_point_mut()),
+            )
         };
         match res {
             0 => match WinError::from_win32() {
-                e if e.code().0 == 0 =>
-                    Ok(self),
+                e if e.code().0 == 0 => Ok(self),
                 e => Err(e),
             },
             _ => Ok(self),
-        }.context("MapWindowPoints")
+        }
+        .context("MapWindowPoints")
     }
 
     pub fn to_screen(mut self, wnd: HWND) -> anyhow::Result<MousePosition> {
         let res = unsafe {
             SetLastError(ERROR_SUCCESS);
-            Gdi::MapWindowPoints(Some(wnd), Some(WindowsAndMessaging::HWND_DESKTOP), slice::from_mut(self.as_point_mut()))
+            Gdi::MapWindowPoints(
+                Some(wnd),
+                Some(WindowsAndMessaging::HWND_DESKTOP),
+                slice::from_mut(self.as_point_mut()),
+            )
         };
         match res {
             0 => match WinError::from_win32() {
-                e if e.code().0 == 0 =>
-                    Ok(self),
+                e if e.code().0 == 0 => Ok(self),
                 e => Err(e),
             },
             _ => Ok(self),
-        }.context("MapWindowPoints")
+        }
+        .context("MapWindowPoints")
     }
 
     pub fn to_input(self, hwnd: HWND) -> anyhow::Result<KeyboardAndMouse::INPUT> {
@@ -129,9 +128,10 @@ impl<P: Into<MousePosition>> ops::Sub<P> for MousePosition {
         }
     }
 }
-impl<P> ops::SubAssign<P> for MousePosition where
+impl<P> ops::SubAssign<P> for MousePosition
+where
     Self: ops::Sub<P>,
-    <MousePosition as ops::Sub<P>>::Output: Into<Self>
+    <MousePosition as ops::Sub<P>>::Output: Into<Self>,
 {
     fn sub_assign(&mut self, rhs: P) {
         *self = (*self - rhs).into();
@@ -149,9 +149,10 @@ impl<P: Into<MousePosition>> ops::Add<P> for MousePosition {
         }
     }
 }
-impl<P> ops::AddAssign<P> for MousePosition where
+impl<P> ops::AddAssign<P> for MousePosition
+where
     Self: ops::Add<P>,
-    <MousePosition as ops::Add<P>>::Output: Into<Self>
+    <MousePosition as ops::Add<P>>::Output: Into<Self>,
 {
     fn add_assign(&mut self, rhs: P) {
         *self = (*self + rhs).into();
@@ -169,9 +170,10 @@ impl<P: Into<MousePosition>> ops::Div<P> for MousePosition {
         }
     }
 }
-impl<P> ops::DivAssign<P> for MousePosition where
+impl<P> ops::DivAssign<P> for MousePosition
+where
     Self: ops::Div<P>,
-    <MousePosition as ops::Div<P>>::Output: Into<Self>
+    <MousePosition as ops::Div<P>>::Output: Into<Self>,
 {
     fn div_assign(&mut self, rhs: P) {
         *self = (*self / rhs).into();
@@ -189,9 +191,10 @@ impl<P: Into<MousePosition>> ops::Mul<P> for MousePosition {
         }
     }
 }
-impl<P> ops::MulAssign<P> for MousePosition where
+impl<P> ops::MulAssign<P> for MousePosition
+where
     Self: ops::Mul<P>,
-    <MousePosition as ops::Mul<P>>::Output: Into<Self>
+    <MousePosition as ops::Mul<P>>::Output: Into<Self>,
 {
     fn mul_assign(&mut self, rhs: P) {
         *self = (*self * rhs).into();
@@ -200,28 +203,19 @@ impl<P> ops::MulAssign<P> for MousePosition where
 
 impl From<POINT> for MousePosition {
     fn from(POINT { x, y }: POINT) -> Self {
-        Self {
-            x,
-            y,
-        }
+        Self { x, y }
     }
 }
 
 impl From<i32> for MousePosition {
     fn from(mag: i32) -> Self {
-        Self {
-            x: mag,
-            y: mag,
-        }
+        Self { x: mag, y: mag }
     }
 }
 
 impl From<MousePosition> for POINT {
     fn from(MousePosition { x, y }: MousePosition) -> Self {
-        POINT {
-            x,
-            y,
-        }
+        POINT { x, y }
     }
 }
 
@@ -229,7 +223,7 @@ impl From<LPARAM> for MousePosition {
     fn from(l: LPARAM) -> Self {
         Self {
             x: l.0 as i16 as i32,
-            y: ((l.0 as usize & 0xffff0000) >> 16) as i16 as i32
+            y: ((l.0 as usize & 0xffff0000) >> 16) as i16 as i32,
         }
     }
 }
@@ -262,7 +256,11 @@ impl From<Point2<ScreenPoint>> for MousePosition {
         if let Some(mid) = MarkerInputData::read() {
             display_size.get_or_insert(mid.display_size.to_array());
         }
-        if let Some(sz) = crate::RENDER_STATE.try_lock().ok().and_then(|state| state.as_ref().and_then(|state| state.last_display_size)) {
+        if let Some(sz) = crate::RENDER_STATE
+            .try_lock()
+            .ok()
+            .and_then(|state| state.as_ref().and_then(|state| state.last_display_size))
+        {
             display_size.get_or_insert(sz);
         }
         let [w, h] = match display_size {
@@ -296,8 +294,10 @@ pub fn primary_screen_bounds() -> anyhow::Result<(NonZeroI32, NonZeroI32)> {
 }
 
 pub fn virtual_screen_bounds() -> anyhow::Result<(NonZeroI32, NonZeroI32)> {
-    let x = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
-    let y = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
+    let x =
+        unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
+    let y =
+        unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
     match (NonZeroI32::new(x), NonZeroI32::new(y)) {
         (Some(x), Some(y)) => Ok((x, y)),
         _ => anyhow::bail!("GetSystemMetrics(SM_CYVIRTUALSCREEN) produced nothing"),
@@ -306,9 +306,7 @@ pub fn virtual_screen_bounds() -> anyhow::Result<(NonZeroI32, NonZeroI32)> {
 
 // TODO: GetDpiAwarenessContextForProcess, GetDpiForSystem, etc?
 pub fn window_dpi(hwnd: HWND) -> anyhow::Result<u32> {
-    let dpi = unsafe {
-        HiDpi::GetDpiForWindow(hwnd)
-    };
+    let dpi = unsafe { HiDpi::GetDpiForWindow(hwnd) };
     match dpi {
         0 => Err(anyhow!("GetDpiForWindow")),
         dpi => Ok(dpi),
@@ -378,19 +376,33 @@ impl MouseInput {
     }
 
     pub fn input_buttons(self) -> impl Iterator<Item = Self> + Clone + Send + Sync + 'static {
-        let Self { position, button, down } = self;
+        let Self {
+            position,
+            button,
+            down,
+        } = self;
         let buttons = button & KeyState::BUTTON;
         let mods = button & !KeyState::BUTTON;
-        buttons.iter_keys()
+        buttons
+            .iter_keys()
             .map(move |b| Self::new(position, b | mods, down))
     }
 
     pub fn to_input(self, hwnd: HWND) -> anyhow::Result<KeyboardAndMouse::INPUT> {
-        let flag_move = KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
-        let flag_button = self.down.and_then(|down| self.button.mouse_flag(down)).unwrap_or_default();
+        let flag_move =
+            KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
+        let flag_button = self
+            .down
+            .and_then(|down| self.button.mouse_flag(down))
+            .unwrap_or_default();
         let xdata = match flag_button {
-            flag if (flag & (KeyboardAndMouse::MOUSEEVENTF_XDOWN | KeyboardAndMouse::MOUSEEVENTF_XUP)).0 != 0 =>
-                self.button.button_x(),
+            flag if (flag
+                & (KeyboardAndMouse::MOUSEEVENTF_XDOWN | KeyboardAndMouse::MOUSEEVENTF_XUP))
+                .0
+                != 0 =>
+            {
+                self.button.button_x()
+            },
             _ => 0,
         };
         let relative_to = ();
@@ -399,12 +411,11 @@ impl MouseInput {
             #[cfg(todo)]
             Some(rel) => (0, self - rel),
             _ => {
-                let position = self.position.to_screen(hwnd)
+                let position = self
+                    .position
+                    .to_screen(hwnd)
                     .and_then(|pos| pos.scale_to_primary())?;
-                (
-                    KeyboardAndMouse::MOUSEEVENTF_ABSOLUTE,
-                    position
-                )
+                (KeyboardAndMouse::MOUSEEVENTF_ABSOLUTE, position)
             },
         };
         Ok(KeyboardAndMouse::INPUT {
@@ -422,13 +433,13 @@ impl MouseInput {
         })
     }
 
-    pub const EVENT_MODS: KeyState = KeyState::from_bits_retain(KeyState::CTRL.bits() | KeyState::SHIFT.bits());
+    pub const EVENT_MODS: KeyState =
+        KeyState::from_bits_retain(KeyState::CTRL.bits() | KeyState::SHIFT.bits());
     pub fn to_event(self) -> Option<(u32, usize, isize)> {
         let button = self.buttons();
 
         let msg = match self.down {
-            Some(down) if !self.is_movement() =>
-                button.event_msg(down),
+            Some(down) if !self.is_movement() => button.event_msg(down),
             _ => WindowsAndMessaging::WM_MOUSEMOVE,
         };
 
@@ -440,7 +451,10 @@ impl MouseInput {
     }
 
     pub fn to_events(self, prior: Option<Self>) -> impl Iterator<Item = (u32, usize, isize)> {
-        let mut before = prior.as_ref().map(|p| p.button_after()).unwrap_or_else(|| self.button_before());
+        let mut before = prior
+            .as_ref()
+            .map(|p| p.button_after())
+            .unwrap_or_else(|| self.button_before());
         let after = self.button_after();
         let changes = after ^ before;
 
@@ -457,21 +471,19 @@ impl MouseInput {
             (true, _) => self.to_event(),
         };
 
-        let events = changes.iter_keys()
-            .filter_map(move |button| {
-                if !button.intersects(KeyState::BUTTON) {
-                    return None
-                }
-                let input = Self::new(self.position, button, self.down);
-                let (msg, _w, l) = input.to_event()?;
-                if let Some(down) = self.down {
-                    before.set(button, down);
-                }
-                let w = button.event_w(msg) | before.to_modifierkeys().0 as usize;
-                Some((msg, w, l))
-            });
-        movement.into_iter()
-            .chain(events)
+        let events = changes.iter_keys().filter_map(move |button| {
+            if !button.intersects(KeyState::BUTTON) {
+                return None
+            }
+            let input = Self::new(self.position, button, self.down);
+            let (msg, _w, l) = input.to_event()?;
+            if let Some(down) = self.down {
+                before.set(button, down);
+            }
+            let w = button.event_w(msg) | before.to_modifierkeys().0 as usize;
+            Some((msg, w, l))
+        });
+        movement.into_iter().chain(events)
     }
 }
 
@@ -510,11 +522,11 @@ impl TryFrom<MouseCode> for MouseInput {
     }
 }
 
-
 #[cfg(todo)]
 impl From<MouseInput> for KeyboardAndMouse::INPUT {
     fn from(input: MouseInput) -> Self {
-        input.to_input(hwnd)
+        input
+            .to_input(hwnd)
             .expect("failed to determine screen coordinates")
     }
 }
@@ -522,17 +534,17 @@ impl From<MouseInput> for KeyboardAndMouse::INPUT {
 #[cfg(todo)]
 impl From<MousePosition> for KeyboardAndMouse::INPUT {
     fn from(position: MousePosition) -> Self {
-        MouseInput::from(position).to_input(hwnd)
+        MouseInput::from(position)
+            .to_input(hwnd)
             .expect("failed to determine screen coordinates")
     }
 }
 
 pub fn screen_position() -> anyhow::Result<MousePosition> {
     let mut out = MousePosition::default();
-    unsafe {
-        WindowsAndMessaging::GetCursorPos(out.as_point_mut())
-    }.context("GetCursorPos")
-    .map(move |()| out)
+    unsafe { WindowsAndMessaging::GetCursorPos(out.as_point_mut()) }
+        .context("GetCursorPos")
+        .map(move |()| out)
 }
 
 pub fn send_mouse(hwnd: HWND, input: MouseInput, prior: Option<MouseInput>) -> anyhow::Result<()> {
@@ -540,9 +552,7 @@ pub fn send_mouse(hwnd: HWND, input: MouseInput, prior: Option<MouseInput>) -> a
     let mut error = None;
     for (msg, w, l) in input.to_events(prior) {
         sent = true;
-        let res = unsafe {
-            window_message(hwnd, msg, w, l)
-        };
+        let res = unsafe { window_message(hwnd, msg, w, l) };
         if let Err(e) = res {
             let _ = error.insert(e);
         }

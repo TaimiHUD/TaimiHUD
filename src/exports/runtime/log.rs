@@ -1,12 +1,32 @@
 #[cfg(not(feature = "log-filter"))]
 use anyhow::Context;
-use std::{ffi::CStr, fmt, fs, io, mem::transmute, path::PathBuf, slice, sync::{Mutex, LazyLock, OnceLock, TryLockError}, time};
-use log::{Log, Metadata, Record, Level, LevelFilter};
-use crate::{exports::{self, runtime as rt}, settings::state::BootstrapState};
+use {
+    crate::{
+        exports::{self, runtime as rt},
+        settings::state::BootstrapState,
+    },
+    log::{Level, LevelFilter, Log, Metadata, Record},
+    std::{
+        ffi::CStr,
+        fmt,
+        fs,
+        io,
+        mem::transmute,
+        path::PathBuf,
+        slice,
+        sync::{LazyLock, Mutex, OnceLock, TryLockError},
+        time,
+    },
+};
 
-pub static LOG_FILTER: LazyLock<LogFilter> = LazyLock::new(|| BootstrapState::read_with(|s|
-    s.log_filter.as_ref().map(LogFilterDesc::to_filter).unwrap_or_default()
-));
+pub static LOG_FILTER: LazyLock<LogFilter> = LazyLock::new(|| {
+    BootstrapState::read_with(|s| {
+        s.log_filter
+            .as_ref()
+            .map(LogFilterDesc::to_filter)
+            .unwrap_or_default()
+    })
+});
 pub const RT_FORMAT_ERROR: &'static str = "log formatting failure";
 pub const LOG_BUFFER_SIZE: usize = 0x400;
 
@@ -46,7 +66,8 @@ impl TaimiLog {
 
     pub fn timestamp(&self) -> f32 {
         let epoch = *self.log_epoch.get_or_init(|| time::SystemTime::now());
-        time::SystemTime::now().duration_since(epoch)
+        time::SystemTime::now()
+            .duration_since(epoch)
             .map(|d| d.as_secs_f32() % Self::TIMESTAMP_MAX)
             .unwrap_or(0.0)
     }
@@ -59,11 +80,17 @@ impl TaimiLog {
 
     pub fn open_file(&self) -> io::Result<&fs::File> {
         let log_path = Self::log_path();
-        let append = match crate::built_info::IS_TAGGED_VERSION || crate::built_info::CI_PLATFORM.is_some() {
+        let append = match crate::built_info::IS_TAGGED_VERSION
+            || crate::built_info::CI_PLATFORM.is_some()
+        {
             // prevent log from growing forever in production
             #[cfg(not(debug_assertions))]
-            true if fs::metadata(&log_path).map(|md| md.len() > 0x400000).unwrap_or(false) =>
-                false,
+            true if fs::metadata(&log_path)
+                .map(|md| md.len() > 0x400000)
+                .unwrap_or(false) =>
+            {
+                false
+            },
             _ => true,
         };
         let res = fs::OpenOptions::new()
@@ -72,14 +99,17 @@ impl TaimiLog {
             .open(log_path);
         let mut f = match res {
             Ok(f) => f,
-            Err(e) => return match self.log_file.get() {
-                Some(f) => Ok(f),
-                None => Err(e),
+            Err(e) => {
+                return match self.log_file.get() {
+                    Some(f) => Ok(f),
+                    None => Err(e),
+                }
             },
         };
         Ok(self.log_file.get_or_init(move || {
             use io::Write as _;
-            let ts = time::SystemTime::now().duration_since(time::UNIX_EPOCH)
+            let ts = time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)
                 .map(|d| d.as_secs_f32())
                 .unwrap_or(0.0);
             let _ = write!(f, "{:08.3}; log opened at {}\n", self.timestamp(), ts);
@@ -120,8 +150,7 @@ impl TaimiLog {
     #[allow(unreachable_patterns, dropping_references)]
     pub fn close(&self) {
         let f = match self.log_file.get() {
-            Some(f) if f.sync_all().is_ok() =>
-                f,
+            Some(f) if f.sync_all().is_ok() => f,
             _ => return,
         };
 
@@ -133,17 +162,13 @@ impl TaimiLog {
             f => {
                 use std::os::fd::{AsRawFd, FromRawFd};
                 let fd = f.as_raw_fd();
-                unsafe {
-                    fs::File::from_raw_fd(fd)
-                }
+                unsafe { fs::File::from_raw_fd(fd) }
             },
             #[cfg(windows)]
             f => {
                 use std::os::windows::io::{AsRawHandle, FromRawHandle};
                 let handle = f.as_raw_handle();
-                unsafe {
-                    fs::File::from_raw_handle(handle)
-                }
+                unsafe { fs::File::from_raw_handle(handle) }
             },
             #[cfg(not(any(unix, windows)))]
             f => f,
@@ -199,8 +224,9 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 let _ = exports::arcdps::log_window(record.metadata(), message);
                 let message = match message_bounds {
                     bounds if bounds.is_empty() => message,
-                    bounds => cstr_slice_mut(message, bounds.start..=bounds.end)
-                        .ok_or(RT_FORMAT_ERROR)?,
+                    bounds => {
+                        cstr_slice_mut(message, bounds.start..=bounds.end).ok_or(RT_FORMAT_ERROR)?
+                    },
                 };
                 (message, false)
             },
@@ -212,8 +238,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                     _ if exports::arcdps::available() => false,
                     _ => true,
                 };
-                write_record(buffer, record, implicit_target_level)
-                    .map_err(|_| RT_FORMAT_ERROR)?;
+                write_record(buffer, record, implicit_target_level).map_err(|_| RT_FORMAT_ERROR)?;
                 let message = buffer.terminate();
                 (message, implicit_target_level)
             },
@@ -234,17 +259,16 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
 
             let res_nexus = exports::nexus::log(record.metadata(), message).transpose();
             match res_nexus {
-                Some(Err(e)) if matches!(res, Some(Ok(()))) =>
-                    Some(Err(e)),
-                res_nexus =>
-                    res.or(res_nexus),
+                Some(Err(e)) if matches!(res, Some(Ok(()))) => Some(Err(e)),
+                res_nexus => res.or(res_nexus),
             }
-        } else { res };
+        } else {
+            res
+        };
 
         let file = match logger.log_file.get() {
             Some(f) => Some(f),
-            None if matches!(res, Some(Ok(()))) && crate::built_info::is_release() =>
-                None,
+            None if matches!(res, Some(Ok(()))) && crate::built_info::is_release() => None,
             #[cfg(not(debug_assertions))]
             None if record.metadata().level() > log::Level::Warn => None,
             None => logger.open_file().ok(),
@@ -259,9 +283,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 let _ = fmt::Write::write_str(buffer, "\n");
                 // and if there's redundant space at the beginning of the line, fill it
                 let prefix = match implicit_target_level {
-                    false => unsafe {
-                        buffer.buffer_mut().get_mut(..LOG_SEGMENT_EXPLICIT_LEN)
-                    },
+                    false => unsafe { buffer.buffer_mut().get_mut(..LOG_SEGMENT_EXPLICIT_LEN) },
                     true => None,
                 };
                 if let Some(mut prefix) = prefix {
@@ -280,11 +302,12 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 .map_err(|_| "log file IO write failed");
             Some(match fres {
                 Ok(..) => Ok(()),
-                Err(e) if matches!(res, Some(Ok(()))) =>
-                    Err(e),
+                Err(e) if matches!(res, Some(Ok(()))) => Err(e),
                 fres => res.unwrap_or(fres),
             })
-        } else { res };
+        } else {
+            res
+        };
 
         res.transpose()
     });
@@ -302,9 +325,7 @@ pub struct LogBuffer {
 
 impl LogBuffer {
     pub const fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-        }
+        Self { buffer: Vec::new() }
     }
 
     pub fn with_capacity(cap: usize) -> Self {
@@ -334,9 +355,7 @@ impl LogBuffer {
 
     pub fn terminate(&mut self) -> &mut CStr {
         self.buffer.push(0);
-        unsafe {
-            cstr_mut_from_bytes_with_nul_unchecked(self.buffer_mut())
-        }
+        unsafe { cstr_mut_from_bytes_with_nul_unchecked(self.buffer_mut()) }
     }
 
     pub fn append(&mut self) -> &mut Self {
@@ -363,7 +382,11 @@ pub fn write_record_body<W: fmt::Write>(w: &mut W, record: &Record) -> fmt::Resu
     w.write_fmt(*record.args())
 }
 
-pub fn write_record<W: fmt::Write>(w: &mut W, record: &Record, implicit_target_level: bool) -> fmt::Result {
+pub fn write_record<W: fmt::Write>(
+    w: &mut W,
+    record: &Record,
+    implicit_target_level: bool,
+) -> fmt::Result {
     let prefix_meta = write_metadata_prefix(w, record.metadata(), implicit_target_level)?;
     let prefix_record = write_record_prefix(w, record)?;
     if prefix_meta > 0 || prefix_record > 0 {
@@ -375,13 +398,14 @@ pub fn write_record<W: fmt::Write>(w: &mut W, record: &Record, implicit_target_l
 }
 
 fn strip_crate_root(target: &str) -> Result<&str, Option<&str>> {
-    let target = target.strip_prefix(rt::CRATE_NAME)
+    let target = target
+        .strip_prefix(rt::CRATE_NAME)
         .map(|target| target.strip_prefix("::").unwrap_or(target))
-        .map(Err).unwrap_or(Ok(target));
+        .map(Err)
+        .unwrap_or(Ok(target));
 
     match target {
-        Err(target) if target.is_empty() =>
-            Err(None),
+        Err(target) if target.is_empty() => Err(None),
         res => res.map_err(Some),
     }
 }
@@ -393,15 +417,17 @@ pub fn write_metadata_level<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Result
 const LOG_SEGMENT_LEVEL_LEN_SEP: usize = 2;
 const LOG_SEGMENT_LEVEL_LEN: usize = 5 + LOG_SEGMENT_LEVEL_LEN_SEP;
 
-pub fn write_metadata_target<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Result<usize, fmt::Error> {
+pub fn write_metadata_target<W: fmt::Write>(
+    w: &mut W,
+    meta: &Metadata,
+) -> Result<usize, fmt::Error> {
     let target = match strip_crate_root(meta.target()) {
         Ok(target) => {
             write!(w, "{target}:")?;
             return Ok(target.len() + 1)
         },
         Err(Some(target)) => target,
-        Err(None) =>
-            return Ok(0),
+        Err(None) => return Ok(0),
     };
 
     write!(w, "::{target};")?;
@@ -411,19 +437,28 @@ pub fn write_metadata_target<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Resul
 const LOG_SEGMENT_TARGET_LEN_SEP: usize = 3;
 
 /// Nexus metadata includes our name and level, so can be omitted
-pub fn write_metadata_prefix<W: fmt::Write>(w: &mut W, meta: &Metadata, implicit_target_level: bool) -> Result<usize, fmt::Error> {
+pub fn write_metadata_prefix<W: fmt::Write>(
+    w: &mut W,
+    meta: &Metadata,
+    implicit_target_level: bool,
+) -> Result<usize, fmt::Error> {
     let amt_level = if !implicit_target_level {
         w.write_str(rt::NAME)?;
         write_metadata_level(w, meta)?;
         LOG_SEGMENT_EXPLICIT_LEN
-    } else { 0 };
+    } else {
+        0
+    };
     let amt_target = write_metadata_target(w, meta)?;
     Ok(amt_level + amt_target)
 }
 const LOG_SEGMENT_NAME_LEN: usize = rt::NAME.len();
 const LOG_SEGMENT_EXPLICIT_LEN: usize = LOG_SEGMENT_NAME_LEN + LOG_SEGMENT_LEVEL_LEN;
 
-pub fn write_record_prefix<W: fmt::Write>(_w: &mut W, _record: &Record) -> Result<usize, fmt::Error> {
+pub fn write_record_prefix<W: fmt::Write>(
+    _w: &mut W,
+    _record: &Record,
+) -> Result<usize, fmt::Error> {
     // TODO: any special record.key_values() we want to use here? (requires log/kv)
     Ok(0)
 }
@@ -431,18 +466,21 @@ pub fn write_record_prefix<W: fmt::Write>(_w: &mut W, _record: &Record) -> Resul
 pub fn write_record_suffix<W: fmt::Write>(w: &mut W, record: &Record) -> Result<usize, fmt::Error> {
     let amt = 0;
     #[cfg(debug_assertions)]
-    let amt = amt + match record.module_path().map(strip_crate_root) {
-        Some(Ok(module)) | Some(Err(Some(module))) => {
-            write!(w, " ({module})")?;
-            let amt_mod = module.len() + LOG_SEGMENT_MOD_LEN_SEP;
-            let amt_line = if let Some(line) = record.line() {
-                write!(w, ":{line}")?;
-                line.ilog10() as usize + 1 + LOG_SEGMENT_LINE_LEN_SEP
-            } else { 0 };
-            amt_mod + amt_line
-        },
-        _ => 0,
-    };
+    let amt = amt
+        + match record.module_path().map(strip_crate_root) {
+            Some(Ok(module)) | Some(Err(Some(module))) => {
+                write!(w, " ({module})")?;
+                let amt_mod = module.len() + LOG_SEGMENT_MOD_LEN_SEP;
+                let amt_line = if let Some(line) = record.line() {
+                    write!(w, ":{line}")?;
+                    line.ilog10() as usize + 1 + LOG_SEGMENT_LINE_LEN_SEP
+                } else {
+                    0
+                };
+                amt_mod + amt_line
+            },
+            _ => 0,
+        };
 
     Ok(amt)
 }
@@ -451,7 +489,8 @@ const LOG_SEGMENT_MOD_LEN_SEP: usize = 2;
 const LOG_SEGMENT_LINE_LEN_SEP: usize = 1;
 
 /// XXX: passing a mut borrow (iow not moving cstr into here) would be a bad idea
-fn cstr_slice_mut<'a, I>(cstr: &'a mut CStr, range: I) -> Option<&'a mut CStr> where
+fn cstr_slice_mut<'a, I>(cstr: &'a mut CStr, range: I) -> Option<&'a mut CStr>
+where
     I: slice::SliceIndex<[u8], Output = [u8]>,
 {
     let bytes = unsafe {
@@ -460,21 +499,16 @@ fn cstr_slice_mut<'a, I>(cstr: &'a mut CStr, range: I) -> Option<&'a mut CStr> w
     };
     let subslice = bytes.get_mut(range)?;
     *subslice.last_mut()? = 0;
-    Some(unsafe {
-        cstr_mut_from_bytes_with_nul_unchecked(subslice)
-    })
+    Some(unsafe { cstr_mut_from_bytes_with_nul_unchecked(subslice) })
 }
 
 fn cstr_slice_from(cstr: &CStr, from: usize) -> Option<&CStr> {
     let terminated = match cstr.to_bytes_with_nul().get(from..) {
-        Some(b) if !b.is_empty() =>
-            b,
+        Some(b) if !b.is_empty() => b,
         _ => return None,
     };
 
-    Some(unsafe {
-        CStr::from_bytes_with_nul_unchecked(terminated)
-    })
+    Some(unsafe { CStr::from_bytes_with_nul_unchecked(terminated) })
 }
 
 unsafe fn cstr_mut_from_bytes_with_nul_unchecked(terminated: &mut [u8]) -> &mut CStr {
@@ -493,7 +527,9 @@ pub const fn nexus_log_level(level: Level) -> NexusLogLevel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum LogFilterDesc {
     Level(LevelFilter),
     Env(String),
@@ -513,18 +549,24 @@ impl LogFilterDesc {
             Self::Level(level) => LogFilter::Level(*level),
             Self::Env(env) => match &env[..] {
                 #[cfg(feature = "log-filter")]
-                env => Some(LogFilter::Env(env_logger::Builder::new().parse_filters(env).build())),
+                env => Some(LogFilter::Env(
+                    env_logger::Builder::new().parse_filters(env).build(),
+                )),
                 #[cfg(not(feature = "log-filter"))]
                 e if e.eq_ignore_ascii_case("all") => Some(LogFilter::Level(LevelFilter::max())),
                 #[cfg(not(feature = "log-filter"))]
-                env => match env.parse::<LevelFilter>().context("log-filter feature required") {
+                env => match env
+                    .parse::<LevelFilter>()
+                    .context("log-filter feature required")
+                {
                     Err(e) => {
                         log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
                         None
                     },
                     Ok(level) => Some(LogFilter::Level(level)),
                 },
-            }.unwrap_or_default(),
+            }
+            .unwrap_or_default(),
         }
     }
 }
@@ -582,12 +624,8 @@ pub struct DeferredLogger {
 }
 
 impl DeferredLogger {
-    pub const BEST_EFFORT: Self = Self {
-        sync: false,
-    };
-    pub const BLOCKING: Self = Self {
-        sync: true,
-    };
+    pub const BEST_EFFORT: Self = Self { sync: false };
+    pub const BLOCKING: Self = Self { sync: true };
 }
 impl Log for DeferredLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {

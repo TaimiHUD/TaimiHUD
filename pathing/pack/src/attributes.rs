@@ -1,6 +1,6 @@
 use {
-    anyhow::{anyhow, Context},
     crate::pack::taco_xml_to_guid,
+    anyhow::{anyhow, Context},
     std::{fmt, str::FromStr},
     uuid::Uuid,
     xml::name::Name,
@@ -401,8 +401,7 @@ impl MarkerAttributes {
         {
             self.toggle_category = Some(value);
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
-            let guids = value.split(',')
-                .map(|g| taco_xml_to_guid(g.trim_ascii()));
+            let guids = value.split(',').map(|g| taco_xml_to_guid(g.trim_ascii()));
             self.reset_guids = Some(guids.collect());
         } else if attr_name.eq_ignore_ascii_case("show") {
             self.show_category = Some(value);
@@ -430,11 +429,10 @@ impl MarkerAttributes {
 
 pub fn parse_bool(value: &str) -> anyhow::Result<bool> {
     match value {
-        value if value.eq_ignore_ascii_case("true") =>
-            Ok(true),
-        value if value.eq_ignore_ascii_case("false") =>
-            Ok(false),
-        value => value.parse::<i32>()
+        value if value.eq_ignore_ascii_case("true") => Ok(true),
+        value if value.eq_ignore_ascii_case("false") => Ok(false),
+        value => value
+            .parse::<i32>()
             .map(|i| i != 0)
             .map_err(|_| anyhow!("unexpected bool `{value}`")),
     }
@@ -461,7 +459,8 @@ fn parse_color(value: &str) -> anyhow::Result<glam::Vec4> {
     ))
 }
 
-fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>> where
+fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>>
+where
     <T as FromStr>::Err: fmt::Display + Into<anyhow::Error>,
 {
     let mut err = None;
@@ -476,26 +475,29 @@ fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>> where
                 }
                 None
             },
-        }).collect();
+        })
+        .collect();
 
     match err {
-        Some(e) if list.is_empty() =>
-            Err(e.into()),
+        Some(e) if list.is_empty() => Err(e.into()),
         _ => Ok(list),
     }
 }
 
-fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]> where
+fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]>
+where
     T: Default + Copy,
     <T as FromStr>::Err: Into<anyhow::Error>,
 {
     let mut list = [T::default(); N];
 
-    let values = value.split(',')
+    let values = value
+        .split(',')
         .map(|f| f.trim_ascii())
         .map(FromStr::from_str);
     for (dest, item) in list.iter_mut().zip(values) {
-        *dest = item.map_err(Into::into)
+        *dest = item
+            .map_err(Into::into)
             .with_context(|| format!("parsing list `{value}`"))?;
     }
 
@@ -632,7 +634,7 @@ impl TryFrom<i32> for Mount {
             10 => SiegeTurtle,
             _ => {
                 anyhow::bail!("unknown mount `{value}`")
-            }
+            },
         })
     }
 }
@@ -702,7 +704,7 @@ impl TryFrom<i32> for Profession {
             9 => Revenant,
             _ => {
                 anyhow::bail!("unknown profession `{value}`")
-            }
+            },
         })
     }
 }
@@ -760,7 +762,7 @@ impl TryFrom<i32> for Race {
             4 => Sylvari,
             _ => {
                 anyhow::bail!("unknown race `{value}`");
-            }
+            },
         })
     }
 }
@@ -840,7 +842,7 @@ impl TryFrom<i32> for MapType {
             18 => WvwLounge,
             _ => {
                 anyhow::bail!("unknown map type `{value}`");
-            }
+            },
         })
     }
 }
@@ -932,7 +934,7 @@ impl TryFrom<i32> for TacoBehavior {
             101 => ReappearOnWeeklyReset,
             _ => {
                 anyhow::bail!("unknown taco behavior `{value}`");
-            }
+            },
         })
     }
 }

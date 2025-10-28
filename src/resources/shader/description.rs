@@ -1,6 +1,6 @@
 use {
-    anyhow::Context,
     crate::resources::Vertex,
+    anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
         ffi::{CString, OsStr},
@@ -9,11 +9,11 @@ use {
         path::{Path, PathBuf},
     },
     taimi_d3d::{
+        blob::Blob,
         dx11::{
             prelude::*,
-            shader::{D3D11_INPUT_ELEMENT_DESC, InputLayout, InputLayoutElement},
+            shader::{InputLayout, InputLayoutElement, D3D11_INPUT_ELEMENT_DESC},
         },
-        blob::Blob,
         shader::{compile, ShaderDefinitions, ShaderTarget},
     },
 };
@@ -49,22 +49,20 @@ impl ShaderDescription {
 
     pub fn load(path: &Path) -> anyhow::Result<Vec<Self>> {
         let context = |op: &str| {
-            let filename = path.file_name()
-                .unwrap_or(path.as_os_str());
+            let filename = path.file_name().unwrap_or(path.as_os_str());
             format!("{} shader description `{}`", op, filename.display())
         };
         let file_data = read_to_string(path)
-        .and_then(|mut file_data| json_strip_comments::strip(&mut file_data)
-            .map(move |()| file_data)
-        ).with_context(|| context("reading"))?;
+            .and_then(|mut file_data| {
+                json_strip_comments::strip(&mut file_data).map(move |()| file_data)
+            })
+            .with_context(|| context("reading"))?;
 
-        serde_json::from_str(&file_data)
-            .with_context(|| context("loading"))
+        serde_json::from_str(&file_data).with_context(|| context("loading"))
     }
 
     pub fn file_name(&self) -> &OsStr {
-        self.path.file_name()
-            .unwrap_or(self.path.as_os_str())
+        self.path.file_name().unwrap_or(self.path.as_os_str())
     }
 
     pub fn input_layout_desc(&self) -> &[D3D11_INPUT_ELEMENT_DESC] {
@@ -76,20 +74,35 @@ impl ShaderDescription {
     }
 
     #[cfg(not(debug_assertions))]
-    pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    pub const COMPILE_FLAGS1: u32 =
+        d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
     #[cfg(debug_assertions)]
-    pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
+    pub const COMPILE_FLAGS1: u32 =
+        d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
     pub const COMPILE_FLAGS2: u32 = 0;
 
     pub fn compile(&self, source: &[u8]) -> anyhow::Result<Blob> {
         let filename = self.file_name().to_string_lossy();
         let name = CString::new(&filename[..])?;
         let entry_point = CString::new(&self.entrypoint[..])?;
-        let (blob, warnings) = compile(&name, source, self.target, &entry_point, self.defs.as_ref(), None, Self::COMPILE_FLAGS1, Self::COMPILE_FLAGS2)
-            .with_context(|| format!("compiling shader {filename}"))?;
+        let (blob, warnings) = compile(
+            &name,
+            source,
+            self.target,
+            &entry_point,
+            self.defs.as_ref(),
+            None,
+            Self::COMPILE_FLAGS1,
+            Self::COMPILE_FLAGS2,
+        )
+        .with_context(|| format!("compiling shader {filename}"))?;
 
         if log::log_enabled!(log::Level::Debug) && !warnings.is_empty() {
-            log::debug!("Shader {} warnings:\n{}", &self.identifier, warnings.to_string_lossy());
+            log::debug!(
+                "Shader {} warnings:\n{}",
+                &self.identifier,
+                warnings.to_string_lossy()
+            );
         }
 
         Ok(blob)
@@ -100,34 +113,40 @@ impl ShaderDescription {
         Self::INPUT_LAYOUT_JUST_VERTEX[1], // COLOR0
         Self::INPUT_LAYOUT_JUST_VERTEX[2], // NORMAL0
         Self::INPUT_LAYOUT_JUST_VERTEX[3], // TEXCOORD0
-        InputLayout::for_instance(1, c"MODEL", 0,
-            dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
-        ),
-        InputLayout::for_instance(1, c"MODEL", 1,
-            dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
-        ),
-        InputLayout::for_instance(1, c"MODEL", 2,
-            dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
-        ),
-        InputLayout::for_instance(1, c"MODEL", 3,
-            dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
-        ),
-        InputLayout::for_instance(1, c"COLOUR", 0,
-            dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None,
-        ),
+        InputLayout::for_instance(1, c"MODEL", 0, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
+        InputLayout::for_instance(1, c"MODEL", 1, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
+        InputLayout::for_instance(1, c"MODEL", 2, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
+        InputLayout::for_instance(1, c"MODEL", 3, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
+        InputLayout::for_instance(1, c"COLOUR", 0, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
     ];
     const INPUT_LAYOUT_JUST_VERTEX: [D3D11_INPUT_ELEMENT_DESC; 4] = [
-        InputLayout::for_vertex(0, c"POSITION", 0,
-            dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, position))
+        InputLayout::for_vertex(
+            0,
+            c"POSITION",
+            0,
+            dxgi::DXGI_FORMAT_R32G32B32_FLOAT,
+            Some(offset_of!(Vertex, position)),
         ),
-        InputLayout::for_vertex(0, c"COLOR", 0,
-            dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, colour))
+        InputLayout::for_vertex(
+            0,
+            c"COLOR",
+            0,
+            dxgi::DXGI_FORMAT_R32G32B32_FLOAT,
+            Some(offset_of!(Vertex, colour)),
         ),
-        InputLayout::for_vertex(0, c"NORMAL", 0,
-            dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(Vertex, normal))
+        InputLayout::for_vertex(
+            0,
+            c"NORMAL",
+            0,
+            dxgi::DXGI_FORMAT_R32G32B32_FLOAT,
+            Some(offset_of!(Vertex, normal)),
         ),
-        InputLayout::for_vertex(0, c"TEXCOORD", 0,
-            dxgi::DXGI_FORMAT_R32G32_FLOAT, Some(offset_of!(Vertex, texture))
+        InputLayout::for_vertex(
+            0,
+            c"TEXCOORD",
+            0,
+            dxgi::DXGI_FORMAT_R32G32_FLOAT,
+            Some(offset_of!(Vertex, texture)),
         ),
     ];
 }

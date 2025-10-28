@@ -1,30 +1,27 @@
 use {
-    crate::{
-        prelude::*,
-        D3dDevice, D3dContext,
-        D3dContextBindableSlot,
-    },
-    std::{
-        ffi,
-        mem,
-        ptr::NonNull,
-    },
+    crate::{prelude::*, D3dContext, D3dContextBindableSlot, D3dDevice},
+    std::{ffi, mem, ptr::NonNull},
 };
 
 pub mod dxgi;
 
-pub unsafe trait D3dContextBindableVertexBuffer<D3DC: D3dContext>: D3dContextBindableSlot<D3DC> {
+pub unsafe trait D3dContextBindableVertexBuffer<D3DC: D3dContext>:
+    D3dContextBindableSlot<D3DC>
+{
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void;
     fn vertex_buffer_stride(&self) -> u32;
     fn vertex_buffer_offset(&self) -> u32;
 
-    unsafe fn vertex_buffer_buffer(&self) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
-        NonNull::new(self.vertex_buffer_ptr() as *mut _)
-            .map(|raw| InterfaceRef::from_raw(raw))
+    unsafe fn vertex_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+        NonNull::new(self.vertex_buffer_ptr() as *mut _).map(|raw| InterfaceRef::from_raw(raw))
     }
 }
 
-unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableVertexBuffer<D3DC>> D3dContextBindableVertexBuffer<D3DC> for &'_ B {
+unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableVertexBuffer<D3DC>>
+    D3dContextBindableVertexBuffer<D3DC> for &'_ B
+{
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void {
         D3dContextBindableVertexBuffer::vertex_buffer_ptr(*self)
     }
@@ -34,7 +31,9 @@ unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableVertexBuffer<D3DC>> 
     fn vertex_buffer_offset(&self) -> u32 {
         D3dContextBindableVertexBuffer::vertex_buffer_stride(*self)
     }
-    unsafe fn vertex_buffer_buffer(&self) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+    unsafe fn vertex_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
         D3dContextBindableVertexBuffer::vertex_buffer_buffer(*self)
     }
 }

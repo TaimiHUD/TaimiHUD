@@ -1,29 +1,16 @@
 use {
-    core::ops::Range,
     crate::{
         render::machine::{RenderMachine, RenderPosition, RenderPositioning},
         settings::pathing::CameraSource,
-        space::{
-            pack::FestivalFixup,
-            DrawSpace,
-        },
+        space::{pack::FestivalFixup, DrawSpace},
     },
-    glamour::{
-        Angle,
-        Matrix4,
-        Point3,
-        Transform3,
-        Vector2, Vector3,
-    },
+    core::ops::Range,
+    glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
     std::time::SystemTime,
     taimi_meta::{
-        coords::{
-            camera_view,
-            ScreenSpace,
-        },
+        coords::{camera_view, MapLocalScale, ScreenSpace},
         ui::MapOpen,
     },
-    taimi_meta::coords::MapLocalScale,
     taimi_pack::attributes::Festival,
 };
 
@@ -34,8 +21,7 @@ impl RenderMachine {
         let has_rtapi = !self.rtapi_state.camera.0.x.is_infinite();
         match source {
             #[cfg(feature = "extension-nexus")]
-            CameraSource::RealTimeAPI if has_rtapi =>
-                Some(self.rtapi_state.camera),
+            CameraSource::RealTimeAPI if has_rtapi => Some(self.rtapi_state.camera),
             #[cfg(feature = "extension-nexus")]
             CameraSource::MumbleLink if self.mumblelink_frame_skip > 0 && has_rtapi => Some({
                 let factor = Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32 /*.min(1.0)*/;
@@ -53,7 +39,8 @@ impl RenderMachine {
 
     pub fn get_camera(&mut self, source: CameraSource) -> RenderPosition<DrawSpace> {
         // TODO: cache direct ptr per frame
-        let (pos, front) = self.get_camera_pos(source)
+        let (pos, front) = self
+            .get_camera_pos(source)
             .unwrap_or((Point3::ZERO, Vector3::ZERO));
         (pos, front.normalize_or(Self::LOCAL_FORWARD), Self::LOCAL_UP)
     }
@@ -118,11 +105,12 @@ impl RenderMachine {
 
     pub fn get_space_perspective(&self) -> Transform3<DrawSpace, ScreenSpace> {
         let r = self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO);
-        let Range { start: near, end: far } = self.get_depth_range().unwrap_or(Self::DEFAULT_DEPTH_RANGE);
+        let Range {
+            start: near,
+            end: far,
+        } = self.get_depth_range().unwrap_or(Self::DEFAULT_DEPTH_RANGE);
         Transform3::from_matrix_unchecked(match self.get_fov() {
-            fov => {
-                Matrix4::perspective_lh(Angle::new(fov.y), r, near, far)
-            },
+            fov => Matrix4::perspective_lh(Angle::new(fov.y), r, near, far),
             #[cfg(todo)]
             fov => {
                 use glamour::Vector4;
@@ -142,8 +130,7 @@ impl RenderMachine {
     pub fn space_view(camera: RenderPosition) -> Transform3<DrawSpace, DrawSpace> {
         let (camera_pos, camera_front, camera_up) = camera;
         Transform3::from_matrix_unchecked(
-            camera_view(camera_pos, camera_front, camera_up)
-            //glam::Mat4::look_to_lh(camera_pos.into(), camera_front.into(), camera_up.into()).into()
+            camera_view(camera_pos, camera_front, camera_up), //glam::Mat4::look_to_lh(camera_pos.into(), camera_front.into(), camera_up.into()).into()
         )
     }
 
@@ -165,10 +152,8 @@ impl RenderMachine {
     pub fn turn_depth_event(&mut self, acquired_or_lost: bool) {
         if !self.map_users.is_empty() {
             let changed = match (acquired_or_lost, self.get_map_open_state()) {
-                (true, MapOpen::Open) =>
-                    self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
-                (false, MapOpen::Opening { .. }) =>
-                    self.set_map_open(MapOpen::Open),
+                (true, MapOpen::Open) => self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
+                (false, MapOpen::Opening { .. }) => self.set_map_open(MapOpen::Open),
                 _ => false,
             };
             if changed {
@@ -179,7 +164,8 @@ impl RenderMachine {
 
     pub fn initial_festivals() -> impl Iterator<Item = Festival> {
         let now = SystemTime::now();
-        FestivalFixup::FESTIVAL_WINDOWS.iter()
+        FestivalFixup::FESTIVAL_WINDOWS
+            .iter()
             .filter(move |(_f, window)| window.is_active(now))
             .map(|&(festival, ..)| festival)
     }

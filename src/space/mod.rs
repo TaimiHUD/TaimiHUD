@@ -1,10 +1,10 @@
 pub mod dx11;
 pub mod engine;
+#[cfg(feature = "goggles")]
+pub mod goggles;
 pub mod object;
 pub mod pack;
 pub mod render_list;
-#[cfg(feature = "goggles")]
-pub mod goggles;
 #[deprecated = "crate::resources"]
 pub(crate) use crate::resources;
 
@@ -16,9 +16,9 @@ taimi_meta::coords::coord_newtype! {
 pub struct TextureSpace([f32; 2]);
 }
 
-pub use self::engine::Engine;
-
 use taimi_meta::ui::MapContext;
+
+pub use self::engine::Engine;
 
 #[derive(Copy, Clone)]
 pub enum LocalContext {

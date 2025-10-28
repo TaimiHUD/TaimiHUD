@@ -2,7 +2,8 @@ use {
     palette::{
         convert::{FromColorUnclamped, IntoColorUnclamped},
         rgb::Rgb,
-        Srgb, WithAlpha,
+        Srgb,
+        WithAlpha,
     },
     serde::{Deserialize, Serialize},
 };

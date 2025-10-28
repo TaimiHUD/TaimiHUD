@@ -1,15 +1,10 @@
-use crate::{
-    dx11::prelude::*,
-    state::D3dState,
-    D3dContextBindableSlot,
-};
-
 pub use crate::dx11::d3d11::{
+    ID3D11SamplerState,
+    D3D11_FILTER,
     D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_MODE,
-    D3D11_FILTER,
-    ID3D11SamplerState,
 };
+use crate::{dx11::prelude::*, state::D3dState, D3dContextBindableSlot};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11SamplerState;
@@ -44,7 +39,7 @@ impl SamplerState {
             AddressU: D3D11_TEXTURE_ADDRESS_MODE(address.x),
             AddressV: D3D11_TEXTURE_ADDRESS_MODE(address.y),
             AddressW: D3D11_TEXTURE_ADDRESS_MODE(address.z),
-            .. Self::DESC_DEFAULT
+            ..Self::DESC_DEFAULT
         }
     }
 
@@ -58,16 +53,17 @@ impl SamplerState {
     }
 
     pub fn with_state(state: ID3D11SamplerState) -> Self {
-        Self {
-            state,
-        }
+        Self { state }
     }
 
     pub fn new_snapshot(context: &Dx11Context) -> [Option<Self>; Self::MAX_COUNT] {
-        Self::new_snapshot_from::<{Self::MAX_COUNT}>(context, 0)
+        Self::new_snapshot_from::<{ Self::MAX_COUNT }>(context, 0)
     }
 
-    pub fn new_snapshot_from<const N: usize /*= Self::MAX_COUNT*/>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
+    pub fn new_snapshot_from<const N: usize /*= Self::MAX_COUNT*/>(
+        context: &Dx11Context,
+        slot: u32,
+    ) -> [Option<Self>; N] {
         let mut states = [const { None::<Self> }; N];
         let count = (states.len()).saturating_sub(slot as usize);
         unsafe {
@@ -78,7 +74,8 @@ impl SamplerState {
         states
     }
 
-    pub fn bind_set<S>(context: &Dx11Context, slot: u32, states: S) where
+    pub fn bind_set<S>(context: &Dx11Context, slot: u32, states: S)
+    where
         S: ID3D11ResourceOf<ID3D11SamplerState>,
     {
         let states = states.as_params_of();

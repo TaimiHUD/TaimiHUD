@@ -1,15 +1,14 @@
 use {
+    super::{RenderMachine, RenderUsers},
     crate::controller::markers::{MarkersController, MarkersEvent},
     std::time::Instant,
-    super::{RenderMachine, RenderUsers},
-    taimi_meta::ui::{
-        MapContext, MapOpen,
-    },
+    taimi_meta::ui::{MapContext, MapOpen},
 };
+
+#[cfg(any(feature = "markers", feature = "space"))]
+use crate::exports::runtime::bindings::{GameControl, GameControls};
 #[cfg(feature = "space")]
 use crate::space::engine::{Engine, SpaceEvent};
-#[cfg(any(feature = "markers", feature = "space"))]
-use crate::exports::runtime::bindings::{GameControls, GameControl};
 
 impl RenderMachine {
     pub fn get_map_open(&self) -> MapOpen {
@@ -25,10 +24,8 @@ impl RenderMachine {
             },
             open => {
                 let open = match self.map_open_timestamp {
-                    Some(ts) =>
-                        open.while_elapsed(ts.elapsed().as_secs_f32()),
-                    None =>
-                        open,
+                    Some(ts) => open.while_elapsed(ts.elapsed().as_secs_f32()),
+                    None => open,
                 };
                 match self.map_open {
                     true => open.cap(false),
@@ -41,10 +38,8 @@ impl RenderMachine {
     pub fn get_map_open_state(&self) -> MapOpen {
         let open = MapOpen::with_open(self.map_open);
         match &self.map_open_timestamp {
-            Some(..) =>
-                open.while_elapsed(0.0),
-            None =>
-                open,
+            Some(..) => open.while_elapsed(0.0),
+            None => open,
         }
     }
 
@@ -93,7 +88,8 @@ impl RenderMachine {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub fn is_map_visible(&self) -> Option<MapContext> {
         self.is_ingame().and_then(|_| {
-            let context = self.get_map_open_state()
+            let context = self
+                .get_map_open_state()
                 // TODO: .primary_context() if no anims enabled
                 .visible_context();
             match (context, self.map_hidden) {
@@ -113,7 +109,11 @@ impl RenderMachine {
     }
 
     #[cfg(any(feature = "markers", feature = "space"))]
-    pub fn act_controls_changed(&mut self, controls_state: GameControls, controls_changed: GameControls) {
+    pub fn act_controls_changed(
+        &mut self,
+        controls_state: GameControls,
+        controls_changed: GameControls,
+    ) {
         let pressed = controls_state & controls_changed;
         if controls_changed.contains(GameControl::Map_OpenClose) {
             self.act_press_map_toggle(controls_state.contains(GameControl::Map_OpenClose));
@@ -131,11 +131,11 @@ impl RenderMachine {
         }
 
         let changed = match self.get_map_open_state() {
-            MapOpen::Open =>
-                self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
+            MapOpen::Open => self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
             // TODO: reconsider in case we're wrong?
-            MapOpen::Opening { elapsed } if elapsed > 0.5 =>
-                self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
+            MapOpen::Opening { elapsed } if elapsed > 0.5 => {
+                self.set_map_open(MapOpen::Closing { elapsed: 0.0 })
+            },
             _ => false,
         };
         if changed {

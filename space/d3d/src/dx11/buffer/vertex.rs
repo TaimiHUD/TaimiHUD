@@ -1,16 +1,13 @@
 use {
-    std::{ffi, mem, slice},
     crate::{
         buffer::D3dContextBindableVertexBuffer,
-        D3dContextBindableSlot,
         dx11::{
+            buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
-            buffer::{
-                D3D11_BUFFER_DESC,
-                BindFlags, Buffer, BufferFlags,
-            },
         },
+        D3dContextBindableSlot,
     },
+    std::{ffi, mem, slice},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,7 +19,8 @@ pub struct VertexBuffer {
 }
 
 impl VertexBuffer {
-    pub unsafe fn with_parts<B>(buffer: B, stride: usize, count: usize, offset: usize) -> Self where
+    pub unsafe fn with_parts<B>(buffer: B, stride: usize, count: usize, offset: usize) -> Self
+    where
         B: Into<Buffer>,
     {
         Self {
@@ -33,27 +31,37 @@ impl VertexBuffer {
         }
     }
 
-    pub fn new_with_data<D: D3dBufferData>(device: &Dx11Device, data: &D, flags: BufferFlags) -> anyhow::Result<Self> {
+    pub fn new_with_data<D: D3dBufferData>(
+        device: &Dx11Device,
+        data: &D,
+        flags: BufferFlags,
+    ) -> anyhow::Result<Self> {
         Self::new_with_slice(device, slice::from_ref(data), flags)
     }
 
-    pub fn new_with_slice<D: D3dBufferData>(device: &Dx11Device, data: &[D], flags: BufferFlags) -> anyhow::Result<Self> {
+    pub fn new_with_slice<D: D3dBufferData>(
+        device: &Dx11Device,
+        data: &[D],
+        flags: BufferFlags,
+    ) -> anyhow::Result<Self> {
         let desc = Self::desc_for::<D>(data.len(), flags);
         let init = match data.is_empty() {
             true => None,
             false => Some(data),
         };
-        Buffer::new_with_desc(device, &desc, init).map(|b| unsafe {
-            Self::with_parts(b, D::stride(), data.len() as _, 0)
-        })
+        Buffer::new_with_desc(device, &desc, init)
+            .map(|b| unsafe { Self::with_parts(b, D::stride(), data.len() as _, 0) })
     }
 
-    pub fn new<D: D3dBufferData>(device: &Dx11Device, count: Option<usize>, flags: BufferFlags) -> anyhow::Result<Self> {
+    pub fn new<D: D3dBufferData>(
+        device: &Dx11Device,
+        count: Option<usize>,
+        flags: BufferFlags,
+    ) -> anyhow::Result<Self> {
         let count = count.unwrap_or(1);
         let desc = Self::desc_for::<D>(count, flags);
-        Buffer::new_with_desc::<D>(device, &desc, None).map(|b| unsafe {
-            Self::with_parts(b, D::stride(), count, 0)
-        })
+        Buffer::new_with_desc::<D>(device, &desc, None)
+            .map(|b| unsafe { Self::with_parts(b, D::stride(), count, 0) })
     }
 
     pub fn desc_for<D: D3dBufferData>(len: usize, flags: BufferFlags) -> D3D11_BUFFER_DESC {
@@ -65,10 +73,15 @@ impl VertexBuffer {
         let mut strides = [0u32; N];
         let mut offsets = [0u32; N];
         unsafe {
-            context.IAGetVertexBuffers(slot, buffers.len() as u32, Some(buffers.as_mut_ptr()), Some(strides.as_mut_ptr()), Some(offsets.as_mut_ptr()));
+            context.IAGetVertexBuffers(
+                slot,
+                buffers.len() as u32,
+                Some(buffers.as_mut_ptr()),
+                Some(strides.as_mut_ptr()),
+                Some(offsets.as_mut_ptr()),
+            );
 
-            let buffers = buffers.iter_mut()
-                .zip(strides.iter().zip(offsets.iter()));
+            let buffers = buffers.iter_mut().zip(strides.iter().zip(offsets.iter()));
 
             let mut out = mem::MaybeUninit::<[Option<VertexBuffer>; N]>::uninit();
             let mut b = out.as_mut_ptr() as *mut Option<VertexBuffer>;
@@ -85,16 +98,23 @@ impl VertexBuffer {
         }
     }
 
-    pub fn set_all(device_context: &Dx11Context, slot: u32, buffers: &[&dyn D3d11ContextBindableVertexBuffer]) {
+    pub fn set_all(
+        device_context: &Dx11Context,
+        slot: u32,
+        buffers: &[&dyn D3d11ContextBindableVertexBuffer],
+    ) {
         Buffer::set_all_vertex(buffers, device_context, slot)
     }
 }
 
-pub unsafe trait D3d11ContextBindableVertexBuffer: D3dContextBindableVertexBuffer<Dx11Context> {
+pub unsafe trait D3d11ContextBindableVertexBuffer:
+    D3dContextBindableVertexBuffer<Dx11Context>
+{
 }
 unsafe impl<T> D3d11ContextBindableVertexBuffer for T where
-    T: D3dContextBindableVertexBuffer<Dx11Context>,
-{}
+    T: D3dContextBindableVertexBuffer<Dx11Context>
+{
+}
 
 unsafe impl D3dContextBindableVertexBuffer<Dx11Context> for VertexBuffer {
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void {

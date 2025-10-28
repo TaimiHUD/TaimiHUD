@@ -113,5 +113,7 @@ impl Counter {
     pub fn reset(&self, _amt: isize) {}
 
     #[inline(always)]
-    pub fn get(&self) -> isize { 0 }
+    pub fn get(&self) -> isize {
+        0
+    }
 }

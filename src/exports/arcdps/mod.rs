@@ -1,42 +1,53 @@
+#[cfg(feature = "space")]
+use {
+    crate::{controller::pathing::PathingEvent, space::Engine},
+    taimi_meta::ui::MapContext,
+};
 use {
     crate::{
-        controller::timers::{TimersController, TimersEvent}, exports::{self, runtime::{self as rt, imgui, RuntimeResult}}, marker::format::MarkerType, render::{machine::RenderMachine, RenderState}, settings::{state::{AddonHostName, BootstrapState}, ArcSettings}, with_i18n
-    }, arcdps::extras::{ExtrasVersion, UserInfoIter},
-    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink}, dpsapi::combat::{CombatArgs, CombatEvent}, log::Level, std::{
+        controller::timers::{TimersController, TimersEvent},
+        exports::{
+            self,
+            runtime::{self as rt, imgui, RuntimeResult},
+        },
+        marker::format::MarkerType,
+        render::{machine::RenderMachine, RenderState},
+        settings::{
+            state::{AddonHostName, BootstrapState},
+            ArcSettings,
+        },
+        with_i18n,
+    },
+    arcdps::extras::{ExtrasVersion, UserInfoIter},
+    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
+    dpsapi::combat::{CombatArgs, CombatEvent},
+    log::Level,
+    std::{
         ffi::{c_void, CStr, CString, OsStr},
         fmt::{self, Write},
         ops,
         panic,
         path::PathBuf,
         ptr::{self, NonNull},
-        sync::{atomic::{AtomicBool, AtomicPtr, Ordering}, Mutex},
+        sync::{
+            atomic::{AtomicBool, AtomicPtr, Ordering},
+            Mutex,
+        },
         thread,
         time::Duration,
-    }, windows::Win32::{
-        Foundation::{HMODULE, HWND},
-        UI::{
-            Input::KeyboardAndMouse, WindowsAndMessaging
-        },
-    }
-};
-#[cfg(feature = "space")]
-use {
-    crate::{
-        controller::pathing::PathingEvent,
-        space::Engine,
     },
-    taimi_meta::ui::MapContext,
+    windows::Win32::{
+        Foundation::{HMODULE, HWND},
+        UI::{Input::KeyboardAndMouse, WindowsAndMessaging},
+    },
 };
 #[cfg(feature = "extension-arcdps-extern")]
-use {
-    dpsapi::api::ApiExports as _,
-    std::mem::transmute,
-};
+use {dpsapi::api::ApiExports as _, std::mem::transmute};
 
-#[cfg(feature = "extension-arcdps-extern")]
-pub(crate) mod r#extern;
 #[cfg(feature = "extension-arcdps-codegen")]
 pub(crate) mod cb;
+#[cfg(feature = "extension-arcdps-extern")]
+pub(crate) mod r#extern;
 #[cfg(feature = "extension-arcdps-extras")]
 pub(crate) mod unofficial_extras;
 
@@ -51,10 +62,8 @@ fn early_init() {
         Ok(ml) => {
             log::debug!("MumbleLink initialized");
             match MUMBLE_LINK.lock() {
-                Ok(mut lock) =>
-                    *lock = Some(ml),
-                Err(..) =>
-                    log::error!("MumbleLink poisoned"),
+                Ok(mut lock) => *lock = Some(ml),
+                Err(..) => log::error!("MumbleLink poisoned"),
             }
         },
         Err(e) => {
@@ -93,13 +102,15 @@ fn check_for_nexus_link() -> bool {
         format!("DL_NEXUS_LINK_{process_id}\0")
     };
     let res = unsafe {
-        OpenFileMappingA(FILE_MAP_READ.0, false, PCSTR(object_name.as_ptr() as *const _))
+        OpenFileMappingA(
+            FILE_MAP_READ.0,
+            false,
+            PCSTR(object_name.as_ptr() as *const _),
+        )
     };
     match res {
         Ok(handle) => {
-            let cleanup = unsafe {
-                CloseHandle(handle)
-            };
+            let cleanup = unsafe { CloseHandle(handle) };
             if let Err(e) = cleanup {
                 log::warn!("Failed to clean up mapped handle after checking for NexusLink: {e}");
             }
@@ -107,7 +118,8 @@ fn check_for_nexus_link() -> bool {
         },
         Err(_e) => {
             // TODO: does it matter what error code we expect, ERROR_OBJECT_NOT_FOUND?
-            #[cfg(debug_assertions)] {
+            #[cfg(debug_assertions)]
+            {
                 log::debug!("NexusLink({object_name}) unavailable: {_e}");
             }
             false
@@ -124,13 +136,17 @@ pub(crate) fn check_for_nexus() -> bool {
 pub(crate) fn has_extension(sig: u32) -> Option<bool> {
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
-        () if cb::available() && arcdps::exports::has_list_extension() => Some(cb::has_extension(sig)),
+        () if cb::available() && arcdps::exports::has_list_extension() => {
+            Some(cb::has_extension(sig))
+        },
         #[cfg(feature = "extension-arcdps-extern")]
         () => match r#extern::arc_args() {
             Some(arc) => {
                 let mut has_ext = false;
-                let res = arc.module.extension_list(|exp| if exp.sig().map(|s| s.get()).unwrap_or_default() == sig {
-                    has_ext = true;
+                let res = arc.module.extension_list(|exp| {
+                    if exp.sig().map(|s| s.get()).unwrap_or_default() == sig {
+                        has_ext = true;
+                    }
                 });
                 res.ok().map(|_| has_ext)
             },
@@ -158,8 +174,7 @@ fn init() -> Result<(), &'static str> {
         init_continue_with_nexus()?;
     }
 
-    let res = crate::init()
-        .and_then(|()| crate::load_arcdps());
+    let res = crate::init().and_then(|()| crate::load_arcdps());
 
     if res.is_err() {
         RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
@@ -184,9 +199,7 @@ fn init_continue_with_nexus() -> Result<(), &'static str> {
 
 fn release() {
     log::trace!("arcdps release");
-    let _ = MUMBLE_LINK.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+    let _ = MUMBLE_LINK.lock().unwrap_or_else(|e| e.into_inner()).take();
 
     let unloading = available() && !rt::nexus_available();
     if unloading {
@@ -219,35 +232,27 @@ impl ExitHandle {
     pub fn try_exit() -> RuntimeResult<Option<Self>> {
         let handle = match loaded() {
             true => match unload_self()? {
-                Some(handle) if !handle.is_invalid() => {
-                    Some(handle)
-                },
+                Some(handle) if !handle.is_invalid() => Some(handle),
                 _ => None,
             },
             false => None,
         };
 
-        Ok(handle.map(|own_handle| Self {
-            own_handle,
-        }))
+        Ok(handle.map(|own_handle| Self { own_handle }))
     }
 
     #[cfg(todo)]
     pub fn free_and_pray(self) {
         use windows::Win32::System::LibraryLoader::FreeLibraryAndExitThread;
 
-        unsafe {
-            FreeLibraryAndExitThread(self.own_handle, 0)
-        };
+        unsafe { FreeLibraryAndExitThread(self.own_handle, 0) };
     }
 
     pub fn free_and_exit(self) -> ! {
         use windows::Win32::System::LibraryLoader::FreeLibraryAndExitThread;
 
         log::info!("goodbye");
-        unsafe {
-            FreeLibraryAndExitThread(self.own_handle, 0)
-        };
+        unsafe { FreeLibraryAndExitThread(self.own_handle, 0) };
     }
 
     pub fn spawn_free(self) {
@@ -301,7 +306,9 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
 
     IS_INGAME.store(not_charsel_loading, Ordering::Relaxed);
 
-    if !available { return }
+    if !available {
+        return
+    }
 
     RenderMachine::turn_ui_entry(ui);
 
@@ -331,9 +338,13 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         None => return hide_checkbox,
     };
     for &binding in ArcSettings::VK_WINDOWS {
-        let Some(window) = binding.window_name() else { continue };
+        let Some(window) = binding.window_name() else {
+            continue
+        };
         let window_id = format!("{window}-window");
-        let Some(state) = settings.get_window_state_mut(window) else { continue };
+        let Some(state) = settings.get_window_state_mut(window) else {
+            continue
+        };
         if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
             // just mutating settings is enough?
         }
@@ -345,11 +356,15 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
 /// Filtered means we only receive input events if the configured
 /// [modifier keys](ui_modifiers) are being held down..?
 fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
-    if !available() { return msg }
+    if !available() {
+        return msg
+    }
 
     match msg {
-        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN
-        | WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP => {
+        WindowsAndMessaging::WM_KEYDOWN
+        | WindowsAndMessaging::WM_SYSKEYDOWN
+        | WindowsAndMessaging::WM_KEYUP
+        | WindowsAndMessaging::WM_SYSKEYUP => {
             // no such thing as a duplicate keyup event, but just in case...
             let prev_down = l & (1 << 30) != 0;
             let repeat = l & 0xff;
@@ -357,11 +372,13 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             // NOTE: modifiers may be released prior to key release, so this needs to
             // trigger on press to be reliable
             // (resolving this likely requires switching to the non-filtered callback)
-            let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
+            let is_up = matches!(
+                msg,
+                WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP
+            );
             let is_trigger = !is_up && repeat == 1;
             let is_release = is_up && prev_down;
-            let settings = crate::SETTINGS.get()
-                .and_then(|s| s.try_read().ok());
+            let settings = crate::SETTINGS.get().and_then(|s| s.try_read().ok());
             let arc = match settings.as_ref().map(|s| s.arc()) {
                 Some(arc) => arc,
                 _ => {
@@ -374,7 +391,8 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 #[cfg(todo)]
                 0 => {
                     let sc = ((l >> 16) & 0xff) as u16;
-                    core::num::NonZeroU16::new(sc).and_then(rt::keyboard::scan_code_key)
+                    core::num::NonZeroU16::new(sc)
+                        .and_then(rt::keyboard::scan_code_key)
                         .unwrap_or(KeyboardAndMouse::VIRTUAL_KEY(sc))
                 },
                 w => KeyboardAndMouse::VIRTUAL_KEY(w as u16),
@@ -419,7 +437,10 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 if arc.binding_matches(binding, vk) {
                     bound = true;
                     if is_release == is_up {
-                        TimersController::try_send(TimersEvent::TimerKeyTrigger(binding.id.into(), is_release));
+                        TimersController::try_send(TimersEvent::TimerKeyTrigger(
+                            binding.id.into(),
+                            is_release,
+                        ));
                     }
                 }
             }
@@ -442,19 +463,28 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
 
 fn wnd(hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(todo)]
-    if !available() { return msg }
+    if !available() {
+        return msg
+    }
 
     // ignore duplicates since arcdps proxies these from nexus
     #[cfg(feature = "extension-nexus")]
-    if rt::nexus_available() { return msg }
+    if rt::nexus_available() {
+        return msg
+    }
 
     match msg {
         _ if !available() => (),
-        WindowsAndMessaging::WM_SIZE if matches!(w as u32, WindowsAndMessaging::SIZE_RESTORED | WindowsAndMessaging::SIZE_MAXIMIZED) => {
+        WindowsAndMessaging::WM_SIZE
+            if matches!(
+                w as u32,
+                WindowsAndMessaging::SIZE_RESTORED | WindowsAndMessaging::SIZE_MAXIMIZED
+            ) =>
+        {
             // TODO: does DPI scaling mess with this?
             let w = l as u16;
             let h = (l as u32) >> 16;
-            let newsize =[w as f32, h as f32];
+            let newsize = [w as f32, h as f32];
             crate::resize_render(Some(newsize));
         },
         _ => (),
@@ -498,18 +528,18 @@ pub(crate) fn update_url() -> Option<String> {
         return None
     }
 
-    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT) {
+    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT)
+    {
         Err(e) => {
             log::warn!("Update check failed: {e}");
             return None
         },
         Ok(release) => release,
     };
-    let dll_url = rt::update::Updater::notify_latest(&release)
-        .and_then(|auth| match auth {
-            true => release.dll_url().map(Some),
-            false => Ok(None),
-        });
+    let dll_url = rt::update::Updater::notify_latest(&release).and_then(|auth| match auth {
+        true => release.dll_url().map(Some),
+        false => Ok(None),
+    });
     match dll_url {
         Err(e) => {
             log::warn!("{e:#}");
@@ -521,11 +551,12 @@ pub(crate) fn update_url() -> Option<String> {
 }
 
 fn combat_local(event: CombatArgs) {
-    if !available() { return }
+    if !available() {
+        return
+    }
 
     match event.event() {
-        Some(CombatEvent::Skill(..)) =>
-            event.borrow_imp(crate::receive_evtc_local),
+        Some(CombatEvent::Skill(..)) => event.borrow_imp(crate::receive_evtc_local),
         Some(CombatEvent::Agent(agent)) if agent.is_self().get() => {
             if let Some(name) = agent.account_names() {
                 crate::receive_account_name(name.to_string_lossy());
@@ -549,7 +580,9 @@ fn extras_init(info: ExtrasVersion) {
 
 #[cfg(feature = "extension-arcdps-extras")]
 fn extras_squad_update(members: UserInfoIter) {
-    if !available() { return }
+    if !available() {
+        return
+    }
 
     crate::receive_squad_update(members)
 }
@@ -596,10 +629,14 @@ pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
             arcdps::exports::raw::free_extension(SIG).0
         })),
         #[cfg(feature = "extension-arcdps-extern")]
-        () => r#extern::arc_args().and_then(|arc| unsafe {
-            arc.module.arc_extension_remove2(Some(r#extern::ARC_SIG))
-        }.ok().map(|module| HMODULE(module.0))),
-    }.ok_or(NO_EXPORT).map(Some)
+        () => r#extern::arc_args().and_then(|arc| {
+            unsafe { arc.module.arc_extension_remove2(Some(r#extern::ARC_SIG)) }
+                .ok()
+                .map(|module| HMODULE(module.0))
+        }),
+    }
+    .ok_or(NO_EXPORT)
+    .map(Some)
 }
 
 pub fn extras_available() -> bool {
@@ -616,7 +653,8 @@ pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
         () => arcdps::exports::config_path(),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args().and_then(|arc| arc.module.get_ini_path().ok()),
-    }.ok_or(NO_EXPORT)
+    }
+    .ok_or(NO_EXPORT)
     .and_then(|mut path| match path.pop() {
         // remove ini leaf from path...
         true => Ok(path),
@@ -645,20 +683,28 @@ pub fn log_window_filter(metadata: &log::Metadata) -> bool {
         _ if !loaded() => false,
         #[cfg(not(debug_assertions))]
         #[cfg(feature = "extension-nexus")]
-        Level::Trace | Level::Debug | Level::Info if !available() && exports::nexus::available() => false,
+        Level::Trace | Level::Debug | Level::Info
+            if !available() && exports::nexus::available() =>
+        {
+            false
+        },
         #[cfg(not(debug_assertions))]
         Level::Trace | Level::Debug => false,
         _ if metadata.target().starts_with("taimi_pack::") =>
-            // avoid visual spam since most packs are full of missing or broken data...
-            false,
+        // avoid visual spam since most packs are full of missing or broken data...
+        {
+            false
+        },
         _ => true,
     }
 }
 
-pub fn log_write_record_buffer(w: &mut rt::log::LogBuffer, record: &log::Record) -> Result<ops::Range<usize>, fmt::Error> {
+pub fn log_write_record_buffer(
+    w: &mut rt::log::LogBuffer,
+    record: &log::Record,
+) -> Result<ops::Range<usize>, fmt::Error> {
     let colour = match record.level() {
-        _ if !log_window_filter(record.metadata()) =>
-            None,
+        _ if !log_window_filter(record.metadata()) => None,
         Level::Error => Some("#ff0000"),
         Level::Warn => Some("#ffa0a0"),
         Level::Debug => Some("#80a0a0"),
@@ -701,9 +747,7 @@ fn log_window_message(message: &CStr) -> RuntimeResult<()> {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_e8_log_window() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
-        () => Some(unsafe {
-            arcdps::exports::raw::e8_log_window(message.as_ptr())
-        }),
+        () => Some(unsafe { arcdps::exports::raw::e8_log_window(message.as_ptr()) }),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args().and_then(|arc| {
             static LOG_WINDOW_EXPORT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
@@ -716,14 +760,12 @@ fn log_window_message(message: &CStr) -> RuntimeResult<()> {
                     }
                     export
                 },
-                p => unsafe {
-                    transmute(p)
-                },
-            }.map(|e| unsafe {
-                e(Some(message.into()))
-            })
+                p => unsafe { transmute(p) },
+            }
+            .map(|e| unsafe { e(Some(message.into())) })
         }),
-    }.ok_or(NO_EXPORT)
+    }
+    .ok_or(NO_EXPORT)
 }
 
 pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
@@ -739,9 +781,7 @@ pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !cb::available() || !arcdps::exports::has_e3_log_file() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
-        () => Some(unsafe {
-            arcdps::exports::raw::e3_log_file(message.as_ptr())
-        }),
+        () => Some(unsafe { arcdps::exports::raw::e3_log_file(message.as_ptr()) }),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args().and_then(|arc| {
             static LOG_EXPORT: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
@@ -754,14 +794,13 @@ pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()
                     }
                     export
                 },
-                p => unsafe {
-                    transmute(p)
-                },
-            }.map(|e| unsafe {
-                e(Some(message.into()))
-            })
+                p => unsafe { transmute(p) },
+            }
+            .map(|e| unsafe { e(Some(message.into())) })
         }),
-    }.ok_or(NO_EXPORT).map(Some)
+    }
+    .ok_or(NO_EXPORT)
+    .map(Some)
 }
 
 pub fn detect_language() -> RuntimeResult<Option<String>> {
@@ -778,12 +817,15 @@ pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<LinkedMem>>> {
         return Ok(None)
     }
 
-    MUMBLE_LINK.lock()
+    MUMBLE_LINK
+        .lock()
         .map_err(|_| "MumbleLink poisoned")
-        .and_then(|ml| ml.as_ref()
-            .map(|ml| ml.as_non_null())
-            .ok_or("MumbleLink unavailable")
-        ).map(Some)
+        .and_then(|ml| {
+            ml.as_ref()
+                .map(|ml| ml.as_non_null())
+                .ok_or("MumbleLink unavailable")
+        })
+        .map(Some)
 }
 
 pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<rt::NexusLink>>> {
@@ -802,7 +844,12 @@ pub fn rtapi() -> RuntimeResult<Option<rt::RealTimeApi>> {
     Err("RTAPI unsupported")
 }
 
-pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
+pub async fn press_marker_bind(
+    marker: MarkerType,
+    target: bool,
+    down: bool,
+    position: Option<rt::MousePosition>,
+) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
@@ -867,16 +914,16 @@ impl From<arcdps::exports::Modifiers> for ModifierKeys {
 pub fn ui_modifiers() -> ModifierKeys {
     match available() {
         #[cfg(feature = "extension-arcdps-codegen")]
-        true if !arcdps::exports::has_e7_ui_modifiers() =>
-            None,
+        true if !arcdps::exports::has_e7_ui_modifiers() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
-        true if arcdps::exports::has_e7_ui_modifiers() =>
-            Some(arcdps::exports::modifiers().into()),
+        true if arcdps::exports::has_e7_ui_modifiers() => Some(arcdps::exports::modifiers().into()),
         #[cfg(feature = "extension-arcdps-extern")]
-        true => r#extern::arc_args().and_then(|arc| arc.module.arc_ui_modifiers().ok())
+        true => r#extern::arc_args()
+            .and_then(|arc| arc.module.arc_ui_modifiers().ok())
             .map(Into::into),
         _ => None,
-    }.unwrap_or(ModifierKeys::ARC_DEFAULT)
+    }
+    .unwrap_or(ModifierKeys::ARC_DEFAULT)
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
@@ -890,5 +937,6 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
         () => r#extern::dxgi_swap_chain().map(|sc| sc.to_owned()),
         #[cfg(feature = "extension-arcdps-codegen")]
         () => cb::dxgi_swap_chain(),
-    }.map(Into::into))
+    }
+    .map(Into::into))
 }

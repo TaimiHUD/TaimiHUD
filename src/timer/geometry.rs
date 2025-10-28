@@ -187,7 +187,7 @@ impl PartialOrd<Vec3> for Position {
                     (false, false, true) => Some(Ordering::Less),
                     _ => None,
                 }
-            }
+            },
         }
     }
 }
@@ -222,12 +222,12 @@ impl Polytope {
             Polytope::NSphere { radius, center } => {
                 // sphere
                 center.distance(player) < *radius
-            }
+            },
             Polytope::NCuboid { pode, antipode } => {
                 let mins = pode.min(*antipode);
                 let maxes = pode.max(*antipode);
                 player >= mins && player <= maxes
-            }
+            },
         }
     }
 }

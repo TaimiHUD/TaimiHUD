@@ -17,9 +17,7 @@ pub fn save_state_backup(path: &Path) {
         log::debug!("Skipping backup of {}", path.display());
         return
     }
-    let ts = UNIX_EPOCH.elapsed()
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let ts = UNIX_EPOCH.elapsed().map(|d| d.as_secs()).unwrap_or(0);
 
     let mut backup_path = path.to_owned();
     {
@@ -29,9 +27,11 @@ pub fn save_state_backup(path: &Path) {
         let _ = write!(backup_os, ".bak.{ts}");
     }
 
-    log::warn!("Something went wrong! Saving backup to {} in case we lose your settings...", backup_path.display());
-    let res = fs::copy(path, &backup_path)
-        .context("Copying to backup");
+    log::warn!(
+        "Something went wrong! Saving backup to {} in case we lose your settings...",
+        backup_path.display()
+    );
+    let res = fs::copy(path, &backup_path).context("Copying to backup");
     if let Err(e) = res {
         log::error!("{e:#}");
     }

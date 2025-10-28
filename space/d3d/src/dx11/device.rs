@@ -1,15 +1,14 @@
-use crate::{
-    dx11::{
-        prelude::*,
-        buffer::ID3D11Buffer,
-        context::DeviceContext0,
-    },
-    device::D3dDevice,
-};
-
 pub use crate::dx11::d3d11::{
     ID3D11Device,
-    ID3D11Device1, ID3D11Device2, ID3D11Device3, ID3D11Device4, ID3D11Device5,
+    ID3D11Device1,
+    ID3D11Device2,
+    ID3D11Device3,
+    ID3D11Device4,
+    ID3D11Device5,
+};
+use crate::{
+    device::D3dDevice,
+    dx11::{buffer::ID3D11Buffer, context::DeviceContext0, prelude::*},
 };
 
 impl D3dDevice for ID3D11Device {
@@ -27,10 +26,9 @@ impl_d3d! {
 
 impl Device0 {
     pub fn get_immediate_context(&self) -> anyhow::Result<DeviceContext0> {
-        unsafe {
-            self.device.GetImmediateContext()
-        }.context("ID3D11Device::GetImmediateContext")
-        .map(Into::into)
+        unsafe { self.device.GetImmediateContext() }
+            .context("ID3D11Device::GetImmediateContext")
+            .map(Into::into)
     }
 }
 

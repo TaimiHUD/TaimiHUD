@@ -1,7 +1,7 @@
 use {
     crate::settings::Settings,
+    serde::{Deserialize, Serialize},
     std::{collections::HashMap, fmt},
-    serde::{Serialize, Deserialize},
     windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY},
 };
 
@@ -18,9 +18,12 @@ impl ArcSettings {
     pub const VK_WINDOW_TOGGLE_TIMERS: ArcVk = ArcVk::new("timer-window-toggle", vk::VK_K);
     pub const VK_WINDOW_TOGGLE_MARKERS: ArcVk = ArcVk::new("marker-window-toggle", vk::VK_L);
     pub const VK_WINDOW_TOGGLE_PATHING: ArcVk = ArcVk::new("pathing-window-toggle", vk::VK_N);
-    pub const VK_RENDER_TOGGLE_PATHING: ArcVk = ArcVk::new("pathing-render-toggle", vk::VK_OEM_COMMA);
-    pub const VK_RENDER_TOGGLE_PATHING_MINIMAP: ArcVk = ArcVk::new("pathing-render-minimap-toggle", vk::VK_F2);
-    pub const VK_RENDER_TOGGLE_PATHING_MAP: ArcVk = ArcVk::new("pathing-render-map-toggle", vk::VK_F1);
+    pub const VK_RENDER_TOGGLE_PATHING: ArcVk =
+        ArcVk::new("pathing-render-toggle", vk::VK_OEM_COMMA);
+    pub const VK_RENDER_TOGGLE_PATHING_MINIMAP: ArcVk =
+        ArcVk::new("pathing-render-minimap-toggle", vk::VK_F2);
+    pub const VK_RENDER_TOGGLE_PATHING_MAP: ArcVk =
+        ArcVk::new("pathing-render-map-toggle", vk::VK_F1);
     pub const VK_TIMER_RESET: ArcVk = ArcVk::empty("timer-key-reset");
     pub const VK_TIMER_TRIGGERS: [ArcVk; 5] = [
         ArcVk::empty("timer-key-trigger-0"),
@@ -40,7 +43,10 @@ impl ArcSettings {
     ];
 
     pub fn get_vk(&self, binding: &ArcVk) -> Option<VIRTUAL_KEY> {
-        self.bind_vks.get(binding.id).copied().map(VIRTUAL_KEY)
+        self.bind_vks
+            .get(binding.id)
+            .copied()
+            .map(VIRTUAL_KEY)
             .or(binding.vkeycode_default())
     }
 
@@ -53,7 +59,9 @@ impl ArcSettings {
 
     #[cfg(todo = "unused")]
     pub fn update_preference(&self) -> &ArcUpdatePreference {
-        self.update_preference.as_ref().unwrap_or(&ArcUpdatePreference::ASK)
+        self.update_preference
+            .as_ref()
+            .unwrap_or(&ArcUpdatePreference::ASK)
     }
 
     #[cfg(todo = "unused")]
@@ -62,7 +70,9 @@ impl ArcSettings {
             ArcUpdatePreference::Never => {
                 self.update_remote_version = None;
             },
-            ArcUpdatePreference::Ask { authorized: Some(Ok(xthorized) | Err(xthorized)) } if Some(xthorized) != self.update_remote_version.as_ref() => {
+            ArcUpdatePreference::Ask {
+                authorized: Some(Ok(xthorized) | Err(xthorized)),
+            } if Some(xthorized) != self.update_remote_version.as_ref() => {
                 self.update_remote_version = None;
             },
             _ => (),
@@ -139,11 +149,14 @@ impl ArcVk {
                 0 => bind_vks.remove(self.id),
                 v => bind_vks.insert(self.id.into(), v),
             }
-        }).map(drop)
+        })
+        .map(drop)
     }
 }
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(
+    Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
 pub enum InvokeMethod {
     /// SendInput
     Input,
@@ -168,15 +181,9 @@ pub enum ArcUpdatePreference {
 }
 
 impl ArcUpdatePreference {
-    pub const ASK: Self = Self::Ask {
-        authorized: None,
-    };
+    pub const ASK: Self = Self::Ask { authorized: None };
 
-    pub const OPTIONS: [Self; 3] = [
-        Self::Never,
-        Self::ASK,
-        Self::Always,
-    ];
+    pub const OPTIONS: [Self; 3] = [Self::Never, Self::ASK, Self::Always];
 
     pub fn ask_allow<V: Into<String>>(version: V) -> Self {
         Self::Ask {
@@ -215,16 +222,24 @@ impl ArcUpdatePreference {
 
     pub fn authorizes_version(&self, version: &str) -> Option<bool> {
         match self {
-            Self::Once { authorized } | Self::Ask { authorized: Some(Ok(authorized)) } if authorized == version => Some(true),
+            Self::Once { authorized }
+            | Self::Ask {
+                authorized: Some(Ok(authorized)),
+            } if authorized == version => Some(true),
             Self::Once { .. } => Some(false),
-            Self::Ask { authorized: Some(Err(unauthorized)) } if unauthorized == version => Some(false),
+            Self::Ask {
+                authorized: Some(Err(unauthorized)),
+            } if unauthorized == version => Some(false),
             _ => self.blanket_authorization(),
         }
     }
 
     pub fn will_authorize(&self) -> Option<bool> {
         match self {
-            Self::Once { .. } | Self::Ask { authorized: Some(Ok(..)) } => Some(true),
+            Self::Once { .. }
+            | Self::Ask {
+                authorized: Some(Ok(..)),
+            } => Some(true),
             _ => self.blanket_authorization(),
         }
     }
@@ -266,8 +281,12 @@ impl ArcUpdatePreference {
 impl fmt::Display for ArcUpdatePreference {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Ask { authorized: Some(Ok(v)) } => write!(f, "Allow {v}"),
-            Self::Ask { authorized: Some(Err(v)) } => write!(f, "Ignore {v}"),
+            Self::Ask {
+                authorized: Some(Ok(v)),
+            } => write!(f, "Allow {v}"),
+            Self::Ask {
+                authorized: Some(Err(v)),
+            } => write!(f, "Ignore {v}"),
             Self::Once { authorized: v } => write!(f, "Just {v}"),
             pref => f.write_str(pref.as_str()),
         }

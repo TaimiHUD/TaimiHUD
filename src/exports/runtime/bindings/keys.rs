@@ -1,7 +1,4 @@
-use {
-    bitvec::array::BitArray,
-    taimi_input::win::keyboard::KeyState,
-};
+use {bitvec::array::BitArray, taimi_input::win::keyboard::KeyState};
 
 pub const KEY_PRESS_BITS: usize = 256;
 pub type KeyPresses = BitArray<[u64; KEY_PRESS_BITS / 64]>;

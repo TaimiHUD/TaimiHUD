@@ -1,11 +1,6 @@
 use {
+    crate::{category::Category, loader::PackLoaderContext, poi::Poi, trail::Trail},
     anyhow::Context,
-    crate::{
-        category::Category,
-        loader::PackLoaderContext,
-        poi::Poi,
-        trail::Trail,
-    },
     indexmap::{map::Entry, IndexMap, IndexSet},
     std::{
         fmt,
@@ -37,13 +32,10 @@ impl Pack {
         let pack_defs = loader.all_files_with_ext_owned("xml");
         let mut error = None;
         for def in pack_defs {
-            let res = def.and_then(|def|
-                parse_pack_def(&mut pack, loader, &def.to_string_lossy())
-            );
+            let res = def.and_then(|def| parse_pack_def(&mut pack, loader, &def.to_string_lossy()));
             match res {
                 Ok(()) => (),
-                Err(e) if strict =>
-                    return Err(e.into()),
+                Err(e) if strict => return Err(e.into()),
                 Err(e) => {
                     log::error!("Pack load failure: {e:#}");
                     error.get_or_insert(e);
@@ -52,8 +44,7 @@ impl Pack {
         }
 
         match error {
-            Some(e) if pack.is_empty() =>
-                return Err(e.into()),
+            Some(e) if pack.is_empty() => return Err(e.into()),
             _ => (),
         }
 
@@ -100,7 +91,9 @@ pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
     if path.len() != locator.len() {
         return false
     }
-    locator.iter().zip(path.iter())
+    locator
+        .iter()
+        .zip(path.iter())
         .all(|(&l, &p)| match (l, p) {
             // path seps whee
             (b'/', b'\\') | (b'\\', b'/') => true,
@@ -187,7 +180,14 @@ fn inner_parse_pack_def(
         let elem = parser.next()?;
         let elem = match elem {
             #[cfg(feature = "fixup-ladyelyssa")]
-            XmlEvent::StartElement { name, attributes, namespace } if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") => {
+            XmlEvent::StartElement {
+                name,
+                attributes,
+                namespace,
+            } if name
+                .local_name
+                .eq_ignore_ascii_case("MarkerCategorykerCategory") =>
+            {
                 // LadyElyssa.taco typo/corruption
                 log::debug!("compensating for invalid element {name}");
                 XmlEvent::StartElement {
@@ -197,7 +197,11 @@ fn inner_parse_pack_def(
                 }
             },
             #[cfg(feature = "fixup-ladyelyssa")]
-            XmlEvent::EndElement { name } if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") => {
+            XmlEvent::EndElement { name }
+                if name
+                    .local_name
+                    .eq_ignore_ascii_case("MarkerCategorykerCategory") =>
+            {
                 log::debug!("compensating for invalid element {name}");
                 XmlEvent::EndElement {
                     name: OwnedName::local("markercategory"),
@@ -207,13 +211,28 @@ fn inner_parse_pack_def(
         };
         match &elem {
             #[cfg(feature = "fixup-tehstrails")]
-            XmlEvent::StartElement { name, .. } if name.local_name.eq_ignore_ascii_case("poi") && parse_stack.last().map(|p| matches!(p, PartialItem::OverlayData)).unwrap_or(false) => {
+            XmlEvent::StartElement { name, .. }
+                if name.local_name.eq_ignore_ascii_case("poi")
+                    && parse_stack
+                        .last()
+                        .map(|p| matches!(p, PartialItem::OverlayData))
+                        .unwrap_or(false) =>
+            {
                 // TehsTrails/Parser/TehsTrails.xml issue
-                log::debug!("compensating for invalid element <{}> inside OverlayData", name);
+                log::debug!(
+                    "compensating for invalid element <{}> inside OverlayData",
+                    name
+                );
                 parse_stack.push(PartialItem::PoiGroup);
             },
             #[cfg(feature = "fixup-tehstrails")]
-            XmlEvent::EndElement { name, .. } if name.local_name.eq_ignore_ascii_case("overlaydata") && parse_stack.last().map(|p| matches!(p, PartialItem::PoiGroup)).unwrap_or(false) => {
+            XmlEvent::EndElement { name, .. }
+                if name.local_name.eq_ignore_ascii_case("overlaydata")
+                    && parse_stack
+                        .last()
+                        .map(|p| matches!(p, PartialItem::PoiGroup))
+                        .unwrap_or(false) =>
+            {
                 parse_stack.pop();
             },
             _ => (),
@@ -225,56 +244,66 @@ fn inner_parse_pack_def(
                 match name.local_name.to_ascii_lowercase().as_str() {
                     "overlaydata" => {
                         parse_stack.push(PartialItem::OverlayData);
-                    }
+                    },
                     "markercategory" => {
                         let category = Category::from_xml(&parse_stack, attributes)?;
                         parse_stack.push(PartialItem::MarkerCategory(category));
-                    }
+                    },
                     "pois" => {
                         parse_stack.push(PartialItem::PoiGroup);
-                    }
+                    },
                     "poi" => match Poi::from_xml(asset, attributes) {
                         Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
                         Err(e) => {
                             log::warn!("POI parse failed in {asset}: {e:#}");
                             parse_stack.push(PartialItem::PoisonElem);
-                        }
+                        },
                     },
                     "trail" => {
-                        let trail = Trail::from_xml(asset, attributes)
-                            .and_then(|mut trail| {
-                                if trail.map_id.is_none() {
-                                    trail.update_map_id(ctx)?
-                                }
-                                Ok(trail)
-                            });
+                        let trail = Trail::from_xml(asset, attributes).and_then(|mut trail| {
+                            if trail.map_id.is_none() {
+                                trail.update_map_id(ctx)?
+                            }
+                            Ok(trail)
+                        });
                         match trail {
                             Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                             Err(e) => {
                                 log::warn!("Trail parse failed in {asset}: {e:#}");
                                 parse_stack.push(PartialItem::PoisonElem);
-                            }
+                            },
                         }
                     },
-                    _ => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
+                    _ => anyhow::bail!(
+                        "Unexpected <{name}> while parsing {}",
+                        parse_stack.last().unwrap_or(&PartialItem::PoisonElem)
+                    ),
                 }
-            }
+            },
             #[cfg(feature = "fixup-typos")]
-            XmlEvent::StartElement { name, .. } | XmlEvent::EndElement { name, .. } if name.local_name.eq_ignore_ascii_case("route") => {
+            XmlEvent::StartElement { name, .. } | XmlEvent::EndElement { name, .. }
+                if name.local_name.eq_ignore_ascii_case("route") =>
+            {
                 // GW2 TacO ReActif FR Externe.taco?
                 log::warn!("ignoring unsupported <{name}> group");
             },
-            XmlEvent::StartElement { name, .. } => anyhow::bail!("Unexpected <{name}> while parsing {}", parse_stack.last().unwrap_or(&PartialItem::PoisonElem)),
+            XmlEvent::StartElement { name, .. } => anyhow::bail!(
+                "Unexpected <{name}> while parsing {}",
+                parse_stack.last().unwrap_or(&PartialItem::PoisonElem)
+            ),
             XmlEvent::EndElement { .. }
-                if parse_stack.last().map(|i| matches!(i, PartialItem::PoisonElem)).unwrap_or(false) =>
+                if parse_stack
+                    .last()
+                    .map(|i| matches!(i, PartialItem::PoisonElem))
+                    .unwrap_or(false) =>
             {
                 parse_stack.pop();
-            }
+            },
             XmlEvent::EndElement { name } if valid_elem_end(parse_stack.last(), &name) => {
                 match name.local_name.to_ascii_lowercase().as_str() {
                     "overlaydata" | "pois" => {
                         parse_stack.pop();
-                    }
+                    },
                     "markercategory" => {
                         let Some(PartialItem::MarkerCategory(category)) = parse_stack.pop() else {
                             anyhow::bail!("Inconsistent internal state");
@@ -285,11 +314,11 @@ fn inner_parse_pack_def(
                                 pack.categories
                                     .root_categories
                                     .insert(category.full_id.clone());
-                            }
+                            },
                             Some(PartialItem::MarkerCategory(parent)) => {
                                 let subs = Arc::make_mut(&mut parent.sub_categories);
                                 subs.insert(category.id.clone(), category.full_id.clone());
-                            }
+                            },
                             _ => anyhow::bail!("Inconsistent internal state"),
                         }
                         match pack
@@ -299,44 +328,44 @@ fn inner_parse_pack_def(
                         {
                             Entry::Occupied(mut existing) => {
                                 existing.get_mut().merge(category);
-                            }
+                            },
                             Entry::Vacant(vacant) => {
                                 vacant.insert(category);
-                            }
+                            },
                         }
-                    }
+                    },
                     "poi" => {
                         let Some(PartialItem::Poi(poi)) = parse_stack.pop() else {
                             anyhow::bail!("Inconsistent internal state");
                         };
 
                         pack.pois.push(poi);
-                    }
+                    },
                     "trail" => {
                         let Some(PartialItem::Trail(trail)) = parse_stack.pop() else {
                             anyhow::bail!("Inconsistent internal state");
                         };
 
                         pack.trails.push(trail);
-                    }
+                    },
                     _ => anyhow::bail!("Unexpected </{name}>"),
                 }
-            }
+            },
             XmlEvent::EndElement { name } => {
                 anyhow::bail!("Unexpected </{name}>")
-            }
-            XmlEvent::StartDocument { .. } => {}
+            },
+            XmlEvent::StartDocument { .. } => {},
             XmlEvent::EndDocument => {
                 if !parse_stack.is_empty() {
                     anyhow::bail!("Unexpected end of document");
                 }
                 break;
-            }
-            XmlEvent::ProcessingInstruction { .. } => {}
-            XmlEvent::CData(_) => {}
-            XmlEvent::Comment(_) => {}
-            XmlEvent::Characters(_) => {}
-            XmlEvent::Whitespace(_) => {}
+            },
+            XmlEvent::ProcessingInstruction { .. } => {},
+            XmlEvent::CData(_) => {},
+            XmlEvent::Comment(_) => {},
+            XmlEvent::Characters(_) => {},
+            XmlEvent::Whitespace(_) => {},
         }
     }
     Ok(())
@@ -408,11 +437,7 @@ fn valid_elem_end(stack_top: Option<&PartialItem>, name: &OwnedName) -> bool {
 fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
     use {
         regex::{Captures, Regex, RegexBuilder, Replacer},
-        std::{
-            borrow::Cow,
-            fmt::Write,
-            sync::LazyLock,
-        },
+        std::{borrow::Cow, fmt::Write, sync::LazyLock},
     };
 
     macro_rules! pats {
@@ -422,18 +447,25 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
     }
     const PAT_FIXUP_AMPERSAND: &'static str = pats!(&);
     const PAT_FIXUP: &'static str = concat!(
-        r#"=\s*""#, pats!(&), "\"",
+        r#"=\s*""#,
+        pats!(&),
+        "\"",
         // reactif-en
-        "|", r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
-        "|", r#"(?<attr_nospace>fadeNear|zpos)\s*=\s*""#,
+        "|",
+        r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
+        "|",
+        r#"(?<attr_nospace>fadeNear|zpos)\s*=\s*""#,
         // rediche's WvW marker pack
-        "|", r#"(?<dup_attr>type)\s*=\s*"(?<dup_attr_v0>[^" ]+)"\s+type\s*=\s*"(?<dup_attr_v1>[^" ]+)""#,
-        "|", r#"(?<dup_attr1>miniMapVisibility)\s*=\s*"(?<dup_attr1_v0>[^" ]+)".+mapVisibility=[^ ]+ miniMapVisibility="(?<dup_attr1_v1>[^" ]+)""#,
+        "|",
+        r#"(?<dup_attr>type)\s*=\s*"(?<dup_attr_v0>[^" ]+)"\s+type\s*=\s*"(?<dup_attr_v1>[^" ]+)""#,
+        "|",
+        r#"(?<dup_attr1>miniMapVisibility)\s*=\s*"(?<dup_attr1_v0>[^" ]+)".+mapVisibility=[^ ]+ miniMapVisibility="(?<dup_attr1_v1>[^" ]+)""#,
     );
 
     fn new_regex(pattern: &'static str) -> Regex {
         let regex = RegexBuilder::new(pattern)
-            .multi_line(true).dot_matches_new_line(false)
+            .multi_line(true)
+            .dot_matches_new_line(false)
             .crlf(true)
             .unicode(true)
             .build();
@@ -451,9 +483,7 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
 
     /// return entire match as a fallback
     fn replacements_0<'a>(captures: &regex::Captures<'a>) -> &'a str {
-        captures.get(0)
-            .map(|m| m.as_str())
-            .unwrap_or_default()
+        captures.get(0).map(|m| m.as_str()).unwrap_or_default()
     }
     fn replacements_bad(captures: &regex::Captures, dst: &mut String) {
         log::error!("unexpected pack xml fixup match, this is a bug");
@@ -465,11 +495,14 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
     }
     impl Replacer for ReplacementsAmp {
         fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
-            if let (Some(amp_pre), amp_ok, Some(amp_post)) = (caps.name("amp_pre"), caps.name("amp_ok"), caps.name("amp_post")) {
+            if let (Some(amp_pre), amp_ok, Some(amp_post)) = (
+                caps.name("amp_pre"),
+                caps.name("amp_ok"),
+                caps.name("amp_post"),
+            ) {
                 let amp_pre = amp_pre.as_str();
                 let amp_post = amp_post.as_str();
-                let amp_ok = amp_ok.map(|ok| ok.as_str())
-                    .unwrap_or("amp;");
+                let amp_ok = amp_ok.map(|ok| ok.as_str()).unwrap_or("amp;");
                 let (prefix, postfix) = match self.rec {
                     false => (r#"=""#, "\""),
                     true => ("", ""),
@@ -507,15 +540,19 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                 let _ = write!(dst, " {attr_nospace}=\"");
             } else if let (Some(dup_attr), Some(dup_attr_v0), Some(dup_attr_v1)) = (
                 caps.name("dup_attr").or_else(|| caps.name("dup_attr1")),
-                caps.name("dup_attr_v0").or_else(|| caps.name("dup_attr1_v0")),
-                caps.name("dup_attr_v1").or_else(|| caps.name("dup_attr1_v1")),
+                caps.name("dup_attr_v0")
+                    .or_else(|| caps.name("dup_attr1_v0")),
+                caps.name("dup_attr_v1")
+                    .or_else(|| caps.name("dup_attr1_v1")),
             ) {
                 let dup_attr = dup_attr.as_str();
                 let dup_attr_v0 = dup_attr_v0.as_str();
                 let dup_attr_v1 = dup_attr_v1.as_str();
-                let dup_attr_mid = caps.name("dup_attr_mid")
+                let dup_attr_mid = caps
+                    .name("dup_attr_mid")
                     .or_else(|| caps.name("dup_attr1_mid"))
-                    .map(|m| m.as_str()).unwrap_or_default();
+                    .map(|m| m.as_str())
+                    .unwrap_or_default();
                 if dup_attr_v0 != dup_attr_v1 {
                     log::error!("pack contains inconsistent duplicate:  {dup_attr}={dup_attr_v0:?} and {dup_attr}={dup_attr_v1:?}");
                 }
@@ -532,15 +569,20 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
     const PAT_FIXUP_OVERLAYDATA: &'static str = r#"<(?<openclose>\/)?(?i)(?<tag>overlaydata)\b"#;
     static FIXUP_OVERLAYDATA: LazyLock<Regex> = LazyLock::new(|| new_regex(PAT_FIXUP_OVERLAYDATA));
 
-    let overlaydata_matches = |n: u8|
-        FIXUP_OVERLAYDATA.captures_iter(&pack_xml)
+    let overlaydata_matches = |n: u8| {
+        FIXUP_OVERLAYDATA
+            .captures_iter(&pack_xml)
             .filter_map(|x| x.name("tag"))
             .map(|m| m.as_str())
             .map(|m| m.as_bytes().get(0).copied())
-            .any(|o| o == Some(n));
+            .any(|o| o == Some(n))
+    };
     let inconsistent_case = overlaydata_matches(b'o') && overlaydata_matches(b'O');
     let pack_xml = match inconsistent_case {
-        true => FIXUP_OVERLAYDATA.replace_all(&pack_xml, "<${openclose}OverlayData").into_owned().into(),
+        true => FIXUP_OVERLAYDATA
+            .replace_all(&pack_xml, "<${openclose}OverlayData")
+            .into_owned()
+            .into(),
         false => pack_xml,
     };
     pack_xml

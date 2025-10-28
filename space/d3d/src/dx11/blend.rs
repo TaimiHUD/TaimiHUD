@@ -1,14 +1,11 @@
-use crate::{
-    dx11::prelude::*,
-    state::D3dState,
-    D3dContextBindable,
-};
-
 pub use crate::dx11::d3d11::{
-    ID3D11BlendState, D3D11_BLEND_DESC,
-    D3D11_BLEND, D3D11_BLEND_OP,
+    ID3D11BlendState,
+    D3D11_BLEND,
+    D3D11_BLEND_DESC,
+    D3D11_BLEND_OP,
     D3D11_RENDER_TARGET_BLEND_DESC,
 };
+use crate::{dx11::prelude::*, state::D3dState, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11BlendState;
@@ -21,24 +18,30 @@ impl BlendState {
     pub const DEFAULT_FACTOR: Vec4 = Vec4::ONE;
     pub const DEFAULT_MASK: u32 = u32::MAX;
 
-    pub const TARGET_DESC_DEFAULT_OFF: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
-        BlendEnable: BOOL(0),
-        SrcBlend: BlendFactor::ONE,
-        DestBlend: BlendFactor::ZERO,
-        BlendOp: BlendOp::ADD,
-        SrcBlendAlpha: BlendFactor::ONE,
-        DestBlendAlpha: BlendFactor::ZERO,
-        BlendOpAlpha: BlendOp::ADD,
-        RenderTargetWriteMask: d3d11::D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
-    };
-    pub const TARGET_DESC_ADDITIVE: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
-        BlendEnable: BOOL(1),
-        SrcBlend: BlendFactor::SRC_ALPHA,
-        DestBlend: BlendFactor::INV_SRC_ALPHA,
-        .. Self::TARGET_DESC_DEFAULT_OFF
-    };
+    pub const TARGET_DESC_DEFAULT_OFF: D3D11_RENDER_TARGET_BLEND_DESC =
+        D3D11_RENDER_TARGET_BLEND_DESC {
+            BlendEnable: BOOL(0),
+            SrcBlend: BlendFactor::ONE,
+            DestBlend: BlendFactor::ZERO,
+            BlendOp: BlendOp::ADD,
+            SrcBlendAlpha: BlendFactor::ONE,
+            DestBlendAlpha: BlendFactor::ZERO,
+            BlendOpAlpha: BlendOp::ADD,
+            RenderTargetWriteMask: d3d11::D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
+        };
+    pub const TARGET_DESC_ADDITIVE: D3D11_RENDER_TARGET_BLEND_DESC =
+        D3D11_RENDER_TARGET_BLEND_DESC {
+            BlendEnable: BOOL(1),
+            SrcBlend: BlendFactor::SRC_ALPHA,
+            DestBlend: BlendFactor::INV_SRC_ALPHA,
+            ..Self::TARGET_DESC_DEFAULT_OFF
+        };
 
-    pub const fn desc_for_target(rt_desc: D3D11_RENDER_TARGET_BLEND_DESC, alpha_to_coverage: bool, independent_blend: bool) -> D3D11_BLEND_DESC {
+    pub const fn desc_for_target(
+        rt_desc: D3D11_RENDER_TARGET_BLEND_DESC,
+        alpha_to_coverage: bool,
+        independent_blend: bool,
+    ) -> D3D11_BLEND_DESC {
         D3D11_BLEND_DESC {
             AlphaToCoverageEnable: BOOL(match alpha_to_coverage {
                 true => 1,
@@ -85,7 +88,8 @@ impl<B> OMBlendState<B> {
         }
     }
 
-    pub fn new_snapshot(context: &Dx11Context) -> Self where
+    pub fn new_snapshot(context: &Dx11Context) -> Self
+    where
         B: From<Option<ID3D11BlendState>>,
     {
         let mut state = None;
@@ -100,11 +104,13 @@ impl<B> OMBlendState<B> {
     }
 
     pub fn factor(&self) -> Option<&[f32; 4]> {
-        self.factor.as_ref()
+        self.factor
+            .as_ref()
             .map(|f| unsafe { &*(&raw const f.x as *const [f32; 4]) })
     }
 
-    pub fn clear(&mut self) where
+    pub fn clear(&mut self)
+    where
         B: Default,
     {
         self.sample_mask.take();
@@ -112,7 +118,8 @@ impl<B> OMBlendState<B> {
     }
 }
 
-impl<B> D3dContextBindable<Dx11Context> for OMBlendState<B> where
+impl<B> D3dContextBindable<Dx11Context> for OMBlendState<B>
+where
     //B: ID3D11ResourceExt<Output = ID3D11BlendState>,
     B: D3dInterfacePtr<Interface = ID3D11BlendState>,
 {
@@ -126,7 +133,8 @@ impl<B> D3dContextBindable<Dx11Context> for OMBlendState<B> where
     }
 }
 
-impl<B> D3dState<Dx11Context> for OMBlendState<B> where
+impl<B> D3dState<Dx11Context> for OMBlendState<B>
+where
     B: From<Option<ID3D11BlendState>>,
     Self: D3dContextBindable<Dx11Context>,
 {

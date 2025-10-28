@@ -4,9 +4,10 @@ use {
         exports::runtime::Counter,
         render::machine::RenderMachine,
         space::{
-            dx11::{RenderBackend, InstanceBufferData},
+            dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
-            DrawSpace, LocalContext,
+            DrawSpace,
+            LocalContext,
         },
     },
     anyhow::Context,
@@ -14,11 +15,11 @@ use {
     glamour::{Box3, Point3, Vector2},
     std::sync::Arc,
     taimi_d3d::{
-        state::PrimitiveTopology,
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
         },
+        state::PrimitiveTopology,
     },
     taimi_pack::Poi,
 };
@@ -46,7 +47,9 @@ impl PoiCommonRenderData {
         vertices.extend_from_slice(&Self::quad(LocalContext::MAP));
 
         let quad_vb = Model::from_vertices(vertices).to_buffer(&backend.device)?;
-        let shaders = backend.shaders.pair_named("poi")
+        let shaders = backend
+            .shaders
+            .pair_named("poi")
             .context("Failed to load POI shader")?;
 
         Ok(PoiCommonRenderData {
@@ -54,7 +57,7 @@ impl PoiCommonRenderData {
             #[cfg(todo)]
             quad_vb_map: VertexBuffer {
                 offset: self.quad_vb.offset + self.quad_vb.stride * POI_QUAD_VERTICES.len() as u32,
-                .. quad_vb.clone()
+                ..quad_vb.clone()
             },
             quad_vb,
             map_ib: None,
@@ -179,10 +182,12 @@ impl ActivePoi {
         category_idx: usize,
         device: &Dx11Device,
     ) -> anyhow::Result<ActivePoi> {
-        let icon_handle = poi.icon_name()
+        let icon_handle = poi
+            .icon_name()
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
         let icon_handle = loader.register_texture(icon_handle);
-        let icon = loader.get_or_load_texture(icon_handle, device)
+        let icon = loader
+            .get_or_load_texture(icon_handle, device)
             .context("Loading poi texture")?;
 
         let position = poi.position();
@@ -217,7 +222,8 @@ impl ActivePoi {
 
     pub fn instance_data(&self) -> InstanceBufferData {
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(self.scale)),
+            world: Mat4::from_translation(self.position.into())
+                * Mat4::from_scale(Vec3::splat(self.scale)),
             colour: self.tint(),
         }
     }
@@ -229,7 +235,8 @@ impl ActivePoi {
         // TODO: DPI/UI scaling is irrelevant here right?
         let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(scale.extend(scale.y).into()),
+            world: Mat4::from_translation(self.position.into())
+                * Mat4::from_scale(scale.extend(scale.y).into()),
             colour: self.tint(),
         }
     }
@@ -246,7 +253,12 @@ impl ActivePoi {
             LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,
         };
         unsafe {
-            device_context.DrawInstanced(PoiCommonRenderData::VERTEX_COUNT as u32, 1, voffset, render_idx as u32);
+            device_context.DrawInstanced(
+                PoiCommonRenderData::VERTEX_COUNT as u32,
+                1,
+                voffset,
+                render_idx as u32,
+            );
         }
         /*self.buffer.set(device_context, 1);
         unsafe {
@@ -268,9 +280,7 @@ impl PoiScale {
     pub const DEFAULT: Self = Self::new(0.0);
 
     pub const fn new(expansion: f32) -> Self {
-        Self {
-            expansion,
-        }
+        Self { expansion }
     }
 
     /// Convert from settings

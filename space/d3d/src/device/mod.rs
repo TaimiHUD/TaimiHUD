@@ -1,8 +1,6 @@
 use windows::core::Interface;
 
-pub use self::swapchain::{
-    SwapChain0, SwapChain1, SwapChain2, SwapChain3, SwapChain4,
-};
+pub use self::swapchain::{SwapChain0, SwapChain1, SwapChain2, SwapChain3, SwapChain4};
 
 pub mod swapchain;
 
@@ -30,18 +28,19 @@ pub trait D3dContextBindableSlot<D3DC> {
     fn set(&self, device_context: &D3DC, slot: u32);
 }
 
-impl<T: ?Sized, D3DC: D3dContext> D3dContextBindable<D3DC> for &'_ T where
+impl<T: ?Sized, D3DC: D3dContext> D3dContextBindable<D3DC> for &'_ T
+where
     T: D3dContextBindable<D3DC>,
 {
     fn set(&self, device_context: &D3DC) {
         D3dContextBindable::set(*self, device_context)
     }
 }
-impl<T: ?Sized, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for &'_ T where
+impl<T: ?Sized, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for &'_ T
+where
     T: D3dContextBindableSlot<D3DC>,
 {
     fn set(&self, device_context: &D3DC, slot: u32) {
         D3dContextBindableSlot::set(*self, device_context, slot)
     }
 }
-

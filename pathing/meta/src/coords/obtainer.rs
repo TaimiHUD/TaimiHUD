@@ -1,15 +1,6 @@
 use {
-    crate::coords::{
-        LocalPoint, LocalSpace,
-        MapLocalScale,
-        MapPoint, MapSpace,
-    },
-    glamour::{
-        Box2, Box3,
-        Point2,
-        Size3,
-        TransformMap,
-    },
+    crate::coords::{LocalPoint, LocalSpace, MapLocalScale, MapPoint, MapSpace},
+    glamour::{Box2, Box3, Point2, Size3, TransformMap},
 };
 
 /// we need to be able to figure out the axis directions, let's do this
@@ -106,27 +97,22 @@ impl SignObtainer {
 
     const SIGNIFIANT_THRESHOLD: f32 = 0.2;
     pub fn is_significant(sign: MapLocalScale) -> bool {
-        (sign.scale - MapLocalScale::COMMON.scale).abs()
-            .cmpgt(MapLocalScale::COMMON.scale * Self::SIGNIFIANT_THRESHOLD).all()
+        (sign.scale - MapLocalScale::COMMON.scale)
+            .abs()
+            .cmpgt(MapLocalScale::COMMON.scale * Self::SIGNIFIANT_THRESHOLD)
+            .all()
     }
 
     pub fn set(&mut self, scale: MapLocalScale, local: LocalPoint, global: MapPoint) {
         let size = Size3::<LocalSpace>::splat(Self::MIN_DIM).to_vector() / 2.0;
-        self.bounds = Box3::new(
-            local - size,
-            local + size,
-        );
+        self.bounds = Box3::new(local - size, local + size);
         let global_size = scale.map(size.truncate());
-        self.global = Box2::new(
-            global - global_size,
-            global + global_size,
-        );
+        self.global = Box2::new(global - global_size, global + global_size);
     }
 
     pub fn scale(&self) -> MapLocalScale {
         match self.get_scale() {
-            Some(sign) if Self::is_significant(sign) =>
-                sign,
+            Some(sign) if Self::is_significant(sign) => sign,
             _ => MapLocalScale::COMMON,
         }
     }

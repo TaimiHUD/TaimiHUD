@@ -1,29 +1,28 @@
 use {
     super::TimerWindowState,
-    anyhow::Context,
     crate::{
         controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent},
         exports::runtime::{self as rt, bindings},
         fl,
         render::{
-            element::{
-                keys::KeyBindSelection,
-                language::LanguageSelection,
-            },
+            element::{keys::KeyBindSelection, language::LanguageSelection},
             machine::RenderMachine,
-            RenderEvent, TextFont,
+            RenderEvent,
+            TextFont,
         },
-        settings::{
-            state::SaveState,
-            MarkerAutoPlaceSettings, Settings, SquadCondition,
-        },
+        settings::{state::SaveState, MarkerAutoPlaceSettings, Settings, SquadCondition},
         with_i18n,
-        Controller, ControllerEvent, MarkersController, MarkersEvent,
+        Controller,
+        ControllerEvent,
+        MarkersController,
+        MarkersEvent,
     },
+    anyhow::Context,
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
     strum::IntoEnumIterator,
     tokio::sync::watch,
 };
+
 #[cfg(feature = "extension-nexus")]
 use crate::exports::runtime::bindings::TaimiControls;
 #[cfg(feature = "updates")]
@@ -63,7 +62,12 @@ impl ConfigTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, timer_window_state: &mut TimerWindowState) {
+    pub fn draw(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        timer_window_state: &mut TimerWindowState,
+    ) {
         if self.save_changed.has_changed().ok() == Some(true) {
             self.bindings.clear_dirty();
         }
@@ -76,7 +80,9 @@ impl ConfigTabState {
         if ui.button(&fl!("quit")) {
             // XXX: this will wipe all of render state, rather than just katrender
             let mut render_sender = crate::RENDER_SENDER.write().unwrap();
-            let render_quit = render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit));
+            let render_quit = render_sender
+                .as_ref()
+                .map(|sender| sender.try_send(RenderEvent::Quit));
             if let Some(Ok(())) = render_quit {
                 let _ = render_sender.take();
                 let _ = crate::SPACE_SENDER.write().unwrap().take();
@@ -92,7 +98,11 @@ impl ConfigTabState {
 
         #[cfg(feature = "extension-nexus")]
         let nexus_ui = || {
-            use crate::exports::nexus::{quick_access_button_id, quick_access_add, quick_access_remove};
+            use crate::exports::nexus::{
+                quick_access_add,
+                quick_access_button_id,
+                quick_access_remove,
+            };
 
             if let Some(settings) = Settings::try_read() {
                 self.quick_access_icons_visible = settings.quick_access_visible.clone();
@@ -102,11 +112,17 @@ impl ConfigTabState {
             let prior_visible = self.quick_access_icons_visible;
             let mut changed = false;
             for (i, icon) in TaimiControls::QUICK_ACCESS_ICONS.into_iter().enumerate() {
-                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else { continue };
-                if i > 0 && i % 4 != 0 { ui.same_line(); }
-                changed |= with_i18n!(keybind, |name|
-                    ui.checkbox_flags(name, &mut self.quick_access_icons_visible, icon)
-                );
+                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else {
+                    continue
+                };
+                if i > 0 && i % 4 != 0 {
+                    ui.same_line();
+                }
+                changed |= with_i18n!(keybind, |name| ui.checkbox_flags(
+                    name,
+                    &mut self.quick_access_icons_visible,
+                    icon
+                ));
             }
 
             if changed {
@@ -130,10 +146,12 @@ impl ConfigTabState {
         #[cfg(feature = "updates")]
         let _update = TreeNode::new(&fl!("update"))
             .flags(TreeNodeFlags::FRAMED)
-            .opened(self.update_state.preference.will_authorize() != Some(false), Condition::Once)
+            .opened(
+                self.update_state.preference.will_authorize() != Some(false),
+                Condition::Once,
+            )
             .tree_push_on_open(true)
-            .build(ui, || self.update_state.draw(ui))
-        ;
+            .build(ui, || self.update_state.draw(ui));
 
         let markers_window_closure = || {
             if let Some(settings) = Settings::try_read() {
@@ -189,10 +207,10 @@ impl ConfigTabState {
                     match &mut self.marker_autoplace {
                         MarkerAutoPlaceSettings::OpenWindow(ref mut t) => {
                             *t = selection.clone();
-                        }
+                        },
                         MarkerAutoPlaceSettings::Place(ref mut t) => {
                             *t = selection.clone();
-                        }
+                        },
                         _ => (),
                     };
                     MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
@@ -298,16 +316,15 @@ impl ConfigTabState {
             if let Err(e) = res {
                 log::error!("{e:#}");
             }
-            BootstrapState::write_with(|state|
-                state.language = Some(language_id.into())
-            );
+            BootstrapState::write_with(|state| state.language = Some(language_id.into()));
         }
     }
 
     pub fn draw_gamebinds(&mut self, ui: &Ui) {
         with_i18n!("gamebind-notice", |msg| ui.text_wrapped(msg));
 
-        self.bindings.do_gamebinds(ui, bindings::interesting_controls());
+        self.bindings
+            .do_gamebinds(ui, bindings::interesting_controls());
         ui.separator();
         #[cfg(feature = "extension-nexus")]
         if self.gamebind_invoke.is_none() {
@@ -316,14 +333,18 @@ impl ConfigTabState {
         #[cfg(feature = "extension-nexus")]
         if let Some(gamebind_invoke) = &mut self.gamebind_invoke {
             // TODO: InvokeMethod dropdown
-            if crate::exports::runtime::nexus_available() && ui.checkbox("Precise Markers", gamebind_invoke) {
-                let _ = Settings::write_with_blocking(|settings|
-                    settings.arc_mut().gamebind_invoke = gamebind_invoke.then_some(Default::default())
-                );
+            if crate::exports::runtime::nexus_available()
+                && ui.checkbox("Precise Markers", gamebind_invoke)
+            {
+                let _ = Settings::write_with_blocking(|settings| {
+                    settings.arc_mut().gamebind_invoke =
+                        gamebind_invoke.then_some(Default::default())
+                });
             }
         }
         if self.gamebind_invoke == Some(true) || !rt::nexus_available() {
-            self.bindings.do_gamebinds(ui, bindings::interesting_keybinds());
+            self.bindings
+                .do_gamebinds(ui, bindings::interesting_keybinds());
         }
     }
 }
@@ -357,7 +378,9 @@ impl ConfigUpdateState {
         self.host_preference = state.update_host_preference().clone();
         //self.preference = state.update_preference().clone();
         self.remote_version = state.update_remote_version.clone();
-        self.remote_version_release = self.remote_version.clone()
+        self.remote_version_release = self
+            .remote_version
+            .clone()
             .and_then(|v| ResolvedVersion::with_version_id(v).ok());
     }
 
@@ -365,19 +388,24 @@ impl ConfigUpdateState {
         if self.changed.has_changed().ok() == Some(true) {
             self.sync_state();
         }
-        let mut index = UpdatePreference::OPTIONS.iter().position(|opt|
-            opt == &self.preference.as_option()
-        ).unwrap_or(0);
-        let auto_update = ui.combo("Auto-update", &mut index, &UpdatePreference::OPTIONS, |option| {
-            option.as_str().into()
-        });
+        let mut index = UpdatePreference::OPTIONS
+            .iter()
+            .position(|opt| opt == &self.preference.as_option())
+            .unwrap_or(0);
+        let auto_update = ui.combo(
+            "Auto-update",
+            &mut index,
+            &UpdatePreference::OPTIONS,
+            |option| option.as_str().into(),
+        );
         let mut new_pref = None;
         if auto_update {
             new_pref = UpdatePreference::OPTIONS.get(index).cloned();
         }
         if let Some(channel) = rt::update::crate_channel() {
             ui.text(&fl!("source-arg", source = channel));
-            ui.same_line(); ui.dummy([4.0, 0.0]);
+            ui.same_line();
+            ui.dummy([4.0, 0.0]);
             ui.same_line();
         }
         if with_i18n!("check-for-updates", |msg| ui.button(msg)) {
@@ -387,7 +415,9 @@ impl ConfigUpdateState {
             latest.is_update()
         } else if let Some(latest) = &self.remote_version {
             rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
-        } else { false };
+        } else {
+            false
+        };
         #[cfg(feature = "extension-nexus")]
         if !crate::built_info::IS_TAGGED_RELEASE && !up_to_date && rt::nexus_available() {
             ui.same_line();
@@ -403,7 +433,9 @@ impl ConfigUpdateState {
                 latest.is_update()
             } else if let Some(latest) = &self.remote_version {
                 rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
-            } else { false };
+            } else {
+                false
+            };
 
             if up_to_date {
                 with_i18n!("update-not-required", |msg| ui.text(msg));
@@ -422,16 +454,21 @@ impl ConfigUpdateState {
                     false
                 }
             }
-        } else { false };
+        } else {
+            false
+        };
         if auth_toggled || new_pref.is_some() {
             BootstrapState::write_with(|state| {
                 let pref = match new_pref {
-                    Some(pref) =>
-                        state.update_preference.insert(pref),
-                    None =>
-                        state.update_preference.get_or_insert_with(|| UpdatePreference::ASK),
+                    Some(pref) => state.update_preference.insert(pref),
+                    None => state
+                        .update_preference
+                        .get_or_insert_with(|| UpdatePreference::ASK),
                 };
-                if let Some(latest) = auth_toggled.then_some(self.remote_version.as_ref()).flatten() {
+                if let Some(latest) = auth_toggled
+                    .then_some(self.remote_version.as_ref())
+                    .flatten()
+                {
                     pref.authorize_update(latest.clone(), authorized);
                 }
             });

@@ -3,7 +3,8 @@ use {
     crate::timer::{BlishAlert, TimerAction, TimerAlert, TimerTrigger},
     serde::{
         de::{self, Error as _, MapAccess, Visitor},
-        Deserialize, Serialize,
+        Deserialize,
+        Serialize,
     },
     serde_json::Value,
 };

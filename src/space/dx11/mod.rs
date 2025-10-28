@@ -11,7 +11,8 @@ pub mod prelude {
 
 pub use {
     self::{
-        backend::RenderBackend, depth_handler::DepthHandler,
+        backend::RenderBackend,
+        depth_handler::DepthHandler,
         instance_buffer_data::InstanceBufferData,
         perspective_handler::PerspectiveHandler,
     },

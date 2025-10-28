@@ -1,17 +1,14 @@
-use {
-    anyhow::anyhow,
-    core::mem,
-};
+use {anyhow::anyhow, core::mem};
 
 pub mod gameplay;
+mod minimap;
 #[cfg(feature = "taimi_mumblelink")]
 pub mod mumblelink;
-mod minimap;
 mod worldmap;
 
 pub use self::{
     gameplay::GameplayState,
-    minimap::{CompassTransform, MinimapState, MinimapPlacement},
+    minimap::{CompassTransform, MinimapPlacement, MinimapState},
     worldmap::{MapCalibration, MapOpen, MapState, MapUnit, UiMap},
 };
 
@@ -36,30 +33,18 @@ impl UiSize {
     pub const MAX: Self = Self::Larger;
     pub const ZERO: Self = Self::Small;
 
-    pub const SCALE_FACTORS: [f32; 4] = [
-        0.9*0.9,
-        0.9,
-        1.0,
-        1.1,
-    ];
+    pub const SCALE_FACTORS: [f32; 4] = [0.9 * 0.9, 0.9, 1.0, 1.1];
     #[cfg(todo)]
     pub const SCALE_FACTORS: [f32; 4] = {
         let large = 1.0 / 1.1;
         let normal = large * 0.9;
         let small = normal * 0.9; //let small = 0.81 / 1.1;
-        [
-            small,
-            normal,
-            large,
-            1.0,
-        ]
+        [small, normal, large, 1.0]
     };
 
     pub const fn from_repr(value: u32) -> Option<Self> {
         match value {
-            0..=3 => Some(unsafe {
-                Self::from_repr_unchecked(value)
-            }),
+            0..=3 => Some(unsafe { Self::from_repr_unchecked(value) }),
             _ => None,
         }
     }
@@ -125,8 +110,13 @@ impl TryFrom<u32> for UiSize {
     type Error = anyhow::Error;
 
     fn try_from(size: u32) -> Result<Self, Self::Error> {
-        Self::from_repr(size)
-            .ok_or_else(|| anyhow!("known UI sizes range from {} to {}", Self::MIN.repr(), Self::MAX.repr()))
+        Self::from_repr(size).ok_or_else(|| {
+            anyhow!(
+                "known UI sizes range from {} to {}",
+                Self::MIN.repr(),
+                Self::MAX.repr()
+            )
+        })
     }
 }
 
@@ -219,9 +209,7 @@ impl LocalContext {
     }
 
     pub fn ui_flag(self) -> UiState {
-        self.as_map()
-            .map(MapContext::ui_flag)
-            .unwrap_or_default()
+        self.as_map().map(MapContext::ui_flag).unwrap_or_default()
     }
 }
 

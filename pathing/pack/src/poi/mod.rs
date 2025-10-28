@@ -39,19 +39,23 @@ impl Poi {
                 category = taco_safe_name(&attr.value, true);
                 Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
-                attr.value.parse()
+                attr.value
+                    .parse()
                     .map(|v| map_id = Some(v))
                     .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
-                attr.value.parse()
+                attr.value
+                    .parse()
                     .map(|v| pos_x = Some(v))
                     .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("ypos") {
-                attr.value.parse()
+                attr.value
+                    .parse()
                     .map(|v| pos_y = Some(v))
                     .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("zpos") {
-                attr.value.parse()
+                attr.value
+                    .parse()
                     .map(|v| pos_z = Some(v))
                     .map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
@@ -59,19 +63,16 @@ impl Poi {
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
                 match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(
-                        log::debug!("unrecognized POI attribute `{}`", attr.name)
-                    ),
+                    Ok(false) => Ok(log::debug!("unrecognized POI attribute `{}`", attr.name)),
                     res => res.map(drop),
                 }
             } else {
                 match attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(
-                        log::info!("unrecognized POI attribute `{}`", attr.name)
-                    ),
+                    Ok(false) => Ok(log::info!("unrecognized POI attribute `{}`", attr.name)),
                     res => res.map(drop),
                 }
-            }.with_context(|| format!("POI attribute '{}'", attr.name));
+            }
+            .with_context(|| format!("POI attribute '{}'", attr.name));
             if let Err(e) = res {
                 log::warn!("{e:#}");
             }
@@ -91,7 +92,8 @@ impl Poi {
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh);
 
-        let parent_path = Path::new(asset).parent()
+        let parent_path = Path::new(asset)
+            .parent()
             .map(|p| p.to_string_lossy().into());
         Ok(Poi {
             category,
@@ -133,10 +135,8 @@ impl fmt::Display for Poi {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let guid = &self.guid;
         match &self.parent_path {
-            Some(parent) =>
-                write!(f, "{parent}/{guid}"),
-            None =>
-                write!(f, "{guid}"),
+            Some(parent) => write!(f, "{parent}/{guid}"),
+            None => write!(f, "{guid}"),
         }
     }
 }

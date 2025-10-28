@@ -1,18 +1,7 @@
 use {
     serde::{Deserialize, Serialize},
-    std::{
-        borrow::Cow,
-        hint::unreachable_unchecked,
-        mem,
-        ops,
-        pin::Pin,
-        ptr,
-        sync::OnceLock,
-    },
-    tokio::{
-        sync::watch,
-        time,
-    },
+    std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock},
+    tokio::{sync::watch, time},
 };
 
 #[derive(Debug)]
@@ -29,8 +18,7 @@ impl<T> Watcher<T> {
         Self::with_sender(watch::Sender::new(value))
     }
     pub fn with_opt(value: Option<T>) -> Self {
-        value.map(Self::new)
-            .unwrap_or(Self::EMPTY)
+        value.map(Self::new).unwrap_or(Self::EMPTY)
     }
     pub fn with_receiver(watch: watch::Receiver<T>) -> Self {
         let mut this = Self::EMPTY;
@@ -43,7 +31,8 @@ impl<T> Watcher<T> {
         this
     }
 
-    pub fn watched(&self) -> Watched<T> where
+    pub fn watched(&self) -> Watched<T>
+    where
         T: Clone,
     {
         Watched::with_watcher(self.clone())
@@ -57,31 +46,23 @@ impl<T> Watcher<T> {
 
     fn receiver_to_sender(receiver: watch::Receiver<T>) -> watch::Sender<T> {
         // TODO: need to determine offset of version vs ptr, but rustc shouldn't shuffle two usize fields right? right?
-        let sender = unsafe {
-            mem::transmute_copy(&receiver)
-        };
+        let sender = unsafe { mem::transmute_copy(&receiver) };
         mem::forget(receiver);
         sender
     }
     fn receiver_as_sender(receiver: &watch::Receiver<T>) -> &watch::Sender<T> {
-        unsafe {
-            &*(receiver as *const watch::Receiver<T> as *const watch::Sender<T>)
-        }
+        unsafe { &*(receiver as *const watch::Receiver<T> as *const watch::Sender<T>) }
     }
     /// unnecessary since sender has no methods that take &mut self, but why not...
     fn receiver_as_sender_mut(receiver: &mut watch::Receiver<T>) -> &mut watch::Sender<T> {
-        unsafe {
-            &mut *(receiver as *mut watch::Receiver<T> as *mut watch::Sender<T>)
-        }
+        unsafe { &mut *(receiver as *mut watch::Receiver<T> as *mut watch::Sender<T>) }
     }
 
     pub fn init(&self, value: T) -> &watch::Receiver<T> {
         self.init_receiver(Self::sender_to_receiver(watch::Sender::new(value)))
     }
     pub fn init_sender(&self, sender: watch::Sender<T>) -> &watch::Sender<T> {
-        Self::receiver_as_sender(
-            self.init_receiver(Self::sender_to_receiver(sender))
-        )
+        Self::receiver_as_sender(self.init_receiver(Self::sender_to_receiver(sender)))
     }
 
     pub fn init_receiver(&self, receiver: watch::Receiver<T>) -> &watch::Receiver<T> {
@@ -117,9 +98,7 @@ impl<T> Watcher<T> {
     pub fn take_parts(&mut self) -> Option<(watch::Sender<T>, watch::Receiver<T>)> {
         let watch = self.watch.take()?;
 
-        let sender = unsafe {
-            ptr::read(Self::receiver_as_sender(&watch))
-        };
+        let sender = unsafe { ptr::read(Self::receiver_as_sender(&watch)) };
         Some((sender, watch))
     }
 
@@ -136,12 +115,10 @@ impl<T> Watcher<T> {
     }
 
     pub fn get_sender(&self) -> Option<&watch::Sender<T>> {
-        self.watch.get()
-            .map(Self::receiver_as_sender)
+        self.watch.get().map(Self::receiver_as_sender)
     }
     pub fn get_sender_mut(&mut self) -> Option<&mut watch::Sender<T>> {
-        self.watch.get_mut()
-            .map(Self::receiver_as_sender_mut)
+        self.watch.get_mut().map(Self::receiver_as_sender_mut)
     }
 
     pub fn has_changed(&self) -> bool {
@@ -161,15 +138,15 @@ impl<T> Watcher<T> {
         if let Some(r) = self.get_receiver_mut() {
             r.mark_changed();
             Ok(())
-        } else { Err(()) }
+        } else {
+            Err(())
+        }
     }
     pub fn try_read(&self) -> Option<watch::Ref<'_, T>> {
-        self.get_receiver()
-            .map(|r| r.borrow())
+        self.get_receiver().map(|r| r.borrow())
     }
     pub fn try_read_update(&mut self) -> Option<watch::Ref<'_, T>> {
-        self.get_receiver_mut()
-            .map(|r| r.borrow_and_update())
+        self.get_receiver_mut().map(|r| r.borrow_and_update())
     }
 
     pub async fn when_changed(&mut self) {
@@ -202,9 +179,7 @@ impl<T: Default> Watcher<T> {
     }
 
     pub fn sender(&self) -> &watch::Sender<T> {
-        Self::receiver_as_sender(
-            self.receiver()
-        )
+        Self::receiver_as_sender(self.receiver())
     }
     pub fn receiver(&self) -> &watch::Receiver<T> {
         self.init(T::default())
@@ -214,8 +189,7 @@ impl<T: Default> Watcher<T> {
         self.receiver().borrow()
     }
     pub fn read_update(&mut self) -> watch::Ref<'_, T> {
-        self.receiver_mut()
-            .borrow_and_update()
+        self.receiver_mut().borrow_and_update()
     }
     pub fn write_with<F: FnOnce(&mut T)>(&self, f: F) {
         self.sender().send_modify(f)
@@ -313,10 +287,7 @@ impl<T: Clone> Watched<T> {
 
     pub fn with_watcher(watch: Watcher<T>) -> Self {
         let cached = watch.try_read().map(|w| (*w).clone());
-        Self {
-            watch,
-            cached,
-        }
+        Self { watch, cached }
     }
 
     pub fn try_get_mut(&mut self) -> Option<&mut T> {
@@ -370,7 +341,8 @@ impl<T: Clone + Default> Watched<T> {
     }
 }
 
-impl<T: Clone> ops::Deref for Watched<T> where
+impl<T: Clone> ops::Deref for Watched<T>
+where
     // the alternative is to panic when empty, so...
     T: Default + Send + Sync + 'static,
 {
@@ -386,9 +358,10 @@ impl<T: Clone> ops::Deref for Watched<T> where
         }
     }
 }
-impl<T: Clone + Default> ops::DerefMut for Watched<T> where
+impl<T: Clone + Default> ops::DerefMut for Watched<T>
+where
     // :<
-    Self: ops::Deref<Target=T>,
+    Self: ops::Deref<Target = T>,
 {
     fn deref_mut(&mut self) -> &mut T {
         self.get_mut()
@@ -422,24 +395,25 @@ impl<T: Clone + Serialize> Serialize for Watched<T> {
 fn watcher_sender_receiver_abi() {
     let sender = watch::Sender::new(5usize);
     let receiver = sender.subscribe();
-    let (read_shared, read_version) = unsafe { (
-        ptr::read_volatile(&receiver as *const _ as *const usize),
-        ptr::read_volatile((&receiver as *const _ as *const usize).add(1)),
-    ) };
+    let (read_shared, read_version) = unsafe {
+        (
+            ptr::read_volatile(&receiver as *const _ as *const usize),
+            ptr::read_volatile((&receiver as *const _ as *const usize).add(1)),
+        )
+    };
     assert_eq!(read_version, 0);
     assert_ne!(read_shared, 0);
 }
 
-static DEFAULT_REFS: std::sync::Mutex<std::collections::BTreeMap<std::any::TypeId, usize>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+static DEFAULT_REFS: std::sync::Mutex<std::collections::BTreeMap<std::any::TypeId, usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
 pub fn default_ref<T: Default + Send + Sync>() -> &'static T {
     let id = std::any::TypeId::of::<T>();
     let default_ref: usize = *DEFAULT_REFS.lock().unwrap().entry(id).or_insert_with(|| {
         let default = Box::<T>::default();
         Box::into_raw(default) as usize
     });
-    unsafe {
-        &*(default_ref as *const T)
-    }
+    unsafe { &*(default_ref as *const T) }
 }
 
 /// TODO: Option because unclear if sleep is fused or what...

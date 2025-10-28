@@ -1,6 +1,6 @@
 use {
     crate::exports::runtime::Counter,
-    std::alloc::{GlobalAlloc, System, Layout},
+    std::alloc::{GlobalAlloc, Layout, System},
 };
 
 pub struct TaimiAllocator;

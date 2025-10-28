@@ -1,31 +1,19 @@
 use {
     crate::{
         controller::{ControllerEvent, MapId, RtSender},
-        exports::runtime::bindings::{CONTROLS, TaimiControls},
-        render::{
-            RenderEvent,
-            TextFont,
-        }, settings::{Settings, SettingsLock}, timer::{
-            CombatState,
-            Position,
-            TimerFile,
-            TimerMachine,
-        }, TIMERS_DIR
+        exports::runtime::bindings::{TaimiControls, CONTROLS},
+        render::{RenderEvent, TextFont},
+        settings::{Settings, SettingsLock},
+        timer::{CombatState, Position, TimerFile, TimerMachine},
+        TIMERS_DIR,
     },
-    std::{
-        sync::Arc,
-        fs::exists,
-        collections::HashMap,
-    },
+    std::{collections::HashMap, fs::exists, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::UiState,
-    tokio::{
-        sync::Mutex,
-        fs::create_dir_all,
-    },
+    tokio::{fs::create_dir_all, sync::Mutex},
 };
 
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub(crate) struct TimersController {
     pub timers: Vec<Arc<TimerFile>>,
     pub current_timers: Vec<TimerMachine>,
@@ -57,11 +45,8 @@ pub(crate) enum ProgressBarStyleChange {
     Font(TextFont),
 }
 
-
 impl TimersController {
-    pub const TIMERS_NOTABLE_STATE: UiState = UiState::from_bits_retain(
-        UiState::InCombat.bits()
-    );
+    pub const TIMERS_NOTABLE_STATE: UiState = UiState::from_bits_retain(UiState::InCombat.bits());
 
     async fn load(&self, settings: SettingsLock) -> Vec<Arc<TimerFile>> {
         let settings_lock = settings.read().await;
@@ -122,13 +107,26 @@ impl TimersController {
             .await;
     }
 
-    pub(crate) async fn handle_event(&mut self, event: TimersEvent, settings: &SettingsLock, alert_sem: &Arc<Mutex<()>>, map_id: MapId, rt_sender: &RtSender) {
+    pub(crate) async fn handle_event(
+        &mut self,
+        event: TimersEvent,
+        settings: &SettingsLock,
+        alert_sem: &Arc<Mutex<()>>,
+        map_id: MapId,
+        rt_sender: &RtSender,
+    ) {
         use TimersEvent::*;
         match event {
             ReloadTimers => self.reload(settings.clone(), rt_sender.clone()).await,
-            TimerEnable(id) => self.enable(&id, map_id, alert_sem.clone(), rt_sender.clone()).await,
+            TimerEnable(id) => {
+                self.enable(&id, map_id, alert_sem.clone(), rt_sender.clone())
+                    .await
+            },
             TimerDisable(id) => self.disable(&id).await,
-            TimerToggle(id) => self.toggle(&id, map_id, alert_sem.clone(), rt_sender.clone()).await,
+            TimerToggle(id) => {
+                self.toggle(&id, map_id, alert_sem.clone(), rt_sender.clone())
+                    .await
+            },
             TimerReset => self.reset().await,
             TimerKeyTrigger(id, is_release) => self.timer_key_trigger(id, is_release).await,
             ProgressBarStyle(style) => self.progress_bar_style(style, rt_sender.clone()).await,
@@ -157,8 +155,16 @@ impl TimersController {
         self.reset().await;
     }
 
-    async fn toggle(&mut self, id: &str, map_id: MapId, alert_sem: Arc<Mutex<()>>, rt_sender: RtSender) {
-        let mut settings_lock = Settings::async_write().await.expect("Settings unitialized, impossible");
+    async fn toggle(
+        &mut self,
+        id: &str,
+        map_id: MapId,
+        alert_sem: Arc<Mutex<()>>,
+        rt_sender: RtSender,
+    ) {
+        let mut settings_lock = Settings::async_write()
+            .await
+            .expect("Settings unitialized, impossible");
         let disabled = settings_lock.toggle_timer(id.to_string());
         drop(settings_lock);
         match disabled {
@@ -179,7 +185,7 @@ impl TimersController {
                         }
                     }
                 }
-            }
+            },
             true => {
                 let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
                 for timer in timers_to_remove {
@@ -189,12 +195,20 @@ impl TimersController {
                     );
                     timer.cleanup().await;
                 }
-            }
+            },
         }
     }
 
-    async fn enable(&mut self, id: &str, map_id: MapId, alert_sem: Arc<Mutex<()>>, rt_sender: RtSender) {
-        let mut settings_lock = Settings::async_write().await.expect("Settings unitialized, impossible");
+    async fn enable(
+        &mut self,
+        id: &str,
+        map_id: MapId,
+        alert_sem: Arc<Mutex<()>>,
+        rt_sender: RtSender,
+    ) {
+        let mut settings_lock = Settings::async_write()
+            .await
+            .expect("Settings unitialized, impossible");
         settings_lock.enable_timer(id.to_string());
         drop(settings_lock);
         if let Some(map_id) = map_id {
@@ -213,7 +227,9 @@ impl TimersController {
     }
 
     async fn disable(&mut self, id: &str) {
-        let mut settings_lock = Settings::async_write().await.expect("Settings unitialized, impossible");
+        let mut settings_lock = Settings::async_write()
+            .await
+            .expect("Settings unitialized, impossible");
         settings_lock.disable_timer(id.to_string());
         drop(settings_lock);
         let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
@@ -230,7 +246,6 @@ impl TimersController {
         }
     }
 
-
     async fn timer_key_trigger(&mut self, id: String, is_release: bool) {
         let idx = id.chars().last().unwrap().to_digit(10).unwrap();
         self.timer_key_trigger_idx(idx, is_release);
@@ -242,7 +257,13 @@ impl TimersController {
         }
     }
 
-    pub(crate) async fn handle_map_event(&mut self, settings: SettingsLock, alert_sem: Arc<Mutex<()>>, new_map_id: u32, rt_sender: RtSender) {
+    pub(crate) async fn handle_map_event(
+        &mut self,
+        settings: SettingsLock,
+        alert_sem: Arc<Mutex<()>>,
+        new_map_id: u32,
+        rt_sender: RtSender,
+    ) {
         log::info!("Map event reached TimersController!");
         for timer in &mut self.current_timers {
             timer.cleanup().await;
@@ -285,7 +306,9 @@ impl TimersController {
     }
 
     async fn progress_bar_style(&mut self, style: ProgressBarStyleChange, rt_sender: RtSender) {
-        let mut settings_lock = Settings::async_write().await.expect("Settings unitialized, impossible");
+        let mut settings_lock = Settings::async_write()
+            .await
+            .expect("Settings unitialized, impossible");
         let progress_bar_settings = settings_lock.set_progress_bar(style);
         let _ = rt_sender
             .send(RenderEvent::ProgressBarUpdate(progress_bar_settings))

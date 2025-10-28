@@ -1,14 +1,9 @@
 use {
-    crate::render::{
-        machine::RenderMachine,
-        RenderState,
-    },
-    std::{
-        cell::RefCell,
-        collections::VecDeque,
-    },
+    crate::render::{machine::RenderMachine, RenderState},
+    std::{cell::RefCell, collections::VecDeque},
     tokio::sync::Mutex,
 };
+
 #[cfg(feature = "space")]
 use crate::space::Engine;
 
@@ -26,9 +21,10 @@ impl RenderMachine {
         match prio {
             #[cfg(todo)]
             RenderTaskPriority::Immediate => {
-                tokio::task::spawn_blocking(move ||
+                tokio::task::spawn_blocking(move || {
                     crate::RenderState::lock().task_queue.push_back(task)
-                ).await
+                })
+                .await
             },
             prio => {
                 let mut queue = Self::shared_task_queue().blocking_lock();
@@ -44,9 +40,10 @@ impl RenderMachine {
         match prio {
             #[cfg(todo)]
             RenderTaskPriority::Immediate => {
-                tokio::task::spawn_blocking(move ||
+                tokio::task::spawn_blocking(move || {
                     crate::RenderState::lock().task_queue.push_back(task)
-                ).await
+                })
+                .await
             },
             prio => {
                 let mut queue = Self::shared_task_queue().lock().await;
@@ -137,9 +134,7 @@ impl RenderMachine {
             let handle = runtime.handle.clone();
             let locals = match runtime.render_local_set() {
                 Some(Some(locals)) => locals,
-                Some(locals @ &mut None) => {
-                    locals.insert(Box::new(tokio::task::LocalSet::new()))
-                },
+                Some(locals @ &mut None) => locals.insert(Box::new(tokio::task::LocalSet::new())),
                 None => {
                     log::error!("polling render runtime outside of render thread???");
                     return
@@ -152,7 +147,10 @@ impl RenderMachine {
             );
             #[cfg(feature = "space")]
             let locals = {
-                let engine = state.engine.as_mut().and_then(|e| e.as_mut().ok())
+                let engine = state
+                    .engine
+                    .as_mut()
+                    .and_then(|e| e.as_mut().ok())
                     .map(|e| unsafe { Self::pretend_leak(e) });
                 Self::runtime_engine().scope(RefCell::new(engine), locals)
             };

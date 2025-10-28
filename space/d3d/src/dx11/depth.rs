@@ -1,23 +1,21 @@
-use crate::{
-    dx11::{
-        buffer::{
-            self,
-            D3D11_TEXTURE2D_DESC,
-            Resource,
-            Texture2,
-        },
-        prelude::*,
-    },
-    D3dContextBindable,
-};
-
 pub use crate::dx11::d3d11::{
-    ID3D11DepthStencilState, ID3D11DepthStencilView,
-    D3D11_CLEAR_FLAG, D3D11_COMPARISON_FUNC,
-    D3D11_DEPTH_STENCILOP_DESC, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_STENCIL_VIEW_DESC,
+    ID3D11DepthStencilState,
+    ID3D11DepthStencilView,
+    D3D11_CLEAR_FLAG,
+    D3D11_COMPARISON_FUNC,
+    D3D11_DEPTH_STENCILOP_DESC,
+    D3D11_DEPTH_STENCIL_DESC,
+    D3D11_DEPTH_STENCIL_VIEW_DESC,
     D3D11_DEPTH_STENCIL_VIEW_DESC_0,
     D3D11_STENCIL_OP,
     D3D11_TEX2D_DSV,
+};
+use crate::{
+    dx11::{
+        buffer::{self, Resource, Texture2, D3D11_TEXTURE2D_DESC},
+        prelude::*,
+    },
+    D3dContextBindable,
 };
 
 impl_d3d! {
@@ -81,15 +79,11 @@ impl DepthState {
         desc: &D3D11_DEPTH_STENCIL_DESC,
     ) -> anyhow::Result<Self> {
         let mut out: Option<ID3D11DepthStencilState> = None;
-        unsafe {
-            device.CreateDepthStencilState(
-                desc,
-                Some(&mut out),
-            )
-        }.map_err(anyhow::Error::from)
-        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce state pointer")))
-        .context("CreateDepthStencilState")
-        .map(Into::into)
+        unsafe { device.CreateDepthStencilState(desc, Some(&mut out)) }
+            .map_err(anyhow::Error::from)
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce state pointer")))
+            .context("CreateDepthStencilState")
+            .map(Into::into)
     }
 }
 
@@ -107,7 +101,8 @@ impl<S> OMDepthState<S> {
         }
     }
 
-    pub fn new_snapshot(context: &Dx11Context) -> Self where
+    pub fn new_snapshot(context: &Dx11Context) -> Self
+    where
         S: From<Option<ID3D11DepthStencilState>>,
     {
         let mut state = None;
@@ -120,7 +115,8 @@ impl<S> OMDepthState<S> {
     }
 }
 
-impl<S> D3dContextBindable<Dx11Context> for OMDepthState<S> where
+impl<S> D3dContextBindable<Dx11Context> for OMDepthState<S>
+where
     S: D3dInterfacePtr<Interface = ID3D11DepthStencilState>,
 {
     fn set(&self, context: &Dx11Context) {
@@ -151,21 +147,13 @@ impl_d3d! { impl bitflags for
     },
 }
 impl ClearFlags {
-    pub const DEPTH_STENCIL: Self = Self::from_bits_retain(
-        Self::DEPTH.bits() | Self::STENCIL.bits()
-    );
+    pub const DEPTH_STENCIL: Self =
+        Self::from_bits_retain(Self::DEPTH.bits() | Self::STENCIL.bits());
 }
 
 impl DepthView {
     pub fn clear(&self, context: &Dx11Context, flags: ClearFlags, depth: f32, stencil: u8) {
-        unsafe {
-            context.ClearDepthStencilView(
-                &self.view,
-                flags.to_raw(),
-                depth,
-                stencil,
-            )
-        }
+        unsafe { context.ClearDepthStencilView(&self.view, flags.to_raw(), depth, stencil) }
     }
 
     pub const fn desc_for_texture2(
@@ -177,9 +165,7 @@ impl DepthView {
             Format: format,
             ViewDimension: d3d11::D3D11_DSV_DIMENSION_TEXTURE2D,
             Flags: flags,
-            Anonymous: D3D11_DEPTH_STENCIL_VIEW_DESC_0 {
-                Texture2D: desc,
-            },
+            Anonymous: D3D11_DEPTH_STENCIL_VIEW_DESC_0 { Texture2D: desc },
         }
     }
 
@@ -199,7 +185,8 @@ impl DepthView {
             MiscFlags: 0,
         }
     }
-    pub const BUFFER2D_DESC_UNSIZED: D3D11_TEXTURE2D_DESC = Self::desc_for_buffer2::<u32>(Size2::ZERO);
+    pub const BUFFER2D_DESC_UNSIZED: D3D11_TEXTURE2D_DESC =
+        Self::desc_for_buffer2::<u32>(Size2::ZERO);
 
     pub fn new_with_texture2(
         device: &Dx11Device,
@@ -219,16 +206,11 @@ impl DepthView {
     ) -> anyhow::Result<Self> {
         let buffer = buffer.as_ref();
         let mut out: Option<ID3D11DepthStencilView> = None;
-        unsafe {
-            device.CreateDepthStencilView(
-                buffer.as_d3d(),
-                Some(desc),
-                Some(&mut out),
-            )
-        }.map_err(anyhow::Error::from)
-        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
-        .context("CreateDepthStencilView")
-        .map(Into::into)
+        unsafe { device.CreateDepthStencilView(buffer.as_d3d(), Some(desc), Some(&mut out)) }
+            .map_err(anyhow::Error::from)
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
+            .context("CreateDepthStencilView")
+            .map(Into::into)
     }
 
     pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_VIEW_DESC {
@@ -240,8 +222,6 @@ impl DepthView {
     }
 
     pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
-        unsafe {
-            self.view.GetResource()
-        }.context("ID3D11DepthStencilView::GetResource")
+        unsafe { self.view.GetResource() }.context("ID3D11DepthStencilView::GetResource")
     }
 }

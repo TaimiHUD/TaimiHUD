@@ -1,8 +1,5 @@
 use {
-    crate::{
-        render::machine::RenderPosition,
-        space::DrawSpace,
-    },
+    crate::{render::machine::RenderPosition, space::DrawSpace},
     glamour::{Box3, Intersection, Point3, Vector3, Vector4},
     std::ops::Range,
 };
@@ -105,7 +102,8 @@ impl RenderList {
             draw_order_heap: std::mem::take(&mut self.draw_order_heap),
         };
         builder.entities.clear();
-        #[cfg(feature = "space-list")] {
+        #[cfg(feature = "space-list")]
+        {
             builder.entity_shapes.clear();
         }
         builder
@@ -113,7 +111,8 @@ impl RenderList {
 
     pub fn clear(&mut self) {
         self.entities.clear();
-        #[cfg(feature = "space-list")] {
+        #[cfg(feature = "space-list")]
+        {
             self.draw_order_heap.clear();
             self.spatial_map.bvh.nodes.clear();
             self.spatial_map.shapes.clear();
@@ -121,7 +120,8 @@ impl RenderList {
     }
 
     pub fn update(&mut self, index: usize) {
-        #[cfg(feature = "space-list")] {
+        #[cfg(feature = "space-list")]
+        {
             self.spatial_map.shapes[index] = RenderEntityShape::new((index, &self.entities[index]));
             self.spatial_map
                 .bvh
@@ -164,13 +164,14 @@ impl RenderList {
             #[cfg(feature = "space-list")]
             () => {
                 let entities = &self.entities;
-                self.spatial_map.select_visible_entities(frustum)
+                self.spatial_map
+                    .select_visible_entities(frustum)
                     .filter_map(move |i| entities.get(i))
             },
             #[cfg(not(feature = "space-list"))]
             () => {
                 self.entities.iter()
-                    //.filter(move |e| frustum.intersects(&e.bounds)).rev()
+                //.filter(move |e| frustum.intersects(&e.bounds)).rev()
             },
         }
     }
@@ -180,7 +181,8 @@ impl RenderList {
         bounds: Box3<DrawSpace>,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         // TODO: select_visible_entities?
-        self.entities.iter()
+        self.entities
+            .iter()
             .filter(move |e| bounds.intersects(&e.bounds))
     }
 
@@ -224,8 +226,7 @@ where
         while let Some(next) = self.bvh_iter.next() {
             let entity = &self.entities[next];
             let cam_dist = match entity.draw_ordered {
-                false =>
-                    return Some(entity),
+                false => return Some(entity),
                 #[cfg(todo)]
                 true => {
                     // TODO: broken or inaccurate idk
@@ -407,7 +408,10 @@ impl MapFrustum {
     pub fn from_camera_data(
         (pos, camera_dir, camera_up): (Point3<DrawSpace>, Vector3<DrawSpace>, Vector3<DrawSpace>),
         // TODO: (aspect_ratio, fov): (f32, Vec2),
-        Range { start: near, end: far }: Range<f32>,
+        Range {
+            start: near,
+            end: far,
+        }: Range<f32>,
     ) -> MapFrustum {
         // TODO: higher accuracy/correctness using fov and perspective idk
         let camera_far = camera_dir * far;
@@ -427,7 +431,11 @@ impl MapFrustum {
         let near_bottomleft = near_topleft - near_h * 2.0;
         #[cfg(feature = "space-list")]
         let near_bottomright = near_bottomleft + near_w * 2.0;
-        let near_plane = points_to_plane(near_topleft.to_raw(), near_topright.to_raw(), near_bottomleft.to_raw());
+        let near_plane = points_to_plane(
+            near_topleft.to_raw(),
+            near_topright.to_raw(),
+            near_bottomleft.to_raw(),
+        );
 
         let far_focal_point = pos + camera_far;
         let far_width2 = far * fov_ratio;
@@ -441,16 +449,36 @@ impl MapFrustum {
         let far_bottomright = far_topright - far_h * 2.0;
         let far_bottomleft = far_topleft - far_h * 2.0;
         #[cfg(feature = "space-list")]
-        let far_plane = points_to_plane(far_topright.to_raw(), far_topleft.to_raw(), far_bottomright.to_raw());
+        let far_plane = points_to_plane(
+            far_topright.to_raw(),
+            far_topleft.to_raw(),
+            far_bottomright.to_raw(),
+        );
 
-        let left_plane = points_to_plane(far_topleft.to_raw(), near_topleft.to_raw(), far_bottomleft.to_raw());
+        let left_plane = points_to_plane(
+            far_topleft.to_raw(),
+            near_topleft.to_raw(),
+            far_bottomleft.to_raw(),
+        );
         #[cfg(feature = "space-list")]
-        let right_plane = points_to_plane(far_topright.to_raw(), far_bottomright.to_raw(), near_topright.to_raw());
+        let right_plane = points_to_plane(
+            far_topright.to_raw(),
+            far_bottomright.to_raw(),
+            near_topright.to_raw(),
+        );
 
         #[cfg(feature = "space-list")]
-        let up_plane = points_to_plane(far_topleft.to_raw(), far_topright.to_raw(), near_topleft.to_raw());
+        let up_plane = points_to_plane(
+            far_topleft.to_raw(),
+            far_topright.to_raw(),
+            near_topleft.to_raw(),
+        );
         #[cfg(feature = "space-list")]
-        let down_plane = points_to_plane(far_bottomright.to_raw(), far_bottomleft.to_raw(), near_bottomright.to_raw());
+        let down_plane = points_to_plane(
+            far_bottomright.to_raw(),
+            far_bottomleft.to_raw(),
+            near_bottomright.to_raw(),
+        );
 
         MapFrustum {
             near: near_plane.into(),
@@ -468,9 +496,7 @@ impl MapFrustum {
 
     const PLANES: usize = size_of::<MapFrustum>() / size_of::<Vector4>();
     pub fn planes(&self) -> &[Vector4<DrawSpace>; MapFrustum::PLANES] {
-        unsafe {
-            &*(self as *const Self as *const [Vector4<DrawSpace>; MapFrustum::PLANES])
-        }
+        unsafe { &*(self as *const Self as *const [Vector4<DrawSpace>; MapFrustum::PLANES]) }
     }
 }
 
@@ -525,10 +551,10 @@ impl Intersection<Point3<DrawSpace>> for MapFrustum {
     fn intersection(&self, thing: &Point3<DrawSpace>) -> Option<Self::Intersection> {
         let point = thing.extend(1.0);
         for plane in self.planes() {
-                if plane.dot(point.into()) < 0.0 {
-                    return Some(false)
-                }
+            if plane.dot(point.into()) < 0.0 {
+                return Some(false)
             }
+        }
 
         Some(true)
     }

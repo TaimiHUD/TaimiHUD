@@ -1,5 +1,4 @@
 use {
-    anyhow::Context,
     crate::{
         exports::runtime::{
             bindings::{self, Control, KeyIntercept},
@@ -8,6 +7,7 @@ use {
         settings::{state::SaveState, ArcVk},
         with_i18n,
     },
+    anyhow::Context,
     std::{
         borrow::Cow,
         collections::{btree_map, BTreeMap},
@@ -21,14 +21,21 @@ pub struct KeyBindSelection {
 }
 
 impl KeyBindSelection {
-    pub fn draw_gamebind<'a>(&'a mut self, ui: &imgui::Ui, control: Control) -> Option<&'a mut KeyBindState> {
-        let default_key = bindings::DEFAULT_GAMEBINDS.get(&control.into())
-            .copied().unwrap_or(KeyInput::EMPTY);
+    pub fn draw_gamebind<'a>(
+        &'a mut self,
+        ui: &imgui::Ui,
+        control: Control,
+    ) -> Option<&'a mut KeyBindState> {
+        let default_key = bindings::DEFAULT_GAMEBINDS
+            .get(&control.into())
+            .copied()
+            .unwrap_or(KeyInput::EMPTY);
 
         let current_key = match SaveState::read_with(|state| state.game_binds.get(control, None)) {
             Some((vk, mods)) => Some(KeyInput::new(vk, mods, true)),
             None => None,
-        }.unwrap_or(KeyInput::EMPTY);
+        }
+        .unwrap_or(KeyInput::EMPTY);
         let key = i32::from(control) as usize;
 
         let keyname = match control {
@@ -38,12 +45,19 @@ impl KeyBindSelection {
         self.draw_bind(ui, key, current_key, default_key, &keyname)
     }
 
-    pub fn draw_keybind<'a, F: FnOnce(&ArcVk)>(&'a mut self, ui: &imgui::Ui, vk: &'static ArcVk, action: Option<F>) -> Option<&'a mut KeyBindState> {
+    pub fn draw_keybind<'a, F: FnOnce(&ArcVk)>(
+        &'a mut self,
+        ui: &imgui::Ui,
+        vk: &'static ArcVk,
+        action: Option<F>,
+    ) -> Option<&'a mut KeyBindState> {
         let _id_token = ui.push_id(vk.id);
         let name = vk.get_name();
         match action {
-            Some(action) => if ui.button(name) {
-                action(vk)
+            Some(action) => {
+                if ui.button(name) {
+                    action(vk)
+                }
             },
             None => ui.text(name),
         }
@@ -55,13 +69,31 @@ impl KeyBindSelection {
         let current_key = current_vk.map(KeyInput::from).unwrap_or(KeyInput::EMPTY);
         let key = vk.id.as_ptr() as usize;
 
-        with_i18n!("keybind", |msg| self.draw_bind(ui, key, current_key, default_key, &msg))
+        with_i18n!("keybind", |msg| self.draw_bind(
+            ui,
+            key,
+            current_key,
+            default_key,
+            &msg
+        ))
     }
 
-    pub fn draw_bind<'a>(&'a mut self, ui: &imgui::Ui, key: usize, current: KeyInput, default: KeyInput, label: &str) -> Option<&'a mut KeyBindState> {
+    pub fn draw_bind<'a>(
+        &'a mut self,
+        ui: &imgui::Ui,
+        key: usize,
+        current: KeyInput,
+        default: KeyInput,
+        label: &str,
+    ) -> Option<&'a mut KeyBindState> {
         let any_configuring = self.binding_buffers.values().any(|b| b.configuring);
 
-        let binding_buffer = KeyBindState::unwrap_entry_btreemap(self.binding_buffers.entry(key), key, current, default);
+        let binding_buffer = KeyBindState::unwrap_entry_btreemap(
+            self.binding_buffers.entry(key),
+            key,
+            current,
+            default,
+        );
         let mut changed = binding_buffer.draw_input(ui, key, label);
         if !changed {
             ui.same_line();
@@ -70,7 +102,12 @@ impl KeyBindSelection {
         changed.then_some(binding_buffer)
     }
 
-    pub fn do_keybind<F: FnOnce(&ArcVk)>(&mut self, ui: &imgui::Ui, vk: &'static ArcVk, action: Option<F>) {
+    pub fn do_keybind<F: FnOnce(&ArcVk)>(
+        &mut self,
+        ui: &imgui::Ui,
+        vk: &'static ArcVk,
+        action: Option<F>,
+    ) {
         let changed = self.draw_keybind(ui, vk, action);
 
         if let Some(new) = changed {
@@ -84,7 +121,8 @@ impl KeyBindSelection {
                 Some(Err(..)) | None => return,
             };
 
-            let res = vk.set_vkeycode(new_vk)
+            let res = vk
+                .set_vkeycode(new_vk)
                 .with_context(|| format!("saving keybind {} failed", vk.id));
             if let Err(e) = res {
                 log::error!("{e:#}");
@@ -99,15 +137,15 @@ impl KeyBindSelection {
             SaveState::write_with(|state| {
                 let game_binds = state.game_binds_mut();
                 match new.take_pending() {
-                    Some(Ok(new)) if new.is_empty() =>
-                        game_binds.remove((control.into(), i8::MIN)),
+                    Some(Ok(new)) if new.is_empty() => game_binds.remove((control.into(), i8::MIN)),
                     Some(Ok(new)) => game_binds.set(control, i8::MIN, (new.vk.0, new.mods)),
                     Some(Err(..)) | None => return,
                 }
             });
         }
     }
-    pub fn do_gamebinds<I: IntoIterator>(&mut self, ui: &imgui::Ui, controls: I) where
+    pub fn do_gamebinds<I: IntoIterator>(&mut self, ui: &imgui::Ui, controls: I)
+    where
         I::Item: Into<Control>,
     {
         for control in controls {
@@ -160,7 +198,8 @@ impl KeyBindState {
     }
 
     pub fn take_pending(&mut self) -> Option<Result<KeyInput, &str>> {
-        self.pending.take()
+        self.pending
+            .take()
             .map(|p| p.map_err(|()| &self.name_buffer[..]))
     }
 
@@ -175,7 +214,12 @@ impl KeyBindState {
         Ok(input)
     }
 
-    pub fn unwrap_entry_btreemap<'b>(binding_buffer: btree_map::Entry<'b, usize, Self>, key: usize, current: KeyInput, default: KeyInput) -> &'b mut Self {
+    pub fn unwrap_entry_btreemap<'b>(
+        binding_buffer: btree_map::Entry<'b, usize, Self>,
+        key: usize,
+        current: KeyInput,
+        default: KeyInput,
+    ) -> &'b mut Self {
         let is_fresh = match &binding_buffer {
             btree_map::Entry::Vacant(..) => true,
             btree_map::Entry::Occupied(b) => b.get().name_buffer.is_empty(),
@@ -201,7 +245,8 @@ impl KeyBindState {
     }
 
     pub fn draw_input(&mut self, ui: &imgui::Ui, key: usize, label: &str) -> bool {
-        let input = ui.input_text(label, &mut self.name_buffer)
+        let input = ui
+            .input_text(label, &mut self.name_buffer)
             .read_only(self.configuring)
             .auto_select_all(true)
             .always_insert_mode(true)
@@ -237,9 +282,7 @@ impl KeyBindState {
 
     pub fn draw_bind(&mut self, ui: &imgui::Ui, any_configuring: bool) -> bool {
         match (self.configuring, any_configuring) {
-            (true, _) => {
-                self.draw_bind_prompt(ui)
-            },
+            (true, _) => self.draw_bind_prompt(ui),
             (false, false) => {
                 self.draw_bind_button(ui);
                 false
@@ -253,10 +296,8 @@ impl KeyBindState {
 
     pub fn draw_bind_prompt(&mut self, ui: &imgui::Ui) -> bool {
         match bindings::held_mods() {
-            mods if mods.is_empty() =>
-                ui.text_disabled("press a key"),
-            mods =>
-                ui.text(format!("press a key: {mods}+")),
+            mods if mods.is_empty() => ui.text_disabled("press a key"),
+            mods => ui.text(format!("press a key: {mods}+")),
         };
         match KeyIntercept::intercept_take() {
             None => {

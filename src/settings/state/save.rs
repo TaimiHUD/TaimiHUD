@@ -1,23 +1,12 @@
 use {
-    anyhow::Context,
     crate::{
-        exports::runtime::{
-            self as rt,
-            bindings::GameBinds,
-        },
+        exports::runtime::{self as rt, bindings::GameBinds},
         settings::state::save_state_backup,
     },
+    anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{
-        fs,
-        io,
-        path::Path,
-        sync::LazyLock,
-    },
-    tokio::{
-        sync::watch,
-        time,
-    },
+    std::{fs, io, path::Path, sync::LazyLock},
+    tokio::{sync::watch, time},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -37,21 +26,18 @@ impl SaveState {
     }
 
     pub fn get() -> &'static watch::Sender<Self> {
-        static LOCK: LazyLock<watch::Sender<SaveState>> = LazyLock::new(|| {
-            watch::Sender::new(SaveState::initial_load())
-        });
+        static LOCK: LazyLock<watch::Sender<SaveState>> =
+            LazyLock::new(|| watch::Sender::new(SaveState::initial_load()));
         &LOCK
     }
 
     fn initial_load() -> Self {
         let res = match Self::read_file(Self::file_path()) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound =>
-                return Self::new(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::new(),
             res => res.context("state file failed to load"),
         };
         match res {
-            Ok(state) =>
-                state,
+            Ok(state) => state,
             Err(e) => {
                 log::error!("{e:#}");
                 save_state_backup(Self::file_path());
@@ -62,9 +48,7 @@ impl SaveState {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            Self {
-                game_binds,
-            } if game_binds.is_empty() => true,
+            Self { game_binds } if game_binds.is_empty() => true,
             _ => false,
         }
     }
@@ -75,18 +59,15 @@ impl SaveState {
 
     pub fn read_file(path: &Path) -> io::Result<Self> {
         let f = fs::File::open(path)?;
-        serde_json::from_reader(io::BufReader::with_capacity(2048, f))
-            .map_err(Into::into)
+        serde_json::from_reader(io::BufReader::with_capacity(2048, f)).map_err(Into::into)
     }
     pub fn write_file(&self, path: &Path) -> anyhow::Result<()> {
         let _ = fs::create_dir_all(rt::addon_dir_fallback());
         let f = fs::File::create(path)?;
-        serde_json::to_writer(f, self)
-            .context("writing state")
+        serde_json::to_writer(f, self).context("writing state")
     }
     pub fn start_save(&self) -> anyhow::Result<(&'static Path, String)> {
-        let s = serde_json::to_string(self)
-            .context("save state serialization error")?;
+        let s = serde_json::to_string(self).context("save state serialization error")?;
 
         Ok((Self::file_path(), s))
     }
@@ -94,7 +75,8 @@ impl SaveState {
         use tokio::{fs, io::AsyncWriteExt};
         let _ = fs::create_dir_all(rt::addon_dir_fallback()).await;
         let mut f = fs::File::create(path).await?;
-        f.write_all(data.as_bytes()).await
+        f.write_all(data.as_bytes())
+            .await
             .context("writing save state")
     }
 
@@ -107,7 +89,10 @@ impl SaveState {
     pub fn watch_initial_delay() -> rt::watched::WatchThrottleDelay {
         Some(Box::pin(time::sleep(Self::SAVE_THROTTLE_TIMEOUT)))
     }
-    pub async fn watch_dirty(receiver: &mut watch::Receiver<Self>, throttle: &mut rt::watched::WatchThrottleDelay) -> Result<(), watch::error::RecvError> {
+    pub async fn watch_dirty(
+        receiver: &mut watch::Receiver<Self>,
+        throttle: &mut rt::watched::WatchThrottleDelay,
+    ) -> Result<(), watch::error::RecvError> {
         if let Some(throttle) = throttle {
             throttle.await;
         }

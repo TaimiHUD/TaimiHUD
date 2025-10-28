@@ -1,8 +1,8 @@
 use {
+    crate::settings::state::SaveState,
     arcdps::extras::keybinds::KeybindChange,
     bitflags::bitflags,
     bitvec::array::BitArray,
-    crate::settings::state::SaveState,
     std::{
         collections::BTreeMap,
         marker::PhantomData,
@@ -11,14 +11,15 @@ use {
             LazyLock,
         },
     },
-    taimi_input::win::keyboard::{KeyState, KeyInput},
+    taimi_input::win::keyboard::{KeyInput, KeyState},
     windows::Win32::UI::{
         Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
         WindowsAndMessaging,
     },
 };
+
 pub use self::{
-    controls::{ControlSlot, Control, GameControl, GameControls, GameBinds},
+    controls::{Control, ControlSlot, GameBinds, GameControl, GameControls},
     held::{ControlsReceiver, HeldControls, TaimiReceiver},
     intercept::KeyIntercept,
     keys::KeyPresses,
@@ -29,7 +30,8 @@ pub mod held;
 pub mod intercept;
 pub mod keys;
 
-pub static CONTROLS: LazyLock<HeldControls> = LazyLock::new(|| HeldControls::new(interesting_controls()));
+pub static CONTROLS: LazyLock<HeldControls> =
+    LazyLock::new(|| HeldControls::new(interesting_controls()));
 pub(crate) fn read_game_binds<R, F: FnOnce(&GameBinds) -> R>(f: F) -> R {
     SaveState::read_with(|s| f(&s.game_binds))
 }
@@ -88,45 +90,45 @@ impl TaimiControls {
     #[allow(unreachable_patterns)]
     pub const WINDOW_TOGGLES: Self = Self::from_bits_retain(
         Self::WINDOW_PRIMARY.bits()
-        | match () {
-            #[cfg(feature = "timers")]
-            _ => Self::WINDOW_TIMERS.bits(),
-            _ => 0,
-        } | match () {
-            #[cfg(feature = "markers")]
-            _ => Self::WINDOW_MARKERS.bits(),
-            _ => 0,
-        } | match () {
-            #[cfg(feature = "space")]
-            _ => Self::WINDOW_PATHING.bits(),
-            _ => 0,
-        }
+            | match () {
+                #[cfg(feature = "timers")]
+                _ => Self::WINDOW_TIMERS.bits(),
+                _ => 0,
+            }
+            | match () {
+                #[cfg(feature = "markers")]
+                _ => Self::WINDOW_MARKERS.bits(),
+                _ => 0,
+            }
+            | match () {
+                #[cfg(feature = "space")]
+                _ => Self::WINDOW_PATHING.bits(),
+                _ => 0,
+            },
     );
 
     #[cfg(feature = "timers")]
     pub const TIMER_TRIGGERS: Self = Self::from_bits_retain(
         Self::TIMER_TRIGGER_0.bits()
-        | Self::TIMER_TRIGGER_1.bits()
-        | Self::TIMER_TRIGGER_2.bits()
-        | Self::TIMER_TRIGGER_3.bits()
-        | Self::TIMER_TRIGGER_4.bits()
+            | Self::TIMER_TRIGGER_1.bits()
+            | Self::TIMER_TRIGGER_2.bits()
+            | Self::TIMER_TRIGGER_3.bits()
+            | Self::TIMER_TRIGGER_4.bits(),
     );
 
     #[cfg(feature = "space")]
     pub const PATHING_TOGGLES: Self = Self::from_bits_retain(
-        Self::PATHING_SPACE.bits()
-        | Self::PATHING_MAP.bits()
-        | Self::PATHING_MINIMAP.bits()
+        Self::PATHING_SPACE.bits() | Self::PATHING_MAP.bits() | Self::PATHING_MINIMAP.bits(),
     );
 
     #[allow(unreachable_patterns)]
     pub const QUICK_ACCESS_ICONS: Self = Self::from_bits_retain(
         Self::WINDOW_TOGGLES.bits()
-        | match () {
-            #[cfg(feature = "space")]
-            _ => Self::PATHING_TOGGLES.bits(),
-            _ => 0,
-        }
+            | match () {
+                #[cfg(feature = "space")]
+                _ => Self::PATHING_TOGGLES.bits(),
+                _ => 0,
+            },
     );
 
     pub fn index(self) -> u8 {
@@ -164,9 +166,8 @@ impl<'de> serde::Deserialize<'de> for TaimiControls {
     }
 }
 
-pub static DEFAULT_GAMEBINDS: LazyLock<BTreeMap<Control, KeyInput>> = LazyLock::new(||
-    self::controls::default_gamebinds()
-);
+pub static DEFAULT_GAMEBINDS: LazyLock<BTreeMap<Control, KeyInput>> =
+    LazyLock::new(|| self::controls::default_gamebinds());
 
 /// we don't care about detecting these, only simulating them...
 fn is_interesting_bind(control: Control) -> bool {
@@ -182,8 +183,7 @@ fn is_interesting_bind(control: Control) -> bool {
         | GameControl::Squad_Location_Circle
         | GameControl::Squad_Location_Square
         | GameControl::Squad_Location_Spiral
-        | GameControl::Squad_Location_Triangle
-        => true,
+        | GameControl::Squad_Location_Triangle => true,
         #[cfg(todo)]
         GameControl::Squad_Object_X
         | GameControl::Squad_Object_Star
@@ -192,8 +192,7 @@ fn is_interesting_bind(control: Control) -> bool {
         | GameControl::Squad_Object_Circle
         | GameControl::Squad_Object_Square
         | GameControl::Squad_Object_Spiral
-        | GameControl::Squad_Object_Triangle
-        => true,
+        | GameControl::Squad_Object_Triangle => true,
         _ => false,
     }
 }
@@ -202,14 +201,17 @@ fn is_interesting(control: Control) -> bool {
         return false
     };
     match control {
-        GameControl::Miscellaneous_Interact | GameControl::Map_OpenClose
+        GameControl::Miscellaneous_Interact
+        | GameControl::Map_OpenClose
         | GameControl::UI_ShowHideUI
-        | GameControl::Squad_ClearAllObjectMarkers | GameControl::Squad_ClearAllLocationMarkers
-        => true,
+        | GameControl::Squad_ClearAllObjectMarkers
+        | GameControl::Squad_ClearAllLocationMarkers => true,
         #[cfg(todo)]
-        GameControl::Map_FloorUp | GameControl::Map_FloorDown
-        | GameControl::Map_ZoomIn | GameControl::Map_ZoomOut | GameControl::Map_Recenter
-        => true,
+        GameControl::Map_FloorUp
+        | GameControl::Map_FloorDown
+        | GameControl::Map_ZoomIn
+        | GameControl::Map_ZoomOut
+        | GameControl::Map_Recenter => true,
         _ => false,
     }
 }
@@ -241,8 +243,10 @@ fn notify_interesting(keyboard: bool, vk: VIRTUAL_KEY, down: bool) {
                 match keyboard {
                     true => binds.key_binds.get(&(vk.0, mods)),
                     false => binds.mouse_binds.get(&(vk.0, mods)),
-                }.copied()
-            }).flatten();
+                }
+                .copied()
+            })
+            .flatten();
             if let Some(bind) = bind {
                 CONTROLS.notify_press(vk, bind);
             }
@@ -253,34 +257,48 @@ fn notify_interesting(keyboard: bool, vk: VIRTUAL_KEY, down: bool) {
 pub fn process_key_bound(change: KeybindChange) {
     let interesting = CONTROLS.is_interested_in_control(change.control.into());
     #[cfg(todo)]
-    if !interesting { return }
+    if !interesting {
+        return
+    }
 
     let mut interesting_keys = None;
     write_game_binds(|binds| {
         binds.process_update(&change);
-        if !interesting { return }
+        if !interesting {
+            return
+        }
 
-        interesting_keys = Some(CONTROLS.collect_interesting_keys(
-            // TODO: these should be delayed since we expect to receive a lot of these events at startup...
-            binds.key_binds.iter()
-                .chain(binds.mouse_binds.iter())
-                .map(|(&(vk, _), &slot)| (slot, VIRTUAL_KEY(vk)))
-        ));
+        interesting_keys = Some(
+            CONTROLS.collect_interesting_keys(
+                // TODO: these should be delayed since we expect to receive a lot of these events at startup...
+                binds
+                    .key_binds
+                    .iter()
+                    .chain(binds.mouse_binds.iter())
+                    .map(|(&(vk, _), &slot)| (slot, VIRTUAL_KEY(vk))),
+            ),
+        );
     });
-    let Some(interesting_keys) = interesting_keys else { return };
+    let Some(interesting_keys) = interesting_keys else {
+        return
+    };
     CONTROLS.set_interesting_keys(interesting_keys);
 }
 
-pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> = BitArray {
-    data: [const { AtomicU64::new(0) }; keys::KEY_PRESS_BITS / 64],
-    _ord: PhantomData,
-};
+pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> =
+    BitArray {
+        data: [const { AtomicU64::new(0) }; keys::KEY_PRESS_BITS / 64],
+        _ord: PhantomData,
+    };
 
 pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(todo)]
     let prev_down = l & (1 << 30) != 0;
     let repeat = l & 0xff;
-    let is_up = matches!(msg, WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP);
+    let is_up = matches!(
+        msg,
+        WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP
+    );
     #[cfg(todo)]
     let is_trigger = !is_up && repeat == 1;
     #[cfg(todo)]
@@ -296,7 +314,9 @@ pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
             // TODO: normalize mods elsewhere...
             KeyboardAndMouse::VK_LMENU | KeyboardAndMouse::VK_RMENU => KeyboardAndMouse::VK_MENU,
             KeyboardAndMouse::VK_LSHIFT | KeyboardAndMouse::VK_RSHIFT => KeyboardAndMouse::VK_SHIFT,
-            KeyboardAndMouse::VK_LCONTROL | KeyboardAndMouse::VK_RCONTROL => KeyboardAndMouse::VK_CONTROL,
+            KeyboardAndMouse::VK_LCONTROL | KeyboardAndMouse::VK_RCONTROL => {
+                KeyboardAndMouse::VK_CONTROL
+            },
             w => w,
         },
         _ => {

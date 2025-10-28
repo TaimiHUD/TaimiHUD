@@ -1,9 +1,6 @@
-use {
-    crate::map::MapID,
-    core::num::NonZero,
-};
 #[cfg(feature = "nexus-rtapi")]
 pub use nexus::rtapi::GameState as NexusGameState;
+use {crate::map::MapID, core::num::NonZero};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GameplayState {
@@ -29,9 +26,7 @@ impl GameplayState {
         prev_map_id: None,
         next_map_id: None,
     };
-    pub const INGAME: Self = Self::Gameplay {
-        map_id: None,
-    };
+    pub const INGAME: Self = Self::Gameplay { map_id: None };
     pub const LOADING: Self = Self::Intermission {
         initial: false,
         prev_map_id: None,
@@ -72,20 +67,29 @@ impl GameplayState {
                 Some(change)
             },
             Self::Gameplay { .. } => None,
-            &mut GameplayState::Intermission { next_map_id: prev_next, prev_map_id, initial } => {
+            &mut GameplayState::Intermission {
+                next_map_id: prev_next,
+                prev_map_id,
+                initial,
+            } => {
                 let latest_map_id = next_map_id.or(prev_next);
                 let change = GameplayTransition::Loaded {
                     next_map_id: latest_map_id,
                     prev_map_id: prev_next.or(prev_map_id),
                     initial,
                 };
-                *self = Self::Gameplay { map_id: next_map_id };
+                *self = Self::Gameplay {
+                    map_id: next_map_id,
+                };
                 Some(change)
             },
         }
     }
 
-    pub fn commit_loading(&mut self, next_map_id: Option<NonZero<MapID>>) -> Option<GameplayTransition> {
+    pub fn commit_loading(
+        &mut self,
+        next_map_id: Option<NonZero<MapID>>,
+    ) -> Option<GameplayTransition> {
         match self {
             &mut Self::Gameplay { map_id, .. } => {
                 let change = GameplayTransition::Intermission {
@@ -98,7 +102,11 @@ impl GameplayState {
                 };
                 Some(change)
             },
-            Self::Intermission { next_map_id: next @ None, prev_map_id, .. } if next_map_id.is_some() && *next != next_map_id => {
+            Self::Intermission {
+                next_map_id: next @ None,
+                prev_map_id,
+                ..
+            } if next_map_id.is_some() && *next != next_map_id => {
                 if *next == *prev_map_id {
                     // TODO: careful here...
                     return None
@@ -110,8 +118,7 @@ impl GameplayState {
                 *next = next_map_id;
                 Some(change)
             },
-            Self::Intermission { .. } =>
-                None,
+            Self::Intermission { .. } => None,
         }
     }
 
@@ -129,8 +136,7 @@ impl GameplayState {
                 };
                 Some(change)
             },
-            Self::Intermission { .. } =>
-                None,
+            Self::Intermission { .. } => None,
         }
     }
 
@@ -143,24 +149,44 @@ impl GameplayState {
 
     pub const fn latest_map(&self) -> Option<NonZero<MapID>> {
         match self {
-            &Self::Gameplay { map_id } =>
-                map_id,
-            &Self::Intermission { next_map_id: Some(map_id), .. } =>
-                Some(map_id),
-            &Self::Intermission { next_map_id: None, prev_map_id, .. } =>
+            &Self::Gameplay { map_id } => map_id,
+            &Self::Intermission {
+                next_map_id: Some(map_id),
+                ..
+            } => Some(map_id),
+            &Self::Intermission {
+                next_map_id: None,
                 prev_map_id,
+                ..
+            } => prev_map_id,
         }
     }
 
     pub const fn latest_transition(&self) -> GameplayTransition {
         match self {
-            &GameplayState::Intermission { prev_map_id: None, next_map_id, .. } =>
-                GameplayTransition::Intermission { prev_map_id: next_map_id },
-            &GameplayState::Intermission { prev_map_id, next_map_id, .. } =>
-                //GameplayTransition::Intermission { prev_map_id: next_map_id.or(prev_map_id) },
-                GameplayTransition::Map { prev_map_id, next_map_id },
-            &GameplayState::Gameplay { map_id } =>
-                GameplayTransition::Map { prev_map_id: None, next_map_id: map_id }
+            &GameplayState::Intermission {
+                prev_map_id: None,
+                next_map_id,
+                ..
+            } => GameplayTransition::Intermission {
+                prev_map_id: next_map_id,
+            },
+            &GameplayState::Intermission {
+                prev_map_id,
+                next_map_id,
+                ..
+            } =>
+            //GameplayTransition::Intermission { prev_map_id: next_map_id.or(prev_map_id) },
+            {
+                GameplayTransition::Map {
+                    prev_map_id,
+                    next_map_id,
+                }
+            },
+            &GameplayState::Gameplay { map_id } => GameplayTransition::Map {
+                prev_map_id: None,
+                next_map_id: map_id,
+            },
         }
     }
 }
@@ -175,12 +201,9 @@ impl Default for GameplayState {
 impl From<NexusGameState> for GameplayState {
     fn from(state: NexusGameState) -> Self {
         match state {
-            NexusGameState::CharacterSelection | NexusGameState::CharacterCreation =>
-                Self::CHARSEL,
-            NexusGameState::Cinematic | NexusGameState::LoadingScreen =>
-                Self::LOADING,
-            NexusGameState::Gameplay =>
-                Self::INGAME,
+            NexusGameState::CharacterSelection | NexusGameState::CharacterCreation => Self::CHARSEL,
+            NexusGameState::Cinematic | NexusGameState::LoadingScreen => Self::LOADING,
+            NexusGameState::Gameplay => Self::INGAME,
         }
     }
 }
@@ -188,12 +211,9 @@ impl From<NexusGameState> for GameplayState {
 impl From<GameplayState> for NexusGameState {
     fn from(state: GameplayState) -> Self {
         match state {
-            GameplayState::Intermission { initial: true, .. } =>
-                NexusGameState::CharacterSelection,
-            GameplayState::Intermission { initial: false, .. } =>
-                NexusGameState::LoadingScreen,
-            GameplayState::Gameplay { .. } =>
-                NexusGameState::Gameplay,
+            GameplayState::Intermission { initial: true, .. } => NexusGameState::CharacterSelection,
+            GameplayState::Intermission { initial: false, .. } => NexusGameState::LoadingScreen,
+            GameplayState::Gameplay { .. } => NexusGameState::Gameplay,
         }
     }
 }
@@ -217,8 +237,10 @@ pub enum GameplayTransition {
 impl GameplayTransition {
     pub fn is_map_outdated(&self) -> bool {
         match self {
-            Self::Map { prev_map_id: Some(..), next_map_id: None } =>
-                true,
+            Self::Map {
+                prev_map_id: Some(..),
+                next_map_id: None,
+            } => true,
             _ => false,
         }
     }
@@ -226,8 +248,10 @@ impl GameplayTransition {
     pub fn is_load_outdated_to(&self, map_id: MapID) -> bool {
         let map_id = NonZero::new(map_id);
         match self {
-            &Self::Loaded { next_map_id: next_map_id @ Some(..), .. } if next_map_id != map_id =>
-                true,
+            &Self::Loaded {
+                next_map_id: next_map_id @ Some(..),
+                ..
+            } if next_map_id != map_id => true,
             _ => false,
         }
     }

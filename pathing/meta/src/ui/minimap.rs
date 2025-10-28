@@ -4,25 +4,14 @@ use {
             coord_newtype,
             transform2_cast,
             CompassSpace,
+            FakeSpace,
             MapSpace,
             MinimapSpace,
-            FakeSpace,
             WorldmapSpace,
         },
-        ui::{
-            MapCalibration,
-            MapContext, MapState,
-            MapUnit,
-            UiState,
-        },
+        ui::{MapCalibration, MapContext, MapState, MapUnit, UiState},
     },
-    glamour::{
-        Angle,
-        Point2, Size2, Rect,
-        Transform2,
-        Unit,
-        Vector2,
-    },
+    glamour::{Angle, Point2, Rect, Size2, Transform2, Unit, Vector2},
 };
 
 pub type MinimapState = MapState<MinimapSpace>;
@@ -34,9 +23,13 @@ impl MapUnit for MinimapSpace {
     const ROTATION_DISABLED: Self::Rotation = None;
     const ROTATION: bool = true;
     #[inline]
-    fn get_rotation(angle: Self::Rotation) -> Option<Angle> { angle }
+    fn get_rotation(angle: Self::Rotation) -> Option<Angle> {
+        angle
+    }
     #[inline]
-    fn rotation_from(angle: Option<Angle>) -> Self::Rotation { angle }
+    fn rotation_from(angle: Option<Angle>) -> Self::Rotation {
+        angle
+    }
 }
 
 /// See also: [MinimapSpace](crate::coords::MinimapSpace)
@@ -79,13 +72,10 @@ impl MinimapPlacement {
     /// `ui_bounds` must have already been adjusted to remove any
     /// [offsets or borders](Self::BOTTOM_OFFSET).
     pub fn bounds<U: Unit>(self, compass_size: Size2<U>, mut ui_bounds: Rect<U>) -> Rect<U> {
-        let origin = Point2::new(
-            ui_bounds.size.width - compass_size.width,
-            match self {
-                MinimapPlacement::Top => <U::Scalar as num_traits::ConstZero>::ZERO,
-                MinimapPlacement::Bottom => ui_bounds.size.height - compass_size.height,
-            },
-        );
+        let origin = Point2::new(ui_bounds.size.width - compass_size.width, match self {
+            MinimapPlacement::Top => <U::Scalar as num_traits::ConstZero>::ZERO,
+            MinimapPlacement::Bottom => ui_bounds.size.height - compass_size.height,
+        });
         ui_bounds.origin += origin;
         ui_bounds.size = compass_size;
         ui_bounds
@@ -116,28 +106,30 @@ impl From<MinimapPlacement> for MapContext {
 impl MapCalibration {
     pub fn compass_bounds(&self) -> Rect<FakeSpace> {
         let bounds = self.display_size() - MinimapPlacement::BOTTOM_OFFSET;
-        self.compass_position.bounds(self.compass_size, Rect::from_size(bounds))
+        self.compass_position
+            .bounds(self.compass_size, Rect::from_size(bounds))
     }
 }
 
-impl<M: MapUnit> MapState<M> where
+impl<M: MapUnit> MapState<M>
+where
     WorldmapSpace: Unit<Scalar = <M as Unit>::Scalar>,
     CompassSpace: Unit<Scalar = <M as Unit>::Scalar>,
 {
     pub fn to_compass(&self) -> Transform2<M, CompassSpace> {
         match M::ROTATION {
-            true => self.rotation()
-                .map(Transform2::from_angle),
+            true => self.rotation().map(Transform2::from_angle),
             false => None,
-        }.unwrap_or(Transform2::IDENTITY)
+        }
+        .unwrap_or(Transform2::IDENTITY)
     }
 
     pub fn from_compass(&self) -> Transform2<CompassSpace, M> {
         match M::ROTATION {
-            true => self.counter_rotation()
-                .map(Transform2::from_angle),
+            true => self.counter_rotation().map(Transform2::from_angle),
             false => None,
-        }.unwrap_or(Transform2::IDENTITY)
+        }
+        .unwrap_or(Transform2::IDENTITY)
     }
 }
 
@@ -197,33 +189,51 @@ coord_newtype! {
 
 #[doc(hidden)]
 impl MapCalibration {
-    pub fn cast_compass_to_worldmap<S>(trans: Transform2<S, CompassSpace>) -> Transform2<S, WorldmapSpace> where
+    pub fn cast_compass_to_worldmap<S>(
+        trans: Transform2<S, CompassSpace>,
+    ) -> Transform2<S, WorldmapSpace>
+    where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_minimap_to_worldmap<S>(trans: Transform2<S, MinimapSpace>) -> Transform2<S, WorldmapSpace> where
+    pub fn cast_minimap_to_worldmap<S>(
+        trans: Transform2<S, MinimapSpace>,
+    ) -> Transform2<S, WorldmapSpace>
+    where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_worldmap_to_compass<D>(trans: Transform2<CompassSpace, D>) -> Transform2<WorldmapSpace, D> where
+    pub fn cast_worldmap_to_compass<D>(
+        trans: Transform2<CompassSpace, D>,
+    ) -> Transform2<WorldmapSpace, D>
+    where
         D: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_worldmap_to_minimap<D>(trans: Transform2<MinimapSpace, D>) -> Transform2<WorldmapSpace, D> where
+    pub fn cast_worldmap_to_minimap<D>(
+        trans: Transform2<MinimapSpace, D>,
+    ) -> Transform2<WorldmapSpace, D>
+    where
         D: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
 
-    pub fn cast_compass_from_worldmap<S>(trans: Transform2<S, WorldmapSpace>) -> Transform2<S, CompassSpace> where
+    pub fn cast_compass_from_worldmap<S>(
+        trans: Transform2<S, WorldmapSpace>,
+    ) -> Transform2<S, CompassSpace>
+    where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_minimap_from_worldmap<S>(trans: Transform2<S, WorldmapSpace>) -> Transform2<S, MinimapSpace> where
+    pub fn cast_minimap_from_worldmap<S>(
+        trans: Transform2<S, WorldmapSpace>,
+    ) -> Transform2<S, MinimapSpace>
+    where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)

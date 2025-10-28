@@ -1,5 +1,12 @@
 use {
-    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, TimerSettings},
+    super::{
+        ArcSettings,
+        PathingSettings,
+        ProgressBarSettings,
+        RemoteSource,
+        RemoteState,
+        TimerSettings,
+    },
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::bindings::TaimiControls,
@@ -17,7 +24,10 @@ use {
         collections::{HashMap, HashSet},
         fmt::{self},
         path::{Path, PathBuf},
-        sync::{Arc, atomic::{AtomicBool, Ordering}},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
     },
     strum_macros::EnumIter,
     tokio::{
@@ -150,7 +160,10 @@ pub struct Settings {
     pub enable_katrender: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dpi_scaling: Option<f32>,
-    #[serde(default = "TaimiControls::default_quick_access", skip_serializing_if = "TaimiControls::is_default_quick_access")]
+    #[serde(
+        default = "TaimiControls::default_quick_access",
+        skip_serializing_if = "TaimiControls::is_default_quick_access"
+    )]
     pub quick_access_visible: TaimiControls,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
@@ -185,10 +198,10 @@ impl Settings {
         match state {
             Some(s) => {
                 *window_open = s;
-            }
+            },
             None => {
                 *window_open = !*window_open;
-            }
+            },
         }
     }
 
@@ -249,15 +262,23 @@ impl Settings {
 
     #[allow(dead_code)]
     pub fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
-        self.remotes.iter().find(|dd| dd.source().name() == source.name())
+        self.remotes
+            .iter()
+            .find(|dd| dd.source().name() == source.name())
     }
 
     pub fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
-        self.remotes.iter_mut().find(|dd| dd.source().name() == source.name())
+        self.remotes
+            .iter_mut()
+            .find(|dd| dd.source().name() == source.name())
     }
 
     pub async fn uninstall_remote(&mut self, source: &RemoteSource) -> anyhow::Result<()> {
-        if let Some(remote) = self.remotes.iter_mut().find(|dd| dd.source().name() == source.name()) {
+        if let Some(remote) = self
+            .remotes
+            .iter_mut()
+            .find(|dd| dd.source().name() == source.name())
+        {
             remote.uninstall().await?;
         }
         Ok(())
@@ -278,18 +299,14 @@ impl Settings {
             .expect("SettingsLock should've been initialized by now!");
         let install_dir = {
             let settings_read_lock = settings_arc.read().await;
-            settings_read_lock
-                .addon_dir
-                .join(source.install_dir())
+            settings_read_lock.addon_dir.join(source.install_dir())
         };
         let tag_name = source.download_latest(state.kind).await?;
         {
             let mut settings_write_lock = settings_arc.write().await;
             if let Some(dd_mut) = settings_write_lock.get_status_for_mut(&source) {
                 let res = dd_mut.commit_downloaded(tag_name, install_dir).await;
-                let _ = settings_write_lock
-                    .save()
-                    .await;
+                let _ = settings_write_lock.save().await;
                 res
             } else {
                 Err(anyhow!("GitHub repository \"{}\" not found.", source))
@@ -320,7 +337,9 @@ impl Settings {
             .expect("SettingsLock should've been initialized by now!");
         let sources: Vec<(RemoteSource, NeedsUpdate)> = {
             let settings_read_lock = settings_arc.read().await;
-            let remotes = settings_read_lock.remotes.iter()
+            let remotes = settings_read_lock
+                .remotes
+                .iter()
                 .filter(|r| everything || r.installed_path.is_some());
             tokio_stream::iter(remotes)
                 .then(|r| async move { (r.remote_source(), r.needs_update().await) })
@@ -337,9 +356,7 @@ impl Settings {
                 }
             }
             settings_write_lock.last_checked = Some(Utc::now());
-            settings_write_lock
-                .save()
-                .await?;
+            settings_write_lock.save().await?;
         }
         Ok(())
     }
@@ -393,7 +410,8 @@ impl Settings {
     }
 
     pub async fn load_default(addon_dir: &Path) -> Self {
-        let res = Settings::load(addon_dir).await
+        let res = Settings::load(addon_dir)
+            .await
             .context("SettingsLock load error");
         match res {
             Ok(settings) => settings,
@@ -401,7 +419,7 @@ impl Settings {
                 log::error!("{err:#}");
                 save_state_backup(&Self::file_path(addon_dir));
                 Self::new(addon_dir)
-            }
+            },
         }
     }
 
@@ -416,8 +434,7 @@ impl Settings {
     }
 
     pub fn settings_str(&self) -> anyhow::Result<String> {
-        serde_json::to_string(self)
-            .context("settings serialization error")
+        serde_json::to_string(self).context("settings serialization error")
     }
 
     pub async fn start_save(&self) -> anyhow::Result<SettingsSave> {
@@ -433,11 +450,12 @@ impl Settings {
         Self::save_to(&save).await
     }
 
-    pub async fn save_to((settings_path, settings_str, dirty): &SettingsSave) -> anyhow::Result<()> {
+    pub async fn save_to(
+        (settings_path, settings_str, dirty): &SettingsSave,
+    ) -> anyhow::Result<()> {
         log::trace!("Settings: Saving to \"{:?}\".", settings_path);
         let res = match File::create(settings_path).await {
-            Ok(mut file) =>
-                file.write_all(settings_str.as_bytes()).await,
+            Ok(mut file) => file.write_all(settings_str.as_bytes()).await,
             Err(e) => Err(e),
         };
 
@@ -470,8 +488,7 @@ impl Settings {
     }
 
     pub fn try_read() -> Option<tokio::sync::RwLockReadGuard<'static, Self>> {
-        SETTINGS.get()
-            .and_then(|settings| settings.try_read().ok())
+        SETTINGS.get().and_then(|settings| settings.try_read().ok())
     }
 
     pub fn read_with_blocking<R, F: FnOnce(&Self) -> R>(f: F) -> anyhow::Result<R> {
@@ -492,7 +509,8 @@ impl Settings {
     }
 
     pub fn try_write() -> Option<tokio::sync::RwLockWriteGuard<'static, Self>> {
-        let mut res = SETTINGS.get()
+        let mut res = SETTINGS
+            .get()
             .and_then(|settings| settings.try_write().ok());
 
         if let Some(settings) = &mut res {
@@ -504,10 +522,8 @@ impl Settings {
 
     pub async fn async_read() -> anyhow::Result<tokio::sync::RwLockReadGuard<'static, Self>> {
         let settings = match SETTINGS.get() {
-            Some(settings) =>
-                settings.read().await,
-            None =>
-                anyhow::bail!("SETTINGS not loaded"),
+            Some(settings) => settings.read().await,
+            None => anyhow::bail!("SETTINGS not loaded"),
         };
 
         Ok(settings)
@@ -515,10 +531,8 @@ impl Settings {
 
     pub async fn async_write() -> anyhow::Result<tokio::sync::RwLockWriteGuard<'static, Self>> {
         let mut settings = match SETTINGS.get() {
-            Some(settings) =>
-                settings.write().await,
-            None =>
-                anyhow::bail!("SETTINGS not loaded"),
+            Some(settings) => settings.write().await,
+            None => anyhow::bail!("SETTINGS not loaded"),
         };
 
         settings.mark_dirty();
@@ -528,10 +542,8 @@ impl Settings {
 
     pub fn write_with_blocking<R, F: FnOnce(&mut Self) -> R>(f: F) -> anyhow::Result<R> {
         let mut settings = match SETTINGS.get() {
-            Some(settings) =>
-                settings.blocking_write(),
-            None =>
-                anyhow::bail!("SETTINGS not loaded"),
+            Some(settings) => settings.blocking_write(),
+            None => anyhow::bail!("SETTINGS not loaded"),
         };
 
         settings.mark_dirty();

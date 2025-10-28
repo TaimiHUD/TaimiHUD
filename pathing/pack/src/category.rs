@@ -1,9 +1,9 @@
 use {
-    anyhow::Context,
     crate::{
         attributes::{parse_bool, MarkerAttributes},
         pack::{taco_safe_name, PartialItem},
     },
+    anyhow::Context,
     bitvec::vec::BitVec,
     indexmap::IndexMap,
     std::sync::Arc,
@@ -79,20 +79,23 @@ impl Category {
                         .map_err(From::from)
                 } else {
                     match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                        Ok(false) => Ok(
-                            log::debug!("unrecognized category attribute `{}`", attr.name)
-                        ),
+                        Ok(false) => Ok(log::debug!(
+                            "unrecognized category attribute `{}`",
+                            attr.name
+                        )),
                         res => res.map(drop),
                     }
                 }
             } else {
                 match marker_attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(
-                        log::info!("unrecognized category attribute `{}`", attr.name)
-                    ),
+                    Ok(false) => Ok(log::info!(
+                        "unrecognized category attribute `{}`",
+                        attr.name
+                    )),
                     res => res.map(drop),
                 }
-            }.with_context(|| format!("parsing category attribute '{}'", attr.name));
+            }
+            .with_context(|| format!("parsing category attribute '{}'", attr.name));
             if let Err(e) = res {
                 log::warn!("{e:#}");
             }
@@ -108,18 +111,10 @@ impl Category {
         marker_attributes.merge(&attributes_bh);
 
         let marker_attributes = Arc::new(marker_attributes);
-        let display_name = display_name
-            .or(bh_display_name)
-            .unwrap_or(id.clone());
-        let is_separator = is_separator
-            .or(bh_is_separator)
-            .unwrap_or(false);
-        let is_hidden = is_hidden
-            .or(bh_is_hidden)
-            .unwrap_or(false);
-        let default_toggle = default_toggle
-            .or(bh_default_toggle)
-            .unwrap_or(true);
+        let display_name = display_name.or(bh_display_name).unwrap_or(id.clone());
+        let is_separator = is_separator.or(bh_is_separator).unwrap_or(false);
+        let is_hidden = is_hidden.or(bh_is_hidden).unwrap_or(false);
+        let default_toggle = default_toggle.or(bh_default_toggle).unwrap_or(true);
 
         Ok(Category {
             display_name,
@@ -133,7 +128,13 @@ impl Category {
         })
     }
 
-    pub fn recompute_enabled(&self, all_categories: &IndexMap<String, Category>, enabled_categories: &mut BitVec, user_category_state: &BitVec, parent: bool) {
+    pub fn recompute_enabled(
+        &self,
+        all_categories: &IndexMap<String, Category>,
+        enabled_categories: &mut BitVec,
+        user_category_state: &BitVec,
+        parent: bool,
+    ) {
         if let Some(idx) = all_categories.get_index_of(&self.full_id) {
             if let Some(cur) = user_category_state.get(idx) {
                 let res = parent && *cur;
@@ -141,7 +142,12 @@ impl Category {
                     *cat = res;
                 }
                 for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].recompute_enabled(all_categories, enabled_categories, user_category_state, res);
+                    all_categories[global].recompute_enabled(
+                        all_categories,
+                        enabled_categories,
+                        user_category_state,
+                        res,
+                    );
                 }
             }
         }

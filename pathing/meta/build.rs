@@ -1,15 +1,12 @@
 use {
+    compression_codecs::{gzip::GzipEncoder, Encode},
     compression_core::{util::PartialBuffer, Level},
-    compression_codecs::{
-        gzip::GzipEncoder,
-        Encode,
-    },
     std::{
         env,
         error::Error as StdError,
         fmt,
         fs,
-        io::{self, Write, BufRead},
+        io::{self, BufRead, Write},
         path::PathBuf,
     },
 };
@@ -33,7 +30,7 @@ fn main() {
             if let Ok(dest_path) = out_dir().map(map_cache) {
                 let _ = fs::remove_file(dest_path);
             }
-        }
+        },
     }
 }
 
@@ -66,8 +63,7 @@ fn write_map_cache() -> Result<Option<PathBuf>, Error> {
     let mut out = PartialBuffer::new(vec![0u8; 0x800]);
     loop {
         let mut buf = PartialBuffer::new(match src.buffer() {
-            b if b.is_empty() =>
-                src.fill_buf()?,
+            b if b.is_empty() => src.fill_buf()?,
             b => b,
         });
         if buf.unwritten().is_empty() {

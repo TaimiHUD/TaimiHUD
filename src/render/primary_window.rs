@@ -3,10 +3,15 @@ use {
         fl,
         render::{
             machine::RenderMachine,
-            ConfigTabState, DataSourceTabState, InfoTabState, TimerTabState, TimerWindowState,
+            ConfigTabState,
+            DataSourceTabState,
+            InfoTabState,
+            TimerTabState,
+            TimerWindowState,
         },
         settings::Settings,
-        ControllerEvent, Controller,
+        Controller,
+        ControllerEvent,
     },
     nexus::imgui::{Ui, Window},
     std::collections::HashMap,
@@ -63,7 +68,9 @@ impl PrimaryWindowState {
             Window::new(&fl!("primary-window"))
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
-                .build(ui, || self.draw_tabs(ui, machine, timer_window_state, state_errors, true));
+                .build(ui, || {
+                    self.draw_tabs(ui, machine, timer_window_state, state_errors, true)
+                });
         }
         if open != self.open {
             Controller::try_send(ControllerEvent::WindowState(
@@ -89,7 +96,13 @@ impl PrimaryWindowState {
         state_errors: &mut HashMap<String, anyhow::Error>,
         standalone: bool,
     ) {
-        let Some(_tabs) = ui.tab_bar(if standalone { "modules" } else { "modules-settings" }) else { return };
+        let Some(_tabs) = ui.tab_bar(if standalone {
+            "modules"
+        } else {
+            "modules-settings"
+        }) else {
+            return
+        };
         if standalone {
             if let Some(_token) = ui.tab_item(&fl!("timer-tab")) {
                 self.timer_tab.draw(ui, state_errors);

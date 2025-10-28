@@ -35,10 +35,16 @@ pub enum ShaderTarget {
     /// DX10.1
     PixelShader_4_1,
 
-    #[cfg_attr(feature = "serde", serde(rename = "vs_5_0", alias = "vertex", alias = "Vertex"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "vs_5_0", alias = "vertex", alias = "Vertex")
+    )]
     /// DX11
     VertexShader_5_0,
-    #[cfg_attr(feature = "serde", serde(rename = "ps_5_0", alias = "pixel", alias = "Pixel"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "ps_5_0", alias = "pixel", alias = "Pixel")
+    )]
     /// DX11
     PixelShader_5_0,
 
@@ -56,9 +62,7 @@ impl ShaderTarget {
 
     pub fn as_str(&self) -> &'static str {
         let bytes = self.c_name().to_bytes();
-        unsafe {
-            str::from_utf8_unchecked(bytes)
-        }
+        unsafe { str::from_utf8_unchecked(bytes) }
     }
 
     pub fn c_name(&self) -> &'static CStr {
@@ -81,16 +85,18 @@ impl ShaderTarget {
 
     pub fn kind(&self) -> ShaderKind {
         match self {
-            ShaderTarget::PixelShader_5_0 | ShaderTarget::PixelShader_5_1
-            | ShaderTarget::PixelShader_4_0 | ShaderTarget::PixelShader_4_1
-            | ShaderTarget::PixelShader_3_0 | ShaderTarget::PixelShader_2_0
-            =>
-                ShaderKind::Pixel,
-            ShaderTarget::VertexShader_5_0 | ShaderTarget::VertexShader_5_1
-            | ShaderTarget::VertexShader_4_0 | ShaderTarget::VertexShader_4_1
-            | ShaderTarget::VertexShader_3_0 | ShaderTarget::VertexShader_2_0
-            =>
-                ShaderKind::Vertex,
+            ShaderTarget::PixelShader_5_0
+            | ShaderTarget::PixelShader_5_1
+            | ShaderTarget::PixelShader_4_0
+            | ShaderTarget::PixelShader_4_1
+            | ShaderTarget::PixelShader_3_0
+            | ShaderTarget::PixelShader_2_0 => ShaderKind::Pixel,
+            ShaderTarget::VertexShader_5_0
+            | ShaderTarget::VertexShader_5_1
+            | ShaderTarget::VertexShader_4_0
+            | ShaderTarget::VertexShader_4_1
+            | ShaderTarget::VertexShader_3_0
+            | ShaderTarget::VertexShader_2_0 => ShaderKind::Vertex,
         }
     }
 }

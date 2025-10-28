@@ -1,12 +1,9 @@
-use {
-    crate::coords::{MapLocalScale, MapSpace, GameSpace},
-    glamour::{
-        Box2, Point2,
-        TransformMap,
-    },
-};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use {
+    crate::coords::{GameSpace, MapLocalScale, MapSpace},
+    glamour::{Box2, Point2, TransformMap},
+};
 
 pub type MapID = u32;
 
@@ -44,13 +41,19 @@ impl Map {
         // axis inversion is only relevant for coordinate conversions, because a negative box would be awkward .-.
         // TODO: consider making this an explicit property of the transition from 3D/Z axis?
         let (top, bottom) = (bottom, top);
-        Box2::new(Point2::new(left as _, top as _), Point2::new(right as _, bottom as _))
+        Box2::new(
+            Point2::new(left as _, top as _),
+            Point2::new(right as _, bottom as _),
+        )
     }
 
     #[inline]
     pub fn continent_rect(&self) -> Box2<MapSpace> {
         let [[left, top], [right, bottom]] = self.continent_rect;
-        Box2::new(Point2::new(left as _, top as _), Point2::new(right as _, bottom as _))
+        Box2::new(
+            Point2::new(left as _, top as _),
+            Point2::new(right as _, bottom as _),
+        )
     }
 
     pub fn map_scale(&self) -> MapLocalScale {
@@ -59,16 +62,14 @@ impl Map {
 
     #[cfg(todo = "unnecessary")]
     pub fn continent_map_origin(&self) -> Point2<MapSpace> {
-        let offset = self.map_scale()
-            .map(Point2::ZERO - self.map_rect().min);
+        let offset = self.map_scale().map(Point2::ZERO - self.map_rect().min);
         self.continent_rect().min + offset
     }
 
     /// Offset from `Point2::<MapSpace>::ZERO` (continent origin)
     /// to `Point2::<GameSpace>::ZERO` (map origin is usually the centre, but often imperfect)
     pub fn continent_map_origin(&self) -> Point2<MapSpace> {
-        let offset = self.map_scale()
-            .map(self.map_rect().center().to_vector());
+        let offset = self.map_scale().map(self.map_rect().center().to_vector());
         self.continent_rect().center() - offset
     }
 }
@@ -78,13 +79,9 @@ pub type MapType = String;
 #[cfg(feature = "map-cache")]
 mod cache {
     use {
-        anyhow::Context,
         crate::map::{Map, MapID},
-        std::{
-            borrow::Cow,
-            collections::BTreeMap,
-            sync::LazyLock,
-        },
+        anyhow::Context,
+        std::{borrow::Cow, collections::BTreeMap, sync::LazyLock},
     };
 
     #[cfg(feature = "map-cache")]
@@ -101,7 +98,8 @@ mod cache {
                         Ok(json) => serde_json::from_str(&json),
                         Err(e) => Err(serde::de::Error::custom(e)),
                     },
-                }.context("failed to deserialize map cache");
+                }
+                .context("failed to deserialize map cache");
                 if let Err(_e) = &maps {
                     log::error!("{_e:#}");
                 }
@@ -122,8 +120,8 @@ mod cache {
         #[cfg(feature = "gzip")]
         pub(crate) fn maps_json_gz() -> anyhow::Result<String> {
             use async_compression::{
+                codecs::{gzip::GzipDecoder, Decode},
                 core::util::PartialBuffer,
-                codecs::{Decode, gzip::GzipDecoder},
             };
 
             const MAPS_JSON_GZ: &'static [u8] = include_bytes!(env!("INC_MAP_CACHE_GZ"));
@@ -133,15 +131,15 @@ mod cache {
             let mut out = PartialBuffer::new(vec![0u8; MAPS_JSON_LEN]);
             let mut decoder = GzipDecoder::new();
             while !input.unwritten().is_empty() {
-                let res = decoder.decode(&mut input, &mut out)
+                let res = decoder
+                    .decode(&mut input, &mut out)
                     .context("GZIP decode failure");
                 if res? {
                     break
                 }
             }
             loop {
-                let res = decoder.finish(&mut out)
-                    .context("GZIP failed to finalize");
+                let res = decoder.finish(&mut out).context("GZIP failed to finalize");
                 if res? {
                     break
                 }
@@ -153,8 +151,7 @@ mod cache {
             let len = out.written().len();
             let mut out = out.into_inner();
             out.truncate(len);
-            String::from_utf8(out)
-                .context("decoded data not stringy enough")
+            String::from_utf8(out).context("decoded data not stringy enough")
         }
     }
 }

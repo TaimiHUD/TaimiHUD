@@ -7,12 +7,8 @@ use {
     std::cell::UnsafeCell,
     taimi_d3d::{
         dx11::{
+            buffer::{Buffer, BufferOf, VertexBuffer},
             prelude::*,
-            buffer::{
-                Buffer,
-                BufferOf,
-                VertexBuffer,
-            },
         },
         state::PrimitiveTopology,
         D3dContextBindableSlot,
@@ -48,16 +44,15 @@ impl ObjectRenderBacking {
                 let buffer = &mut *buffer;
                 buffer.replace(device, device_context, data)?;
             } else {
-                self.instance_buffer().update_all_unchecked(device_context, data, 0);
+                self.instance_buffer()
+                    .update_all_unchecked(device_context, data, 0);
             }
         }
         Ok(())
     }
 
     pub fn instance_buffer(&self) -> &BufferOf<InstanceBufferData> {
-        unsafe {
-            BufferOf::with_buffer_ref(&*self.instance_buffer.get())
-        }
+        unsafe { BufferOf::with_buffer_ref(&*self.instance_buffer.get()) }
     }
 
     pub fn set_shaders(&self, device_context: &Dx11Context) {
@@ -81,9 +76,7 @@ impl ObjectRenderBacking {
         let instances = self.instance_buffer().count_of::<InstanceBufferData>();
         let total = self.vertex_buffer.count + instances as u32;
         self.metadata.topology.set(device_context);
-        unsafe {
-            device_context.DrawInstanced(total, instances as u32, start, 0)
-        }
+        unsafe { device_context.DrawInstanced(total, instances as u32, start, 0) }
     }
     pub fn set_and_draw(
         &self,

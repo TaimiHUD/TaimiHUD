@@ -1,11 +1,13 @@
-use anyhow::Context;
-use crate::{
-    exports::runtime as rt,
-    space::goggles::{self, LensClass, LENSES, LENS_PTR},
+use {
+    crate::{
+        exports::runtime as rt,
+        space::goggles::{self, LensClass, LENSES, LENS_PTR},
+    },
+    anyhow::Context,
+    nexus::imgui,
+    std::{mem, ptr, sync::atomic::Ordering, thread},
+    windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl},
 };
-use nexus::imgui;
-use std::{mem, ptr, sync::atomic::Ordering, thread};
-use windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl};
 
 #[cfg(todo = "unused")]
 pub fn options_ui(ui: &imgui::Ui) {
@@ -90,28 +92,30 @@ pub fn enable(needs_setup: bool) {
     // avoid deadlocks...
     thread::spawn(move || {
         if let Some(vtbl) = vtbl {
-            let res = goggles::setup(vtbl)
-                .context("goggles failure");
+            let res = goggles::setup(vtbl).context("goggles failure");
             if let Err(e) = res {
                 log::error!("{e:#}");
                 return
             }
         }
 
-        let res = goggles::enable()
-            .context("failed to enable goggles");
+        let res = goggles::enable().context("failed to enable goggles");
         if let Err(e) = res {
             log::error!("{e:#}");
             let _ = goggles::disable();
         } else {
-            let _ = LENS_PTR.compare_exchange(ptr::null_mut(), ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
+            let _ = LENS_PTR.compare_exchange(
+                ptr::null_mut(),
+                ptr::dangling_mut(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
         }
     });
 }
 
 pub fn disable() {
-    let res = goggles::disable()
-        .context("failed to disable goggles");
+    let res = goggles::disable().context("failed to disable goggles");
     if let Err(e) = res {
         log::error!("{e:#}");
     } else {

@@ -1,8 +1,4 @@
-use {
-    crate::render::machine::RenderMachine,
-    taimi_meta::ui::UiMap,
-    tokio::sync::Mutex,
-};
+use {crate::render::machine::RenderMachine, taimi_meta::ui::UiMap, tokio::sync::Mutex};
 
 impl RenderMachine {
     pub fn shared_map_state() -> &'static Mutex<UiMap> {

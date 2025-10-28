@@ -20,19 +20,19 @@ impl fmt::Display for NeedsUpdate {
             Unknown => {
                 let translation = fl!("update-unknown");
                 write!(f, "{}", translation)
-            }
+            },
             Error(e) => {
                 let translation = fl!("update-error", error = e);
                 write!(f, "{}", translation)
-            }
+            },
             Known(true, id) => {
                 let translation = fl!("update-available", version = id);
                 write!(f, "{}", translation)
-            }
+            },
             Known(false, _id) => {
                 let translation = fl!("update-not-required");
                 write!(f, "{}", translation)
-            }
+            },
         }
     }
 }

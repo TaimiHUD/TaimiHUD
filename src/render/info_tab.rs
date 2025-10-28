@@ -1,7 +1,15 @@
 use {
     super::TimerWindowState,
-    crate::{built_info, exports::runtime as rt, fl, render::RenderState, TEXTURES, ControllerEvent, Controller},
-    nexus::imgui::{TableColumnSetup, Ui, StyleColor},
+    crate::{
+        built_info,
+        exports::runtime as rt,
+        fl,
+        render::RenderState,
+        Controller,
+        ControllerEvent,
+        TEXTURES,
+    },
+    nexus::imgui::{StyleColor, TableColumnSetup, Ui},
 };
 
 pub struct InfoTabState {
@@ -31,7 +39,12 @@ impl InfoTabState {
             _ => rt::CRATE_VERSION,
         };
 
-        let project_heading = format!("{}, {} by {}", crate::exports::addon_title!(), version, self.authors);
+        let project_heading = format!(
+            "{}, {} by {}",
+            crate::exports::addon_title!(),
+            version,
+            self.authors
+        );
         RenderState::font_text("big", ui, &project_heading);
 
         let in_ci = match built_info::CI_PLATFORM {
@@ -50,10 +63,7 @@ impl InfoTabState {
         ui.text_wrapped(fl!("having-issues"));
         ui.dummy([4.0, 4.0]);
         let path = fl!("discord-link");
-        let color_token = ui.push_style_color(
-            StyleColor::Button,
-            [0.0, 0.5, 0.8, 1.0]
-        );
+        let color_token = ui.push_style_color(StyleColor::Button, [0.0, 0.5, 0.8, 1.0]);
         if ui.button(fl!("join-discord")) {
             log::debug!("Triggered open Discord join");
             Controller::try_send(ControllerEvent::OpenOpenable(
@@ -72,13 +82,10 @@ impl InfoTabState {
         ui.text_wrapped(&fl!("keybind-triggers"));
         ui.separator();
         RenderState::font_text("ui", ui, &fl!("active-timer-phases"));
-        let table_token = ui.begin_table_header(
-            "phase_states",
-            [
-                TableColumnSetup::new(&fl!("timer")),
-                TableColumnSetup::new(&fl!("phase")),
-            ],
-        );
+        let table_token = ui.begin_table_header("phase_states", [
+            TableColumnSetup::new(&fl!("timer")),
+            TableColumnSetup::new(&fl!("phase")),
+        ]);
         ui.table_next_column();
         for phase_state in &timer_window_state.phase_states {
             let phase = phase_state.phase.phase();
@@ -98,12 +105,16 @@ impl InfoTabState {
             use crate::resources::texture;
             ui.text(&fl!("d3d-textures", count = tex_count));
             if let Some(tex_size) = texture::STATS_TEXTURE_SIZE.get_any() {
-                ui.same_line(); ui.text(", ");
-                ui.same_line(); ui.text(Self::size_frag(tex_size));
+                ui.same_line();
+                ui.text(", ");
+                ui.same_line();
+                ui.text(Self::size_frag(tex_size));
             }
             if let Some(tex_size_cloned) = texture::STATS_TEXTURE_SIZE_CLONED.get_any() {
-                ui.same_line(); ui.text(" - <=");
-                ui.same_line(); ui.text(Self::size_frag(tex_size_cloned));
+                ui.same_line();
+                ui.text(" - <=");
+                ui.same_line();
+                ui.text(Self::size_frag(tex_size_cloned));
             }
         }
         #[cfg(feature = "allocator")]
@@ -129,7 +140,7 @@ impl InfoTabState {
             minimum_significant_digits: Some(3),
             maximum_significant_digits: Some(5),
             maximum_fraction_digits: Some(4),
-            .. Default::default()
+            ..Default::default()
         };
         match size as f64 {
             size if size >= MIN_MB => {
@@ -166,10 +177,9 @@ impl InfoTabState {
             #[cfg(feature = "space-ecs")]
             {
                 RenderState::font_text("ui", ui, &fl!("object-data"));
-                let table_token = ui.begin_table_header(
-                    "object_types",
-                    [TableColumnSetup::new(&fl!("object-kind"))],
-                );
+                let table_token = ui.begin_table_header("object_types", [TableColumnSetup::new(
+                    &fl!("object-kind"),
+                )]);
                 ui.table_next_column();
                 for object in engine.object_kinds.keys() {
                     ui.text(object);
@@ -178,14 +188,11 @@ impl InfoTabState {
                 drop(table_token);
                 RenderState::font_text("ui", ui, &fl!("model-files"));
                 #[cfg(feature = "space-ecs")]
-                let table_token = ui.begin_table_header(
-                    "model_files",
-                    [
-                        TableColumnSetup::new(&fl!("name")),
-                        TableColumnSetup::new(&fl!("path")),
-                        TableColumnSetup::new(&fl!("vertices")),
-                    ],
-                );
+                let table_token = ui.begin_table_header("model_files", [
+                    TableColumnSetup::new(&fl!("name")),
+                    TableColumnSetup::new(&fl!("path")),
+                    TableColumnSetup::new(&fl!("vertices")),
+                ]);
                 ui.table_next_column();
                 for (path, file) in &engine.model_files {
                     for model in &file.models {
@@ -201,24 +208,24 @@ impl InfoTabState {
             }
         });
 
-            RenderState::font_text("ui", ui, "Pathing Stats");
-            let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
-            let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
-            let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
-            ui.text(format!("Drawn: {}", pack_entity_draw));
-            ui.text(format!("Mapped: {}", pack_entity_draw_map));
-            ui.text(format!("Total: {}", pack_entity_total));
-            if let Some(size) = trail::STATS_TRAIL_VERTEX_SIZE.get_any() {
-                let trail = fl!("trail");
-                let vertices = fl!("vertices");
-                let size = Self::size_frag(size);
-                let size = fl!("alloc-size", size = size);
-                ui.text(&format!("{trail} {vertices} {size}"));
-            }
-            if let Some(size) = poi::STATS_POI_INSTANCE_SIZE.get_any() {
-                let size = Self::size_frag(size);
-                let size = fl!("alloc-size", size = size);
-                ui.text(&format!("POI Instance Buffer {size}"));
-            }
+        RenderState::font_text("ui", ui, "Pathing Stats");
+        let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
+        let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
+        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
+        ui.text(format!("Drawn: {}", pack_entity_draw));
+        ui.text(format!("Mapped: {}", pack_entity_draw_map));
+        ui.text(format!("Total: {}", pack_entity_total));
+        if let Some(size) = trail::STATS_TRAIL_VERTEX_SIZE.get_any() {
+            let trail = fl!("trail");
+            let vertices = fl!("vertices");
+            let size = Self::size_frag(size);
+            let size = fl!("alloc-size", size = size);
+            ui.text(&format!("{trail} {vertices} {size}"));
+        }
+        if let Some(size) = poi::STATS_POI_INSTANCE_SIZE.get_any() {
+            let size = Self::size_frag(size);
+            let size = fl!("alloc-size", size = size);
+            ui.text(&format!("POI Instance Buffer {size}"));
+        }
     }
 }

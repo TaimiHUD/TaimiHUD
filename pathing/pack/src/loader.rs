@@ -1,6 +1,8 @@
+#[cfg(feature = "zip")]
+use zip::ZipArchive;
 use {
-    anyhow::{anyhow, Context as _},
     crate::pack::file_path_eq,
+    anyhow::{anyhow, Context as _},
     relative_path::PathExt,
     std::{
         borrow::Cow,
@@ -10,8 +12,6 @@ use {
         path::{Path, PathBuf},
     },
 };
-#[cfg(feature = "zip")]
-use zip::ZipArchive;
 
 pub trait LoaderAssetReader: io::BufRead + io::Seek + 'static {}
 impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
@@ -27,7 +27,8 @@ pub trait PackLoaderContext {
 
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a>;
 
-    fn all_files_with_ext_owned(&self, ext: &'static str) -> Vec<anyhow::Result<PathBuf>> where
+    fn all_files_with_ext_owned(&self, ext: &'static str) -> Vec<anyhow::Result<PathBuf>>
+    where
         Self: Sized,
     {
         self.all_files_with_ext(ext)
@@ -35,7 +36,8 @@ pub trait PackLoaderContext {
             .collect()
     }
 
-    fn as_dyn(&mut self) -> &mut dyn PackLoaderContext where
+    fn as_dyn(&mut self) -> &mut dyn PackLoaderContext
+    where
         Self: Sized,
     {
         self
@@ -43,7 +45,11 @@ pub trait PackLoaderContext {
 }
 
 impl<'l> dyn PackLoaderContext + 'l {
-    pub fn find_asset_near(&mut self, relative: &str, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+    pub fn find_asset_near(
+        &mut self,
+        relative: &str,
+        name: &str,
+    ) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         let e = match self.load_asset_dyn(name) {
             Ok(a) => return Ok(a),
             Err(e) => e,
@@ -58,7 +64,6 @@ impl<'l> dyn PackLoaderContext + 'l {
 
         Err(e)
     }
-
 }
 
 impl PackLoaderContext for &mut dyn PackLoaderContext {
@@ -135,14 +140,13 @@ impl DirectoryLoader {
 impl PackLoaderContext for DirectoryLoader {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
         let path = self.root.join(name);
-        Ok(io::BufReader::new(
-            fs::File::open(&path).with_context(|| {
+        Ok(io::BufReader::new(fs::File::open(&path).with_context(
+            || {
                 let root = self.root.parent().unwrap_or(&self.root);
-                let path = path.strip_prefix(root)
-                    .unwrap_or(&path);
+                let path = path.strip_prefix(root).unwrap_or(&path);
                 format!("Opening {}", path.display())
-            })?,
-        ))
+            },
+        )?))
     }
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
@@ -165,40 +169,40 @@ fn visit_dir_ext<'a>(
         Ok(read) => (Some(read), None),
         Err(e) => (None, Some(anyhow::Error::from(e))),
     };
-    let iter = read.into_iter()
-        .flatten()
-        .flat_map(move |file| {
-            let (f, d, e) = match file {
-                Ok(file) => {
-                    let path = file.path();
-                    let (f, d) = match path.is_dir() {
-                        true => (None, Some((path, file))),
-                        false => (Some((path, file)), None),
-                    };
-                    (f, d, None)
-                },
-                Err(e) => (None, None, Some(anyhow::Error::from(e))),
-            };
+    let iter = read.into_iter().flatten().flat_map(move |file| {
+        let (f, d, e) = match file {
+            Ok(file) => {
+                let path = file.path();
+                let (f, d) = match path.is_dir() {
+                    true => (None, Some((path, file))),
+                    false => (Some((path, file)), None),
+                };
+                (f, d, None)
+            },
+            Err(e) => (None, None, Some(anyhow::Error::from(e))),
+        };
 
-            let f = f.into_iter()
-                .filter(move |(path, _)| path.extension().unwrap_or_default().eq_ignore_ascii_case(ext))
-                .map(move |(path, _)| path.relative_to(base)
+        let f = f
+            .into_iter()
+            .filter(move |(path, _)| {
+                path.extension()
+                    .unwrap_or_default()
+                    .eq_ignore_ascii_case(ext)
+            })
+            .map(move |(path, _)| {
+                path.relative_to(base)
                     .map_err(anyhow::Error::from)
                     .map(|f| PathBuf::from(f.into_string()).into())
-                );
+            });
 
-            let d = d.into_iter()
-                .flat_map(move |(path, _)| {
-                    let iter = visit_dir_ext(base, Cow::Owned(path), ext);
-                    Box::new(iter) as PackFilenameIter
-                });
-
-            e.into_iter().map(Err)
-                .chain(f)
-                .chain(d)
+        let d = d.into_iter().flat_map(move |(path, _)| {
+            let iter = visit_dir_ext(base, Cow::Owned(path), ext);
+            Box::new(iter) as PackFilenameIter
         });
-    e.into_iter().map(Err)
-        .chain(iter)
+
+        e.into_iter().map(Err).chain(f).chain(d)
+    });
+    e.into_iter().map(Err).chain(iter)
 }
 
 #[cfg(feature = "zip")]
@@ -217,7 +221,11 @@ impl ZipLoader {
         Ok(ZipLoader { archive })
     }
 
-    pub fn load_asset_by_index(&mut self, index: usize, name: impl fmt::Display) -> anyhow::Result<impl LoaderAssetReader> {
+    pub fn load_asset_by_index(
+        &mut self,
+        index: usize,
+        name: impl fmt::Display,
+    ) -> anyhow::Result<impl LoaderAssetReader> {
         let res = self.archive.by_index(index);
         let mut file = res.with_context(|| format!("{name} not found in zip archive"))?;
         if file.size() > Self::SIZE_LIMIT {
@@ -237,9 +245,12 @@ impl PackLoaderContext for ZipLoader {
         match self.archive.index_for_name(name) {
             Some(index) => self.load_asset_by_index(index, name),
             None => {
-                let index = self.archive.file_names()
+                let index = self
+                    .archive
+                    .file_names()
                     .position(|filename| file_path_eq(name, filename));
-                index.ok_or_else(|| anyhow!("{name} not found in zip archive"))
+                index
+                    .ok_or_else(|| anyhow!("{name} not found in zip archive"))
                     .and_then(|index| self.load_asset_by_index(index, name))
             },
         }

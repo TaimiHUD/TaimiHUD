@@ -1,17 +1,11 @@
 use {
-    anyhow::Context,
     crate::{
         exports::runtime as rt,
         resources::shader::{ShaderDescription, ShaderPair},
     },
+    anyhow::Context,
     include_dir::include_dir,
-    std::{
-        borrow::Cow,
-        collections::HashMap,
-        fs,
-        io,
-        path::Path,
-    },
+    std::{borrow::Cow, collections::HashMap, fs, io, path::Path},
     taimi_d3d::{
         dx11::{
             prelude::*,
@@ -49,10 +43,10 @@ impl ShaderLoader {
         };
         fs::File::open(&path)
             .with_context(|| {
-                let filename = path.file_name()
-                    .unwrap_or(path.as_os_str());
+                let filename = path.file_name().unwrap_or(path.as_os_str());
                 format!("missing shader data `{}`", filename.display())
-            }).map(|f| Box::new(io::BufReader::new(f)) as Box<_>)
+            })
+            .map(|f| Box::new(io::BufReader::new(f)) as Box<_>)
     }
 
     pub fn get_file_contents<P: AsRef<Path>>(path: &P) -> anyhow::Result<Cow<'static, [u8]>> {
@@ -66,13 +60,12 @@ impl ShaderLoader {
         };
         let mut out = Vec::new();
         fs::File::open(&path)
-            .and_then(|mut f| f.read_to_end(&mut out)
-                .map(move |_| out)
-            ).with_context(|| {
-                let filename = path.file_name()
-                    .unwrap_or(path.as_os_str());
+            .and_then(|mut f| f.read_to_end(&mut out).map(move |_| out))
+            .with_context(|| {
+                let filename = path.file_name().unwrap_or(path.as_os_str());
                 format!("missing shader data `{}`", filename.display())
-            }).map(Cow::Owned)
+            })
+            .map(Cow::Owned)
     }
 
     pub fn load_bundled(device: &Dx11Device) -> anyhow::Result<Self> {
@@ -109,7 +102,8 @@ impl ShaderLoader {
         use glob::Paths;
     }
 
-    pub fn load_from<S>(shader_descriptions: S, device: &Dx11Device) -> anyhow::Result<Self> where
+    pub fn load_from<S>(shader_descriptions: S, device: &Dx11Device) -> anyhow::Result<Self>
+    where
         S: IntoIterator<Item = ShaderDescription>,
     {
         log::debug!("Beginning shader setup!");
@@ -125,12 +119,16 @@ impl ShaderLoader {
                     let shader = ShaderV::new_with_bytecode(device, &bytecode)?;
                     let desc = shader_description.input_layout_desc();
                     let layout = InputLayout::new_with_desc(device, desc, &bytecode)?;
-                    shaders.vertex.insert(shader_description.identifier, (shader, layout));
-                }
+                    shaders
+                        .vertex
+                        .insert(shader_description.identifier, (shader, layout));
+                },
                 ShaderKind::Pixel => {
                     let shader = ShaderP::new_with_bytecode(device, &bytecode)?;
-                    shaders.pixel.insert(shader_description.identifier, Some(shader));
-                }
+                    shaders
+                        .pixel
+                        .insert(shader_description.identifier, Some(shader));
+                },
             }
         }
         log::info!(
@@ -143,17 +141,14 @@ impl ShaderLoader {
 
     pub fn pair_named(&self, name: &str) -> anyhow::Result<ShaderPair> {
         let context = || format!("shader {name} unavailable");
-        let vertex = self.vertex.get(name)
-            .with_context(context)?;
-        let pixel = self.pixel.get(name)
-            .with_context(context)?;
+        let vertex = self.vertex.get(name).with_context(context)?;
+        let pixel = self.pixel.get(name).with_context(context)?;
         Ok(ShaderPair(vertex.clone(), pixel.clone()))
     }
 
     pub fn set_named(&self, context: &Dx11Context, name: &str) {
         let vertex = self.vertex.get(name);
-        let pixel = self.pixel.get(name)
-            .map(|s| s.as_ref()).flatten();
+        let pixel = self.pixel.get(name).map(|s| s.as_ref()).flatten();
         if vertex.is_none() && pixel.is_none() {
             // TODO: insert stub shader after warning once...
             log::warn!("shader {name} unavailable!");

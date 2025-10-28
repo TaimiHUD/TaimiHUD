@@ -1,19 +1,19 @@
+#[cfg(feature = "image")]
+use image::{FlatSamples, ImageReader};
 use {
-    anyhow::{anyhow, Context as _},
     crate::exports::runtime::Counter,
+    anyhow::{anyhow, Context as _},
     glam::Vec4,
-    std::{fmt, path::Path, sync::Arc},
     nexus::texture::Texture as NexusTexture,
+    std::{fmt, path::Path, sync::Arc},
     taimi_d3d::{
         dx11::{
+            buffer::{BindFlags, Texture2, TextureView2, Usage, D3D11_TEXTURE2D_DESC},
             prelude::*,
-            buffer::{D3D11_TEXTURE2D_DESC, BindFlags, Texture2, TextureView2, Usage},
         },
         D3dContextBindableSlot,
     },
 };
-#[cfg(feature = "image")]
-use image::{ImageReader, FlatSamples};
 
 #[derive(Debug, PartialEq)]
 pub struct Texture {
@@ -34,9 +34,7 @@ impl Texture {
                     log::debug!("deprecated texture interface used for {path:?}");
                     Ok(texture)
                 },
-                None => {
-                    Err(anyhow!("texture {path:?} isn't done loading"))
-                },
+                None => Err(anyhow!("texture {path:?} isn't done loading")),
             }
         } else {
             let texture = Self::new_path(device, path)?;
@@ -47,22 +45,22 @@ impl Texture {
         }
     }
 
-    pub fn new_bytes<D: fmt::Debug>(device: &Dx11Device, mut bytes: &[u8], name: D) -> anyhow::Result<Self> {
+    pub fn new_bytes<D: fmt::Debug>(
+        device: &Dx11Device,
+        mut bytes: &[u8],
+        name: D,
+    ) -> anyhow::Result<Self> {
         let read = std::io::Cursor::new(&mut bytes);
         Self::new_image(device, ImageReader::new(read))
-            .with_context(|| {
-                format!("loading texture {:?}", name)
-            })
+            .with_context(|| format!("loading texture {:?}", name))
     }
 
     pub fn new_path(device: &Dx11Device, path: &Path) -> anyhow::Result<Self> {
         let image_reader = ImageReader::open(path)?;
-        Self::new_image(device, image_reader)
-            .with_context(|| {
-                let filename = path.file_name()
-                    .unwrap_or(path.as_os_str());
-                format!("loading texture from {}", filename.display())
-            })
+        Self::new_image(device, image_reader).with_context(|| {
+            let filename = path.file_name().unwrap_or(path.as_os_str());
+            format!("loading texture from {}", filename.display())
+        })
     }
 
     const DESC_TEXTURE: D3D11_TEXTURE2D_DESC = D3D11_TEXTURE2D_DESC {
@@ -79,7 +77,8 @@ impl Texture {
     };
 
     #[cfg(feature = "image")]
-    pub fn new_image<R>(device: &Dx11Device, image_reader: ImageReader<R>) -> anyhow::Result<Self> where
+    pub fn new_image<R>(device: &Dx11Device, image_reader: ImageReader<R>) -> anyhow::Result<Self>
+    where
         R: std::io::BufRead + std::io::Seek,
     {
         let format = image_reader.format();
@@ -91,11 +90,14 @@ impl Texture {
             Width: dimensions.0,
             Height: dimensions.1,
             Format: dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT,
-            .. Self::DESC_TEXTURE
+            ..Self::DESC_TEXTURE
         };
         let samples: &[Vec4] = unsafe {
             use std::slice::from_raw_parts;
-            from_raw_parts(raw_rgba_image.as_ptr() as *const Vec4, raw_rgba_image.len() / 4)
+            from_raw_parts(
+                raw_rgba_image.as_ptr() as *const Vec4,
+                raw_rgba_image.len() / 4,
+            )
         };
         let texture = Texture2::new_with_desc(device, &desc, Some(samples))?;
         let view = TextureView2::new_with_texture2(device, &texture, None)?;
@@ -153,7 +155,13 @@ impl Texture {
         // TODO: Is sRGB correct?
         debug_assert!(stride >= dimensions[0] as usize * 4);
         unsafe {
-            Self::new_raw(device, image, dimensions, stride, dxgi::DXGI_FORMAT_R8G8B8A8_UNORM)
+            Self::new_raw(
+                device,
+                image,
+                dimensions,
+                stride,
+                dxgi::DXGI_FORMAT_R8G8B8A8_UNORM,
+            )
         }
     }
 
@@ -171,7 +179,7 @@ impl Texture {
                 Width: width,
                 Height: height,
                 Format: format,
-                .. Self::DESC_TEXTURE
+                ..Self::DESC_TEXTURE
             };
             let init_data = d3d11::D3D11_SUBRESOURCE_DATA {
                 pSysMem: image.as_ptr() as *const _,
@@ -204,14 +212,12 @@ impl Texture {
     /// TODO: this is implemented by arcffi, defer to that once it's used more
     fn format_bpp(format: dxgi::DXGI_FORMAT) -> usize {
         match DxgiFormat::try_from_d3d(format).map_err(|_| format) {
-            Ok(DxgiFormat::R32G32B32A32Float)
-                => 16,
-            Ok(DxgiFormat::R32G32B32Float)
-                => 12,
-            Ok(DxgiFormat::R32G32Float)
-                => 8,
-            Ok(DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm)
-                => 4,
+            Ok(DxgiFormat::R32G32B32A32Float) => 16,
+            Ok(DxgiFormat::R32G32B32Float) => 12,
+            Ok(DxgiFormat::R32G32Float) => 8,
+            Ok(
+                DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm,
+            ) => 4,
             _f => {
                 log::debug!("unrecognized texture DXGI_FORMAT {_f:?}");
                 4

@@ -118,7 +118,7 @@ impl TimerMarker {
                 Mat4::from_rotation_x(rot.x)
                     * Mat4::from_rotation_y(rot.y)
                     * Mat4::from_rotation_z(rot.z)
-            }
+            },
         };
         // then move them
         //let mtx_position = Mat4::from_translation(self.position);

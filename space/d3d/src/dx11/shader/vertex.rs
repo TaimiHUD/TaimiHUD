@@ -1,8 +1,5 @@
-use crate::{
-    dx11::prelude::*,
-    D3dContextBindable,
-};
 pub use crate::dx11::d3d11::ID3D11VertexShader;
+use crate::{dx11::prelude::*, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11VertexShader;
@@ -18,7 +15,11 @@ impl ShaderV {
         let mut instances = [None; 0];
         let mut instance_count = instances.len() as u32;
         unsafe {
-            context.VSGetShader(&mut out, Some(instances.as_mut_ptr()), Some(&mut instance_count))
+            context.VSGetShader(
+                &mut out,
+                Some(instances.as_mut_ptr()),
+                Some(&mut instance_count),
+            )
         }
         out.map(Into::into)
     }
@@ -29,12 +30,11 @@ impl ShaderV {
     ) -> anyhow::Result<Self> {
         let bytecode = bytecode.as_ref();
         let mut out: Option<ID3D11VertexShader> = None;
-        unsafe {
-            device.CreateVertexShader(bytecode, None, Some(&mut out))
-        }.map_err(anyhow::Error::from)
-        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce shader pointer")))
-        .context("CreateVertexShader")
-        .map(Into::into)
+        unsafe { device.CreateVertexShader(bytecode, None, Some(&mut out)) }
+            .map_err(anyhow::Error::from)
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce shader pointer")))
+            .context("CreateVertexShader")
+            .map(Into::into)
     }
 }
 

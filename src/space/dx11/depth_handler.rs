@@ -1,20 +1,31 @@
 use {
     crate::{
         resources::Model,
-        space::{
-            dx11::SwapChain,
-            ScreenSpace,
-        },
+        space::{dx11::SwapChain, ScreenSpace},
     },
     glamour::{Box2, Point2, Size2},
     taimi_d3d::dx11::{
-        prelude::*,
         buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
-        depth::{ClearFlags, ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
-        raster::{CullMode, RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
+        depth::{
+            ClearFlags,
+            ComparisonFunc,
+            DepthState,
+            DepthView,
+            StencilOp,
+            D3D11_DEPTH_STENCIL_DESC,
+        },
+        prelude::*,
+        raster::{
+            CullMode,
+            RasterizerState,
+            RenderTargetView,
+            RenderTargetViews,
+            D3D11_RASTERIZER_DESC,
+        },
     },
     taimi_meta::ui::MapCalibration,
 };
+
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
 
@@ -44,38 +55,54 @@ impl DepthHandler {
         let framebuffer = swap_chain.get_framebuffer11(0)?;
         let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
         let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
-        let depth_stencil_state_mask = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;
+        let depth_stencil_state_mask =
+            DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;
         #[cfg(feature = "goggles")]
         let depth_stencil_state_write = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL)?;
         #[cfg(feature = "goggles")]
-        let depth_stencil_state_obscured = DepthState::new_with_desc(device, &Self::DEPTH_DESC_OBSCURED)?;
+        let depth_stencil_state_obscured =
+            DepthState::new_with_desc(device, &Self::DEPTH_DESC_OBSCURED)?;
 
         let depth_stencil_buffer_desc = D3D11_TEXTURE2D_DESC {
             Width: display_size.width as _,
             Height: display_size.height as _,
-            .. Self::BUFFER_DESC
+            ..Self::BUFFER_DESC
         };
-        let depth_stencil_buffer = Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
-        let depth_stencil_view = DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
+        let depth_stencil_buffer =
+            Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
+        let depth_stencil_view =
+            DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
         #[cfg(feature = "goggles")]
-        let _ = DEPTH_STENCIL_VIEW_VTABLE.set(unsafe {
-            &*(depth_stencil_view.view.vtable() as *const _)
-        });
+        let _ = DEPTH_STENCIL_VIEW_VTABLE
+            .set(unsafe { &*(depth_stencil_view.view.vtable() as *const _) });
 
         let fill_quad = Self::new_fill_quad(device, None)?;
         let rasterizer_state = RasterizerState::new_with_desc(device, &Self::RASTER_DESC)?;
 
         let render_target_view = RenderTargetView::new_with_buffer2(device, &framebuffer)?;
-        let render_target_view = RenderTargetViews::with_views(render_target_view, Some(depth_stencil_view));
+        let render_target_view =
+            RenderTargetViews::with_views(render_target_view, Some(depth_stencil_view));
         Ok(Self {
             render_target_view,
             depth_stencil_state: OMDepthState::with_state(depth_stencil_state, Self::STENCIL_REF),
-            depth_stencil_state_map: OMDepthState::with_state(depth_stencil_state_map, Self::STENCIL_REF),
-            depth_stencil_state_mask: OMDepthState::with_state(depth_stencil_state_mask, Self::STENCIL_REF_MASK),
+            depth_stencil_state_map: OMDepthState::with_state(
+                depth_stencil_state_map,
+                Self::STENCIL_REF,
+            ),
+            depth_stencil_state_mask: OMDepthState::with_state(
+                depth_stencil_state_mask,
+                Self::STENCIL_REF_MASK,
+            ),
             #[cfg(feature = "goggles")]
-            depth_stencil_state_write: OMDepthState::with_state(depth_stencil_state_write, Self::STENCIL_REF),
+            depth_stencil_state_write: OMDepthState::with_state(
+                depth_stencil_state_write,
+                Self::STENCIL_REF,
+            ),
             #[cfg(feature = "goggles")]
-            depth_stencil_state_obscured: OMDepthState::with_state(depth_stencil_state_obscured, Self::STENCIL_REF),
+            depth_stencil_state_obscured: OMDepthState::with_state(
+                depth_stencil_state_obscured,
+                Self::STENCIL_REF,
+            ),
             rasterizer_state,
             fill_quad,
             fill_edge: None,
@@ -92,10 +119,10 @@ impl DepthHandler {
         StencilEnable: BOOL(1),
         FrontFace: Self::STENCILOP_ON,
         BackFace: Self::STENCILOP_ON,
-        .. DepthState::DESC_DEFAULT
+        ..DepthState::DESC_DEFAULT
     };
     const DEPTH_DESC_MAP: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
-        .. Self::DEPTH_DESC_IGNORE
+        ..Self::DEPTH_DESC_IGNORE
     };
     const DEPTH_DESC_IGNORE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthEnable: BOOL(0),
@@ -103,14 +130,14 @@ impl DepthHandler {
         DepthFunc: ComparisonFunc::ALWAYS,
         StencilReadMask: 0,
         StencilEnable: BOOL(0),
-        .. Self::DEPTH_DESC_ON
+        ..Self::DEPTH_DESC_ON
     };
     const DEPTH_DESC_FILL: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,
         DepthFunc: ComparisonFunc::ALWAYS,
         DepthEnable: BOOL(1),
         StencilEnable: BOOL(0),
-        .. DepthState::DESC_DEFAULT
+        ..DepthState::DESC_DEFAULT
     };
     const DEPTH_DESC_FILL_OPAQUE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
@@ -120,7 +147,7 @@ impl DepthHandler {
         //StencilWriteMask: 0xff,
         FrontFace: Self::STENCILOP_FILL,
         BackFace: Self::STENCILOP_FILL,
-        .. Self::DEPTH_DESC_FILL
+        ..Self::DEPTH_DESC_FILL
     };
     #[cfg(feature = "goggles")]
     const DEPTH_DESC_OBSCURED: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
@@ -129,16 +156,16 @@ impl DepthHandler {
         StencilEnable: BOOL(1),
         FrontFace: Self::STENCILOP_ON,
         BackFace: Self::STENCILOP_ON,
-        .. Self::DEPTH_DESC_ON
+        ..Self::DEPTH_DESC_ON
     };
     const STENCILOP_ON: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
         StencilFunc: ComparisonFunc::GREATER,
-        .. DepthState::STENCILOP_DEFAULT
+        ..DepthState::STENCILOP_DEFAULT
     };
     const STENCILOP_FILL: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
         StencilFunc: ComparisonFunc::ALWAYS,
         StencilPassOp: StencilOp::REPLACE,
-        .. DepthState::STENCILOP_DEFAULT
+        ..DepthState::STENCILOP_DEFAULT
     };
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
@@ -149,12 +176,27 @@ impl DepthHandler {
         dsview.set(device_context);
         self.depth_stencil_state.set(device_context);
         if let Some(clear_depth) = clear_depth {
-            dsview.clear_depth(device_context, ClearFlags::DEPTH_STENCIL, clear_depth, Self::STENCIL_CLEAR);
+            dsview.clear_depth(
+                device_context,
+                ClearFlags::DEPTH_STENCIL,
+                clear_depth,
+                Self::STENCIL_CLEAR,
+            );
         }
     }
 
-    pub fn depth_stencil_view(&self) -> (RenderTargetViews<InterfaceRef<'_, d3d11::ID3D11RenderTargetView>, InterfaceRef<'_, d3d11::ID3D11DepthStencilView>>, Option<f32>) {
-        let dsview = self.render_target_view.to_ref()
+    pub fn depth_stencil_view(
+        &self,
+    ) -> (
+        RenderTargetViews<
+            InterfaceRef<'_, d3d11::ID3D11RenderTargetView>,
+            InterfaceRef<'_, d3d11::ID3D11DepthStencilView>,
+        >,
+        Option<f32>,
+    ) {
+        let dsview = self
+            .render_target_view
+            .to_ref()
             .map_depth(|d| d.map(|d| d.to_ref()))
             .map_views(RenderTargetView::to_ref);
         let clear_depth = Some(1.0f32);
@@ -192,7 +234,7 @@ impl DepthHandler {
         // TODO: on or off?
         MultisampleEnable: BOOL(1),
         AntialiasedLineEnable: BOOL(1),
-        .. RasterizerState::DESC_DEFAULT
+        ..RasterizerState::DESC_DEFAULT
     };
 
     pub fn setup_map(&self, device_context: &Dx11Context) {
@@ -212,8 +254,14 @@ impl DepthHandler {
 
     pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
         let minimap_bounds = Box2::new(
-            Point2::new(bounds.min.x.round_ties_even(), bounds.min.y.round_ties_even()),
-            Point2::new(bounds.max.x.round_ties_even(), bounds.max.y.round_ties_even()),
+            Point2::new(
+                bounds.min.x.round_ties_even(),
+                bounds.min.y.round_ties_even(),
+            ),
+            Point2::new(
+                bounds.max.x.round_ties_even(),
+                bounds.max.y.round_ties_even(),
+            ),
         );
         self.set_scissor(device_context, minimap_bounds)
     }
@@ -261,23 +309,35 @@ impl DepthHandler {
         unsafe {
             //device_context.DrawInstanced(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_EDGE_COUNT, Self::FILL_QUAD_VERTEX_COUNT * 1, 0);
             for i in 1..=Self::FILL_QUAD_EDGE_COUNT {
-                device_context.Draw(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_VERTEX_COUNT * i);
+                device_context.Draw(
+                    Self::FILL_QUAD_VERTEX_COUNT,
+                    Self::FILL_QUAD_VERTEX_COUNT * i,
+                );
             }
         }
     }
 
-    pub fn regen_edge(&mut self, device: &Dx11Device, edge_scale: Option<(f32, &MapCalibration)>) -> anyhow::Result<()> {
-        self.fill_edge = edge_scale.map(|scale|
-            Self::new_fill_quad(device, Some(scale))
-        ).transpose()?;
+    pub fn regen_edge(
+        &mut self,
+        device: &Dx11Device,
+        edge_scale: Option<(f32, &MapCalibration)>,
+    ) -> anyhow::Result<()> {
+        self.fill_edge = edge_scale
+            .map(|scale| Self::new_fill_quad(device, Some(scale)))
+            .transpose()?;
         Ok(())
     }
 
     const FILL_QUAD_VERTEX_COUNT: u32 = 4;
     const FILL_QUAD_EDGE_COUNT: u32 = 4;
     /// TODO: hack .-.
-    pub fn new_fill_quad(device: &Dx11Device, edge_scale: Option<(f32, &MapCalibration)>) -> anyhow::Result<VertexBuffer> {
-        let mut verts: Vec<_> = crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into();
+    pub fn new_fill_quad(
+        device: &Dx11Device,
+        edge_scale: Option<(f32, &MapCalibration)>,
+    ) -> anyhow::Result<VertexBuffer> {
+        let mut verts: Vec<_> =
+            crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL)
+                .into();
 
         if let Some((edge_scale, calibration)) = edge_scale {
             use {
@@ -293,25 +353,25 @@ impl DepthHandler {
                         position: Vec3::new(b.min.x, 0.0, b.max.y),
                         colour: Vec3::ONE,
                         normal: Vec3::Y,
-                        .. Default::default()
+                        ..Default::default()
                     },
                     Vertex {
                         position: Vec3::new(b.max.x, 0.0, b.max.y),
                         colour: Vec3::ONE,
                         normal: Vec3::Y,
-                        .. Default::default()
+                        ..Default::default()
                     },
                     Vertex {
                         position: Vec3::new(b.min.x, 0.0, b.min.y),
                         colour: Vec3::ONE,
                         normal: Vec3::Y,
-                        .. Default::default()
+                        ..Default::default()
                     },
                     Vertex {
                         position: Vec3::new(b.max.x, 0.0, b.min.y),
                         colour: Vec3::ONE,
                         normal: Vec3::Y,
-                        .. Default::default()
+                        ..Default::default()
                     },
                 ]
             }
@@ -319,10 +379,7 @@ impl DepthHandler {
             //let bottom_h = 0.15 * edge_scale;
             // just enough for the xp bar...
             let bottom_h = 0.0175 * edge_scale;
-            let bottom = Box2::new(
-                vec2(-1.0, -1.0).into(),
-                vec2(1.0, -1.0 + bottom_h).into(),
-            );
+            let bottom = Box2::new(vec2(-1.0, -1.0).into(), vec2(1.0, -1.0 + bottom_h).into());
             verts.extend_from_slice(&quad_verts(bottom));
 
             // use feather for this instead...
@@ -368,4 +425,5 @@ impl DepthHandler {
 }
 
 #[cfg(feature = "goggles")]
-static DEPTH_STENCIL_VIEW_VTABLE: std::sync::OnceLock<&'static d3d11::ID3D11DepthStencilView_Vtbl> = std::sync::OnceLock::new();
+static DEPTH_STENCIL_VIEW_VTABLE: std::sync::OnceLock<&'static d3d11::ID3D11DepthStencilView_Vtbl> =
+    std::sync::OnceLock::new();

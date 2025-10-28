@@ -1,23 +1,20 @@
+#[cfg(feature = "updates")]
+use semver::Version;
 use {
-    anyhow::{anyhow, Context},
     crate::{
         built_info,
         exports::runtime as rt,
         settings::{
             state::{BootstrapState, UpdatePreference},
-            GitHubSource, GitHubLatestRelease,
+            GitHubLatestRelease,
+            GitHubSource,
         },
     },
+    anyhow::{anyhow, Context},
+    std::{fmt, sync::LazyLock, time::Duration},
     tokio::{runtime, time::timeout},
-    std::{
-        fmt,
-        sync::LazyLock,
-        time::Duration,
-    },
     url::Url,
 };
-#[cfg(feature = "updates")]
-use semver::Version;
 
 pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
 pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
@@ -72,9 +69,14 @@ pub static GH_REPO_SRC: LazyLock<GitHubSource> = LazyLock::new(|| GitHubSource {
 impl ResolvedVersion {
     pub fn with_gh_release(release: GitHubLatestRelease) -> anyhow::Result<Self> {
         #[cfg(feature = "updates")]
-        let version = release.tag_name.strip_prefix("v").map(|v|
-            v.parse().with_context(|| format!("Latest version {} unrecognized", release.tag_name))
-        ).transpose()?;
+        let version = release
+            .tag_name
+            .strip_prefix("v")
+            .map(|v| {
+                v.parse()
+                    .with_context(|| format!("Latest version {} unrecognized", release.tag_name))
+            })
+            .transpose()?;
         Ok(Self {
             release,
             #[cfg(feature = "updates")]
@@ -85,7 +87,9 @@ impl ResolvedVersion {
     pub fn with_version_id(id: String) -> anyhow::Result<Self> {
         #[cfg(feature = "updates")]
         let version = match id.strip_prefix("v") {
-            Some(release) => release.parse::<Version>().map(Some)
+            Some(release) => release
+                .parse::<Version>()
+                .map(Some)
                 .with_context(|| format!("version {id} unrecognized"))?,
             _ => None,
         };
@@ -94,7 +98,7 @@ impl ResolvedVersion {
             version,
             release: GitHubLatestRelease {
                 tag_name: id,
-                .. GitHubLatestRelease::empty_with_url("https://taimihud.com".try_into()?)
+                ..GitHubLatestRelease::empty_with_url("https://taimihud.com".try_into()?)
             },
         })
     }
@@ -121,28 +125,40 @@ impl ResolvedVersion {
             if let Some(release) = latest_release {
                 return Ok(release)
             }
-            let mut releases: Vec<Self> = src.latest_releases(GitHubSource::RELEASES_RANGE_DEFAULT).await?.into_iter()
+            let mut releases: Vec<Self> = src
+                .latest_releases(GitHubSource::RELEASES_RANGE_DEFAULT)
+                .await?
+                .into_iter()
                 .map(|r| Self::with_gh_release(r).context("parsing GH release"))
                 .filter_map(|release| {
                     if let Err(e) = &release {
                         log::debug!("{e:#}");
                     }
                     release.ok()
-                }).filter(|release| release.version_channel() == channel)
+                })
+                .filter(|release| release.version_channel() == channel)
                 .collect();
 
-            releases.sort_by(|l, r| {
-                match (&l, &r) {
-                    #[cfg(feature = "updates")]
-                    (Self { version: Some(l), .. }, Self { version: Some(r), .. }) => l.cmp_precedence(r),
-                    _ => l.release.created_at.cmp(&r.release.created_at)
-                }
+            releases.sort_by(|l, r| match (&l, &r) {
+                #[cfg(feature = "updates")]
+                (
+                    Self {
+                        version: Some(l), ..
+                    },
+                    Self {
+                        version: Some(r), ..
+                    },
+                ) => l.cmp_precedence(r),
+                _ => l.release.created_at.cmp(&r.release.created_at),
             });
             let channel = channel.unwrap_or("");
-            releases.into_iter().last()
+            releases
+                .into_iter()
+                .last()
                 .ok_or_else(|| anyhow!("no {channel} releases found at {src}"))
         };
-        timeout(patience, check).await
+        timeout(patience, check)
+            .await
             .context("Timed out while checking for updates")
             .and_then(|res| res)
     }
@@ -151,40 +167,46 @@ impl ResolvedVersion {
         Self::latest_gh_release_standalone(&GH_REPO_SRC, patience)
     }
 
-    pub fn latest_gh_release_standalone(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
+    pub fn latest_gh_release_standalone(
+        src: &GitHubSource,
+        patience: Duration,
+    ) -> anyhow::Result<Self> {
         let runner = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .context("Failed to start update check")?;
 
         runner.block_on(Self::latest_gh_release(src, patience))
-            //.context("Checking for updates")
+        //.context("Checking for updates")
     }
 
     pub fn dll_url(&self) -> anyhow::Result<&Url> {
-        let dll_asset = self.release.assets.iter()
-            .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
+        let dll_asset = self.release.assets.iter().find(
+            |a| a.name.ends_with(".dll"), /*&& a.state == "uploaded"*/
+        );
 
-        dll_asset.and_then(|dll_asset|
+        dll_asset
+            .and_then(|dll_asset|
             // asset.url can also work as long as Content-Type is set correctly...
-            dll_asset.browser_download_url.as_ref()
-        ).ok_or_else(|| anyhow!("Expected associated dll with release"))
+            dll_asset.browser_download_url.as_ref())
+            .ok_or_else(|| anyhow!("Expected associated dll with release"))
     }
 
     pub fn is_update(&self) -> bool {
         let version_matches = match self {
             #[cfg(feature = "updates")]
-            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_eq() =>
-                true,
+            Self {
+                version: Some(v), ..
+            } if v.cmp_precedence(&CRATE_SEMVER).is_eq() => true,
             #[cfg(feature = "updates")]
-            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
+            Self {
+                version: Some(v), ..
+            } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
                 log::info!("Ignoring outdated update {self}");
                 return false
             },
-            _ if Some(&self.release.tag_name[..]) == built_info::git_tag_name() =>
-                true,
-            _ if self.version_tag().ok() == Some(rt::CRATE_VERSION) =>
-                true,
+            _ if Some(&self.release.tag_name[..]) == built_info::git_tag_name() => true,
+            _ if self.version_tag().ok() == Some(rt::CRATE_VERSION) => true,
             _ => false,
         };
         if version_matches {
@@ -207,7 +229,11 @@ impl ResolvedVersion {
     }
 
     pub fn is_authorized(&self) -> Option<bool> {
-        BootstrapState::read_with(|state| state.update_preference().authorizes_version(self.version_id()))
+        BootstrapState::read_with(|state| {
+            state
+                .update_preference()
+                .authorizes_version(self.version_id())
+        })
     }
 
     #[cfg(todo)]
@@ -217,14 +243,10 @@ impl ResolvedVersion {
                 log::info!("Update to {self} blacklisted, skipping");
                 Some(false)
             },
-            Some(Err(..)) =>
-                None,
-            Some(Ok(None)) =>
-                Some(true),
-            Some(Ok(Some(authorized))) if authorized == self.version_id() =>
-                Some(true),
-            Some(Ok(Some(..))) | None =>
-                None,
+            Some(Err(..)) => None,
+            Some(Ok(None)) => Some(true),
+            Some(Ok(Some(authorized))) if authorized == self.version_id() => Some(true),
+            Some(Ok(Some(..))) | None => None,
         }
     }
 
@@ -233,13 +255,18 @@ impl ResolvedVersion {
     }
 
     pub fn version_name(&self) -> &str {
-        self.release.name.as_ref().map(|s| &s[..])
+        self.release
+            .name
+            .as_ref()
+            .map(|s| &s[..])
             //.unwrap_or(self.version_tag().ok().unwrap_or(&self.release.tag_name))
             .unwrap_or(&self.release.tag_name)
     }
 
     pub fn version_tag(&self) -> anyhow::Result<&str> {
-        self.release.tag_name.strip_prefix("v")
+        self.release
+            .tag_name
+            .strip_prefix("v")
             .ok_or_else(|| anyhow!("Latest version {} unrecognized", self.release.tag_name))
     }
 
@@ -247,8 +274,12 @@ impl ResolvedVersion {
         match self {
             // TODO: tag via name idk
             #[cfg(feature = "updates")]
-            Self { version: Some(v), .. } => version_channel(v),
-            _ if self.release.prerelease || self.release.tag_name.contains("-rc.") => Some(CHANNEL_PRERELEASE),
+            Self {
+                version: Some(v), ..
+            } => version_channel(v),
+            _ if self.release.prerelease || self.release.tag_name.contains("-rc.") => {
+                Some(CHANNEL_PRERELEASE)
+            },
             _ => None,
         }
     }
@@ -258,7 +289,10 @@ impl fmt::Display for ResolvedVersion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             #[cfg(feature = "updates")]
-            Self { version: Some(version), .. } => fmt::Display::fmt(version, f),
+            Self {
+                version: Some(version),
+                ..
+            } => fmt::Display::fmt(version, f),
             _ => f.write_str(self.version_name()),
         }
     }
@@ -269,18 +303,18 @@ pub struct Updater;
 impl Updater {
     pub fn get_preference() -> UpdatePreference {
         let mut outdated = false;
-        let pref = BootstrapState::read_with(|state| {
-            match state.update_preference() {
-                UpdatePreference::Ask { authorized: Some(Ok(version) | Err(version)) } if version == rt::CRATE_VERSION => {
-                    outdated = true;
-                    UpdatePreference::ASK
-                },
-                UpdatePreference::Once { authorized } if authorized == rt::CRATE_VERSION => {
-                    outdated = true;
-                    UpdatePreference::Never
-                },
-                pref => pref.clone(),
-            }
+        let pref = BootstrapState::read_with(|state| match state.update_preference() {
+            UpdatePreference::Ask {
+                authorized: Some(Ok(version) | Err(version)),
+            } if version == rt::CRATE_VERSION => {
+                outdated = true;
+                UpdatePreference::ASK
+            },
+            UpdatePreference::Once { authorized } if authorized == rt::CRATE_VERSION => {
+                outdated = true;
+                UpdatePreference::Never
+            },
+            pref => pref.clone(),
         });
         if outdated {
             Self::mark_update_outdated(None);
@@ -306,12 +340,11 @@ impl Updater {
     /// returns [`release.is_authorized()`](ResolvedVersion::is_authorized)
     pub fn notify_latest(release: &ResolvedVersion) -> anyhow::Result<bool> {
         log::info!("Latest version is {}", release);
-        let _ = release.dll_url()
-            .context("Invalid update found")?;
+        let _ = release.dll_url().context("Invalid update found")?;
         if !release.is_update() {
             return Ok(false)
         }
-        
+
         Ok(match release.is_authorized() {
             None => {
                 log::info!("Update requires user authorization");
@@ -338,10 +371,10 @@ impl Updater {
                 return
             }
             let updated_pref = match state.update_preference {
-                Some(UpdatePreference::Ask { authorized: Some(..) }) =>
-                    Some(UpdatePreference::ASK),
-                Some(UpdatePreference::Once { .. }) =>
-                    Some(UpdatePreference::Never),
+                Some(UpdatePreference::Ask {
+                    authorized: Some(..),
+                }) => Some(UpdatePreference::ASK),
+                Some(UpdatePreference::Once { .. }) => Some(UpdatePreference::Never),
                 _ => None,
             };
             if let Some(pref) = updated_pref {
@@ -364,8 +397,7 @@ impl Updater {
 #[cfg(feature = "updates")]
 fn version_channel(version: &Version) -> Option<&str> {
     match version {
-        version if !version.pre.is_empty() =>
-            version.pre.split(".").next(),
+        version if !version.pre.is_empty() => version.pre.split(".").next(),
         _ => None,
     }
 }

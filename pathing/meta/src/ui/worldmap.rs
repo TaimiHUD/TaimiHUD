@@ -3,40 +3,44 @@ use {
         coords::{
             coord_newtype,
             FakeSpace,
-            MapLocalScale,
             LocalSpace,
+            MapLocalScale,
             MapSpace,
             ScreenSpace,
             WorldmapSpace,
         },
         map::{Map, MapID},
-        ui::{MapContext, MinimapState, MinimapPlacement, UiSize, UiState},
+        ui::{MapContext, MinimapPlacement, MinimapState, UiSize, UiState},
     },
     glamour::{
         Angle,
         Contains,
         FloatUnit,
-        Point2, Point3,
+        Point2,
+        Point3,
         Rect,
         Size2,
-        Transform2, Transform3, TransformMap,
+        Transform2,
+        Transform3,
+        TransformMap,
         Unit,
-        Vector2,
         Vec3Swizzles,
+        Vector2,
     },
     num_traits::{ConstOne, NumCast},
-    std::{
-        fmt,
-        time::Duration,
-    },
+    std::{fmt, time::Duration},
 };
+
 #[cfg(feature = "taimi_mumblelink")]
 use crate::ui::mumblelink::gw2_mumble::{Context, Identity};
 #[cfg(feature = "taimi_mumblelink")]
 
 /// [MumbleLink context](https://wiki.guildwars2.com/wiki/API:MumbleLink#context)
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "mumblelink-arcloader", doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)")]
+#[cfg_attr(
+    feature = "mumblelink-arcloader",
+    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+)]
 pub struct MapCalibration {
     pub compass_position: MinimapPlacement,
     pub compass_size: Size2<FakeSpace>,
@@ -148,9 +152,12 @@ impl MapCalibration {
         self.bounds_for(ctx).contains(&point).then_some(point)
     }
 
-    pub fn clip_screen_for(&self, ctx: MapContext, point: Point2<ScreenSpace>) -> Option<Point2<ScreenSpace>> {
-        self.clip_for(ctx, self.map(point))
-            .map(|_| point)
+    pub fn clip_screen_for(
+        &self,
+        ctx: MapContext,
+        point: Point2<ScreenSpace>,
+    ) -> Option<Point2<ScreenSpace>> {
+        self.clip_for(ctx, self.map(point)).map(|_| point)
     }
 
     pub fn set_offset(&mut self, local: Point3<LocalSpace>, global: Point2<MapSpace>) {
@@ -188,7 +195,8 @@ impl MapCalibration {
                 read_volatile(&raw const (*context).player_x),
                 read_volatile(&raw const (*context).player_y),
             );
-            let link = context.byte_sub(core::mem::offset_of!(MumbleLink, context)) as *const MumbleLink;
+            let link =
+                context.byte_sub(core::mem::offset_of!(MumbleLink, context)) as *const MumbleLink;
             let player_local = Point3::<LocalSpace>::new(
                 read_volatile(&raw const (*link).avatar.position[0]),
                 read_volatile(&raw const (*link).avatar.position[1]),
@@ -198,7 +206,11 @@ impl MapCalibration {
         };
     }
 
-    pub fn update_from_mumblelink_identity_data(&mut self, ui_size: UiSize, _map_id: MapID) -> bool {
+    pub fn update_from_mumblelink_identity_data(
+        &mut self,
+        ui_size: UiSize,
+        _map_id: MapID,
+    ) -> bool {
         let changed = self.ui_size != ui_size;
         self.ui_size = ui_size;
 
@@ -210,9 +222,11 @@ impl MapCalibration {
     }
 
     #[cfg(any(feature = "mumblelink-arcloader", feature = "nexus"))]
-    pub fn update_from_mumblelink_identity_nexus(&mut self, identity: &crate::ui::mumblelink::NexusIdentity) -> bool {
-        let ui_size = UiSize::try_from(identity.ui_size)
-            .unwrap_or(UiSize::Normal);
+    pub fn update_from_mumblelink_identity_nexus(
+        &mut self,
+        identity: &crate::ui::mumblelink::NexusIdentity,
+    ) -> bool {
+        let ui_size = UiSize::try_from(identity.ui_size).unwrap_or(UiSize::Normal);
         self.update_from_mumblelink_identity_data(ui_size, identity.map_id.into())
     }
 }
@@ -240,13 +254,18 @@ impl MapUnit for WorldmapSpace {
     const ROTATION_DISABLED: Self::Rotation = ();
     const ROTATION: bool = false;
     #[inline]
-    fn get_rotation(_: ()) -> Option<Angle<<Self as Unit>::Scalar>> { None }
+    fn get_rotation(_: ()) -> Option<Angle<<Self as Unit>::Scalar>> {
+        None
+    }
     #[inline]
     fn rotation_from(_: Option<Angle<<Self as Unit>::Scalar>>) -> Self::Rotation {}
 }
 
 /// [MumbleLink context](https://wiki.guildwars2.com/wiki/API:MumbleLink#context)
-#[cfg_attr(feature = "mumblelink-arcloader", doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)")]
+#[cfg_attr(
+    feature = "mumblelink-arcloader",
+    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+)]
 pub struct MapState<M: MapUnit = WorldmapSpace> {
     pub centre: Point2<MapSpace>,
     pub rotation: M::Rotation,
@@ -267,15 +286,14 @@ impl<M: MapUnit> MapState<M> {
 
     #[inline]
     pub fn counter_rotation(&self) -> Option<Angle<M::Scalar>> {
-        self.rotation()
-            .map(|r| Angle::new(-r.radians))
+        self.rotation().map(|r| Angle::new(-r.radians))
     }
 
     #[inline]
     pub fn rotation_angle(&self) -> Angle<f32> {
-        self.rotation().and_then(|a|
-            NumCast::from(a.radians).map(Angle::new)
-        ).unwrap_or_default()
+        self.rotation()
+            .and_then(|a| NumCast::from(a.radians).map(Angle::new))
+            .unwrap_or_default()
     }
 
     #[inline]
@@ -293,11 +311,14 @@ impl<M: MapUnit> MapState<M> {
         use core::ptr::read_volatile;
 
         #[cfg(todo = "unnecessary")]
-        if MapContext::from(context) != M::CONTEXT { return }
+        if MapContext::from(context) != M::CONTEXT {
+            return
+        }
 
         self.centre.x = read_volatile(&raw const (*context).map_center_x);
         self.centre.y = read_volatile(&raw const (*context).map_center_y);
-        self.scale = NumCast::from(read_volatile(&raw const (*context).map_scale)).unwrap_or_default();
+        self.scale =
+            NumCast::from(read_volatile(&raw const (*context).map_scale)).unwrap_or_default();
 
         if M::CONTEXT == MapContext::Minimap {
             let ui_state = UiState::from(read_volatile(&raw const (*context).ui_state));
@@ -345,7 +366,10 @@ impl<M: MapUnit> fmt::Debug for MapState<M> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "mumblelink-arcloader", doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)")]
+#[cfg_attr(
+    feature = "mumblelink-arcloader",
+    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+)]
 pub struct UiMap {
     pub calibration: MapCalibration,
     pub map: MapState,
@@ -451,7 +475,10 @@ impl UiMap {
     }
 
     #[cfg(feature = "mumblelink-arcloader")]
-    pub fn update_from_mumblelink(&mut self, mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr) {
+    pub fn update_from_mumblelink(
+        &mut self,
+        mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr,
+    ) {
         if mumblelink.read_ui_version() == 0 {
             return
         }
@@ -463,7 +490,10 @@ impl UiMap {
     }
 
     #[cfg(feature = "nexus")]
-    pub fn update_from_mumblelink_nexus(&mut self, mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr) {
+    pub fn update_from_mumblelink_nexus(
+        &mut self,
+        mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr,
+    ) {
         if mumblelink.read_ui_version() == 0 {
             return
         }
@@ -566,20 +596,19 @@ impl MapOpen {
 
     pub const fn while_elapsed(self, elapsed: f32) -> Self {
         match self.is_open() {
-            true => Self::Opening {
-                elapsed,
-            },
-            false => Self::Closing {
-                elapsed,
-            },
+            true => Self::Opening { elapsed },
+            false => Self::Closing { elapsed },
         }
     }
 
     pub const fn cap(self, relaxed: bool) -> Self {
         let cap = Self::max_duration(relaxed);
         match self {
-            Self::Opening { elapsed } | Self::Closing { elapsed } if elapsed >= cap.as_secs_f32() =>
-                Self::with_open(self.is_open()),
+            Self::Opening { elapsed } | Self::Closing { elapsed }
+                if elapsed >= cap.as_secs_f32() =>
+            {
+                Self::with_open(self.is_open())
+            },
             open => open,
         }
     }
@@ -595,8 +624,7 @@ impl MapOpen {
     /// prefer minimap when closing
     pub const fn primary_context(&self) -> MapContext {
         match self {
-            MapOpen::Closed | MapOpen::Closing { .. } =>
-                MapContext::Minimap,
+            MapOpen::Closed | MapOpen::Closing { .. } => MapContext::Minimap,
             _ => MapContext::Global,
         }
     }
@@ -607,31 +635,24 @@ impl MapOpen {
 
     pub fn elapsed_mut(&mut self) -> Option<&mut f32> {
         match self {
-            Self::Opening { elapsed } | Self::Closing { elapsed } =>
-                Some(elapsed),
-            Self::Open | Self::Closed =>
-                None,
+            Self::Opening { elapsed } | Self::Closing { elapsed } => Some(elapsed),
+            Self::Open | Self::Closed => None,
         }
     }
 
     pub const fn elapsed_s(self) -> Option<f32> {
         match self {
-            Self::Opening { elapsed } | Self::Closing { elapsed } =>
-                Some(elapsed),
-            Self::Open | Self::Closed =>
-                None,
+            Self::Opening { elapsed } | Self::Closing { elapsed } => Some(elapsed),
+            Self::Open | Self::Closed => None,
         }
     }
 
     /// Animation completion out of 1.0
     pub fn progress(&self) -> Option<f32> {
         match self {
-            Self::Opening { elapsed } =>
-                Some(elapsed / Self::DURATION.as_secs_f32()),
-            Self::Closing { elapsed } =>
-                Some(elapsed / Self::MAX_DURATION.as_secs_f32()),
-            Self::Open | Self::Closed =>
-                None,
+            Self::Opening { elapsed } => Some(elapsed / Self::DURATION.as_secs_f32()),
+            Self::Closing { elapsed } => Some(elapsed / Self::MAX_DURATION.as_secs_f32()),
+            Self::Open | Self::Closed => None,
         }
     }
 
@@ -646,10 +667,8 @@ impl MapOpen {
         let progress = self.progress()?.min(1.0);
         const INV: f32 = 1.73; //3.0f32.sqrt();
         Some(match self {
-            Self::Opening { .. } =>
-                progress.powf(INV),
-            _ =>
-                progress.powi(3),
+            Self::Opening { .. } => progress.powf(INV),
+            _ => progress.powi(3),
         })
     }
 }
@@ -791,24 +810,25 @@ coord_newtype! {
     }
 }
 
-impl<M: MapUnit> MapState<M> where
+impl<M: MapUnit> MapState<M>
+where
     MapSpace: Unit<Scalar = <M as Unit>::Scalar>,
 {
     pub fn from_map(&self) -> Transform2<MapSpace, M> {
-        let trans = Transform2::from_translation(
-            self.centre.to_vector().map(|s| -s)
-        );
-        trans.then_scale(Vector2::splat(<<M as Unit>::Scalar as ConstOne>::ONE / self.scale))
+        let trans = Transform2::from_translation(self.centre.to_vector().map(|s| -s));
+        trans.then_scale(Vector2::splat(
+            <<M as Unit>::Scalar as ConstOne>::ONE / self.scale,
+        ))
     }
 
     pub fn to_map(&self) -> Transform2<M, MapSpace> {
         //self.from_map().inverse()
-        Transform2::from_scale(Vector2::splat(self.scale))
-        .then_translate(self.centre.to_vector())
+        Transform2::from_scale(Vector2::splat(self.scale)).then_translate(self.centre.to_vector())
     }
 }
 
-impl<M: MapUnit> MapState<M> where
+impl<M: MapUnit> MapState<M>
+where
     WorldmapSpace: Unit<Scalar = <M as Unit>::Scalar>,
 {
     pub fn to_worldmap(&self) -> Transform2<M, WorldmapSpace> {
@@ -855,8 +875,9 @@ impl UiMap {
     pub fn fake_to_worldmap_for(&self, ctx: MapContext) -> Transform2<FakeSpace, WorldmapSpace> {
         match ctx {
             MapContext::Minimap => MapCalibration::cast_minimap_to_worldmap(
-                self.calibration.fake_to_compass()
-                    .then(self.compass.from_compass())
+                self.calibration
+                    .fake_to_compass()
+                    .then(self.compass.from_compass()),
             ),
             MapContext::Global => self.calibration.fake_to_worldmap(), // no need for then(self.map.to_worldmap())
         }
@@ -864,8 +885,9 @@ impl UiMap {
     pub fn worldmap_to_fake_for(&self, ctx: MapContext) -> Transform2<WorldmapSpace, FakeSpace> {
         match ctx {
             MapContext::Minimap => MapCalibration::cast_worldmap_to_minimap(
-                self.compass.to_compass()
-                .then(self.calibration.compass_to_fake())
+                self.compass
+                    .to_compass()
+                    .then(self.calibration.compass_to_fake()),
             ),
             MapContext::Global => self.calibration.worldmap_to_fake(), // no need for from_worldmap
         }
@@ -873,15 +895,13 @@ impl UiMap {
 
     pub fn map_to_worldmap_for(&self, ctx: MapContext) -> Transform2<MapSpace, WorldmapSpace> {
         match ctx {
-            MapContext::Minimap => self.compass.from_map()
-                .then(self.compass.to_worldmap()),
+            MapContext::Minimap => self.compass.from_map().then(self.compass.to_worldmap()),
             MapContext::Global => self.map.from_map(), // no need for then(self.map.to_worldmap())
         }
     }
     pub fn worldmap_to_map_for(&self, ctx: MapContext) -> Transform2<WorldmapSpace, MapSpace> {
         match ctx {
-            MapContext::Minimap => self.compass.from_worldmap()
-                .then(self.compass.to_map()),
+            MapContext::Minimap => self.compass.from_worldmap().then(self.compass.to_map()),
             MapContext::Global => self.map.to_map(), // no need for from_worldmap
         }
     }

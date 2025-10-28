@@ -1,12 +1,5 @@
-use crate::dx11::{
-    prelude::*,
-    buffer::Resource,
-};
-
-pub use crate::dx11::d3d11::{
-    ID3D11Texture2D,
-    D3D11_TEXTURE2D_DESC,
-};
+pub use crate::dx11::d3d11::{ID3D11Texture2D, D3D11_TEXTURE2D_DESC};
+use crate::dx11::{buffer::Resource, prelude::*};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11Texture2D;
@@ -31,16 +24,19 @@ impl Texture2 {
                 pSysMem: data.as_ptr().cast(),
                 SysMemPitch: {
                     if (desc.Width as usize * desc.Height as usize) > data.len() {
-                        anyhow::bail!("initial texture buffer len={} is too small for {}x{}", data.len(), desc.Width, desc.Height);
+                        anyhow::bail!(
+                            "initial texture buffer len={} is too small for {}x{}",
+                            data.len(),
+                            desc.Width,
+                            desc.Height
+                        );
                     }
                     D::stride() as u32 * desc.Width
                 },
                 SysMemSlicePitch: 0,
             }),
         };
-        unsafe {
-            Self::new_with_desc_unchecked(device, desc, data_desc.as_ref())
-        }
+        unsafe { Self::new_with_desc_unchecked(device, desc, data_desc.as_ref()) }
     }
 
     pub unsafe fn new_with_desc_unchecked(
@@ -49,16 +45,11 @@ impl Texture2 {
         data_desc: Option<&d3d11::D3D11_SUBRESOURCE_DATA>,
     ) -> anyhow::Result<Self> {
         let mut out: Option<ID3D11Texture2D> = None;
-        unsafe {
-            device.CreateTexture2D(
-                desc,
-                data_desc.map(|d| d as *const _),
-                Some(&mut out),
-            )
-        }.map_err(anyhow::Error::from)
-        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce texture pointer")))
-        .context("CreateTexture2D")
-        .map(Into::into)
+        unsafe { device.CreateTexture2D(desc, data_desc.map(|d| d as *const _), Some(&mut out)) }
+            .map_err(anyhow::Error::from)
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce texture pointer")))
+            .context("CreateTexture2D")
+            .map(Into::into)
     }
 
     pub fn new_empty_with_desc(

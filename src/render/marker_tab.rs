@@ -1,23 +1,34 @@
 use {
     super::Alignment,
     crate::{
-        fl, marker::format::MarkerSet, render::{machine::RenderMachine, RenderState}, settings::{MarkerSettings, Settings}, MarkersController, MarkersEvent, RenderEvent
+        fl,
+        marker::format::MarkerSet,
+        render::{machine::RenderMachine, RenderState},
+        settings::{MarkerSettings, Settings},
+        MarkersController,
+        MarkersEvent,
+        RenderEvent,
     },
     glam::Vec2,
     glamour::TransformMap,
     indexmap::IndexMap,
     nexus::imgui::{
-        ChildWindow, Condition, PopupModal, Selectable, TableColumnSetup, TableFlags, TreeNode,
-        TreeNodeFlags, Ui, WindowFlags,
+        ChildWindow,
+        Condition,
+        PopupModal,
+        Selectable,
+        TableColumnSetup,
+        TableFlags,
+        TreeNode,
+        TreeNodeFlags,
+        Ui,
+        WindowFlags,
     },
     std::{
         collections::{HashMap, HashSet},
         sync::Arc,
     },
-    taimi_meta::coords::{
-        LocalPoint, LocalSpace,
-        MapLocalScale, ScreenPoint,
-    },
+    taimi_meta::coords::{LocalPoint, LocalSpace, MapLocalScale, ScreenPoint},
 };
 
 pub struct MarkerTabState {
@@ -37,7 +48,12 @@ impl MarkerTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, machine: &mut RenderMachine, state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        state_errors: &mut HashMap<String, anyhow::Error>,
+    ) {
         ui.columns(2, "marker_tab_start", true);
         self.draw_sidebar(ui, state_errors);
         ui.next_column();
@@ -130,10 +146,10 @@ impl MarkerTabState {
         match tree_node {
             Some(_) => {
                 self.category_status.insert(category_name.to_string());
-            }
+            },
             None => {
                 self.category_status.remove(category_name);
-            }
+            },
         }
     }
 
@@ -267,10 +283,12 @@ impl MarkerTabState {
                                 let global = machine.map.calibration.map(position);
 
                                 let context = map.context;
-                                map.clip_screen(map.map_to_worldmap_for(context)
-                                    .then(map.worldmap_to_fake_for(context))
-                                    .then(map.calibration.to_screen())
-                                    .map(global))
+                                map.clip_screen(
+                                    map.map_to_worldmap_for(context)
+                                        .then(map.worldmap_to_fake_for(context))
+                                        .then(map.calibration.to_screen())
+                                        .map(global),
+                                )
                             } else {
                                 None
                             }
@@ -319,7 +337,8 @@ impl MarkerTabState {
                                 map_position.x, map_position.y
                             ));
                             ui.table_next_column();
-                            let trans = map.map_to_worldmap_for(map.context)
+                            let trans = map
+                                .map_to_worldmap_for(map.context)
                                 .then(map.worldmap_to_fake_for(map.context));
                             if let Some(take_position) = map.clip(trans.map(map_position)) {
                                 let screen_position = map.calibration.map(map_position);
@@ -347,11 +366,15 @@ impl MarkerTabState {
                         false => fl!("autoplacement-enable"),
                     };
                     if ui.button(button_text) {
-                        MarkersController::try_send(MarkersEvent::MarkerToggle(selected_marker_set.id()));
+                        MarkersController::try_send(MarkersEvent::MarkerToggle(
+                            selected_marker_set.id(),
+                        ));
                     }
                     ui.dummy([4.0; 2]);
                     if ui.button(&fl!("markers-place")) {
-                        MarkersController::try_send(MarkersEvent::SetMarker(selected_marker_set.clone()));
+                        MarkersController::try_send(MarkersEvent::SetMarker(
+                            selected_marker_set.clone(),
+                        ));
                     }
                     pushy.pop();
                 } else {

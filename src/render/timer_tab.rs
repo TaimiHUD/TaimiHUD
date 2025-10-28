@@ -140,10 +140,10 @@ impl TimerTabState {
         match tree_node {
             Some(_) => {
                 self.category_status.insert(category_name.to_string());
-            }
+            },
             None => {
                 self.category_status.remove(category_name);
-            }
+            },
         }
     }
 
@@ -153,7 +153,12 @@ impl TimerTabState {
         let widget_pos = Vec2::from(ui.cursor_pos());
         let window_size = Vec2::from(ui.window_content_region_max());
         let widget_size = window_size.with_y(height);
-        RenderState::icon(ui, Some(height), Some(&timer.icon), timer.path.as_ref().and_then(|p| p.parent()));
+        RenderState::icon(
+            ui,
+            Some(height),
+            Some(&timer.icon),
+            timer.path.as_ref().and_then(|p| p.parent()),
+        );
         if Selectable::new(&timer.combined())
             .selected(selected)
             .build(ui)
@@ -166,7 +171,7 @@ impl TimerTabState {
             let (color, text) = match settings_for_timer {
                 Some(TimerSettings { disabled: true, .. }) => {
                     ([1.0, 0.0, 0.0, 1.0], &fl!("disabled"))
-                }
+                },
                 _ => ([0.0, 1.0, 0.0, 1.0], &fl!("enabled")),
             };
             let text_size = Vec2::from(ui.calc_text_size(text));
@@ -250,7 +255,9 @@ impl TimerTabState {
                             _ => &fl!("disable"),
                         };
                         if ui.button(button_text) {
-                            TimersController::try_send(TimersEvent::TimerToggle(selected_timer.id.clone()));
+                            TimersController::try_send(TimersEvent::TimerToggle(
+                                selected_timer.id.clone(),
+                            ));
                         }
                     }
                 } else {

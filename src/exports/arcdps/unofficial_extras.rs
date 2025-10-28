@@ -1,11 +1,14 @@
 use {
-    arcdps::extras::{self, ExtrasSubscriberInfo},
     crate::exports::{arcdps as exports, runtime as rt},
+    arcdps::extras::{self, ExtrasSubscriberInfo},
     std::{ffi::CStr, panic, str},
     taimi_input::win::keyboard::keybind_change_from_raw,
 };
 
-pub(crate) unsafe fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, subscriber: *mut ExtrasSubscriberInfo) {
+pub(crate) unsafe fn extras_init_raw(
+    info: *const extras::RawExtrasAddonInfo,
+    subscriber: *mut ExtrasSubscriberInfo,
+) {
     if !exports::loaded() {
         crate::crate_init();
     }
@@ -24,24 +27,34 @@ pub(crate) unsafe fn extras_init_raw(info: *const extras::RawExtrasAddonInfo, su
         let info = &*info;
         let version = info.version();
         if !version.is_compatible() {
-            log::info!("unsupported arcdps_unofficial_extras api version {}/{}", version.api_version, version.max_info_version);
+            log::info!(
+                "unsupported arcdps_unofficial_extras api version {}/{}",
+                version.api_version,
+                version.max_info_version
+            );
             return
         }
 
-        let (squad_update, language_changed, keybind_changed) = extras_callbacks().unwrap_or(EXTRAS_CALLBACKS_DEFAULT);
+        let (squad_update, language_changed, keybind_changed) =
+            extras_callbacks().unwrap_or(EXTRAS_CALLBACKS_DEFAULT);
         let squad_chat_message = None;
         let chat_message = None;
 
         // there's a type for this you know...
         let name = str::from_utf8_unchecked(rt::NAME_C.to_bytes_with_nul());
-        ExtrasSubscriberInfo::subscribe(subscriber, info, name,
-            squad_update, language_changed, keybind_changed,
-            squad_chat_message, chat_message,
+        ExtrasSubscriberInfo::subscribe(
+            subscriber,
+            info,
+            name,
+            squad_update,
+            language_changed,
+            keybind_changed,
+            squad_chat_message,
+            chat_message,
         );
-        
+
         let account_name = match info.self_account_name {
-            name if name.is_null() =>
-                None,
+            name if name.is_null() => None,
             name => Some(CStr::from_ptr(name as *const _)),
         };
         if let Some(name) = account_name {
@@ -76,7 +89,9 @@ pub(crate) fn extras_resubscribe() -> bool {
 
     match () {
         #[cfg(feature = "closure-ffi")]
-        _ if exports::has_extension(UNOFFICIAL_EXTRAS_SIG) == Some(true) && hotload::can_reclaim() => {
+        _ if exports::has_extension(UNOFFICIAL_EXTRAS_SIG) == Some(true)
+            && hotload::can_reclaim() =>
+        {
             hotload::extras_resubscribe() != (None, None, None)
         },
         _ => false,
@@ -107,10 +122,17 @@ fn extras_callbacks() -> Option<ExtrasCallbackFns> {
 pub(crate) type SquadUpdateFn = unsafe extern "C-unwind" fn(*const extras::user::UserInfo, u64);
 pub(crate) type LanguageChangedFn = unsafe extern "C-unwind" fn(arcdps::Language);
 pub(crate) type KeybindChangedFn = unsafe extern "C-unwind" fn(extras::keybinds::RawKeybindChange);
-pub(crate) type ExtrasCallbackFns = (Option<SquadUpdateFn>, Option<LanguageChangedFn>, Option<KeybindChangedFn>);
+pub(crate) type ExtrasCallbackFns = (
+    Option<SquadUpdateFn>,
+    Option<LanguageChangedFn>,
+    Option<KeybindChangedFn>,
+);
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(users: *const extras::user::UserInfo, len: u64) {
+pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(
+    users: *const extras::user::UserInfo,
+    len: u64,
+) {
     exports::extras_squad_update(extras::user::to_user_info_iter(users, len))
 }
 
@@ -120,18 +142,22 @@ pub(crate) unsafe extern "C-unwind" fn cb_language_changed_raw(language: arcdps:
 }
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
+pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(
+    keybind: extras::keybinds::RawKeybindChange,
+) {
     rt::bindings::process_key_bound(keybind_change_from_raw(&keybind));
 }
 
 #[cfg(feature = "closure-ffi")]
 mod hotload {
     use {
-        anyhow::{anyhow, Context},
-        crate::exports::runtime as rt,
         super::ExtrasCallbackFns,
+        crate::exports::runtime as rt,
+        anyhow::{anyhow, Context},
         closure_ffi::{
-            cc::CUnwind as C, jit_alloc::{JitAlloc, JitAllocError, ProtectJitAccess}, BareFnAny
+            cc::CUnwind as C,
+            jit_alloc::{JitAlloc, JitAllocError, ProtectJitAccess},
+            BareFnAny,
         },
         jit_allocator2::{JitAllocator, JitAllocatorOptions},
         std::{
@@ -177,13 +203,10 @@ mod hotload {
         let mut callbacks = CALLBACKS.lock();
         let callbacks = match &mut callbacks {
             Ok(callbacks) if callbacks.is_empty() => {
-                let res = ExtrasCallbacks::new_cb()
-                    .context("failed to allocate extras callbacks");
+                let res = ExtrasCallbacks::new_cb().context("failed to allocate extras callbacks");
                 match res {
-                    Ok(cb) =>
-                        **callbacks = cb,
-                    Err(e) =>
-                        log::warn!("{e:#}"),
+                    Ok(cb) => **callbacks = cb,
+                    Err(e) => log::warn!("{e:#}"),
                 }
                 callbacks
             },
@@ -222,15 +245,15 @@ mod hotload {
         }
 
         pub fn reclaim_or_new() -> Self {
-            let reclaimed = Self::reclaim()
-                .context("Failed to reclaim JIT allocator");
+            let reclaimed = Self::reclaim().context("Failed to reclaim JIT allocator");
             match reclaimed {
                 Ok(jit) => jit,
                 Err(e) => {
                     log::warn!("{e:#}");
                     None
                 },
-            }.unwrap_or_else(|| Self::new())
+            }
+            .unwrap_or_else(|| Self::new())
         }
 
         pub fn reclaim() -> anyhow::Result<Option<Self>> {
@@ -265,8 +288,7 @@ mod hotload {
             };
             let ptr = Box::into_raw(jit);
             Self::map_reclaim_handle(true, |w| unsafe {
-                let w = ptr::NonNull::new(w)
-                    .ok_or_else(|| anyhow!("JIT stash unavailable"))?;
+                let w = ptr::NonNull::new(w).ok_or_else(|| anyhow!("JIT stash unavailable"))?;
                 let data = &ptr as *const *mut Jit as *const [u8; Self::RECLAIM_SIZE];
                 ptr::write_volatile(w.as_ptr(), *data);
                 Ok(())
@@ -280,35 +302,39 @@ mod hotload {
                     ptr::write_volatile(w, Default::default());
                 }
                 Ok(())
-            }).context("cleaning up extras JIT");
+            })
+            .context("cleaning up extras JIT");
             if let Err(e) = res {
                 log::warn!("{e:#}");
             }
-            let mut jit = self.jit.lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut jit = self.jit.lock().unwrap_or_else(|e| e.into_inner());
             drop(jit.take());
         }
 
         pub fn leak(&self) {
-            let mut jit = self.jit.lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let mut jit = self.jit.lock().unwrap_or_else(|e| e.into_inner());
             mem::forget(jit.take());
         }
 
         fn reclaim_name() -> arcffi::cstr::CStrBox {
             let process_id = process::id();
             let name = format!("Local\\ARC_UE_RECLAIM_JIT_{process_id}");
-            arcffi::cstr::CStrBox::with_cstring(unsafe {
-                CString::from_vec_unchecked(name.into())
-            })
+            arcffi::cstr::CStrBox::with_cstring(unsafe { CString::from_vec_unchecked(name.into()) })
         }
 
-        fn map_reclaim_handle<R, F: FnOnce(*mut [u8; Self::RECLAIM_SIZE]) -> anyhow::Result<R>>(create: bool, f: F) -> anyhow::Result<R> {
+        fn map_reclaim_handle<R, F: FnOnce(*mut [u8; Self::RECLAIM_SIZE]) -> anyhow::Result<R>>(
+            create: bool,
+            f: F,
+        ) -> anyhow::Result<R> {
             use windows::Win32::{
                 Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, INVALID_HANDLE_VALUE},
                 System::Memory::{
-                    CreateFileMappingA, MapViewOfFile, OpenFileMappingA, UnmapViewOfFile,
-                    FILE_MAP_WRITE, PAGE_READWRITE,
+                    CreateFileMappingA,
+                    MapViewOfFile,
+                    OpenFileMappingA,
+                    UnmapViewOfFile,
+                    FILE_MAP_WRITE,
+                    PAGE_READWRITE,
                 },
             };
 
@@ -317,16 +343,22 @@ mod hotload {
             unsafe {
                 let handle = OpenFileMappingA(access.0, false, &name);
                 let handle = match (handle, create) {
-                    (Err(..), true) => CreateFileMappingA(INVALID_HANDLE_VALUE, None, PAGE_READWRITE, 0, Self::RECLAIM_SIZE as _, &name)
-                        .context("CreateFileMappingA"),
+                    (Err(..), true) => CreateFileMappingA(
+                        INVALID_HANDLE_VALUE,
+                        None,
+                        PAGE_READWRITE,
+                        0,
+                        Self::RECLAIM_SIZE as _,
+                        &name,
+                    )
+                    .context("CreateFileMappingA"),
                     (Err(e), false) => {
                         if e.code() != ERROR_FILE_NOT_FOUND.to_hresult() {
                             log::info!("Failed to open JIT mapping: {e}");
                         }
                         return f(ptr::null_mut())
                     },
-                    (res, _) => res
-                        .context("OpenFileMappingA"),
+                    (res, _) => res.context("OpenFileMappingA"),
                 }?;
                 let map = {
                     let p = MapViewOfFile(handle, access, 0, 0, Self::RECLAIM_SIZE as _);
@@ -334,11 +366,11 @@ mod hotload {
                         p if p.Value.is_null() => Err(windows::core::Error::from_win32()),
                         p => Ok(p),
                     }
-                }.context("map file view")?;
+                }
+                .context("map file view")?;
                 let w = map.Value.cast::<[u8; Self::RECLAIM_SIZE]>();
                 let res = f(w);
-                let res_unmap = UnmapViewOfFile(map)
-                    .context("UnmapViewOfFile");
+                let res_unmap = UnmapViewOfFile(map).context("UnmapViewOfFile");
                 let res_close = match create {
                     true => Ok(()),
                     false => CloseHandle(handle).context("CloseHandle"),
@@ -354,30 +386,39 @@ mod hotload {
             }
         }
 
-        pub fn map_jit<R, F: FnOnce(&mut Jit) -> anyhow::Result<R>>(&self, f: F) -> anyhow::Result<R> {
+        pub fn map_jit<R, F: FnOnce(&mut Jit) -> anyhow::Result<R>>(
+            &self,
+            f: F,
+        ) -> anyhow::Result<R> {
             let mut jit = self.jit.lock();
             let jit = match jit.as_mut().map(|j| &mut **j) {
                 Ok(Some(jit)) => jit,
-                Ok(None) =>
-                    anyhow::bail!("JIT inactive"),
-                Err(_e) =>
-                    anyhow::bail!("JIT poisoned"),
+                Ok(None) => anyhow::bail!("JIT inactive"),
+                Err(_e) => anyhow::bail!("JIT poisoned"),
             };
             f(jit)
         }
 
-        pub fn reclaim_or_register_cb<F>(&self, id: usize, _f: *const (), create: F) -> anyhow::Result<StoredFn> where
+        pub fn reclaim_or_register_cb<F>(
+            &self,
+            id: usize,
+            _f: *const (),
+            create: F,
+        ) -> anyhow::Result<StoredFn>
+        where
             F: FnOnce() -> anyhow::Result<ErasedBareFn>,
         {
             let cb = {
-                let cb = self.map_jit(|jit|
-                    Ok(jit.registry.get(&id).map(|&cb: &usize| cb as *const u8))
-                ).ok().flatten();
-                cb.map(|cb|
-                    (cb, self.map_jit(|jit| jit.query(cb)
-                        .map_err(|e| anyhow!("{e:?}"))
-                    ))
-                )
+                let cb = self
+                    .map_jit(|jit| Ok(jit.registry.get(&id).map(|&cb: &usize| cb as *const u8)))
+                    .ok()
+                    .flatten();
+                cb.map(|cb| {
+                    (
+                        cb,
+                        self.map_jit(|jit| jit.query(cb).map_err(|e| anyhow!("{e:?}"))),
+                    )
+                })
             };
             let cb = match cb {
                 Some((cb, Ok(cb_w))) => {
@@ -413,11 +454,22 @@ mod hotload {
             Ok(Ok(res))
         }
 
-        pub unsafe fn copy_stub(&self, stub_template: &[u8], dst: *const u8, alloc_r: *const u8, alloc_w: *mut u8, size: usize) {
+        pub unsafe fn copy_stub(
+            &self,
+            stub_template: &[u8],
+            dst: *const u8,
+            alloc_r: *const u8,
+            alloc_w: *mut u8,
+            size: usize,
+        ) {
             let offset = dst.offset_from_unsigned(alloc_r);
             self.protect_jit_memory(alloc_r, size, ProtectJitAccess::ReadWrite);
             // TODO: volatile?
-            ptr::copy_nonoverlapping(stub_template.as_ptr(), alloc_w.add(offset), stub_template.len());
+            ptr::copy_nonoverlapping(
+                stub_template.as_ptr(),
+                alloc_w.add(offset),
+                stub_template.len(),
+            );
 
             self.protect_jit_memory(alloc_r, size, ProtectJitAccess::ReadExecute);
             self.flush_instruction_cache(alloc_r, size);
@@ -426,10 +478,9 @@ mod hotload {
 
     impl JitAlloc for SharedJit {
         fn alloc(&self, size: usize) -> Result<(*const u8, *mut u8), JitAllocError> {
-            let res = self.map_jit(move |jit| {
-                jit.alloc(size)
-                    .map_err(|e| anyhow!("{e:?}"))
-            }).context("JIT alloc failed");
+            let res = self
+                .map_jit(move |jit| jit.alloc(size).map_err(|e| anyhow!("{e:?}")))
+                .context("JIT alloc failed");
 
             match res {
                 Ok((rx, rw)) => Ok((rx, rw)),
@@ -441,10 +492,9 @@ mod hotload {
         }
 
         unsafe fn release(&self, rx_ptr: *const u8) -> Result<(), JitAllocError> {
-            let res = self.map_jit(move |jit| {
-                jit.release(rx_ptr)
-                    .map_err(|e| anyhow!("{e:?}"))
-            }).context("JIT release failed");
+            let res = self
+                .map_jit(move |jit| jit.release(rx_ptr).map_err(|e| anyhow!("{e:?}")))
+                .context("JIT release failed");
 
             match res {
                 Ok(()) => Ok(()),
@@ -455,7 +505,12 @@ mod hotload {
             }
         }
 
-        unsafe fn protect_jit_memory(&self, _ptr: *const u8, _size: usize, access: ProtectJitAccess) {
+        unsafe fn protect_jit_memory(
+            &self,
+            _ptr: *const u8,
+            _size: usize,
+            access: ProtectJitAccess,
+        ) {
             let access = match access {
                 ProtectJitAccess::ReadExecute => jit_allocator2::ProtectJitAccess::ReadExecute,
                 ProtectJitAccess::ReadWrite => jit_allocator2::ProtectJitAccess::ReadWrite,
@@ -471,8 +526,11 @@ mod hotload {
 
     impl Drop for SharedJit {
         fn drop(&mut self) {
-            let empty = self.jit.lock()
-                .ok().and_then(|j| j.as_ref().map(|j| j.registry.is_empty()))
+            let empty = self
+                .jit
+                .lock()
+                .ok()
+                .and_then(|j| j.as_ref().map(|j| j.registry.is_empty()))
                 .unwrap_or(false);
             if !empty {
                 self.leak();
@@ -491,7 +549,7 @@ mod hotload {
                 use_dual_mapping: false,
                 use_multiple_pools: false,
                 immediate_release: true,
-                .. Default::default()
+                ..Default::default()
             };
             Self::with_allocator(*JitAllocator::new(opts))
         }
@@ -543,15 +601,9 @@ mod hotload {
         pub const ID_KEYBIND_CHANGED: usize = 2;
 
         pub fn new_cb() -> anyhow::Result<Self> {
-            let squad_update = |users, len| unsafe {
-                super::cb_squad_update_raw(users, len)
-            };
-            let language_changed = |language| unsafe {
-                super::cb_language_changed_raw(language)
-            };
-            let keybind_changed = |keybind| unsafe {
-                super::cb_keybind_changed_raw(keybind)
-            };
+            let squad_update = |users, len| unsafe { super::cb_squad_update_raw(users, len) };
+            let language_changed = |language| unsafe { super::cb_language_changed_raw(language) };
+            let keybind_changed = |keybind| unsafe { super::cb_keybind_changed_raw(keybind) };
 
             // TODO: reclaim and redirect callbacks if found
 
@@ -559,23 +611,29 @@ mod hotload {
             let squad_update = jit.reclaim_or_register_cb(
                 Self::ID_SQUAD_UPDATE,
                 super::cb_squad_update_raw as super::SquadUpdateFn as _,
-                || BareFnAny::try_with_cc_in(C, squad_update, jit)
-                    .map_err(|e| anyhow!("{e:?}"))
-                    .map(|cb| cb.into_untyped()),
+                || {
+                    BareFnAny::try_with_cc_in(C, squad_update, jit)
+                        .map_err(|e| anyhow!("{e:?}"))
+                        .map(|cb| cb.into_untyped())
+                },
             )?;
             let language_changed = jit.reclaim_or_register_cb(
                 Self::ID_LANGUAGE_CHANGED,
                 super::cb_language_changed_raw as super::LanguageChangedFn as _,
-                || BareFnAny::try_with_cc_in(C, language_changed, jit)
-                    .map_err(|e| anyhow!("{e:?}"))
-                    .map(|cb| cb.into_untyped()),
+                || {
+                    BareFnAny::try_with_cc_in(C, language_changed, jit)
+                        .map_err(|e| anyhow!("{e:?}"))
+                        .map(|cb| cb.into_untyped())
+                },
             )?;
             let keybind_changed = jit.reclaim_or_register_cb(
                 Self::ID_KEYBIND_CHANGED,
                 super::cb_keybind_changed_raw as super::KeybindChangedFn as _,
-                || BareFnAny::try_with_cc_in(C, keybind_changed, jit)
-                    .map_err(|e| anyhow!("{e:?}"))
-                    .map(|cb| cb.into_untyped()),
+                || {
+                    BareFnAny::try_with_cc_in(C, keybind_changed, jit)
+                        .map_err(|e| anyhow!("{e:?}"))
+                        .map(|cb| cb.into_untyped())
+                },
             )?;
 
             Ok(Self {
@@ -595,15 +653,14 @@ mod hotload {
 
             let f = f as *const u8;
             let jit = &*JIT;
-            let f_w = jit.map_jit(|jit| {
-                jit.registry.insert(id, f as usize);
-                jit.query(f)
-                    .map_err(|e| anyhow!("{e:?}"))
-            }).ok();
+            let f_w = jit
+                .map_jit(|jit| {
+                    jit.registry.insert(id, f as usize);
+                    jit.query(f).map_err(|e| anyhow!("{e:?}"))
+                })
+                .ok();
             let (base, f_w, len) = match f_w {
-                Some((base, f_w, len)) => {
-                    (base, f_w, len)
-                },
+                Some((base, f_w, len)) => (base, f_w, len),
                 None => {
                     log::warn!("query JIT memory {f:p} failed");
                     // TODO? (f, f as *mut u8, stub_template.len())
@@ -615,64 +672,72 @@ mod hotload {
 
         /// Replace allocated trampoline with a no-op stub
         pub fn leak_unload(&mut self) {
-            let squad_update = self.squad_update.take()
-                .map(|cb| cb
-                    .map(|cb| cb.leak())
-                    .unwrap_or_else(|cb| cb)
-                );
-            let language_changed = self.language_changed.take()
-                .map(|cb| cb
-                    .map(|cb| cb.leak())
-                    .unwrap_or_else(|cb| cb)
-                );
-            let keybind_changed = self.keybind_changed.take()
-                .map(|cb| cb
-                    .map(|cb| cb.leak())
-                    .unwrap_or_else(|cb| cb)
-                );
+            let squad_update = self
+                .squad_update
+                .take()
+                .map(|cb| cb.map(|cb| cb.leak()).unwrap_or_else(|cb| cb));
+            let language_changed = self
+                .language_changed
+                .take()
+                .map(|cb| cb.map(|cb| cb.leak()).unwrap_or_else(|cb| cb));
+            let keybind_changed = self
+                .keybind_changed
+                .take()
+                .map(|cb| cb.map(|cb| cb.leak()).unwrap_or_else(|cb| cb));
 
             unsafe {
                 if let Some(cb) = squad_update {
-                    Self::stub_fn(Self::ID_SQUAD_UPDATE, cb, super::cb_squad_update_raw as *const ());
+                    Self::stub_fn(
+                        Self::ID_SQUAD_UPDATE,
+                        cb,
+                        super::cb_squad_update_raw as *const (),
+                    );
                 }
                 if let Some(cb) = language_changed {
-                    Self::stub_fn(Self::ID_LANGUAGE_CHANGED, cb, super::cb_language_changed_raw as *const ());
+                    Self::stub_fn(
+                        Self::ID_LANGUAGE_CHANGED,
+                        cb,
+                        super::cb_language_changed_raw as *const (),
+                    );
                 }
                 if let Some(cb) = keybind_changed {
-                    Self::stub_fn(Self::ID_KEYBIND_CHANGED, cb, super::cb_keybind_changed_raw as *const ());
+                    Self::stub_fn(
+                        Self::ID_KEYBIND_CHANGED,
+                        cb,
+                        super::cb_keybind_changed_raw as *const (),
+                    );
                 }
             }
         }
 
         pub fn is_empty(&self) -> bool {
-            matches!(self, Self { squad_update: None, language_changed: None, keybind_changed: None })
+            matches!(self, Self {
+                squad_update: None,
+                language_changed: None,
+                keybind_changed: None
+            })
         }
 
         pub fn squad_update_bare(&self) -> Option<super::SquadUpdateFn> {
-            self.squad_update.as_ref()
-                .map(|cb| unsafe {
-                    mem::transmute(Self::cb_bare(cb))
-                })
+            self.squad_update
+                .as_ref()
+                .map(|cb| unsafe { mem::transmute(Self::cb_bare(cb)) })
         }
 
         pub fn language_changed_bare(&self) -> Option<super::LanguageChangedFn> {
-            self.language_changed.as_ref()
-                .map(|cb| unsafe {
-                    mem::transmute(Self::cb_bare(cb))
-                })
+            self.language_changed
+                .as_ref()
+                .map(|cb| unsafe { mem::transmute(Self::cb_bare(cb)) })
         }
 
         pub fn keybind_changed_bare(&self) -> Option<super::KeybindChangedFn> {
-            self.keybind_changed.as_ref()
-                .map(|cb| unsafe {
-                    mem::transmute(Self::cb_bare(cb))
-                })
+            self.keybind_changed
+                .as_ref()
+                .map(|cb| unsafe { mem::transmute(Self::cb_bare(cb)) })
         }
 
         fn cb_bare(cb: &StoredFn) -> *const () {
-            cb.as_ref()
-                .map(|cb| cb.bare())
-                .unwrap_or_else(|&cb| cb)
+            cb.as_ref().map(|cb| cb.bare()).unwrap_or_else(|&cb| cb)
         }
 
         fn cb_drop(cb: &mut Option<StoredFn>) {
@@ -705,7 +770,9 @@ mod hotload {
                 #[cfg(any(target_arch = "x86_64"))]
                 _ => &__EXTRAS_STUB_TEMPLATE,
                 #[cfg(not(any(target_arch = "x86_64")))]
-                _ => &*(__extras_stub_template as unsafe extern "C" fn() as usize as *const [u8; 8]),
+                _ => {
+                    &*(__extras_stub_template as unsafe extern "C" fn() as usize as *const [u8; 8])
+                },
             }
         }
     }

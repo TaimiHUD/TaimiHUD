@@ -3,41 +3,34 @@ pub use self::arcloader::{
     gw2_mumble,
     LinkedMem as MumbleLink,
     MumblePtr,
-    UIScaling,
-    UIState,
     NexusIdentity,
-};
-#[cfg(all(feature = "mumblelink-nexus", not(feature = "mumblelink-arcloader")))]
-pub use self::nexus::{
-    gw2_mumble,
-    LinkedMem as MumbleLink,
-    MumblePtr,
     UIScaling,
     UIState,
 };
-#[cfg(all(feature = "mumblelink-nexus", feature = "nexus", not(feature = "mumblelink-arcloader")))]
+#[cfg(all(
+    feature = "mumblelink-nexus",
+    feature = "nexus",
+    not(feature = "mumblelink-arcloader")
+))]
 pub use self::nexus::NexusIdentity;
+#[cfg(all(feature = "mumblelink-nexus", not(feature = "mumblelink-arcloader")))]
+pub use self::nexus::{gw2_mumble, LinkedMem as MumbleLink, MumblePtr, UIScaling, UIState};
 
 #[cfg(feature = "mumblelink-nexus")]
 pub mod nexus {
-    use {
-        std::mem::transmute,
-        crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
-    };
-
+    #[cfg(not(feature = "nexus"))]
+    pub use ::gw2_mumble_nexus as gw2_mumble;
     #[cfg(feature = "nexus")]
     pub use ::nexus::{
         data_link::mumble as gw2_mumble,
         event::MumbleIdentityUpdate as NexusIdentity,
     };
-    #[cfg(not(feature = "nexus"))]
-    pub use ::gw2_mumble_nexus as gw2_mumble;
-    pub use self::gw2_mumble::{
-        LinkedMem,
-        MumblePtr,
-        UiState as UIState,
-        UIScaling,
+    use {
+        crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
+        std::mem::transmute,
     };
+
+    pub use self::gw2_mumble::{LinkedMem, MumblePtr, UIScaling, UiState as UIState};
 
     impl From<UIState> for UiState {
         #[inline]
@@ -69,36 +62,25 @@ pub mod nexus {
 
     impl From<UIScaling> for UiSize {
         fn from(size: UIScaling) -> Self {
-            unsafe {
-                Self::from_repr_unchecked(size as _)
-            }
+            unsafe { Self::from_repr_unchecked(size as _) }
         }
     }
     impl From<UiSize> for UIScaling {
         fn from(size: UiSize) -> Self {
-            unsafe {
-                transmute(size.repr() as u8)
-            }
+            unsafe { transmute(size.repr() as u8) }
         }
     }
 }
 
 #[cfg(feature = "mumblelink-arcloader")]
 mod arcloader {
-    use {
-        std::mem::transmute,
-        crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
-    };
-
     pub use arcloader_mumblelink::{
+        gw2_mumble::{self, LinkedMem, MumblePtr, UIScaling, UiState as UIState},
         identity::ImpIdentity as NexusIdentity,
-        gw2_mumble::{
-            self,
-            LinkedMem,
-            MumblePtr,
-            UiState as UIState,
-            UIScaling,
-        },
+    };
+    use {
+        crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
+        std::mem::transmute,
     };
 
     impl From<UIState> for UiState {
@@ -131,16 +113,12 @@ mod arcloader {
 
     impl From<UIScaling> for UiSize {
         fn from(size: UIScaling) -> Self {
-            unsafe {
-                Self::from_repr_unchecked(size as _)
-            }
+            unsafe { Self::from_repr_unchecked(size as _) }
         }
     }
     impl From<UiSize> for UIScaling {
         fn from(size: UiSize) -> Self {
-            unsafe {
-                transmute(size.repr() as u8)
-            }
+            unsafe { transmute(size.repr() as u8) }
         }
     }
 }

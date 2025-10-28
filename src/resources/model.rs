@@ -2,10 +2,7 @@ use {
     crate::resources::Vertex,
     glam::{Vec3, Vec3Swizzles},
     serde::{Deserialize, Serialize},
-    taimi_d3d::dx11::{
-        prelude::*,
-        buffer::VertexBuffer,
-    },
+    taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
 };
 
 // TODO: cut down on this

@@ -3,10 +3,7 @@
 */
 
 use {
-    crate::{
-        exports::runtime as rt,
-        fl,
-    },
+    crate::{exports::runtime as rt, fl},
     glam::Vec3,
     nexus::imgui::{ComboBox, InputFloat3, Selectable, StyleColor, Ui},
 };
@@ -180,14 +177,14 @@ impl PositionInput {
         if self.opened {
             let position_as_type = self.position.get_or_insert_default().as_mut();
             if !trigger {
-                let text =  fl!("manual-position");
+                let text = fl!("manual-position");
                 let text_width = ui.calc_text_size(&text)[0] + 4.0f32;
                 let item_width_token = ui.push_item_width(-text_width);
                 let position_input = InputFloat3::new(ui, &text, position_as_type);
                 position_input.build();
                 item_width_token.pop(ui);
             } else {
-                let text =  fl!("manual-position");
+                let text = fl!("manual-position");
                 let position_input = InputFloat3::new(ui, &text, position_as_type);
                 position_input.build();
             }

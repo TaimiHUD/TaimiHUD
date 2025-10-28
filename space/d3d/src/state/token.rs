@@ -1,8 +1,4 @@
-use crate::{
-    prelude::*,
-    state::D3dState,
-    D3dContextBindable, D3dContextBindableSlot,
-};
+use crate::{prelude::*, state::D3dState, D3dContextBindable, D3dContextBindableSlot};
 
 #[must_use]
 #[derive(Debug, Default)]
@@ -43,7 +39,8 @@ impl<'c, S: D3dState<D3DC>, D3DC: D3dContext> D3dStateToken<'c, S, D3DC> {
     }
 }
 
-impl<'c, S, D3DC: D3dContext> D3dContextBindable<D3DC> for D3dStateToken<'c, S, D3DC> where
+impl<'c, S, D3DC: D3dContext> D3dContextBindable<D3DC> for D3dStateToken<'c, S, D3DC>
+where
     S: D3dState<D3DC> + D3dContextBindable<D3DC>,
 {
     fn set(&self, device_context: &D3DC) {
@@ -51,7 +48,8 @@ impl<'c, S, D3DC: D3dContext> D3dContextBindable<D3DC> for D3dStateToken<'c, S, 
     }
 }
 
-impl<'c, S, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for D3dStateToken<'c, S, D3DC> where
+impl<'c, S, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for D3dStateToken<'c, S, D3DC>
+where
     S: D3dState<D3DC> + D3dContextBindableSlot<D3DC>,
 {
     fn set(&self, device_context: &D3DC, slot: u32) {
@@ -66,5 +64,4 @@ impl<'c, S: D3dState<D3DC>, D3DC: D3dContext> Drop for D3dStateToken<'c, S, D3DC
 }
 
 #[cfg(todo)]
-impl<'c, S: D3dState<D3DC>, D3DC: D3dContext> D3dState for D3dStateToken<'c, S, D3DC> {
-}
+impl<'c, S: D3dState<D3DC>, D3DC: D3dContext> D3dState for D3dStateToken<'c, S, D3DC> {}

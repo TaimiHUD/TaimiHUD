@@ -1,22 +1,17 @@
+pub use arcdps::extras::keybinds::Control as GameControl;
 use {
-    arcdps::extras::keybinds::{Key, KeybindChange, KeyCode, MouseCode},
-    bitvec::array::BitArray,
     crate::exports::runtime::bindings::keys::{KeyBind, MouseBind},
+    arcdps::extras::keybinds::{Key, KeyCode, KeybindChange, MouseCode},
+    bitvec::array::BitArray,
     serde::{Deserialize, Serialize},
-    std::{
-        collections::BTreeMap,
-        fmt,
-        iter,
-        num::TryFromIntError,
-        ops,
-    },
+    std::{collections::BTreeMap, fmt, iter, num::TryFromIntError, ops},
     taimi_input::win::keyboard::{KeyInput, KeyState},
     windows::Win32::UI::Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
 };
-pub use arcdps::extras::keybinds::Control as GameControl;
 
-#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(
+    Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize, serde::Serialize,
+)]
 #[repr(transparent)]
 #[serde(transparent)]
 pub struct Control {
@@ -77,8 +72,7 @@ impl TryFrom<Control> for GameControl {
     type Error = anyhow::Error;
 
     fn try_from(index: Control) -> Result<Self, Self::Error> {
-        GameControl::try_from(index.index as i32)
-            .map_err(Into::into)
+        GameControl::try_from(index.index as i32).map_err(Into::into)
     }
 }
 
@@ -86,18 +80,14 @@ impl fmt::Debug for Control {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.as_control() {
             Some(c) => fmt::Debug::fmt(&c, f),
-            None => f.debug_tuple("GameControl")
-                .field(&self.index)
-                .finish(),
+            None => f.debug_tuple("GameControl").field(&self.index).finish(),
         }
     }
 }
 impl fmt::Display for Control {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.as_control() {
-            Some(c) => {
-                f.write_str(&format!("{c:?}").replace("_", " "))
-            },
+            Some(c) => f.write_str(&format!("{c:?}").replace("_", " ")),
             None => write!(f, "#{}", self.index),
         }
     }
@@ -112,17 +102,14 @@ pub struct GameControls {
 }
 impl GameControls {
     pub const fn new(bits: BitArray<GameControlsBits>) -> Self {
-        Self {
-            bits,
-        }
+        Self { bits }
     }
 
     pub fn iter<'a>(&'a self) -> GameControlsIter<'a> {
         fn map_control(index: usize) -> Control {
             Control::with_index(index as u8)
         }
-        self.bits.iter_ones()
-            .map(map_control)
+        self.bits.iter_ones().map(map_control)
     }
 
     pub fn into_iter(self) -> GameControlsIntoIter {
@@ -132,15 +119,12 @@ impl GameControls {
                 false => None,
             }
         }
-        self.bits.into_iter().enumerate()
-            .filter_map(map_control_i)
+        self.bits.into_iter().enumerate().filter_map(map_control_i)
     }
 
     pub fn contains<C: Into<Control>>(&self, control: C) -> bool {
         let i = control.into().index as usize;
-        unsafe {
-            *self.bits.get_unchecked(i)
-        }
+        unsafe { *self.bits.get_unchecked(i) }
     }
 
     pub fn set<C: Into<Control>>(&mut self, control: C, set: bool) {
@@ -198,8 +182,12 @@ impl<I: Into<Control>> FromIterator<I> for GameControls {
         controls
     }
 }
-pub type GameControlsIntoIter = iter::FilterMap<iter::Enumerate<bitvec::array::IntoIter<GameControlsBits, bitvec::order::Lsb0>>, fn((usize, bool)) -> Option<Control>>;
-pub type GameControlsIter<'a> = iter::Map<bitvec::slice::IterOnes<'a, u64, bitvec::order::Lsb0>, fn(usize) -> Control>;
+pub type GameControlsIntoIter = iter::FilterMap<
+    iter::Enumerate<bitvec::array::IntoIter<GameControlsBits, bitvec::order::Lsb0>>,
+    fn((usize, bool)) -> Option<Control>,
+>;
+pub type GameControlsIter<'a> =
+    iter::Map<bitvec::slice::IterOnes<'a, u64, bitvec::order::Lsb0>, fn(usize) -> Control>;
 impl IntoIterator for GameControls {
     type Item = Control;
     type IntoIter = GameControlsIntoIter;
@@ -318,7 +306,10 @@ impl GameBinds {
             // 0 indicates unbound
             Key::Unknown(0) => (),
             Key::Unknown(code) => {
-                log::warn!("unrecognized keybind code {code} for control {}", i32::from(change.control));
+                log::warn!(
+                    "unrecognized keybind code {code} for control {}",
+                    i32::from(change.control)
+                );
             },
         }
     }
@@ -347,25 +338,32 @@ impl GameBinds {
 
     pub fn vk_is_button(vk: VIRTUAL_KEY) -> bool {
         match vk {
-            KeyboardAndMouse::VK_LBUTTON | KeyboardAndMouse::VK_MBUTTON | KeyboardAndMouse::VK_RBUTTON
-            | KeyboardAndMouse::VK_XBUTTON1 | KeyboardAndMouse::VK_XBUTTON2
-            => true,
-            vk =>
+            KeyboardAndMouse::VK_LBUTTON
+            | KeyboardAndMouse::VK_MBUTTON
+            | KeyboardAndMouse::VK_RBUTTON
+            | KeyboardAndMouse::VK_XBUTTON1
+            | KeyboardAndMouse::VK_XBUTTON2 => true,
+            vk => {
                 vk.0 >= KeyboardAndMouse::VK_GAMEPAD_A.0
                 //&& vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_BUTTON.0
                 && vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT.0
-            ,
+            },
         }
     }
 
-    pub fn get<C: Into<Control>>(&self, control: C, index: Option<ControlIndex>) -> Option<(VIRTUAL_KEY, KeyState)> {
+    pub fn get<C: Into<Control>>(
+        &self,
+        control: C,
+        index: Option<ControlIndex>,
+    ) -> Option<(VIRTUAL_KEY, KeyState)> {
         let control = control.into();
-        let bind = self.key_binds.iter()
-            .chain(self.mouse_binds.iter())
-            .find(|(_k, &(c, i))| match index {
-                Some(index) if index != i => false,
-                _ => c == control,
-            });
+        let bind =
+            self.key_binds.iter().chain(self.mouse_binds.iter()).find(
+                |(_k, &(c, i))| match index {
+                    Some(index) if index != i => false,
+                    _ => c == control,
+                },
+            );
         bind.map(|(&(vk, mods), _)| (VIRTUAL_KEY(vk), mods))
     }
 
@@ -390,7 +388,8 @@ impl GameBinds {
 
 impl<'de> Deserialize<'de> for GameBinds {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let binds = <Vec<((u16, u32), (i32, ControlIndex))> as Deserialize>::deserialize(deserializer)?;
+        let binds =
+            <Vec<((u16, u32), (i32, ControlIndex))> as Deserialize>::deserialize(deserializer)?;
 
         let mut out = Self::default();
         for ((vk, mods), (control, index)) in binds {
@@ -411,12 +410,12 @@ impl<'de> Deserialize<'de> for GameBinds {
 }
 impl Serialize for GameBinds {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let binds = self.key_binds.iter()
+        let binds = self
+            .key_binds
+            .iter()
             .chain(self.mouse_binds.iter())
-            .map(|(&(vk, mods), &(control, index))| (
-                (vk, mods.bits()),
-                (control, index)
-            )).collect::<Vec<_>>();
+            .map(|(&(vk, mods), &(control, index))| ((vk, mods.bits()), (control, index)))
+            .collect::<Vec<_>>();
         binds.serialize(serializer)
     }
 }

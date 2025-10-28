@@ -1,9 +1,10 @@
+#[cfg(feature = "built-info")]
+use std::{fs, path::PathBuf};
+
 use {
     semver::{BuildMetadata, Prerelease, Version},
     std::env,
 };
-#[cfg(feature = "built-info")]
-use std::{fs, path::PathBuf};
 
 const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
 const FEATURE_NEXUS_CODEGEN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_CODEGEN";
@@ -54,7 +55,9 @@ fn apply_built_info() {
     let ci = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_CI}"));
     let commit = env::var(&format!("{built_env_prefix}{BUILT_ATTR_REF}"));
     let release = match &commit {
-        Ok(head) => head.strip_prefix("refs/tags/v").map(Ok)
+        Ok(head) => head
+            .strip_prefix("refs/tags/v")
+            .map(Ok)
             .or(head.strip_prefix("refs/heads/").map(Err)),
         _ => None,
     };
@@ -78,25 +81,31 @@ fn apply_built_info() {
             ci.unwrap_or("").into()
         }
     };
-    let release_channel = if let Some(pkg_version) = pkg_version.as_ref().and_then(|v| v.parse::<Version>().ok()) {
+    let release_channel = if let Some(pkg_version) =
+        pkg_version.as_ref().and_then(|v| v.parse::<Version>().ok())
+    {
         println!("cargo::rustc-cfg=taimi_has={:?}", "version");
         let mut release_channel: Option<String>;
 
-        let release_version = release.and_then(|r|
-            r.ok()
-        ).and_then(|r| match r.parse::<Version>() {
-            Ok(v) => Some(v),
-            Err(e) => {
-                println!("cargo::warning=release version {r:?} not valid semver: {e}");
-                None
-            },
-        });
+        let release_version =
+            release
+                .and_then(|r| r.ok())
+                .and_then(|r| match r.parse::<Version>() {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        println!("cargo::warning=release version {r:?} not valid semver: {e}");
+                        None
+                    },
+                });
 
         match &release_version {
             Some(release_version) if release_version.cmp_precedence(&pkg_version).is_eq() => (),
             Some(release_version) => {
-                let partial_match = Version::new(release_version.major, release_version.minor, 0) == Version::new(pkg_version.major, pkg_version.minor, 0);
-                let msg = || format!("release version {release_version} mismatches package: {pkg_version}");
+                let partial_match = Version::new(release_version.major, release_version.minor, 0)
+                    == Version::new(pkg_version.major, pkg_version.minor, 0);
+                let msg = || {
+                    format!("release version {release_version} mismatches package: {pkg_version}")
+                };
                 if !release_version.pre.is_empty() || partial_match {
                     println!("cargo::warning={}", msg())
                 } else {
@@ -119,16 +128,20 @@ fn apply_built_info() {
                 let mut version = pkg_version;
                 if version.pre.is_empty() {
                     release_channel = Some(if debug { "debug" } else { "dev" }.into());
-                    let pre = release.map(|r| r.err().map(|branch| {
-                        let channel = match branch {
-                            "main" => "dev",
-                            "develop" => "develop",
-                            branch => &*release_channel.insert(format!("dev-{branch}")),
-                        };
-                        // TODO?
-                        let build_no = 0;
-                        Prerelease::new(&format!("{channel}.{build_no}"))
-                    })).unwrap_or_else(|| Some(Prerelease::new("debug")));
+                    let pre = release
+                        .map(|r| {
+                            r.err().map(|branch| {
+                                let channel = match branch {
+                                    "main" => "dev",
+                                    "develop" => "develop",
+                                    branch => &*release_channel.insert(format!("dev-{branch}")),
+                                };
+                                // TODO?
+                                let build_no = 0;
+                                Prerelease::new(&format!("{channel}.{build_no}"))
+                            })
+                        })
+                        .unwrap_or_else(|| Some(Prerelease::new("debug")));
                     if let Some(Ok(pre)) = pre {
                         version.pre = pre;
                     }
@@ -176,9 +189,15 @@ fn apply_built_info() {
         if let Some(rev) = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_REV_SHORT}")) {
             let ci_sep = ci.is_some().then_some("-").unwrap_or("");
             let ci = ci.unwrap_or("");
-            println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}{ci_sep}{ci}", rev.display());
+            println!(
+                "cargo::rustc-env={ADDON_VERSION}_BUILD={}{ci_sep}{ci}",
+                rev.display()
+            );
         } else {
-            println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}", ci.unwrap_or(""));
+            println!(
+                "cargo::rustc-env={ADDON_VERSION}_BUILD={}",
+                ci.unwrap_or("")
+            );
         }
         if let Some(pre) = env::var_os("CARGO_PKG_VERSION_PRE") {
             println!("cargo::rustc-env={ADDON_VERSION}_PRE={}", pre.display());
@@ -199,7 +218,10 @@ fn apply_built_info() {
         })
     };
     let release_channel = release_channel.as_ref().map(|c| &c[..]);
-    println!("cargo::rustc-env={ADDON_VERSION}_CHANNEL={}", release_channel.unwrap_or(""));
+    println!(
+        "cargo::rustc-env={ADDON_VERSION}_CHANNEL={}",
+        release_channel.unwrap_or("")
+    );
 
     tags.push(release_channel.map(|c| match c {
         "rc" => "Release Candidate",
@@ -244,8 +266,7 @@ fn write_built_info() {
         let built_out = env::var_os("OUT_DIR")
             .map(PathBuf::from)
             .map(|p| p.join("built.rs"));
-        let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from);
+        let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
         let manifest_dir = manifest_dir.as_ref().map(PathBuf::as_path);
 
         let res = if let Some(out) = built_out {
@@ -254,13 +275,18 @@ fn write_built_info() {
             if let Err(e) = res {
                 println!("cargo::warning=built failed to produce metadata: {e}");
                 let built_empty = "src/built.rs";
-                let p = manifest_dir.as_ref()
+                let p = manifest_dir
+                    .as_ref()
                     .map(|p| p.join(built_empty))
                     .unwrap_or_else(|| built_empty.into());
                 let res = fs::copy(&p, &out);
                 res.map(drop).map_err(Some)
-            } else { Ok(()) }
-        } else { Err(None) };
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(None)
+        };
 
         if let Err(e) = res {
             println!("cargo::warning=failed to stub out built metadata: {e:?}");

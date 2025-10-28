@@ -1,22 +1,25 @@
-use {
-    nexus::imgui::TextureId,
-    relative_path::RelativePath,
-    std::{collections::{hash_map, HashMap}, future::Future, mem, path::{Path, PathBuf}, sync::{Arc, RwLock as StdRwLock}},
-    tokio::sync::{self, mpsc, RwLock},
-    taimi_d3d::dx11::{
-        prelude::*,
-        buffer::TextureView2,
-    },
-};
+#[cfg(feature = "extension-nexus")]
+pub use nexus::texture::Texture as NexusTexture;
 #[cfg(feature = "texture-loader")]
 use {
     anyhow::{anyhow, Context},
-    std::{thread, io},
+    std::{io, thread},
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
+use {
+    nexus::imgui::TextureId,
+    relative_path::RelativePath,
+    std::{
+        collections::{hash_map, HashMap},
+        future::Future,
+        mem,
+        path::{Path, PathBuf},
+        sync::{Arc, RwLock as StdRwLock},
+    },
+    taimi_d3d::dx11::{buffer::TextureView2, prelude::*},
+    tokio::sync::{self, mpsc, RwLock},
+};
 
-#[cfg(feature = "extension-nexus")]
-pub use nexus::texture::Texture as NexusTexture;
 #[cfg(feature = "texture-loader")]
 pub use crate::resources::Texture;
 
@@ -39,8 +42,7 @@ impl TextureLoader {
 
     #[cfg(feature = "texture-loader")]
     pub fn setup(&self) -> Result<(), &'static str> {
-        let mut loader = self.loader.write()
-            .map_err(|_| "texture loader poisoned")?;
+        let mut loader = self.loader.write().map_err(|_| "texture loader poisoned")?;
         if loader.is_some() {
             return Err("texture loader already running")
         }
@@ -80,7 +82,11 @@ impl TextureLoader {
     pub fn is_available(&self) -> bool {
         match () {
             #[cfg(feature = "texture-loader")]
-            _ => self.loader.try_read().map(|loader| loader.is_some()).unwrap_or(false),
+            _ => self
+                .loader
+                .try_read()
+                .map(|loader| loader.is_some())
+                .unwrap_or(false),
             #[cfg(not(feature = "texture-loader"))]
             _ => false,
         }
@@ -96,18 +102,26 @@ impl TextureLoader {
     }
 
     #[cfg(feature = "texture-loader")]
-    pub fn read_loader(&self) -> anyhow::Result<std::sync::RwLockReadGuard<'_, Option<TextureLoaderHandle>>> {
-        self.loader.read()
+    pub fn read_loader(
+        &self,
+    ) -> anyhow::Result<std::sync::RwLockReadGuard<'_, Option<TextureLoaderHandle>>> {
+        self.loader
+            .read()
             .map_err(|_| anyhow!("texture loader poisoned"))
     }
 
-    pub async fn report_begin_load(&self, key: &Arc<str>, request: impl Future<Output = anyhow::Result<()>>) -> anyhow::Result<()> {
+    pub async fn report_begin_load(
+        &self,
+        key: &Arc<str>,
+        request: impl Future<Output = anyhow::Result<()>>,
+    ) -> anyhow::Result<()> {
         {
             let mut textures = self.textures.write().await;
             let entry = textures.entry(key.clone());
             match entry {
-                hash_map::Entry::Occupied(e) if !e.get().can_load() =>
-                    return Err(anyhow!("duplicate texture load request")),
+                hash_map::Entry::Occupied(e) if !e.get().can_load() => {
+                    return Err(anyhow!("duplicate texture load request"))
+                },
                 hash_map::Entry::Occupied(mut e) => {
                     e.insert(TextureSlot::Loading);
                 },
@@ -122,16 +136,23 @@ impl TextureLoader {
                 let mut textures = self.textures.write().await;
                 textures.insert(key.clone(), TextureSlot::Unavailable);
                 Err(e)
-            }
+            },
         }
     }
-    async fn begin_load(&self, key: &Arc<str>, request: impl FnOnce() -> TextureRequest) -> anyhow::Result<()> {
+    async fn begin_load(
+        &self,
+        key: &Arc<str>,
+        request: impl FnOnce() -> TextureRequest,
+    ) -> anyhow::Result<()> {
         #[cfg(feature = "texture-loader")]
         let sender = self.with_loader(|loader| loader.sender.clone())?;
         self.report_begin_load(key, async move {
-            sender.send(request()).await
+            sender
+                .send(request())
+                .await
                 .map_err(|_| anyhow!("texture loader unavailable"))
-        }).await
+        })
+        .await
     }
 
     #[cfg(feature = "texture-loader")]
@@ -141,8 +162,7 @@ impl TextureLoader {
             // temporary failure, just pretend it's loading or something
             Err(..) => return Some(None),
         };
-        textures.get(key)
-            .map(|texture| texture.resource())
+        textures.get(key).map(|texture| texture.resource())
     }
 
     pub fn lookup_imgui(&self, key: &str) -> Option<Option<ImguiTexture>> {
@@ -151,33 +171,57 @@ impl TextureLoader {
             // temporary failure, just pretend it's loading or something
             Err(..) => return Some(None),
         };
-        textures.get(key)
-            .map(|texture| texture.imgui_texture())
+        textures.get(key).map(|texture| texture.imgui_texture())
     }
 
-    pub async fn request_load_file_relative<R, P>(&self, rel: R, path: P) -> anyhow::Result<()> where
+    pub async fn request_load_file_relative<R, P>(&self, rel: R, path: P) -> anyhow::Result<()>
+    where
         R: AsRef<RelativePath> + Into<String>,
         P: AsRef<Path>,
     {
         let path = path.as_ref();
         let relpath = rel.as_ref();
-        let base = path.parent()
-            .ok_or_else(|| anyhow!("parent of path {} required to load texture {relpath}", path.display()))?;
+        let base = path.parent().ok_or_else(|| {
+            anyhow!(
+                "parent of path {} required to load texture {relpath}",
+                path.display()
+            )
+        })?;
         let abs = relpath.to_path(base);
         self.request_load_file(rel.into(), abs).await
     }
 
-    pub async fn request_load_file<K: Into<Arc<str>>, P: Into<PathBuf>>(&self, key: K, path: P) -> anyhow::Result<()> {
+    pub async fn request_load_file<K: Into<Arc<str>>, P: Into<PathBuf>>(
+        &self,
+        key: K,
+        path: P,
+    ) -> anyhow::Result<()> {
         let key = key.into();
-        self.begin_load(&key, || TextureRequest::LoadFile { key: key.clone(), path: path.into() }).await
+        self.begin_load(&key, || TextureRequest::LoadFile {
+            key: key.clone(),
+            path: path.into(),
+        })
+        .await
     }
 
-    pub async fn request_load_bytes<K: Into<Arc<str>>, D: Into<Vec<u8>>>(&self, key: K, bytes: D) -> anyhow::Result<()> {
+    pub async fn request_load_bytes<K: Into<Arc<str>>, D: Into<Vec<u8>>>(
+        &self,
+        key: K,
+        bytes: D,
+    ) -> anyhow::Result<()> {
         let key = key.into();
-        self.begin_load(&key, || TextureRequest::LoadBytes { key: key.clone(), bytes: bytes.into() }).await
+        self.begin_load(&key, || TextureRequest::LoadBytes {
+            key: key.clone(),
+            bytes: bytes.into(),
+        })
+        .await
     }
 
-    pub fn report_load<K: Into<Arc<str>>, T: Into<TextureSlot>>(&self, key: K, texture: anyhow::Result<T>) {
+    pub fn report_load<K: Into<Arc<str>>, T: Into<TextureSlot>>(
+        &self,
+        key: K,
+        texture: anyhow::Result<T>,
+    ) {
         let key = key.into();
         let slot = match texture {
             Ok(slot) => slot.into(),
@@ -196,18 +240,28 @@ impl TextureLoader {
     }
 
     #[cfg(feature = "texture-loader")]
-    pub fn blocking_responses<R>(&self, f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> R) -> anyhow::Result<R> {
+    pub fn blocking_responses<R>(
+        &self,
+        f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> R,
+    ) -> anyhow::Result<R> {
         self.with_loader(|loader| f(loader.upload_queue.blocking_write()))
     }
 
     #[cfg(feature = "texture-loader")]
-    pub fn try_responses<R>(&self, f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> R) -> anyhow::Result<Option<R>> {
+    pub fn try_responses<R>(
+        &self,
+        f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> R,
+    ) -> anyhow::Result<Option<R>> {
         self.with_loader(|loader| loader.upload_queue.try_write().ok().map(f))
     }
 
     #[cfg(feature = "texture-loader")]
     #[cfg(todo)]
-    pub async fn responses_async<R, F>(&self, f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> F) -> anyhow::Result<R> where
+    pub async fn responses_async<R, F>(
+        &self,
+        f: impl FnOnce(sync::RwLockWriteGuard<mpsc::Receiver<TextureResponse>>) -> F,
+    ) -> anyhow::Result<R>
+    where
         F: Future<Output = R>,
     {
         match *self.read_loader()? {
@@ -252,18 +306,19 @@ impl TextureLoader {
 
     pub fn quit(&self) {
         #[cfg(feature = "texture-loader")]
-        let _ = self.with_loader(|loader|
-            loader.sender.try_send(TextureRequest::Shutdown)
-        );
+        let _ = self.with_loader(|loader| loader.sender.try_send(TextureRequest::Shutdown));
     }
 
     #[cfg(feature = "texture-loader")]
     pub fn shutdown(&self) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
-        let loader = self.loader.write().unwrap_or_else(|e| e.into_inner()).take();
+        let loader = self
+            .loader
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         let loader = match loader {
             Some(loader) => loader,
-            None =>
-                return Err(anyhow!("texture loader already shutdown?")),
+            None => return Err(anyhow!("texture loader already shutdown?")),
         };
         Ok(loader.shutdown())
     }
@@ -273,25 +328,29 @@ impl TextureLoader {
         let handle = self.shutdown()?;
         match handle.join() {
             Ok(res) => res,
-            Err(e) => Err(crate::with_any_error(&e, |e|
-                    anyhow!("texture loader thread panicked: {e}")
-            )),
+            Err(e) => Err(crate::with_any_error(&e, |e| {
+                anyhow!("texture loader thread panicked: {e}")
+            })),
         }
     }
 
     #[cfg(feature = "texture-loader")]
-    fn background_loop(mut receiver: mpsc::Receiver<TextureRequest>, sender: mpsc::Sender<TextureResponse>) -> anyhow::Result<()> {
+    fn background_loop(
+        mut receiver: mpsc::Receiver<TextureRequest>,
+        sender: mpsc::Sender<TextureResponse>,
+    ) -> anyhow::Result<()> {
         let id = thread::current().id();
-        sender.blocking_send(TextureResponse::LoopEnter {
-            id,
-        }).map_err(|_| anyhow!("texture loader did not wait"))?;
+        sender
+            .blocking_send(TextureResponse::LoopEnter { id })
+            .map_err(|_| anyhow!("texture loader did not wait"))?;
 
         while let Some(request) = receiver.blocking_recv() {
             match &request {
-                TextureRequest::LoadBytes { key, bytes } =>
-                    log::debug!("texture loader request received: load {} bytes for {key}", bytes.len()),
-                request =>
-                    log::debug!("texture loader request received: {request:?}"),
+                TextureRequest::LoadBytes { key, bytes } => log::debug!(
+                    "texture loader request received: load {} bytes for {key}",
+                    bytes.len()
+                ),
+                request => log::debug!("texture loader request received: {request:?}"),
             }
 
             if receiver.is_closed() || sender.is_closed() {
@@ -304,14 +363,16 @@ impl TextureLoader {
                     log::info!("texture loader received shutdown request");
                     break
                 },
-                TextureRequest::LoadFile { key, ..} | TextureRequest::LoadBytes { key, .. } => key.clone(),
+                TextureRequest::LoadFile { key, .. } | TextureRequest::LoadBytes { key, .. } => {
+                    key.clone()
+                },
             };
 
             let res = request.process_decode();
             log::debug!("texture loader decode result: {:?}", res.as_ref().map(drop));
 
-            let sent = sender.blocking_send(res
-                .unwrap_or_else(|error| TextureResponse::DecodeFailed { key, error })
+            let sent = sender.blocking_send(
+                res.unwrap_or_else(|error| TextureResponse::DecodeFailed { key, error }),
             );
 
             if let Err(..) = sent {
@@ -321,13 +382,10 @@ impl TextureLoader {
             }
         }
 
-        let _ = sender.try_send(TextureResponse::LoopExit {
-            id,
-        });
+        let _ = sender.try_send(TextureResponse::LoopExit { id });
 
         Ok(())
     }
-
 }
 
 #[derive(Debug)]
@@ -345,17 +403,16 @@ impl TextureSlot {
     pub fn resource_view(&self) -> Option<&TextureView2> {
         match self {
             #[cfg(feature = "texture-loader")]
-            Self::Loaded(t) =>
-                Some(&t.view),
+            Self::Loaded(t) => Some(&t.view),
             #[cfg(feature = "extension-nexus")]
-            Self::Nexus(t) =>
-                Some(t.resource.as_ref()),
+            Self::Nexus(t) => Some(t.resource.as_ref()),
             _ => None,
         }
     }
 
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
-        let id = self.resource_view()
+        let id = self
+            .resource_view()
             .map(|resource| TextureId::new(resource.to_ref().as_raw() as usize));
         let id = id.unwrap_or(TextureId::new(0));
 
@@ -369,11 +426,8 @@ impl TextureSlot {
                 },
             },
             #[cfg(feature = "extension-nexus")]
-            Self::Nexus(t) => ImguiTexture {
-                id,
-                size: t.size(),
-            },
-            _ => return None
+            Self::Nexus(t) => ImguiTexture { id, size: t.size() },
+            _ => return None,
         })
     }
 
@@ -386,7 +440,7 @@ impl TextureSlot {
                 let texture = Texture::with_nexus(t.clone()).ok()?;
                 Arc::new(texture)
             }),
-            _ => None
+            _ => None,
         }
     }
 
@@ -454,14 +508,8 @@ impl TextureLoaderHandle {
 #[cfg(feature = "texture-loader")]
 #[derive(Debug, Clone)]
 pub enum TextureRequest {
-    LoadFile {
-        key: Arc<str>,
-        path: PathBuf,
-    },
-    LoadBytes {
-        key: Arc<str>,
-        bytes: Vec<u8>,
-    },
+    LoadFile { key: Arc<str>, path: PathBuf },
+    LoadBytes { key: Arc<str>, bytes: Vec<u8> },
     Shutdown,
 }
 
@@ -470,8 +518,7 @@ impl TextureRequest {
     #[cfg(todo)]
     pub fn key(&self) -> Option<&Arc<str>> {
         Some(match self {
-            Self::LoadFile { key, .. } | Self::LoadBytes { key, .. }  =>
-                key,
+            Self::LoadFile { key, .. } | Self::LoadBytes { key, .. } => key,
             _ => return None,
         })
     }
@@ -492,12 +539,17 @@ impl TextureRequest {
     }
 
     #[cfg(feature = "image")]
-    fn decode_image_read<R: io::BufRead + io::Seek>(image: image::ImageReader<R>, key: Arc<str>) -> anyhow::Result<TextureResponse> {
-        let image = image.with_guessed_format()
+    fn decode_image_read<R: io::BufRead + io::Seek>(
+        image: image::ImageReader<R>,
+        key: Arc<str>,
+    ) -> anyhow::Result<TextureResponse> {
+        let image = image
+            .with_guessed_format()
             .with_context(|| format!("loading texture {key}"))?;
         log::info!("Loading {:?} texture for {key}", image.format());
 
-        let image = image.decode()
+        let image = image
+            .decode()
             .with_context(|| format!("decoding texture {key}"))?;
 
         let rgba8 = image.to_rgba8().into_flat_samples();

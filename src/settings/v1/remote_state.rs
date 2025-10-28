@@ -1,8 +1,14 @@
 use {
     crate::{
-        settings::{source::Source, SourceKind, DeserializedSource, NeedsUpdate, RemoteSource, SourcesFile},
+        settings::{
+            source::Source,
+            DeserializedSource,
+            NeedsUpdate,
+            RemoteSource,
+            SourceKind,
+            SourcesFile,
+        },
         timer::TimerFile,
-
     },
     serde::{Deserialize, Serialize},
     std::{path::PathBuf, sync::Arc},
@@ -37,7 +43,7 @@ impl RemoteState {
             DeserializedSource::Direct(s) => s,
         }
     }
-    
+
     pub fn remote_source(&self) -> RemoteSource {
         match &self.source {
             DeserializedSource::GitHub(s) => Arc::new(s.clone()),
@@ -81,16 +87,24 @@ impl RemoteState {
     }
 
     pub fn hardcoded_sources() -> Vec<(&'static str, &'static str, &'static str)> {
-        let hardcoded_sources = [
-            ("QuitarHero", "Hero-Timers", "The OG timer pack for BlishHUD!")
-        ];
+        let hardcoded_sources = [(
+            "QuitarHero",
+            "Hero-Timers",
+            "The OG timer pack for BlishHUD!",
+        )];
         hardcoded_sources.into()
     }
     pub fn suggested_sources() -> Result<Vec<Self>, anyhow::Error> {
         let sources = SourcesFile::downloadless_load()?;
-        Ok(sources.0.into_iter().flat_map(|(kind, ssources)| ssources.into_iter().map(move |ssource| {
-            Self::new_from_source(kind, ssource)
-    })).collect())
+        Ok(sources
+            .0
+            .into_iter()
+            .flat_map(|(kind, ssources)| {
+                ssources
+                    .into_iter()
+                    .map(move |ssource| Self::new_from_source(kind, ssource))
+            })
+            .collect())
     }
 
     pub async fn needs_update(&self) -> NeedsUpdate {
@@ -105,11 +119,11 @@ impl RemoteState {
                 } else {
                     Known(true, rid)
                 }
-            }
+            },
             Err(err) => {
                 log::error!("Update check failed: {}", err);
                 NeedsUpdate::Error(err.to_string())
-            }
+            },
         }
     }
     pub async fn commit_downloaded(

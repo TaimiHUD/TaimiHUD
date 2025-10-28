@@ -1,14 +1,11 @@
 use {
     crate::settings::Settings,
+    serde::{Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, sync::Arc},
-    strum::{VariantArray, IntoStaticStr},
-    serde::{Serialize, Deserialize},
+    strum::{IntoStaticStr, VariantArray},
 };
 #[cfg(feature = "space")]
-use {
-    taimi_meta::ui::MapContext,
-    taimi_pack::attributes::Festival,
-};
+use {taimi_meta::ui::MapContext, taimi_pack::attributes::Festival};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct PathingSettings {
@@ -34,7 +31,11 @@ impl PathingSettings {
         self.festival_filter.get(festival.as_str()).copied()
     }
     #[cfg(feature = "space")]
-    pub fn set_festival_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
+    pub fn set_festival_preference(
+        &mut self,
+        festival: Festival,
+        pref: Option<FestivalPreference>,
+    ) {
         let festival_filter = self.festival_filter_mut();
         match pref {
             None => {
@@ -57,7 +58,11 @@ pub type FestivalPreference = bool;
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct SpaceSettings {
-    #[serde(rename = "goggles0", default, skip_serializing_if = "GogglesSettings::is_empty")]
+    #[serde(
+        rename = "goggles0",
+        default,
+        skip_serializing_if = "GogglesSettings::is_empty"
+    )]
     pub goggles: GogglesSettings,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,7 +160,7 @@ impl SpaceSettings {
     fn optional_f32(v: f32) -> Option<f32> {
         match v {
             Self::NONE_F32 => None,
-            v => Some(v)
+            v => Some(v),
         }
     }
 
@@ -164,24 +169,33 @@ impl SpaceSettings {
             Self {
                 camera_source: None | Some(Self::DEFAULT_CAMERA_SOURCE),
                 visible_space: None | Some(Self::DEFAULT_VISIBLE),
-                visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP), visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
+                visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP),
+                visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
                 map_open: None | Some(Self::DEFAULT_MAP_OPEN),
                 distance_max: None,
-                distance_fade_intensity: None, player_overlap_threshold: None,
+                distance_fade_intensity: None,
+                player_overlap_threshold: None,
                 edge_feather_scale: None | Some(Self::DEFAULT_EDGE_FEATHER_SCALE),
                 trail_alpha: None,
                 poi_alpha: None,
                 trail_textured_space: None | Some(Self::DEFAULT_TRAIL_TEXTURED),
                 map_trail_textured_mini: None | Some(Self::DEFAULT_TRAIL_TEXTURED_MAP_MINI),
                 map_trail_textured_world: None | Some(Self::DEFAULT_TRAIL_TEXTURED_MAP_WORLD),
-                map_poi_alpha_mini: None, map_trail_alpha_mini: None,
-                map_poi_alpha_world: None, map_trail_alpha_world: None,
-                scale_poi_space: None, scale_poi_mini: None, scale_poi_world: None,
-                scale_trail_space: None, scale_trail_mini: None, scale_trail_world: None,
-                trail_y_offset: None, trail_resolution: None, trail_width: None,
+                map_poi_alpha_mini: None,
+                map_trail_alpha_mini: None,
+                map_poi_alpha_world: None,
+                map_trail_alpha_world: None,
+                scale_poi_space: None,
+                scale_poi_mini: None,
+                scale_poi_world: None,
+                scale_trail_space: None,
+                scale_trail_mini: None,
+                scale_trail_world: None,
+                trail_y_offset: None,
+                trail_resolution: None,
+                trail_width: None,
                 goggles,
-            } if goggles.is_empty() =>
-                true,
+            } if goggles.is_empty() => true,
             _ => false,
         }
     }
@@ -218,13 +232,16 @@ impl SpaceSettings {
         }
     }
     pub fn trail_textured_space(&self) -> bool {
-        self.trail_textured_space.unwrap_or(Self::DEFAULT_TRAIL_TEXTURED)
+        self.trail_textured_space
+            .unwrap_or(Self::DEFAULT_TRAIL_TEXTURED)
     }
     pub fn trail_textured_minimap(&self) -> bool {
-        self.map_trail_textured_mini.unwrap_or(Self::DEFAULT_TRAIL_TEXTURED_MAP_MINI)
+        self.map_trail_textured_mini
+            .unwrap_or(Self::DEFAULT_TRAIL_TEXTURED_MAP_MINI)
     }
     pub fn trail_textured_worldmap(&self) -> bool {
-        self.map_trail_textured_world.unwrap_or(Self::DEFAULT_TRAIL_TEXTURED_MAP_WORLD)
+        self.map_trail_textured_world
+            .unwrap_or(Self::DEFAULT_TRAIL_TEXTURED_MAP_WORLD)
     }
 
     pub fn distance_max(&self) -> f32 {
@@ -255,16 +272,20 @@ impl SpaceSettings {
     }
 
     pub fn trail_alpha_worldmap(&self) -> f32 {
-        self.map_trail_alpha_world.unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
+        self.map_trail_alpha_world
+            .unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
     }
     pub fn poi_alpha_worldmap(&self) -> f32 {
-        self.map_poi_alpha_world.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
+        self.map_poi_alpha_world
+            .unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
     pub fn trail_alpha_minimap(&self) -> f32 {
-        self.map_trail_alpha_mini.unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
+        self.map_trail_alpha_mini
+            .unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
     }
     pub fn poi_alpha_minimap(&self) -> f32 {
-        self.map_poi_alpha_mini.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
+        self.map_poi_alpha_mini
+            .unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
     #[cfg(feature = "space")]
     pub fn trail_alpha_map(&self, ctx: MapContext) -> f32 {
@@ -302,10 +323,12 @@ impl SpaceSettings {
         self.scale_trail_space.unwrap_or(Self::DEFAULT_TRAIL_SCALE)
     }
     pub fn trail_scale_worldmap(&self) -> f32 {
-        self.scale_trail_world.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
+        self.scale_trail_world
+            .unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
     pub fn trail_scale_minimap(&self) -> f32 {
-        self.scale_trail_mini.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
+        self.scale_trail_mini
+            .unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
     #[cfg(feature = "space")]
     pub fn trail_scale_map(&self, ctx: MapContext) -> f32 {
@@ -321,7 +344,7 @@ impl SpaceSettings {
             .unwrap_or(match self.goggles.enabled() {
                 #[cfg(feature = "goggles")]
                 true => Some(GogglesSettings::DEFAULT_TRAIL_Y_OFFSET),
-                _ =>  Some(Self::DEFAULT_TRAIL_Y_OFFSET),
+                _ => Some(Self::DEFAULT_TRAIL_Y_OFFSET),
             })
     }
     pub fn trail_resolution(&self) -> f32 {
@@ -329,13 +352,25 @@ impl SpaceSettings {
             .unwrap_or(Self::DEFAULT_TRAIL_RESOLUTION)
     }
     pub fn trail_width(&self) -> f32 {
-        self.trail_width
-            .unwrap_or(Self::DEFAULT_TRAIL_WIDTH)
+        self.trail_width.unwrap_or(Self::DEFAULT_TRAIL_WIDTH)
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(Deserialize, Serialize, VariantArray, IntoStaticStr)]
+#[derive(
+    Default,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    VariantArray,
+    IntoStaticStr,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum CameraSource {
     #[default]
@@ -399,8 +434,7 @@ impl GogglesSettings {
                 obscured_alpha: None,
                 edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
                 map_depth_calibration,
-            } if map_depth_calibration.is_empty() =>
-                true,
+            } if map_depth_calibration.is_empty() => true,
             _ => false,
         }
     }

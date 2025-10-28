@@ -9,55 +9,44 @@ pub mod shader;
 pub mod state;
 
 pub mod prelude {
+    #[cfg(feature = "arcffi")]
+    pub use arcffi::cstr;
     pub use {
         crate::{
             blob::Blob,
-            buffer::{
-                dxgi::DxgiFormat,
-                D3dContextBindableVertexBuffer as _,
-                D3dBufferData,
-            },
-            state::{
-                D3dState as _,
-                D3dStateToken,
-            },
+            buffer::{dxgi::DxgiFormat, D3dBufferData, D3dContextBindableVertexBuffer as _},
+            state::{D3dState as _, D3dStateToken},
             D3dContext,
-            D3dContextBindable as _, D3dContextBindableSlot as _,
+            D3dContextBindable as _,
+            D3dContextBindableSlot as _,
         },
         windows::{
-            core::{BOOL, Interface as _, InterfaceRef},
+            core::{Interface as _, InterfaceRef, BOOL},
             Win32::Graphics::{
-                Direct3D::{
-                    self as d3d,
-                    ID3DBlob,
-                },
-                Dxgi::{
-                    Common as dxgi,
-                    IDXGISwapChain,
-                },
+                Direct3D::{self as d3d, ID3DBlob},
+                Dxgi::{Common as dxgi, IDXGISwapChain},
             },
         },
     };
-    #[cfg(feature = "arcffi")]
-    pub use arcffi::cstr;
     #[allow(unused_imports)]
     pub(crate) use {
+        crate::{impl_d3d, D3dInterfacePtr},
         anyhow::{anyhow, Context},
-        crate::{
-            impl_d3d,
-            D3dInterfacePtr,
-        },
+        glam::Vec4,
         glamour::{
-            Box2, Box3,
+            Box2,
+            Box3,
             Contains as _,
             Intersection as _,
-            Point2, Point3,
+            Point2,
+            Point3,
             Scalar,
-            Size2, Size3,
-            Unit, Vector3,
+            Size2,
+            Size3,
+            Unit,
+            Vector3,
         },
-        glam::Vec4,
-        std::{ops, mem, ptr, slice},
+        std::{mem, ops, ptr, slice},
         windows::core::PCSTR,
     };
 }
@@ -67,27 +56,21 @@ pub mod defaults {
     pub use crate::dx11::{
         self as dx,
         Dx11Buffer as DxBuffer,
-        Dx11Device as DxDevice,
         Dx11Context as DxContext,
         Dx11ContextRef as DxContextRef,
+        Dx11Device as DxDevice,
     };
 }
 
 #[cfg(feature = "windows")]
 pub use windows::Win32::Graphics::{
     Direct3D as d3d,
-    Dxgi::{
-        self as dx,
-        Common as dxgi,
-    },
+    Dxgi::{self as dx, Common as dxgi},
 };
 
 pub use self::{
     buffer::dxgi::DxgiFormat,
-    device::{
-        D3dContext, D3dDevice,
-        D3dContextBindable, D3dContextBindableSlot,
-    },
+    device::{D3dContext, D3dContextBindable, D3dContextBindableSlot, D3dDevice},
 };
 
 pub unsafe trait D3dInterfacePtr: Clone {

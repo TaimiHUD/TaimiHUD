@@ -1,15 +1,10 @@
 use {
     crate::exports::runtime::bindings::{
-        controls::{ControlIndex, ControlSlot, Control, GameControls},
+        controls::{Control, ControlIndex, ControlSlot, GameControls},
         KeyPresses,
         TaimiControls,
     },
-    std::{
-        collections::BTreeMap,
-        fmt,
-        mem,
-        sync::RwLock,
-    },
+    std::{collections::BTreeMap, fmt, mem, sync::RwLock},
     tokio::sync::watch,
     windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
 };
@@ -44,10 +39,7 @@ impl WatcherSlot {
 
 impl From<ControlSlot> for WatcherSlot {
     fn from((control, index): ControlSlot) -> Self {
-        Self::Control {
-            control,
-            index,
-        }
+        Self::Control { control, index }
     }
 }
 impl From<TaimiControls> for WatcherSlot {
@@ -80,10 +72,11 @@ impl HeldControls {
     }
 
     pub fn is_interested_in_key(&self, vk: VIRTUAL_KEY) -> bool {
-        self.interesting_keys.read().ok()
-            .and_then(|interesting| interesting.get(vk.0 as usize)
-                .map(|b| *b)
-            ).unwrap_or(false)
+        self.interesting_keys
+            .read()
+            .ok()
+            .and_then(|interesting| interesting.get(vk.0 as usize).map(|b| *b))
+            .unwrap_or(false)
     }
 
     /// Controls are "virtual" keys, and some implementations (nexus quick access)
@@ -120,13 +113,18 @@ impl HeldControls {
         controls.keys().map(|&slot| slot.taimi()).collect()
     }
 
-    pub fn collect_interesting_keys<B>(&self, binds: B) -> KeyPresses where
+    pub fn collect_interesting_keys<B>(&self, binds: B) -> KeyPresses
+    where
         B: IntoIterator<Item = (ControlSlot, VIRTUAL_KEY)>,
     {
         let mut interesting_binds = KeyPresses::default();
         for ((control, _index), vk) in binds {
-            if !self.is_interested_in_control(control) { continue }
-            if vk.0 == 0 || vk.0 >= 0xff { continue }
+            if !self.is_interested_in_control(control) {
+                continue
+            }
+            if vk.0 == 0 || vk.0 >= 0xff {
+                continue
+            }
             unsafe {
                 interesting_binds.set_unchecked(vk.0 as usize, true);
             }
@@ -163,8 +161,7 @@ impl ControlsReceiver {
         }
     }
 
-    pub fn mark_unchanged(&mut self) {
-    }
+    pub fn mark_unchanged(&mut self) {}
 
     pub fn current(&self) -> &GameControls {
         &self.prev
@@ -175,15 +172,19 @@ impl ControlsReceiver {
         HeldControls::held_controls(&self.receiver.borrow())
     }
 
-    pub async fn wait<'a>(&'a mut self) -> Result<(&'a GameControls, GameControls), watch::error::RecvError> {
+    pub async fn wait<'a>(
+        &'a mut self,
+    ) -> Result<(&'a GameControls, GameControls), watch::error::RecvError> {
         let mut latest = Default::default();
         let prev = &mut self.prev;
-        self.receiver.wait_for(|held| {
-            latest = HeldControls::held_controls(held);
-            let prev = mem::replace(prev, latest);
-            latest ^= prev;
-            !latest.is_empty()
-        }).await?;
+        self.receiver
+            .wait_for(|held| {
+                latest = HeldControls::held_controls(held);
+                let prev = mem::replace(prev, latest);
+                latest ^= prev;
+                !latest.is_empty()
+            })
+            .await?;
         Ok((&*prev, latest))
     }
 
@@ -218,8 +219,7 @@ impl TaimiReceiver {
     }
 
     #[cfg(todo = "unused")]
-    pub fn mark_unchanged(&mut self) {
-    }
+    pub fn mark_unchanged(&mut self) {}
 
     #[cfg(todo = "unused")]
     pub fn current(&self) -> &TaimiControls {
@@ -231,15 +231,19 @@ impl TaimiReceiver {
         HeldControls::taimi_controls(&self.receiver.borrow())
     }
 
-    pub async fn wait(&mut self) -> Result<(TaimiControls, TaimiControls), watch::error::RecvError> {
+    pub async fn wait(
+        &mut self,
+    ) -> Result<(TaimiControls, TaimiControls), watch::error::RecvError> {
         let mut latest = Default::default();
         let prev = &mut self.prev;
-        self.receiver.wait_for(|held| {
-            latest = HeldControls::taimi_controls(held);
-            let prev = mem::replace(prev, latest);
-            latest ^= prev;
-            !latest.is_empty()
-        }).await?;
+        self.receiver
+            .wait_for(|held| {
+                latest = HeldControls::taimi_controls(held);
+                let prev = mem::replace(prev, latest);
+                latest ^= prev;
+                !latest.is_empty()
+            })
+            .await?;
         Ok((*prev, latest))
     }
 

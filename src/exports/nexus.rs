@@ -1,6 +1,36 @@
 use {
+    crate::{
+        exports::{
+            self,
+            runtime::{
+                self as rt,
+                bindings::{TaimiControls, CONTROLS},
+                RuntimeResult,
+            },
+        },
+        game_language_id as lang_id,
+        marker::format::MarkerType,
+        unload,
+        with_i18n,
+        TEXTURES,
+    },
     anyhow::anyhow,
     arcdps::Language,
+    nexus::{
+        alert,
+        data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
+        gamebind,
+        localization::translate,
+        paths,
+        rtapi::RealTimeApi,
+        texture::{
+            load_texture_from_file,
+            load_texture_from_memory,
+            RawTextureReceiveCallback,
+            Texture,
+        },
+        AddonApi,
+    },
     std::{
         collections::BTreeMap,
         ffi::{c_char, CStr, CString},
@@ -12,33 +42,8 @@ use {
         },
         time::Duration,
     },
-    nexus::{
-        alert,
-        data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
-        gamebind,
-        localization::translate,
-        paths,
-        rtapi::RealTimeApi,
-        texture::{load_texture_from_file, load_texture_from_memory, Texture, RawTextureReceiveCallback},
-        AddonApi,
-    },
-    crate::{
-        exports::{
-            self,
-            runtime::{
-                self as rt,
-                bindings::{CONTROLS, TaimiControls},
-                RuntimeResult,
-            },
-        },
-        game_language_id as lang_id,
-        marker::format::MarkerType,
-        unload,
-        with_i18n,
-        TEXTURES,
-    },
+    windows::Win32::Foundation::{HWND, LPARAM, WPARAM},
 };
-use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 
 /// raidcore addon id or NEGATIVE random unique signature
 pub const SIG: i32 = -exports::SIG;
@@ -115,8 +120,7 @@ pub fn detect_language() -> RuntimeResult<Option<String>> {
     }
 
     let index_to_check = "KB_CHANGELOG";
-    let translated = translate(index_to_check)
-        .ok_or("Couldn't translate string")?;
+    let translated = translate(index_to_check).ok_or("Couldn't translate string")?;
     let language = match &translated[..] {
         "Registro de Alterações" => "pt-br",
         "更新日志" => lang_id(Language::Chinese),
@@ -161,15 +165,22 @@ pub fn nexus_link_ptr() -> RuntimeResult<Option<NonNull<NexusLink>>> {
 }
 
 const MOUSE_MOVE_DELAY: Duration = Duration::from_millis(60); // 50 too low?
-pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, position: Option<rt::MousePosition>) -> RuntimeResult<Option<()>> {
+pub async fn press_marker_bind(
+    marker: MarkerType,
+    target: bool,
+    down: bool,
+    position: Option<rt::MousePosition>,
+) -> RuntimeResult<Option<()>> {
     use crate::settings::{InvokeMethod, Settings};
 
     if !available() {
         return Ok(None)
     }
 
-    let method = Settings::async_read().await
-        .ok().and_then(|s| s.arc().gamebind_invoke)
+    let method = Settings::async_read()
+        .await
+        .ok()
+        .and_then(|s| s.arc().gamebind_invoke)
         .unwrap_or(InvokeMethod::Nexus);
     if method != InvokeMethod::Nexus {
         return rt::keyboard::press_marker_bind(marker, target, down, position).await
@@ -178,8 +189,10 @@ pub async fn press_marker_bind(marker: MarkerType, target: bool, down: bool, pos
     if let Some(position) = position {
         match rt::mouse::send_input(position) {
             Ok(()) =>
-                // wait for nexus to get the event, ugh
-                tokio::time::sleep(MOUSE_MOVE_DELAY).await,
+            // wait for nexus to get the event, ugh
+            {
+                tokio::time::sleep(MOUSE_MOVE_DELAY).await
+            },
             Err(e) => {
                 log::error!("Failed to adjust mouse position for marker placement: {e}");
                 return Err("Marker mouse move failed")
@@ -254,9 +267,7 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
 
     let api: &'static AddonApi = AddonApi::get();
 
-    let swap_chain = unsafe {
-        &*(ptr::addr_of!(api.swap_chain) as *const Option<IDXGISwapChain>)
-    };
+    let swap_chain = unsafe { &*(ptr::addr_of!(api.swap_chain) as *const Option<IDXGISwapChain>) };
     if swap_chain.is_none() {
         return Err("DXGI swap chain unavailable")
     }
@@ -266,8 +277,7 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
 
 pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
     match rt::handle_wnd_event(hwnd, msg, w.0, l.0) {
-        m if m == msg =>
-            msg,
+        m if m == msg => msg,
         _ => 0,
     }
 }
@@ -277,30 +287,31 @@ fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {
 
     match texture {
         Some(texture) => {
-            let srv = unsafe {
-                &*(ptr::addr_of!(texture.resource) as *const Option<IUnknown>)
-            };
+            let srv = unsafe { &*(ptr::addr_of!(texture.resource) as *const Option<IUnknown>) };
             match srv.is_some() {
                 true => Ok(texture.clone()),
                 false => Err(anyhow!("nexus produced an empty SRV")),
             }
         },
-        _ => {
-            Err(anyhow!("nexus could not load the texture"))
-        },
+        _ => Err(anyhow!("nexus could not load the texture")),
     }
 }
 
-static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
-    TEXTURES.report_load(id, nexus_texture_ok(texture));
-});
+static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback =
+    nexus::texture_receive!(|id, texture| {
+        TEXTURES.report_load(id, nexus_texture_ok(texture));
+    });
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
 
-    Ok(Some(load_texture_from_file(key, path, Some(IMGUI_TEXTURE_CALLBACK))))
+    Ok(Some(load_texture_from_file(
+        key,
+        path,
+        Some(IMGUI_TEXTURE_CALLBACK),
+    )))
 }
 
 pub fn texture_schedule_bytes(key: &str, data: &[u8]) -> RuntimeResult<Option<()>> {
@@ -308,14 +319,16 @@ pub fn texture_schedule_bytes(key: &str, data: &[u8]) -> RuntimeResult<Option<()
         return Ok(None)
     }
 
-    Ok(Some(load_texture_from_memory(key, data, Some(IMGUI_TEXTURE_CALLBACK))))
+    Ok(Some(load_texture_from_memory(
+        key,
+        data,
+        Some(IMGUI_TEXTURE_CALLBACK),
+    )))
 }
 
 static KEYBIND_IDS: RwLock<BTreeMap<CString, TaimiControls>> = RwLock::new(BTreeMap::new());
 extern "C-unwind" fn unsafe_keybind_cb(identifier: *const c_char, is_release: bool) {
-    let id = unsafe {
-        CStr::from_ptr(identifier as *const _)
-    };
+    let id = unsafe { CStr::from_ptr(identifier as *const _) };
     let kb = KEYBIND_IDS.read().ok().and_then(|kb| kb.get(id).copied());
     match kb {
         Some(control) => match is_release {
@@ -329,11 +342,7 @@ extern "C-unwind" fn unsafe_keybind_cb(identifier: *const c_char, is_release: bo
 }
 
 pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default_keybind: &CStr) {
-    use {
-        crate::fl,
-        i18n_embed::LanguageLoader,
-        nexus::localization::set_translation,
-    };
+    use {crate::fl, i18n_embed::LanguageLoader, nexus::localization::set_translation};
 
     let id = id.into();
     if let Ok(id) = id.to_str() {
@@ -346,11 +355,7 @@ pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default
                 fl!("timer-key-trigger", id = timer_trigger),
             )
         } else {
-            with_i18n(id, |msg| set_translation(
-                id,
-                language.as_str(),
-                msg,
-            ));
+            with_i18n(id, |msg| set_translation(id, language.as_str(), msg));
         }
     }
     let id = if let Ok(mut keybinds) = KEYBIND_IDS.write() {
@@ -363,7 +368,11 @@ pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default
         return
     };
     unsafe {
-        (AddonApi::get().input_binds.register_with_string)(id, unsafe_keybind_cb, default_keybind.as_ptr());
+        (AddonApi::get().input_binds.register_with_string)(
+            id,
+            unsafe_keybind_cb,
+            default_keybind.as_ptr(),
+        );
     }
 }
 
@@ -373,9 +382,7 @@ pub fn unregister_keybinds() {
         return
     };
     for kb in keybinds.keys() {
-        unsafe {
-            (AddonApi::get().input_binds.deregister)(kb.as_ptr())
-        }
+        unsafe { (AddonApi::get().input_binds.deregister)(kb.as_ptr()) }
     }
     keybinds.clear();
 }
@@ -383,7 +390,11 @@ pub fn unregister_keybinds() {
 pub fn quick_access_add(icon: TaimiControls) {
     use nexus::quick_access::{add_quick_access, add_quick_access_context_menu};
 
-    let Some((identifier, (neutral, neutral_png), (hover, hover_png), keybind)) = quick_access_button_id(icon) else { return };
+    let Some((identifier, (neutral, neutral_png), (hover, hover_png), keybind)) =
+        quick_access_button_id(icon)
+    else {
+        return
+    };
 
     load_texture_from_memory(neutral, neutral_png, None);
     load_texture_from_memory(hover, hover_png, None);
@@ -392,20 +403,11 @@ pub fn quick_access_add(icon: TaimiControls) {
         _ => keybind,
     };
     with_i18n(tooltip_id, |tooltip_text| {
-        add_quick_access(
-            identifier,
-            neutral,
-            hover,
-            keybind,
-            tooltip_text,
-        ).leak();
+        add_quick_access(identifier, neutral, hover, keybind, tooltip_text).leak();
     });
 
     if let TaimiControls::WINDOW_PRIMARY = icon {
-        use crate::{
-            control_window,
-            fl,
-        };
+        use crate::{control_window, fl};
 
         add_quick_access_context_menu(
             "TAIMI_MENU",
@@ -418,10 +420,7 @@ pub fn quick_access_add(icon: TaimiControls) {
                 }
                 #[cfg(feature = "space")]
                 {
-                    use {
-                        crate::controller::pathing::PathingEvent,
-                        taimi_meta::ui::MapContext,
-                    };
+                    use {crate::controller::pathing::PathingEvent, taimi_meta::ui::MapContext};
                     if ui.button(fl!("pathing-render-toggle")) {
                         PathingEvent::VISIBLE_TOGGLE_SPACE.try_send();
                     }
@@ -443,7 +442,8 @@ pub fn quick_access_add(icon: TaimiControls) {
                     control_window(crate::WINDOW_PRIMARY, None);
                 }
             }),
-        ).leak();
+        )
+        .leak();
     }
 }
 
@@ -458,7 +458,9 @@ pub fn quick_access_remove_all() {
 pub fn quick_access_remove(icon: TaimiControls) {
     use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
 
-    let Some((identifier, ..)) = quick_access_button_id(icon) else { return };
+    let Some((identifier, ..)) = quick_access_button_id(icon) else {
+        return
+    };
     if let TaimiControls::WINDOW_PRIMARY = icon {
         remove_quick_access_context_menu("TAIMI_MENU");
     }
@@ -466,49 +468,80 @@ pub fn quick_access_remove(icon: TaimiControls) {
 }
 
 /// ("BUTTON", "ICON", "HOVER", "keybind")
-pub(crate) fn quick_access_button_id(icon: TaimiControls) -> Option<(
+pub(crate) fn quick_access_button_id(
+    icon: TaimiControls,
+) -> Option<(
     &'static str,
     (&'static str, &'static [u8]),
     (&'static str, &'static [u8]),
     &'static str,
-    )> {
+)> {
     Some(match icon {
         TaimiControls::WINDOW_PRIMARY => (
             "TAIMI_BUTTON",
             ("TAIMI_ICON", include_bytes!("../../icons/taimi.png")),
-            ("TAIMI_ICON_HOVER", include_bytes!("../../icons/taimi-hover.png")),
+            (
+                "TAIMI_ICON_HOVER",
+                include_bytes!("../../icons/taimi-hover.png"),
+            ),
             "primary-window-toggle",
         ),
         #[cfg(feature = "markers")]
         TaimiControls::WINDOW_MARKERS => (
             "TAIMI_MARKERS_BUTTON",
-            ("TAIMI_MARKERS_ICON", include_bytes!("../../icons/markers.png")),
-            ("TAIMI_MARKERS_ICON_HOVER", include_bytes!("../../icons/markers-hover.png")),
+            (
+                "TAIMI_MARKERS_ICON",
+                include_bytes!("../../icons/markers.png"),
+            ),
+            (
+                "TAIMI_MARKERS_ICON_HOVER",
+                include_bytes!("../../icons/markers-hover.png"),
+            ),
             "marker-window-toggle",
         ),
         #[cfg(feature = "timers")]
         TaimiControls::WINDOW_TIMERS => (
             "TAIMI_TIMER_BUTTON",
-            ("TAIMI_TIMERS_ICON", include_bytes!("../../icons/timers.png")),
-            ("TAIMI_TIMERS_ICON_HOVER", include_bytes!("../../icons/timers-hover.png")),
+            (
+                "TAIMI_TIMERS_ICON",
+                include_bytes!("../../icons/timers.png"),
+            ),
+            (
+                "TAIMI_TIMERS_ICON_HOVER",
+                include_bytes!("../../icons/timers-hover.png"),
+            ),
             "timer-window-toggle",
         ),
         #[cfg(feature = "space")]
         TaimiControls::WINDOW_PATHING => (
             "TAIMI_PATHING_BUTTON",
-            ("TAIMI_PATHING_ICON", include_bytes!("../../icons/pathing.png")),
-            ("TAIMI_PATHING_ICON_HOVER", include_bytes!("../../icons/pathing-hover.png")),
+            (
+                "TAIMI_PATHING_ICON",
+                include_bytes!("../../icons/pathing.png"),
+            ),
+            (
+                "TAIMI_PATHING_ICON_HOVER",
+                include_bytes!("../../icons/pathing-hover.png"),
+            ),
             "pathing-window-toggle",
         ),
         #[cfg(feature = "space")]
-        TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MINIMAP | TaimiControls::PATHING_MAP => (
+        TaimiControls::PATHING_SPACE
+        | TaimiControls::PATHING_MINIMAP
+        | TaimiControls::PATHING_MAP => (
             match icon {
                 TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_BUTTON",
                 TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_BUTTON",
                 _ => "TAIMI_PATHING_RENDER_BUTTON",
             },
-            ("TAIMI_PATHING_RENDER_ICON", include_bytes!("../../icons/pathing-toggle.png")),
-            ("TAIMI_PATHING_RENDER_ICON_HOVER", include_bytes!("../../icons/pathing-toggle-hover.png")),
+            (
+                "TAIMI_PATHING_RENDER_ICON",
+                include_bytes!("../../icons/pathing-toggle.png"),
+            ),
+            (
+                "TAIMI_PATHING_RENDER_ICON_HOVER",
+                include_bytes!("../../icons/pathing-toggle-hover.png"),
+            ),
             match icon {
                 TaimiControls::PATHING_MINIMAP => "pathing-render-minimap-toggle",
                 TaimiControls::PATHING_MAP => "pathing-render-map-toggle",

@@ -1,14 +1,37 @@
-use anyhow::anyhow;
-use windows::{
-    core::{Interface, InterfaceRef, IUnknown},
-    Win32::Graphics::Direct3D11::{ID3D11DepthStencilView, ID3D11DeviceContext, ID3D11DeviceContext_Vtbl, ID3D11RenderTargetView, D3D11_COMPARISON_LESS, D3D11_COMPARISON_LESS_EQUAL, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_VIEWPORT},
+use {
+    crate::render::{RenderEvent, RenderState},
+    anyhow::anyhow,
+    core::{
+        ffi::c_void,
+        mem::transmute,
+        ptr::{self, NonNull},
+    },
+    retour::GenericDetour,
+    std::{
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicPtr, Ordering},
+            OnceLock,
+            RwLock,
+        },
+    },
+    windows::{
+        core::{IUnknown, Interface, InterfaceRef},
+        Win32::Graphics::Direct3D11::{
+            ID3D11DepthStencilView,
+            ID3D11DeviceContext,
+            ID3D11DeviceContext_Vtbl,
+            ID3D11RenderTargetView,
+            D3D11_COMPARISON_LESS,
+            D3D11_COMPARISON_LESS_EQUAL,
+            D3D11_DEPTH_WRITE_MASK_ZERO,
+            D3D11_VIEWPORT,
+        },
+    },
 };
-use core::{ffi::c_void, mem::transmute, ptr::{self, NonNull}};
-use std::{collections::BTreeMap, sync::{OnceLock, RwLock, atomic::{AtomicPtr, Ordering}}};
-use retour::GenericDetour;
+
 #[cfg(feature = "space")]
 use crate::space::Engine;
-use crate::render::{RenderState, RenderEvent};
 
 pub type Lenses = BTreeMap<usize, LensClass>;
 
@@ -20,7 +43,12 @@ pub struct Goggles {
 }
 
 //type SetDepthState = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, buffer: Option<InterfaceRef<'static, ID3D11DepthStencilState>>, u32);
-type SetTargets = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, count: u32, views: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>, depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>);
+type SetTargets = unsafe extern "system" fn(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    count: u32,
+    views: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
+    depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
+);
 //type ClearDepth = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>, flags: u32, depth: f32, fill_value: u8);
 type Release = unsafe extern "system" fn(this: InterfaceRef<'static, IUnknown>) -> u32;
 
@@ -41,11 +69,10 @@ pub fn lens_valid(p: *const ID3D11DepthStencilView) -> bool {
 
 pub fn current_lens() -> Option<InterfaceRef<'static, ID3D11DepthStencilView>> {
     match NonNull::new(read_lens()) {
-        Some(lens) if lens == NonNull::dangling() =>
-            None,
-        Some(lens) if lens_valid(lens.as_ptr()) => Some(unsafe {
-            InterfaceRef::from_raw(lens.cast())
-        }),
+        Some(lens) if lens == NonNull::dangling() => None,
+        Some(lens) if lens_valid(lens.as_ptr()) => {
+            Some(unsafe { InterfaceRef::from_raw(lens.cast()) })
+        },
         _ => None,
     }
 }
@@ -64,7 +91,10 @@ pub fn pick_lens(force: bool) {
         if !force && lenses.contains_key(&(selected_lens as usize)) {
             return
         }
-        if let Some((&world_key, _cls)) = lenses.iter().find(|(_, cls)| matches!(cls, LensClass::World)) {
+        if let Some((&world_key, _cls)) = lenses
+            .iter()
+            .find(|(_, cls)| matches!(cls, LensClass::World))
+        {
             LENS_PTR.store(world_key as *mut _, Ordering::Relaxed);
         }
     }
@@ -148,29 +178,34 @@ unsafe extern "system" fn taimi_set_targets(
                             //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
                             //log::trace!("{desc_state:?}");
                             match desc_state.DepthEnable.0 != 0 {
-                                false if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO => {
+                                false
+                                    if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO =>
+                                {
                                     Some(LensClass::UI)
                                 },
-                                true if desc_state.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO => {
+                                true if desc_state.DepthWriteMask
+                                    == D3D11_DEPTH_WRITE_MASK_ZERO =>
+                                {
                                     //log::trace!("skipping for now (read-only bind)");
                                     None
                                 },
-                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS => Some(match stencil_ref {
-                                    0 => LensClass::World,
-                                    _ => LensClass::Dummy,
-                                }),
-                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS_EQUAL =>
-                                    Some(LensClass::Test),
-                                true =>
-                                    Some(LensClass::Unknown),
-                                false =>
-                                    Some(LensClass::Overlay),
+                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS => {
+                                    Some(match stencil_ref {
+                                        0 => LensClass::World,
+                                        _ => LensClass::Dummy,
+                                    })
+                                },
+                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS_EQUAL => {
+                                    Some(LensClass::Test)
+                                },
+                                true => Some(LensClass::Unknown),
+                                false => Some(LensClass::Overlay),
                             }
                         },
                         None => {
                             log::warn!("failed to get state, maybe it doesn't exist?");
                             Some(LensClass::Unknown)
-                        }
+                        },
                     }
                 };
                 if let Some(cls) = cls {
@@ -178,7 +213,9 @@ unsafe extern "system" fn taimi_set_targets(
                         lenses.insert(key, cls);
                         if cls == LensClass::World {
                             let selected_lens = LENS_PTR.load(Ordering::Relaxed);
-                            if !selected_lens.is_null() && !lenses.contains_key(&(selected_lens as usize)) {
+                            if !selected_lens.is_null()
+                                && !lenses.contains_key(&(selected_lens as usize))
+                            {
                                 LENS_PTR.store(key as *mut _, Ordering::Relaxed);
                             }
                         }
@@ -195,17 +232,14 @@ unsafe extern "system" fn taimi_set_targets(
     }
 
     match GOGGLES.get() {
-        Some(orig) => orig.set_targets
-            .call(this, count, views_ptr, depth_view),
+        Some(orig) => orig.set_targets.call(this, count, views_ptr, depth_view),
         None => {
             log::warn!("set_targets in place without original?");
         },
     };
 }
 
-unsafe extern "system" fn taimi_release_depth_view(
-    this: InterfaceRef<'static, IUnknown>,
-) -> u32 {
+unsafe extern "system" fn taimi_release_depth_view(this: InterfaceRef<'static, IUnknown>) -> u32 {
     //log::trace!("IUnknown::Release({this:?}, {views:?}, {depth_view:?})");
 
     if let Some(release) = GOGGLES.get().and_then(|o| o.release_depth_view.as_ref()) {
@@ -214,9 +248,8 @@ unsafe extern "system" fn taimi_release_depth_view(
             Some(view) => {
                 let key = view.as_raw() as usize;
                 let view_ref = IUnknown::from(view).into_raw();
-                let _refcount = release.call(unsafe {
-                    InterfaceRef::from_raw(NonNull::new_unchecked(view_ref))
-                });
+                let _refcount = release
+                    .call(unsafe { InterfaceRef::from_raw(NonNull::new_unchecked(view_ref)) });
 
                 Some(key)
             },
@@ -230,7 +263,12 @@ unsafe extern "system" fn taimi_release_depth_view(
                     let removed = lenses.remove(&key);
                     if let Some(LensClass::World) = removed {
                         RenderState::try_send(RenderEvent::UiDepthReleased());
-                        let _ = LENS_PTR.compare_exchange(key as *mut _, ptr::dangling_mut(), Ordering::Relaxed, Ordering::Relaxed);
+                        let _ = LENS_PTR.compare_exchange(
+                            key as *mut _,
+                            ptr::dangling_mut(),
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        );
                     }
                     removed.is_some()
                 } else {
@@ -273,26 +311,33 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
     let set_depth_state: SetDepthState = unsafe { transmute(set_depth_state) };*/
     /*let clear_depth: unsafe extern "system" fn (*mut c_void, *mut c_void, u32, f32, u8) = vtable.ClearDepthStencilView;
     let clear_depth: ClearDepth = unsafe { transmute(clear_depth) };*/
-    let set_targets: unsafe extern "system" fn (*mut c_void, u32, *const *mut c_void, *mut c_void) = vtable.OMSetRenderTargets;
+    let set_targets: unsafe extern "system" fn(*mut c_void, u32, *const *mut c_void, *mut c_void) =
+        vtable.OMSetRenderTargets;
     let set_targets: SetTargets = unsafe { transmute(set_targets) };
-    let release_depth_view: unsafe extern "system" fn (*mut c_void) -> u32 =
-        crate::space::dx11::DepthHandler::depth_stencil_view_vtbl().map(|vtbl| vtbl.base__.base__.base__.Release)
-        .ok_or_else(|| anyhow!("can't find ID3D11DepthStencilView template"))?;
+    let release_depth_view: unsafe extern "system" fn(*mut c_void) -> u32 =
+        crate::space::dx11::DepthHandler::depth_stencil_view_vtbl()
+            .map(|vtbl| vtbl.base__.base__.base__.Release)
+            .ok_or_else(|| anyhow!("can't find ID3D11DepthStencilView template"))?;
     let release_depth_view: Release = unsafe { transmute(release_depth_view) };
 
     let orig = unsafe {
         Goggles {
             //set_depth_state: GenericDetour::new(set_depth_state, taimi_set_depth_state)?,
             set_targets: GenericDetour::new(set_targets, taimi_set_targets)?,
-            release_depth_view: Some(GenericDetour::new(release_depth_view, taimi_release_depth_view)?),
+            release_depth_view: Some(GenericDetour::new(
+                release_depth_view,
+                taimi_release_depth_view,
+            )?),
         }
     };
-    GOGGLES.set(orig)
+    GOGGLES
+        .set(orig)
         .map_err(|_| anyhow!("goggles already set up?"))
 }
 
 pub fn enable() -> anyhow::Result<()> {
-    let orig = GOGGLES.get()
+    let orig = GOGGLES
+        .get()
         .ok_or_else(|| anyhow!("can't enable what hasn't been set up first"))?;
 
     unsafe {
@@ -306,7 +351,8 @@ pub fn enable() -> anyhow::Result<()> {
 }
 
 pub fn disable() -> anyhow::Result<()> {
-    let orig = GOGGLES.get()
+    let orig = GOGGLES
+        .get()
         .ok_or_else(|| anyhow!("can't disable what hasn't been set up first"))?;
 
     let mut res: anyhow::Result<()> = Ok(());
@@ -321,7 +367,8 @@ pub fn disable() -> anyhow::Result<()> {
     }
 
     #[cfg(todo = "unnecessary")]
-    #[cfg(feature = "goggles")] {
+    #[cfg(feature = "goggles")]
+    {
         if let Ok(mut lenses) = LENSES.try_write() {
             lenses.clear();
         }
@@ -351,7 +398,9 @@ pub fn shutdown() -> anyhow::Result<()> {
 
 #[cfg(todo = "unused")]
 pub fn has_classification(cls: LensClass) -> Option<bool> {
-    LENSES.try_read().ok()
+    LENSES
+        .try_read()
+        .ok()
         .map(|lenses| lenses.values().any(|&c| c == cls))
 }
 

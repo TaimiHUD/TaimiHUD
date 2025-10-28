@@ -1,19 +1,19 @@
-use crate::{
-    dx11::{
-        prelude::*,
-        buffer::{Resource, Texture2},
-    },
-    D3dContextBindableSlot,
-};
-
 pub use crate::{
     d3d::D3D_SRV_DIMENSION,
     dx11::d3d11::{
         ID3D11ShaderResourceView,
         ID3D11View,
-        D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0,
+        D3D11_SHADER_RESOURCE_VIEW_DESC,
+        D3D11_SHADER_RESOURCE_VIEW_DESC_0,
         D3D11_TEX2D_SRV,
     },
+};
+use crate::{
+    dx11::{
+        buffer::{Resource, Texture2},
+        prelude::*,
+    },
+    D3dContextBindableSlot,
 };
 
 impl_d3d! {
@@ -37,7 +37,8 @@ impl_d3d! {
 impl View {
     pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
         unsafe {
-            self.as_d3d().GetResource()
+            self.as_d3d()
+                .GetResource()
                 .context("ID3D11ShaderResourceView::GetResource")
         }
     }
@@ -53,13 +54,15 @@ impl ShaderResourceView {
         let mut out = None;
         unsafe {
             device.CreateShaderResourceView(resource, desc.map(|d| d as *const _), Some(&mut out))
-        }.map_err(anyhow::Error::from)
+        }
+        .map_err(anyhow::Error::from)
         .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
         .context("CreateShaderResourceView")
         .map(Into::into)
     }
 
-    pub fn bind_set<V>(views: V, context: &Dx11Context, slot: u32) where
+    pub fn bind_set<V>(views: V, context: &Dx11Context, slot: u32)
+    where
         V: ID3D11ResourceOf<ID3D11ShaderResourceView>,
     {
         let views = views.as_params_of();
@@ -75,7 +78,6 @@ impl ShaderResourceView {
         }
         desc
     }
-
 }
 
 impl D3dContextBindableSlot<Dx11Context> for ShaderResourceView {
@@ -109,9 +111,7 @@ impl_d3d! {
 
 impl TextureView2 {
     pub fn with_view(view: ShaderResourceView) -> Self {
-        Self {
-            view,
-        }
+        Self { view }
     }
 
     pub const DESC_DEFAULT: D3D11_TEX2D_SRV = D3D11_TEX2D_SRV {
@@ -119,22 +119,26 @@ impl TextureView2 {
         MipLevels: u32::MAX,
     };
 
-    pub fn desc_for_texture2(texture2: &Texture2, desc: D3D11_TEX2D_SRV) -> D3D11_SHADER_RESOURCE_VIEW_DESC {
+    pub fn desc_for_texture2(
+        texture2: &Texture2,
+        desc: D3D11_TEX2D_SRV,
+    ) -> D3D11_SHADER_RESOURCE_VIEW_DESC {
         let format = texture2.dxgi_format();
         D3D11_SHADER_RESOURCE_VIEW_DESC {
             Format: format,
             ViewDimension: ViewDimension::TEXTURE2.into(),
-            Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
-                Texture2D: desc,
-            },
+            Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 { Texture2D: desc },
         }
     }
 
-    pub fn new_with_texture2(device: &Dx11Device, texture2: &Texture2, desc: Option<D3D11_TEX2D_SRV>) -> anyhow::Result<Self> {
+    pub fn new_with_texture2(
+        device: &Dx11Device,
+        texture2: &Texture2,
+        desc: Option<D3D11_TEX2D_SRV>,
+    ) -> anyhow::Result<Self> {
         let desc = desc.unwrap_or(Self::DESC_DEFAULT);
         let desc = Self::desc_for_texture2(texture2, desc);
-        ShaderResourceView::new_with_desc(device, texture2, Some(&desc))
-            .map(Self::with_view)
+        ShaderResourceView::new_with_desc(device, texture2, Some(&desc)).map(Self::with_view)
     }
 
     pub fn generate_mips(&self, context: &Dx11Context) {
@@ -145,7 +149,8 @@ impl TextureView2 {
 
     pub fn get_resource(&self) -> anyhow::Result<Texture2> {
         unsafe {
-            self.as_d3d().GetResource()
+            self.as_d3d()
+                .GetResource()
                 .and_then(|r| r.cast().map(Texture2::from_d3d))
                 .context("ID3D11ShaderResourceView::GetResource<Texture2>")
         }

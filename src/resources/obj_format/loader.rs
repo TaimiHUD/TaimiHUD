@@ -49,11 +49,7 @@ impl ObjFile {
         }
     }
 
-    pub fn load_material_for_model(
-        &self,
-        device: &Dx11Device,
-        idx: usize,
-    ) -> Option<ObjMaterial> {
+    pub fn load_material_for_model(&self, device: &Dx11Device, idx: usize) -> Option<ObjMaterial> {
         let mat_idx = &self.models[idx].0.mesh.material_id?;
         if let Some(materials) = &self.materials {
             materials.load(device, *mat_idx).ok()
@@ -64,17 +60,14 @@ impl ObjFile {
 
     pub fn load_file(file: &Path) -> anyhow::Result<Self> {
         log::info!("Attempting to load {file:?}.");
-        let (models, materials) = tobj::load_obj(
-            file,
-            &tobj::LoadOptions {
-                merge_identical_points: false,
-                reorder_data: false,
-                single_index: true,
-                triangulate: true,
-                ignore_points: true,
-                ignore_lines: true,
-            },
-        )?;
+        let (models, materials) = tobj::load_obj(file, &tobj::LoadOptions {
+            merge_identical_points: false,
+            reorder_data: false,
+            single_index: true,
+            triangulate: true,
+            ignore_points: true,
+            ignore_lines: true,
+        })?;
         let models: Vec<_> = models.into_iter().map(ObjModel).collect();
         let folder = file.parent();
         let materials = match (materials, folder) {
@@ -84,15 +77,15 @@ impl ObjFile {
                     materials: mats,
                     folder: folder.to_path_buf(),
                 })
-            }
+            },
             (_, None) => {
                 log::warn!("Material load failure for obj model file {file:?}, has no parent");
                 None
-            }
+            },
             (Err(err), _) => {
                 log::warn!("Material load error for obj model file {file:?}: {err}");
                 None
-            }
+            },
         };
         if let Some(ref materials) = materials {
             log::info!(

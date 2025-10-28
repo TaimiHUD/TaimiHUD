@@ -1,16 +1,13 @@
 use {
-    anyhow::Context,
-    core::ptr,
     crate::{
         exports::runtime as rt,
         render::machine::{MumblelinkTick, RenderMachine},
     },
+    anyhow::Context,
+    core::ptr,
     glamour::{Point3, Vector3},
     nexus::rtapi::GameState,
-    taimi_meta::{
-        coords::LocalSpace,
-        ui::GameplayState,
-    },
+    taimi_meta::{coords::LocalSpace, ui::GameplayState},
 };
 
 pub struct RenderStateRtapi {
@@ -32,10 +29,8 @@ impl RenderMachine {
         let rtapi = Self::rtapi_open();
         #[cfg(feature = "extension-nexus")]
         match &rtapi {
-            Ok(Some(rtapi)) if !rtapi.is_active() =>
-                log::info!("RTAPI unavailable"),
-            Ok(Some(..)) =>
-                log::info!("Using RTAPI as perspective data source"),
+            Ok(Some(rtapi)) if !rtapi.is_active() => log::info!("RTAPI unavailable"),
+            Ok(Some(..)) => log::info!("Using RTAPI as perspective data source"),
             Err(e) => {
                 // TODO: listen for events in case it gets loaded later or something
                 log::debug!("{e:#}");
@@ -50,8 +45,7 @@ impl RenderMachine {
             self.rtapi = Self::rtapi_open()?;
         }
 
-        let active = self.rtapi.as_ref()
-            .map(|rtapi| rtapi.is_active());
+        let active = self.rtapi.as_ref().map(|rtapi| rtapi.is_active());
 
         Ok(active.unwrap_or(false))
     }
@@ -83,27 +77,21 @@ impl RenderStateRtapi {
     /// Vista viewing...
     const GAMEPLAY_CINEMATIC: u32 = GameState::Cinematic as _;
 
-    pub fn update(&mut self, rtapi: &rt::RealTimeApi, ui_tick: Option<MumblelinkTick>, camera_wanted: bool) -> Option<GameplayState> {
+    pub fn update(
+        &mut self,
+        rtapi: &rt::RealTimeApi,
+        ui_tick: Option<MumblelinkTick>,
+        camera_wanted: bool,
+    ) -> Option<GameplayState> {
         let prev_gameplay = self.gameplay;
-        self.gameplay = unsafe {
-            ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state)
-        };
-        let map_id = unsafe {
-            ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id)
-        };
+        self.gameplay = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state) };
+        let map_id = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id) };
         let gameplay_update = match self.gameplay {
-            state if state == prev_gameplay =>
-                None,
-            Self::GAMEPLAY_INGAME =>
-                Some(GameplayState::new_ingame(map_id)),
-            Self::GAMEPLAY_LOADING =>
-                Some(GameplayState::new_loading(map_id, Default::default())),
-            Self::GAMEPLAY_CINEMATIC =>
-                Some(GameplayState::new_loading(map_id, map_id)),
-            state => {
-                GameState::try_from(state).ok()
-                    .map(GameplayState::from)
-            },
+            state if state == prev_gameplay => None,
+            Self::GAMEPLAY_INGAME => Some(GameplayState::new_ingame(map_id)),
+            Self::GAMEPLAY_LOADING => Some(GameplayState::new_loading(map_id, Default::default())),
+            Self::GAMEPLAY_CINEMATIC => Some(GameplayState::new_loading(map_id, map_id)),
+            state => GameState::try_from(state).ok().map(GameplayState::from),
         };
 
         let rtapi_ingame = self.gameplay == Self::GAMEPLAY_INGAME;
@@ -111,13 +99,21 @@ impl RenderStateRtapi {
         let player_tick = ui_tick.map(|tick| tick.is_player()).unwrap_or(false);
 
         self.player = (rtapi_ingame && (rtapi_camera || !player_tick))
-            .then(|| (
-                Point3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_position) }),
-                Vector3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_facing) }),
-            )).and_then(|(pos, front)| match rt::vec_eq(front, Vector3::ZERO) {
+            .then(|| {
+                (
+                    Point3::from_array(unsafe {
+                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_position)
+                    }),
+                    Vector3::from_array(unsafe {
+                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).character_facing)
+                    }),
+                )
+            })
+            .and_then(|(pos, front)| match rt::vec_eq(front, Vector3::ZERO) {
                 true => None,
                 false => Some((pos, front)),
-            }).unwrap_or((Point3::INFINITY, Vector3::INFINITY));
+            })
+            .unwrap_or((Point3::INFINITY, Vector3::INFINITY));
 
         #[cfg(feature = "space")]
         #[cfg(todo)]
@@ -127,12 +123,17 @@ impl RenderStateRtapi {
             #[cfg(todo)]
             let needs_fov = self.fov_y().is_none();
             let needs_fov = false;
-            let camera = (rtapi_ingame && (rtapi_camera || needs_fov))
-                .then(|| (
-                    Point3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position) }),
-                    Vector3::from_array(unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing) }),
+            let camera = (rtapi_ingame && (rtapi_camera || needs_fov)).then(|| {
+                (
+                    Point3::from_array(unsafe {
+                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position)
+                    }),
+                    Vector3::from_array(unsafe {
+                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing)
+                    }),
                     unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_fov) },
-                ));
+                )
+            });
             if let Some((camera_pos, camera_front, _fov)) = camera {
                 #[cfg(todo)]
                 if camera_fov.to_bits() != 0 {
@@ -142,8 +143,11 @@ impl RenderStateRtapi {
                     true => None,
                     false => Some((camera_pos, camera_front)),
                 }
-            } else { None }
-        }.unwrap_or((Point3::INFINITY, Vector3::INFINITY));
+            } else {
+                None
+            }
+        }
+        .unwrap_or((Point3::INFINITY, Vector3::INFINITY));
         #[cfg(feature = "space")]
         {
             self.camera = camera;

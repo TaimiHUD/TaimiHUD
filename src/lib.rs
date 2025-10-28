@@ -13,13 +13,33 @@ mod marker;
 mod space;
 
 //use i18n_embed_fl::fl;
-#[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
+#[cfg(feature = "extension-nexus")]
+use nexus::{
+    event::{
+        arc::{ACCOUNT_NAME, COMBAT_LOCAL},
+        event_consume,
+        extras::EXTRAS_SQUAD_UPDATE,
+        Event,
+        MUMBLE_IDENTITY_UPDATED,
+        WINDOW_RESIZED,
+    },
+    gui::{register_render, RenderType},
+    on_unload,
+    rtapi::{
+        event::{RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE},
+        GroupMember,
+        GroupMemberOwned,
+    },
+    wnd_proc::register_wnd_proc,
+    AddonFlags,
+    UpdateProvider,
+};
 use {
     crate::{
         controller::{
-            Controller, ControllerEvent,
             markers::{MarkersController, MarkersEvent},
+            Controller,
+            ControllerEvent,
         },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
@@ -30,14 +50,12 @@ use {
     controller::markers::SquadState,
     i18n_embed::{
         fluent::{fluent_language_loader, FluentLanguageLoader},
-        DefaultLocalizer, LanguageLoader, RustEmbedNotifyAssets,
+        DefaultLocalizer,
+        LanguageLoader,
+        RustEmbedNotifyAssets,
     },
     marker::format::MarkerType,
-    nexus::event::{
-        arc::CombatData,
-        extras::SquadUpdate,
-        MumbleIdentityUpdate,
-    },
+    nexus::event::{arc::CombatData, extras::SquadUpdate, MumbleIdentityUpdate},
     relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
     settings::SourcesFile,
@@ -56,26 +74,9 @@ use {
     tokio::sync::mpsc::{channel, Sender},
     unic_langid_impl::LanguageIdentifier,
 };
-#[cfg(feature = "extension-nexus")]
-use nexus::{
-    event::{
-        arc::{ACCOUNT_NAME, COMBAT_LOCAL},
-        event_consume,
-        extras::EXTRAS_SQUAD_UPDATE,
-        Event, MUMBLE_IDENTITY_UPDATED,
-        WINDOW_RESIZED,
-    },
-    on_unload,
-    gui::{register_render, RenderType},
-    rtapi::{
-        event::{
-            RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE,
-        },
-        GroupMember, GroupMemberOwned,
-    },
-    wnd_proc::register_wnd_proc,
-    AddonFlags, UpdateProvider,
-};
+
+#[cfg(feature = "space")]
+use crate::space::engine::{Engine, SpaceEvent};
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
 
@@ -88,9 +89,7 @@ pub struct LocalizationsEmbed;
 
 pub static LOCALIZATIONS: LazyLock<RustEmbedNotifyAssets<LocalizationsEmbed>> =
     LazyLock::new(|| {
-        RustEmbedNotifyAssets::new(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/"),
-        )
+        RustEmbedNotifyAssets::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/"))
     });
 
 static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
@@ -99,12 +98,15 @@ static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     loader
         .load_available_languages(assets)
         .expect("Error while loading fallback language");
-    let res = BootstrapState::read_with(|state| match state.language.as_ref().and_then(|l| l.parse().ok()) {
-        Some(language) if loader.current_language() != language =>
-            i18n_embed::select(&loader, assets, slice::from_ref(&language))
-                .with_context(|| format!("Failed to select language {language}"))
-                .map(drop),
-        _ => Ok(()),
+    let res = BootstrapState::read_with(|state| {
+        match state.language.as_ref().and_then(|l| l.parse().ok()) {
+            Some(language) if loader.current_language() != language => {
+                i18n_embed::select(&loader, assets, slice::from_ref(&language))
+                    .with_context(|| format!("Failed to select language {language}"))
+                    .map(drop)
+            },
+            _ => Ok(()),
+        }
     });
     if let Err(e) = res {
         log::warn!(logger: rt::log::DeferredLogger::BEST_EFFORT, "{e:#}");
@@ -117,7 +119,8 @@ fn language_loader_setup(loader: &FluentLanguageLoader) {
     #[cfg(todo)]
     loader.with_bundles_mut(|b| {
         // might be needed for fluent 0.17..
-        let res = b.add_builtins()
+        let res = b
+            .add_builtins()
             .context("Failed to add i18n/fluent builtins");
         if let Err(e) = res {
             log::warn!("{e:#}");
@@ -136,36 +139,30 @@ macro_rules! fl {
     }};
 }
 
-pub fn with_i18n<R, F>(message_id: &str, f: F) -> R where
+pub fn with_i18n<R, F>(message_id: &str, f: F) -> R
+where
     F: FnOnce(Cow<str>) -> R,
 {
-    use {
-        core::cell::RefCell,
-        fluent_syntax::ast::PatternElement,
-    };
+    use {core::cell::RefCell, fluent_syntax::ast::PatternElement};
 
     // XXX: why does this not take an FnOnce...
     let mut f = RefCell::new(Some(f));
     let res = LANGUAGE_LOADER.with_fluent_message(message_id, |m| {
         let msg = m.value().and_then(|m| match &m.elements[..] {
-            &[PatternElement::TextElement { value: one }] =>
-                Some(one),
+            &[PatternElement::TextElement { value: one }] => Some(one),
             _ => None,
         })?;
         let f = f.try_borrow_mut().ok()?.take()?;
         Some(f(Cow::Borrowed(msg)))
     });
     match (res, f.get_mut().take()) {
-        (Some(Some(r)), _) =>
-            r,
-        (Some(None), Some(f)) =>
-            f(LANGUAGE_LOADER.get(message_id).into()),
+        (Some(Some(r)), _) => r,
+        (Some(None), Some(f)) => f(LANGUAGE_LOADER.get(message_id).into()),
         (None, Some(f)) => {
             log::debug!("missing static i18n message {message_id}");
             f(Cow::Borrowed(message_id))
         },
-        (_, None) =>
-            unreachable!("with_message calls once"),
+        (_, None) => unreachable!("with_message calls once"),
     }
 }
 #[macro_export]
@@ -220,8 +217,7 @@ pub mod built_info {
             // never allow debug builds to be marked as a release
             #[cfg(debug_assertions)]
             true => false,
-            true if git_release() == Some(crate::exports::runtime::CRATE_VERSION) =>
-                true,
+            true if git_release() == Some(crate::exports::runtime::CRATE_VERSION) => true,
             _ => false,
         }
     }
@@ -230,10 +226,7 @@ pub mod built_info {
     pub fn git_ref_name() -> Result<&'static str, &'static str> {
         match git_tag_name() {
             Some(tag) => Ok(tag),
-            None => Err(git_branch_name()
-                .or(GIT_HEAD_REF)
-                .unwrap_or("HEAD")
-            ),
+            None => Err(git_branch_name().or(GIT_HEAD_REF).unwrap_or("HEAD")),
         }
     }
 
@@ -249,7 +242,11 @@ pub mod built_info {
         GIT_HEAD_REF.and_then(|head| head.strip_prefix(GIT_REF_RELEASE_PREFIX))
     }
 
-    use crate::exports::runtime::update::{GIT_REF_BRANCH_PREFIX, GIT_REF_RELEASE_PREFIX, GIT_REF_TAG_PREFIX};
+    use crate::exports::runtime::update::{
+        GIT_REF_BRANCH_PREFIX,
+        GIT_REF_RELEASE_PREFIX,
+        GIT_REF_TAG_PREFIX,
+    };
 }
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
@@ -365,7 +362,10 @@ fn init() -> Result<(), &'static str> {
     let version = rt::CRATE_VERSION;
     let authors = rt::crate_authors();
     log::info!("Loading {name} {version} by {authors}");
-    match (built_info::git_ref_name(), built_info::GIT_COMMIT_HASH_SHORT) {
+    match (
+        built_info::git_ref_name(),
+        built_info::GIT_COMMIT_HASH_SHORT,
+    ) {
         (Ok(_), _) if built_info::is_release() => (),
         (Ok(tag), commit) => {
             let commit = commit.unwrap_or("HEAD");
@@ -375,8 +375,7 @@ fn init() -> Result<(), &'static str> {
             let platform = built_info::CI_PLATFORM.unwrap_or("unknown");
             log::info!("Development build of {branch}({commit}) on {platform}");
         },
-        (Err(branch), None) =>
-            log::info!("Development build of {branch}"),
+        (Err(branch), None) => log::info!("Development build of {branch}"),
     }
 
     // Set up the thread
@@ -388,10 +387,10 @@ fn init() -> Result<(), &'static str> {
 
     #[cfg(feature = "texture-loader")]
     if let Err(e) = TEXTURES.setup() {
-            if !rt::nexus_available() {
-                return Err(e)
-            }
-            log::error!("{e:#}");
+        if !rt::nexus_available() {
+            return Err(e)
+        }
+        log::error!("{e:#}");
     } else {
         if let Err(e) = TEXTURES.wait_for_startup() {
             log::error!("{e:#}");
@@ -408,7 +407,9 @@ fn init() -> Result<(), &'static str> {
 
     let controller_handler = {
         let render_sender = render_sender.clone();
-        thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir.to_owned()))
+        thread::spawn(move || {
+            Controller::load(controller_receiver, render_sender, addon_dir.to_owned())
+        })
     };
 
     // muh queues
@@ -427,7 +428,7 @@ fn init() -> Result<(), &'static str> {
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
     use crate::exports::{
-        nexus::{register_keybind, unregister_keybinds, quick_access_add, quick_access_remove_all},
+        nexus::{quick_access_add, quick_access_remove_all, register_keybind, unregister_keybinds},
         runtime::bindings::TaimiControls,
     };
 
@@ -458,22 +459,50 @@ fn load_nexus() {
 
     on_unload(unregister_keybinds);
     // Handle window toggling with keybind and button
-    register_keybind(TaimiControls::WINDOW_PRIMARY, c"primary-window-toggle", c"ALT+SHIFT+M");
+    register_keybind(
+        TaimiControls::WINDOW_PRIMARY,
+        c"primary-window-toggle",
+        c"ALT+SHIFT+M",
+    );
 
     // Handle window toggling with keybind and button
     #[cfg(feature = "markers")]
-    register_keybind(TaimiControls::WINDOW_MARKERS, c"marker-window-toggle", c"ALT+SHIFT+L");
+    register_keybind(
+        TaimiControls::WINDOW_MARKERS,
+        c"marker-window-toggle",
+        c"ALT+SHIFT+L",
+    );
 
     // Handle window toggling with keybind and button
     #[cfg(feature = "timers")]
-    register_keybind(TaimiControls::WINDOW_TIMERS, c"timer-window-toggle", c"ALT+SHIFT+K");
+    register_keybind(
+        TaimiControls::WINDOW_TIMERS,
+        c"timer-window-toggle",
+        c"ALT+SHIFT+K",
+    );
 
     #[cfg(feature = "space")]
     {
-        register_keybind(TaimiControls::WINDOW_PATHING, c"pathing-window-toggle", c"ALT+SHIFT+N");
-        register_keybind(TaimiControls::PATHING_SPACE, c"pathing-render-toggle", c"(null)");
-        register_keybind(TaimiControls::PATHING_MINIMAP, c"pathing-render-minimap-toggle", c"ALT+SHIFT+F1");
-        register_keybind(TaimiControls::PATHING_MAP, c"pathing-render-map-toggle", c"ALT+SHIFT+F2");
+        register_keybind(
+            TaimiControls::WINDOW_PATHING,
+            c"pathing-window-toggle",
+            c"ALT+SHIFT+N",
+        );
+        register_keybind(
+            TaimiControls::PATHING_SPACE,
+            c"pathing-render-toggle",
+            c"(null)",
+        );
+        register_keybind(
+            TaimiControls::PATHING_MINIMAP,
+            c"pathing-render-minimap-toggle",
+            c"ALT+SHIFT+F1",
+        );
+        register_keybind(
+            TaimiControls::PATHING_MAP,
+            c"pathing-render-map-toggle",
+            c"ALT+SHIFT+F2",
+        );
     }
 
     #[cfg(feature = "timers")]
@@ -498,9 +527,11 @@ fn load_nexus() {
     */
 
     on_unload(quick_access_remove_all);
-    let quick_access_icons = settings::Settings::try_read().map(|s| s.quick_access_visible)
+    let quick_access_icons = settings::Settings::try_read()
+        .map(|s| s.quick_access_visible)
         .unwrap_or(TaimiControls::default_quick_access());
-    let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS.into_iter()
+    let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS
+        .into_iter()
         .filter(|&icon| quick_access_icons.intersects(icon));
     for icon in quick_access_icons_visible {
         quick_access_add(icon);
@@ -533,40 +564,40 @@ fn load_nexus() {
         .revert_on_unload();
 
     #[cfg(feature = "markers")]
-    RTAPI_GROUP_MEMBER_LEFT.subscribe(
-        event_consume!(
+    RTAPI_GROUP_MEMBER_LEFT
+        .subscribe(event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
                     receive_group_update(SquadState::Left, group_member);
                 }
             }
-        )
-    ).revert_on_unload();
+        ))
+        .revert_on_unload();
 
     #[cfg(feature = "markers")]
-    RTAPI_GROUP_MEMBER_JOINED.subscribe(
-        event_consume!(
+    RTAPI_GROUP_MEMBER_JOINED
+        .subscribe(event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
                     receive_group_update(SquadState::Joined, group_member);
                 }
             }
-        )
-    ).revert_on_unload();
+        ))
+        .revert_on_unload();
 
     #[cfg(feature = "markers")]
-    RTAPI_GROUP_MEMBER_UPDATE.subscribe(
-        event_consume!(
+    RTAPI_GROUP_MEMBER_UPDATE
+        .subscribe(event_consume!(
             <GroupMember> | group_member | {
                 if let Some(group_member) = group_member {
                     receive_group_update(SquadState::Update, group_member);
                 }
             }
-        )
-    ).revert_on_unload();
+        ))
+        .revert_on_unload();
 
-    EXTRAS_SQUAD_UPDATE.subscribe(
-        event_consume!(
+    EXTRAS_SQUAD_UPDATE
+        .subscribe(event_consume!(
             <SquadUpdate> | update | {
                 if let Some(update) = update {
                     receive_squad_update(update.iter().map(|p| unsafe {
@@ -575,36 +606,40 @@ fn load_nexus() {
                     }));
                 }
             }
-        )
-    ).revert_on_unload();
+        ))
+        .revert_on_unload();
 
-    nexus::event::extras::KEYBIND_CHANGED.subscribe({
-        let cb = event_consume!(
-            <arcdps::extras::keybinds::RawKeybindChange> | keybind | {
-                if let Some(keybind) = keybind {
-                    let keybind = taimi_input::win::keyboard::keybind_change_from_raw(keybind);
-                    rt::bindings::process_key_bound(keybind);
+    nexus::event::extras::KEYBIND_CHANGED
+        .subscribe({
+            let cb = event_consume!(
+                <arcdps::extras::keybinds::RawKeybindChange> | keybind | {
+                    if let Some(keybind) = keybind {
+                        let keybind = taimi_input::win::keyboard::keybind_change_from_raw(keybind);
+                        rt::bindings::process_key_bound(keybind);
+                    }
                 }
+            );
+            unsafe {
+                // crate versions strike again...
+                mem::transmute(cb as unsafe extern "C-unwind" fn(_))
             }
-        );
-        unsafe {
-            // crate versions strike again...
-            mem::transmute(cb as unsafe extern "C-unwind" fn(_))
-        }
-    }).revert_on_unload();
-    nexus::event::extras::LANGUAGE_CHANGED.subscribe({
-        let cb = event_consume!(
-            <arcdps::Language> | language | {
-                if let Some(language) = language {
-                    rt::notify_game_language(*language)
+        })
+        .revert_on_unload();
+    nexus::event::extras::LANGUAGE_CHANGED
+        .subscribe({
+            let cb = event_consume!(
+                <arcdps::Language> | language | {
+                    if let Some(language) = language {
+                        rt::notify_game_language(*language)
+                    }
                 }
+            );
+            unsafe {
+                // crate versions strike again...
+                mem::transmute(cb as unsafe extern "C-unwind" fn(_))
             }
-        );
-        unsafe {
-            // crate versions strike again...
-            mem::transmute(cb as unsafe extern "C-unwind" fn(_))
-        }
-    }).revert_on_unload();
+        })
+        .revert_on_unload();
 
     pub const EV_LANGUAGE_CHANGED: Event<()> = unsafe { Event::new("EV_LANGUAGE_CHANGED") };
 
@@ -624,30 +659,34 @@ fn load_nexus() {
         ))
         .revert_on_unload();
 
-    WINDOW_RESIZED.subscribe(event_consume!(<()> |_| {
-        resize_render(None);
-    })).revert_on_unload();
+    WINDOW_RESIZED
+        .subscribe(event_consume!(<()> |_| {
+            resize_render(None);
+        }))
+        .revert_on_unload();
 }
 
 pub fn resize_render(newsize: Option<[f32; 2]>) {
     match RENDER_STATE.try_lock() {
-        Ok(mut state) => if let Some(ref mut state) = *state {
-            // TODO: do this on most reloads (move reload/resize to method on RenderState or machine)
-            match newsize {
-                Some(newsize) if newsize == state.machine.display_size_ref().to_array() => {
-                    log::trace!("Ignoring redundant resize to {newsize:?}");
-                    return
-                },
-                Some(newsize) => {
-                    log::debug!("Resizing to {newsize:?}");
-                    //*state.machine.display_size_mut() = newsize.into();
-                    state.machine.reset_display_size();
-                },
-                None => {
-                    state.machine.reset_display_size();
-                },
+        Ok(mut state) => {
+            if let Some(ref mut state) = *state {
+                // TODO: do this on most reloads (move reload/resize to method on RenderState or machine)
+                match newsize {
+                    Some(newsize) if newsize == state.machine.display_size_ref().to_array() => {
+                        log::trace!("Ignoring redundant resize to {newsize:?}");
+                        return
+                    },
+                    Some(newsize) => {
+                        log::debug!("Resizing to {newsize:?}");
+                        //*state.machine.display_size_mut() = newsize.into();
+                        state.machine.reset_display_size();
+                    },
+                    None => {
+                        state.machine.reset_display_size();
+                    },
+                }
+                state.reload(true);
             }
-            state.reload(true);
         },
         _ => {
             RenderState::try_send(RenderEvent::Reload);
@@ -663,17 +702,11 @@ fn load_arcdps() -> Result<(), &'static str> {
 pub const LANGUAGES_GAME: [Language; 5] = [
     Language::English,
     Language::French,
-    Language::German ,
+    Language::German,
     Language::Spanish,
     Language::Chinese,
 ];
-pub const LANGUAGES_EXTRA: [&'static str; 5] = [
-    "cz",
-    "it",
-    "pl",
-    "pt-br",
-    "ru",
-];
+pub const LANGUAGES_EXTRA: [&'static str; 5] = ["cz", "it", "pl", "pt-br", "ru"];
 
 pub fn game_language_id(lang: Language) -> &'static str {
     match lang {
@@ -702,8 +735,7 @@ fn load_language(detected_language: &str) -> rt::RuntimeResult {
 }
 
 pub const ADDON_DIR: rt::AddonDir = rt::AddonDir;
-pub static TIMERS_DIR: LazyLock<PathBuf> =
-    LazyLock::new(|| ADDON_DIR.join("timers"));
+pub static TIMERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| ADDON_DIR.join("timers"));
 
 fn control_window(window: impl Into<String>, state: Option<bool>) {
     let window = window.into();
@@ -719,8 +751,7 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
     };
     match ACCOUNT_NAME_CELL.get() {
         // ignore duplicates
-        Some(prev) if prev == name =>
-            return,
+        Some(prev) if prev == name => return,
         _ => (),
     }
     //log::info!("Received account name: {name:?}");
@@ -734,7 +765,10 @@ fn receive_account_name<N: AsRef<str> + Into<String>>(account_name: N) {
         Err(name) => {
             let prev = ACCOUNT_NAME_CELL.get();
             if Some(&name) != prev {
-                log::error!("Account name {name:?} inconsistent with previously recorded value {:?}", prev.map(|s| &s[..]).unwrap_or(""))
+                log::error!(
+                    "Account name {name:?} inconsistent with previously recorded value {:?}",
+                    prev.map(|s| &s[..]).unwrap_or("")
+                )
             }
         },
     }
@@ -765,10 +799,7 @@ fn receive_evtc_local(combat_data: &CombatData) {
         )
     };
 
-    let event = ControllerEvent::CombatEvent {
-        src,
-        evt,
-    };
+    let event = ControllerEvent::CombatEvent { src, evt };
     Controller::try_send(event);
 }
 
@@ -780,7 +811,8 @@ fn receive_group_update(state: SquadState, group_member: &GroupMember) {
 }
 
 fn receive_squad_update<'u>(update: impl IntoIterator<Item = &'u UserInfo>) {
-    let update: Vec<_> = update.into_iter()
+    let update: Vec<_> = update
+        .into_iter()
         .map(|x| unsafe { ptr::read(x) }.into())
         .collect();
     let event = MarkersEvent::ExtrasSquadUpdate(update);
@@ -789,50 +821,58 @@ fn receive_squad_update<'u>(update: impl IntoIterator<Item = &'u UserInfo>) {
 
 fn process_textures() {
     #[cfg(feature = "texture-loader")]
-    let res = TEXTURES.try_responses(|mut responses| -> anyhow::Result<()> {
-        use {
-            anyhow::{anyhow, Context},
-            rt::textures::{TextureResponse, Texture},
-            tokio::sync::mpsc::error::TryRecvError,
-        };
-        let mut device = None;
+    let res = TEXTURES
+        .try_responses(|mut responses| -> anyhow::Result<()> {
+            use {
+                anyhow::{anyhow, Context},
+                rt::textures::{Texture, TextureResponse},
+                tokio::sync::mpsc::error::TryRecvError,
+            };
+            let mut device = None;
 
-        loop {
-            let response = match responses.try_recv() {
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => Err(anyhow!("texture loader shut down?")),
-                Ok(response) => Ok(response),
-            }?;
-            match response {
-                TextureResponse::Decoded { key, format, pixels, stride, dimensions } => {
-                    let device = match &mut device {
-                        Some(d) => d,
-                        device => {
-                            let (d3d11, _) = rt::d3d11_device()
-                                .context("d3d11 device required to load textures")?;
-                            device.insert(d3d11)
-                        },
-                    };
-                    let texture = unsafe {
-                        Texture::new_raw(device, &pixels, dimensions, stride, format)
-                    };
-                    TEXTURES.report_load(key, texture);
-                },
-                TextureResponse::DecodeFailed { key, error } => {
-                    log::error!("texture {key} failed to decode: {error:#}");
-                    TEXTURES.report_failure(key);
-                },
-                TextureResponse::LoopExit { id } => {
-                    log::warn!("texture loader {id:?} exited?");
-                },
-                TextureResponse::LoopEnter { id } => {
-                    log::info!("texture loader {id:?} started");
-                },
+            loop {
+                let response = match responses.try_recv() {
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => Err(anyhow!("texture loader shut down?")),
+                    Ok(response) => Ok(response),
+                }?;
+                match response {
+                    TextureResponse::Decoded {
+                        key,
+                        format,
+                        pixels,
+                        stride,
+                        dimensions,
+                    } => {
+                        let device = match &mut device {
+                            Some(d) => d,
+                            device => {
+                                let (d3d11, _) = rt::d3d11_device()
+                                    .context("d3d11 device required to load textures")?;
+                                device.insert(d3d11)
+                            },
+                        };
+                        let texture = unsafe {
+                            Texture::new_raw(device, &pixels, dimensions, stride, format)
+                        };
+                        TEXTURES.report_load(key, texture);
+                    },
+                    TextureResponse::DecodeFailed { key, error } => {
+                        log::error!("texture {key} failed to decode: {error:#}");
+                        TEXTURES.report_failure(key);
+                    },
+                    TextureResponse::LoopExit { id } => {
+                        log::warn!("texture loader {id:?} exited?");
+                    },
+                    TextureResponse::LoopEnter { id } => {
+                        log::info!("texture loader {id:?} started");
+                    },
+                }
             }
-        }
 
-        Ok(())
-    }).and_then(|res| res.transpose());
+            Ok(())
+        })
+        .and_then(|res| res.transpose());
     #[cfg(feature = "texture-loader")]
     match res {
         Err(e) => {
@@ -842,25 +882,21 @@ fn process_textures() {
     }
 }
 
-fn texture_schedule_bytes<K, B>(key: K, bytes: B) where
+fn texture_schedule_bytes<K, B>(key: K, bytes: B)
+where
     K: Into<String>,
     B: Into<Vec<u8>>,
 {
-    let event = ControllerEvent::LoadTextureIntegrated(
-        key.into(),
-        bytes.into(),
-    );
+    let event = ControllerEvent::LoadTextureIntegrated(key.into(), bytes.into());
     Controller::try_send(event);
 }
 
-fn texture_schedule_path<R, P>(rel: R, path: P) where
+fn texture_schedule_path<R, P>(rel: R, path: P)
+where
     R: Into<RelativePathBuf>,
     P: Into<PathBuf>,
 {
-    let event = ControllerEvent::LoadTexture(
-        rel.into(),
-        path.into(),
-    );
+    let event = ControllerEvent::LoadTexture(rel.into(), path.into());
     Controller::try_send(event);
 }
 
@@ -871,7 +907,8 @@ fn notify_quit() {
     rt::notify_shutdown();
 
     let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
-    let controller_quit = controller_sender.as_ref()
+    let controller_quit = controller_sender
+        .as_ref()
         .map(|sender| sender.try_send(ControllerEvent::Quit));
     if let Some(Ok(())) = controller_quit {
         *controller_sender = None;
@@ -932,7 +969,10 @@ fn unload() {
     }
 
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
-    let controller_quit = CONTROLLER_SENDER.write().unwrap().take()
+    let controller_quit = CONTROLLER_SENDER
+        .write()
+        .unwrap()
+        .take()
         .map(|sender| sender.try_send(ControllerEvent::Quit));
 
     let confirm_render_unload = {
@@ -948,7 +988,9 @@ fn unload() {
                 }
                 None
             },
-            _ => render_sender.as_ref().map(|sender| sender.try_send(RenderEvent::Quit)),
+            _ => render_sender
+                .as_ref()
+                .map(|sender| sender.try_send(RenderEvent::Quit)),
         };
         let _ = render_sender.take();
 
@@ -962,12 +1004,15 @@ fn unload() {
                 let unload_timeout = match () {
                     #[cfg(feature = "space")]
                     () if _space.is_some() =>
-                        // give it time to do more shutdown if needed...
-                        Duration::from_millis(1500),
-                    _ =>
-                        Duration::from_millis(67),
+                    // give it time to do more shutdown if needed...
+                    {
+                        Duration::from_millis(1500)
+                    },
+                    _ => Duration::from_millis(67),
                 };
-                let timeout = RENDER_UNLOAD.wait_timeout_while(render_state, unload_timeout, |state| state.is_some());
+                let timeout =
+                    RENDER_UNLOAD
+                        .wait_timeout_while(render_state, unload_timeout, |state| state.is_some());
                 let (mut render_state, timeout) = timeout.unwrap_or_else(|e| e.into_inner());
                 if timeout.timed_out() {
                     log::warn!("timed out waiting for render quit");
@@ -985,7 +1030,10 @@ fn unload() {
         }
     };
 
-    if let Err(e) = TEXTURES.wait_for_shutdown().context("failed to shut down texture loader") {
+    if let Err(e) = TEXTURES
+        .wait_for_shutdown()
+        .context("failed to shut down texture loader")
+    {
         log::error!("{e:#}");
     }
 
@@ -1023,7 +1071,8 @@ fn unload() {
     *loaded = false;
 
     #[cfg(todo = "unnecessary")]
-    #[cfg(not(debug_assertions))] {
+    #[cfg(not(debug_assertions))]
+    {
         drop(panic::take_hook());
     }
 

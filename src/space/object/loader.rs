@@ -45,9 +45,7 @@ impl ObjectLoader {
         self.0
             .iter()
             .filter_map(|o| {
-                let backing = o
-                    .to_backing(model_files, device, shaders)
-                    .ok();
+                let backing = o.to_backing(model_files, device, shaders).ok();
                 if let Some(backing) = backing {
                     let backing = Arc::new(backing);
                     Some((backing.name.clone(), backing))

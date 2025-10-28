@@ -1,6 +1,12 @@
 use {
     crate::{
-        fl, marker::format::MarkerSet, settings::Settings, Controller, ControllerEvent, MarkersController, MarkersEvent
+        fl,
+        marker::format::MarkerSet,
+        settings::Settings,
+        Controller,
+        ControllerEvent,
+        MarkersController,
+        MarkersEvent,
     },
     nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::sync::Arc,
@@ -91,7 +97,9 @@ impl MarkerWindowState {
                             ui.text_wrapped(format!("{}", marker.description));
                             ui.table_next_column();
                             if ui.button(&fl!("markers-place")) {
-                                MarkersController::try_send(MarkersEvent::SetMarker(marker.clone()));
+                                MarkersController::try_send(MarkersEvent::SetMarker(
+                                    marker.clone(),
+                                ));
                             }
                             ui.table_next_column();
                             id_token.end();

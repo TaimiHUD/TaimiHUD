@@ -1,6 +1,7 @@
 use {
     super::TimerMarker,
     crate::{
+        controller::RtSender,
         render::{RenderEvent, RenderState},
         settings::Settings,
         timer::{CombatState, Position, TimerAlert, TimerFile, TimerPhase},
@@ -14,7 +15,6 @@ use {
     },
 };
 
-use crate::controller::RtSender;
 #[cfg(feature = "space")]
 use crate::space::engine::{Engine, SpaceEvent};
 
@@ -46,8 +46,7 @@ impl EventMapper {
     #[cfg(feature = "space")]
     async fn send_space(&self) {
         match Settings::try_read() {
-            Some(settings) if settings.enable_katrender =>
-                (),
+            Some(settings) if settings.enable_katrender => (),
             _ => return,
         }
         let space_sender = match Engine::sender() {
@@ -58,10 +57,10 @@ impl EventMapper {
         match self {
             Self::Feed(ps) => {
                 let _ = space_sender.send(SpaceEvent::MarkerFeed(ps.clone())).await;
-            }
+            },
             Self::Reset(tf) => {
                 let _ = space_sender.send(SpaceEvent::MarkerReset(tf.clone())).await;
-            }
+            },
         }
     }
     async fn send_render(&self) {
@@ -72,12 +71,12 @@ impl EventMapper {
         match self {
             Self::Feed(ps) => {
                 let _ = render_sender.send(RenderEvent::AlertFeed(ps.clone())).await;
-            }
+            },
             Self::Reset(tf) => {
                 let _ = render_sender
                     .send(RenderEvent::AlertReset(tf.clone()))
                     .await;
-            }
+            },
         }
     }
 
@@ -196,11 +195,7 @@ pub struct TextAlert {
 }
 
 impl TimerMachine {
-    pub fn new(
-        timer: Arc<TimerFile>,
-        alert_sem: Arc<Mutex<()>>,
-        sender: RtSender,
-    ) -> Self {
+    pub fn new(timer: Arc<TimerFile>, alert_sem: Arc<Mutex<()>>, sender: RtSender) -> Self {
         TimerMachine {
             state: TimerMachineState::AwakeUnaware,
             timer,
@@ -276,7 +271,7 @@ impl TimerMachine {
                 if trigger.check(pos, self.combat_state, &mut self.key_pressed) {
                     self.do_reset().await;
                 }
-            }
+            },
             _ => (),
         }
     }
@@ -370,7 +365,7 @@ impl TimerMachine {
                         self.state_change(OnPhase(phase)).await;
                     }
                 }
-            }
+            },
             // within a phase (nth)
             OnPhase(phase) => {
                 // handle the finish check
@@ -379,7 +374,7 @@ impl TimerMachine {
                         self.state_change(FinishedPhase(phase.clone())).await;
                     }
                 }
-            }
+            },
             FinishedPhase(phase) => {
                 // check the next phase's start trigger
                 if let Some(next_phase) = &phase.clone().next() {
@@ -388,7 +383,7 @@ impl TimerMachine {
                         self.state_change(OnPhase(next_phase.clone())).await;
                     }
                 }
-            }
+            },
             Finished => (),
         }
     }

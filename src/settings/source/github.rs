@@ -1,10 +1,13 @@
 use {
+    super::super::SourceKind,
+    crate::{settings::Source, ADDON_DIR},
     anyhow::Context,
-    super::super::SourceKind, crate::{settings::Source, ADDON_DIR}, chrono::{DateTime, Utc}, serde::{Deserialize, Serialize}, serde_json::Value, std::{fmt,
-    ops::Range,
-    pin::Pin,
-    future::Future,
-}, tokio::fs::create_dir_all, url::Url
+    chrono::{DateTime, Utc},
+    serde::{Deserialize, Serialize},
+    serde_json::Value,
+    std::{fmt, future::Future, ops::Range, pin::Pin},
+    tokio::fs::create_dir_all,
+    url::Url,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -102,15 +105,16 @@ impl GitHubSource {
         );
         let response = super::get(url).await?;
         let json_data = response.text().await?;
-        serde_json::from_str(&json_data)
-            .context("Deserializing GitHub release")
+        serde_json::from_str(&json_data).context("Deserializing GitHub release")
     }
 
     pub const RELEASES_RANGE_DEFAULT: Range<usize> = 0..30;
-    pub async fn latest_releases(&self, range: Range<usize>) -> anyhow::Result<Vec<GitHubLatestRelease>> {
+    pub async fn latest_releases(
+        &self,
+        range: Range<usize>,
+    ) -> anyhow::Result<Vec<GitHubLatestRelease>> {
         let page = match range {
-            range if range == Self::RELEASES_RANGE_DEFAULT =>
-                None,
+            range if range == Self::RELEASES_RANGE_DEFAULT => None,
             range if range.start == 0 => Some((1, range.end)),
             range => Some({
                 let len = range.len();
@@ -118,18 +122,14 @@ impl GitHubSource {
                 (page, len)
             }),
         };
-        let url = format!(
-            "https://api.github.com/repos/{}/releases",
-            self.name()
-        );
+        let url = format!("https://api.github.com/repos/{}/releases", self.name());
         let url = match page {
             None => url,
-            Some((page, per)) => format!("{url}?page={page}&per_page={per}")
+            Some((page, per)) => format!("{url}?page={page}&per_page={per}"),
         };
         let response = super::get(url).await?;
         let json_data = response.text().await?;
-        serde_json::from_str(&json_data)
-            .context("Deserializing GitHub releases")
+        serde_json::from_str(&json_data).context("Deserializing GitHub releases")
     }
 }
 
@@ -150,9 +150,14 @@ impl Source for GitHubSource {
         format!("https://github.com/{}", self.name())
     }
 
-    fn download_latest(&self, kind: SourceKind) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+    fn download_latest(
+        &self,
+        kind: SourceKind,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
         Box::pin(async move {
-            let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
+            let install_dir = ADDON_DIR
+                .join(kind.get_unpack_dir())
+                .join(self.install_dir());
             create_dir_all(&install_dir).await?;
             let latest = self.latest_release().await?;
             if let Some(tarball_url) = latest.tarball_url {

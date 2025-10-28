@@ -1,7 +1,7 @@
 use {
     crate::{
         attributes::MarkerAttributes,
-        loader::{PackLoaderContext, LoaderAssetReader},
+        loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
@@ -49,7 +49,8 @@ impl Trail {
                 guid = Some(taco_xml_to_guid(&attr.value));
                 Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
-                attr.value.parse()
+                attr.value
+                    .parse()
                     .map(|v| {
                         map_id = Some(v);
                         true
@@ -59,12 +60,11 @@ impl Trail {
                 attributes_bh.try_add(attr.name.borrow(), attr.value)
             } else {
                 attributes.try_add(attr.name.borrow(), attr.value)
-            }.with_context(|| format!("Trail attribute '{}'", attr.name));
+            }
+            .with_context(|| format!("Trail attribute '{}'", attr.name));
             match res {
-                Err(e) =>
-                    log::warn!("{e:#}"),
-                Ok(false) =>
-                    log::info!("unrecognized trail attribute `{}`", attr.name),
+                Err(e) => log::warn!("{e:#}"),
+                Ok(false) => log::info!("unrecognized trail attribute `{}`", attr.name),
                 Ok(true) => (),
             }
         }
@@ -75,12 +75,11 @@ impl Trail {
 
         let guid = guid.unwrap_or_default();
 
-        let parent_path = Path::new(asset).parent()
-            .map(|p| {
-                let mut parent = p.to_string_lossy().into_owned();
-                parent.push_str("/");
-                parent
-            });
+        let parent_path = Path::new(asset).parent().map(|p| {
+            let mut parent = p.to_string_lossy().into_owned();
+            parent.push_str("/");
+            parent
+        });
 
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh);
@@ -104,7 +103,10 @@ impl Trail {
         Ok(())
     }
 
-    pub fn open_trl_data<'l>(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+    pub fn open_trl_data<'l>(
+        &self,
+        ctx: &mut dyn PackLoaderContext,
+    ) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         let Some(trail_path) = &self.trail_path else {
             anyhow::bail!("No 'trailData' specified for Trail '{self}'");
         };
@@ -121,7 +123,10 @@ impl Trail {
 
         match (self.map_id, &data) {
             (Some(map_id), Ok(data)) if data.header.map_id != map_id => {
-                log::warn!("MapID mismatch on {self}: expected {map_id} but read {} from trl", data.header.map_id);
+                log::warn!(
+                    "MapID mismatch on {self}: expected {map_id} but read {} from trl",
+                    data.header.map_id
+                );
             },
             _ => (),
         }
@@ -150,10 +155,8 @@ impl fmt::Display for Trail {
         let category = &self.category;
         let guid = &self.guid;
         match &self.parent_path {
-            Some(parent) =>
-                write!(f, "{parent}{category}/{guid}"),
-            None =>
-                write!(f, "{category}/{guid}"),
+            Some(parent) => write!(f, "{parent}{category}/{guid}"),
+            None => write!(f, "{category}/{guid}"),
         }
     }
 }
@@ -172,9 +175,7 @@ impl TrailHeader0 {
     pub const SIZE: usize = 8;
 
     pub const fn with_map_id(map_id: i32) -> Self {
-        Self {
-            map_id,
-        }
+        Self { map_id }
     }
 
     pub fn read_from_trl<R: Read>(reader: &mut R) -> io::Result<Self> {
@@ -206,12 +207,14 @@ impl TrailData {
     const AVERAGE_SECTION_LEN: usize = 32;
 
     pub fn read_from_trl<R: Read>(read: &mut R) -> anyhow::Result<Self> {
-        let mut read = io::BufReader::with_capacity(TrailSection::POINT_SIZE * Self::POINT_BUFFER_LEN, read);
-        let header = TrailHeader::read_from_trl(&mut read)
-            .context("Reading trail header")?;
+        let mut read =
+            io::BufReader::with_capacity(TrailSection::POINT_SIZE * Self::POINT_BUFFER_LEN, read);
+        let header = TrailHeader::read_from_trl(&mut read).context("Reading trail header")?;
         let read_ahead_points = read.fill_buf()?.len() / TrailSection::POINT_SIZE;
         let mut points_buf = Vec::with_capacity(Self::AVERAGE_SECTION_LEN.min(read_ahead_points));
-        let mut sections = Vec::with_capacity((read_ahead_points + Self::AVERAGE_SECTION_LEN - 1) / Self::AVERAGE_SECTION_LEN);
+        let mut sections = Vec::with_capacity(
+            (read_ahead_points + Self::AVERAGE_SECTION_LEN - 1) / Self::AVERAGE_SECTION_LEN,
+        );
         TrailSection::read_all_from_trl(&mut read, &mut sections, &mut points_buf)
             .context("Reading trail sections")?;
 
@@ -241,11 +244,7 @@ impl TrailSection {
     };
 
     /// Zero-height trail bounds are common, but empty boxes are invalid...
-    pub const BOUNDS_MIN_SIZE: Size3 = Size3::new(
-        f32::EPSILON,
-        f32::EPSILON,
-        f32::EPSILON,
-    );
+    pub const BOUNDS_MIN_SIZE: Size3 = Size3::new(f32::EPSILON, f32::EPSILON, f32::EPSILON);
 
     pub fn with_points<P: Into<Box<[Point3]>>>(points: P) -> Self {
         let points = points.into();
@@ -260,16 +259,16 @@ impl TrailSection {
                 bounds => bounds,
             },
         };
-        Self {
-            bounds,
-            points,
-        }
+        Self { bounds, points }
     }
 
     /// Read a section from a .trl file
     ///
     /// Ensure `points_buf` is empty prior to reading, unless you intend to prepend points to the section!
-    pub fn read_from_trl<R: io::Read>(reader: &mut R, points_buf: &mut Vec<Point3>) -> io::Result<Option<Self>> {
+    pub fn read_from_trl<R: io::Read>(
+        reader: &mut R,
+        points_buf: &mut Vec<Point3>,
+    ) -> io::Result<Option<Self>> {
         let mut next_point = match Self::read_point(reader) {
             Err(e) => return Err(e),
             Ok(None) => return Ok(None),
@@ -279,12 +278,17 @@ impl TrailSection {
             points_buf.push(point);
             next_point = match Self::read_point(reader)? {
                 #[cfg(todo)]
-                None => return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "unterminated trail section",
-                )),
                 None => {
-                    log::trace!("unterminated trail section after {} points", points_buf.len());
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "unterminated trail section",
+                    ))
+                },
+                None => {
+                    log::trace!(
+                        "unterminated trail section after {} points",
+                        points_buf.len()
+                    );
                     None
                 },
                 Some(p) => p,
@@ -295,7 +299,11 @@ impl TrailSection {
         Ok(Some(section))
     }
 
-    pub fn read_all_from_trl<R: io::Read>(reader: &mut R, out: &mut Vec<Self>, points_buf: &mut Vec<Point3>) -> io::Result<()> {
+    pub fn read_all_from_trl<R: io::Read>(
+        reader: &mut R,
+        out: &mut Vec<Self>,
+        points_buf: &mut Vec<Point3>,
+    ) -> io::Result<()> {
         points_buf.clear();
         while let Some(section) = TrailSection::read_from_trl(&mut *reader, points_buf)? {
             out.push(section);
@@ -321,11 +329,7 @@ impl TrailSection {
 
         Ok(Some(match point_data {
             Self::POINT_EMPTY_DATA => None,
-            [
-                x0, x1, x2, x3,
-                y0, y1, y2, y3,
-                z0, z1, z2, z3,
-            ] => Some(Point3::new(
+            [x0, x1, x2, x3, y0, y1, y2, y3, z0, z1, z2, z3] => Some(Point3::new(
                 f32::from_le_bytes([x0, x1, x2, x3]),
                 f32::from_le_bytes([y0, y1, y2, y3]),
                 f32::from_le_bytes([z0, z1, z2, z3]),

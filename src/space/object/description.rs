@@ -1,27 +1,17 @@
 use {
     crate::{
+        resources::{ModelKind, ObjFile, ObjInstance, ShaderLoader, ShaderPair},
         space::{
             dx11::InstanceBufferData,
             object::{ObjectBacking, ObjectRenderBacking, ObjectRenderMetadata},
-        },
-        resources::{
-            ModelKind, ObjFile, ObjInstance, ShaderPair,
-            ShaderLoader,
         },
     },
     anyhow::anyhow,
     glam::Mat4,
     serde::{Deserialize, Serialize},
-    std::{
-        collections::HashMap,
-        fs::read_to_string,
-        path::PathBuf,
-    },
+    std::{collections::HashMap, fs::read_to_string, path::PathBuf},
     taimi_d3d::{
-        dx11::{
-            prelude::*,
-            buffer::BufferOf,
-        },
+        dx11::{buffer::BufferOf, prelude::*},
         state::PrimitiveTopology,
     },
 };
@@ -65,12 +55,8 @@ impl ObjectDescription {
         Ok(entity_description_data)
     }
 
-    pub fn get_shaders(
-        &self,
-        shaders: &ShaderLoader,
-    ) -> ShaderPair {
-        let vertex_shader =
-            shaders.vertex.get(&self.vertex_shader).unwrap().clone();
+    pub fn get_shaders(&self, shaders: &ShaderLoader) -> ShaderPair {
+        let vertex_shader = shaders.vertex.get(&self.vertex_shader).unwrap().clone();
         let pixel_shader = shaders.pixel.get(&self.pixel_shader).cloned().flatten();
         ShaderPair(vertex_shader, pixel_shader)
     }
@@ -109,7 +95,9 @@ impl ObjectDescription {
 
         let render_backing = ObjectRenderBacking {
             metadata: render_metadata,
-            instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(device, Err(0), ())?.buffer.into(),
+            instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(device, Err(0), ())?
+                .buffer
+                .into(),
             vertex_buffer,
             shaders,
         };

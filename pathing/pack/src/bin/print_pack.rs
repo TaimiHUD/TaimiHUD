@@ -1,24 +1,23 @@
 use {
-    std::{
-        collections::BTreeMap,
-        env,
-        fs,
-        path::Path,
-    },
+    std::{collections::BTreeMap, env, fs, path::Path},
     taimi_pack::{loader, Pack},
 };
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
-    let fname = env::args_os().nth(1)
-        .expect("marker path to parse");
+    let fname = env::args_os().nth(1).expect("marker path to parse");
     let fname = Path::new(&fname);
 
     let meta = fs::metadata(fname);
     let mut loader_zip;
     let mut loader_dir;
-    let mut loader = if fname.extension().map(|ext| ext.eq_ignore_ascii_case("taco")) == Some(true) || !meta?.is_dir() {
+    let mut loader = if fname
+        .extension()
+        .map(|ext| ext.eq_ignore_ascii_case("taco"))
+        == Some(true)
+        || !meta?.is_dir()
+    {
         loader_zip = loader::ZipLoader::new(fname)?;
         &mut loader_zip as &mut dyn loader::PackLoaderContext
     } else {
@@ -28,7 +27,12 @@ fn main() -> anyhow::Result<()> {
 
     let pack = Pack::load_strict(&mut loader, true)?;
 
-    eprintln!("loaded pack {} with {} trails and {} pois", pack.name, pack.trails.len(), pack.pois.len());
+    eprintln!(
+        "loaded pack {} with {} trails and {} pois",
+        pack.name,
+        pack.trails.len(),
+        pack.pois.len()
+    );
 
     Ok(())
 }

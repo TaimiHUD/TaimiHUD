@@ -1,21 +1,15 @@
 use {
     super::{DepthHandler, PerspectiveHandler},
     crate::{
-        exports::runtime::{
-            self as rt,
-            Device, SwapChain,
-        },
-        space::{
-            resources::ShaderLoader,
-            ScreenSpace,
-        },
+        exports::runtime::{self as rt, Device, SwapChain},
+        space::{resources::ShaderLoader, ScreenSpace},
     },
     anyhow::Context,
     glamour::Size2,
     taimi_d3d::dx11::{
+        blend::{BlendState, OMBlendState, D3D11_RENDER_TARGET_BLEND_DESC},
+        buffer::{SamplerState, TextureAddressMode, D3D11_SAMPLER_DESC},
         prelude::*,
-        buffer::{D3D11_SAMPLER_DESC, SamplerState, TextureAddressMode},
-        blend::{BlendState, D3D11_RENDER_TARGET_BLEND_DESC, OMBlendState},
         viewport::Viewport,
     },
 };
@@ -41,10 +35,9 @@ impl RenderBackend {
 
         let viewport = Viewport::with_size(display_size.extend(1.0));
 
-        let shaders = ShaderLoader::load_bundled(&device)
-            .context("Shaders failed to load")?;
-        let perspective_handler = PerspectiveHandler::setup(&device)
-            .context("Perspective handler setup failed")?;
+        let shaders = ShaderLoader::load_bundled(&device).context("Shaders failed to load")?;
+        let perspective_handler =
+            PerspectiveHandler::setup(&device).context("Perspective handler setup failed")?;
 
         let depth_handler = DepthHandler::create(display_size, &device, &swap_chain)
             .context("Depth setup failed")?;
@@ -52,8 +45,8 @@ impl RenderBackend {
             .context("Sampler setup failed")?;
 
         let blend_desc = BlendState::desc_for_target(Self::BLEND_STATE_DESC_RT, false, false);
-        let blend_state = BlendState::new_with_desc(&device, &blend_desc)
-            .context("Blending setup failed")?;
+        let blend_state =
+            BlendState::new_with_desc(&device, &blend_desc).context("Blending setup failed")?;
         //log::info!("Setting up device context");
         //let device_context = unsafe { device.GetImmediateContext().expect("I lost my context!") };
 
@@ -132,13 +125,13 @@ impl RenderBackend {
     }
 
     const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
-        .. BlendState::TARGET_DESC_ADDITIVE
+        ..BlendState::TARGET_DESC_ADDITIVE
     };
 
     const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
         MinLOD: 0.0,
         ComparisonFunc: d3d11::D3D11_COMPARISON_ALWAYS,
         BorderColor: [0.0; 4],
-        .. SamplerState::desc_with_address(TextureAddressMode::WRAP.to_vec3())
+        ..SamplerState::desc_with_address(TextureAddressMode::WRAP.to_vec3())
     };
 }

@@ -1,20 +1,16 @@
-use crate::{
-    prelude::*,
-    D3dContextBindable, D3dContextBindableSlot,
-};
+use crate::{prelude::*, D3dContextBindable, D3dContextBindableSlot};
 
-mod token;
 pub mod primitivetopology;
+mod token;
 
-pub use self::{
-    primitivetopology::PrimitiveTopology,
-    token::D3dStateToken,
-};
+pub use self::{primitivetopology::PrimitiveTopology, token::D3dStateToken};
 
 pub trait D3dState<D3DC: D3dContext> {
-    fn empty_state(device: &D3DC::IDevice) -> anyhow::Result<Self> where
+    fn empty_state(device: &D3DC::IDevice) -> anyhow::Result<Self>
+    where
         Self: Sized;
-    fn snapshot_state(context: &D3DC) -> Self where
+    fn snapshot_state(context: &D3DC) -> Self
+    where
         Self: Sized;
 
     fn restore_state(&self, context: &D3DC);
@@ -30,7 +26,8 @@ pub struct BufferState<B> {
     pub buffer: B,
 }
 
-impl<D3DC: D3dContext, B> D3dContextBindable<D3DC> for BufferState<B> where
+impl<D3DC: D3dContext, B> D3dContextBindable<D3DC> for BufferState<B>
+where
     B: D3dContextBindableSlot<D3DC>,
 {
     fn set(&self, context: &D3DC) {

@@ -13,7 +13,7 @@ use {
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::Vec3,
-    glamour::{Size2, Box2, TransformMap},
+    glamour::{Box2, Size2, TransformMap},
     std::{
         collections::{HashMap, HashSet},
         mem,
@@ -29,7 +29,10 @@ use {
         },
     },
     taimi_pack::attributes::Festival,
-    tokio::{sync::mpsc::{Receiver, Sender}, time::Instant},
+    tokio::{
+        sync::mpsc::{Receiver, Sender},
+        time::Instant,
+    },
 };
 #[cfg(feature = "space-ecs")]
 use {
@@ -40,6 +43,7 @@ use {
     },
     std::path::PathBuf,
 };
+
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
 
@@ -151,23 +155,33 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn initialise(machine: &RenderMachine, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
-        let display_size = machine.display_size()
+    pub fn initialise(
+        machine: &RenderMachine,
+        receiver: Receiver<SpaceEvent>,
+    ) -> anyhow::Result<Engine> {
+        let display_size = machine
+            .display_size()
             .ok_or_else(|| anyhow!("display size unknown"))?;
 
-        let mut render_backend = RenderBackend::setup(display_size)
-            .context("Failed to set up render backend")?;
-        render_backend.perspective_handler.constant_buffer_data.trail_expansion = TrailScale::DIRTY;
-        render_backend.perspective_handler.constant_buffer_mapv_data.trail_expansion = TrailScale::DIRTY;
+        let mut render_backend =
+            RenderBackend::setup(display_size).context("Failed to set up render backend")?;
+        render_backend
+            .perspective_handler
+            .constant_buffer_data
+            .trail_expansion = TrailScale::DIRTY;
+        render_backend
+            .perspective_handler
+            .constant_buffer_mapv_data
+            .trail_expansion = TrailScale::DIRTY;
 
         #[cfg(feature = "space-ecs")]
         let object_kinds = {
             let models_dir = crate::ADDON_DIR.join("models");
-            let object_descs = ObjectLoader::load_desc(&models_dir)
-                .context("Failed to load model descriptors")?;
+            let object_descs =
+                ObjectLoader::load_desc(&models_dir).context("Failed to load model descriptors")?;
             log::debug!("{:?}", object_descs);
-            let model_files = ObjFile::load(&models_dir, &object_descs)
-                .context("Failed to load model object")?;
+            let model_files =
+                ObjFile::load(&models_dir, &object_descs).context("Failed to load model object")?;
 
             let object_kinds = object_descs.to_backings(
                 &render_backend.device,
@@ -184,8 +198,7 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let packs = PackCollection::new(&render_backend)
-            .context("Initializing packs")?;
+        let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
         PathingController::try_send(PathingEvent::PathingLoadAll);
 
         let engine = Engine {
@@ -224,11 +237,15 @@ impl Engine {
         Ok(engine)
     }
 
-    pub fn init_mut<F>(machine: &mut RenderMachine, slot: &mut Option<anyhow::Result<Self>>, f: F) -> anyhow::Result<()> where
+    pub fn init_mut<F>(
+        machine: &mut RenderMachine,
+        slot: &mut Option<anyhow::Result<Self>>,
+        f: F,
+    ) -> anyhow::Result<()>
+    where
         F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
     {
-        let enabled = Settings::try_read()
-            .map(|s| s.enable_katrender);
+        let enabled = Settings::try_read().map(|s| s.enable_katrender);
 
         let mut engine = match slot {
             None if machine.gameplay.is_initial() || !enabled.unwrap_or(false) => {
@@ -250,9 +267,11 @@ impl Engine {
             });
             #[cfg(feature = "goggles")]
             let _ = tx.try_send(SpaceEvent::RefreshEdgeScale);
-            match crate::SPACE_SENDER.write().map_err(|_| anyhow!("space sender poisoned?")) {
-                Ok(mut sender) =>
-                    *sender = Some(tx),
+            match crate::SPACE_SENDER
+                .write()
+                .map_err(|_| anyhow!("space sender poisoned?"))
+            {
+                Ok(mut sender) => *sender = Some(tx),
                 Err(e) => {
                     res = Some(anyhow!("{e:#}"));
                     return Err(e)
@@ -271,7 +290,8 @@ impl Engine {
 
                     Ok(e)
                 },
-            }.context("Space engine setup failed")
+            }
+            .context("Space engine setup failed")
         });
         if let Some(e) = res {
             return Err(e)
@@ -279,7 +299,7 @@ impl Engine {
         match engine {
             Ok(..) if !enabled.unwrap_or(true) => Ok(()),
             Ok(e) => f(e, machine),
-            Err(..) => Ok(())
+            Err(..) => Ok(()),
         }
     }
 
@@ -323,11 +343,10 @@ impl Engine {
         for marker in markers {
             if let Some(_base_path) = &phase_state.timer.path {
                 #[cfg(feature = "space-ecs")]
-                let backing = Arc::new(ObjectBacking::create_marker(
-                    &self.render_backend,
-                    marker,
-                    _base_path.clone(),
-                ).context("marker object creation failed")?);
+                let backing = Arc::new(
+                    ObjectBacking::create_marker(&self.render_backend, marker, _base_path.clone())
+                        .context("marker object creation failed")?,
+                );
                 let entity = self.world.spawn((
                     #[cfg(feature = "space-ecs")]
                     Position(marker.position),
@@ -393,10 +412,14 @@ impl Engine {
                 match event {
                     #[cfg(deleteme)]
                     DisabledPaths(disabled_paths) => {
-                        self.packs.active_festivals = self.map_settings(|s| Festival::all()
-                            .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
-                            .collect()
-                        );
+                        self.packs.active_festivals = self.map_settings(|s| {
+                            Festival::all()
+                                .filter(|&f| {
+                                    s.get_festival_preference(f)
+                                        .unwrap_or(machine.festival_active(f))
+                                })
+                                .collect()
+                        });
                         self.packs.disable_paths(disabled_paths);
                     },
                     SettingsDirty => {
@@ -404,18 +427,18 @@ impl Engine {
                     },
                     #[cfg(deleteme)]
                     PathingToggle => {
-                        let res = self.map_settings_mut(|s| {
-                            let visible = !s.space.visible_space();
-                            s.space.visible_space = Some(visible);
-                            visible
-                        }).context("toggle paths");
+                        let res = self
+                            .map_settings_mut(|s| {
+                                let visible = !s.space.visible_space();
+                                s.space.visible_space = Some(visible);
+                                visible
+                            })
+                            .context("toggle paths");
                         #[cfg(feature = "goggles")]
                         match &res {
                             _ if !goggles::is_enabled() => (),
-                            Ok(false) =>
-                                goggles::clear_lens(),
-                            Ok(true) =>
-                                self.goggles_enter(false),
+                            Ok(false) => goggles::clear_lens(),
+                            Ok(true) => self.goggles_enter(false),
                             _ => (),
                         }
                         if let Err(e) = res {
@@ -424,19 +447,25 @@ impl Engine {
                     },
                     #[cfg(deleteme)]
                     MapToggle(cx) => {
-                        if let Err(e) = self.map_settings_mut(|s| match cx {
-                            MapContext::Minimap =>
-                                s.space.visible_map_mini = Some(!s.space.visible_minimap()),
-                            MapContext::Global =>
-                                s.space.visible_map_world = Some(!s.space.visible_worldmap()),
-                        }).context("toggle map paths") {
+                        if let Err(e) = self
+                            .map_settings_mut(|s| match cx {
+                                MapContext::Minimap => {
+                                    s.space.visible_map_mini = Some(!s.space.visible_minimap())
+                                },
+                                MapContext::Global => {
+                                    s.space.visible_map_world = Some(!s.space.visible_worldmap())
+                                },
+                            })
+                            .context("toggle map paths")
+                        {
                             log::warn!("{e:#}");
                         }
                     },
                     #[cfg(deleteme)]
                     PackLoad { pack, loader } => {
                         let pack_idx = self.packs.add_pack(pack, loader);
-                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
+                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx)
+                        {
                             log::error!("{e:#}");
                         }
                     },
@@ -448,7 +477,7 @@ impl Engine {
                     GameplayStatus { gameplay, trans } => {
                         let device_context =
                             unsafe { self.render_backend.device.GetImmediateContext() }
-                            .context("I lost my context!");
+                                .context("I lost my context!");
                         match gameplay {
                             GameplayState::Gameplay { map_id: Some(new_map_id) } => {
                                 let prev = match trans {
@@ -481,19 +510,19 @@ impl Engine {
                         }.with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))?;
                     },
                     UiResize(display_size) => match display_size {
-                        None => {
-                        },
+                        None => {},
                         Some(sz) => {
                             log::debug!("TODO: resize event to {sz:?}");
                         },
                     },
                     #[cfg(feature = "goggles")]
                     RefreshEdgeScale => {
-                        let edge_scale = self.map_settings(|s|
-                            s.space.goggles.edge_scale()
-                        );
+                        let edge_scale = self.map_settings(|s| s.space.goggles.edge_scale());
                         let edge_scale = edge_scale.map(|s| (s, &machine.map.calibration));
-                        let res = self.render_backend.depth_handler.regen_edge(&self.render_backend.device, edge_scale)
+                        let res = self
+                            .render_backend
+                            .depth_handler
+                            .regen_edge(&self.render_backend.device, edge_scale)
                             .context("generating fill geometry");
                         if let Err(e) = res {
                             log::error!("{e:#}");
@@ -502,9 +531,14 @@ impl Engine {
                     #[cfg(feature = "goggles")]
                     GogglesRefreshLens { .. } | GogglesClearLens if !goggles::is_enabled() => (),
                     #[cfg(feature = "goggles")]
-                    GogglesRefreshLens { force, delay_override } => {
+                    GogglesRefreshLens {
+                        force,
+                        delay_override,
+                    } => {
                         self.goggles_enter(force);
-                        if let (Some(delay_override), Some((delay, ..))) = (delay_override, &mut self.goggles_select_lens_delay) {
+                        if let (Some(delay_override), Some((delay, ..))) =
+                            (delay_override, &mut self.goggles_select_lens_delay)
+                        {
                             *delay = 8 * delay_override;
                         }
                     },
@@ -512,22 +546,28 @@ impl Engine {
                     GogglesClearLens => {
                         goggles::clear_lens();
                     },
-                    MarkerFeed(phase_state) => self.new_phase(phase_state)
-                        .context("marker new phase")?,
-                    MarkerReset(timer) => self.remove_phase(timer)
-                        .context("marker remove phase")?,
+                    MarkerFeed(phase_state) => {
+                        self.new_phase(phase_state).context("marker new phase")?
+                    },
+                    MarkerReset(timer) => {
+                        self.remove_phase(timer).context("marker remove phase")?
+                    },
                 }
                 Ok(true)
-            }
+            },
             Err(_error) => Ok(false),
         }
     }
 
     pub fn disable_paths(&mut self, machine: &RenderMachine, disabled_paths: HashSet<String>) {
-        self.packs.active_festivals = self.map_settings(|s| Festival::all()
-            .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
-            .collect()
-        );
+        self.packs.active_festivals = self.map_settings(|s| {
+            Festival::all()
+                .filter(|&f| {
+                    s.get_festival_preference(f)
+                        .unwrap_or(machine.festival_active(f))
+                })
+                .collect()
+        });
         self.packs.disable_paths(disabled_paths);
     }
 
@@ -544,27 +584,32 @@ impl Engine {
             visible_map,
             camera_source,
             edge_feather_scale,
-            trail_y_offset, trail_resolution, trail_width,
+            trail_y_offset,
+            trail_resolution,
+            trail_width,
             (_obscured_alpha,),
-        ) = self.map_settings(|s| (
-            (
+        ) = self.map_settings(|s| {
+            ((
                 map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
                 s.space.edge_feather_scale(),
-                s.space.trail_y_offset(), s.space.trail_resolution(), s.space.trail_width(),
+                s.space.trail_y_offset(),
+                s.space.trail_resolution(),
+                s.space.trail_width(),
                 match () {
                     #[cfg(feature = "goggles")]
                     _ => (s.space.goggles.obscured_alpha(),),
                     #[cfg(not(feature = "goggles"))]
                     _ => ((),),
                 },
-            )
-        ));
+            ))
+        });
         for _ in 0..5 {
             // try to get a couple events out of the way at a time
             // (would be nice to batch pack loads)
-            let processed = self.process_event(machine)
+            let processed = self
+                .process_event(machine)
                 .context("render engine event processing failure")?;
             if !processed {
                 break
@@ -572,8 +617,7 @@ impl Engine {
         }
         self.schedule.run(&mut self.world);
 
-        let device_context =
-            unsafe { self.render_backend.device.GetImmediateContext() }
+        let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
             .context("I lost my context!")?;
 
         if map_id.is_none() {
@@ -588,13 +632,17 @@ impl Engine {
         self.packs.update();
 
         let render_map = match visible_map {
-            Some(true) => map_ctx.map(|ctx| (ctx, super::dx11::PerspectiveHandler::map_local_bounds(machine))),
+            Some(true) => map_ctx.map(|ctx| {
+                (
+                    ctx,
+                    super::dx11::PerspectiveHandler::map_local_bounds(machine),
+                )
+            }),
             _ => None,
         };
         let render_world = match visible_space {
             None => None,
-            Some(..) if machine.get_map_open_state().is_visible() =>
-                None,
+            Some(..) if machine.get_map_open_state().is_visible() => None,
             Some(distance_max) => {
                 let depth = machine.depth_range();
                 let camera = machine.get_camera(camera_source);
@@ -626,44 +674,53 @@ impl Engine {
         };
 
         if let Some(minimap_bounds) = &minimap_bounds {
-            self.render_backend.depth_handler.setup_minimap_scissor(&device_context, minimap_bounds);
+            self.render_backend
+                .depth_handler
+                .setup_minimap_scissor(&device_context, minimap_bounds);
         }
 
         if let Some((map_ctx, local_bounds)) = render_map {
-            let (
-                fwoom,
-                trail_textured,
-                trail_scale,
-                trail_alpha,
-                poi_scale,
-                poi_alpha,
-            ) = self.map_settings(|s| (
-                s.space.map_open(),
-                s.space.trail_textured_map(map_ctx),
-                s.space.trail_scale_map(map_ctx),
-                s.space.trail_alpha_map(map_ctx),
-                s.space.poi_scale_map(map_ctx),
-                s.space.poi_alpha_map(map_ctx),
-            ));
+            let (fwoom, trail_textured, trail_scale, trail_alpha, poi_scale, poi_alpha) = self
+                .map_settings(|s| {
+                    (
+                        s.space.map_open(),
+                        s.space.trail_textured_map(map_ctx),
+                        s.space.trail_scale_map(map_ctx),
+                        s.space.trail_alpha_map(map_ctx),
+                        s.space.poi_scale_map(map_ctx),
+                        s.space.poi_alpha_map(map_ctx),
+                    )
+                });
             {
-                let vdata = &mut self.render_backend.perspective_handler.constant_buffer_mapv_data;
+                let vdata = &mut self
+                    .render_backend
+                    .perspective_handler
+                    .constant_buffer_mapv_data;
                 vdata.poi_expansion = PoiScale::with_scale(poi_scale);
                 let trail_expansion = TrailScale::with_scale(trail_scale);
                 match trail_textured {
-                    true if vdata.trail_expansion == trail_expansion && vdata.trail_texture != TrailTextureMap::UNTEXTURED => (),
+                    true if vdata.trail_expansion == trail_expansion
+                        && vdata.trail_texture != TrailTextureMap::UNTEXTURED =>
+                    {
+                        ()
+                    },
                     true => {
-                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
+                        vdata
+                            .trail_texture
+                            .set_scale_from_expansion(trail_expansion);
                         vdata.trail_texture.v_offset = 0.0;
                     },
-                    false =>
-                        vdata.trail_texture = TrailTextureMap::UNTEXTURED,
+                    false => vdata.trail_texture = TrailTextureMap::UNTEXTURED,
                 }
                 vdata.trail_expansion = trail_expansion;
             }
             {
                 // TODO: cpbuffer per type? just mixing them together for now...
                 let alpha = trail_alpha * poi_alpha;
-                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_mapp_data;
+                let pdata = &mut self
+                    .render_backend
+                    .perspective_handler
+                    .constant_buffer_mapp_data;
                 let map_open = machine.map_open();
                 pdata.colour.w = match map_open.progress_open().map(|p| p / 0.8) {
                     Some(p) if p < 1.0 => alpha * p * p * if fwoom { 1.0 } else { p },
@@ -673,15 +730,26 @@ impl Engine {
 
             if trail_alpha > 0.0 || poi_alpha > 0.0 {
                 let backend = &mut self.render_backend;
-                backend.perspective_handler.update_map(machine, local_bounds, fwoom);
+                backend
+                    .perspective_handler
+                    .update_map(machine, local_bounds, fwoom);
 
                 backend.perspective_handler.update_map_cb(&device_context);
 
                 backend.depth_handler.setup_map(&device_context);
-                backend.perspective_handler.set_map_cb(&device_context, perspective_slot);
+                backend
+                    .perspective_handler
+                    .set_map_cb(&device_context, perspective_slot);
 
                 let entities = self.packs.entities_map(local_bounds);
-                PackCollection::draw_map_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, map_ctx, entities);
+                PackCollection::draw_map_entities(
+                    &self.packs.loaded_packs,
+                    &self.packs.poi_common,
+                    &device_context,
+                    &backend,
+                    map_ctx,
+                    entities,
+                );
             }
         }
 
@@ -690,7 +758,8 @@ impl Engine {
         #[cfg(feature = "goggles")]
         let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
-        let masking = minimap_bounds.is_some() || (is_rendering && self.render_backend.depth_handler.fill_edge.is_some());
+        let masking = minimap_bounds.is_some()
+            || (is_rendering && self.render_backend.depth_handler.fill_edge.is_some());
         let masking = match render_world.is_some() && masking {
             #[cfg(feature = "goggles")]
             true if goggles_2pass => Some(true),
@@ -699,7 +768,9 @@ impl Engine {
         };
         if let Some(depth_fill) = masking {
             let backend = &mut self.render_backend;
-            backend.depth_handler.setup_depth_write(&device_context, Some(depth_fill));
+            backend
+                .depth_handler
+                .setup_depth_write(&device_context, Some(depth_fill));
 
             if let Some((shader, layout)) = backend.shaders.vertex.get("mask") {
                 layout.set(&device_context);
@@ -710,19 +781,30 @@ impl Engine {
 
         if let Some(..) = &minimap_bounds {
             if masking.is_some() {
-                self.render_backend.depth_handler.fill_clipped(&device_context);
+                self.render_backend
+                    .depth_handler
+                    .fill_clipped(&device_context);
             }
-            self.render_backend.depth_handler.set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
+            self.render_backend.depth_handler.set_scissor(
+                &device_context,
+                Box2::from_size(self.render_backend.display_size),
+            );
         }
 
         if let Some(depth_fill) = masking {
-            self.render_backend.depth_handler.fill_corners(&device_context, depth_fill);
+            self.render_backend
+                .depth_handler
+                .fill_corners(&device_context, depth_fill);
 
-            self.render_backend.depth_handler.setup_depth_write(&device_context, None);
+            self.render_backend
+                .depth_handler
+                .setup_depth_write(&device_context, None);
         }
 
         if is_rendering {
-            self.render_backend.perspective_handler.set(&device_context, perspective_slot);
+            self.render_backend
+                .perspective_handler
+                .set(&device_context, perspective_slot);
         }
 
         #[cfg(feature = "space-ecs")]
@@ -742,7 +824,7 @@ impl Engine {
                         let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
                         y
                         //Mat4::IDENTITY
-                    }
+                    },
                     _ => Mat4::IDENTITY,
                 };
                 let ibd: Vec<_> = vec![slice]
@@ -760,8 +842,12 @@ impl Engine {
                         }
                     })
                     .collect();
-                r.backing
-                    .set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &ibd)?;
+                r.backing.set_and_draw(
+                    perspective_slot,
+                    &self.render_backend.device,
+                    &device_context,
+                    &ibd,
+                )?;
             }
         }
 
@@ -774,31 +860,39 @@ impl Engine {
                 trail_alpha,
                 poi_scale,
                 poi_alpha,
-            ) = self.map_settings(|s| (
-                s.space.player_overlap_threshold(),
-                s.space.distance_fade_intensity(),
-                s.space.trail_textured_space(),
-                s.space.trail_scale_space(),
-                s.space.trail_alpha(),
-                s.space.poi_scale_space(),
-                s.space.poi_alpha(),
-            ));
+            ) = self.map_settings(|s| {
+                (
+                    s.space.player_overlap_threshold(),
+                    s.space.distance_fade_intensity(),
+                    s.space.trail_textured_space(),
+                    s.space.trail_scale_space(),
+                    s.space.trail_alpha(),
+                    s.space.poi_scale_space(),
+                    s.space.poi_alpha(),
+                )
+            });
             // TODO: cpbuffer per type? just mixing them together for now...
             let alpha = trail_alpha * poi_alpha;
             let poi_scale = {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
-                #[cfg(todo = "unused")] {
+                #[cfg(todo = "unused")]
+                {
                     vdata._poi_expansion = PoiScale::with_scale(poi_scale);
                 }
                 let trail_expansion = TrailScale::with_scale(trail_scale);
                 match trail_textured {
-                    true if vdata.trail_expansion == trail_expansion && vdata.trail_texture != TrailTextureMap::UNTEXTURED => (),
+                    true if vdata.trail_expansion == trail_expansion
+                        && vdata.trail_texture != TrailTextureMap::UNTEXTURED =>
+                    {
+                        ()
+                    },
                     true => {
-                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
+                        vdata
+                            .trail_texture
+                            .set_scale_from_expansion(trail_expansion);
                         vdata.trail_texture.v_offset = 0.0;
                     },
-                    false =>
-                        vdata.trail_texture = TrailTextureMap::UNTEXTURED,
+                    false => vdata.trail_texture = TrailTextureMap::UNTEXTURED,
                 }
                 vdata.trail_expansion = trail_expansion;
                 Vec3::splat(match () {
@@ -808,13 +902,20 @@ impl Engine {
                 })
             };
             {
-                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_pixel_data;
+                let pdata = &mut self
+                    .render_backend
+                    .perspective_handler
+                    .constant_buffer_pixel_data;
                 pdata.set_overlap_threshold(overlap_threshold);
                 pdata.set_intensity(distance_intensity);
             }
 
-            self.render_backend.perspective_handler.update_perspective(machine, camera, poi_scale);
-            self.render_backend.perspective_handler.set_feather_scale(edge_feather_scale, self.render_backend.display_size);
+            self.render_backend
+                .perspective_handler
+                .update_perspective(machine, camera, poi_scale);
+            self.render_backend
+                .perspective_handler
+                .set_feather_scale(edge_feather_scale, self.render_backend.display_size);
 
             #[cfg(feature = "goggles")]
             if goggles_2pass {
@@ -822,19 +923,32 @@ impl Engine {
                 let backend = &mut self.render_backend;
                 backend.perspective_handler.set_alpha(_obscured_alpha);
                 backend.perspective_handler.update_cb(&device_context);
-                backend.depth_handler.set_state_obscured(&device_context, true);
+                backend
+                    .depth_handler
+                    .set_state_obscured(&device_context, true);
 
                 let entities = self.packs.entities_obscured(cull);
-                PackCollection::draw_entities(&self.packs.loaded_packs, &self.packs.poi_common, &device_context, &backend, entities);
+                PackCollection::draw_entities(
+                    &self.packs.loaded_packs,
+                    &self.packs.poi_common,
+                    &device_context,
+                    &backend,
+                    entities,
+                );
 
-                backend.depth_handler.set_state_obscured(&device_context, false);
+                backend
+                    .depth_handler
+                    .set_state_obscured(&device_context, false);
             }
 
             if trail_alpha > 0.0 || poi_alpha > 0.0 {
                 self.render_backend.perspective_handler.set_alpha(alpha);
-                self.render_backend.perspective_handler.update_cb(&device_context);
+                self.render_backend
+                    .perspective_handler
+                    .update_cb(&device_context);
 
-                self.packs.draw(camera.clone(), cull, &self.render_backend, &device_context);
+                self.packs
+                    .draw(camera.clone(), cull, &self.render_backend, &device_context);
             }
         }
 
@@ -844,7 +958,9 @@ impl Engine {
 
         #[cfg(feature = "goggles")]
         if let Some(map_id) = map_id {
-            let goggles_tick = self.goggles_select_lens_delay.as_mut()
+            let goggles_tick = self
+                .goggles_select_lens_delay
+                .as_mut()
                 .map(|(d, f)| (d, *f, map_id));
             match goggles_tick {
                 _ if machine.map_open ^ machine.map_open_timestamp.is_some() => (),
@@ -852,9 +968,11 @@ impl Engine {
                     self.goggles_start(machine, force, Some(map_id));
                     let _ = self.goggles_select_lens_delay.take();
                 },
-                Some((ticks, ..)) => if let Some(ui_tick) = machine.ui_tick() {
-                    let amt = if ui_tick.is_player() { 6 } else { 1 };
-                    *ticks = ticks.saturating_sub(amt);
+                Some((ticks, ..)) => {
+                    if let Some(ui_tick) = machine.ui_tick() {
+                        let amt = if ui_tick.is_player() { 6 } else { 1 };
+                        *ticks = ticks.saturating_sub(amt);
+                    }
                 },
                 _ => (),
             }
@@ -868,8 +986,7 @@ impl Engine {
                 }
                 self.settings_dirty = false;
             },
-            Some(None) =>
-                log::debug!("settings unavailable for saving"),
+            Some(None) => log::debug!("settings unavailable for saving"),
             _ => (),
         }
 
@@ -877,8 +994,10 @@ impl Engine {
     }
 
     pub fn sender() -> Option<Sender<SpaceEvent>> {
-        crate::SPACE_SENDER.try_read()
-            .as_ref().ok()
+        crate::SPACE_SENDER
+            .try_read()
+            .as_ref()
+            .ok()
             .and_then(|s| (*s).clone())
     }
 
@@ -898,19 +1017,30 @@ impl Engine {
     }
 
     pub fn cleanup(&mut self) {
-        #[cfg(debug_assertions)] {
+        #[cfg(debug_assertions)]
+        {
             log::warn!("TODO: Please clean up the engine when the program quits");
         }
     }
 
-    pub fn gameplay_map_exit(&mut self, device_context: &Dx11Context, prev_map_id: NonZeroU32) -> anyhow::Result<()> {
+    pub fn gameplay_map_exit(
+        &mut self,
+        device_context: &Dx11Context,
+        prev_map_id: NonZeroU32,
+    ) -> anyhow::Result<()> {
         let res = self.packs.unload_map(device_context, prev_map_id.get());
 
         res
     }
 
-    pub fn gameplay_map_enter(&mut self, device_context: &Dx11Context, map_id: NonZeroU32) -> anyhow::Result<()> {
-        let res = self.packs.load_map(&self.render_backend.device, device_context, map_id.get());
+    pub fn gameplay_map_enter(
+        &mut self,
+        device_context: &Dx11Context,
+        map_id: NonZeroU32,
+    ) -> anyhow::Result<()> {
+        let res = self
+            .packs
+            .load_map(&self.render_backend.device, device_context, map_id.get());
 
         self.goggles_enter(true);
 
@@ -922,19 +1052,16 @@ impl Engine {
             Some(s) => f(Some(s)),
             None => {
                 let mut f = Some(f);
-                let res = Settings::read_with_blocking(|s| {
-                    match f.take() {
-                        Some(f) => f(Some(&s.pathing())),
-                        None => unreachable!(),
-                    }
-                }).context("map settings unavailable");
+                let res = Settings::read_with_blocking(|s| match f.take() {
+                    Some(f) => f(Some(&s.pathing())),
+                    None => unreachable!(),
+                })
+                .context("map settings unavailable");
                 if let Err(e) = &res {
                     log::warn!("{e:#}");
                 }
                 match (f, res) {
-                    (Some(f), _) => {
-                        f(None)
-                    },
+                    (Some(f), _) => f(None),
                     (None, Ok(res)) => res,
                     (None, Err(..)) => unreachable!(),
                 }
@@ -973,7 +1100,10 @@ impl Engine {
     }
 
     #[cfg(deleteme)]
-    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(&mut self, f: F) -> anyhow::Result<R> {
+    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(
+        &mut self,
+        f: F,
+    ) -> anyhow::Result<R> {
         let mut fail = None;
         let s = self.settings.get_or_insert_with(|| {
             match Settings::read_with_blocking(|s| s.pathing.clone()) {
@@ -989,9 +1119,7 @@ impl Engine {
             }
         });
         match fail {
-            Some(Some(e)) => {
-                Err(e)
-            },
+            Some(Some(e)) => Err(e),
             _ => Ok({
                 let res = f(s);
 
@@ -1016,17 +1144,33 @@ impl Engine {
     }
 
     #[cfg(feature = "goggles")]
-    fn goggles_start(&mut self, machine: &mut RenderMachine, force: bool, map_id: Option<NonZeroU32>) {
+    fn goggles_start(
+        &mut self,
+        machine: &mut RenderMachine,
+        force: bool,
+        map_id: Option<NonZeroU32>,
+    ) {
         use crate::render::goggles as render_goggles;
 
-        let settings = self.map_settings_ref(|s| s.map(|s| (
-            s.space.goggles.enabled(),
-            map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get()))
-        )));
+        let settings = self.map_settings_ref(|s| {
+            s.map(|s| {
+                (
+                    s.space.goggles.enabled(),
+                    map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get())),
+                )
+            })
+        });
 
         if let Some((true, depth)) = settings {
             if let (false, needs_setup) = render_goggles::get_state() {
-                log::debug!("Goggles setup: {}...", if needs_setup { "initializing" } else { "restarting" });
+                log::debug!(
+                    "Goggles setup: {}...",
+                    if needs_setup {
+                        "initializing"
+                    } else {
+                        "restarting"
+                    }
+                );
                 render_goggles::enable(needs_setup);
             }
 
@@ -1034,7 +1178,7 @@ impl Engine {
 
             if let Some((min, max)) = depth {
                 let reference = RenderMachine::GOGGLES_DEPTH_RANGE;
-                machine.depth_range = Some(reference.start*min..reference.end*max);
+                machine.depth_range = Some(reference.start * min..reference.end * max);
             }
         }
     }

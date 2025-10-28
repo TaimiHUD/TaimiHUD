@@ -1,5 +1,4 @@
 use {
-    anyhow::Context,
     crate::{
         controller::Controller,
         render::{
@@ -7,13 +6,17 @@ use {
             RenderState,
         },
     },
+    anyhow::Context,
     std::{
         borrow::Cow,
         future::Future,
         mem,
         pin::Pin,
         ptr,
-        sync::{atomic::{AtomicBool, Ordering}, Arc},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
         task::{self, Poll},
         time::Duration,
     },
@@ -44,7 +47,11 @@ impl Controller {
         runtime.shutdown_timeout(Self::RUNTIME_SHUTDOWN_TIMEOUT);
     }
 
-    pub async fn schedule_render<R, F: FnOnce(&mut RenderState) -> R>(prio: RenderTaskPriority, f: F) -> oneshot::Receiver<R> where
+    pub async fn schedule_render<R, F: FnOnce(&mut RenderState) -> R>(
+        prio: RenderTaskPriority,
+        f: F,
+    ) -> oneshot::Receiver<R>
+    where
         F: Send + 'static,
         R: Send + 'static,
     {
@@ -61,7 +68,11 @@ impl Controller {
         rx
     }
 
-    pub async fn run_render<R, F: FnOnce(&mut RenderState) -> R>(prio: RenderTaskPriority, f: F) -> Result<R, oneshot::error::RecvError> where
+    pub async fn run_render<R, F: FnOnce(&mut RenderState) -> R>(
+        prio: RenderTaskPriority,
+        f: F,
+    ) -> Result<R, oneshot::error::RecvError>
+    where
         F: Send + 'static,
         R: Send + 'static,
     {
@@ -77,7 +88,10 @@ impl Controller {
             let context = RemoteContext::new(handle);
             state.runtime = Some(context);
         }) as RenderTask;
-        tokio::spawn(RenderMachine::schedule_task_async(task, RenderTaskPriority::Immediate));
+        tokio::spawn(RenderMachine::schedule_task_async(
+            task,
+            RenderTaskPriority::Immediate,
+        ));
     }
     #[cfg(not(feature = "render-rt"))]
     pub(crate) fn render_inherit(&mut self) {}
@@ -98,9 +112,7 @@ impl RemoteContext {
 
     pub fn render_local_set(&mut self) -> Option<&mut Option<Box<LocalSet>>> {
         if RenderState::is_render_thread() {
-            Some(unsafe {
-                self.render_local_set_unchecked()
-            })
+            Some(unsafe { self.render_local_set_unchecked() })
         } else {
             None
         }
@@ -135,15 +147,11 @@ pub struct PollOnce<F> {
 
 impl<F> PollOnce<F> {
     pub fn new(f: F) -> Self {
-        Self {
-            f,
-        }
+        Self { f }
     }
 
     pub fn inner_mut(self: Pin<&mut Self>) -> Pin<&mut F> {
-        unsafe {
-            self.map_unchecked_mut(|this| &mut this.f)
-        }
+        unsafe { self.map_unchecked_mut(|this| &mut this.f) }
     }
 }
 
@@ -154,7 +162,11 @@ impl<F: Unpin> PollOnce<F> {
 }
 
 impl<F: Future> PollOnce<F> {
-    pub fn poll_with_limit(mut self: Pin<&mut Self>, cx: &mut task::Context, iterations: usize) -> Poll<Option<F::Output>> {
+    pub fn poll_with_limit(
+        mut self: Pin<&mut Self>,
+        cx: &mut task::Context,
+        iterations: usize,
+    ) -> Poll<Option<F::Output>> {
         for _ in 0..iterations {
             match self.as_mut().poll(cx) {
                 Poll::Pending => return Poll::Pending,
@@ -165,7 +177,10 @@ impl<F: Future> PollOnce<F> {
         Poll::Ready(None)
     }
 
-    pub fn with_limit<'a>(mut self: Pin<&'a mut Self>, mut iterations: usize) -> impl Future<Output = Option<F::Output>> + 'a {
+    pub fn with_limit<'a>(
+        mut self: Pin<&'a mut Self>,
+        mut iterations: usize,
+    ) -> impl Future<Output = Option<F::Output>> + 'a {
         futures::future::poll_fn(move |cx| {
             let res = self.as_mut().poll_with_limit(cx, iterations);
             iterations = 0;
@@ -227,17 +242,13 @@ impl<'w> ReenterWaker<'w> {
     }
 
     pub fn with_waker<R, F: FnOnce(&task::Waker) -> R>(&self, f: F) -> R {
-        let waker = unsafe {
-            task::Waker::from_raw(self.raw_waker())
-        };
+        let waker = unsafe { task::Waker::from_raw(self.raw_waker()) };
         f(&waker)
     }
 
     #[inline]
     fn waker_to_raw(waker: task::Waker) -> task::RawWaker {
-        unsafe {
-            mem::transmute(waker)
-        }
+        unsafe { mem::transmute(waker) }
     }
 
     #[inline(never)]
@@ -265,7 +276,10 @@ impl<'w> ReenterWaker<'w> {
     pub unsafe fn raw_drop(_waker: *const ()) {}
 
     pub fn wake_and_take(&mut self) {
-        let upstream_waker = mem::replace(&mut self.upstream_waker, Cow::Owned(task::Waker::noop().clone()));
+        let upstream_waker = mem::replace(
+            &mut self.upstream_waker,
+            Cow::Owned(task::Waker::noop().clone()),
+        );
         match upstream_waker {
             Cow::Owned(waker) => waker.wake(),
             // unreachable

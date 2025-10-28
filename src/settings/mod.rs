@@ -1,11 +1,11 @@
 mod arc;
-pub mod state;
-pub mod pathing;
 mod needs_update;
+pub mod pathing;
 mod progress_bar_config;
 mod settings_struct;
 mod source;
 mod sources;
+pub mod state;
 mod v1;
 
 pub use {
@@ -13,11 +13,15 @@ pub use {
     pathing::PathingSettings,
     progress_bar_config::ProgressBarSettings,
     settings_struct::{
-        MarkerAutoPlaceSettings, MarkerSettings, NeedsUpdate,
-        Settings, SettingsLock, SettingsSave,
+        MarkerAutoPlaceSettings,
+        MarkerSettings,
+        NeedsUpdate,
+        Settings,
+        SettingsLock,
+        SettingsSave,
         SquadCondition,
     },
-    source::{GitHubSource, GitHubLatestRelease, RemoteSource, DirectSource, Source},
-    sources::{SourceKind, SourcesFile, DeserializedSource},
+    source::{DirectSource, GitHubLatestRelease, GitHubSource, RemoteSource, Source},
+    sources::{DeserializedSource, SourceKind, SourcesFile},
     v1::{RemoteState, TimerSettings},
 };

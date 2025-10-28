@@ -51,10 +51,7 @@ impl TimerFile {
         Ok(glob::glob(path_glob_str)?)
     }
 
-    pub async fn load(
-        path: &PathBuf,
-        source: Option<RemoteSource>,
-    ) -> anyhow::Result<Arc<Self>> {
+    pub async fn load(path: &PathBuf, source: Option<RemoteSource>) -> anyhow::Result<Arc<Self>> {
         log::trace!("Attempting to load the timer file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
@@ -89,16 +86,16 @@ impl TimerFile {
                 Ok(res) => match res {
                     Ok(timer_file) => {
                         timer_files.push(timer_file);
-                    }
+                    },
                     Err(err) => {
                         load_errors += 1;
                         log::error!("Timer load_many error for {load_dir:?}: {err}");
-                    }
+                    },
                 },
                 Err(err) => {
                     join_errors += 1;
                     log::error!("Timer load_many join error for {load_dir:?}: {err}");
-                }
+                },
             }
         }
         log::debug!(
@@ -134,16 +131,16 @@ impl TimerFile {
                 Ok(res) => match res {
                     Ok(timer_file) => {
                         timer_files.push(timer_file);
-                    }
+                    },
                     Err(err) => {
                         load_errors += 1;
                         log::error!("Timer load_many error for {load_dir:?}: {err}");
-                    }
+                    },
                 },
                 Err(err) => {
                     join_errors += 1;
                     log::error!("Timer load_many join error for {load_dir:?}: {err}");
-                }
+                },
             }
         }
         log::debug!(
