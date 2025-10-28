@@ -1,7 +1,7 @@
 use {
     crate::{
         controller::{ControllerEvent, MapId, RtSender},
-        exports::runtime::bindings::TaimiControls,
+        exports::runtime::bindings::{CONTROLS, TaimiControls},
         render::{
             RenderEvent,
             TextFont,
@@ -138,10 +138,12 @@ impl TimersController {
     pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::TIMER_RESET) {
+            CONTROLS.notify_handled(TaimiControls::TIMER_RESET);
             self.reset().await;
         }
         let triggers = changed & TaimiControls::TIMER_TRIGGERS;
         for trigger in triggers {
+            CONTROLS.notify_handled(trigger);
             let idx = trigger.index() - TaimiControls::TIMER_TRIGGER_0.index();
             self.timer_key_trigger_idx(idx.into(), !state.intersects(trigger))
         }

@@ -1,7 +1,7 @@
 use {
     crate::{
         controller::{Controller, ControllerEvent},
-        exports::runtime::bindings::{GameControl, GameControls, TaimiControls},
+        exports::runtime::bindings::{CONTROLS, GameControl, GameControls, TaimiControls},
         render::machine::RenderTaskPriority,
         settings::{Settings, SettingsLock},
         space::{
@@ -265,12 +265,15 @@ impl PathingController {
     pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::PATHING_SPACE) {
+            CONTROLS.notify_handled(TaimiControls::PATHING_SPACE);
             self.set_visible(None, None).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MAP) {
+            CONTROLS.notify_handled(TaimiControls::PATHING_MAP);
             self.set_visible(Some(MapContext::Global), None).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MINIMAP) {
+            CONTROLS.notify_handled(TaimiControls::PATHING_MINIMAP);
             self.set_visible(Some(MapContext::Minimap), None).await;
         }
     }

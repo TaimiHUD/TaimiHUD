@@ -206,18 +206,22 @@ impl Controller {
         let pressed = state & changed;
 
         if pressed.intersects(TaimiControls::WINDOW_PRIMARY) {
+            CONTROLS.notify_handled(TaimiControls::WINDOW_PRIMARY);
             self.set_window_state(crate::WINDOW_PRIMARY, None).await;
         }
         #[cfg(feature = "markers")]
         if pressed.intersects(TaimiControls::WINDOW_MARKERS) {
+            CONTROLS.notify_handled(TaimiControls::WINDOW_MARKERS);
             self.set_window_state(crate::WINDOW_MARKERS, None).await;
         }
         #[cfg(feature = "timers")]
         if pressed.intersects(TaimiControls::WINDOW_TIMERS) {
+            CONTROLS.notify_handled(TaimiControls::WINDOW_TIMERS);
             self.set_window_state(crate::WINDOW_TIMERS, None).await;
         }
         #[cfg(feature = "space")]
         if pressed.intersects(TaimiControls::WINDOW_PATHING) {
+            CONTROLS.notify_handled(TaimiControls::WINDOW_PATHING);
             self.set_window_state(crate::WINDOW_PATHING, None).await;
         }
 

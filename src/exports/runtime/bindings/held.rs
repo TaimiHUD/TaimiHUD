@@ -86,6 +86,13 @@ impl HeldControls {
             ).unwrap_or(false)
     }
 
+    /// Controls are "virtual" keys, and some implementations (nexus quick access)
+    /// do not produce matching release events...
+    pub fn notify_handled(&self, control: TaimiControls) {
+        // TODO: could provide false to send_if_modified(), but that could anger other receivers?
+        self.notify_release(control.to_vk_dummy());
+    }
+
     pub fn notify_release(&self, vk: VIRTUAL_KEY) {
         self.controls.send_if_modified(|controls| {
             let prev_len = controls.len();
@@ -210,9 +217,11 @@ impl TaimiReceiver {
         }
     }
 
+    #[cfg(todo = "unused")]
     pub fn mark_unchanged(&mut self) {
     }
 
+    #[cfg(todo = "unused")]
     pub fn current(&self) -> &TaimiControls {
         &self.prev
     }
@@ -234,6 +243,7 @@ impl TaimiReceiver {
         Ok((*prev, latest))
     }
 
+    #[cfg(todo = "unused")]
     pub fn update(&mut self) -> Option<(TaimiControls, TaimiControls)> {
         let mut latest = HeldControls::taimi_controls(&*self.receiver.borrow_and_update());
         let prev = mem::replace(&mut self.prev, latest);
