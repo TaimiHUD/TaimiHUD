@@ -11,6 +11,7 @@ jobs:
       name: git clone
       uses: actions/checkout@v4
       with:
+        fetch-depth: 0
         submodules: true
     - id: nix-install
       name: nix install
@@ -38,6 +39,7 @@ jobs:
       name: git clone
       uses: actions/checkout@v4
       with:
+        fetch-depth: 0
         submodules: true
     - id: nix-install
       name: nix install
@@ -100,14 +102,36 @@ jobs:
       with:
         name: TaimiHUD
         path: .ci/artifacts/lib/TaimiHUD*.dll
+    - id: artifact-parse
+      name: artifact parse
+      run: "NEXUS_TAG_NAME=$(cat .ci/artifacts/share/taimi/release.nexus.tag)\necho\
+        \ \"release-nexus-tag=$NEXUS_TAG_NAME\" >> $GITHUB_OUTPUT\nif [[ -n $NEXUS_TAG_NAME\
+        \ && $NEXUS_TAG_NAME != \"${{ github.ref_name }}\" ]]; then\n  git fetch origin\
+        \ \"refs/tags/$NEXUS_TAG_NAME\" || true\n  git tag -f \"$NEXUS_TAG_NAME\"\
+        \ \"${{ github.ref }}\" &&\n  git push -f origin \"$NEXUS_TAG_NAME\" || true\n\
+        fi\n"
+      shell: bash
     - id: release-upload
       if: startsWith(github.ref, 'refs/tags/v')
       name: release
       uses: softprops/action-gh-release@v1
       with:
-        files: .ci/artifacts/lib/taimi_hud.dll
-        prerelease: ${{ contains(github.ref, '-') }}
+        files: .ci/artifacts/lib/TaimiHUD.dll
+        name: ${{ contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
+          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag &&
+          format('{0} ({1}-nexus)', github.ref_name, contains(github.ref_name, '-')
+          && steps.artifact-parse.outputs.release-nexus-tag != github.ref_name &&
+          steps.artifact-parse.outputs.release-nexus-tag) || github.ref_name }}
+        prerelease: ${{ contains(github.ref_name, '-') }}
+        tag_name: ${{ contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
+          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag ||
+          github.ref_name }}
 name: taimiHUD
 'on':
-- push
-- pull_request
+  pull_request: {}
+  push:
+    branches:
+    - '**'
+    tags:
+    - v[0-9]+.[0-9]+.[0-9]+
+    - v[0-9]+.[0-9]+.[0-9]+-**
