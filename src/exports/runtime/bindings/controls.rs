@@ -343,11 +343,10 @@ impl GameBinds {
             | KeyboardAndMouse::VK_RBUTTON
             | KeyboardAndMouse::VK_XBUTTON1
             | KeyboardAndMouse::VK_XBUTTON2 => true,
-            vk => {
+            vk =>
                 vk.0 >= KeyboardAndMouse::VK_GAMEPAD_A.0
                 //&& vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_BUTTON.0
-                && vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT.0
-            },
+                && vk.0 <= KeyboardAndMouse::VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT.0,
         }
     }
 
@@ -357,13 +356,14 @@ impl GameBinds {
         index: Option<ControlIndex>,
     ) -> Option<(VIRTUAL_KEY, KeyState)> {
         let control = control.into();
-        let bind =
-            self.key_binds.iter().chain(self.mouse_binds.iter()).find(
-                |(_k, &(c, i))| match index {
-                    Some(index) if index != i => false,
-                    _ => c == control,
-                },
-            );
+        let bind = self
+            .key_binds
+            .iter()
+            .chain(self.mouse_binds.iter())
+            .find(|(_k, &(c, i))| match index {
+                Some(index) if index != i => false,
+                _ => c == control,
+            });
         bind.map(|(&(vk, mods), _)| (VIRTUAL_KEY(vk), mods))
     }
 
@@ -388,13 +388,12 @@ impl GameBinds {
 
 impl<'de> Deserialize<'de> for GameBinds {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let binds =
-            <Vec<((u16, u32), (i32, ControlIndex))> as Deserialize>::deserialize(deserializer)?;
+        let binds = <Vec<((u16, u32), (i32, ControlIndex))> as Deserialize>::deserialize(deserializer)?;
 
         let mut out = Self::default();
         for ((vk, mods), (control, index)) in binds {
-            let control = Control::try_from(control)
-                .map_err(|e| <D::Error as serde::de::Error>::custom(e))?;
+            let control =
+                Control::try_from(control).map_err(|e| <D::Error as serde::de::Error>::custom(e))?;
             let mods = KeyState::from_bits_retain(mods);
             match Self::vk_is_button(VIRTUAL_KEY(vk)) {
                 false => {

@@ -23,12 +23,7 @@ use {
         localization::translate,
         paths,
         rtapi::RealTimeApi,
-        texture::{
-            load_texture_from_file,
-            load_texture_from_memory,
-            RawTextureReceiveCallback,
-            Texture,
-        },
+        texture::{load_texture_from_file, load_texture_from_memory, RawTextureReceiveCallback, Texture},
         AddonApi,
     },
     std::{
@@ -190,9 +185,7 @@ pub async fn press_marker_bind(
         match rt::mouse::send_input(position) {
             Ok(()) =>
             // wait for nexus to get the event, ugh
-            {
-                tokio::time::sleep(MOUSE_MOVE_DELAY).await
-            },
+                tokio::time::sleep(MOUSE_MOVE_DELAY).await,
             Err(e) => {
                 log::error!("Failed to adjust mouse position for marker placement: {e}");
                 return Err("Marker mouse move failed")
@@ -297,10 +290,9 @@ fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {
     }
 }
 
-static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback =
-    nexus::texture_receive!(|id, texture| {
-        TEXTURES.report_load(id, nexus_texture_ok(texture));
-    });
+static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
+    TEXTURES.report_load(id, nexus_texture_ok(texture));
+});
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {
     if !available() {
@@ -368,11 +360,7 @@ pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default
         return
     };
     unsafe {
-        (AddonApi::get().input_binds.register_with_string)(
-            id,
-            unsafe_keybind_cb,
-            default_keybind.as_ptr(),
-        );
+        (AddonApi::get().input_binds.register_with_string)(id, unsafe_keybind_cb, default_keybind.as_ptr());
     }
 }
 
@@ -458,9 +446,7 @@ pub fn quick_access_remove_all() {
 pub fn quick_access_remove(icon: TaimiControls) {
     use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
 
-    let Some((identifier, ..)) = quick_access_button_id(icon) else {
-        return
-    };
+    let Some((identifier, ..)) = quick_access_button_id(icon) else { return };
     if let TaimiControls::WINDOW_PRIMARY = icon {
         remove_quick_access_context_menu("TAIMI_MENU");
     }
@@ -480,19 +466,13 @@ pub(crate) fn quick_access_button_id(
         TaimiControls::WINDOW_PRIMARY => (
             "TAIMI_BUTTON",
             ("TAIMI_ICON", include_bytes!("../../icons/taimi.png")),
-            (
-                "TAIMI_ICON_HOVER",
-                include_bytes!("../../icons/taimi-hover.png"),
-            ),
+            ("TAIMI_ICON_HOVER", include_bytes!("../../icons/taimi-hover.png")),
             "primary-window-toggle",
         ),
         #[cfg(feature = "markers")]
         TaimiControls::WINDOW_MARKERS => (
             "TAIMI_MARKERS_BUTTON",
-            (
-                "TAIMI_MARKERS_ICON",
-                include_bytes!("../../icons/markers.png"),
-            ),
+            ("TAIMI_MARKERS_ICON", include_bytes!("../../icons/markers.png")),
             (
                 "TAIMI_MARKERS_ICON_HOVER",
                 include_bytes!("../../icons/markers-hover.png"),
@@ -502,10 +482,7 @@ pub(crate) fn quick_access_button_id(
         #[cfg(feature = "timers")]
         TaimiControls::WINDOW_TIMERS => (
             "TAIMI_TIMER_BUTTON",
-            (
-                "TAIMI_TIMERS_ICON",
-                include_bytes!("../../icons/timers.png"),
-            ),
+            ("TAIMI_TIMERS_ICON", include_bytes!("../../icons/timers.png")),
             (
                 "TAIMI_TIMERS_ICON_HOVER",
                 include_bytes!("../../icons/timers-hover.png"),
@@ -515,10 +492,7 @@ pub(crate) fn quick_access_button_id(
         #[cfg(feature = "space")]
         TaimiControls::WINDOW_PATHING => (
             "TAIMI_PATHING_BUTTON",
-            (
-                "TAIMI_PATHING_ICON",
-                include_bytes!("../../icons/pathing.png"),
-            ),
+            ("TAIMI_PATHING_ICON", include_bytes!("../../icons/pathing.png")),
             (
                 "TAIMI_PATHING_ICON_HOVER",
                 include_bytes!("../../icons/pathing-hover.png"),
@@ -526,9 +500,7 @@ pub(crate) fn quick_access_button_id(
             "pathing-window-toggle",
         ),
         #[cfg(feature = "space")]
-        TaimiControls::PATHING_SPACE
-        | TaimiControls::PATHING_MINIMAP
-        | TaimiControls::PATHING_MAP => (
+        TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MINIMAP | TaimiControls::PATHING_MAP => (
             match icon {
                 TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_BUTTON",
                 TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_BUTTON",

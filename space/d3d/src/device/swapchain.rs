@@ -56,12 +56,8 @@ impl SwapChain0 {
         .map(move |()| output);
         match (res, fullscreen.0) {
             (Ok(None), 0) => Ok(None),
-            (Ok(None), _) => Err(anyhow!(
-                "inconsistent fullscreen state due to missing output"
-            )),
-            (Ok(Some(..)), 0) => Err(anyhow!(
-                "inconsistent fullscreen state due to unexpected output"
-            )),
+            (Ok(None), _) => Err(anyhow!("inconsistent fullscreen state due to missing output")),
+            (Ok(Some(..)), 0) => Err(anyhow!("inconsistent fullscreen state due to unexpected output")),
             (Ok(Some(output)), _) => Ok(Some(output)),
             (Err(e), ..) => Err(e.into()),
         }
@@ -95,8 +91,7 @@ impl SwapChain0 {
 #[cfg(feature = "dx11")]
 impl SwapChain0 {
     pub fn get_device11(&self) -> anyhow::Result<crate::dx11::device::Device0> {
-        self.get_device()
-            .map(crate::dx11::device::Device0::from_d3d)
+        self.get_device().map(crate::dx11::device::Device0::from_d3d)
     }
 
     pub fn get_framebuffer11(&self, index: u32) -> anyhow::Result<crate::dx11::Texture2> {
@@ -154,8 +149,7 @@ impl_d3d! {
 
 impl SwapChain2 {
     pub fn get_maximum_frame_latency(&self) -> anyhow::Result<u32> {
-        unsafe { self.as_d3d().GetMaximumFrameLatency() }
-            .context("IDXGISwapChain2::GetMaximumFrameLatency")
+        unsafe { self.as_d3d().GetMaximumFrameLatency() }.context("IDXGISwapChain2::GetMaximumFrameLatency")
     }
 
     /// The resulting rect is always aligned at (0,0)

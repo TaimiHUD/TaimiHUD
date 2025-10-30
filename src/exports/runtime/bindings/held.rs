@@ -11,13 +11,8 @@ use {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WatcherSlot {
-    Control {
-        control: Control,
-        index: ControlIndex,
-    },
-    Taimi {
-        index: u8,
-    },
+    Control { control: Control, index: ControlIndex },
+    Taimi { index: u8 },
 }
 
 impl WatcherSlot {
@@ -44,9 +39,7 @@ impl From<ControlSlot> for WatcherSlot {
 }
 impl From<TaimiControls> for WatcherSlot {
     fn from(controls: TaimiControls) -> Self {
-        Self::Taimi {
-            index: controls.index(),
-        }
+        Self::Taimi { index: controls.index() }
     }
 }
 
@@ -155,10 +148,7 @@ pub struct ControlsReceiver {
 
 impl ControlsReceiver {
     pub fn new(receiver: watch::Receiver<HeldControlsState>) -> Self {
-        Self {
-            prev: Default::default(),
-            receiver,
-        }
+        Self { prev: Default::default(), receiver }
     }
 
     pub fn mark_unchanged(&mut self) {}
@@ -212,10 +202,7 @@ pub struct TaimiReceiver {
 
 impl TaimiReceiver {
     pub fn new(receiver: watch::Receiver<HeldControlsState>) -> Self {
-        Self {
-            prev: Default::default(),
-            receiver,
-        }
+        Self { prev: Default::default(), receiver }
     }
 
     #[cfg(todo = "unused")]
@@ -231,9 +218,7 @@ impl TaimiReceiver {
         HeldControls::taimi_controls(&self.receiver.borrow())
     }
 
-    pub async fn wait(
-        &mut self,
-    ) -> Result<(TaimiControls, TaimiControls), watch::error::RecvError> {
+    pub async fn wait(&mut self) -> Result<(TaimiControls, TaimiControls), watch::error::RecvError> {
         let mut latest = Default::default();
         let prev = &mut self.prev;
         self.receiver
@@ -258,8 +243,6 @@ impl TaimiReceiver {
 
 impl fmt::Debug for TaimiReceiver {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("TaimiReceiver")
-            .field("prev", &self.prev)
-            .finish()
+        f.debug_struct("TaimiReceiver").field("prev", &self.prev).finish()
     }
 }

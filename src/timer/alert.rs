@@ -63,11 +63,7 @@ impl BlishAlert {
     pub fn get_alerts(&self) -> Vec<TimerAlert> {
         self.timestamps
             .iter()
-            .flat_map(|&timestamp| {
-                self.alert(timestamp)
-                    .into_iter()
-                    .chain(self.warning(timestamp))
-            })
+            .flat_map(|&timestamp| self.alert(timestamp).into_iter().chain(self.warning(timestamp)))
             .collect()
     }
 }
@@ -115,10 +111,6 @@ impl TimerAlert {
         self.end(start).saturating_duration_since(Instant::now())
     }
     pub fn progress_bar_text(&self, start: Instant) -> String {
-        format!(
-            "{} - in {:.1}s",
-            self.text,
-            self.remaining(start).as_secs_f32()
-        )
+        format!("{} - in {:.1}s", self.text, self.remaining(start).as_secs_f32())
     }
 }

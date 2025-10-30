@@ -20,12 +20,9 @@ impl RenderMachine {
     pub fn schedule_task_blocking(task: RenderTask, prio: RenderTaskPriority) {
         match prio {
             #[cfg(todo)]
-            RenderTaskPriority::Immediate => {
-                tokio::task::spawn_blocking(move || {
-                    crate::RenderState::lock().task_queue.push_back(task)
-                })
-                .await
-            },
+            RenderTaskPriority::Immediate =>
+                tokio::task::spawn_blocking(move || crate::RenderState::lock().task_queue.push_back(task))
+                    .await,
             prio => {
                 let mut queue = Self::shared_task_queue().blocking_lock();
                 match prio {
@@ -39,12 +36,9 @@ impl RenderMachine {
     pub async fn schedule_task_async(task: RenderTask, prio: RenderTaskPriority) {
         match prio {
             #[cfg(todo)]
-            RenderTaskPriority::Immediate => {
-                tokio::task::spawn_blocking(move || {
-                    crate::RenderState::lock().task_queue.push_back(task)
-                })
-                .await
-            },
+            RenderTaskPriority::Immediate =>
+                tokio::task::spawn_blocking(move || crate::RenderState::lock().task_queue.push_back(task))
+                    .await,
             prio => {
                 let mut queue = Self::shared_task_queue().lock().await;
                 match prio {
@@ -77,9 +71,7 @@ impl RenderMachine {
             task(state);
         }
 
-        let Some((task, remaining)) = Self::try_pop_task() else {
-            return
-        };
+        let Some((task, remaining)) = Self::try_pop_task() else { return };
 
         task(state);
 

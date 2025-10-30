@@ -51,10 +51,7 @@ impl RasterizerState {
         AntialiasedLineEnable: BOOL(0),
     };
 
-    pub fn new_with_desc(
-        device: &Dx11Device,
-        desc: &D3D11_RASTERIZER_DESC,
-    ) -> anyhow::Result<Self> {
+    pub fn new_with_desc(device: &Dx11Device, desc: &D3D11_RASTERIZER_DESC) -> anyhow::Result<Self> {
         let mut out: Option<ID3D11RasterizerState> = None;
         unsafe { device.CreateRasterizerState(desc, Some(&mut out)) }
             .map_err(anyhow::Error::from)

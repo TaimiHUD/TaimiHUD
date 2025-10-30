@@ -8,9 +8,7 @@ impl RenderMachine {
     }
 
     pub(crate) fn publish_map_state(&self) {
-        let Ok(mut shared) = Self::shared_map_state().try_lock() else {
-            return
-        };
+        let Ok(mut shared) = Self::shared_map_state().try_lock() else { return };
 
         *shared = self.map.clone();
         drop(shared);

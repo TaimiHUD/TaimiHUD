@@ -41,10 +41,7 @@ pub enum ShaderTarget {
     )]
     /// DX11
     VertexShader_5_0,
-    #[cfg_attr(
-        feature = "serde",
-        serde(rename = "ps_5_0", alias = "pixel", alias = "Pixel")
-    )]
+    #[cfg_attr(feature = "serde", serde(rename = "ps_5_0", alias = "pixel", alias = "Pixel"))]
     /// DX11
     PixelShader_5_0,
 

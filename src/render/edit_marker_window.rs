@@ -145,11 +145,7 @@ impl EditMarkerWindowState {
         if self.map_id <= 0 {
             conditions.push(fl!("map-id-wrong"));
         }
-        let positions: Vec<_> = self
-            .markers
-            .iter()
-            .flat_map(|x| x.position.position)
-            .collect();
+        let positions: Vec<_> = self.markers.iter().flat_map(|x| x.position.position).collect();
         let pos_count = positions.len();
         if pos_count == 0 {
             conditions.push(fl!("no-positions"));
@@ -189,9 +185,8 @@ impl EditMarkerWindowState {
             if let Some(path) = &self.path {
                 if let Some(save_mode) = &self.save_mode {
                     let evt = match save_mode {
-                        MarkerSaveMode::Create => {
-                            MarkerSaveEvent::Create(ms, path.into(), self.filetype.clone().unwrap())
-                        },
+                        MarkerSaveMode::Create =>
+                            MarkerSaveEvent::Create(ms, path.into(), self.filetype.clone().unwrap()),
                         MarkerSaveMode::Append => MarkerSaveEvent::Append(ms, path.into()),
                         MarkerSaveMode::Edit => MarkerSaveEvent::Edit(
                             ms,
@@ -269,13 +264,12 @@ impl EditMarkerWindowState {
                 Some(a) => a.clone(),
                 None => match rt::rtapi() {
                     #[cfg(feature = "extension-nexus")]
-                    Ok(Some(rtapi)) => {
+                    Ok(Some(rtapi)) =>
                         if let Some(player_data) = rtapi.read_player() {
                             player_data.account_name
                         } else {
                             "".to_string()
-                        }
-                    },
+                        },
                     _ => "".to_string(),
                 },
             };
@@ -318,9 +312,7 @@ impl EditMarkerWindowState {
                     ui.dummy([4.0; 2]);
                     let description_name = fl!("description");
                     let description_input =
-                        ui.input_text_multiline(&description_name, &mut self.description, [
-                            0.0, 0.0,
-                        ]);
+                        ui.input_text_multiline(&description_name, &mut self.description, [0.0, 0.0]);
                     description_input.build();
                     self.trigger.draw_display(ui, true);
                     self.trigger.draw_take_current(ui);
@@ -331,10 +323,8 @@ impl EditMarkerWindowState {
                         use nexus::rtapi::GroupType;
 
                         if let Some(group) = rtapi.read_group() {
-                            let is_squad = matches!(
-                                group.group_type,
-                                Ok(GroupType::Squad | GroupType::RaidSquad)
-                            );
+                            let is_squad =
+                                matches!(group.group_type, Ok(GroupType::Squad | GroupType::RaidSquad));
                             if is_squad {
                                 if ui.button(&fl!("take-squad-markers")) {
                                     for (i, marker) in group.squad_markers.iter().enumerate() {
@@ -344,26 +334,16 @@ impl EditMarkerWindowState {
                                     }
                                 }
                             } else {
-                                ui.text_colored(
-                                    [1.0, 1.0, 0.0, 1.0],
-                                    &fl!("cannot-take-squad-markers"),
-                                );
+                                ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("cannot-take-squad-markers"));
                             }
                         } else {
-                            ui.text_colored(
-                                [1.0, 1.0, 0.0, 1.0],
-                                &fl!("cannot-take-squad-markers"),
-                            );
+                            ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("cannot-take-squad-markers"));
                         }
                     } else {
-                        ui.text_colored(
-                            [1.0, 1.0, 0.0, 1.0],
-                            &fl!("rt-api-required-squad-markers"),
-                        );
+                        ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("rt-api-required-squad-markers"));
                     }
                     ui.dummy([4.0; 2]);
-                    let table_flags =
-                        TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+                    let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
                     let table = ui.begin_table_header_with_flags(
                         "edit_markers",
                         [
@@ -404,8 +384,7 @@ impl EditMarkerWindowState {
                         let label_size = ui.push_item_width(-1.0);
                         let label = format!("##Marker Description {value}");
                         let meep = ui.push_id(&label);
-                        let description_input =
-                            ui.input_text(&label, &mut self.markers[i].description);
+                        let description_input = ui.input_text(&label, &mut self.markers[i].description);
                         description_input.hint(&fl!("no-description")).build();
                         label_size.pop(ui);
                         meep.pop();
@@ -427,8 +406,7 @@ impl EditMarkerWindowState {
                         if ui.button(&fl!("save-edit")) {
                             self.problems = self.validate_presave();
                             if self.problems.is_empty() {
-                                self.formatted_name =
-                                    fl!("save-edit-item", item = self.name.clone());
+                                self.formatted_name = fl!("save-edit-item", item = self.name.clone());
                                 ui.open_popup(&self.formatted_name);
                             }
                         }
@@ -461,8 +439,7 @@ impl EditMarkerWindowState {
                             };
                             let save_mode_closure = || {
                                 let mut selected = self.save_mode.clone();
-                                for item in [MarkerSaveMode::Create, MarkerSaveMode::Append].iter()
-                                {
+                                for item in [MarkerSaveMode::Create, MarkerSaveMode::Append].iter() {
                                     if Selectable::new(msm_name(item))
                                         .selected(Some(item) == self.save_mode.as_ref())
                                         .build(ui)

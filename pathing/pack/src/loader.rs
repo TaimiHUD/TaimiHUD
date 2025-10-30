@@ -140,13 +140,11 @@ impl DirectoryLoader {
 impl PackLoaderContext for DirectoryLoader {
     fn load_asset(&mut self, name: &str) -> anyhow::Result<impl LoaderAssetReader> {
         let path = self.root.join(name);
-        Ok(io::BufReader::new(fs::File::open(&path).with_context(
-            || {
-                let root = self.root.parent().unwrap_or(&self.root);
-                let path = path.strip_prefix(root).unwrap_or(&path);
-                format!("Opening {}", path.display())
-            },
-        )?))
+        Ok(io::BufReader::new(fs::File::open(&path).with_context(|| {
+            let root = self.root.parent().unwrap_or(&self.root);
+            let path = path.strip_prefix(root).unwrap_or(&path);
+            format!("Opening {}", path.display())
+        })?))
     }
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
@@ -184,11 +182,7 @@ fn visit_dir_ext<'a>(
 
         let f = f
             .into_iter()
-            .filter(move |(path, _)| {
-                path.extension()
-                    .unwrap_or_default()
-                    .eq_ignore_ascii_case(ext)
-            })
+            .filter(move |(path, _)| path.extension().unwrap_or_default().eq_ignore_ascii_case(ext))
             .map(move |(path, _)| {
                 path.relative_to(base)
                     .map_err(anyhow::Error::from)

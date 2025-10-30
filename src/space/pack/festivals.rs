@@ -45,10 +45,7 @@ impl FestivalFixup {
         ("reactif.festivals.normal", Festival::SuperAdventureBox),
         ("reactif.festivals.halloween", Festival::Halloween),
         ("reactif.festivals.pumpkin_carving", Festival::Halloween),
-        (
-            "reactif.festivals.new_afterlife_for_quaggan",
-            Festival::Halloween,
-        ),
+        ("reactif.festivals.new_afterlife_for_quaggan", Festival::Halloween),
         ("reactif.festivals.mad_maleficence", Festival::Halloween),
         ("reactif.festivals.mad_mementos", Festival::Halloween),
         ("reactif.festivals.mad_mysteries", Festival::Halloween),
@@ -58,19 +55,10 @@ impl FestivalFixup {
             "reactif.festivals.mad_king_s_herald_in_training",
             Festival::Halloween,
         ),
-        (
-            "reactif.festivals.halloween_time_trial",
-            Festival::Halloween,
-        ),
-        (
-            "reactif.festivals.champion_of_the_labyrinth",
-            Festival::Halloween,
-        ),
+        ("reactif.festivals.halloween_time_trial", Festival::Halloween),
+        ("reactif.festivals.champion_of_the_labyrinth", Festival::Halloween),
         ("reactif.festivals.courtly_service", Festival::Halloween),
-        (
-            "reactif.festivals.firecracker_finder",
-            Festival::LunarNewYear,
-        ),
+        ("reactif.festivals.firecracker_finder", Festival::LunarNewYear),
         ("reactif.festivals.lunar_new_year", Festival::LunarNewYear),
         (
             "reactif.festivals.lunar_new_year_adventure_1",
@@ -80,14 +68,8 @@ impl FestivalFixup {
             "reactif.festivals.lunar_new_year_adventure_2",
             Festival::LunarNewYear,
         ),
-        (
-            "reactif.festivals.lunar_new_year_race",
-            Festival::LunarNewYear,
-        ),
-        (
-            "reactif.festivals.wintersdaytimetrial",
-            Festival::Wintersday,
-        ),
+        ("reactif.festivals.lunar_new_year_race", Festival::LunarNewYear),
+        ("reactif.festivals.wintersdaytimetrial", Festival::Wintersday),
         (
             "reactif.festivals.winter_wonderland_mastery",
             Festival::Wintersday,
@@ -107,27 +89,15 @@ impl FestivalFixup {
         ("reactif.festivals.paper_dragon", Festival::DragonBash),
         ("reactif.festivals.drooburt", Festival::DragonBash),
         ("reactif.festivals.adventure", Festival::DragonBash),
-        (
-            "reactif.festivals.adventure.pinata_bashing",
-            Festival::DragonBash,
-        ),
-        (
-            "reactif.festivals.adventure.time_trial",
-            Festival::DragonBash,
-        ),
+        ("reactif.festivals.adventure.pinata_bashing", Festival::DragonBash),
+        ("reactif.festivals.adventure.time_trial", Festival::DragonBash),
         ("reactif.festivals.dragon_bash", Festival::DragonBash),
         ("reactif.festivals.aspect_gatherer", Festival::FourWinds),
         ("reactif.festivals.dolyak_flyer", Festival::FourWinds),
         ("reactif.festivals.man_overboard", Festival::FourWinds),
-        (
-            "reactif.festivals.master_aspect_gatherer",
-            Festival::FourWinds,
-        ),
+        ("reactif.festivals.master_aspect_gatherer", Festival::FourWinds),
         ("reactif.festivals.master_of_ceremony", Festival::FourWinds),
-        (
-            "reactif.festivals.no_one_likes_a_wet_charr",
-            Festival::FourWinds,
-        ),
+        ("reactif.festivals.no_one_likes_a_wet_charr", Festival::FourWinds),
         (
             "reactif.festivals.rise_and_fall_of_kookoochoo",
             Festival::FourWinds,
@@ -169,10 +139,7 @@ impl FestivalWindow {
 
     pub const fn try_with_timestamp(start_timestamp: u64, end_timestamp: u64) -> Option<Self> {
         match end_timestamp > start_timestamp {
-            true => Some(Self {
-                start_timestamp,
-                end_timestamp,
-            }),
+            true => Some(Self { start_timestamp, end_timestamp }),
             false => None,
         }
     }
@@ -193,9 +160,7 @@ impl FestivalWindow {
     }
 
     pub fn is_active(&self, now: SystemTime) -> bool {
-        let Some(start) = self.start() else {
-            return false
-        };
+        let Some(start) = self.start() else { return false };
 
         #[cfg(todo = "unnecessary")]
         if now < start {

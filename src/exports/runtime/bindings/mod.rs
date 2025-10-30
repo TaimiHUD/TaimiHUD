@@ -30,8 +30,7 @@ pub mod held;
 pub mod intercept;
 pub mod keys;
 
-pub static CONTROLS: LazyLock<HeldControls> =
-    LazyLock::new(|| HeldControls::new(interesting_controls()));
+pub static CONTROLS: LazyLock<HeldControls> = LazyLock::new(|| HeldControls::new(interesting_controls()));
 pub(crate) fn read_game_binds<R, F: FnOnce(&GameBinds) -> R>(f: F) -> R {
     SaveState::read_with(|s| f(&s.game_binds))
 }
@@ -197,9 +196,7 @@ fn is_interesting_bind(control: Control) -> bool {
     }
 }
 fn is_interesting(control: Control) -> bool {
-    let Some(control) = control.as_control() else {
-        return false
-    };
+    let Some(control) = control.as_control() else { return false };
     match control {
         GameControl::Miscellaneous_Interact
         | GameControl::Map_OpenClose
@@ -279,17 +276,14 @@ pub fn process_key_bound(change: KeybindChange) {
             ),
         );
     });
-    let Some(interesting_keys) = interesting_keys else {
-        return
-    };
+    let Some(interesting_keys) = interesting_keys else { return };
     CONTROLS.set_interesting_keys(interesting_keys);
 }
 
-pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> =
-    BitArray {
-        data: [const { AtomicU64::new(0) }; keys::KEY_PRESS_BITS / 64],
-        _ord: PhantomData,
-    };
+pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> = BitArray {
+    data: [const { AtomicU64::new(0) }; keys::KEY_PRESS_BITS / 64],
+    _ord: PhantomData,
+};
 
 pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(todo)]
@@ -314,9 +308,7 @@ pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
             // TODO: normalize mods elsewhere...
             KeyboardAndMouse::VK_LMENU | KeyboardAndMouse::VK_RMENU => KeyboardAndMouse::VK_MENU,
             KeyboardAndMouse::VK_LSHIFT | KeyboardAndMouse::VK_RSHIFT => KeyboardAndMouse::VK_SHIFT,
-            KeyboardAndMouse::VK_LCONTROL | KeyboardAndMouse::VK_RCONTROL => {
-                KeyboardAndMouse::VK_CONTROL
-            },
+            KeyboardAndMouse::VK_LCONTROL | KeyboardAndMouse::VK_RCONTROL => KeyboardAndMouse::VK_CONTROL,
             w => w,
         },
         _ => {
@@ -328,11 +320,7 @@ pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
 
     let mods = KeyState::from_index(vk.0.into());
     if down && mods.is_empty() {
-        let key = KeyInput {
-            down,
-            vk,
-            mods: held_mods(),
-        };
+        let key = KeyInput { down, vk, mods: held_mods() };
         if KeyIntercept::intercept_try_report(key) {
             return 0
         }
@@ -362,11 +350,7 @@ pub fn process_button_event(msg: u32, w: usize, _l: isize) -> u32 {
     };
     HELD_KEYS.set_aliased(button.0 as usize, down);
     if down {
-        let key = KeyInput {
-            down,
-            vk: button,
-            mods: held_mods(),
-        };
+        let key = KeyInput { down, vk: button, mods: held_mods() };
         if KeyIntercept::intercept_try_report(key) {
             return 0
         }

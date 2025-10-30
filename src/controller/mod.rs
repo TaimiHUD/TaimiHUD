@@ -146,9 +146,7 @@ impl Controller {
     }
 
     pub async fn run(&mut self) {
-        let sources = SourcesFile::load()
-            .await
-            .expect("Couldn't load sources file");
+        let sources = SourcesFile::load().await.expect("Couldn't load sources file");
         let sources = Arc::new(RwLock::new(sources));
         let _ = SOURCES.set(sources);
         let state = self;
@@ -280,7 +278,7 @@ impl Controller {
                 })
                 .context("Checking for addon updates");
             match res {
-                Ok((release, auth)) => {
+                Ok((release, auth)) =>
                     if auth && proceed {
                         let res = rt::update::Updater::perform(&release)
                             .await
@@ -289,17 +287,14 @@ impl Controller {
                         if let Err(e) = res {
                             log::error!("{e:#}");
                         }
-                    }
-                },
+                    },
                 Err(e) => log::error!("{e:#}"),
             }
         });
     }
 
     async fn mumblelink_tick(&mut self) -> anyhow::Result<()> {
-        let Ok(mumble) = rt::mumble_link_ptr() else {
-            return Ok(())
-        };
+        let Ok(mumble) = rt::mumble_link_ptr() else { return Ok(()) };
 
         let ui_state = mumble.read_ui_state();
 
@@ -400,10 +395,7 @@ impl Controller {
     }
 
     async fn check_updates(&mut self, everything: bool) {
-        let _ = self
-            .rt_sender
-            .send(RenderEvent::CheckingForUpdates(true))
-            .await;
+        let _ = self.rt_sender.send(RenderEvent::CheckingForUpdates(true)).await;
         let res = Settings::check_for_updates(everything)
             .await
             .context("Controller.check_updates");
@@ -411,10 +403,7 @@ impl Controller {
             Ok(_) => (),
             Err(err) => log::error!("{err:#}"),
         }
-        let _ = self
-            .rt_sender
-            .send(RenderEvent::CheckingForUpdates(false))
-            .await;
+        let _ = self.rt_sender.send(RenderEvent::CheckingForUpdates(false)).await;
     }
 
     async fn save_settings(&mut self) {
@@ -479,9 +468,7 @@ impl Controller {
                 save
             },
         };
-        BootstrapState::save_to(&save)
-            .await
-            .context("Saving boot state")
+        BootstrapState::save_to(&save).await.context("Saving boot state")
     }
     async fn commit_state_save(state: watch::Ref<'_, SaveState>) -> anyhow::Result<()> {
         let save = match state {
@@ -573,17 +560,10 @@ impl Controller {
 
         match event {
             #[cfg(feature = "timers")]
-            Timers(evt) => {
+            Timers(evt) =>
                 self.timers
-                    .handle_event(
-                        evt,
-                        &self.settings,
-                        &self.alert_sem,
-                        self.map_id,
-                        &self.rt_sender,
-                    )
-                    .await
-            },
+                    .handle_event(evt, &self.settings, &self.alert_sem, self.map_id, &self.rt_sender)
+                    .await,
             #[cfg(feature = "markers")]
             Markers(evt) => self.markers.handle_event(evt, &self.rt_sender).await?,
             #[cfg(feature = "markers")]
@@ -600,9 +580,7 @@ impl Controller {
             DoDataSourceUpdate { state } => self.do_update(state).await,
             WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
-            LoadTextureIntegrated(identifier, data) => {
-                self.load_texture_integrated(identifier, data).await
-            },
+            LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
             UiTick(tick) => match tick.is_player() {
                 #[cfg(todo)]
                 false => (),

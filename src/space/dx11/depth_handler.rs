@@ -6,22 +6,9 @@ use {
     glamour::{Box2, Point2, Size2},
     taimi_d3d::dx11::{
         buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
-        depth::{
-            ClearFlags,
-            ComparisonFunc,
-            DepthState,
-            DepthView,
-            StencilOp,
-            D3D11_DEPTH_STENCIL_DESC,
-        },
+        depth::{ClearFlags, ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
         prelude::*,
-        raster::{
-            CullMode,
-            RasterizerState,
-            RenderTargetView,
-            RenderTargetViews,
-            D3D11_RASTERIZER_DESC,
-        },
+        raster::{CullMode, RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
     },
     taimi_meta::ui::MapCalibration,
 };
@@ -55,26 +42,22 @@ impl DepthHandler {
         let framebuffer = swap_chain.get_framebuffer11(0)?;
         let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
         let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
-        let depth_stencil_state_mask =
-            DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;
+        let depth_stencil_state_mask = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL_OPAQUE)?;
         #[cfg(feature = "goggles")]
         let depth_stencil_state_write = DepthState::new_with_desc(device, &Self::DEPTH_DESC_FILL)?;
         #[cfg(feature = "goggles")]
-        let depth_stencil_state_obscured =
-            DepthState::new_with_desc(device, &Self::DEPTH_DESC_OBSCURED)?;
+        let depth_stencil_state_obscured = DepthState::new_with_desc(device, &Self::DEPTH_DESC_OBSCURED)?;
 
         let depth_stencil_buffer_desc = D3D11_TEXTURE2D_DESC {
             Width: display_size.width as _,
             Height: display_size.height as _,
             ..Self::BUFFER_DESC
         };
-        let depth_stencil_buffer =
-            Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
+        let depth_stencil_buffer = Texture2::new_empty_with_desc(device, &depth_stencil_buffer_desc)?;
         let depth_stencil_view =
             DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
         #[cfg(feature = "goggles")]
-        let _ = DEPTH_STENCIL_VIEW_VTABLE
-            .set(unsafe { &*(depth_stencil_view.view.vtable() as *const _) });
+        let _ = DEPTH_STENCIL_VIEW_VTABLE.set(unsafe { &*(depth_stencil_view.view.vtable() as *const _) });
 
         let fill_quad = Self::new_fill_quad(device, None)?;
         let rasterizer_state = RasterizerState::new_with_desc(device, &Self::RASTER_DESC)?;
@@ -85,10 +68,7 @@ impl DepthHandler {
         Ok(Self {
             render_target_view,
             depth_stencil_state: OMDepthState::with_state(depth_stencil_state, Self::STENCIL_REF),
-            depth_stencil_state_map: OMDepthState::with_state(
-                depth_stencil_state_map,
-                Self::STENCIL_REF,
-            ),
+            depth_stencil_state_map: OMDepthState::with_state(depth_stencil_state_map, Self::STENCIL_REF),
             depth_stencil_state_mask: OMDepthState::with_state(
                 depth_stencil_state_mask,
                 Self::STENCIL_REF_MASK,
@@ -121,9 +101,7 @@ impl DepthHandler {
         BackFace: Self::STENCILOP_ON,
         ..DepthState::DESC_DEFAULT
     };
-    const DEPTH_DESC_MAP: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
-        ..Self::DEPTH_DESC_IGNORE
-    };
+    const DEPTH_DESC_MAP: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC { ..Self::DEPTH_DESC_IGNORE };
     const DEPTH_DESC_IGNORE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthEnable: BOOL(0),
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
@@ -254,14 +232,8 @@ impl DepthHandler {
 
     pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
         let minimap_bounds = Box2::new(
-            Point2::new(
-                bounds.min.x.round_ties_even(),
-                bounds.min.y.round_ties_even(),
-            ),
-            Point2::new(
-                bounds.max.x.round_ties_even(),
-                bounds.max.y.round_ties_even(),
-            ),
+            Point2::new(bounds.min.x.round_ties_even(), bounds.min.y.round_ties_even()),
+            Point2::new(bounds.max.x.round_ties_even(), bounds.max.y.round_ties_even()),
         );
         self.set_scissor(device_context, minimap_bounds)
     }
@@ -309,10 +281,7 @@ impl DepthHandler {
         unsafe {
             //device_context.DrawInstanced(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_EDGE_COUNT, Self::FILL_QUAD_VERTEX_COUNT * 1, 0);
             for i in 1..=Self::FILL_QUAD_EDGE_COUNT {
-                device_context.Draw(
-                    Self::FILL_QUAD_VERTEX_COUNT,
-                    Self::FILL_QUAD_VERTEX_COUNT * i,
-                );
+                device_context.Draw(Self::FILL_QUAD_VERTEX_COUNT, Self::FILL_QUAD_VERTEX_COUNT * i);
             }
         }
     }
@@ -336,8 +305,7 @@ impl DepthHandler {
         edge_scale: Option<(f32, &MapCalibration)>,
     ) -> anyhow::Result<VertexBuffer> {
         let mut verts: Vec<_> =
-            crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL)
-                .into();
+            crate::space::pack::poi::PoiCommonRenderData::quad(crate::space::LocalContext::GLOBAL).into();
 
         if let Some((edge_scale, calibration)) = edge_scale {
             use {
@@ -393,18 +361,12 @@ impl DepthHandler {
 
             let left_w = 0.18 * edge_scale;
             let tl_h = 0.485 * edge_scale;
-            let top_left = Box2::new(
-                vec2(-1.0, 1.0 - tl_h).into(),
-                vec2(-1.0 + left_w, 1.0).into(),
-            );
+            let top_left = Box2::new(vec2(-1.0, 1.0 - tl_h).into(), vec2(-1.0 + left_w, 1.0).into());
             verts.extend_from_slice(&quad_verts(top_left));
             // b-l
             let bleft_w = 0.3 * edge_scale;
             let bl_h = 0.5 * edge_scale;
-            let bottom_left = Box2::new(
-                vec2(-1.0, -1.0).into(),
-                vec2(-1.0 + bleft_w, -1.0 + bl_h).into(),
-            );
+            let bottom_left = Box2::new(vec2(-1.0, -1.0).into(), vec2(-1.0 + bleft_w, -1.0 + bl_h).into());
             verts.extend_from_slice(&quad_verts(bottom_left));
 
             let sign = match calibration.compass_position {

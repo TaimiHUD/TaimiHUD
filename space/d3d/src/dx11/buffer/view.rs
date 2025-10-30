@@ -52,13 +52,11 @@ impl ShaderResourceView {
     ) -> anyhow::Result<Self> {
         let resource = resource.as_ref();
         let mut out = None;
-        unsafe {
-            device.CreateShaderResourceView(resource, desc.map(|d| d as *const _), Some(&mut out))
-        }
-        .map_err(anyhow::Error::from)
-        .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
-        .context("CreateShaderResourceView")
-        .map(Into::into)
+        unsafe { device.CreateShaderResourceView(resource, desc.map(|d| d as *const _), Some(&mut out)) }
+            .map_err(anyhow::Error::from)
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
+            .context("CreateShaderResourceView")
+            .map(Into::into)
     }
 
     pub fn bind_set<V>(views: V, context: &Dx11Context, slot: u32)

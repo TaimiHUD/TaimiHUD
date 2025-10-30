@@ -74,8 +74,7 @@ impl ShaderLoader {
         for shader_description_path in shader_description_paths {
             if let Some(file) = shader_description_path.as_file() {
                 if let Some(content) = file.contents_utf8() {
-                    let mut shader_description =
-                        ShaderDescription::load_from_str(content.to_string())?;
+                    let mut shader_description = ShaderDescription::load_from_str(content.to_string())?;
 
                     // copy to all shaders sharing the same source path...
                     let mut defs = None::<taimi_d3d::shader::ShaderDefinitions>;
@@ -125,9 +124,7 @@ impl ShaderLoader {
                 },
                 ShaderKind::Pixel => {
                     let shader = ShaderP::new_with_bytecode(device, &bytecode)?;
-                    shaders
-                        .pixel
-                        .insert(shader_description.identifier, Some(shader));
+                    shaders.pixel.insert(shader_description.identifier, Some(shader));
                 },
             }
         }

@@ -3,12 +3,7 @@ use {
     crate::{
         space::{
             dx11::RenderBackend,
-            resources::{
-                obj_format::material::ColouredMaterialTexture,
-                Model,
-                ObjMaterial,
-                Texture,
-            },
+            resources::{obj_format::material::ColouredMaterialTexture, Model, ObjMaterial, Texture},
         },
         timer::TimerMarker,
     },
@@ -41,11 +36,7 @@ impl ObjectBacking {
         let shaders = render_backend.shaders.pair_named("textured")?;
         let model = Model::quad();
         let model_matrix = marker.model_matrix();
-        let ibd = [InstanceBufferData {
-            world: model_matrix,
-
-            colour: Vec4::ONE,
-        }];
+        let ibd = [InstanceBufferData { world: model_matrix, colour: Vec4::ONE }];
         let render = ObjectRenderBacking {
             instance_buffer: BufferOf::<InstanceBufferData>::new_with_data(
                 &render_backend.device,
@@ -64,19 +55,13 @@ impl ObjectBacking {
                     shininess: None,
                     dissolve: None,
                     normal: None,
-                    diffuse: Some(ColouredMaterialTexture {
-                        texture,
-                        colour: Vec3::ONE,
-                    }),
+                    diffuse: Some(ColouredMaterialTexture { texture, colour: Vec3::ONE }),
                 },
                 model_matrix,
                 topology: PrimitiveTopology::TriangleList,
             },
         };
-        let marker = Self {
-            name: "Marker".to_string(),
-            render,
-        };
+        let marker = Self { name: "Marker".to_string(), render };
         Ok(marker)
     }
 

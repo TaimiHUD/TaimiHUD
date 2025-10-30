@@ -60,14 +60,11 @@ impl PerspectiveHandler {
         let constant_buffer_data = PerspectiveData::INITIAL;
         let constant_buffer = ConstantBufferV::new_with_data(device, &constant_buffer_data)?;
         let constant_buffer_pixel_data = PixelData::INITIAL;
-        let constant_buffer_pixel =
-            ConstantBufferP::new_with_data(device, &constant_buffer_pixel_data)?;
+        let constant_buffer_pixel = ConstantBufferP::new_with_data(device, &constant_buffer_pixel_data)?;
         let constant_buffer_mapv_data = MapDataV::INITIAL;
-        let constant_buffer_mapv =
-            ConstantBufferV::new_with_data(device, &constant_buffer_mapv_data)?;
+        let constant_buffer_mapv = ConstantBufferV::new_with_data(device, &constant_buffer_mapv_data)?;
         let constant_buffer_mapp_data = MapDataP::INITIAL;
-        let constant_buffer_mapp =
-            ConstantBufferP::new_with_data(device, &constant_buffer_mapp_data)?;
+        let constant_buffer_mapp = ConstantBufferP::new_with_data(device, &constant_buffer_mapp_data)?;
         Ok(Self {
             alpha: 1.0,
             constant_buffer,
@@ -108,15 +105,10 @@ impl PerspectiveHandler {
     }
 
     pub const FEATHER_SCALE_SQUARE: Vec2 = Vec2::new(0.065, 0.0825);
-    pub fn set_feather_scale(
-        &mut self,
-        feather_scale: Option<f32>,
-        display_size: Size2<ScreenSpace>,
-    ) {
+    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>, display_size: Size2<ScreenSpace>) {
         let aspect_ratio = display_size.width / display_size.height;
         let feather = feather_scale.map(|scale| {
-            let normalized =
-                Vec2::new(1.0 / aspect_ratio, aspect_ratio) * Self::FEATHER_SCALE_SQUARE;
+            let normalized = Vec2::new(1.0 / aspect_ratio, aspect_ratio) * Self::FEATHER_SCALE_SQUARE;
             scale / normalized
         });
         self.set_feather(feather, display_size)
@@ -124,10 +116,8 @@ impl PerspectiveHandler {
 
     pub fn set_feather(&mut self, feather_scale: Option<Vec2>, display_size: Size2<ScreenSpace>) {
         let viewport_size = feather_scale.is_some().then_some(display_size.to_raw());
-        self.constant_buffer_pixel_data
-            .set_viewport_size(viewport_size);
-        self.constant_buffer_pixel_data
-            .set_feather_scale(feather_scale);
+        self.constant_buffer_pixel_data.set_viewport_size(viewport_size);
+        self.constant_buffer_pixel_data.set_feather_scale(feather_scale);
     }
 
     pub fn update_cb(&self, device_context: &Dx11Context) {
@@ -170,10 +160,7 @@ impl PerspectiveHandler {
         );
         let (height_offset_below, height_offset_above) = match ctx {
             MapContext::Global => (Self::HEIGHT_OFFSET_BELOW, Self::HEIGHT_OFFSET_ABOVE),
-            MapContext::Minimap => (
-                Self::HEIGHT_OFFSET_BELOW_MINI,
-                Self::HEIGHT_OFFSET_ABOVE_MINI,
-            ),
+            MapContext::Minimap => (Self::HEIGHT_OFFSET_BELOW_MINI, Self::HEIGHT_OFFSET_ABOVE_MINI),
         };
         let (player_pos_local, ..) = machine.get_player();
         Box3::<LocalSpace>::new(
@@ -190,12 +177,7 @@ impl PerspectiveHandler {
         )
     }
 
-    pub fn update_map(
-        &mut self,
-        machine: &mut RenderMachine,
-        bounds: Box3<LocalSpace>,
-        fwoom: bool,
-    ) {
+    pub fn update_map(&mut self, machine: &mut RenderMachine, bounds: Box3<LocalSpace>, fwoom: bool) {
         let open = machine.map_open();
         let ctx = machine.is_map_visible().unwrap_or(open.into());
 
@@ -203,8 +185,7 @@ impl PerspectiveHandler {
         let centre_local = map_to_local.map(machine.map.centre_for(ctx));
 
         let map_bounds_fake = machine.map.calibration.bounds_for(ctx);
-        let bounds_screen: glamour::Rect<ScreenSpace> =
-            machine.map.calibration.map(map_bounds_fake);
+        let bounds_screen: glamour::Rect<ScreenSpace> = machine.map.calibration.map(map_bounds_fake);
 
         let (_pos, cam_front, _up) = machine.get_camera(Default::default());
         let anim_progress = open.progress().and_then(|p| fwoom.then_some(p)).map(|p| {

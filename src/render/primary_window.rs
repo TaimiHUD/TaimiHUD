@@ -96,11 +96,7 @@ impl PrimaryWindowState {
         state_errors: &mut HashMap<String, anyhow::Error>,
         standalone: bool,
     ) {
-        let Some(_tabs) = ui.tab_bar(if standalone {
-            "modules"
-        } else {
-            "modules-settings"
-        }) else {
+        let Some(_tabs) = ui.tab_bar(if standalone { "modules" } else { "modules-settings" }) else {
             return
         };
         if standalone {

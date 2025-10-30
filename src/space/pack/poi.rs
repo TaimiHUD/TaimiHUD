@@ -222,8 +222,7 @@ impl ActivePoi {
 
     pub fn instance_data(&self) -> InstanceBufferData {
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into())
-                * Mat4::from_scale(Vec3::splat(self.scale)),
+            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(self.scale)),
             colour: self.tint(),
         }
     }

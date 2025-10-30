@@ -54,11 +54,10 @@ impl KeyBindSelection {
         let _id_token = ui.push_id(vk.id);
         let name = vk.get_name();
         match action {
-            Some(action) => {
+            Some(action) =>
                 if ui.button(name) {
                     action(vk)
-                }
-            },
+                },
             None => ui.text(name),
         }
         ui.same_line();
@@ -88,12 +87,8 @@ impl KeyBindSelection {
     ) -> Option<&'a mut KeyBindState> {
         let any_configuring = self.binding_buffers.values().any(|b| b.configuring);
 
-        let binding_buffer = KeyBindState::unwrap_entry_btreemap(
-            self.binding_buffers.entry(key),
-            key,
-            current,
-            default,
-        );
+        let binding_buffer =
+            KeyBindState::unwrap_entry_btreemap(self.binding_buffers.entry(key), key, current, default);
         let mut changed = binding_buffer.draw_input(ui, key, label);
         if !changed {
             ui.same_line();
@@ -102,12 +97,7 @@ impl KeyBindSelection {
         changed.then_some(binding_buffer)
     }
 
-    pub fn do_keybind<F: FnOnce(&ArcVk)>(
-        &mut self,
-        ui: &imgui::Ui,
-        vk: &'static ArcVk,
-        action: Option<F>,
-    ) {
+    pub fn do_keybind<F: FnOnce(&ArcVk)>(&mut self, ui: &imgui::Ui, vk: &'static ArcVk, action: Option<F>) {
         let changed = self.draw_keybind(ui, vk, action);
 
         if let Some(new) = changed {
@@ -198,9 +188,7 @@ impl KeyBindState {
     }
 
     pub fn take_pending(&mut self) -> Option<Result<KeyInput, &str>> {
-        self.pending
-            .take()
-            .map(|p| p.map_err(|()| &self.name_buffer[..]))
+        self.pending.take().map(|p| p.map_err(|()| &self.name_buffer[..]))
     }
 
     pub fn binding_from_input(input: &str) -> anyhow::Result<KeyInput> {

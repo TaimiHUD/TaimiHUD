@@ -263,18 +263,13 @@ pub mod serde_imp {
             serde::{Deserialize, Deserializer, Serialize, Serializer},
         };
 
-        pub fn serialize<S: Serializer>(
-            class: &DXGI_FORMAT,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
+        pub fn serialize<S: Serializer>(class: &DXGI_FORMAT, serializer: S) -> Result<S::Ok, S::Error> {
             match DxgiFormat::try_from_d3d(*class) {
                 Ok(class) => class.serialize(serializer),
                 Err(..) => class.0.serialize(serializer),
             }
         }
-        pub fn deserialize<'de, D: Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<DXGI_FORMAT, D::Error> {
+        pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<DXGI_FORMAT, D::Error> {
             #[derive(Deserialize)]
             #[serde(untagged)]
             enum DxgiFormat {

@@ -86,8 +86,7 @@ impl TimerWindowState {
             }
             let mut colour_tokens = Vec::new();
             if let Some(fill_colour) = alert.fill_colour {
-                colour_tokens
-                    .push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
+                colour_tokens.push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
             }
             if let Some(colour) = alert.colour {
                 colour_tokens.push(ui.push_style_color(StyleColor::Text, colour.imgcolor()));
@@ -114,12 +113,7 @@ impl TimerWindowState {
         }
     }
 
-    fn stock_progress_bar(
-        settings: &ProgressBarSettings,
-        alert: &TimerAlert,
-        ui: &Ui,
-        ps: &PhaseState,
-    ) {
+    fn stock_progress_bar(settings: &ProgressBarSettings, alert: &TimerAlert, ui: &Ui, ps: &PhaseState) {
         let start = ps.start;
         let height = settings.height;
         if let Some(percent) = alert.percentage(start) {
@@ -131,8 +125,7 @@ impl TimerWindowState {
             );
             let mut colour_tokens = Vec::new();
             if let Some(fill_colour) = alert.fill_colour {
-                colour_tokens
-                    .push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
+                colour_tokens.push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
             }
             if let Some(colour) = alert.colour {
                 colour_tokens.push(ui.push_style_color(StyleColor::Text, colour.imgcolor()));

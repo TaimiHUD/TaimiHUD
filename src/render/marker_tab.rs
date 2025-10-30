@@ -88,9 +88,7 @@ impl MarkerTabState {
                 self.category_status.extend(self.markers.keys().cloned());
             }
         }
-        if self.category_status.len() != self.markers.keys().len()
-            && !self.category_status.is_empty()
-        {
+        if self.category_status.len() != self.markers.keys().len() && !self.category_status.is_empty() {
             ui.same_line();
         }
         #[allow(clippy::collapsible_if)]
@@ -128,8 +126,7 @@ impl MarkerTabState {
                 if let Some(selected_marker) = &self.marker_selection {
                     selected = Arc::ptr_eq(selected_marker, marker);
                 }
-                let element_selected =
-                    Self::draw_marker_set_in_sidebar(ui, marker, selected, height);
+                let element_selected = Self::draw_marker_set_in_sidebar(ui, marker, selected, height);
                 if element_selected && element_selected != selected {
                     self.marker_selection = Some(marker.clone());
                 }
@@ -137,10 +134,7 @@ impl MarkerTabState {
         };
         let tree_node = TreeNode::new(category_name)
             .flags(header_flags)
-            .opened(
-                self.category_status.contains(category_name),
-                Condition::Always,
-            )
+            .opened(self.category_status.contains(category_name), Condition::Always)
             .tree_push_on_open(false)
             .build(ui, category_closure);
         match tree_node {
@@ -164,10 +158,7 @@ impl MarkerTabState {
         let window_size = Vec2::from(ui.window_content_region_max());
         let widget_size = window_size.with_y(height);
         let group_token = ui.begin_group();
-        if Selectable::new(&marker.combined())
-            .selected(selected)
-            .build(ui)
-        {
+        if Selectable::new(&marker.combined()).selected(selected).build(ui) {
             selected = true;
         }
         if let Some(settings) = Settings::try_read() {
@@ -178,13 +169,7 @@ impl MarkerTabState {
                 _ => ([0.0, 1.0, 0.0, 1.0], "Enabled"),
             };
             let text_size = Vec2::from(ui.calc_text_size(text));
-            Alignment::set_cursor(
-                ui,
-                Alignment::RIGHT_MIDDLE,
-                widget_pos,
-                widget_size,
-                text_size,
-            );
+            Alignment::set_cursor(ui, Alignment::RIGHT_MIDDLE, widget_pos, widget_size, text_size);
             ui.text_colored(color, text);
         }
         ui.dummy([0.0, 4.0]);
@@ -236,14 +221,10 @@ impl MarkerTabState {
                     }
                     RenderState::font_text("ui", ui, &selected_marker_set.description);
                     ui.text(&fl!("map-id-arg", id = selected_marker_set.map_id));
-                    ui.text(&fl!(
-                        "markers-arg",
-                        count = selected_marker_set.markers.len()
-                    ));
+                    ui.text(&fl!("markers-arg", count = selected_marker_set.markers.len()));
                     #[cfg(feature = "markers-edit")]
                     if ui.button(fl!("marker-set-edit")) {
-                        let raw_inner =
-                            Arc::<MarkerSet>::unwrap_or_clone(selected_marker_set.clone());
+                        let raw_inner = Arc::<MarkerSet>::unwrap_or_clone(selected_marker_set.clone());
                         RenderState::try_send(RenderEvent::OpenEditMarkers(Some(raw_inner)));
                     }
                     ui.same_line();
@@ -295,8 +276,7 @@ impl MarkerTabState {
                         })
                         .collect();
                     ui.dummy([4.0; 2]);
-                    let table_flags =
-                        TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+                    let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
                     let table_name = format!("markers_for_{}", selected_marker_set.name);
                     let table_token = ui.begin_table_header_with_flags(
                         &table_name,
@@ -332,10 +312,7 @@ impl MarkerTabState {
                         ui.table_next_column();
                         if let Some(map) = machine.map.get() {
                             let map_position = map.calibration.map(LocalSpace::to2(position));
-                            ui.text_wrapped(format!(
-                                "({:.2}, {:.2})",
-                                map_position.x, map_position.y
-                            ));
+                            ui.text_wrapped(format!("({:.2}, {:.2})", map_position.x, map_position.y));
                             ui.table_next_column();
                             let trans = map
                                 .map_to_worldmap_for(map.context)
@@ -366,15 +343,11 @@ impl MarkerTabState {
                         false => fl!("autoplacement-enable"),
                     };
                     if ui.button(button_text) {
-                        MarkersController::try_send(MarkersEvent::MarkerToggle(
-                            selected_marker_set.id(),
-                        ));
+                        MarkersController::try_send(MarkersEvent::MarkerToggle(selected_marker_set.id()));
                     }
                     ui.dummy([4.0; 2]);
                     if ui.button(&fl!("markers-place")) {
-                        MarkersController::try_send(MarkersEvent::SetMarker(
-                            selected_marker_set.clone(),
-                        ));
+                        MarkersController::try_send(MarkersEvent::SetMarker(selected_marker_set.clone()));
                     }
                     pushy.pop();
                 } else {

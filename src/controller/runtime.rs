@@ -104,10 +104,7 @@ pub struct RemoteContext {
 
 impl RemoteContext {
     pub const fn new(handle: Handle) -> Self {
-        Self {
-            handle,
-            local_set: None,
-        }
+        Self { handle, local_set: None }
     }
 
     pub fn render_local_set(&mut self) -> Option<&mut Option<Box<LocalSet>>> {
@@ -276,10 +273,8 @@ impl<'w> ReenterWaker<'w> {
     pub unsafe fn raw_drop(_waker: *const ()) {}
 
     pub fn wake_and_take(&mut self) {
-        let upstream_waker = mem::replace(
-            &mut self.upstream_waker,
-            Cow::Owned(task::Waker::noop().clone()),
-        );
+        let upstream_waker =
+            mem::replace(&mut self.upstream_waker, Cow::Owned(task::Waker::noop().clone()));
         match upstream_waker {
             Cow::Owned(waker) => waker.wake(),
             // unreachable

@@ -89,11 +89,8 @@ pub(crate) fn extras_resubscribe() -> bool {
 
     match () {
         #[cfg(feature = "closure-ffi")]
-        _ if exports::has_extension(UNOFFICIAL_EXTRAS_SIG) == Some(true)
-            && hotload::can_reclaim() =>
-        {
-            hotload::extras_resubscribe() != (None, None, None)
-        },
+        _ if exports::has_extension(UNOFFICIAL_EXTRAS_SIG) == Some(true) && hotload::can_reclaim() =>
+            hotload::extras_resubscribe() != (None, None, None),
         _ => false,
     }
 }
@@ -129,10 +126,7 @@ pub(crate) type ExtrasCallbackFns = (
 );
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(
-    users: *const extras::user::UserInfo,
-    len: u64,
-) {
+pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(users: *const extras::user::UserInfo, len: u64) {
     exports::extras_squad_update(extras::user::to_user_info_iter(users, len))
 }
 
@@ -142,9 +136,7 @@ pub(crate) unsafe extern "C-unwind" fn cb_language_changed_raw(language: arcdps:
 }
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(
-    keybind: extras::keybinds::RawKeybindChange,
-) {
+pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
     rt::bindings::process_key_bound(keybind_change_from_raw(&keybind));
 }
 
@@ -234,14 +226,11 @@ mod hotload {
         }
 
         pub fn with_jit<J: Into<Box<Jit>>>(jit: J) -> Self {
-            Self {
-                jit: Mutex::new(Some(jit.into())),
-            }
+            Self { jit: Mutex::new(Some(jit.into())) }
         }
 
         pub fn is_registry_empty(&self) -> bool {
-            self.map_jit(|jit| Ok(jit.registry.is_empty()))
-                .unwrap_or(true)
+            self.map_jit(|jit| Ok(jit.registry.is_empty())).unwrap_or(true)
         }
 
         pub fn reclaim_or_new() -> Self {
@@ -386,10 +375,7 @@ mod hotload {
             }
         }
 
-        pub fn map_jit<R, F: FnOnce(&mut Jit) -> anyhow::Result<R>>(
-            &self,
-            f: F,
-        ) -> anyhow::Result<R> {
+        pub fn map_jit<R, F: FnOnce(&mut Jit) -> anyhow::Result<R>>(&self, f: F) -> anyhow::Result<R> {
             let mut jit = self.jit.lock();
             let jit = match jit.as_mut().map(|j| &mut **j) {
                 Ok(Some(jit)) => jit,
@@ -465,11 +451,7 @@ mod hotload {
             let offset = dst.offset_from_unsigned(alloc_r);
             self.protect_jit_memory(alloc_r, size, ProtectJitAccess::ReadWrite);
             // TODO: volatile?
-            ptr::copy_nonoverlapping(
-                stub_template.as_ptr(),
-                alloc_w.add(offset),
-                stub_template.len(),
-            );
+            ptr::copy_nonoverlapping(stub_template.as_ptr(), alloc_w.add(offset), stub_template.len());
 
             self.protect_jit_memory(alloc_r, size, ProtectJitAccess::ReadExecute);
             self.flush_instruction_cache(alloc_r, size);
@@ -505,12 +487,7 @@ mod hotload {
             }
         }
 
-        unsafe fn protect_jit_memory(
-            &self,
-            _ptr: *const u8,
-            _size: usize,
-            access: ProtectJitAccess,
-        ) {
+        unsafe fn protect_jit_memory(&self, _ptr: *const u8, _size: usize, access: ProtectJitAccess) {
             let access = match access {
                 ProtectJitAccess::ReadExecute => jit_allocator2::ProtectJitAccess::ReadExecute,
                 ProtectJitAccess::ReadWrite => jit_allocator2::ProtectJitAccess::ReadWrite,
@@ -556,10 +533,7 @@ mod hotload {
 
         pub fn with_allocator<J: Into<JitAllocator>>(alloc: J) -> Self {
             let alloc = alloc.into();
-            Self {
-                alloc,
-                registry: BTreeMap::new(),
-            }
+            Self { alloc, registry: BTreeMap::new() }
         }
     }
     impl ops::Deref for Jit {
@@ -687,11 +661,7 @@ mod hotload {
 
             unsafe {
                 if let Some(cb) = squad_update {
-                    Self::stub_fn(
-                        Self::ID_SQUAD_UPDATE,
-                        cb,
-                        super::cb_squad_update_raw as *const (),
-                    );
+                    Self::stub_fn(Self::ID_SQUAD_UPDATE, cb, super::cb_squad_update_raw as *const ());
                 }
                 if let Some(cb) = language_changed {
                     Self::stub_fn(
@@ -770,9 +740,7 @@ mod hotload {
                 #[cfg(any(target_arch = "x86_64"))]
                 _ => &__EXTRAS_STUB_TEMPLATE,
                 #[cfg(not(any(target_arch = "x86_64")))]
-                _ => {
-                    &*(__extras_stub_template as unsafe extern "C" fn() as usize as *const [u8; 8])
-                },
+                _ => &*(__extras_stub_template as unsafe extern "C" fn() as usize as *const [u8; 8]),
             }
         }
     }

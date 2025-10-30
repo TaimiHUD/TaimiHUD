@@ -22,10 +22,7 @@ use {
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
-    VisibleToggle {
-        context: Option<MapContext>,
-        set: Option<bool>,
-    },
+    VisibleToggle { context: Option<MapContext>, set: Option<bool> },
     PathingLoadAll,
     PathingUnloadAll,
     RequestDisabledPaths,
@@ -41,16 +38,12 @@ impl PathingController {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
-        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state)
-            .await;
+        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
         drop(settings_lock);
     }
 
     async fn pathing_load_all(&self) {
-        let res = self
-            .pathing_load_all_inner()
-            .await
-            .context("Loading all paths");
+        let res = self.pathing_load_all_inner().await.context("Loading all paths");
         if let Err(e) = res {
             log::error!("{e}");
         }
@@ -182,9 +175,7 @@ impl PathingController {
             engine.packs.fixup_pack(&mut pack);
             let pack = Arc::new(pack);
             let pack_idx = engine.packs.add_pack(pack, loader);
-            engine
-                .packs
-                .load_pack(&engine.render_backend.device, pack_idx)
+            engine.packs.load_pack(&engine.render_backend.device, pack_idx)
         })
         .await;
         let res = res
@@ -198,17 +189,14 @@ impl PathingController {
     async fn pathing_unload_all(&self) {
         log::info!("Unloading all paths...");
         let context = "Unloading packs from engine";
-        let res = Controller::run_render(
-            RenderTaskPriority::High,
-            move |state| -> anyhow::Result<()> {
-                let engine = match &mut state.engine {
-                    Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                    None => return Ok(()),
-                }?;
-                engine.packs.clear();
-                Ok(())
-            },
-        )
+        let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.packs.clear();
+            Ok(())
+        })
         .await;
         let res = res.map(|res| res.context(context)).context(context);
         if let Err(e) | Ok(Err(e)) = res {
@@ -222,17 +210,14 @@ impl PathingController {
         drop(settings_lock);
 
         let context = "Providing disabled paths to engine";
-        let res = Controller::run_render(
-            RenderTaskPriority::Normal,
-            move |state| -> anyhow::Result<()> {
-                let engine = match &mut state.engine {
-                    Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                    None => return Ok(()),
-                }?;
-                engine.disable_paths(&state.machine, disabled_paths);
-                Ok(())
-            },
-        )
+        let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.disable_paths(&state.machine, disabled_paths);
+            Ok(())
+        })
         .await;
         let res = res.map(|res| res.context(context)).context(context);
         if let Err(e) | Ok(Err(e)) = res {
@@ -253,9 +238,7 @@ impl PathingController {
     }
 
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
-        let Ok(mut settings) = Settings::async_write().await else {
-            return
-        };
+        let Ok(mut settings) = Settings::async_write().await else { return };
 
         let pathing = settings.pathing_mut();
         let (is_visible, out) = match context {
@@ -267,20 +250,15 @@ impl PathingController {
                 pathing.space.visible_minimap(),
                 &mut pathing.space.visible_map_mini,
             ),
-            None => (
-                pathing.space.visible_space(),
-                &mut pathing.space.visible_space,
-            ),
+            None => (pathing.space.visible_space(), &mut pathing.space.visible_space),
         };
         let set = set.unwrap_or(!is_visible);
         *out = Some(set);
 
         #[cfg(feature = "goggles")]
         match (context, set) {
-            (None, true) => Engine::try_send(SpaceEvent::GogglesRefreshLens {
-                force: false,
-                delay_override: Some(2),
-            }),
+            (None, true) =>
+                Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) }),
             (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
             _ => (),
         }
@@ -332,14 +310,8 @@ impl PathingEvent {
         PathingController::try_send(self);
     }
 
-    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle {
-        context: None,
-        set: None,
-    };
+    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None };
     pub const fn visible_toggle(context: MapContext) -> Self {
-        Self::VisibleToggle {
-            context: Some(context),
-            set: None,
-        }
+        Self::VisibleToggle { context: Some(context), set: None }
     }
 }

@@ -77,11 +77,10 @@ impl RuntimeMarkers {
     pub fn append() -> anyhow::Result<()> {
     }*/
 
-    pub async fn load_many(
-        load_dir: &Path,
-        simultaneous_limit: usize,
-    ) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!("Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}.");
+    pub async fn load_many(load_dir: &Path, simultaneous_limit: usize) -> anyhow::Result<Vec<Arc<Self>>> {
+        log::debug!(
+            "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
+        );
         let mut marker_files = Vec::new();
         if exists(load_dir)? {
             let mut set = JoinSet::new();
@@ -146,11 +145,7 @@ impl RuntimeMarkers {
     pub async fn save(&self, path: &PathBuf) -> anyhow::Result<()> {
         log::debug!("MarkerFormat: Saving to \"{}\".", path.display());
         let settings_str = serde_json::to_string(&self.file)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(path)
-            .await?;
+        let mut file = OpenOptions::new().write(true).truncate(true).open(path).await?;
         file.write_all(settings_str.as_bytes()).await?;
         file.flush().await?;
         Ok(())
@@ -174,11 +169,7 @@ impl RuntimeMarkers {
         Ok(())
     }
 
-    pub async fn delete(
-        path: &PathBuf,
-        category: Option<String>,
-        idx: usize,
-    ) -> anyhow::Result<()> {
+    pub async fn delete(path: &PathBuf, category: Option<String>, idx: usize) -> anyhow::Result<()> {
         let mut file = Self::load_arcless(path).await?;
         file.remove(path, category, idx).await?;
         file.save(path).await?;
@@ -235,7 +226,7 @@ impl RuntimeMarkers {
 
     pub async fn append_raw(&mut self, ms: MarkerSet) -> anyhow::Result<()> {
         match &mut self.file {
-            MarkerFormats::Community(f) => {
+            MarkerFormats::Community(f) =>
                 if let Some(mscat) = &ms.category {
                     let category = match f.categories.iter_mut().find(|c| &c.name == mscat) {
                         Some(c) => c,
@@ -247,35 +238,28 @@ impl RuntimeMarkers {
                             f.categories
                                 .iter_mut()
                                 .find(|c| &c.name == mscat)
-                                .ok_or(anyhow!(
-                                    "Can't find the category \"{}\" we should've made",
-                                    mscat
-                                ))?
+                                .ok_or(anyhow!("Can't find the category \"{}\" we should've made", mscat))?
                         },
                     };
                     category.marker_sets.push(ms);
                     f.last_edit = Utc::now();
                 } else {
-                    let category = match f.categories.iter_mut().find(|c| &c.name == "No category")
-                    {
-                        Some(c) => c,
-                        None => {
-                            f.categories.push(MarkerCategory {
-                                name: "No category".to_string(),
-                                marker_sets: Vec::new(),
-                            });
-                            f.categories
-                                .iter_mut()
-                                .find(|c| &c.name == "No category")
-                                .ok_or(anyhow!(
-                                    "Can't find the category \"No category\" we should've made"
-                                ))?
-                        },
-                    };
+                    let category =
+                        match f.categories.iter_mut().find(|c| &c.name == "No category") {
+                            Some(c) => c,
+                            None => {
+                                f.categories.push(MarkerCategory {
+                                    name: "No category".to_string(),
+                                    marker_sets: Vec::new(),
+                                });
+                                f.categories.iter_mut().find(|c| &c.name == "No category").ok_or(
+                                    anyhow!("Can't find the category \"No category\" we should've made"),
+                                )?
+                            },
+                        };
                     category.marker_sets.push(ms);
                     f.last_edit = Utc::now();
-                }
-            },
+                },
             MarkerFormats::Taimi(t) => {
                 t.push(ms);
             },
@@ -293,11 +277,7 @@ impl RuntimeMarkers {
         Ok(())
     }
 
-    pub async fn create(
-        path: &PathBuf,
-        format: MarkerFiletype,
-        ms: MarkerSet,
-    ) -> anyhow::Result<()> {
+    pub async fn create(path: &PathBuf, format: MarkerFiletype, ms: MarkerSet) -> anyhow::Result<()> {
         let markers_dir = ADDON_DIR.join("markers");
         if !exists(&markers_dir)? {
             create_dir_all(&markers_dir).await?;
@@ -347,7 +327,7 @@ impl RuntimeMarkers {
         let mut finalized: HashMap<String, Vec<Arc<MarkerSet>>> = HashMap::new();
         for pack in marker_packs {
             match &pack.file {
-                MarkerFormats::Community(f) => {
+                MarkerFormats::Community(f) =>
                     for category in &f.categories {
                         let category_name = category.name.clone();
                         let entry = finalized.entry(category_name.clone()).or_default();
@@ -359,14 +339,11 @@ impl RuntimeMarkers {
                             let marker_set_arc = Arc::new(marker_set_data);
                             entry.push(marker_set_arc);
                         }
-                    }
-                },
-                MarkerFormats::Taimi(t) => {
+                    },
+                MarkerFormats::Taimi(t) =>
                     for (i, marker_set) in t.iter().enumerate() {
-                        let category_name = marker_set
-                            .category
-                            .clone()
-                            .unwrap_or("No category".to_string());
+                        let category_name =
+                            marker_set.category.clone().unwrap_or("No category".to_string());
                         let entry = finalized.entry(category_name.clone()).or_default();
                         let mut marker_set_data = marker_set.clone();
                         marker_set_data.category = Some(category_name.clone());
@@ -374,15 +351,11 @@ impl RuntimeMarkers {
                         marker_set_data.idx = Some(i);
                         let marker_set_arc = Arc::new(marker_set_data);
                         entry.push(marker_set_arc);
-                    }
-                },
+                    },
                 MarkerFormats::Integrated(c) => {
                     for (i, marker_set) in c.squad_marker_preset.iter().enumerate() {
                         // extend their format by allowing the Category :)
-                        let category_name = marker_set
-                            .category
-                            .clone()
-                            .unwrap_or("Integrated".to_string());
+                        let category_name = marker_set.category.clone().unwrap_or("Integrated".to_string());
                         let entry = finalized.entry(category_name.clone()).or_default();
                         let mut marker_set_data = marker_set.clone();
                         marker_set_data.category = Some(category_name.clone());
@@ -547,16 +520,11 @@ impl From<MarkerPosition> for Position {
 
 impl From<MarkerPosition> for Polytope {
     fn from(local: MarkerPosition) -> Self {
-        Polytope::NSphere {
-            center: local.into(),
-            radius: 15.0,
-        }
+        Polytope::NSphere { center: local.into(), radius: 15.0 }
     }
 }
 
-#[derive(
-    Hash, Eq, PartialEq, Serialize_repr, Deserialize_repr, FromRepr, Display, Debug, Copy, Clone,
-)]
+#[derive(Hash, Eq, PartialEq, Serialize_repr, Deserialize_repr, FromRepr, Display, Debug, Copy, Clone)]
 #[repr(u8)]
 pub enum MarkerType {
     // Schema reference: https://github.com/manlaan/BlishHud-CommanderMarkers/blob/bhud-static/Manlaan.CommanderMarkers/README.md?plain=1#L69-L78

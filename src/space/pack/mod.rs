@@ -40,10 +40,7 @@ pub trait MarkerAttributesExt {
 impl MarkerAttributesExt for MarkerAttributes {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>> {
         match &self.schedule {
-            Some(schedule) => schedule
-                .parse()
-                .context("parsing marker schedule")
-                .map(Some),
+            Some(schedule) => schedule.parse().context("parsing marker schedule").map(Some),
             None => Ok(None),
         }
     }

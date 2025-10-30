@@ -138,11 +138,10 @@ pub fn addon_dir() -> &'static Path {
     let fallback = addon_dir_fallback();
     let saved = BootstrapState::read_with(|state| {
         // as long as what we saved still seems valid, use it...
-        let addon_dir = state.addon_dir.as_ref().and_then(|addon_dir| {
-            fs::metadata(Path::new(addon_dir))
-                .is_ok()
-                .then_some(addon_dir)
-        });
+        let addon_dir = state
+            .addon_dir
+            .as_ref()
+            .and_then(|addon_dir| fs::metadata(Path::new(addon_dir)).is_ok().then_some(addon_dir));
         match addon_dir {
             Some(addon_dir) => try_init_addon_dir(false, move || Some(addon_dir.into())),
             None => fallback,
@@ -175,9 +174,7 @@ pub(crate) fn try_init_addon_dir<F: FnOnce() -> Option<PathBuf>>(
         true => ADDON_DIR.write().map_err(drop),
         false => ADDON_DIR.try_write().map_err(drop),
     };
-    let Ok(mut path) = path else {
-        return addon_dir_fallback()
-    };
+    let Ok(mut path) = path else { return addon_dir_fallback() };
     if let Some(path) = *path {
         return path
     }
@@ -188,9 +185,7 @@ pub(crate) fn try_init_addon_dir<F: FnOnce() -> Option<PathBuf>>(
         addon_dir_fallback()
     }
 }
-pub(crate) fn init_addon_dir<D: Into<Cow<'static, Path>> + AsRef<Path>>(
-    addon_dir: D,
-) -> &'static Path {
+pub(crate) fn init_addon_dir<D: Into<Cow<'static, Path>> + AsRef<Path>>(addon_dir: D) -> &'static Path {
     if let Ok(mut path) = ADDON_DIR.write() {
         if let Some(path) = *path {
             if path == addon_dir.as_ref() {
@@ -235,10 +230,7 @@ pub fn detect_language() -> RuntimeResult<Cow<'static, str>> {
 
 pub fn reload_language() -> RuntimeResult {
     let saved = BootstrapState::read_with(|state: &BootstrapState| {
-        state
-            .language
-            .as_ref()
-            .and_then(|l| l.parse::<Language>().ok())
+        state.language.as_ref().and_then(|l| l.parse::<Language>().ok())
     });
     let language;
     let language = match &saved {
@@ -395,9 +387,7 @@ pub async fn invoke_marker_bind(
     position: Option<MousePosition>,
 ) -> RuntimeResult<()> {
     use crate::settings::{InvokeMethod, Settings};
-    if let Ok(false) =
-        mumble_link_ptr().map(|ml| ml.read_ui_state().contains(UiState::GAME_HAS_FOCUS))
-    {
+    if let Ok(false) = mumble_link_ptr().map(|ml| ml.read_ui_state().contains(UiState::GAME_HAS_FOCUS)) {
         return Err("Game unfocused")
     }
 
@@ -537,9 +527,7 @@ pub async fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<
 pub fn window_handle() -> RuntimeResult<HWND> {
     let sc = dxgi_swap_chain()?.ok_or("swap chain unavailable")?;
 
-    let desc = sc
-        .get_desc0()
-        .map_err(|_| "swap chain descriptor missing")?;
+    let desc = sc.get_desc0().map_err(|_| "swap chain descriptor missing")?;
 
     match desc.OutputWindow.is_invalid() {
         false => Ok(desc.OutputWindow),
@@ -593,8 +581,7 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(
         },
     };
 
-    let res =
-        taimi_input::win::window_send_inputs(hwnd, inputs).context("failed to send window inputs");
+    let res = taimi_input::win::window_send_inputs(hwnd, inputs).context("failed to send window inputs");
     if let Err(e) = res {
         ::log::warn!("{e:#}");
         return Err("SendInput failed")
@@ -617,9 +604,7 @@ pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
         | WindowsAndMessaging::WM_MBUTTONDOWN
         | WindowsAndMessaging::WM_XBUTTONUP
         | WindowsAndMessaging::WM_XBUTTONDOWN => return bindings::process_button_event(msg, w, l),
-        WindowsAndMessaging::WM_DESTROY
-        | WindowsAndMessaging::WM_QUIT
-        | WindowsAndMessaging::WM_CLOSE => {
+        WindowsAndMessaging::WM_DESTROY | WindowsAndMessaging::WM_QUIT | WindowsAndMessaging::WM_CLOSE => {
             // nexus will unload you immediately after, and need to make a point not to take too long waiting for a render cb that won't come
             notify_quit();
         },

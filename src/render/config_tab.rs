@@ -98,11 +98,7 @@ impl ConfigTabState {
 
         #[cfg(feature = "extension-nexus")]
         let nexus_ui = || {
-            use crate::exports::nexus::{
-                quick_access_add,
-                quick_access_button_id,
-                quick_access_remove,
-            };
+            use crate::exports::nexus::{quick_access_add, quick_access_button_id, quick_access_remove};
 
             if let Some(settings) = Settings::try_read() {
                 self.quick_access_icons_visible = settings.quick_access_visible.clone();
@@ -112,9 +108,7 @@ impl ConfigTabState {
             let prior_visible = self.quick_access_icons_visible;
             let mut changed = false;
             for (i, icon) in TaimiControls::QUICK_ACCESS_ICONS.into_iter().enumerate() {
-                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else {
-                    continue
-                };
+                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else { continue };
                 if i > 0 && i % 4 != 0 {
                     ui.same_line();
                 }
@@ -241,30 +235,30 @@ impl ConfigTabState {
                 &fl!("stock-imgui-progress-bar"),
                 &mut timer_window_state.progress_bar.stock,
             ) {
-                TimersController::try_send(TimersEvent::ProgressBarStyle(
-                    ProgressBarStyleChange::Stock(timer_window_state.progress_bar.stock),
-                ));
+                TimersController::try_send(TimersEvent::ProgressBarStyle(ProgressBarStyleChange::Stock(
+                    timer_window_state.progress_bar.stock,
+                )));
             };
             if ui.checkbox(&fl!("shadow"), &mut timer_window_state.progress_bar.shadow) {
-                TimersController::try_send(TimersEvent::ProgressBarStyle(
-                    ProgressBarStyleChange::Shadow(timer_window_state.progress_bar.shadow),
-                ));
+                TimersController::try_send(TimersEvent::ProgressBarStyle(ProgressBarStyleChange::Shadow(
+                    timer_window_state.progress_bar.shadow,
+                )));
             }
             if ui.checkbox(
                 &fl!("centre-text-after-icon"),
                 &mut timer_window_state.progress_bar.centre_after,
             ) {
-                TimersController::try_send(TimersEvent::ProgressBarStyle(
-                    ProgressBarStyleChange::Centre(timer_window_state.progress_bar.centre_after),
-                ));
+                TimersController::try_send(TimersEvent::ProgressBarStyle(ProgressBarStyleChange::Centre(
+                    timer_window_state.progress_bar.centre_after,
+                )));
             }
             if Slider::new(&fl!("height"), 8.0, 256.0)
                 .display_format("%.0f")
                 .build(ui, &mut timer_window_state.progress_bar.height)
             {
-                TimersController::try_send(TimersEvent::ProgressBarStyle(
-                    ProgressBarStyleChange::Height(timer_window_state.progress_bar.height),
-                ));
+                TimersController::try_send(TimersEvent::ProgressBarStyle(ProgressBarStyleChange::Height(
+                    timer_window_state.progress_bar.height,
+                )));
             }
             let font_closure = || {
                 let mut selected = timer_window_state.progress_bar.font.clone();
@@ -323,8 +317,7 @@ impl ConfigTabState {
     pub fn draw_gamebinds(&mut self, ui: &Ui) {
         with_i18n!("gamebind-notice", |msg| ui.text_wrapped(msg));
 
-        self.bindings
-            .do_gamebinds(ui, bindings::interesting_controls());
+        self.bindings.do_gamebinds(ui, bindings::interesting_controls());
         ui.separator();
         #[cfg(feature = "extension-nexus")]
         if self.gamebind_invoke.is_none() {
@@ -333,18 +326,15 @@ impl ConfigTabState {
         #[cfg(feature = "extension-nexus")]
         if let Some(gamebind_invoke) = &mut self.gamebind_invoke {
             // TODO: InvokeMethod dropdown
-            if crate::exports::runtime::nexus_available()
-                && ui.checkbox("Precise Markers", gamebind_invoke)
+            if crate::exports::runtime::nexus_available() && ui.checkbox("Precise Markers", gamebind_invoke)
             {
                 let _ = Settings::write_with_blocking(|settings| {
-                    settings.arc_mut().gamebind_invoke =
-                        gamebind_invoke.then_some(Default::default())
+                    settings.arc_mut().gamebind_invoke = gamebind_invoke.then_some(Default::default())
                 });
             }
         }
         if self.gamebind_invoke == Some(true) || !rt::nexus_available() {
-            self.bindings
-                .do_gamebinds(ui, bindings::interesting_keybinds());
+            self.bindings.do_gamebinds(ui, bindings::interesting_keybinds());
         }
     }
 }
@@ -392,12 +382,9 @@ impl ConfigUpdateState {
             .iter()
             .position(|opt| opt == &self.preference.as_option())
             .unwrap_or(0);
-        let auto_update = ui.combo(
-            "Auto-update",
-            &mut index,
-            &UpdatePreference::OPTIONS,
-            |option| option.as_str().into(),
-        );
+        let auto_update = ui.combo("Auto-update", &mut index, &UpdatePreference::OPTIONS, |option| {
+            option.as_str().into()
+        });
         let mut new_pref = None;
         if auto_update {
             new_pref = UpdatePreference::OPTIONS.get(index).cloned();
@@ -465,10 +452,7 @@ impl ConfigUpdateState {
                         .update_preference
                         .get_or_insert_with(|| UpdatePreference::ASK),
                 };
-                if let Some(latest) = auth_toggled
-                    .then_some(self.remote_version.as_ref())
-                    .flatten()
-                {
+                if let Some(latest) = auth_toggled.then_some(self.remote_version.as_ref()).flatten() {
                     pref.authorize_update(latest.clone(), authorized);
                 }
             });

@@ -66,7 +66,9 @@ impl TimerFile {
         load_dir: &Path,
         simultaneous_limit: usize,
     ) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!("Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}.");
+        log::debug!(
+            "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
+        );
         let mut set = JoinSet::new();
         let semaphore = Arc::new(Semaphore::new(simultaneous_limit));
         let mut paths = Self::get_paths(load_dir)?;
@@ -110,7 +112,9 @@ impl TimerFile {
         source: RemoteSource,
         simultaneous_limit: usize,
     ) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!("Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}.");
+        log::debug!(
+            "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
+        );
         let mut set = JoinSet::new();
         let semaphore = Arc::new(Semaphore::new(simultaneous_limit));
         let mut paths = Self::get_paths(load_dir)?;

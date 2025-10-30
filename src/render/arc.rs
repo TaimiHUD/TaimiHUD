@@ -106,10 +106,7 @@ impl ArcRenderState {
                     ui,
                     binding,
                     Some(|vk: &ArcVk| {
-                        TimersController::try_send(TimersEvent::TimerKeyTrigger(
-                            vk.id.into(),
-                            false,
-                        ))
+                        TimersController::try_send(TimersEvent::TimerKeyTrigger(vk.id.into(), false))
                     }),
                 );
             }

@@ -111,10 +111,7 @@ pub unsafe trait D3d11ContextBindableVertexBuffer:
     D3dContextBindableVertexBuffer<Dx11Context>
 {
 }
-unsafe impl<T> D3d11ContextBindableVertexBuffer for T where
-    T: D3dContextBindableVertexBuffer<Dx11Context>
-{
-}
+unsafe impl<T> D3d11ContextBindableVertexBuffer for T where T: D3dContextBindableVertexBuffer<Dx11Context> {}
 
 unsafe impl D3dContextBindableVertexBuffer<Dx11Context> for VertexBuffer {
     fn vertex_buffer_ptr(&self) -> *mut ffi::c_void {

@@ -17,9 +17,7 @@ pub struct SaveState {
 }
 
 impl SaveState {
-    pub const EMPTY: Self = Self {
-        game_binds: GameBinds::new(),
-    };
+    pub const EMPTY: Self = Self { game_binds: GameBinds::new() };
 
     pub fn new() -> Self {
         Self::EMPTY
@@ -75,9 +73,7 @@ impl SaveState {
         use tokio::{fs, io::AsyncWriteExt};
         let _ = fs::create_dir_all(rt::addon_dir_fallback()).await;
         let mut f = fs::File::create(path).await?;
-        f.write_all(data.as_bytes())
-            .await
-            .context("writing save state")
+        f.write_all(data.as_bytes()).await.context("writing save state")
     }
 
     pub fn read_with<R, F: FnOnce(&Self) -> R>(f: F) -> R {

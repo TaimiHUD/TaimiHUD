@@ -94,10 +94,7 @@ impl Texture {
         };
         let samples: &[Vec4] = unsafe {
             use std::slice::from_raw_parts;
-            from_raw_parts(
-                raw_rgba_image.as_ptr() as *const Vec4,
-                raw_rgba_image.len() / 4,
-            )
+            from_raw_parts(raw_rgba_image.as_ptr() as *const Vec4, raw_rgba_image.len() / 4)
         };
         let texture = Texture2::new_with_desc(device, &desc, Some(samples))?;
         let view = TextureView2::new_with_texture2(device, &texture, None)?;
@@ -190,11 +187,7 @@ impl Texture {
         }?;
         let view = TextureView2::new_with_texture2(device, &texture, None)?;
 
-        let texture = Texture {
-            texture,
-            view,
-            dimensions,
-        };
+        let texture = Texture { texture, view, dimensions };
         STATS_TEXTURE_COUNT.increment(1);
         STATS_TEXTURE_SIZE.increment_by(|| texture.texture_byte_size());
 
@@ -215,9 +208,7 @@ impl Texture {
             Ok(DxgiFormat::R32G32B32A32Float) => 16,
             Ok(DxgiFormat::R32G32B32Float) => 12,
             Ok(DxgiFormat::R32G32Float) => 8,
-            Ok(
-                DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm,
-            ) => 4,
+            Ok(DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm) => 4,
             _f => {
                 log::debug!("unrecognized texture DXGI_FORMAT {_f:?}");
                 4

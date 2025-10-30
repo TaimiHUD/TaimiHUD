@@ -61,12 +61,7 @@ use {
     std::mem,
     windows::{
         core::InterfaceRef,
-        Win32::Graphics::Direct3D11::{
-            ID3D11Buffer,
-            ID3D11DeviceChild,
-            ID3D11Resource,
-            ID3D11View,
-        },
+        Win32::Graphics::Direct3D11::{ID3D11Buffer, ID3D11DeviceChild, ID3D11Resource, ID3D11View},
     },
 };
 

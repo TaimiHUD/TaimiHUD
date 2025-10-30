@@ -105,9 +105,7 @@ impl TextureLoader {
     pub fn read_loader(
         &self,
     ) -> anyhow::Result<std::sync::RwLockReadGuard<'_, Option<TextureLoaderHandle>>> {
-        self.loader
-            .read()
-            .map_err(|_| anyhow!("texture loader poisoned"))
+        self.loader.read().map_err(|_| anyhow!("texture loader poisoned"))
     }
 
     pub async fn report_begin_load(
@@ -119,9 +117,8 @@ impl TextureLoader {
             let mut textures = self.textures.write().await;
             let entry = textures.entry(key.clone());
             match entry {
-                hash_map::Entry::Occupied(e) if !e.get().can_load() => {
-                    return Err(anyhow!("duplicate texture load request"))
-                },
+                hash_map::Entry::Occupied(e) if !e.get().can_load() =>
+                    return Err(anyhow!("duplicate texture load request")),
                 hash_map::Entry::Occupied(mut e) => {
                     e.insert(TextureSlot::Loading);
                 },
@@ -217,11 +214,7 @@ impl TextureLoader {
         .await
     }
 
-    pub fn report_load<K: Into<Arc<str>>, T: Into<TextureSlot>>(
-        &self,
-        key: K,
-        texture: anyhow::Result<T>,
-    ) {
+    pub fn report_load<K: Into<Arc<str>>, T: Into<TextureSlot>>(&self, key: K, texture: anyhow::Result<T>) {
         let key = key.into();
         let slot = match texture {
             Ok(slot) => slot.into(),
@@ -311,11 +304,7 @@ impl TextureLoader {
 
     #[cfg(feature = "texture-loader")]
     pub fn shutdown(&self) -> anyhow::Result<thread::JoinHandle<anyhow::Result<()>>> {
-        let loader = self
-            .loader
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        let loader = self.loader.write().unwrap_or_else(|e| e.into_inner()).take();
         let loader = match loader {
             Some(loader) => loader,
             None => return Err(anyhow!("texture loader already shutdown?")),
@@ -363,17 +352,14 @@ impl TextureLoader {
                     log::info!("texture loader received shutdown request");
                     break
                 },
-                TextureRequest::LoadFile { key, .. } | TextureRequest::LoadBytes { key, .. } => {
-                    key.clone()
-                },
+                TextureRequest::LoadFile { key, .. } | TextureRequest::LoadBytes { key, .. } => key.clone(),
             };
 
             let res = request.process_decode();
             log::debug!("texture loader decode result: {:?}", res.as_ref().map(drop));
 
-            let sent = sender.blocking_send(
-                res.unwrap_or_else(|error| TextureResponse::DecodeFailed { key, error }),
-            );
+            let sent = sender
+                .blocking_send(res.unwrap_or_else(|error| TextureResponse::DecodeFailed { key, error }));
 
             if let Err(..) = sent {
                 log::debug!("texture loader hung up");
@@ -526,9 +512,7 @@ impl TextureRequest {
     pub fn process_decode(self) -> anyhow::Result<TextureResponse> {
         match self {
             #[cfg(feature = "image")]
-            Self::LoadFile { key, path } => {
-                Self::decode_image_read(image::ImageReader::open(path)?, key)
-            },
+            Self::LoadFile { key, path } => Self::decode_image_read(image::ImageReader::open(path)?, key),
             Self::LoadBytes { key, bytes } => {
                 let mut bytes = &bytes[..];
                 let read = io::Cursor::new(&mut bytes);

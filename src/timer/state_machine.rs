@@ -73,9 +73,7 @@ impl EventMapper {
                 let _ = render_sender.send(RenderEvent::AlertFeed(ps.clone())).await;
             },
             Self::Reset(tf) => {
-                let _ = render_sender
-                    .send(RenderEvent::AlertReset(tf.clone()))
-                    .await;
+                let _ = render_sender.send(RenderEvent::AlertReset(tf.clone())).await;
             },
         }
     }
@@ -149,10 +147,7 @@ impl TimerFilePhase {
     fn next(self) -> Option<Self> {
         let phase_len = self.timer.phases.len();
         let phase = (self.phase + 1..phase_len).next()?;
-        Some(Self {
-            timer: self.timer,
-            phase,
-        })
+        Some(Self { timer: self.timer, phase })
     }
 
     pub fn phase(&self) -> &TimerPhase {
@@ -293,18 +288,11 @@ impl TimerMachine {
             self.timer.name
         );
         self.abort_tasks(reason).await;
-        let _ = self
-            .sender
-            .send(RenderEvent::AlertEnd(self.timer.clone()))
-            .await;
+        let _ = self.sender.send(RenderEvent::AlertEnd(self.timer.clone())).await;
     }
 
     async fn abort_tasks(&self, reason: String) {
-        log::info!(
-            "Aborting {} tasks for reason: \"{}\".",
-            self.tasks.len(),
-            reason
-        );
+        log::info!("Aborting {} tasks for reason: \"{}\".", self.tasks.len(), reason);
         let reset_event = EventMapper::reset(self.timer.clone());
         reset_event.send().await;
     }
@@ -391,12 +379,8 @@ impl TimerMachine {
     pub fn key_event(&mut self, idx: u32, is_release: bool) {
         let flag = 1u8 << idx;
         match is_release {
-            false => self
-                .key_pressed
-                .insert(TimerKeybinds::from_bits_retain(flag)),
-            true => self
-                .key_pressed
-                .remove(TimerKeybinds::from_bits_retain(flag)),
+            false => self.key_pressed.insert(TimerKeybinds::from_bits_retain(flag)),
+            true => self.key_pressed.remove(TimerKeybinds::from_bits_retain(flag)),
         }
     }
 
@@ -407,18 +391,10 @@ impl TimerMachine {
     pub fn update_on_map(&mut self, map_id: u32) {
         let machine_map_id = &self.timer.map_id;
         if *machine_map_id == map_id {
-            log::info!(
-                "On map with ID \"{}\" for \"{}\"",
-                map_id,
-                self.timer.name()
-            );
+            log::info!("On map with ID \"{}\" for \"{}\"", map_id, self.timer.name());
             self.state = TimerMachineState::OnMap;
         } else {
-            log::info!(
-                "Off map with ID \"{}\" for \"{}\"",
-                map_id,
-                self.timer.name()
-            );
+            log::info!("Off map with ID \"{}\" for \"{}\"", map_id, self.timer.name());
             self.state = TimerMachineState::OffMap;
         }
     }

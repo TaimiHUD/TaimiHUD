@@ -43,17 +43,10 @@ struct BlishMarkersHolder {
 
 impl TimerPhase {
     pub fn get_alerts(&self) -> Vec<TimerAlert> {
-        self.alerts
-            .iter()
-            .flat_map(BlishAlert::get_alerts)
-            .collect()
+        self.alerts.iter().flat_map(BlishAlert::get_alerts).collect()
     }
     pub fn get_markers(&self) -> Vec<TimerMarker> {
-        self.markers
-            .0
-            .iter()
-            .flat_map(BlishMarker::get_markers)
-            .collect()
+        self.markers.0.iter().flat_map(BlishMarker::get_markers).collect()
     }
 }
 

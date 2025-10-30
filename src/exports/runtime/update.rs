@@ -141,14 +141,7 @@ impl ResolvedVersion {
 
             releases.sort_by(|l, r| match (&l, &r) {
                 #[cfg(feature = "updates")]
-                (
-                    Self {
-                        version: Some(l), ..
-                    },
-                    Self {
-                        version: Some(r), ..
-                    },
-                ) => l.cmp_precedence(r),
+                (Self { version: Some(l), .. }, Self { version: Some(r), .. }) => l.cmp_precedence(r),
                 _ => l.release.created_at.cmp(&r.release.created_at),
             });
             let channel = channel.unwrap_or("");
@@ -167,10 +160,7 @@ impl ResolvedVersion {
         Self::latest_gh_release_standalone(&GH_REPO_SRC, patience)
     }
 
-    pub fn latest_gh_release_standalone(
-        src: &GitHubSource,
-        patience: Duration,
-    ) -> anyhow::Result<Self> {
+    pub fn latest_gh_release_standalone(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
         let runner = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -181,9 +171,11 @@ impl ResolvedVersion {
     }
 
     pub fn dll_url(&self) -> anyhow::Result<&Url> {
-        let dll_asset = self.release.assets.iter().find(
-            |a| a.name.ends_with(".dll"), /*&& a.state == "uploaded"*/
-        );
+        let dll_asset = self
+            .release
+            .assets
+            .iter()
+            .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
 
         dll_asset
             .and_then(|dll_asset|
@@ -195,13 +187,9 @@ impl ResolvedVersion {
     pub fn is_update(&self) -> bool {
         let version_matches = match self {
             #[cfg(feature = "updates")]
-            Self {
-                version: Some(v), ..
-            } if v.cmp_precedence(&CRATE_SEMVER).is_eq() => true,
+            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_eq() => true,
             #[cfg(feature = "updates")]
-            Self {
-                version: Some(v), ..
-            } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
+            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
                 log::info!("Ignoring outdated update {self}");
                 return false
             },
@@ -229,11 +217,7 @@ impl ResolvedVersion {
     }
 
     pub fn is_authorized(&self) -> Option<bool> {
-        BootstrapState::read_with(|state| {
-            state
-                .update_preference()
-                .authorizes_version(self.version_id())
-        })
+        BootstrapState::read_with(|state| state.update_preference().authorizes_version(self.version_id()))
     }
 
     #[cfg(todo)]
@@ -274,12 +258,9 @@ impl ResolvedVersion {
         match self {
             // TODO: tag via name idk
             #[cfg(feature = "updates")]
-            Self {
-                version: Some(v), ..
-            } => version_channel(v),
-            _ if self.release.prerelease || self.release.tag_name.contains("-rc.") => {
-                Some(CHANNEL_PRERELEASE)
-            },
+            Self { version: Some(v), .. } => version_channel(v),
+            _ if self.release.prerelease || self.release.tag_name.contains("-rc.") =>
+                Some(CHANNEL_PRERELEASE),
             _ => None,
         }
     }
@@ -289,10 +270,7 @@ impl fmt::Display for ResolvedVersion {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             #[cfg(feature = "updates")]
-            Self {
-                version: Some(version),
-                ..
-            } => fmt::Display::fmt(version, f),
+            Self { version: Some(version), .. } => fmt::Display::fmt(version, f),
             _ => f.write_str(self.version_name()),
         }
     }
@@ -371,9 +349,7 @@ impl Updater {
                 return
             }
             let updated_pref = match state.update_preference {
-                Some(UpdatePreference::Ask {
-                    authorized: Some(..),
-                }) => Some(UpdatePreference::ASK),
+                Some(UpdatePreference::Ask { authorized: Some(..) }) => Some(UpdatePreference::ASK),
                 Some(UpdatePreference::Once { .. }) => Some(UpdatePreference::Never),
                 _ => None,
             };

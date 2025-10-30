@@ -10,9 +10,7 @@ pub struct Watcher<T> {
 }
 
 impl<T> Watcher<T> {
-    pub const EMPTY: Self = Self {
-        watch: OnceLock::new(),
-    };
+    pub const EMPTY: Self = Self { watch: OnceLock::new() };
 
     pub fn new(value: T) -> Self {
         Self::with_sender(watch::Sender::new(value))
@@ -258,17 +256,11 @@ pub struct Watched<T: Clone> {
 }
 
 impl<T: Clone> Watched<T> {
-    pub const EMPTY: Self = Self {
-        watch: Watcher::EMPTY,
-        cached: None,
-    };
+    pub const EMPTY: Self = Self { watch: Watcher::EMPTY, cached: None };
 
     pub fn new(value: T) -> Self {
         let cached = Some(value.clone());
-        Self {
-            watch: Watcher::new(value),
-            cached,
-        }
+        Self { watch: Watcher::new(value), cached }
     }
 
     pub const fn empty_with(value: T) -> Self {
@@ -279,10 +271,7 @@ impl<T: Clone> Watched<T> {
     }
 
     pub const fn new_with_watcher(watch: Watcher<T>) -> Self {
-        Self {
-            watch,
-            cached: None,
-        }
+        Self { watch, cached: None }
     }
 
     pub fn with_watcher(watch: Watcher<T>) -> Self {

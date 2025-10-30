@@ -88,9 +88,7 @@ type Revertible = Box<dyn FnOnce() + Send + 'static>;
 pub struct LocalizationsEmbed;
 
 pub static LOCALIZATIONS: LazyLock<RustEmbedNotifyAssets<LocalizationsEmbed>> =
-    LazyLock::new(|| {
-        RustEmbedNotifyAssets::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/"))
-    });
+    LazyLock::new(|| RustEmbedNotifyAssets::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/")));
 
 static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     let assets = &*LOCALIZATIONS;
@@ -98,16 +96,16 @@ static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
     loader
         .load_available_languages(assets)
         .expect("Error while loading fallback language");
-    let res = BootstrapState::read_with(|state| {
-        match state.language.as_ref().and_then(|l| l.parse().ok()) {
-            Some(language) if loader.current_language() != language => {
-                i18n_embed::select(&loader, assets, slice::from_ref(&language))
-                    .with_context(|| format!("Failed to select language {language}"))
-                    .map(drop)
+    let res =
+        BootstrapState::read_with(
+            |state| match state.language.as_ref().and_then(|l| l.parse().ok()) {
+                Some(language) if loader.current_language() != language =>
+                    i18n_embed::select(&loader, assets, slice::from_ref(&language))
+                        .with_context(|| format!("Failed to select language {language}"))
+                        .map(drop),
+                _ => Ok(()),
             },
-            _ => Ok(()),
-        }
-    });
+        );
     if let Err(e) = res {
         log::warn!(logger: rt::log::DeferredLogger::BEST_EFFORT, "{e:#}");
     }
@@ -119,9 +117,7 @@ fn language_loader_setup(loader: &FluentLanguageLoader) {
     #[cfg(todo)]
     loader.with_bundles_mut(|b| {
         // might be needed for fluent 0.17..
-        let res = b
-            .add_builtins()
-            .context("Failed to add i18n/fluent builtins");
+        let res = b.add_builtins().context("Failed to add i18n/fluent builtins");
         if let Err(e) = res {
             log::warn!("{e:#}");
         }
@@ -362,10 +358,7 @@ fn init() -> Result<(), &'static str> {
     let version = rt::CRATE_VERSION;
     let authors = rt::crate_authors();
     log::info!("Loading {name} {version} by {authors}");
-    match (
-        built_info::git_ref_name(),
-        built_info::GIT_COMMIT_HASH_SHORT,
-    ) {
+    match (built_info::git_ref_name(), built_info::GIT_COMMIT_HASH_SHORT) {
         (Ok(_), _) if built_info::is_release() => (),
         (Ok(tag), commit) => {
             let commit = commit.unwrap_or("HEAD");
@@ -407,9 +400,7 @@ fn init() -> Result<(), &'static str> {
 
     let controller_handler = {
         let render_sender = render_sender.clone();
-        thread::spawn(move || {
-            Controller::load(controller_receiver, render_sender, addon_dir.to_owned())
-        })
+        thread::spawn(move || Controller::load(controller_receiver, render_sender, addon_dir.to_owned()))
     };
 
     // muh queues
@@ -488,11 +479,7 @@ fn load_nexus() {
             c"pathing-window-toggle",
             c"ALT+SHIFT+N",
         );
-        register_keybind(
-            TaimiControls::PATHING_SPACE,
-            c"pathing-render-toggle",
-            c"(null)",
-        );
+        register_keybind(TaimiControls::PATHING_SPACE, c"pathing-render-toggle", c"(null)");
         register_keybind(
             TaimiControls::PATHING_MINIMAP,
             c"pathing-render-minimap-toggle",
@@ -668,7 +655,7 @@ fn load_nexus() {
 
 pub fn resize_render(newsize: Option<[f32; 2]>) {
     match RENDER_STATE.try_lock() {
-        Ok(mut state) => {
+        Ok(mut state) =>
             if let Some(ref mut state) = *state {
                 // TODO: do this on most reloads (move reload/resize to method on RenderState or machine)
                 match newsize {
@@ -686,8 +673,7 @@ pub fn resize_render(newsize: Option<[f32; 2]>) {
                     },
                 }
                 state.reload(true);
-            }
-        },
+            },
         _ => {
             RenderState::try_send(RenderEvent::Reload);
         },
@@ -847,14 +833,13 @@ fn process_textures() {
                         let device = match &mut device {
                             Some(d) => d,
                             device => {
-                                let (d3d11, _) = rt::d3d11_device()
-                                    .context("d3d11 device required to load textures")?;
+                                let (d3d11, _) =
+                                    rt::d3d11_device().context("d3d11 device required to load textures")?;
                                 device.insert(d3d11)
                             },
                         };
-                        let texture = unsafe {
-                            Texture::new_raw(device, &pixels, dimensions, stride, format)
-                        };
+                        let texture =
+                            unsafe { Texture::new_raw(device, &pixels, dimensions, stride, format) };
                         TEXTURES.report_load(key, texture);
                     },
                     TextureResponse::DecodeFailed { key, error } => {
@@ -1005,14 +990,11 @@ fn unload() {
                     #[cfg(feature = "space")]
                     () if _space.is_some() =>
                     // give it time to do more shutdown if needed...
-                    {
-                        Duration::from_millis(1500)
-                    },
+                        Duration::from_millis(1500),
                     _ => Duration::from_millis(67),
                 };
                 let timeout =
-                    RENDER_UNLOAD
-                        .wait_timeout_while(render_state, unload_timeout, |state| state.is_some());
+                    RENDER_UNLOAD.wait_timeout_while(render_state, unload_timeout, |state| state.is_some());
                 let (mut render_state, timeout) = timeout.unwrap_or_else(|e| e.into_inner());
                 if timeout.timed_out() {
                     log::warn!("timed out waiting for render quit");

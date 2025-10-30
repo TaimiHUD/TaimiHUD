@@ -119,11 +119,7 @@ fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Mark
             );
             commands.entity(entity).despawn();
         } else if now > marker.marker.start(marker.start) && render.disabled {
-            log::info!(
-                "Entity {} reached start at {}!",
-                entity,
-                marker.marker.timestamp
-            );
+            log::info!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
             render.disabled = false;
         }
     }
@@ -155,10 +151,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn initialise(
-        machine: &RenderMachine,
-        receiver: Receiver<SpaceEvent>,
-    ) -> anyhow::Result<Engine> {
+    pub fn initialise(machine: &RenderMachine, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
         let display_size = machine
             .display_size()
             .ok_or_else(|| anyhow!("display size unknown"))?;
@@ -183,11 +176,8 @@ impl Engine {
             let model_files =
                 ObjFile::load(&models_dir, &object_descs).context("Failed to load model object")?;
 
-            let object_kinds = object_descs.to_backings(
-                &render_backend.device,
-                &model_files,
-                &render_backend.shaders,
-            );
+            let object_kinds =
+                object_descs.to_backings(&render_backend.device, &model_files, &render_backend.shaders);
 
             object_kinds
         };
@@ -415,8 +405,7 @@ impl Engine {
                         self.packs.active_festivals = self.map_settings(|s| {
                             Festival::all()
                                 .filter(|&f| {
-                                    s.get_festival_preference(f)
-                                        .unwrap_or(machine.festival_active(f))
+                                    s.get_festival_preference(f).unwrap_or(machine.festival_active(f))
                                 })
                                 .collect()
                         });
@@ -449,12 +438,10 @@ impl Engine {
                     MapToggle(cx) => {
                         if let Err(e) = self
                             .map_settings_mut(|s| match cx {
-                                MapContext::Minimap => {
-                                    s.space.visible_map_mini = Some(!s.space.visible_minimap())
-                                },
-                                MapContext::Global => {
-                                    s.space.visible_map_world = Some(!s.space.visible_worldmap())
-                                },
+                                MapContext::Minimap =>
+                                    s.space.visible_map_mini = Some(!s.space.visible_minimap()),
+                                MapContext::Global =>
+                                    s.space.visible_map_world = Some(!s.space.visible_worldmap()),
                             })
                             .context("toggle map paths")
                         {
@@ -464,8 +451,7 @@ impl Engine {
                     #[cfg(deleteme)]
                     PackLoad { pack, loader } => {
                         let pack_idx = self.packs.add_pack(pack, loader);
-                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx)
-                        {
+                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
                             log::error!("{e:#}");
                         }
                     },
@@ -475,9 +461,8 @@ impl Engine {
                         self.packs.clear();
                     },
                     GameplayStatus { gameplay, trans } => {
-                        let device_context =
-                            unsafe { self.render_backend.device.GetImmediateContext() }
-                                .context("I lost my context!");
+                        let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
+                            .context("I lost my context!");
                         match gameplay {
                             GameplayState::Gameplay { map_id: Some(new_map_id) } => {
                                 let prev = match trans {
@@ -531,10 +516,7 @@ impl Engine {
                     #[cfg(feature = "goggles")]
                     GogglesRefreshLens { .. } | GogglesClearLens if !goggles::is_enabled() => (),
                     #[cfg(feature = "goggles")]
-                    GogglesRefreshLens {
-                        force,
-                        delay_override,
-                    } => {
+                    GogglesRefreshLens { force, delay_override } => {
                         self.goggles_enter(force);
                         if let (Some(delay_override), Some((delay, ..))) =
                             (delay_override, &mut self.goggles_select_lens_delay)
@@ -546,12 +528,8 @@ impl Engine {
                     GogglesClearLens => {
                         goggles::clear_lens();
                     },
-                    MarkerFeed(phase_state) => {
-                        self.new_phase(phase_state).context("marker new phase")?
-                    },
-                    MarkerReset(timer) => {
-                        self.remove_phase(timer).context("marker remove phase")?
-                    },
+                    MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
+                    MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
                 }
                 Ok(true)
             },
@@ -562,10 +540,7 @@ impl Engine {
     pub fn disable_paths(&mut self, machine: &RenderMachine, disabled_paths: HashSet<String>) {
         self.packs.active_festivals = self.map_settings(|s| {
             Festival::all()
-                .filter(|&f| {
-                    s.get_festival_preference(f)
-                        .unwrap_or(machine.festival_active(f))
-                })
+                .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
                 .collect()
         });
         self.packs.disable_paths(disabled_paths);
@@ -617,8 +592,8 @@ impl Engine {
         }
         self.schedule.run(&mut self.world);
 
-        let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
-            .context("I lost my context!")?;
+        let device_context =
+            unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
 
         if map_id.is_none() {
             return Ok(())
@@ -632,12 +607,8 @@ impl Engine {
         self.packs.update();
 
         let render_map = match visible_map {
-            Some(true) => map_ctx.map(|ctx| {
-                (
-                    ctx,
-                    super::dx11::PerspectiveHandler::map_local_bounds(machine),
-                )
-            }),
+            Some(true) =>
+                map_ctx.map(|ctx| (ctx, super::dx11::PerspectiveHandler::map_local_bounds(machine))),
             _ => None,
         };
         let render_world = match visible_space {
@@ -692,22 +663,15 @@ impl Engine {
                     )
                 });
             {
-                let vdata = &mut self
-                    .render_backend
-                    .perspective_handler
-                    .constant_buffer_mapv_data;
+                let vdata = &mut self.render_backend.perspective_handler.constant_buffer_mapv_data;
                 vdata.poi_expansion = PoiScale::with_scale(poi_scale);
                 let trail_expansion = TrailScale::with_scale(trail_scale);
                 match trail_textured {
                     true if vdata.trail_expansion == trail_expansion
                         && vdata.trail_texture != TrailTextureMap::UNTEXTURED =>
-                    {
-                        ()
-                    },
+                        (),
                     true => {
-                        vdata
-                            .trail_texture
-                            .set_scale_from_expansion(trail_expansion);
+                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
                         vdata.trail_texture.v_offset = 0.0;
                     },
                     false => vdata.trail_texture = TrailTextureMap::UNTEXTURED,
@@ -717,10 +681,7 @@ impl Engine {
             {
                 // TODO: cpbuffer per type? just mixing them together for now...
                 let alpha = trail_alpha * poi_alpha;
-                let pdata = &mut self
-                    .render_backend
-                    .perspective_handler
-                    .constant_buffer_mapp_data;
+                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_mapp_data;
                 let map_open = machine.map_open();
                 pdata.colour.w = match map_open.progress_open().map(|p| p / 0.8) {
                     Some(p) if p < 1.0 => alpha * p * p * if fwoom { 1.0 } else { p },
@@ -781,14 +742,11 @@ impl Engine {
 
         if let Some(..) = &minimap_bounds {
             if masking.is_some() {
-                self.render_backend
-                    .depth_handler
-                    .fill_clipped(&device_context);
+                self.render_backend.depth_handler.fill_clipped(&device_context);
             }
-            self.render_backend.depth_handler.set_scissor(
-                &device_context,
-                Box2::from_size(self.render_backend.display_size),
-            );
+            self.render_backend
+                .depth_handler
+                .set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
         }
 
         if let Some(depth_fill) = masking {
@@ -810,10 +768,7 @@ impl Engine {
         #[cfg(feature = "space-ecs")]
         let mut query = self.world.query::<(&mut Render, &Position)>();
         #[cfg(feature = "space-ecs")]
-        for (_k, c) in &query
-            .iter(&self.world)
-            .chunk_by(|(r, _p)| r.backing.name.clone())
-        {
+        for (_k, c) in &query.iter(&self.world).chunk_by(|(r, _p)| r.backing.name.clone()) {
             let mut itery = c.into_iter();
             let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
             let (r, p) = slice;
@@ -832,9 +787,8 @@ impl Engine {
                     .chain(itery)
                     .map(|(_r, p)| {
                         //  r.backing.render.metadata.model_matrix *
-                        let affy = Mat4::from_translation(p.0)
-                            * rot
-                            * r.backing.render.metadata.model_matrix;
+                        let affy =
+                            Mat4::from_translation(p.0) * rot * r.backing.render.metadata.model_matrix;
                         InstanceBufferData {
                             world: affy,
                             //world_position: affy.translation,
@@ -883,13 +837,9 @@ impl Engine {
                 match trail_textured {
                     true if vdata.trail_expansion == trail_expansion
                         && vdata.trail_texture != TrailTextureMap::UNTEXTURED =>
-                    {
-                        ()
-                    },
+                        (),
                     true => {
-                        vdata
-                            .trail_texture
-                            .set_scale_from_expansion(trail_expansion);
+                        vdata.trail_texture.set_scale_from_expansion(trail_expansion);
                         vdata.trail_texture.v_offset = 0.0;
                     },
                     false => vdata.trail_texture = TrailTextureMap::UNTEXTURED,
@@ -902,10 +852,7 @@ impl Engine {
                 })
             };
             {
-                let pdata = &mut self
-                    .render_backend
-                    .perspective_handler
-                    .constant_buffer_pixel_data;
+                let pdata = &mut self.render_backend.perspective_handler.constant_buffer_pixel_data;
                 pdata.set_overlap_threshold(overlap_threshold);
                 pdata.set_intensity(distance_intensity);
             }
@@ -923,9 +870,7 @@ impl Engine {
                 let backend = &mut self.render_backend;
                 backend.perspective_handler.set_alpha(_obscured_alpha);
                 backend.perspective_handler.update_cb(&device_context);
-                backend
-                    .depth_handler
-                    .set_state_obscured(&device_context, true);
+                backend.depth_handler.set_state_obscured(&device_context, true);
 
                 let entities = self.packs.entities_obscured(cull);
                 PackCollection::draw_entities(
@@ -936,16 +881,12 @@ impl Engine {
                     entities,
                 );
 
-                backend
-                    .depth_handler
-                    .set_state_obscured(&device_context, false);
+                backend.depth_handler.set_state_obscured(&device_context, false);
             }
 
             if trail_alpha > 0.0 || poi_alpha > 0.0 {
                 self.render_backend.perspective_handler.set_alpha(alpha);
-                self.render_backend
-                    .perspective_handler
-                    .update_cb(&device_context);
+                self.render_backend.perspective_handler.update_cb(&device_context);
 
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
@@ -968,12 +909,11 @@ impl Engine {
                     self.goggles_start(machine, force, Some(map_id));
                     let _ = self.goggles_select_lens_delay.take();
                 },
-                Some((ticks, ..)) => {
+                Some((ticks, ..)) =>
                     if let Some(ui_tick) = machine.ui_tick() {
                         let amt = if ui_tick.is_player() { 6 } else { 1 };
                         *ticks = ticks.saturating_sub(amt);
-                    }
-                },
+                    },
                 _ => (),
             }
         }
@@ -1100,10 +1040,7 @@ impl Engine {
     }
 
     #[cfg(deleteme)]
-    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(
-        &mut self,
-        f: F,
-    ) -> anyhow::Result<R> {
+    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(&mut self, f: F) -> anyhow::Result<R> {
         let mut fail = None;
         let s = self.settings.get_or_insert_with(|| {
             match Settings::read_with_blocking(|s| s.pathing.clone()) {
@@ -1144,12 +1081,7 @@ impl Engine {
     }
 
     #[cfg(feature = "goggles")]
-    fn goggles_start(
-        &mut self,
-        machine: &mut RenderMachine,
-        force: bool,
-        map_id: Option<NonZeroU32>,
-    ) {
+    fn goggles_start(&mut self, machine: &mut RenderMachine, force: bool, map_id: Option<NonZeroU32>) {
         use crate::render::goggles as render_goggles;
 
         let settings = self.map_settings_ref(|s| {
@@ -1165,11 +1097,7 @@ impl Engine {
             if let (false, needs_setup) = render_goggles::get_state() {
                 log::debug!(
                     "Goggles setup: {}...",
-                    if needs_setup {
-                        "initializing"
-                    } else {
-                        "restarting"
-                    }
+                    if needs_setup { "initializing" } else { "restarting" }
                 );
                 render_goggles::enable(needs_setup);
             }

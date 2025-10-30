@@ -69,16 +69,13 @@ pub async fn press_bind(
                 match method {
                     InvokeMethod::Message =>
                         rt::mouse::send_mouse(MouseInput::with_position(position), None)?,
-                    InvokeMethod::Input | _ =>
-                        rt::mouse::send_input(MouseInput::with_position(position))?,
+                    InvokeMethod::Input | _ => rt::mouse::send_input(MouseInput::with_position(position))?,
                 }
             }
             let input = KeyInput::new(vk, mods, down);
             match method {
-                InvokeMethod::Message =>
-                    rt::keyboard::send_key_combo(input),
-                InvokeMethod::Input | _ =>
-                    rt::keyboard::send_key_input(input),
+                InvokeMethod::Message => rt::keyboard::send_key_combo(input),
+                InvokeMethod::Input | _ => rt::keyboard::send_key_input(input),
             }
         },
         true => {
@@ -95,7 +92,11 @@ pub async fn press_bind(
             let input = MouseInput::new(pos, button | mods, Some(down));
             let prior = match (method, position) {
                 // ensure the mouse is moved if a position was explicitly requested
-                (InvokeMethod::Input, Some(..)) => Some(MouseInput::new(rt::MousePosition::EMPTY, input.button_before(), None)),
+                (InvokeMethod::Input, Some(..)) => Some(MouseInput::new(
+                    rt::MousePosition::EMPTY,
+                    input.button_before(),
+                    None,
+                )),
                 _ => None,
             };
             let mouse_mods = match mods.take(MouseInput::EVENT_MODS) {
@@ -104,8 +105,7 @@ pub async fn press_bind(
                     mods.insert(mouse_mods);
                     KeyState::EMPTY
                 },
-                mouse_mods =>
-                    mouse_mods,
+                mouse_mods => mouse_mods,
             };
 
             let invoke = || match (method, mouse_mods.is_empty()) {
@@ -117,7 +117,8 @@ pub async fn press_bind(
                 false => rt::keyboard::do_key_combo(invoke, KeyInput::empty_with_mods(mods, down)),
             }
         },
-    }.map(Some)
+    }
+    .map(Some)
 }
 #[cfg(feature = "markers")]
 pub async fn press_marker_bind(

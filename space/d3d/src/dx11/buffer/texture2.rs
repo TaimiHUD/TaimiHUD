@@ -52,10 +52,7 @@ impl Texture2 {
             .map(Into::into)
     }
 
-    pub fn new_empty_with_desc(
-        device: &Dx11Device,
-        desc: &D3D11_TEXTURE2D_DESC,
-    ) -> anyhow::Result<Self> {
+    pub fn new_empty_with_desc(device: &Dx11Device, desc: &D3D11_TEXTURE2D_DESC) -> anyhow::Result<Self> {
         Self::new_with_desc::<u8>(device, desc, None)
     }
 
@@ -71,10 +68,7 @@ impl Texture2 {
         self.desc().Format
     }
 
-    pub const DEFAULT_SAMPLE_DESC: dxgi::DXGI_SAMPLE_DESC = dxgi::DXGI_SAMPLE_DESC {
-        Count: 1,
-        Quality: 0,
-    };
+    pub const DEFAULT_SAMPLE_DESC: dxgi::DXGI_SAMPLE_DESC = dxgi::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 };
 }
 
 impl AsRef<Resource> for ID3D11Texture2D {

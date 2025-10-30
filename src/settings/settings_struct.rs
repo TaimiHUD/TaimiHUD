@@ -1,12 +1,5 @@
 use {
-    super::{
-        ArcSettings,
-        PathingSettings,
-        ProgressBarSettings,
-        RemoteSource,
-        RemoteState,
-        TimerSettings,
-    },
+    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, TimerSettings},
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::bindings::TaimiControls,
@@ -248,8 +241,7 @@ impl Settings {
         if let Some(entry_mut) = self.markers.get_mut(&marker) {
             entry_mut.disable();
         } else {
-            self.markers
-                .insert(marker, MarkerSettings { disabled: true });
+            self.markers.insert(marker, MarkerSettings { disabled: true });
         }
     }
     pub fn enable_marker(&mut self, marker: String) {
@@ -262,9 +254,7 @@ impl Settings {
 
     #[allow(dead_code)]
     pub fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
-        self.remotes
-            .iter()
-            .find(|dd| dd.source().name() == source.name())
+        self.remotes.iter().find(|dd| dd.source().name() == source.name())
     }
 
     pub fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
@@ -284,10 +274,7 @@ impl Settings {
         Ok(())
     }
 
-    pub fn set_marker_autoplace_settings(
-        &mut self,
-        maps: &MarkerAutoPlaceSettings,
-    ) -> anyhow::Result<()> {
+    pub fn set_marker_autoplace_settings(&mut self, maps: &MarkerAutoPlaceSettings) -> anyhow::Result<()> {
         self.marker_autoplace = maps.clone();
         Ok(())
     }
@@ -410,9 +397,7 @@ impl Settings {
     }
 
     pub async fn load_default(addon_dir: &Path) -> Self {
-        let res = Settings::load(addon_dir)
-            .await
-            .context("SettingsLock load error");
+        let res = Settings::load(addon_dir).await.context("SettingsLock load error");
         match res {
             Ok(settings) => settings,
             Err(err) => {
@@ -450,9 +435,7 @@ impl Settings {
         Self::save_to(&save).await
     }
 
-    pub async fn save_to(
-        (settings_path, settings_str, dirty): &SettingsSave,
-    ) -> anyhow::Result<()> {
+    pub async fn save_to((settings_path, settings_str, dirty): &SettingsSave) -> anyhow::Result<()> {
         log::trace!("Settings: Saving to \"{:?}\".", settings_path);
         let res = match File::create(settings_path).await {
             Ok(mut file) => file.write_all(settings_str.as_bytes()).await,
@@ -509,9 +492,7 @@ impl Settings {
     }
 
     pub fn try_write() -> Option<tokio::sync::RwLockWriteGuard<'static, Self>> {
-        let mut res = SETTINGS
-            .get()
-            .and_then(|settings| settings.try_write().ok());
+        let mut res = SETTINGS.get().and_then(|settings| settings.try_write().ok());
 
         if let Some(settings) = &mut res {
             settings.mark_dirty();

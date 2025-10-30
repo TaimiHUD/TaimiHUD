@@ -87,11 +87,7 @@ impl RemoteState {
     }
 
     pub fn hardcoded_sources() -> Vec<(&'static str, &'static str, &'static str)> {
-        let hardcoded_sources = [(
-            "QuitarHero",
-            "Hero-Timers",
-            "The OG timer pack for BlishHUD!",
-        )];
+        let hardcoded_sources = [("QuitarHero", "Hero-Timers", "The OG timer pack for BlishHUD!")];
         hardcoded_sources.into()
     }
     pub fn suggested_sources() -> Result<Vec<Self>, anyhow::Error> {
@@ -113,13 +109,12 @@ impl RemoteState {
         let remote_id = source.latest_id().await;
         log::debug!("{:?}", remote_id);
         match remote_id {
-            Ok(rid) => {
+            Ok(rid) =>
                 if let Some(lid) = &self.installed_tag {
                     Known(*lid != rid, rid)
                 } else {
                     Known(true, rid)
-                }
-            },
+                },
             Err(err) => {
                 log::error!("Update check failed: {}", err);
                 NeedsUpdate::Error(err.to_string())

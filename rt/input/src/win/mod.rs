@@ -24,9 +24,8 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(
 ) -> anyhow::Result<()> {
     // TODO: bail out if window isn't focused or something
     let inputs: Vec<_> = inputs.into_iter().map(I::into).collect();
-    let res = unsafe {
-        KeyboardAndMouse::SendInput(&inputs[..], mem::size_of::<KeyboardAndMouse::INPUT>() as _)
-    };
+    let res =
+        unsafe { KeyboardAndMouse::SendInput(&inputs[..], mem::size_of::<KeyboardAndMouse::INPUT>() as _) };
     match res {
         0 => Err(WinError::from_win32()),
         _ => Ok(()),

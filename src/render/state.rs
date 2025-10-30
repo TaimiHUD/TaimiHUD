@@ -160,8 +160,7 @@ impl RenderState {
                         self.timer_window.progress_bar = settings;
                     },
                     CheckingForUpdates(checking_for_updates) => {
-                        self.primary_window.data_sources_tab.checking_for_updates =
-                            checking_for_updates;
+                        self.primary_window.data_sources_tab.checking_for_updates = checking_for_updates;
                     },
                     TimerData(timers) => {
                         self.primary_window.timer_tab.timer_selection = None;
@@ -178,13 +177,12 @@ impl RenderState {
                     AlertStart(alert) => {
                         self.alert = Some(alert);
                     },
-                    AlertEnd(timer_file) => {
+                    AlertEnd(timer_file) =>
                         if let Some(alert) = &self.alert {
                             if Arc::ptr_eq(&alert.timer, &timer_file) {
                                 self.alert = None;
                             }
-                        }
-                    },
+                        },
                     AlertFeed(phase_state) => {
                         self.timer_window.new_phase(phase_state);
                     },
@@ -192,11 +190,10 @@ impl RenderState {
                         self.timer_window.remove_phase(timer);
                     },
                     #[cfg(any(feature = "markers", feature = "space"))]
-                    UiMapOpen(open) => {
+                    UiMapOpen(open) =>
                         if self.machine.set_map_open(open) {
                             self.machine.act_map_open();
-                        }
-                    },
+                        },
                     #[cfg(feature = "goggles")]
                     UiDepthReleased() => {
                         self.machine.turn_depth_event(false);
@@ -272,12 +269,7 @@ impl RenderState {
         ui.same_line();
     }
 
-    pub fn icon(
-        ui: &Ui,
-        height: Option<f32>,
-        alert_icon: Option<&RelativePathBuf>,
-        path: Option<&Path>,
-    ) {
+    pub fn icon(ui: &Ui, height: Option<f32>, alert_icon: Option<&RelativePathBuf>, path: Option<&Path>) {
         let icon = match alert_icon {
             Some(icon) => icon,
             None => return,
@@ -300,10 +292,7 @@ impl RenderState {
         Image::new(icon.id, size).build(ui);
         ui.same_line();
     }
-    pub fn draw_open_button<
-        S: AsRef<str> + std::fmt::Display,
-        O: Into<String> + std::fmt::Display,
-    >(
+    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Display>(
         state_errors: &mut HashMap<String, anyhow::Error>,
         ui: &Ui,
         text: S,
@@ -318,10 +307,7 @@ impl RenderState {
         );
         if ui.button(&text) {
             log::debug!("Triggered open {openable} for {text}");
-            Controller::try_send(ControllerEvent::OpenOpenable(
-                entry_name.clone(),
-                openable.into(),
-            ));
+            Controller::try_send(ControllerEvent::OpenOpenable(entry_name.clone(), openable.into()));
         }
         if ui.is_item_hovered() {
             ui.tooltip_text(fl!("location", path = openable_display));
@@ -361,11 +347,7 @@ impl RenderState {
         let cursor_pos =
             Alignment::get_position(Alignment::CENTRE_MIDDLE, position, bounding_size, text_size);
         if shadow {
-            let cursor_pos_shadow = cursor_pos
-                + Vec2 {
-                    x: 2.0,
-                    y: text_size.y / 8.0,
-                };
+            let cursor_pos_shadow = cursor_pos + Vec2 { x: 2.0, y: text_size.y / 8.0 };
             ui.set_cursor_pos(cursor_pos_shadow.into());
             let token = ui.push_style_color(StyleColor::Text, [0.0, 0.0, 0.0, 1.0]);
             ui.text(text);
@@ -446,10 +428,7 @@ impl RenderState {
         }
     }
     pub fn reload(&mut self, superficial: bool) {
-        log::info!(
-            "{} renderer...",
-            if superficial { "reloading" } else { "reinit" }
-        );
+        log::info!("{} renderer...", if superficial { "reloading" } else { "reinit" });
 
         #[cfg(feature = "goggles")]
         let _ = crate::space::goggles::shutdown();
@@ -497,11 +476,7 @@ impl RenderState {
     }
 
     pub fn sender() -> Option<Sender<RenderEvent>> {
-        RENDER_SENDER
-            .try_read()
-            .as_ref()
-            .ok()
-            .and_then(|s| (*s).clone())
+        RENDER_SENDER.try_read().as_ref().ok().and_then(|s| (*s).clone())
     }
 
     pub fn try_send(e: RenderEvent) {
@@ -583,23 +558,12 @@ impl Alignment {
     pub const RIGHT_MIDDLE: Vec2 = Vec2::new(1.0, 0.5);
     pub const RIGHT_BOTTOM: Vec2 = Vec2::new(1.0, 1.0);
 
-    pub fn get_position(
-        scaler: Vec2,
-        position: Vec2,
-        bounding_size: Vec2,
-        element_size: Vec2,
-    ) -> Vec2 {
+    pub fn get_position(scaler: Vec2, position: Vec2, bounding_size: Vec2, element_size: Vec2) -> Vec2 {
         let scaled_size = (bounding_size - element_size) * scaler;
         position + scaled_size
     }
 
-    pub fn set_cursor(
-        ui: &Ui,
-        scaler: Vec2,
-        position: Vec2,
-        bounding_size: Vec2,
-        element_size: Vec2,
-    ) {
+    pub fn set_cursor(ui: &Ui, scaler: Vec2, position: Vec2, bounding_size: Vec2, element_size: Vec2) {
         ui.set_cursor_pos(Self::get_position(scaler, position, bounding_size, element_size).into());
     }
 

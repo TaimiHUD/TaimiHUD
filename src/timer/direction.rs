@@ -32,10 +32,7 @@ impl BlishDirection {
     }
 
     pub fn get_directions(&self) -> Vec<TimerDirection> {
-        self.timestamps
-            .iter()
-            .map(|&ts| self.direction(ts))
-            .collect()
+        self.timestamps.iter().map(|&ts| self.direction(ts)).collect()
     }
 }
 

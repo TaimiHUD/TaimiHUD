@@ -21,10 +21,7 @@ pub struct Poi {
 }
 
 impl Poi {
-    pub fn from_xml(
-        asset: &str,
-        attrs: Vec<xml::attribute::OwnedAttribute>,
-    ) -> anyhow::Result<Poi> {
+    pub fn from_xml(asset: &str, attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Poi> {
         let mut category = String::new();
         let mut map_id = None;
         let mut pos_x = None;
@@ -39,25 +36,13 @@ impl Poi {
                 category = taco_safe_name(&attr.value, true);
                 Ok(())
             } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
-                attr.value
-                    .parse()
-                    .map(|v| map_id = Some(v))
-                    .map_err(From::from)
+                attr.value.parse().map(|v| map_id = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
-                attr.value
-                    .parse()
-                    .map(|v| pos_x = Some(v))
-                    .map_err(From::from)
+                attr.value.parse().map(|v| pos_x = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("ypos") {
-                attr.value
-                    .parse()
-                    .map(|v| pos_y = Some(v))
-                    .map_err(From::from)
+                attr.value.parse().map(|v| pos_y = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("zpos") {
-                attr.value
-                    .parse()
-                    .map(|v| pos_z = Some(v))
-                    .map_err(From::from)
+                attr.value.parse().map(|v| pos_z = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 guid = Some(taco_xml_to_guid(&attr.value));
                 Ok(())
@@ -92,9 +77,7 @@ impl Poi {
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh);
 
-        let parent_path = Path::new(asset)
-            .parent()
-            .map(|p| p.to_string_lossy().into());
+        let parent_path = Path::new(asset).parent().map(|p| p.to_string_lossy().into());
         Ok(Poi {
             category,
             guid,

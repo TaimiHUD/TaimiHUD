@@ -31,20 +31,14 @@ impl MapLocalScale {
 
     pub const fn with_map_scale(scale: Vector2<MapSpace>) -> Self {
         Self {
-            scale: Vector2::new(
-                scale.x * Self::METRES_PER_FEET,
-                scale.y * Self::METRES_PER_FEET,
-            ),
+            scale: Vector2::new(scale.x * Self::METRES_PER_FEET, scale.y * Self::METRES_PER_FEET),
         }
     }
 
     /// From [game inches](GameSpace)
     pub const fn with_game_scale(scale: Vector2<GameSpace>) -> Self {
         Self {
-            scale: Vector2::new(
-                scale.x * Self::METRES_PER_INCH,
-                scale.y * Self::METRES_PER_INCH,
-            ),
+            scale: Vector2::new(scale.x * Self::METRES_PER_INCH, scale.y * Self::METRES_PER_INCH),
         }
     }
 

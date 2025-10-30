@@ -8,14 +8,7 @@ mod view;
 
 pub use {
     self::{
-        buffer::{
-            Buffer,
-            BufferOf,
-            ID3D11Buffer,
-            D3D11_BOX,
-            D3D11_BUFFER_DESC,
-            D3D11_SUBRESOURCE_DATA,
-        },
+        buffer::{Buffer, BufferOf, ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA},
         constant::{ConstantBufferP, ConstantBufferV},
         resource::{ID3D11Resource, Resource, ResourceDimension, D3D11_RESOURCE_DIMENSION},
         sampler::{
@@ -41,12 +34,7 @@ pub use {
             D3D_SRV_DIMENSION,
         },
     },
-    crate::dx11::d3d11::{
-        D3D11_BIND_FLAG,
-        D3D11_CPU_ACCESS_FLAG,
-        D3D11_RESOURCE_MISC_FLAG,
-        D3D11_USAGE,
-    },
+    crate::dx11::d3d11::{D3D11_BIND_FLAG, D3D11_CPU_ACCESS_FLAG, D3D11_RESOURCE_MISC_FLAG, D3D11_USAGE},
 };
 
 use crate::{dx11::d3d11, impl_d3d};
@@ -56,10 +44,8 @@ impl AccessFlags {
 }
 
 impl BindFlags {
-    pub const SHADER_RENDER: Self =
-        Self::from_bits_retain(Self::SHADER.bits() | Self::RENDER.bits());
-    pub const SHADER_UNORDERED: Self =
-        Self::from_bits_retain(Self::SHADER.bits() | Self::UNORDERED.bits());
+    pub const SHADER_RENDER: Self = Self::from_bits_retain(Self::SHADER.bits() | Self::RENDER.bits());
+    pub const SHADER_UNORDERED: Self = Self::from_bits_retain(Self::SHADER.bits() | Self::UNORDERED.bits());
 }
 
 impl_d3d! { impl bitflags for

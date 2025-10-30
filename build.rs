@@ -87,25 +87,22 @@ fn apply_built_info() {
         println!("cargo::rustc-cfg=taimi_has={:?}", "version");
         let mut release_channel: Option<String>;
 
-        let release_version =
-            release
-                .and_then(|r| r.ok())
-                .and_then(|r| match r.parse::<Version>() {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        println!("cargo::warning=release version {r:?} not valid semver: {e}");
-                        None
-                    },
-                });
+        let release_version = release
+            .and_then(|r| r.ok())
+            .and_then(|r| match r.parse::<Version>() {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    println!("cargo::warning=release version {r:?} not valid semver: {e}");
+                    None
+                },
+            });
 
         match &release_version {
             Some(release_version) if release_version.cmp_precedence(&pkg_version).is_eq() => (),
             Some(release_version) => {
                 let partial_match = Version::new(release_version.major, release_version.minor, 0)
                     == Version::new(pkg_version.major, pkg_version.minor, 0);
-                let msg = || {
-                    format!("release version {release_version} mismatches package: {pkg_version}")
-                };
+                let msg = || format!("release version {release_version} mismatches package: {pkg_version}");
                 if !release_version.pre.is_empty() || partial_match {
                     println!("cargo::warning={}", msg())
                 } else {
@@ -194,10 +191,7 @@ fn apply_built_info() {
                 rev.display()
             );
         } else {
-            println!(
-                "cargo::rustc-env={ADDON_VERSION}_BUILD={}",
-                ci.unwrap_or("")
-            );
+            println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}", ci.unwrap_or(""));
         }
         if let Some(pre) = env::var_os("CARGO_PKG_VERSION_PRE") {
             println!("cargo::rustc-env={ADDON_VERSION}_PRE={}", pre.display());

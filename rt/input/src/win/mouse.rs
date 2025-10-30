@@ -49,20 +49,16 @@ impl MousePosition {
     pub fn scale_to_primary(self) -> anyhow::Result<MousePosition> {
         let bounds = {
             let (w, h) = primary_screen_bounds()?;
-            Self {
-                x: w.get(),
-                y: h.get(),
-            }
+            Self { x: w.get(), y: h.get() }
         };
         Ok(match self * 0x10000i32 {
-            normalized => {
+            normalized =>
                 (normalized
                     + MousePosition {
                         x: bounds.x / 2 - 1,
                         y: bounds.y / 2 - 1,
                     })
-                    / bounds
-            },
+                    / bounds,
             #[cfg(todo)]
             normalized => normalized / bounds,
             #[cfg(todo)]
@@ -294,10 +290,8 @@ pub fn primary_screen_bounds() -> anyhow::Result<(NonZeroI32, NonZeroI32)> {
 }
 
 pub fn virtual_screen_bounds() -> anyhow::Result<(NonZeroI32, NonZeroI32)> {
-    let x =
-        unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
-    let y =
-        unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
+    let x = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CXVIRTUALSCREEN) };
+    let y = unsafe { WindowsAndMessaging::GetSystemMetrics(WindowsAndMessaging::SM_CYVIRTUALSCREEN) };
     match (NonZeroI32::new(x), NonZeroI32::new(y)) {
         (Some(x), Some(y)) => Ok((x, y)),
         _ => anyhow::bail!("GetSystemMetrics(SM_CYVIRTUALSCREEN) produced nothing"),
@@ -338,11 +332,7 @@ impl MouseInput {
     }
 
     pub const fn new(position: MousePosition, button: KeyState, down: Option<bool>) -> Self {
-        Self {
-            position,
-            button,
-            down,
-        }
+        Self { position, button, down }
     }
 
     pub const fn to_movement(self) -> Self {
@@ -376,11 +366,7 @@ impl MouseInput {
     }
 
     pub fn input_buttons(self) -> impl Iterator<Item = Self> + Clone + Send + Sync + 'static {
-        let Self {
-            position,
-            button,
-            down,
-        } = self;
+        let Self { position, button, down } = self;
         let buttons = button & KeyState::BUTTON;
         let mods = button & !KeyState::BUTTON;
         buttons
@@ -389,20 +375,16 @@ impl MouseInput {
     }
 
     pub fn to_input(self, hwnd: HWND) -> anyhow::Result<KeyboardAndMouse::INPUT> {
-        let flag_move =
-            KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
+        let flag_move = KeyboardAndMouse::MOUSEEVENTF_MOVE | KeyboardAndMouse::MOUSEEVENTF_MOVE_NOCOALESCE;
         let flag_button = self
             .down
             .and_then(|down| self.button.mouse_flag(down))
             .unwrap_or_default();
         let xdata = match flag_button {
-            flag if (flag
-                & (KeyboardAndMouse::MOUSEEVENTF_XDOWN | KeyboardAndMouse::MOUSEEVENTF_XUP))
+            flag if (flag & (KeyboardAndMouse::MOUSEEVENTF_XDOWN | KeyboardAndMouse::MOUSEEVENTF_XUP))
                 .0
                 != 0 =>
-            {
-                self.button.button_x()
-            },
+                self.button.button_x(),
             _ => 0,
         };
         let relative_to = ();

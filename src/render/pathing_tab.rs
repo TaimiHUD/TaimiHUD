@@ -105,10 +105,7 @@ impl PathingConfig {
     pub fn draw_space_error(ui: &Ui, machine: &RenderMachine, e: Option<&anyhow::Error>) {
         let _font = RenderState::push_font("big", ui);
         let e = match e {
-            None if !Settings::try_read()
-                .map(|s| s.enable_katrender)
-                .unwrap_or(true) =>
-            {
+            None if !Settings::try_read().map(|s| s.enable_katrender).unwrap_or(true) => {
                 {
                     let _notice = RenderState::push_font("ui", ui);
                     ui.text_wrapped(&fl!("experimental-notice"));
@@ -124,10 +121,10 @@ impl PathingConfig {
             },
             None => {
                 #[cfg(deleteme)]
-                let res = crate::ENGINE.try_lock().ok().and_then(|e| {
-                    e.as_ref()
-                        .map(|e| e.as_ref().map(drop).map_err(Clone::clone))
-                });
+                let res = crate::ENGINE
+                    .try_lock()
+                    .ok()
+                    .and_then(|e| e.as_ref().map(|e| e.as_ref().map(drop).map_err(Clone::clone)));
                 match Engine::is_available() {
                     false => {
                         ui.text_wrapped("Load in to the game to get started");
@@ -202,19 +199,12 @@ impl PathingConfig {
             Some(Some(selected)) => Some(Some(selected)),
             None if ui.is_item_clicked_with_button(imgui::MouseButton::Right) =>
             // reset to default
-            {
-                Some(None)
-            },
+                Some(None),
             _ => None,
         }
     }
 
-    fn slider_setting(
-        ui: &Ui,
-        label: &str,
-        mut value: f32,
-        (min, max): (f32, f32),
-    ) -> Option<Option<f32>> {
+    fn slider_setting(ui: &Ui, label: &str, mut value: f32, (min, max): (f32, f32)) -> Option<Option<f32>> {
         let changed = Slider::new(label, min, max).build(ui, &mut value);
         // TODO: right-click to reset or something?
         match changed {
@@ -336,10 +326,7 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.visible_space = Some(visible_space));
             #[cfg(feature = "goggles")]
             Engine::try_send(match visible_space {
-                true => SpaceEvent::GogglesRefreshLens {
-                    force: false,
-                    delay_override: Some(2),
-                },
+                true => SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) },
                 false => SpaceEvent::GogglesClearLens,
             });
         }
@@ -367,12 +354,9 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.scale_trail_space = value);
         }
         #[cfg(todo)]
-        if let Some(value) = Self::slider_setting(
-            ui,
-            &fl!("pathing-config-poi-alpha"),
-            poi_alpha,
-            Self::RANGE_ALPHA,
-        ) {
+        if let Some(value) =
+            Self::slider_setting(ui, &fl!("pathing-config-poi-alpha"), poi_alpha, Self::RANGE_ALPHA)
+        {
             Self::set_pathing(|s| s.space.poi_alpha = value);
         }
         if let Some(value) = Self::slider_setting(
@@ -399,12 +383,9 @@ impl PathingConfig {
         ) {
             Self::set_pathing(|s| s.space.player_overlap_threshold = value);
         }
-        if let Some(value) = Self::slider_opt_setting(
-            ui,
-            "edge feather scale",
-            edge_feather_scale,
-            (0.001f32, 5.0),
-        ) {
+        if let Some(value) =
+            Self::slider_opt_setting(ui, "edge feather scale", edge_feather_scale, (0.001f32, 5.0))
+        {
             Self::set_pathing(|s| s.space.edge_feather_scale = value);
         }
         #[cfg(feature = "goggles")]
@@ -427,16 +408,13 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.distance_max = value);
         }
         #[cfg(feature = "extension-nexus")]
-        if let Some(value) =
-            Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source)
-        {
+        if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
             if value == Some(CameraSource::RealTimeAPI) {
                 match machine.rtapi_init() {
                     Err(e) => log::warn!("{e:#}"),
-                    Ok(false) => log::warn!(
-                        "RTAPI inactive - make sure the addon is installed and loaded by Nexus"
-                    ),
+                    Ok(false) =>
+                        log::warn!("RTAPI inactive - make sure the addon is installed and loaded by Nexus"),
                     Ok(true) => (),
                 }
             }
@@ -482,12 +460,9 @@ impl PathingConfig {
             ) {
                 Self::set_pathing(|s| s.space.trail_resolution = value);
             }
-            if let Some(value) = Self::slider_setting(
-                ui,
-                &fl!("pathing-config-trail-width"),
-                trail_width,
-                (0.01, 25.0),
-            ) {
+            if let Some(value) =
+                Self::slider_setting(ui, &fl!("pathing-config-trail-width"), trail_width, (0.01, 25.0))
+            {
                 Self::set_pathing(|s| s.space.trail_width = value);
             }
         };
@@ -536,10 +511,7 @@ impl PathingConfig {
                 Self::set_pathing(|s| s.space.visible_map_mini = Some(visible_minimap));
             }
             ui.same_line();
-            if ui.checkbox(
-                &fl!("pathing-config-textured-minimap"),
-                &mut trail_textured_mini,
-            ) {
+            if ui.checkbox(&fl!("pathing-config-textured-minimap"), &mut trail_textured_mini) {
                 Self::set_pathing(|s| s.space.map_trail_textured_mini = Some(trail_textured_mini));
             }
             if let Some(value) = Self::slider_setting(
@@ -591,9 +563,7 @@ impl PathingConfig {
                 &fl!("pathing-config-textured-worldmap"),
                 &mut trail_textured_world,
             ) {
-                Self::set_pathing(|s| {
-                    s.space.map_trail_textured_world = Some(trail_textured_world)
-                });
+                Self::set_pathing(|s| s.space.map_trail_textured_world = Some(trail_textured_world));
             }
             ui.same_line();
             if ui.checkbox(&fl!("pathing-config-map-open"), &mut map_open) {
@@ -676,10 +646,7 @@ impl PathingConfig {
         use {crate::render::goggles as render_goggles, core::ops::Range};
 
         let map_id = machine.gameplay.gameplay_map();
-        let Range {
-            start: near,
-            end: far,
-        } = machine.depth_range();
+        let Range { start: near, end: far } = machine.depth_range();
         let (mut is_enabled, obscured_alpha) =
             Self::get_pathing(|s| (s.space.goggles.enabled(), s.space.goggles.obscured_alpha()))?;
 
@@ -707,7 +674,9 @@ impl PathingConfig {
 
         if !needs_setup {
             let _font = RenderState::push_font("big", ui);
-            ui.text_wrapped("For good goggles, you will need to adjust the \"near\" slider for each new map you visit.");
+            ui.text_wrapped(
+                "For good goggles, you will need to adjust the \"near\" slider for each new map you visit.",
+            );
             drop(_font);
             ui.text_wrapped(concat!(
                 "Try sliding it down until paths disappear under the ground, then back off a bit.",
@@ -716,9 +685,7 @@ impl PathingConfig {
             ));
         }
 
-        if let Some(value) =
-            Self::slider_setting(ui, "x-ray opacity", obscured_alpha, Self::RANGE_ALPHA)
-        {
+        if let Some(value) = Self::slider_setting(ui, "x-ray opacity", obscured_alpha, Self::RANGE_ALPHA) {
             Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
         }
 

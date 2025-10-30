@@ -189,50 +189,38 @@ coord_newtype! {
 
 #[doc(hidden)]
 impl MapCalibration {
-    pub fn cast_compass_to_worldmap<S>(
-        trans: Transform2<S, CompassSpace>,
-    ) -> Transform2<S, WorldmapSpace>
+    pub fn cast_compass_to_worldmap<S>(trans: Transform2<S, CompassSpace>) -> Transform2<S, WorldmapSpace>
     where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_minimap_to_worldmap<S>(
-        trans: Transform2<S, MinimapSpace>,
-    ) -> Transform2<S, WorldmapSpace>
+    pub fn cast_minimap_to_worldmap<S>(trans: Transform2<S, MinimapSpace>) -> Transform2<S, WorldmapSpace>
     where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_worldmap_to_compass<D>(
-        trans: Transform2<CompassSpace, D>,
-    ) -> Transform2<WorldmapSpace, D>
+    pub fn cast_worldmap_to_compass<D>(trans: Transform2<CompassSpace, D>) -> Transform2<WorldmapSpace, D>
     where
         D: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_worldmap_to_minimap<D>(
-        trans: Transform2<MinimapSpace, D>,
-    ) -> Transform2<WorldmapSpace, D>
+    pub fn cast_worldmap_to_minimap<D>(trans: Transform2<MinimapSpace, D>) -> Transform2<WorldmapSpace, D>
     where
         D: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
 
-    pub fn cast_compass_from_worldmap<S>(
-        trans: Transform2<S, WorldmapSpace>,
-    ) -> Transform2<S, CompassSpace>
+    pub fn cast_compass_from_worldmap<S>(trans: Transform2<S, WorldmapSpace>) -> Transform2<S, CompassSpace>
     where
         S: Unit<Scalar = f32>,
     {
         transform2_cast(trans)
     }
-    pub fn cast_minimap_from_worldmap<S>(
-        trans: Transform2<S, WorldmapSpace>,
-    ) -> Transform2<S, MinimapSpace>
+    pub fn cast_minimap_from_worldmap<S>(trans: Transform2<S, WorldmapSpace>) -> Transform2<S, MinimapSpace>
     where
         S: Unit<Scalar = f32>,
     {

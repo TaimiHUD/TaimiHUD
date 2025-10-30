@@ -75,9 +75,7 @@ impl TimersController {
         }
         for timer in &self.timers {
             if let Some(association) = &timer.association {
-                self.sources_to_timers
-                    .entry(association.clone())
-                    .or_default();
+                self.sources_to_timers.entry(association.clone()).or_default();
                 if let Some(val) = self.sources_to_timers.get_mut(association) {
                     val.push(timer.clone());
                 };
@@ -102,9 +100,7 @@ impl TimersController {
             );
         }
         log::info!("Set up {} timers.", self.timers.len());
-        let _ = rt_sender
-            .send(RenderEvent::TimerData(self.timers.clone()))
-            .await;
+        let _ = rt_sender.send(RenderEvent::TimerData(self.timers.clone())).await;
     }
 
     pub(crate) async fn handle_event(
@@ -118,15 +114,13 @@ impl TimersController {
         use TimersEvent::*;
         match event {
             ReloadTimers => self.reload(settings.clone(), rt_sender.clone()).await,
-            TimerEnable(id) => {
+            TimerEnable(id) =>
                 self.enable(&id, map_id, alert_sem.clone(), rt_sender.clone())
-                    .await
-            },
+                    .await,
             TimerDisable(id) => self.disable(&id).await,
-            TimerToggle(id) => {
+            TimerToggle(id) =>
                 self.toggle(&id, map_id, alert_sem.clone(), rt_sender.clone())
-                    .await
-            },
+                    .await,
             TimerReset => self.reset().await,
             TimerKeyTrigger(id, is_release) => self.timer_key_trigger(id, is_release).await,
             ProgressBarStyle(style) => self.progress_bar_style(style, rt_sender.clone()).await,
@@ -155,28 +149,19 @@ impl TimersController {
         self.reset().await;
     }
 
-    async fn toggle(
-        &mut self,
-        id: &str,
-        map_id: MapId,
-        alert_sem: Arc<Mutex<()>>,
-        rt_sender: RtSender,
-    ) {
+    async fn toggle(&mut self, id: &str, map_id: MapId, alert_sem: Arc<Mutex<()>>, rt_sender: RtSender) {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
         let disabled = settings_lock.toggle_timer(id.to_string());
         drop(settings_lock);
         match disabled {
-            false => {
+            false =>
                 if let Some(map_id) = map_id {
                     if let Some(timers_for_map) = &self.map_id_to_timers.get(&map_id) {
                         let timers = timers_for_map.iter().filter(|t| t.id == id);
                         for timer in timers {
-                            log::debug!(
-                                "Creating timer machine for {} as it has been enabled.",
-                                timer.id
-                            );
+                            log::debug!("Creating timer machine for {} as it has been enabled.", timer.id);
                             self.current_timers.push(TimerMachine::new(
                                 timer.clone(),
                                 alert_sem.clone(),
@@ -184,8 +169,7 @@ impl TimersController {
                             ));
                         }
                     }
-                }
-            },
+                },
             true => {
                 let timers_to_remove = self.current_timers.iter_mut().filter(|t| t.timer.id == id);
                 for timer in timers_to_remove {
@@ -199,13 +183,7 @@ impl TimersController {
         }
     }
 
-    async fn enable(
-        &mut self,
-        id: &str,
-        map_id: MapId,
-        alert_sem: Arc<Mutex<()>>,
-        rt_sender: RtSender,
-    ) {
+    async fn enable(&mut self, id: &str, map_id: MapId, alert_sem: Arc<Mutex<()>>, rt_sender: RtSender) {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");

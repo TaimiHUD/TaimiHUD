@@ -3,11 +3,7 @@ use {
     std::ffi::CStr,
 };
 
-pub use crate::dx11::d3d11::{
-    ID3D11InputLayout,
-    D3D11_INPUT_CLASSIFICATION,
-    D3D11_INPUT_ELEMENT_DESC,
-};
+pub use crate::dx11::d3d11::{ID3D11InputLayout, D3D11_INPUT_CLASSIFICATION, D3D11_INPUT_ELEMENT_DESC};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11InputLayout;
@@ -42,9 +38,7 @@ impl InputLayout {
         let mut out: Option<ID3D11InputLayout> = None;
         unsafe { device.CreateInputLayout(desc, bytecode, Some(&mut out)) }
             .map_err(anyhow::Error::from)
-            .and_then(move |()| {
-                out.ok_or_else(|| anyhow!("failed to produce input layout pointer"))
-            })
+            .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce input layout pointer")))
             .context("CreateInputLayout")
             .map(Into::into)
     }
@@ -286,9 +280,7 @@ pub(crate) mod serde_imp {
                     semantic_index: input.semantic_index,
                     format: input.format,
                     input_slot: input.input_slot,
-                    aligned_byte_offset: input
-                        .aligned_byte_offset
-                        .unwrap_or(InputLayout::OFFSET_ALIGNED),
+                    aligned_byte_offset: input.aligned_byte_offset.unwrap_or(InputLayout::OFFSET_ALIGNED),
                     instance_step: input
                         .instance_step
                         .unwrap_or(super::default_instance_step(input.class)),

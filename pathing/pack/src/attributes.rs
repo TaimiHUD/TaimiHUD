@@ -278,8 +278,7 @@ impl MarkerAttributes {
             self.alpha = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("canfade") {
             self.can_fade = Some(parse_bool(&value)?);
-        } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint")
-        {
+        } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint") {
             if let Some(tint) = opt_str(&value).map(parse_color).transpose()? {
                 self.tint = Some(tint);
             }
@@ -327,8 +326,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("rotate-z") {
             let z = value.parse()?;
             self.rotate.get_or_insert_default().z = z;
-        } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title")
-        {
+        } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title") {
             if self.billboard_text.is_none() || !value.is_empty() {
                 self.billboard_text = Some(value);
             }
@@ -491,10 +489,7 @@ where
 {
     let mut list = [T::default(); N];
 
-    let values = value
-        .split(',')
-        .map(|f| f.trim_ascii())
-        .map(FromStr::from_str);
+    let values = value.split(',').map(|f| f.trim_ascii()).map(FromStr::from_str);
     for (dest, item) in list.iter_mut().zip(values) {
         *dest = item
             .map_err(Into::into)
@@ -874,20 +869,17 @@ impl FromStr for MapType {
             Ok(Tutorial)
         } else if s.eq_ignore_ascii_case("usertournament") {
             Ok(UserTournament)
-        } else if s.eq_ignore_ascii_case("center") || s.eq_ignore_ascii_case("eternalbattlegrounds")
-        {
+        } else if s.eq_ignore_ascii_case("center") || s.eq_ignore_ascii_case("eternalbattlegrounds") {
             Ok(EternalBattlegrounds)
         } else if s.eq_ignore_ascii_case("bluehome") || s.eq_ignore_ascii_case("blueborderlands") {
             Ok(BlueHome)
-        } else if s.eq_ignore_ascii_case("greenhome") || s.eq_ignore_ascii_case("greenborderlands")
-        {
+        } else if s.eq_ignore_ascii_case("greenhome") || s.eq_ignore_ascii_case("greenborderlands") {
             Ok(GreenHome)
         } else if s.eq_ignore_ascii_case("redhome") || s.eq_ignore_ascii_case("redborderlands") {
             Ok(RedHome)
         } else if s.eq_ignore_ascii_case("fortunesvale") {
             Ok(FortunesVale)
-        } else if s.eq_ignore_ascii_case("jumppuzzle") || s.eq_ignore_ascii_case("obsidiansanctum")
-        {
+        } else if s.eq_ignore_ascii_case("jumppuzzle") || s.eq_ignore_ascii_case("obsidiansanctum") {
             Ok(ObsidianSanctum)
         } else if s.eq_ignore_ascii_case("edgeofthemists") {
             Ok(EdgeOfTheMists)

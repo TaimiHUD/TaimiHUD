@@ -55,12 +55,7 @@ impl KeyIntercept {
                 res @ (None | Some(Self::Pending)) => return res,
                 int => int,
             };
-            match KEY_INTERCEPT.compare_exchange_weak(
-                raw,
-                Self::NONE,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            ) {
+            match KEY_INTERCEPT.compare_exchange_weak(raw, Self::NONE, Ordering::SeqCst, Ordering::SeqCst) {
                 Ok(..) => break int,
                 Err(current) => {
                     raw = current;
@@ -86,12 +81,7 @@ impl KeyIntercept {
     pub fn intercept_try_report(key: KeyInput) -> bool {
         let int = Self::Intercepted { key };
         KEY_INTERCEPT
-            .compare_exchange(
-                Self::PENDING,
-                int.raw(),
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            )
+            .compare_exchange(Self::PENDING, int.raw(), Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
     }
 }

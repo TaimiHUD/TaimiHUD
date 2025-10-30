@@ -27,10 +27,7 @@ pub struct Trail {
 }
 
 impl Trail {
-    pub fn from_xml(
-        asset: &str,
-        attrs: Vec<xml::attribute::OwnedAttribute>,
-    ) -> anyhow::Result<Trail> {
+    pub fn from_xml(asset: &str, attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Trail> {
         let mut category = String::new();
         let mut trail_path = None;
         let mut guid = None;
@@ -118,8 +115,8 @@ impl Trail {
 
     pub fn read_trl_data(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<TrailData> {
         let mut asset = self.open_trl_data(ctx)?;
-        let data = TrailData::read_from_trl(&mut asset)
-            .with_context(|| format!("Reading trail data from {self}"));
+        let data =
+            TrailData::read_from_trl(&mut asset).with_context(|| format!("Reading trail data from {self}"));
 
         match (self.map_id, &data) {
             (Some(map_id), Ok(data)) if data.header.map_id != map_id => {
@@ -278,17 +275,13 @@ impl TrailSection {
             points_buf.push(point);
             next_point = match Self::read_point(reader)? {
                 #[cfg(todo)]
-                None => {
+                None =>
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "unterminated trail section",
-                    ))
-                },
+                    )),
                 None => {
-                    log::trace!(
-                        "unterminated trail section after {} points",
-                        points_buf.len()
-                    );
+                    log::trace!("unterminated trail section after {} points", points_buf.len());
                     None
                 },
                 Some(p) => p,

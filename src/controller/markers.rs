@@ -98,9 +98,7 @@ impl MarkersController {
         }
         let markers = RuntimeMarkers::load_many(&markers_dir, 100).await?;
         let markers = RuntimeMarkers::markers(markers).await;
-        let _ = rt_sender
-            .send(RenderEvent::MarkerData(markers.clone()))
-            .await;
+        let _ = rt_sender.send(RenderEvent::MarkerData(markers.clone())).await;
         self.markers = markers;
         Ok(())
     }
@@ -141,11 +139,7 @@ impl MarkersController {
         self.spent_markers = Default::default();
     }
 
-    async fn handle_marker_autoplace(
-        &self,
-        marker: &MarkerSet,
-        rt_sender: RtSender,
-    ) -> anyhow::Result<()> {
+    async fn handle_marker_autoplace(&self, marker: &MarkerSet, rt_sender: RtSender) -> anyhow::Result<()> {
         if marker.status() {
             use crate::settings::SquadCondition;
             let role = self.get_role().await;
@@ -155,41 +149,35 @@ impl MarkersController {
                 match t {
                     MarkerAutoPlaceSettings::OpenWindow(s) => match s {
                         SquadCondition::Never => (),
-                        SquadCondition::IfCommander => {
+                        SquadCondition::IfCommander =>
                             if let Some(role) = role {
                                 if role == SquadRoleState::Commander {
                                     self.open_window().await;
                                 }
-                            }
-                        },
-                        SquadCondition::IfLieutenantOrAbove => {
+                            },
+                        SquadCondition::IfLieutenantOrAbove =>
                             if let Some(role) = role {
                                 if role >= SquadRoleState::Lieutenant {
                                     self.open_window().await;
                                 }
-                            }
-                        },
+                            },
                         SquadCondition::Always => self.open_window().await,
                     },
                     MarkerAutoPlaceSettings::Place(s) => match s {
                         SquadCondition::Never => (),
-                        SquadCondition::IfCommander => {
+                        SquadCondition::IfCommander =>
                             if let Some(role) = role {
                                 if role == SquadRoleState::Commander {
                                     self.set_marker(marker, rt_sender.clone()).await??;
                                 }
-                            }
-                        },
-                        SquadCondition::IfLieutenantOrAbove => {
+                            },
+                        SquadCondition::IfLieutenantOrAbove =>
                             if let Some(role) = role {
                                 if role >= SquadRoleState::Lieutenant {
                                     self.set_marker(marker, rt_sender.clone()).await??;
                                 }
-                            }
-                        },
-                        SquadCondition::Always => {
-                            self.set_marker(marker, rt_sender.clone()).await??
-                        },
+                            },
+                        SquadCondition::Always => self.set_marker(marker, rt_sender.clone()).await??,
                     },
                     MarkerAutoPlaceSettings::DoNothing => (),
                 }
@@ -249,21 +237,19 @@ impl MarkersController {
                 None => return,
             };
             match change {
-                SquadState::Left => {
+                SquadState::Left =>
                     if member_name == account_name {
                         self.rtapi_squad.clear();
                     } else {
                         self.rtapi_squad.remove(member_name);
-                    }
-                },
+                    },
                 SquadState::Joined => {
                     self.rtapi_squad.insert(member_name.into(), member);
                 },
-                SquadState::Update => {
+                SquadState::Update =>
                     if let Some(entry) = self.rtapi_squad.get_mut(member_name) {
                         *entry = member;
-                    }
-                },
+                    },
             }
         }
     }
@@ -307,10 +293,7 @@ impl MarkersController {
         Ok(())
     }
 
-    async fn set_autoplace_settings(
-        &mut self,
-        maps: MarkerAutoPlaceSettings,
-    ) -> anyhow::Result<()> {
+    async fn set_autoplace_settings(&mut self, maps: MarkerAutoPlaceSettings) -> anyhow::Result<()> {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
@@ -357,9 +340,7 @@ impl MarkersController {
     pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(50);
 
     pub async fn reload(&mut self, rt_sender: RtSender) {
-        self.load(rt_sender.clone())
-            .await
-            .expect("markers load failed");
+        self.load(rt_sender.clone()).await.expect("markers load failed");
         let mut map_id_to_markers: HashMap<u32, HashSet<Arc<MarkerSet>>> = HashMap::new();
         let marker_sets: Vec<_> = self.markers.values().flatten().collect();
         for set in marker_sets {
@@ -371,13 +352,8 @@ impl MarkersController {
     async fn clear(&self) {
         use crate::marker::format::MarkerType;
 
-        if let Err(e) = rt::invoke_marker_bind(
-            MarkerType::ClearMarkers,
-            false,
-            Self::KEY_INVOKE_DURATION,
-            None,
-        )
-        .await
+        if let Err(e) =
+            rt::invoke_marker_bind(MarkerType::ClearMarkers, false, Self::KEY_INVOKE_DURATION, None).await
         {
             log::warn!("Failed to clear markers: {e}");
         }
@@ -410,11 +386,7 @@ impl MarkersController {
         }
     }
 
-    fn set_marker(
-        &self,
-        markers: &MarkerSet,
-        rt_sender: RtSender,
-    ) -> JoinHandle<anyhow::Result<()>> {
+    fn set_marker(&self, markers: &MarkerSet, rt_sender: RtSender) -> JoinHandle<anyhow::Result<()>> {
         tokio::spawn(Self::set_marker_task(markers.clone(), rt_sender.clone()))
     }
 
@@ -432,8 +404,7 @@ impl MarkersController {
                 }
             }
             if too_far {
-                let err =
-                    anyhow!("Player is too far away from the markers they are trying to place.");
+                let err = anyhow!("Player is too far away from the markers they are trying to place.");
                 let _ = rt_sender
                     .send(RenderEvent::OpenableError(
                         format!("Error setting marker set: {}", &markers.name),
@@ -485,9 +456,7 @@ impl MarkersController {
                             .map(|map| map.centre());
                         log::debug!("Reached none arm for marker placement");
                         if let Some(mut map_centre) = map_centre {
-                            while (map_centre.distance(map_point) > 5.0)
-                                && (attempts < max_attempts)
-                            {
+                            while (map_centre.distance(map_point) > 5.0) && (attempts < max_attempts) {
                                 log::debug!("Attempt {}/{}", attempts, max_attempts);
                                 let map = RenderMachine::shared_map_state().lock().await.clone();
                                 if let Some(map) = map.get() {
@@ -523,11 +492,7 @@ impl MarkersController {
                                         map_point
                                     );
                                     //log::debug!("Min: {:?}, max: {:?}", min, max);
-                                    log::debug!(
-                                        "Attempting a drag from {:?} to {:?}",
-                                        drag_from,
-                                        drag_res
-                                    );
+                                    log::debug!("Attempting a drag from {:?} to {:?}", drag_from, drag_res);
                                     Self::drag_mouse_abs(drag_from, drag_res)
                                         .await
                                         .map_err(|e| anyhow!("mouse drag failed: {e}"))?;
@@ -537,17 +502,14 @@ impl MarkersController {
                             }
                             log::info!("Attempts: {}", attempts);
                             if map_centre.distance(map_point) > 5.0 {
-                                let err =
-                                    anyhow!("Could not drag map perspective to marker location!");
+                                let err = anyhow!("Could not drag map perspective to marker location!");
                                 let _ = rt_sender
                                     .send(RenderEvent::OpenableError(
                                         format!("Error setting marker set: {}", &markers.name),
                                         err,
                                     ))
                                     .await;
-                                return Err(anyhow!(
-                                    "Could not drag map perspective to marker location!"
-                                ));
+                                return Err(anyhow!("Could not drag map perspective to marker location!"));
                             } else {
                                 Self::place_marker_from_map(
                                     Self::KEY_INVOKE_DURATION,
@@ -673,14 +635,9 @@ impl MarkersController {
                 self.set_marker(&t, rt_sender.clone());
             },
             SaveMarker(e) => self.save(e, rt_sender.clone()).await?,
-            DeleteMarker {
-                path,
-                category,
-                idx,
-            } => {
+            DeleteMarker { path, category, idx } =>
                 self.delete_marker(&path, category, idx, rt_sender.clone())
-                    .await?
-            },
+                    .await?,
             GetMarkerPaths => self.get_marker_paths(rt_sender.clone()).await?,
             UiResize(_calibration) => (),
             UiMapOpened(_open) => (),

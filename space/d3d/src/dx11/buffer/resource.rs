@@ -32,9 +32,7 @@ impl Resource {
     pub fn as_buffer(&self) -> Option<&Buffer> {
         match self.get_type_d3d() {
             ResourceDimension::BUFFER => Some(unsafe {
-                Buffer::from_d3d_ref(mem::transmute::<&ID3D11Resource, &ID3D11Buffer>(
-                    self.as_d3d(),
-                ))
+                Buffer::from_d3d_ref(mem::transmute::<&ID3D11Resource, &ID3D11Buffer>(self.as_d3d()))
             }),
             _ => None,
         }
@@ -43,9 +41,7 @@ impl Resource {
     pub fn try_into_buffer(self) -> Result<Buffer, Self> {
         match self.get_type_d3d() {
             ResourceDimension::BUFFER => Ok(unsafe {
-                Buffer::from_d3d(mem::transmute::<ID3D11Resource, ID3D11Buffer>(
-                    self.into_d3d(),
-                ))
+                Buffer::from_d3d(mem::transmute::<ID3D11Resource, ID3D11Buffer>(self.into_d3d()))
             }),
             _ => Err(self),
         }
@@ -54,9 +50,7 @@ impl Resource {
     pub fn as_texture2(&self) -> Option<&Texture2> {
         match self.get_type_d3d() {
             ResourceDimension::TEXTURE2D => Some(unsafe {
-                Texture2::from_d3d_ref(mem::transmute::<&ID3D11Resource, &ID3D11Texture2D>(
-                    self.as_d3d(),
-                ))
+                Texture2::from_d3d_ref(mem::transmute::<&ID3D11Resource, &ID3D11Texture2D>(self.as_d3d()))
             }),
             _ => None,
         }
@@ -65,9 +59,7 @@ impl Resource {
     pub fn try_into_texture2(self) -> Result<Texture2, Self> {
         match self.get_type_d3d() {
             ResourceDimension::TEXTURE2D => Ok(unsafe {
-                Texture2::from_d3d(mem::transmute::<ID3D11Resource, ID3D11Texture2D>(
-                    self.into_d3d(),
-                ))
+                Texture2::from_d3d(mem::transmute::<ID3D11Resource, ID3D11Texture2D>(self.into_d3d()))
             }),
             _ => Err(self),
         }

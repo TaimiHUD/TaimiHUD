@@ -223,9 +223,7 @@ impl RenderMachine {
             self.map_info = match self.gameplay.latest_map() {
                 None => {
                     if self.map_hidden {
-                        log::info!(
-                            "UI toggle escape hatch - resetting hidden state due to loading screen"
-                        );
+                        log::info!("UI toggle escape hatch - resetting hidden state due to loading screen");
                         self.map_hidden = false;
                     }
                     None
@@ -261,9 +259,7 @@ impl RenderMachine {
             self.map.calibration.dpi = dpi.unwrap_or_else(|| match rt::window_dpi() {
                 Ok(dpi) => dpi as f32,
                 Err(e) => {
-                    log::warn!(
-                        "Maps and markers may be incorrect, could not determine DPI due to: {e}"
-                    );
+                    log::warn!("Maps and markers may be incorrect, could not determine DPI due to: {e}");
                     MapCalibration::DPI_REFERENCE
                 },
             });
@@ -305,10 +301,7 @@ impl RenderMachine {
 
     pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]
-        let controls_changed = self
-            .controls
-            .update()
-            .map(|(&state, changes)| (state, changes));
+        let controls_changed = self.controls.update().map(|(&state, changes)| (state, changes));
 
         let (ml, frameskip_gameplay) = self.next_mumblelink_frame();
 
@@ -335,13 +328,9 @@ impl RenderMachine {
         }
 
         let gameplay_transition = gameplay_change.and_then(|gameplay| match gameplay {
-            GameplayState::Intermission {
-                next_map_id: map_id @ Some(..),
-                ..
-            } => self.gameplay.commit_loading(map_id),
-            GameplayState::Intermission {
-                next_map_id: None, ..
-            } => {
+            GameplayState::Intermission { next_map_id: map_id @ Some(..), .. } =>
+                self.gameplay.commit_loading(map_id),
+            GameplayState::Intermission { next_map_id: None, .. } => {
                 //self.map.calibration.clear_map();
                 self.gameplay.commit_intermission()
             },

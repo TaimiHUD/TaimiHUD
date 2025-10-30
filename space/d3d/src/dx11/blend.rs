@@ -18,24 +18,22 @@ impl BlendState {
     pub const DEFAULT_FACTOR: Vec4 = Vec4::ONE;
     pub const DEFAULT_MASK: u32 = u32::MAX;
 
-    pub const TARGET_DESC_DEFAULT_OFF: D3D11_RENDER_TARGET_BLEND_DESC =
-        D3D11_RENDER_TARGET_BLEND_DESC {
-            BlendEnable: BOOL(0),
-            SrcBlend: BlendFactor::ONE,
-            DestBlend: BlendFactor::ZERO,
-            BlendOp: BlendOp::ADD,
-            SrcBlendAlpha: BlendFactor::ONE,
-            DestBlendAlpha: BlendFactor::ZERO,
-            BlendOpAlpha: BlendOp::ADD,
-            RenderTargetWriteMask: d3d11::D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
-        };
-    pub const TARGET_DESC_ADDITIVE: D3D11_RENDER_TARGET_BLEND_DESC =
-        D3D11_RENDER_TARGET_BLEND_DESC {
-            BlendEnable: BOOL(1),
-            SrcBlend: BlendFactor::SRC_ALPHA,
-            DestBlend: BlendFactor::INV_SRC_ALPHA,
-            ..Self::TARGET_DESC_DEFAULT_OFF
-        };
+    pub const TARGET_DESC_DEFAULT_OFF: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
+        BlendEnable: BOOL(0),
+        SrcBlend: BlendFactor::ONE,
+        DestBlend: BlendFactor::ZERO,
+        BlendOp: BlendOp::ADD,
+        SrcBlendAlpha: BlendFactor::ONE,
+        DestBlendAlpha: BlendFactor::ZERO,
+        BlendOpAlpha: BlendOp::ADD,
+        RenderTargetWriteMask: d3d11::D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
+    };
+    pub const TARGET_DESC_ADDITIVE: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
+        BlendEnable: BOOL(1),
+        SrcBlend: BlendFactor::SRC_ALPHA,
+        DestBlend: BlendFactor::INV_SRC_ALPHA,
+        ..Self::TARGET_DESC_DEFAULT_OFF
+    };
 
     pub const fn desc_for_target(
         rt_desc: D3D11_RENDER_TARGET_BLEND_DESC,
@@ -95,9 +93,7 @@ impl<B> OMBlendState<B> {
         let mut state = None;
         let mut factor = BlendState::DEFAULT_FACTOR.to_array();
         let mut sample_mask = BlendState::DEFAULT_MASK;
-        unsafe {
-            context.OMGetBlendState(Some(&mut state), Some(&mut factor), Some(&mut sample_mask))
-        }
+        unsafe { context.OMGetBlendState(Some(&mut state), Some(&mut factor), Some(&mut sample_mask)) }
         let factor = Vec4::from_array(factor);
         //let factor = (factor != Self::DEFAULT_FACTOR).then(factor);
         Self::new(state.into(), Some(factor), Some(sample_mask))

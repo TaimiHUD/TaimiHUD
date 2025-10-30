@@ -79,19 +79,13 @@ impl Category {
                         .map_err(From::from)
                 } else {
                     match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                        Ok(false) => Ok(log::debug!(
-                            "unrecognized category attribute `{}`",
-                            attr.name
-                        )),
+                        Ok(false) => Ok(log::debug!("unrecognized category attribute `{}`", attr.name)),
                         res => res.map(drop),
                     }
                 }
             } else {
                 match marker_attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::info!(
-                        "unrecognized category attribute `{}`",
-                        attr.name
-                    )),
+                    Ok(false) => Ok(log::info!("unrecognized category attribute `{}`", attr.name)),
                     res => res.map(drop),
                 }
             }
@@ -159,9 +153,7 @@ impl Category {
         all_categories: &IndexMap<String, Category>,
         state: &mut HashMap<String, bool>,
     ) {
-        let _ = state
-            .entry(self.full_id.clone())
-            .or_insert(self.default_toggle);
+        let _ = state.entry(self.full_id.clone()).or_insert(self.default_toggle);
         for (_local, global) in self.sub_categories.iter() {
             all_categories[global].attain_state(all_categories, state);
         }

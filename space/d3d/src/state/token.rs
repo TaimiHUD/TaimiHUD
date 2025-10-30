@@ -9,10 +9,7 @@ pub struct D3dStateToken<'c, S: D3dState<D3DC>, D3DC: D3dContext = crate::defaul
 
 impl<'c, S: D3dState<D3DC>, D3DC: D3dContext> D3dStateToken<'c, S, D3DC> {
     pub fn empty(device: &D3DC::IDevice) -> anyhow::Result<Self> {
-        S::empty_state(device).map(|state| Self {
-            state,
-            context: None,
-        })
+        S::empty_state(device).map(|state| Self { state, context: None })
     }
 
     pub fn new_snapshot(context: &'c D3DC) -> Self {

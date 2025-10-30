@@ -20,9 +20,7 @@ impl LanguageSelection {
         let selected_language = *self.language.insert(Self::get_current_language());
         let selected_language = selected_language.as_str();
 
-        if let Some(languages) =
-            with_i18n!("language", |msg| ui.begin_combo(&msg, selected_language))
-        {
+        if let Some(languages) = with_i18n!("language", |msg| ui.begin_combo(&msg, selected_language)) {
             let mut new_language = None;
             for l in crate::LANGUAGES_GAME {
                 let id = game_language_id(l);

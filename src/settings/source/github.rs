@@ -99,20 +99,14 @@ impl fmt::Display for GitHubSource {
 
 impl GitHubSource {
     pub async fn latest_release(&self) -> anyhow::Result<GitHubLatestRelease> {
-        let url = format!(
-            "https://api.github.com/repos/{}/releases/latest",
-            self.name()
-        );
+        let url = format!("https://api.github.com/repos/{}/releases/latest", self.name());
         let response = super::get(url).await?;
         let json_data = response.text().await?;
         serde_json::from_str(&json_data).context("Deserializing GitHub release")
     }
 
     pub const RELEASES_RANGE_DEFAULT: Range<usize> = 0..30;
-    pub async fn latest_releases(
-        &self,
-        range: Range<usize>,
-    ) -> anyhow::Result<Vec<GitHubLatestRelease>> {
+    pub async fn latest_releases(&self, range: Range<usize>) -> anyhow::Result<Vec<GitHubLatestRelease>> {
         let page = match range {
             range if range == Self::RELEASES_RANGE_DEFAULT => None,
             range if range.start == 0 => Some((1, range.end)),
@@ -155,9 +149,7 @@ impl Source for GitHubSource {
         kind: SourceKind,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
         Box::pin(async move {
-            let install_dir = ADDON_DIR
-                .join(kind.get_unpack_dir())
-                .join(self.install_dir());
+            let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
             create_dir_all(&install_dir).await?;
             let latest = self.latest_release().await?;
             if let Some(tarball_url) = latest.tarball_url {

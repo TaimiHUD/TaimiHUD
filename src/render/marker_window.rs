@@ -47,8 +47,7 @@ impl MarkerWindowState {
                         MarkersController::try_send(MarkersEvent::ClearSpentAutoplace);
                     }
                     if !self.markers_for_map.is_empty() {
-                        let table_flags =
-                            TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+                        let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
                         let table_name = format!("markers_for_map");
                         let table_token = ui.begin_table_header_with_flags(
                             &table_name,
@@ -97,9 +96,7 @@ impl MarkerWindowState {
                             ui.text_wrapped(format!("{}", marker.description));
                             ui.table_next_column();
                             if ui.button(&fl!("markers-place")) {
-                                MarkersController::try_send(MarkersEvent::SetMarker(
-                                    marker.clone(),
-                                ));
+                                MarkersController::try_send(MarkersEvent::SetMarker(marker.clone()));
                             }
                             ui.table_next_column();
                             id_token.end();

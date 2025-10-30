@@ -195,8 +195,7 @@ impl MapCalibration {
                 read_volatile(&raw const (*context).player_x),
                 read_volatile(&raw const (*context).player_y),
             );
-            let link =
-                context.byte_sub(core::mem::offset_of!(MumbleLink, context)) as *const MumbleLink;
+            let link = context.byte_sub(core::mem::offset_of!(MumbleLink, context)) as *const MumbleLink;
             let player_local = Point3::<LocalSpace>::new(
                 read_volatile(&raw const (*link).avatar.position[0]),
                 read_volatile(&raw const (*link).avatar.position[1]),
@@ -206,11 +205,7 @@ impl MapCalibration {
         };
     }
 
-    pub fn update_from_mumblelink_identity_data(
-        &mut self,
-        ui_size: UiSize,
-        _map_id: MapID,
-    ) -> bool {
+    pub fn update_from_mumblelink_identity_data(&mut self, ui_size: UiSize, _map_id: MapID) -> bool {
         let changed = self.ui_size != ui_size;
         self.ui_size = ui_size;
 
@@ -317,8 +312,7 @@ impl<M: MapUnit> MapState<M> {
 
         self.centre.x = read_volatile(&raw const (*context).map_center_x);
         self.centre.y = read_volatile(&raw const (*context).map_center_y);
-        self.scale =
-            NumCast::from(read_volatile(&raw const (*context).map_scale)).unwrap_or_default();
+        self.scale = NumCast::from(read_volatile(&raw const (*context).map_scale)).unwrap_or_default();
 
         if M::CONTEXT == MapContext::Minimap {
             let ui_state = UiState::from(read_volatile(&raw const (*context).ui_state));
@@ -475,10 +469,7 @@ impl UiMap {
     }
 
     #[cfg(feature = "mumblelink-arcloader")]
-    pub fn update_from_mumblelink(
-        &mut self,
-        mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr,
-    ) {
+    pub fn update_from_mumblelink(&mut self, mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr) {
         if mumblelink.read_ui_version() == 0 {
             return
         }
@@ -604,11 +595,8 @@ impl MapOpen {
     pub const fn cap(self, relaxed: bool) -> Self {
         let cap = Self::max_duration(relaxed);
         match self {
-            Self::Opening { elapsed } | Self::Closing { elapsed }
-                if elapsed >= cap.as_secs_f32() =>
-            {
-                Self::with_open(self.is_open())
-            },
+            Self::Opening { elapsed } | Self::Closing { elapsed } if elapsed >= cap.as_secs_f32() =>
+                Self::with_open(self.is_open()),
             open => open,
         }
     }
@@ -885,9 +873,7 @@ impl UiMap {
     pub fn worldmap_to_fake_for(&self, ctx: MapContext) -> Transform2<WorldmapSpace, FakeSpace> {
         match ctx {
             MapContext::Minimap => MapCalibration::cast_worldmap_to_minimap(
-                self.compass
-                    .to_compass()
-                    .then(self.calibration.compass_to_fake()),
+                self.compass.to_compass().then(self.calibration.compass_to_fake()),
             ),
             MapContext::Global => self.calibration.worldmap_to_fake(), // no need for from_worldmap
         }

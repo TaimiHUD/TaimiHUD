@@ -238,21 +238,17 @@ impl PathingWindowState {
                                 ui.tooltip_text(fl!("searchbar-clear"));
                             }
                             ui.same_line();
-                            search_dirty |= ui.checkbox(
-                                &fl!("case-insensitive"),
-                                &mut self.search_state.ignore_case,
-                            );
+                            search_dirty |=
+                                ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
                             ui.same_line();
-                            search_dirty |= ui.checkbox(
-                                &fl!("ignore-whitespace"),
-                                &mut self.search_state.ignore_space,
-                            );
+                            search_dirty |=
+                                ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
                             pushy.pop();
                             ui.dummy([4.0; 2]);
                             ui.text(fl!("filter-options"));
-                            let filters = PathingFilterState::all().iter().filter_map(|filter| {
-                                filter.bit_as_str().map(|name| (filter, name))
-                            });
+                            let filters = PathingFilterState::all()
+                                .iter()
+                                .filter_map(|filter| filter.bit_as_str().map(|name| (filter, name)));
                             for (i, (flag, filter_name)) in filters.enumerate() {
                                 if i > 0 && i % 3 != 0 {
                                     ui.same_line();
@@ -275,9 +271,8 @@ impl PathingWindowState {
                             .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
                             .size([0.0; 2])
                             .build(ui, || {
-                                let table_flags = TableFlags::RESIZABLE
-                                    | TableFlags::ROW_BG
-                                    | TableFlags::BORDERS;
+                                let table_flags =
+                                    TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
                                 let table_name = format!("pathing");
                                 let table_token = ui.begin_table_header_with_flags(
                                     &table_name,

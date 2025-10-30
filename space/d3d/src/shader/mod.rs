@@ -37,9 +37,8 @@ pub fn compile(
     let filename = PCSTR(filename.as_ptr() as *const _);
     let defines = match defines {
         defs if defs.is_empty() => None,
-        defs if !defs.last().map(|d| d.is_empty()).unwrap_or(false) => {
-            anyhow::bail!("defs must be null-terminated")
-        },
+        defs if !defs.last().map(|d| d.is_empty()).unwrap_or(false) =>
+            anyhow::bail!("defs must be null-terminated"),
         defines => Some(ShaderDefinition::slice_as_d3d_macros(defines)),
     };
     let target_name = PCSTR(target.c_name().as_ptr() as *const _);
@@ -62,9 +61,7 @@ pub fn compile(
     }
     .map_err(anyhow::Error::from)
     .with_context(error_context)
-    .and_then(|()| {
-        out.ok_or_else(|| anyhow!("failed to produce {} shader bytecode pointer", target))
-    })
+    .and_then(|()| out.ok_or_else(|| anyhow!("failed to produce {} shader bytecode pointer", target)))
     .map(Blob::with_blob);
     let messages = messages.map(Blob::with_blob);
     let messages = messages
@@ -73,9 +70,8 @@ pub fn compile(
 
     match (res, messages) {
         (Err(e), None) => Err(e),
-        (Err(e), Some(messages)) => {
-            Err(anyhow::Error::msg(messages.to_string_lossy().into_owned()).context(e))
-        },
+        (Err(e), Some(messages)) =>
+            Err(anyhow::Error::msg(messages.to_string_lossy().into_owned()).context(e)),
         // TODO: skip this allocation
         (Ok(b), messages) => Ok((b, messages.map(|m| m.to_owned()).unwrap_or_default())),
     }
@@ -100,10 +96,7 @@ mod defs {
 
     #[cfg(feature = "arcffi")]
     impl ShaderDefinition {
-        pub const EMPTY: Self = Self {
-            name: None,
-            definition: None,
-        };
+        pub const EMPTY: Self = Self { name: None, definition: None };
 
         pub fn as_ptr_tuple(&self) -> (Option<CStrPtr<'_>>, Option<CStrPtr<'_>>) {
             (
@@ -128,10 +121,7 @@ mod defs {
         }
 
         pub const fn is_empty(&self) -> bool {
-            matches!(self, Self {
-                name: None,
-                definition: None
-            })
+            matches!(self, Self { name: None, definition: None })
         }
 
         pub fn try_from_str<N, D>(n: N, d: D) -> anyhow::Result<Self>
@@ -208,10 +198,7 @@ mod defs {
 
     #[derive(Debug, Clone, Default)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize))]
-    #[cfg_attr(
-        feature = "serde",
-        serde(into = "std::collections::BTreeMap<String, String>")
-    )]
+    #[cfg_attr(feature = "serde", serde(into = "std::collections::BTreeMap<String, String>"))]
     pub struct ShaderDefinitions {
         pub defs: Vec<ShaderDefinition>,
     }

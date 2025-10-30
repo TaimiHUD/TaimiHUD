@@ -53,9 +53,7 @@ impl ShaderDescription {
             format!("{} shader description `{}`", op, filename.display())
         };
         let file_data = read_to_string(path)
-            .and_then(|mut file_data| {
-                json_strip_comments::strip(&mut file_data).map(move |()| file_data)
-            })
+            .and_then(|mut file_data| json_strip_comments::strip(&mut file_data).map(move |()| file_data))
             .with_context(|| context("reading"))?;
 
         serde_json::from_str(&file_data).with_context(|| context("loading"))
@@ -74,11 +72,9 @@ impl ShaderDescription {
     }
 
     #[cfg(not(debug_assertions))]
-    pub const COMPILE_FLAGS1: u32 =
-        d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
     #[cfg(debug_assertions)]
-    pub const COMPILE_FLAGS1: u32 =
-        d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
+    pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
     pub const COMPILE_FLAGS2: u32 = 0;
 
     pub fn compile(&self, source: &[u8]) -> anyhow::Result<Blob> {

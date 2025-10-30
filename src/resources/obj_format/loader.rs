@@ -20,12 +20,8 @@ impl ObjFile {
         object_descs: &ObjectLoader,
     ) -> anyhow::Result<HashMap<PathBuf, ObjFile>> {
         let mut model_files: HashMap<PathBuf, ObjFile> = Default::default();
-        let model_filenames: Vec<&PathBuf> = object_descs
-            .0
-            .iter()
-            .map(|o| &o.location.file)
-            .dedup()
-            .collect();
+        let model_filenames: Vec<&PathBuf> =
+            object_descs.0.iter().map(|o| &o.location.file).dedup().collect();
         for model_filename in &model_filenames {
             let model_file = Self::load_file(&models_dir.join(model_filename))?;
             model_files.insert(model_filename.to_path_buf(), model_file);
@@ -43,9 +39,7 @@ impl ObjFile {
         let model = &self.models[idx];
         ObjInstance {
             model: model.load(xzy),
-            material: self
-                .load_material_for_model(device, idx)
-                .unwrap_or_default(),
+            material: self.load_material_for_model(device, idx).unwrap_or_default(),
         }
     }
 

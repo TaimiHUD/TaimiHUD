@@ -31,11 +31,7 @@ impl PathingSettings {
         self.festival_filter.get(festival.as_str()).copied()
     }
     #[cfg(feature = "space")]
-    pub fn set_festival_preference(
-        &mut self,
-        festival: Festival,
-        pref: Option<FestivalPreference>,
-    ) {
+    pub fn set_festival_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
         let festival_filter = self.festival_filter_mut();
         match pref {
             None => {
@@ -232,8 +228,7 @@ impl SpaceSettings {
         }
     }
     pub fn trail_textured_space(&self) -> bool {
-        self.trail_textured_space
-            .unwrap_or(Self::DEFAULT_TRAIL_TEXTURED)
+        self.trail_textured_space.unwrap_or(Self::DEFAULT_TRAIL_TEXTURED)
     }
     pub fn trail_textured_minimap(&self) -> bool {
         self.map_trail_textured_mini
@@ -276,16 +271,13 @@ impl SpaceSettings {
             .unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
     }
     pub fn poi_alpha_worldmap(&self) -> f32 {
-        self.map_poi_alpha_world
-            .unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
+        self.map_poi_alpha_world.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
     pub fn trail_alpha_minimap(&self) -> f32 {
-        self.map_trail_alpha_mini
-            .unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
+        self.map_trail_alpha_mini.unwrap_or(Self::DEFAULT_TRAIL_MAP_ALPHA)
     }
     pub fn poi_alpha_minimap(&self) -> f32 {
-        self.map_poi_alpha_mini
-            .unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
+        self.map_poi_alpha_mini.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
     #[cfg(feature = "space")]
     pub fn trail_alpha_map(&self, ctx: MapContext) -> f32 {
@@ -323,12 +315,10 @@ impl SpaceSettings {
         self.scale_trail_space.unwrap_or(Self::DEFAULT_TRAIL_SCALE)
     }
     pub fn trail_scale_worldmap(&self) -> f32 {
-        self.scale_trail_world
-            .unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
+        self.scale_trail_world.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
     pub fn trail_scale_minimap(&self) -> f32 {
-        self.scale_trail_mini
-            .unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
+        self.scale_trail_mini.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
     #[cfg(feature = "space")]
     pub fn trail_scale_map(&self, ctx: MapContext) -> f32 {
@@ -348,8 +338,7 @@ impl SpaceSettings {
             })
     }
     pub fn trail_resolution(&self) -> f32 {
-        self.trail_resolution
-            .unwrap_or(Self::DEFAULT_TRAIL_RESOLUTION)
+        self.trail_resolution.unwrap_or(Self::DEFAULT_TRAIL_RESOLUTION)
     }
     pub fn trail_width(&self) -> f32 {
         self.trail_width.unwrap_or(Self::DEFAULT_TRAIL_WIDTH)

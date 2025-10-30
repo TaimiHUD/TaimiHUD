@@ -45,9 +45,7 @@ impl Source for DirectSource {
         kind: SourceKind,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
         Box::pin(async move {
-            let install_dir = ADDON_DIR
-                .join(kind.get_unpack_dir())
-                .join(self.install_dir());
+            let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
             create_dir_all(&install_dir).await?;
             let last_modified = super::download_file(&install_dir, &self.url).await?;
             Ok(last_modified)

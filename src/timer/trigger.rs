@@ -48,10 +48,7 @@ impl TimerTrigger {
                 radius: Some(radius),
                 position: Some(center),
                 ..
-            } => Some(Polytope::NSphere {
-                radius,
-                center: center.into(),
-            }),
+            } => Some(Polytope::NSphere { radius, center: center.into() }),
             Self {
                 antipode: Some(antipode),
                 position: Some(pode),
@@ -71,7 +68,7 @@ impl TimerTrigger {
         use TimerTriggerType::*;
         let key_check = match self.kind {
             Location => true,
-            Key => {
+            Key =>
                 if let Some(key_bind) = &self.key_bind {
                     let idx = key_bind.parse::<usize>().unwrap();
                     let flag = 1u8 << idx;
@@ -81,8 +78,7 @@ impl TimerTrigger {
                     result
                 } else {
                     unreachable!("keybind not specified for a key type phase trigger");
-                }
-            },
+                },
         };
         let position_check = shape.point_is_within(pos);
         let combat_entered_check = !self.require_combat || cb == CombatState::Entered;

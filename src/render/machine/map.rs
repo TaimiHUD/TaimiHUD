@@ -109,11 +109,7 @@ impl RenderMachine {
     }
 
     #[cfg(any(feature = "markers", feature = "space"))]
-    pub fn act_controls_changed(
-        &mut self,
-        controls_state: GameControls,
-        controls_changed: GameControls,
-    ) {
+    pub fn act_controls_changed(&mut self, controls_state: GameControls, controls_changed: GameControls) {
         let pressed = controls_state & controls_changed;
         if controls_changed.contains(GameControl::Map_OpenClose) {
             self.act_press_map_toggle(controls_state.contains(GameControl::Map_OpenClose));
@@ -133,9 +129,8 @@ impl RenderMachine {
         let changed = match self.get_map_open_state() {
             MapOpen::Open => self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
             // TODO: reconsider in case we're wrong?
-            MapOpen::Opening { elapsed } if elapsed > 0.5 => {
-                self.set_map_open(MapOpen::Closing { elapsed: 0.0 })
-            },
+            MapOpen::Opening { elapsed } if elapsed > 0.5 =>
+                self.set_map_open(MapOpen::Closing { elapsed: 0.0 }),
             _ => false,
         };
         if changed {

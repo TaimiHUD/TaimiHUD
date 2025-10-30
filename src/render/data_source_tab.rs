@@ -16,9 +16,7 @@ pub struct DataSourceTabState {
 
 impl DataSourceTabState {
     pub fn new() -> Self {
-        Self {
-            checking_for_updates: false,
-        }
+        Self { checking_for_updates: false }
     }
 
     pub fn draw_uninstall(&self, ui: &Ui, rs: &RemoteState) {

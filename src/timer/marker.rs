@@ -114,11 +114,8 @@ impl TimerMarker {
             // billboards should have their rotation component handled elsewhere ideally
             // perhaps *prior* to the application of this, thus NOOP :p
             RotationType::Billboard => Mat4::IDENTITY, //Mat4::from_rotation_y(180.0f32.to_radians()), //Mat4::from_rotation_x(90.0f32.to_radians()), //* Mat4::from_rotation_z(90.0f32.to_radians()),
-            RotationType::Rotation(rot) => {
-                Mat4::from_rotation_x(rot.x)
-                    * Mat4::from_rotation_y(rot.y)
-                    * Mat4::from_rotation_z(rot.z)
-            },
+            RotationType::Rotation(rot) =>
+                Mat4::from_rotation_x(rot.x) * Mat4::from_rotation_y(rot.y) * Mat4::from_rotation_z(rot.z),
         };
         // then move them
         //let mtx_position = Mat4::from_translation(self.position);

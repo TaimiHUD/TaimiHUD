@@ -91,14 +91,11 @@ pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
     if path.len() != locator.len() {
         return false
     }
-    locator
-        .iter()
-        .zip(path.iter())
-        .all(|(&l, &p)| match (l, p) {
-            // path seps whee
-            (b'/', b'\\') | (b'\\', b'/') => true,
-            (l, p) => l.eq_ignore_ascii_case(&p),
-        })
+    locator.iter().zip(path.iter()).all(|(&l, &p)| match (l, p) {
+        // path seps whee
+        (b'/', b'\\') | (b'\\', b'/') => true,
+        (l, p) => l.eq_ignore_ascii_case(&p),
+    })
 }
 
 /// I hate this. See: https://github.com/blish-hud/Pathing/blob/main/Utility/AttributeParsingUtil.cs#L39
@@ -180,13 +177,8 @@ fn inner_parse_pack_def(
         let elem = parser.next()?;
         let elem = match elem {
             #[cfg(feature = "fixup-ladyelyssa")]
-            XmlEvent::StartElement {
-                name,
-                attributes,
-                namespace,
-            } if name
-                .local_name
-                .eq_ignore_ascii_case("MarkerCategorykerCategory") =>
+            XmlEvent::StartElement { name, attributes, namespace }
+                if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") =>
             {
                 // LadyElyssa.taco typo/corruption
                 log::debug!("compensating for invalid element {name}");
@@ -198,9 +190,7 @@ fn inner_parse_pack_def(
             },
             #[cfg(feature = "fixup-ladyelyssa")]
             XmlEvent::EndElement { name }
-                if name
-                    .local_name
-                    .eq_ignore_ascii_case("MarkerCategorykerCategory") =>
+                if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") =>
             {
                 log::debug!("compensating for invalid element {name}");
                 XmlEvent::EndElement {
@@ -219,10 +209,7 @@ fn inner_parse_pack_def(
                         .unwrap_or(false) =>
             {
                 // TehsTrails/Parser/TehsTrails.xml issue
-                log::debug!(
-                    "compensating for invalid element <{}> inside OverlayData",
-                    name
-                );
+                log::debug!("compensating for invalid element <{}> inside OverlayData", name);
                 parse_stack.push(PartialItem::PoiGroup);
             },
             #[cfg(feature = "fixup-tehstrails")]
@@ -238,9 +225,9 @@ fn inner_parse_pack_def(
             _ => (),
         }
         match elem {
-            XmlEvent::StartElement {
-                name, attributes, ..
-            } if valid_elem_start(parse_stack.last(), &name) => {
+            XmlEvent::StartElement { name, attributes, .. }
+                if valid_elem_start(parse_stack.last(), &name) =>
+            {
                 match name.local_name.to_ascii_lowercase().as_str() {
                     "overlaydata" => {
                         parse_stack.push(PartialItem::OverlayData);
@@ -311,9 +298,7 @@ fn inner_parse_pack_def(
 
                         match parse_stack.last_mut() {
                             Some(PartialItem::OverlayData) => {
-                                pack.categories
-                                    .root_categories
-                                    .insert(category.full_id.clone());
+                                pack.categories.root_categories.insert(category.full_id.clone());
                             },
                             Some(PartialItem::MarkerCategory(parent)) => {
                                 let subs = Arc::make_mut(&mut parent.sub_categories);
@@ -321,11 +306,7 @@ fn inner_parse_pack_def(
                             },
                             _ => anyhow::bail!("Inconsistent internal state"),
                         }
-                        match pack
-                            .categories
-                            .all_categories
-                            .entry(category.full_id.clone())
-                        {
+                        match pack.categories.all_categories.entry(category.full_id.clone()) {
                             Entry::Occupied(mut existing) => {
                                 existing.get_mut().merge(category);
                             },
@@ -495,11 +476,9 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
     }
     impl Replacer for ReplacementsAmp {
         fn replace_append(&mut self, caps: &Captures<'_>, dst: &mut String) {
-            if let (Some(amp_pre), amp_ok, Some(amp_post)) = (
-                caps.name("amp_pre"),
-                caps.name("amp_ok"),
-                caps.name("amp_post"),
-            ) {
+            if let (Some(amp_pre), amp_ok, Some(amp_post)) =
+                (caps.name("amp_pre"), caps.name("amp_ok"), caps.name("amp_post"))
+            {
                 let amp_pre = amp_pre.as_str();
                 let amp_post = amp_post.as_str();
                 let amp_ok = amp_ok.map(|ok| ok.as_str()).unwrap_or("amp;");
@@ -540,10 +519,8 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                 let _ = write!(dst, " {attr_nospace}=\"");
             } else if let (Some(dup_attr), Some(dup_attr_v0), Some(dup_attr_v1)) = (
                 caps.name("dup_attr").or_else(|| caps.name("dup_attr1")),
-                caps.name("dup_attr_v0")
-                    .or_else(|| caps.name("dup_attr1_v0")),
-                caps.name("dup_attr_v1")
-                    .or_else(|| caps.name("dup_attr1_v1")),
+                caps.name("dup_attr_v0").or_else(|| caps.name("dup_attr1_v0")),
+                caps.name("dup_attr_v1").or_else(|| caps.name("dup_attr1_v1")),
             ) {
                 let dup_attr = dup_attr.as_str();
                 let dup_attr_v0 = dup_attr_v0.as_str();

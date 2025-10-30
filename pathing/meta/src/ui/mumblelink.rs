@@ -21,10 +21,7 @@ pub mod nexus {
     #[cfg(not(feature = "nexus"))]
     pub use ::gw2_mumble_nexus as gw2_mumble;
     #[cfg(feature = "nexus")]
-    pub use ::nexus::{
-        data_link::mumble as gw2_mumble,
-        event::MumbleIdentityUpdate as NexusIdentity,
-    };
+    pub use ::nexus::{data_link::mumble as gw2_mumble, event::MumbleIdentityUpdate as NexusIdentity};
     use {
         crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
         std::mem::transmute,

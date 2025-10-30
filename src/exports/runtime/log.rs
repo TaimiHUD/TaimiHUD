@@ -80,31 +80,24 @@ impl TaimiLog {
 
     pub fn open_file(&self) -> io::Result<&fs::File> {
         let log_path = Self::log_path();
-        let append = match crate::built_info::IS_TAGGED_VERSION
-            || crate::built_info::CI_PLATFORM.is_some()
+        let append = match crate::built_info::IS_TAGGED_VERSION || crate::built_info::CI_PLATFORM.is_some()
         {
             // prevent log from growing forever in production
             #[cfg(not(debug_assertions))]
             true if fs::metadata(&log_path)
                 .map(|md| md.len() > 0x400000)
                 .unwrap_or(false) =>
-            {
-                false
-            },
+                false,
             _ => true,
         };
-        let res = fs::OpenOptions::new()
-            .create(true)
-            .append(append)
-            .open(log_path);
+        let res = fs::OpenOptions::new().create(true).append(append).open(log_path);
         let mut f = match res {
             Ok(f) => f,
-            Err(e) => {
+            Err(e) =>
                 return match self.log_file.get() {
                     Some(f) => Ok(f),
                     None => Err(e),
-                }
-            },
+                },
         };
         Ok(self.log_file.get_or_init(move || {
             use io::Write as _;
@@ -224,9 +217,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 let _ = exports::arcdps::log_window(record.metadata(), message);
                 let message = match message_bounds {
                     bounds if bounds.is_empty() => message,
-                    bounds => {
-                        cstr_slice_mut(message, bounds.start..=bounds.end).ok_or(RT_FORMAT_ERROR)?
-                    },
+                    bounds => cstr_slice_mut(message, bounds.start..=bounds.end).ok_or(RT_FORMAT_ERROR)?,
                 };
                 (message, false)
             },
@@ -252,8 +243,8 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
         #[cfg(feature = "extension-nexus")]
         let res = if exports::nexus::available() {
             let message = match implicit_target_level {
-                false => cstr_slice_from(&*message, LOG_SEGMENT_EXPLICIT_LEN)
-                    .ok_or("log write truncated?")?,
+                false =>
+                    cstr_slice_from(&*message, LOG_SEGMENT_EXPLICIT_LEN).ok_or("log write truncated?")?,
                 true => &*message,
             };
 
@@ -329,9 +320,7 @@ impl LogBuffer {
     }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self {
-            buffer: Vec::with_capacity(cap),
-        }
+        Self { buffer: Vec::with_capacity(cap) }
     }
 
     pub fn setup_with_capacity(&mut self, cap: usize) {
@@ -382,11 +371,7 @@ pub fn write_record_body<W: fmt::Write>(w: &mut W, record: &Record) -> fmt::Resu
     w.write_fmt(*record.args())
 }
 
-pub fn write_record<W: fmt::Write>(
-    w: &mut W,
-    record: &Record,
-    implicit_target_level: bool,
-) -> fmt::Result {
+pub fn write_record<W: fmt::Write>(w: &mut W, record: &Record, implicit_target_level: bool) -> fmt::Result {
     let prefix_meta = write_metadata_prefix(w, record.metadata(), implicit_target_level)?;
     let prefix_record = write_record_prefix(w, record)?;
     if prefix_meta > 0 || prefix_record > 0 {
@@ -417,10 +402,7 @@ pub fn write_metadata_level<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Result
 const LOG_SEGMENT_LEVEL_LEN_SEP: usize = 2;
 const LOG_SEGMENT_LEVEL_LEN: usize = 5 + LOG_SEGMENT_LEVEL_LEN_SEP;
 
-pub fn write_metadata_target<W: fmt::Write>(
-    w: &mut W,
-    meta: &Metadata,
-) -> Result<usize, fmt::Error> {
+pub fn write_metadata_target<W: fmt::Write>(w: &mut W, meta: &Metadata) -> Result<usize, fmt::Error> {
     let target = match strip_crate_root(meta.target()) {
         Ok(target) => {
             write!(w, "{target}:")?;
@@ -455,10 +437,7 @@ pub fn write_metadata_prefix<W: fmt::Write>(
 const LOG_SEGMENT_NAME_LEN: usize = rt::NAME.len();
 const LOG_SEGMENT_EXPLICIT_LEN: usize = LOG_SEGMENT_NAME_LEN + LOG_SEGMENT_LEVEL_LEN;
 
-pub fn write_record_prefix<W: fmt::Write>(
-    _w: &mut W,
-    _record: &Record,
-) -> Result<usize, fmt::Error> {
+pub fn write_record_prefix<W: fmt::Write>(_w: &mut W, _record: &Record) -> Result<usize, fmt::Error> {
     // TODO: any special record.key_values() we want to use here? (requires log/kv)
     Ok(0)
 }
@@ -527,9 +506,7 @@ pub const fn nexus_log_level(level: Level) -> NexusLogLevel {
     }
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum LogFilterDesc {
     Level(LevelFilter),
     Env(String),
@@ -555,10 +532,7 @@ impl LogFilterDesc {
                 #[cfg(not(feature = "log-filter"))]
                 e if e.eq_ignore_ascii_case("all") => Some(LogFilter::Level(LevelFilter::max())),
                 #[cfg(not(feature = "log-filter"))]
-                env => match env
-                    .parse::<LevelFilter>()
-                    .context("log-filter feature required")
-                {
+                env => match env.parse::<LevelFilter>().context("log-filter feature required") {
                     Err(e) => {
                         log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
                         None

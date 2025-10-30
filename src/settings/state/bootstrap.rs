@@ -112,9 +112,7 @@ impl BootstrapState {
         use tokio::{fs, io::AsyncWriteExt};
         let _ = fs::create_dir_all(rt::addon_dir_fallback()).await;
         let mut f = fs::File::create(path).await?;
-        f.write_all(data.as_bytes())
-            .await
-            .context("writing boot state")
+        f.write_all(data.as_bytes()).await.context("writing boot state")
     }
 
     pub fn read_with<R, F: FnOnce(&Self) -> R>(f: F) -> R {
@@ -164,13 +162,10 @@ impl BootstrapState {
             #[cfg(debug_assertions)]
             _ => &UpdatePreference::Never,
             #[cfg(feature = "extension-nexus")]
-            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => {
-                &UpdatePreference::Never
-            },
+            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() =>
+                &UpdatePreference::Never,
             #[cfg(feature = "updates")]
-            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => {
-                &UpdatePreference::ASK
-            },
+            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => &UpdatePreference::ASK,
             _ => &UpdatePreference::Never,
         }
     }
@@ -208,13 +203,13 @@ impl BootstrapState {
 
     pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
         Self::try_write_with(|state| {
-            let mut changed =
-                if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref()) {
-                    state.addon_dir = Some(addon_dir.into());
-                    true
-                } else {
-                    false
-                };
+            let mut changed = if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref())
+            {
+                state.addon_dir = Some(addon_dir.into());
+                true
+            } else {
+                false
+            };
 
             if let Some(current_host) = Self::current_addon_host() {
                 let host = match state.latest_addon_host {

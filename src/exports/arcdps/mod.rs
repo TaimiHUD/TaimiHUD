@@ -101,13 +101,7 @@ fn check_for_nexus_link() -> bool {
         let process_id = std::process::id();
         format!("DL_NEXUS_LINK_{process_id}\0")
     };
-    let res = unsafe {
-        OpenFileMappingA(
-            FILE_MAP_READ.0,
-            false,
-            PCSTR(object_name.as_ptr() as *const _),
-        )
-    };
+    let res = unsafe { OpenFileMappingA(FILE_MAP_READ.0, false, PCSTR(object_name.as_ptr() as *const _)) };
     match res {
         Ok(handle) => {
             let cleanup = unsafe { CloseHandle(handle) };
@@ -136,9 +130,7 @@ pub(crate) fn check_for_nexus() -> bool {
 pub(crate) fn has_extension(sig: u32) -> Option<bool> {
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
-        () if cb::available() && arcdps::exports::has_list_extension() => {
-            Some(cb::has_extension(sig))
-        },
+        () if cb::available() && arcdps::exports::has_list_extension() => Some(cb::has_extension(sig)),
         #[cfg(feature = "extension-arcdps-extern")]
         () => match r#extern::arc_args() {
             Some(arc) => {
@@ -338,13 +330,9 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         None => return hide_checkbox,
     };
     for &binding in ArcSettings::VK_WINDOWS {
-        let Some(window) = binding.window_name() else {
-            continue
-        };
+        let Some(window) = binding.window_name() else { continue };
         let window_id = format!("{window}-window");
-        let Some(state) = settings.get_window_state_mut(window) else {
-            continue
-        };
+        let Some(state) = settings.get_window_state_mut(window) else { continue };
         if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
             // just mutating settings is enough?
         }
@@ -528,8 +516,7 @@ pub(crate) fn update_url() -> Option<String> {
         return None
     }
 
-    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT)
-    {
+    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT) {
         Err(e) => {
             log::warn!("Update check failed: {e}");
             return None
@@ -625,9 +612,7 @@ pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_free_extension() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
-        () => Some(HMODULE(unsafe {
-            arcdps::exports::raw::free_extension(SIG).0
-        })),
+        () => Some(HMODULE(unsafe { arcdps::exports::raw::free_extension(SIG).0 })),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args().and_then(|arc| {
             unsafe { arc.module.arc_extension_remove2(Some(r#extern::ARC_SIG)) }
@@ -683,18 +668,12 @@ pub fn log_window_filter(metadata: &log::Metadata) -> bool {
         _ if !loaded() => false,
         #[cfg(not(debug_assertions))]
         #[cfg(feature = "extension-nexus")]
-        Level::Trace | Level::Debug | Level::Info
-            if !available() && exports::nexus::available() =>
-        {
-            false
-        },
+        Level::Trace | Level::Debug | Level::Info if !available() && exports::nexus::available() => false,
         #[cfg(not(debug_assertions))]
         Level::Trace | Level::Debug => false,
         _ if metadata.target().starts_with("taimi_pack::") =>
         // avoid visual spam since most packs are full of missing or broken data...
-        {
-            false
-        },
+            false,
         _ => true,
     }
 }

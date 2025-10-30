@@ -29,8 +29,7 @@ use {
 
 pub const ARC_SIG: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(exports::SIG) };
 static ARC_ARGS: SyncUnsafeCell<InitArgs> = SyncUnsafeCell::new(InitArgs::EMPTY);
-static ARC_EXPORT: SyncUnsafeCell<ExtensionExports<'static>> =
-    SyncUnsafeCell::new(ExtensionExports::EMPTY);
+static ARC_EXPORT: SyncUnsafeCell<ExtensionExports<'static>> = SyncUnsafeCell::new(ExtensionExports::EMPTY);
 static ARC_IMGUI_CONTEXT: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
 static ARC_IMGUI_UI: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
 //pub const ARC_CB_COMBAT: ExtensionFnCombat = ExtensionExports::wrap_combat_fn_item(&arc_cb_combat);
@@ -60,9 +59,7 @@ pub unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
         },
         None => {
             let arc = arc_args()?;
-            let context_sys = arc
-                .imgui_ctx
-                .map(NonNull::cast::<imgui_sys::ImGuiContext>)?;
+            let context_sys = arc.imgui_ctx.map(NonNull::cast::<imgui_sys::ImGuiContext>)?;
             unsafe {
                 imgui_sys::igSetCurrentContext(context_sys.as_ptr());
                 imgui_sys::igSetAllocatorFunctions(arc.malloc, arc.free, InitArgs::ALLOC_USER_DATA);
@@ -123,9 +120,7 @@ pub unsafe fn arc_imgui_ui<'u>() -> Option<&'u Ui<'static>> {
                         ptr::write(ARC_IMGUI_BUFFER_OFFSET.get(), Some(off));
                     },
                     Err(e) => {
-                        log::error!(
-                            "could not find imgui buffer offset, this should not happen! {e}"
-                        );
+                        log::error!("could not find imgui buffer offset, this should not happen! {e}");
                     },
                 }
             }
@@ -192,19 +187,10 @@ unsafe extern "C" fn arc_cb_wnd_filter(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM
     exports::wnd_filter(wnd.into(), msg, w.into(), l.into())
 }
 
-unsafe extern "C" fn arc_cb_imgui(
-    not_charsel_or_loading: c_bool32,
-    hide_if_combat_or_ooc: c_bool32,
-) {
+unsafe extern "C" fn arc_cb_imgui(not_charsel_or_loading: c_bool32, hide_if_combat_or_ooc: c_bool32) {
     new_imgui_frame();
 
-    with_imgui(|ui| {
-        exports::imgui(
-            ui,
-            not_charsel_or_loading.into(),
-            hide_if_combat_or_ooc.value,
-        )
-    });
+    with_imgui(|ui| exports::imgui(ui, not_charsel_or_loading.into(), hide_if_combat_or_ooc.value));
 }
 
 unsafe extern "C" fn arc_cb_imgui_options_tab() {
@@ -236,9 +222,8 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
         cb_ui_options_tab: Some(arc_cb_imgui_options_tab),
         cb_ui_options_windows: Some(arc_cb_imgui_options_windows),
         header: match res {
-            Ok(Some(Ok(()))) => {
-                ExtensionHeader::new_loaded(ARC_SIG, ExtensionExports::SIZE, ARC_IMGUI_VERSION)
-            },
+            Ok(Some(Ok(()))) =>
+                ExtensionHeader::new_loaded(ARC_SIG, ExtensionExports::SIZE, ARC_IMGUI_VERSION),
             Ok(Some(Err(e))) => {
                 // TODO
                 ::log::error!("Failed initialization: {e}");

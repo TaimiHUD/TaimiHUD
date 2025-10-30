@@ -32,10 +32,7 @@ impl ConstantBufferV {
         Self::new_with_slice(device, slice::from_ref(data))
     }
 
-    pub fn new_with_slice<D: D3dBufferData>(
-        device: &Dx11Device,
-        data: &[D],
-    ) -> anyhow::Result<Self> {
+    pub fn new_with_slice<D: D3dBufferData>(device: &Dx11Device, data: &[D]) -> anyhow::Result<Self> {
         let desc = Self::desc_for::<D>(data.len(), None);
         #[cfg(todo)]
         let data = match data.is_empty() {
@@ -72,8 +69,7 @@ impl ConstantBufferV {
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
         unsafe {
-            let buffers =
-                &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
+            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
             context.VSGetConstantBuffers(slot, Some(buffers));
         }
         buffers
@@ -114,10 +110,7 @@ impl ConstantBufferP {
         Self::new_with_slice(device, slice::from_ref(data))
     }
 
-    pub fn new_with_slice<D: D3dBufferData>(
-        device: &Dx11Device,
-        data: &[D],
-    ) -> anyhow::Result<Self> {
+    pub fn new_with_slice<D: D3dBufferData>(device: &Dx11Device, data: &[D]) -> anyhow::Result<Self> {
         ConstantBufferV::new_with_slice::<D>(device, data).map(Into::into)
     }
 
@@ -140,8 +133,7 @@ impl ConstantBufferP {
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
         unsafe {
-            let buffers =
-                &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
+            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
             context.PSGetConstantBuffers(slot, Some(buffers));
         }
         buffers

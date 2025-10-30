@@ -74,10 +74,7 @@ impl DepthState {
         BackFace: Self::STENCILOP_DEFAULT,
     };
 
-    pub fn new_with_desc(
-        device: &Dx11Device,
-        desc: &D3D11_DEPTH_STENCIL_DESC,
-    ) -> anyhow::Result<Self> {
+    pub fn new_with_desc(device: &Dx11Device, desc: &D3D11_DEPTH_STENCIL_DESC) -> anyhow::Result<Self> {
         let mut out: Option<ID3D11DepthStencilState> = None;
         unsafe { device.CreateDepthStencilState(desc, Some(&mut out)) }
             .map_err(anyhow::Error::from)
@@ -95,10 +92,7 @@ pub struct OMDepthState<S = Option<DepthState>> {
 
 impl<S> OMDepthState<S> {
     pub fn with_state<T: Into<S>>(state: T, stencil_ref: u32) -> Self {
-        Self {
-            state: state.into(),
-            stencil_ref,
-        }
+        Self { state: state.into(), stencil_ref }
     }
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
@@ -147,8 +141,7 @@ impl_d3d! { impl bitflags for
     },
 }
 impl ClearFlags {
-    pub const DEPTH_STENCIL: Self =
-        Self::from_bits_retain(Self::DEPTH.bits() | Self::STENCIL.bits());
+    pub const DEPTH_STENCIL: Self = Self::from_bits_retain(Self::DEPTH.bits() | Self::STENCIL.bits());
 }
 
 impl DepthView {
@@ -169,9 +162,7 @@ impl DepthView {
         }
     }
 
-    pub const fn desc_for_buffer2<U: Unit<Scalar = u32>>(
-        display_size: Size2<U>,
-    ) -> D3D11_TEXTURE2D_DESC {
+    pub const fn desc_for_buffer2<U: Unit<Scalar = u32>>(display_size: Size2<U>) -> D3D11_TEXTURE2D_DESC {
         D3D11_TEXTURE2D_DESC {
             Width: display_size.width,
             Height: display_size.height,
@@ -185,8 +176,7 @@ impl DepthView {
             MiscFlags: 0,
         }
     }
-    pub const BUFFER2D_DESC_UNSIZED: D3D11_TEXTURE2D_DESC =
-        Self::desc_for_buffer2::<u32>(Size2::ZERO);
+    pub const BUFFER2D_DESC_UNSIZED: D3D11_TEXTURE2D_DESC = Self::desc_for_buffer2::<u32>(Size2::ZERO);
 
     pub fn new_with_texture2(
         device: &Dx11Device,

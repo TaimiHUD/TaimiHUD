@@ -14,10 +14,7 @@ pub struct SignObtainer {
 }
 
 impl SignObtainer {
-    pub const DEFAULT: Self = Self {
-        bounds: Box3::ZERO,
-        global: Box2::ZERO,
-    };
+    pub const DEFAULT: Self = Self { bounds: Box3::ZERO, global: Box2::ZERO };
 
     pub fn is_empty(&self) -> bool {
         self.global == Box2::ZERO
@@ -65,10 +62,7 @@ impl SignObtainer {
     }
 
     pub fn bounds2(&self) -> Box2<LocalSpace> {
-        Box2::new(
-            LocalSpace::to2(self.bounds.min),
-            LocalSpace::to2(self.bounds.max),
-        )
+        Box2::new(LocalSpace::to2(self.bounds.min), LocalSpace::to2(self.bounds.max))
     }
 
     const MIN_DIM: f32 = MapLocalScale::METRES_PER_FEET * 10.0 * 1.5;
@@ -77,8 +71,7 @@ impl SignObtainer {
     pub fn has_scale(&self) -> bool {
         let bounds = self.bounds2();
         let range = bounds.min - bounds.max;
-        range.abs().min_element() > Self::MIN_DIM
-            && range.length_squared() >= Self::MIN_RANGE_SQUARED
+        range.abs().min_element() > Self::MIN_DIM && range.length_squared() >= Self::MIN_RANGE_SQUARED
     }
 
     pub fn get_scale(&self) -> Option<MapLocalScale> {

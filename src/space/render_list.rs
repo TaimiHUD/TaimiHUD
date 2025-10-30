@@ -31,15 +31,8 @@ impl RenderEntity {
 
 #[derive(Copy, Clone, Debug)]
 pub enum RenderId {
-    TrailSection {
-        pack_idx: usize,
-        trail_idx: usize,
-        section: usize,
-    },
-    Poi {
-        pack_idx: usize,
-        poi_idx: usize,
-    },
+    TrailSection { pack_idx: usize, trail_idx: usize, section: usize },
+    Poi { pack_idx: usize, poi_idx: usize },
 }
 
 pub struct RenderListBuilder {
@@ -181,9 +174,7 @@ impl RenderList {
         bounds: Box3<DrawSpace>,
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         // TODO: select_visible_entities?
-        self.entities
-            .iter()
-            .filter(move |e| bounds.intersects(&e.bounds))
+        self.entities.iter().filter(move |e| bounds.intersects(&e.bounds))
     }
 
     /// TODO: on drop, rebuild spatial map - for now just call [self.end_entities_mut()]
@@ -238,10 +229,7 @@ where
                 true => (entity.position.distance_squared(self.cam_origin) * 1_000_000.0)
                     .min(0x40000000i32 as f32) as i32,
             };
-            self.draw_order_heap.push(HeapEntity {
-                cam_dist,
-                idx: next,
-            });
+            self.draw_order_heap.push(HeapEntity { cam_dist, idx: next });
         }
 
         self.draw_order_heap.pop().map(|he| &self.entities[he.idx])
@@ -267,18 +255,8 @@ impl RenderEntityShape {
     fn new((entity_idx, entity): (usize, &RenderEntity)) -> Self {
         RenderEntityShape {
             bounds: bvh::aabb::Aabb {
-                min: [
-                    entity.bounds.min.x,
-                    entity.bounds.min.y,
-                    entity.bounds.min.z,
-                ]
-                .into(),
-                max: [
-                    entity.bounds.max.x,
-                    entity.bounds.max.y,
-                    entity.bounds.max.z,
-                ]
-                .into(),
+                min: [entity.bounds.min.x, entity.bounds.min.y, entity.bounds.min.z].into(),
+                max: [entity.bounds.max.x, entity.bounds.max.y, entity.bounds.max.z].into(),
             },
             entity_idx,
             bh_idx: 0,
@@ -408,10 +386,7 @@ impl MapFrustum {
     pub fn from_camera_data(
         (pos, camera_dir, camera_up): (Point3<DrawSpace>, Vector3<DrawSpace>, Vector3<DrawSpace>),
         // TODO: (aspect_ratio, fov): (f32, Vec2),
-        Range {
-            start: near,
-            end: far,
-        }: Range<f32>,
+        Range { start: near, end: far }: Range<f32>,
     ) -> MapFrustum {
         // TODO: higher accuracy/correctness using fov and perspective idk
         let camera_far = camera_dir * far;
@@ -468,11 +443,7 @@ impl MapFrustum {
         );
 
         #[cfg(feature = "space-list")]
-        let up_plane = points_to_plane(
-            far_topleft.to_raw(),
-            far_topright.to_raw(),
-            near_topleft.to_raw(),
-        );
+        let up_plane = points_to_plane(far_topleft.to_raw(), far_topright.to_raw(), near_topleft.to_raw());
         #[cfg(feature = "space-list")]
         let down_plane = points_to_plane(
             far_bottomright.to_raw(),

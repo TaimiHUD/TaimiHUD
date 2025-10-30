@@ -105,10 +105,7 @@ pub async fn get_and_extract_tar<U: IntoUrl>(dir: &Path, url: U) -> anyhow::Resu
             containing_directory = Some(path.into_owned());
         }
     }
-    log::debug!(
-        "Completed fetching and extracting into {dir:?} from {:?}",
-        url
-    );
+    log::debug!("Completed fetching and extracting into {dir:?} from {:?}", url);
     Ok(())
 }
 

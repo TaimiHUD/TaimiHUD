@@ -18,9 +18,7 @@ pub struct InfoTabState {
 
 impl InfoTabState {
     pub fn new() -> Self {
-        Self {
-            authors: rt::crate_authors(),
-        }
+        Self { authors: rt::crate_authors() }
     }
 
     pub fn regen_authors(&mut self) {
@@ -177,9 +175,8 @@ impl InfoTabState {
             #[cfg(feature = "space-ecs")]
             {
                 RenderState::font_text("ui", ui, &fl!("object-data"));
-                let table_token = ui.begin_table_header("object_types", [TableColumnSetup::new(
-                    &fl!("object-kind"),
-                )]);
+                let table_token =
+                    ui.begin_table_header("object_types", [TableColumnSetup::new(&fl!("object-kind"))]);
                 ui.table_next_column();
                 for object in engine.object_kinds.keys() {
                     ui.text(object);

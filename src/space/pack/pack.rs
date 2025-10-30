@@ -169,11 +169,7 @@ impl ActivePack {
                 recompute,
                 search_state,
                 map_filter,
-                (
-                    &self.copyable_categories,
-                    &self.copyable_pois,
-                    &self.pack.pois,
-                ),
+                (&self.copyable_categories, &self.copyable_pois, &self.pack.pois),
             );
         }
     }
@@ -204,9 +200,7 @@ impl ActivePack {
             let seps = category.full_id.rmatch_indices(".");
             'parents: for (idx, _) in seps {
                 if let Some(parent) = category.full_id.get(..idx) {
-                    if let Some(parent_idx) =
-                        self.pack.categories.all_categories.get_index_of(parent)
-                    {
+                    if let Some(parent_idx) = self.pack.categories.all_categories.get_index_of(parent) {
                         if available[parent_idx] {
                             // we've already been here before
                             break 'parents
@@ -240,16 +234,12 @@ impl ActivePack {
         let category_idx = all_categories.get_index_of(&category.full_id);
         if let Some(idx) = category_idx {
             if let Some(substate) = state.get(idx) {
-                let enabled_filter =
-                    *substate && filter_state.contains(PathingFilterState::Enabled);
-                let disabled_filter =
-                    !*substate && filter_state.contains(PathingFilterState::Disabled);
-                let is_root_filter =
-                    is_root && filter_state.contains(PathingFilterState::IgnoreRoot);
+                let enabled_filter = *substate && filter_state.contains(PathingFilterState::Enabled);
+                let disabled_filter = !*substate && filter_state.contains(PathingFilterState::Disabled);
+                let is_root_filter = is_root && filter_state.contains(PathingFilterState::IgnoreRoot);
                 let is_leaf = category.sub_categories.is_empty();
                 let is_branch = !is_leaf;
-                let is_leaf_filter =
-                    is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
+                let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
                 let is_branch_filter =
                     is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
                 let search_filter = search_state.matches_id(&category.full_id);
@@ -266,9 +256,7 @@ impl ActivePack {
         }
         if display {
             let is_copyable = match &category.marker_attributes.copy_value {
-                Some(value) if category.sub_categories.is_empty() && !category.is_separator => {
-                    Some(value)
-                },
+                Some(value) if category.sub_categories.is_empty() && !category.is_separator => Some(value),
                 _ => None,
             };
             if let Some(..) = is_copyable {
@@ -421,9 +409,7 @@ impl ActivePack {
     }
 
     fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
-        let Some(copy_value) = &attributes.copy_value else {
-            return
-        };
+        let Some(copy_value) = &attributes.copy_value else { return };
         ui.set_clipboard_text(copy_value);
         if let Some(copy_message) = &attributes.copy_message {
             let _ = rt::send_alert(ui, copy_message);
@@ -436,9 +422,8 @@ impl ActivePack {
             _ => None,
         };
         let title = match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) => {
-                Some(&title[..])
-            },
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+                Some(&title[..]),
             _ => None,
         };
 
@@ -473,9 +458,7 @@ impl ActivePack {
             _ => (),
         }
         match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) => {
-                return true
-            },
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) => return true,
             _ => (),
         }
 
@@ -485,9 +468,7 @@ impl ActivePack {
     /// since these aren't intended to be displayed, there's no canon name to use...
     /// if it looks like more than just a location link, we'll try to preview it
     fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
-        let Some(copy_value) = attributes.copy_value.as_ref() else {
-            return false
-        };
+        let Some(copy_value) = attributes.copy_value.as_ref() else { return false };
         if !copy_value.starts_with('[') || !copy_value.ends_with(']') {
             return true
         }
@@ -500,16 +481,12 @@ impl ActivePack {
         let _id = ui.push_id("category_tooltip");
         let [minwidth, lineheight] = ui.calc_text_size(title_template);
         unsafe {
-            imgui::sys::igSetNextWindowSize(
-                [0.0, lineheight * 1.5].into(),
-                Condition::Appearing as _,
-            );
+            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
         };
         let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
         ui.tooltip(|| {
             {
-                let _padding =
-                    ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
                 ui.dummy([minwidth, f32::EPSILON]);
             }
             f()
@@ -522,9 +499,7 @@ impl ActivePack {
             Some(copy_value)
                 if (display_name.is_none() || copy_message.is_none())
                     && Self::copyable_value_has_message(attributes) =>
-            {
-                ui.text_wrapped(&format!("\"{copy_value}\""))
-            },
+                ui.text_wrapped(&format!("\"{copy_value}\"")),
             _ => (),
         }
         if let Some(copy_message) = copy_message {
@@ -547,12 +522,7 @@ impl ActivePack {
         let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
-                root.recompute_enabled(
-                    all,
-                    &mut self.enabled_categories,
-                    &self.user_category_state,
-                    true,
-                );
+                root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
             }
         }
         for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
@@ -899,9 +869,8 @@ impl PackCollection {
             ActivePack::load(loader)
         } else {
             match path.extension().map(|e| e.as_encoded_bytes()) {
-                Some(e) if e.eq_ignore_ascii_case(b"taco") => {
-                    ZipLoader::new(path).and_then(ActivePack::load)
-                },
+                Some(e) if e.eq_ignore_ascii_case(b"taco") =>
+                    ZipLoader::new(path).and_then(ActivePack::load),
                 _ => {
                     self.unloaded_packs
                         .insert(name.into(), UnloadedReason::UnknownFormat);
@@ -986,10 +955,7 @@ impl PackCollection {
             },
         };
 
-        log::debug!(
-            "Preparing pack #{pack_idx} {} for rendering...",
-            pack.pack.name
-        );
+        log::debug!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
         self.build_active_pack(pack_idx, device, None, map_id)?;
 
         if log::log_enabled!(log::Level::Info) {
@@ -1138,11 +1104,7 @@ impl PackCollection {
         Ok(())
     }
 
-    fn recreate_buffers(
-        &mut self,
-        device: &Dx11Device,
-        machine: &RenderMachine,
-    ) -> anyhow::Result<()> {
+    fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         let res = self
             .recreate_buffers_inner(device, machine)
             .context("preparing POI instance buffers");
@@ -1212,20 +1174,11 @@ impl PackCollection {
                 None => continue,
             };
             match render_id {
-                RenderId::TrailSection {
-                    pack_idx,
-                    trail_idx,
-                    section,
-                } => {
+                RenderId::TrailSection { pack_idx, trail_idx, section } => {
                     let trail = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_trails
-                            .get_index(trail_idx)
-                            .and_then(|(_, trail)| {
-                                pack.pack
-                                    .trails
-                                    .get(trail.trail_idx)
-                                    .map(|info| (trail, info))
-                            })
+                        pack.active_trails.get_index(trail_idx).and_then(|(_, trail)| {
+                            pack.pack.trails.get(trail.trail_idx).map(|info| (trail, info))
+                        })
                     });
                     let (trail, info) = match trail {
                         Some(t) => t,
@@ -1246,19 +1199,14 @@ impl PackCollection {
                 RenderId::Poi { pack_idx, poi_idx } => {
                     let poi = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
                         pack.active_pois.get_index(poi_idx).and_then(|(_, poi)| {
-                            pack.pack
-                                .pois
-                                .get(poi.poi_idx)
-                                .map(|info| (pack, poi, info))
+                            pack.pack.pois.get(poi.poi_idx).map(|info| (pack, poi, info))
                         })
                     });
                     let (pack, poi, info) = match poi {
                         Some((pack, _, _)) if pack.render_poi_bookmark == 0 => continue,
                         Some(t) => t,
                         None => {
-                            log::error!(
-                                "Render ID refers to missing trail#{poi_idx} pack#{pack_idx}"
-                            );
+                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
                             continue
                         },
                     };
@@ -1308,20 +1256,11 @@ impl PackCollection {
                 None => continue,
             };
             match render_id {
-                RenderId::TrailSection {
-                    pack_idx,
-                    trail_idx,
-                    section,
-                } => {
+                RenderId::TrailSection { pack_idx, trail_idx, section } => {
                     let trail = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_trails
-                            .get_index(trail_idx)
-                            .and_then(|(_, trail)| {
-                                pack.pack
-                                    .trails
-                                    .get(trail.trail_idx)
-                                    .map(|info| (trail, info))
-                            })
+                        pack.active_trails.get_index(trail_idx).and_then(|(_, trail)| {
+                            pack.pack.trails.get(trail.trail_idx).map(|info| (trail, info))
+                        })
                     });
                     let (trail, info) = match trail {
                         Some(t) => t,
@@ -1349,19 +1288,14 @@ impl PackCollection {
                 RenderId::Poi { pack_idx, poi_idx } => {
                     let poi = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
                         pack.active_pois.get_index(poi_idx).and_then(|(_, poi)| {
-                            pack.pack
-                                .pois
-                                .get(poi.poi_idx)
-                                .map(|info| (pack, poi, info))
+                            pack.pack.pois.get(poi.poi_idx).map(|info| (pack, poi, info))
                         })
                     });
                     let (pack, poi, info) = match poi {
                         Some((pack, _, _)) if pack.render_poi_bookmark == 0 => continue,
                         Some(t) => t,
                         None => {
-                            log::error!(
-                                "Render ID refers to missing trail#{poi_idx} pack#{pack_idx}"
-                            );
+                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
                             continue
                         },
                     };
@@ -1403,11 +1337,7 @@ impl PackCollection {
         self.render_list.map_entities(bounds)
     }
 
-    pub fn unload_map(
-        &mut self,
-        _device_context: &Dx11Context,
-        _map_id: u32,
-    ) -> anyhow::Result<()> {
+    pub fn unload_map(&mut self, _device_context: &Dx11Context, _map_id: u32) -> anyhow::Result<()> {
         //if self.current_map != Some(_map_id) { return }
         self.clear_active();
         self.current_map = None;
@@ -1443,11 +1373,7 @@ impl PackCollection {
     ///
     /// TODO: revisit, avoid, etc
     pub fn cleanup_background(self) {
-        let Self {
-            loaded_packs,
-            poi_common,
-            ..
-        } = self;
+        let Self { loaded_packs, poi_common, .. } = self;
         mem::forget((loaded_packs, poi_common));
     }
 }

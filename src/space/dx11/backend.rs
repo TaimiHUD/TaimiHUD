@@ -39,10 +39,10 @@ impl RenderBackend {
         let perspective_handler =
             PerspectiveHandler::setup(&device).context("Perspective handler setup failed")?;
 
-        let depth_handler = DepthHandler::create(display_size, &device, &swap_chain)
-            .context("Depth setup failed")?;
-        let sampler_state = SamplerState::new_with_desc(&device, &Self::SAMPLER_DESC)
-            .context("Sampler setup failed")?;
+        let depth_handler =
+            DepthHandler::create(display_size, &device, &swap_chain).context("Depth setup failed")?;
+        let sampler_state =
+            SamplerState::new_with_desc(&device, &Self::SAMPLER_DESC).context("Sampler setup failed")?;
 
         let blend_desc = BlendState::desc_for_target(Self::BLEND_STATE_DESC_RT, false, false);
         let blend_state =
@@ -124,9 +124,8 @@ impl RenderBackend {
         std::mem::forget(self)
     }
 
-    const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
-        ..BlendState::TARGET_DESC_ADDITIVE
-    };
+    const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC =
+        D3D11_RENDER_TARGET_BLEND_DESC { ..BlendState::TARGET_DESC_ADDITIVE };
 
     const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
         MinLOD: 0.0,

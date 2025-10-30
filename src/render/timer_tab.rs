@@ -82,9 +82,7 @@ impl TimerTabState {
                 self.category_status.extend(self.categories.keys().cloned());
             }
         }
-        if self.category_status.len() != self.categories.keys().len()
-            && !self.category_status.is_empty()
-        {
+        if self.category_status.len() != self.categories.keys().len() && !self.category_status.is_empty() {
             ui.same_line();
         }
         if !self.category_status.is_empty() {
@@ -131,10 +129,7 @@ impl TimerTabState {
         };
         let tree_node = TreeNode::new(category_name)
             .flags(header_flags)
-            .opened(
-                self.category_status.contains(category_name),
-                Condition::Always,
-            )
+            .opened(self.category_status.contains(category_name), Condition::Always)
             .tree_push_on_open(false)
             .build(ui, category_closure);
         match tree_node {
@@ -159,29 +154,18 @@ impl TimerTabState {
             Some(&timer.icon),
             timer.path.as_ref().and_then(|p| p.parent()),
         );
-        if Selectable::new(&timer.combined())
-            .selected(selected)
-            .build(ui)
-        {
+        if Selectable::new(&timer.combined()).selected(selected).build(ui) {
             selected = true;
         }
         if let Some(settings) = Settings::try_read() {
             let settings_for_timer = settings.timers.get(&timer.id);
             ui.same_line();
             let (color, text) = match settings_for_timer {
-                Some(TimerSettings { disabled: true, .. }) => {
-                    ([1.0, 0.0, 0.0, 1.0], &fl!("disabled"))
-                },
+                Some(TimerSettings { disabled: true, .. }) => ([1.0, 0.0, 0.0, 1.0], &fl!("disabled")),
                 _ => ([0.0, 1.0, 0.0, 1.0], &fl!("enabled")),
             };
             let text_size = Vec2::from(ui.calc_text_size(text));
-            Alignment::set_cursor(
-                ui,
-                Alignment::RIGHT_MIDDLE,
-                widget_pos,
-                widget_size,
-                text_size,
-            );
+            Alignment::set_cursor(ui, Alignment::RIGHT_MIDDLE, widget_pos, widget_size, text_size);
             ui.text_colored(color, text);
         }
         ui.dummy([0.0, 4.0]);
@@ -231,16 +215,8 @@ impl TimerTabState {
                         let path_display = format!("{}", path.display());
                         RenderState::font_text("font", ui, &fl!("location", path = path_display));
                     }
-                    RenderState::font_text(
-                        "font",
-                        ui,
-                        &fl!("id-arg", id = selected_timer.id.clone()),
-                    );
-                    RenderState::font_text(
-                        "font",
-                        ui,
-                        &fl!("map-id-arg", id = selected_timer.map_id),
-                    );
+                    RenderState::font_text("font", ui, &fl!("id-arg", id = selected_timer.id.clone()));
+                    RenderState::font_text("font", ui, &fl!("map-id-arg", id = selected_timer.map_id));
                     ui.dummy([4.0; 2]);
                     ui.separator();
                     ui.dummy([4.0; 2]);
@@ -255,9 +231,7 @@ impl TimerTabState {
                             _ => &fl!("disable"),
                         };
                         if ui.button(button_text) {
-                            TimersController::try_send(TimersEvent::TimerToggle(
-                                selected_timer.id.clone(),
-                            ));
+                            TimersController::try_send(TimersEvent::TimerToggle(selected_timer.id.clone()));
                         }
                     }
                 } else {
@@ -271,9 +245,7 @@ impl TimerTabState {
         self.categories.clear();
         for timer in &self.timers {
             if let Some(association) = &timer.association {
-                self.sources_to_timers
-                    .entry(association.clone())
-                    .or_default();
+                self.sources_to_timers.entry(association.clone()).or_default();
                 if let Some(val) = self.sources_to_timers.get_mut(association) {
                     val.push(timer.clone());
                 };

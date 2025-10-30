@@ -129,11 +129,7 @@ impl ActiveTrail {
             for &next_point in points.iter().skip(1) {
                 let path_direction = next_point - cur_point;
                 let offset = path_direction.cross(Vector3::Y);
-                let offset = if trail.is_wall() {
-                    path_direction.cross(offset)
-                } else {
-                    offset
-                };
+                let offset = if trail.is_wall() { path_direction.cross(offset) } else { offset };
                 let offset = offset.normalize();
 
                 if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
@@ -348,10 +344,7 @@ impl TrailTextureMap {
     }
 
     pub const fn with_tex_scale(v_scale: f32) -> Self {
-        Self {
-            v_scale,
-            ..Self::DEFAULT
-        }
+        Self { v_scale, ..Self::DEFAULT }
     }
 
     pub fn set_scale_from_expansion(&mut self, scale: TrailScale) {
