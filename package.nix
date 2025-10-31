@@ -8,6 +8,7 @@
   pkg-config,
   builtInfo ? {},
   features ? [],
+  doCheck ? false,
   buildType ? "release",
   enableBuilt ? builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev),
   enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0",
@@ -21,6 +22,7 @@
   enableNexus ? true,
   enableArcdps ? true,
   source ? ./.,
+  cargoArtifacts ? null,
 }: let
   inherit (lib.trivial) mapNullable;
   inherit (lib.lists) optional optionals;
@@ -66,6 +68,12 @@ in
   craneLib.buildPackage ({
       src = source;
       strictDeps = true;
+      ${
+        if cargoArtifacts != null
+        then "cargoArtifacts"
+        else null
+      } =
+        cargoArtifacts;
       cargoExtraArgs = optionalString (cargoBuildFeatures != []) (
         toString
         ["--no-default-features" "--features" (concatStringsSep "," (lib.unique cargoBuildFeatures))]
@@ -89,7 +97,17 @@ in
         ]
         ++ optional enableLibgit libgit2'build;
 
-      doCheck = false;
+      inherit doCheck;
+      ${
+        if doCheck
+        then "cargoBuildCommand"
+        else null
+      } = "cargoWithProfile check --workspace";
+      ${
+        if doCheck
+        then "installPhaseCommand"
+        else null
+      } = "touch $out";
 
       LIBGIT2_NO_VENDOR = true;
 

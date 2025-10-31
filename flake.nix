@@ -61,6 +61,10 @@
         taimiHUD-debug = packages.taimiHUD.override {
           buildType = "dev";
         };
+        taimiHUD-check = packages.taimiHUD.override {
+          inherit (packages.taimiHUD) cargoArtifacts;
+          doCheck = true;
+        };
 
         default = packages.taimiHUD;
       };

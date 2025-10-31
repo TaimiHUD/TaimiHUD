@@ -7,11 +7,11 @@
 }:
 with pkgs;
 with lib; let
-  taimiHUD-rs = import ./.;
+  taimiHUD-rs = import ../.;
   checks = taimiHUD-rs.checks.${pkgs.system};
   packages = taimiHUD-rs.packages.${pkgs.system};
   legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.system};
-  taimiHUD = packages.taimiHUD.override {
+  taimiHUD = disableCache (packages.taimiHUD.override {
     builtInfo = {
       ${
         if env.platform != "none"
@@ -44,7 +44,17 @@ with lib; let
       } =
         false;
     };
-  };
+  });
+  taimiHUD-check = disableCache packages.taimiHUD-check;
+  disableCache = pkg:
+    pkg.overrideAttrs (old: {
+      passthru =
+        old.passthru
+        or {}
+        // {
+          ci.cache.enable = false;
+        };
+    });
   artifactRoot = ".ci/artifacts";
   artifacts = "${artifactRoot}/lib/TaimiHUD*.dll";
   release = "${artifactRoot}/lib/TaimiHUD.dll";
@@ -139,19 +149,22 @@ in {
         version = "24.11";
       };
     };
-    tasks = {
-      build.inputs = [taimiHUD];
-      cache.inputs = [
-        checks.formatting
-        checks.git-hooks
-        taimiHUD
-        taimiHUD.cargoArtifacts
-        legacyPackages.git-hooks.package
-        legacyPackages.formatter
-      ];
-    };
     jobs = {
-      main = {
+      ci-check = {
+        tasks = {
+          check.inputs = [
+            taimiHUD-check
+            checks.formatting
+            checks.git-hooks
+          ];
+          cache.inputs = [
+            taimiHUD.cargoArtifacts
+            legacyPackages.git-hooks.package
+            legacyPackages.formatter
+          ];
+        };
+      };
+      release = {
         tasks = {
           build-windows.inputs = singleton taimiHUD;
         };
@@ -192,70 +205,88 @@ in {
           ];
         };
         pull_request = {};
+        workflow_dispatch = {};
       };
-      jobs = mkIf (config.id != "ci") {
-        ${config.id} = {
-          permissions = {
-            contents = "write";
+      jobs = let
+        step = {
+          artifact-build = {
+            order = 1100;
+            name = "artifact build";
+            uses = {
+              # XXX: a very hacky way of getting the runner
+              inherit (config.gh-actions.jobs.${config.id}.step.ci-setup.uses) owner repo version;
+              path = "actions/nix/build";
+            };
+            "with" = {
+              file = "<ci>";
+              attrs = "config.jobs.${config.jobId}.artifactPackage";
+              out-link = artifactRoot;
+            };
           };
-          step = {
-            artifact-build = {
-              order = 1100;
-              name = "artifact build";
-              uses = {
-                # XXX: a very hacky way of getting the runner
-                inherit (config.gh-actions.jobs.${config.id}.step.ci-setup.uses) owner repo version;
-                path = "actions/nix/build";
-              };
-              "with" = {
-                file = "<ci>";
-                attrs = "config.jobs.${config.jobId}.artifactPackage";
-                out-link = artifactRoot;
-              };
+          artifact-upload = {
+            order = 1110;
+            name = "artifact upload";
+            uses.path = "actions/upload-artifact@v4";
+            "with" = {
+              name = "TaimiHUD";
+              path = artifacts;
             };
-            artifact-upload = {
-              order = 1110;
-              name = "artifact upload";
-              uses.path = "actions/upload-artifact@v4";
-              "with" = {
-                name = "TaimiHUD";
-                path = artifacts;
-              };
-            };
-            artifact-parse = {
-              order = 1111;
-              name = "artifact parse";
-              shell = "bash";
-              run = ''
-                NEXUS_TAG_NAME=$(cat ${artifactRoot}/${artifactShare.nexusTagName})
-                echo "release-nexus-tag=$NEXUS_TAG_NAME" >> $GITHUB_OUTPUT
-                if [[ -n $NEXUS_TAG_NAME && $NEXUS_TAG_NAME != "''${{ github.ref_name }}" ]]; then
-                  git fetch origin "refs/tags/$NEXUS_TAG_NAME" || true
-                  git tag -f "$NEXUS_TAG_NAME" "''${{ github.ref }}" &&
-                  git push -f origin "$NEXUS_TAG_NAME" || true
-                fi
-              '';
-            };
-            release-upload = {
-              order = 1112;
-              name = "release";
-              "if" = "startsWith(github.ref, 'refs/tags/v')";
-              uses.path = "softprops/action-gh-release@v1";
-              "with" = let
-                is_pre = "contains(${real_tag}, '-')";
-                nexus_tag = "${is_pre} && steps.artifact-parse.outputs.release-nexus-tag != ${real_tag} && steps.artifact-parse.outputs.release-nexus-tag";
-                real_tag = "github.ref_name";
-                pre_name = "format('{0} ({1}-nexus)', ${real_tag}, ${nexus_tag})";
-              in {
-                files = release;
-                prerelease = "\${{ ${is_pre} }}";
-                tag_name = "\${{ ${nexus_tag} || ${real_tag} }}";
-                name = "\${{ ${nexus_tag} && ${pre_name} || ${real_tag} }}";
-                #target_commitish = channel branch?
-              };
+          };
+          artifact-parse = {
+            order = 1111;
+            name = "artifact parse";
+            shell = "bash";
+            run = ''
+              NEXUS_TAG_NAME=$(cat ${artifactRoot}/${artifactShare.nexusTagName})
+              echo "release-nexus-tag=$NEXUS_TAG_NAME" >> $GITHUB_OUTPUT
+              if [[ -n $NEXUS_TAG_NAME && $NEXUS_TAG_NAME != "''${{ github.ref_name }}" ]]; then
+                git fetch origin "refs/tags/$NEXUS_TAG_NAME" || true
+                git tag -f "$NEXUS_TAG_NAME" "''${{ github.ref }}" &&
+                git push -f origin "$NEXUS_TAG_NAME" || true
+              fi
+            '';
+          };
+          release-upload = {
+            order = 1112;
+            name = "release";
+            "if" = "startsWith(github.ref, 'refs/tags/v')";
+            uses.path = "softprops/action-gh-release@v1";
+            "with" = let
+              is_pre = "contains(${real_tag}, '-')";
+              nexus_tag = "${is_pre} && steps.artifact-parse.outputs.release-nexus-tag != ${real_tag} && steps.artifact-parse.outputs.release-nexus-tag";
+              real_tag = "github.ref_name";
+              pre_name = "format('{0} ({1}-nexus)', ${real_tag}, ${nexus_tag})";
+            in {
+              files = release;
+              prerelease = "\${{ ${is_pre} }}";
+              tag_name = "\${{ ${nexus_tag} || ${real_tag} }}";
+              name = "\${{ ${nexus_tag} && ${pre_name} || ${real_tag} }}";
+              #target_commitish = channel branch?
             };
           };
         };
+        confDeploy = {
+          name = "${config.name} build --release";
+          "if" = let
+            notPush = "github.event_name != 'push'";
+            pushAllowed = "github.event.push.ref == 'refs/heads/main' || github.event.push.ref == 'refs/heads/develop' || startsWith(github.event.push.ref, 'refs/tags')";
+          in "\${{ (${notPush} || (${pushAllowed})) && always() || false }}";
+          permissions = {
+            contents = "write";
+          };
+          inherit step;
+          needs = ["ci-check"];
+        };
+        confDuplicatePr = {
+          "if" = "github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork";
+        };
+        confCheck = _: {
+          imports = [confDuplicatePr];
+          name = "${config.name} check";
+        };
+      in {
+        release = mkIf (config.id == "release") confDeploy;
+        ci-check = mkIf (config.id == "ci-check") confCheck;
       };
     };
   };
