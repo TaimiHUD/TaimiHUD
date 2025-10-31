@@ -470,29 +470,40 @@ impl Engine {
                                     GameplayTransition::Loaded { prev_map_id, .. } => prev_map_id,
                                     GameplayTransition::Intermission { prev_map_id } => prev_map_id,
                                 };
-                                log::debug!("{}entering map {new_map_id}", if prev == Some(new_map_id) { "re-" } else { "" });
+                                log::debug!(
+                                    "{}entering map {new_map_id}",
+                                    if prev == Some(new_map_id) { "re-" } else { "" }
+                                );
                                 self.gameplay_map_enter(&device_context?, new_map_id)
                             },
                             GameplayState::Gameplay { map_id: None } => {
                                 log::info!("how do we know we loaded into a null map from {trans:?} to {gameplay:?}?");
                                 Ok(())
                             },
-                            GameplayState::Intermission { prev_map_id: Some(prev), next_map_id: None, initial: false } => {
+                            GameplayState::Intermission {
+                                prev_map_id: Some(prev),
+                                next_map_id: None,
+                                initial: false,
+                            } => {
                                 log::debug!("leaving map {prev}");
                                 self.goggles_exit();
                                 //self.gameplay_map_exit(&device_context?, prev)
                                 Ok(())
                             },
-                            GameplayState::Intermission { prev_map_id: Some(prev), next_map_id: Some(next), initial: false } => {
+                            GameplayState::Intermission {
+                                prev_map_id: Some(prev),
+                                next_map_id: Some(next),
+                                initial: false,
+                            } =>
                                 if prev != next {
                                     log::info!("forget about previous map {prev}, prepare for {next}!");
                                     self.gameplay_map_exit(&device_context?, prev)
                                 } else {
                                     Ok(())
-                                }
-                            },
+                                },
                             _ => Ok(()),
-                        }.with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))?;
+                        }
+                        .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))?;
                     },
                     UiResize(display_size) => match display_size {
                         None => {},

@@ -246,11 +246,8 @@ impl ActivePack {
                 let category_filter = category_filter
                     .and_then(|f| f.get(idx).map(|b| *b))
                     .unwrap_or(true);
-                let filter = enabled_filter
-                    || disabled_filter
-                    || is_root_filter
-                    || is_leaf_filter
-                    || is_branch_filter;
+                let filter =
+                    enabled_filter | disabled_filter | is_root_filter | is_leaf_filter | is_branch_filter;
                 display = search_filter && category_filter && filter;
             }
         }

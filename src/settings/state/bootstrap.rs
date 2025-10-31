@@ -157,16 +157,16 @@ impl BootstrapState {
     }
 
     fn default_update_preference() -> &'static UpdatePreference {
+        let never = &UpdatePreference::Never;
         #[allow(unreachable_patterns)]
         match () {
             #[cfg(debug_assertions)]
-            _ => &UpdatePreference::Never,
+            _ => never,
             #[cfg(feature = "extension-nexus")]
-            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() =>
-                &UpdatePreference::Never,
+            _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => never,
             #[cfg(feature = "updates")]
             _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => &UpdatePreference::ASK,
-            _ => &UpdatePreference::Never,
+            _ => never,
         }
     }
 

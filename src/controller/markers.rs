@@ -471,11 +471,8 @@ impl MarkersController {
                                         .map(map_point);
                                     let screen_point = map.calibration.map(fake_point);
                                     #[cfg(todo)]
-                                    let difference_screen = map
-                                        .map_to_worldmap_for(map.context)
-                                        .then(map.worldmap_to_fake_for(map.context))
-                                        .then(map.calibration.to_screen())
-                                        .map(map_point - map_centre);
+                                    #[rustfmt::skip]
+                                    let difference_screen = map.map_to_worldmap_for(map.context).then(map.worldmap_to_fake_for(map.context)).then(map.calibration.to_screen()).map(map_point - map_centre);
                                     let difference_screen = screen_point - bounds.center();
 
                                     // the l

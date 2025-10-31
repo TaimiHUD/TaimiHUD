@@ -3,6 +3,6 @@
 /.cargo
 /.rustup
 /.pre-commit-config.yaml
-/.rustfmt.yaml
+/.rustfmt.toml
 /.direnv
 /result

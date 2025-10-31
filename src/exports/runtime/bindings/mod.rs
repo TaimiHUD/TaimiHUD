@@ -87,8 +87,9 @@ bitflags! {
 
 impl TaimiControls {
     #[allow(unreachable_patterns)]
-    pub const WINDOW_TOGGLES: Self = Self::from_bits_retain(
-        Self::WINDOW_PRIMARY.bits()
+    pub const WINDOW_TOGGLES: Self = Self::from_bits_retain({
+        #[rustfmt::skip]
+        let bits = Self::WINDOW_PRIMARY.bits()
             | match () {
                 #[cfg(feature = "timers")]
                 _ => Self::WINDOW_TIMERS.bits(),
@@ -103,8 +104,9 @@ impl TaimiControls {
                 #[cfg(feature = "space")]
                 _ => Self::WINDOW_PATHING.bits(),
                 _ => 0,
-            },
-    );
+            };
+        bits
+    });
 
     #[cfg(feature = "timers")]
     pub const TIMER_TRIGGERS: Self = Self::from_bits_retain(
