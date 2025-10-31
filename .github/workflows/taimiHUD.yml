@@ -76,9 +76,10 @@ jobs:
         quiet: false
         stdin: ${{ runner.temp }}/ci.build.cache
   release:
-    if: ${{ (github.event_name != 'push' || (github.event.push.ref == 'refs/heads/main'
-      || github.event.push.ref == 'refs/heads/develop' || startsWith(github.event.push.ref,
-      'refs/tags'))) && always() || false }}
+    if: ${{ (github.event_name != 'push' || (github.event.ref == 'refs/heads/main'
+      || github.event.ref == 'refs/heads/develop' || startsWith(github.event.ref,
+      'refs/heads/v') || startsWith(github.event.ref, 'refs/tags/'))) && always()
+      }}
     name: taimiHUD build --release
     needs:
     - ci-check

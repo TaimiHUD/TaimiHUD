@@ -269,8 +269,8 @@ in {
           name = "${config.name} build --release";
           "if" = let
             notPush = "github.event_name != 'push'";
-            pushAllowed = "github.event.push.ref == 'refs/heads/main' || github.event.push.ref == 'refs/heads/develop' || startsWith(github.event.push.ref, 'refs/tags')";
-          in "\${{ (${notPush} || (${pushAllowed})) && always() || false }}";
+            pushAllowed = "github.event.ref == 'refs/heads/main' || github.event.ref == 'refs/heads/develop' || startsWith(github.event.ref, 'refs/heads/v') || startsWith(github.event.ref, 'refs/tags/')";
+          in "\${{ (${notPush} || (${pushAllowed})) && always() }}";
           permissions = {
             contents = "write";
           };
