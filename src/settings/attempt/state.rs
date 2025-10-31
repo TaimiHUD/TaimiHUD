@@ -1,3 +1,5 @@
+#![rustfmt::skip]
+
 use tokio::fs::{create_dir_all, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};

@@ -8,4 +8,4 @@ let
     src = ./.;
   };
 in
-taimiHUD.defaultNix
+  taimiHUD.defaultNix

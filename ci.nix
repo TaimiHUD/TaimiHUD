@@ -1,14 +1,47 @@
-{ config, pkgs, lib, env, ... }: with pkgs; with lib; let
+{
+  config,
+  pkgs,
+  lib,
+  env,
+  ...
+}:
+with pkgs;
+with lib; let
   taimiHUD-rs = import ./.;
   packages = taimiHUD-rs.packages.${pkgs.system};
   legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.system};
   taimiHUD = packages.taimiHUD.override {
     builtInfo = {
-      ${if env.platform != "none" then "platform" else null} = env.platform;
-      ${if env.git-ref != null then "ref" else null} = env.git-ref;
-      ${if env.git-commit != null then "rev" else null} = env.git-commit;
-      ${if env.git-commit != null then "shortRev" else null} = builtins.substring 0 8 env.git-commit;
-      ${if env.platform != "none" then "dirty" else null} = false;
+      ${
+        if env.platform != "none"
+        then "platform"
+        else null
+      } =
+        env.platform;
+      ${
+        if env.git-ref != null
+        then "ref"
+        else null
+      } =
+        env.git-ref;
+      ${
+        if env.git-commit != null
+        then "rev"
+        else null
+      } =
+        env.git-commit;
+      ${
+        if env.git-commit != null
+        then "shortRev"
+        else null
+      } =
+        builtins.substring 0 8 env.git-commit;
+      ${
+        if env.platform != "none"
+        then "dirty"
+        else null
+      } =
+        false;
     };
   };
   artifactRoot = ".ci/artifacts";
@@ -19,7 +52,10 @@
   };
   intOr = s: let
     int = builtins.tryEval (toInt s);
-  in if int.success then int.value else s;
+  in
+    if int.success
+    then int.value
+    else s;
   parseTag = ref: let
     name = removePrefix "v" (removePrefix "refs/tags/" ref);
     parts = versions.splitVersion name;
@@ -31,18 +67,39 @@
   in {
     inherit name;
     success = ref != null && length (splitString "." ref) > 2;
-    major = if length parts > 0 then intOr (elemAt parts 0) else 0;
-    minor = if length parts > 1 then intOr (elemAt parts 1) else 0;
-    patch = if length parts > 2 then intOr (elemAt parts 2) else 0;
+    major =
+      if length parts > 0
+      then intOr (elemAt parts 0)
+      else 0;
+    minor =
+      if length parts > 1
+      then intOr (elemAt parts 1)
+      else 0;
+    patch =
+      if length parts > 2
+      then intOr (elemAt parts 2)
+      else 0;
     #revision = if length (versions.splitVersion name) > 4 && isNumericOrSomething (elemAt thatSplittedThing 4) && elemAt thatSplittedThing 3 != "+";
-    pre = if isPre then pre else null;
-    revision = if isPre && builtins.isInt pre.revision then pre.revision else 0;
+    pre =
+      if isPre
+      then pre
+      else null;
+    revision =
+      if isPre && builtins.isInt pre.revision
+      then pre.revision
+      else 0;
   };
   tag2nexus = tag: let
     rcTag = {
       inherit (tag) success;
-      major = if tag.minor > 0 then tag.major else tag.major - 1;
-      minor = if tag.minor > 0 then tag.minor - 1 else 99;
+      major =
+        if tag.minor > 0
+        then tag.major
+        else tag.major - 1;
+      minor =
+        if tag.minor > 0
+        then tag.minor - 1
+        else 99;
       patch = 900 + tag.revision;
       # TODO: stop using extension-nexus-codegen feature because it won't set this
       revision = 0;
@@ -51,14 +108,16 @@
       inherit (tag) success major minor patch;
       revision = -(tag.revision + 1);
     };
-  in if ! tag.success or false || tag.pre == null then tag
-    else if tag.pre.channel == "rc" then rcTag
+  in
+    if ! tag.success or false || tag.pre == null
+    then tag
+    else if tag.pre.channel == "rc"
+    then rcTag
     else preTag;
   tag = parseTag env.git-ref;
   nexusTag = tag2nexus tag;
   nexusTagName = "v${toString nexusTag.major}.${toString nexusTag.minor}.${toString nexusTag.patch}.${toString nexusTag.revision}";
-in
-{
+in {
   config = {
     name = "taimiHUD";
     ci.gh-actions = {
@@ -80,9 +139,10 @@ in
       };
     };
     tasks = {
-      build.inputs = [ taimiHUD ];
+      build.inputs = [taimiHUD];
       cache.inputs = [
-        taimiHUD taimiHUD.cargoArtifacts
+        taimiHUD
+        taimiHUD.cargoArtifacts
         legacyPackages.git-hooks.package
       ];
     };
@@ -99,16 +159,22 @@ in
 
     # XXX: symlinks are not followed, see https://github.com/softprops/action-gh-release/issues/182
     #artifactPackage = config.artifactPackages.win64;
-    artifactPackage = runCommand "taimihud-artifacts" {
-      nexusTagName = if nexusTag.success or false then nexusTagName else "";
-    } (''
-      mkdir -p $out/lib $out/share/taimi
-      printf '%s\n' "$nexusTagName" > $out/${artifactShare.nexusTagName}
-    '' + concatStringsSep "\n" (mapAttrsToList (key: taimi: let
-      outname = "TaimiHUD" + optionalString (key != "main") "-${key}";
-    in ''
-        cp ${taimi}/lib/taimi_hud.dll $out/lib/${outname}.dll
-    '') config.artifactPackages));
+    artifactPackage =
+      runCommand "taimihud-artifacts" {
+        nexusTagName =
+          if nexusTag.success or false
+          then nexusTagName
+          else "";
+      } (''
+          mkdir -p $out/lib $out/share/taimi
+          printf '%s\n' "$nexusTagName" > $out/${artifactShare.nexusTagName}
+        ''
+        + concatStringsSep "\n" (mapAttrsToList (key: taimi: let
+            outname = "TaimiHUD" + optionalString (key != "main") "-${key}";
+          in ''
+            cp ${taimi}/lib/taimi_hud.dll $out/lib/${outname}.dll
+          '')
+          config.artifactPackages));
 
     gh-actions = {
       on = {

@@ -1,4 +1,4 @@
-{ inputs }: let
+{inputs}: let
   nixlib = inputs.nixpkgs.lib;
   inherit (inputs.self.lib) treefmt;
 in {
@@ -9,15 +9,19 @@ in {
   inherit (inputs.treefmt-nix) lib;
   argsForSystem = system: _: {
     _module.args = {
+      taimi = nixlib.mkOptionDefault inputs.self;
       taimi'legacyPackages = nixlib.mkOptionDefault inputs.self.legacyPackages.${system};
     };
   };
   configForSystem = system: let
     legacyPackages = inputs.self.legacyPackages.${system};
     pkgs = legacyPackages.pkgs.buildPackages.buildPackages;
-  in treefmt.lib.evalModule pkgs (_: {
-    imports = treefmt.imports ++ [
-      (treefmt.argsForSystem system)
-    ];
-  });
+  in
+    treefmt.lib.evalModule pkgs (_: {
+      imports =
+        treefmt.imports
+        ++ [
+          (treefmt.argsForSystem system)
+        ];
+    });
 }

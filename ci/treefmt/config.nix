@@ -1,4 +1,4 @@
-{ taimi'legacyPackages, ... }: {
+{taimi'legacyPackages, ...}: {
   projectRootFile = "flake.nix";
   programs = {
     alejandra.enable = true;
@@ -11,4 +11,6 @@
       edition = "2021";
     };
   };
+  # TODO: consider cargo fmt --check instead?
+  #settings.formatter.rustfmt.options = lib.mkForce [ "--all" ]
 }
