@@ -1,6 +1,7 @@
 { config, pkgs, lib, env, ... }: with pkgs; with lib; let
   taimiHUD-rs = import ./.;
   packages = taimiHUD-rs.packages.${pkgs.system};
+  legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.system};
   taimiHUD = packages.taimiHUD.override {
     builtInfo = {
       ${if env.platform != "none" then "platform" else null} = env.platform;
@@ -79,8 +80,11 @@ in
       };
     };
     tasks = {
-      build.inputs = [ taimiHUD ]; #taimiHUDSpace ];
-      cache.inputs = [ taimiHUD taimiHUD.cargoArtifacts ]; #taimiHUDSpace ];
+      build.inputs = [ taimiHUD ];
+      cache.inputs = [
+        taimiHUD taimiHUD.cargoArtifacts
+        legacyPackages.git-hooks.package
+      ];
     };
     jobs = {
       main = {

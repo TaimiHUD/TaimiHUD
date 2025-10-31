@@ -31,7 +31,7 @@
     platform = builtInfo.platform or (if source ? sourceInfo then "flake" else "nix");
     ref = builtInfo.ref or null;
     rev = builtInfo.rev or source.sourceInfo.rev or source.sourceInfo.dirtyRev or null;
-    shortRev = builtInfo.shortRev or source.sourceInfo.shortRev or source.sourceInfo.dirtyShortRev or (mapNullable (builtins.substring 0 8));
+    shortRev = builtInfo.shortRev or source.sourceInfo.shortRev or source.sourceInfo.dirtyShortRev or (mapNullable (builtins.substring 0 8) rev);
     revSuffix = optionalString (builtInfo.dirty or (source ? sourceInfo.dirtyRev)) "-dirty";
   in {
     ${mapNullable (_: "BUILT_OVERRIDE_taimi_hud_CI_PLATFORM") platform} = platform;

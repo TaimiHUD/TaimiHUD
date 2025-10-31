@@ -3,8 +3,7 @@
 , system ? builtins.currentSystem
 , callPackage ? legacyPackages.callPackage or legacyPackages.pkgs.callPackage
 }: let
-  systemless-git-hooks = system: inputs.self.checks.${system}.git-hooks;
-  git-hooks = systemless-git-hooks system;
+  inherit (legacyPackages) git-hooks formatter;
   taimiShell = { mkShell
   , lib
   , taimiHUD
@@ -21,8 +20,7 @@
   in mkShell {
     buildInputs = [
       stdenv.cc
-    ] ++ git-hooks.buildInputs
-      ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
+    ] ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
 
     depsBuildBuild = [
       pkg-config
@@ -32,10 +30,15 @@
       buildPackages.stdenv.cc
       libgit2'build
       fenixToolchainShell
+      git-hooks.package
+      git-hooks.installationScriptBin
+      formatter
     ];
 
     shellHook = ''
-      ${git-hooks.shellHook}
+      if [[ -n ''${FLAKE_OPT_HOOKS_INSTALL-1} ]]; then
+        git-hooks-install
+      fi
       export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH-}:${LD_LIBRARY_PATH}";
     '';
 

@@ -33,14 +33,17 @@
     };
   };
 
-  outputs = { self, fenix, flake-utils, crane, nixpkgs, rust-overlay, ... }@inputs:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, fenix, flake-utils, crane, nixpkgs, rust-overlay, ... }@inputs: let
+    outputs.lib = {
+      git-hooks = import ./ci/git-hooks { inherit inputs; };
+      treefmt = import ./ci/treefmt { inherit inputs; };
+    };
+  in outputs // flake-utils.lib.eachDefaultSystem (system:
       let
         legacyPackages = self.legacyPackages.${system};
         packages = self.packages.${system};
         devShells = self.devShells.${system};
         inherit (legacyPackages) pkgs callPackage fenixPackages;
-        treefmtEval = inputs.treefmt-nix.lib.evalModule inputs.nixpkgs.legacyPackages.${system} ./treefmt.nix;
       in
       {
         # TaimiHUD Package
@@ -51,8 +54,6 @@
           taimiHUD-debug = packages.taimiHUD.override {
             buildType = "dev";
           };
-
-          packs = callPackage ./pathing/pack/taco.nix;
 
           default = packages.taimiHUD;
         };
@@ -108,24 +109,14 @@
           craneLib = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchain);
           craneLibBuild = (crane.mkLib pkgs.buildPackages).overrideToolchain (p: legacyPackages.fenixToolchainBuild);
           craneLibShell = (crane.mkLib pkgs).overrideToolchain (p: legacyPackages.fenixToolchainShell);
+
+          git-hooks = self.lib.git-hooks.configForSystem system;
+          treefmt = self.lib.treefmt.configForSystem system;
+          formatter = legacyPackages.treefmt.config.build.wrapper;
         };
-        formatter = treefmtEval.config.build.wrapper;
-        checks = let
-          git-hooks = system:
-          inputs.git-hooks.lib.${system}.run {
-            src = ./.;
-            hooks = {
-              treefmt = {
-                enable = true;
-                packageOverrides = {treefmt = inputs.self.formatter.${system};};
-              };
-              flake-checker.enable = true;
-              ripsecrets.enable = true;
-            };
-          };
-        in {
-          formatting = treefmtEval.config.build.check inputs.self;
-          git-hooks = git-hooks system;
+        checks = {
+          formatting = legacyPackages.treefmt.config.build.check self;
+          git-hooks = legacyPackages.git-hooks.check;
         };
       });
 }
