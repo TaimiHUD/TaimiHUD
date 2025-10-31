@@ -34,6 +34,7 @@ use {
 #[cfg(feature = "texture-loader")]
 use crate::TEXTURES;
 
+pub mod alert;
 #[cfg(feature = "allocator")]
 pub mod allocator;
 pub mod bindings;
@@ -51,7 +52,13 @@ pub use nexus::data_link::mumble::{MumbleLink, MumblePtr, UiState};
 #[cfg(feature = "extension-nexus")]
 pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
 pub use {
-    self::{mouse::MousePosition, statistics::Counter, textures::TextureLoader, watched::Watched},
+    self::{
+        alert::send_alert,
+        mouse::MousePosition,
+        statistics::Counter,
+        textures::TextureLoader,
+        watched::Watched,
+    },
     arcdps::Language as GameLanguage,
     nexus::imgui,
     taimi_meta::coords::vec_eq,
@@ -415,21 +422,6 @@ pub async fn invoke_marker_bind(
     };
 
     press_marker_bind(marker, target, false, position).await
-}
-
-/// TODO: push to controller alert queue or something...
-pub fn send_alert(ui: &imgui::Ui, message: &str) -> RuntimeResult<()> {
-    #[cfg(feature = "extension-nexus")]
-    if let Some(res) = exports::nexus::send_alert(ui, message)? {
-        return Ok(res)
-    }
-
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(res) = exports::arcdps::send_alert(ui, message)? {
-        return Ok(res)
-    }
-
-    Err(RT_UNAVAILABLE)
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]

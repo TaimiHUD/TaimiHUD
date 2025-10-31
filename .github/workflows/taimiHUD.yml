@@ -1,9 +1,10 @@
 env:
   CI_ALLOW_ROOT: '1'
-  CI_CONFIG: ./ci.nix
+  CI_CONFIG: ./ci/config.nix
   CI_PLATFORM: gh-actions
 jobs:
   ci-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork
     name: taimiHUD check
     runs-on: ubuntu-latest
     steps:
@@ -16,6 +17,12 @@ jobs:
     - id: nix-install
       name: nix install
       uses: arcnmx/ci/actions/nix/install@v0.7
+    - id: ci-setup
+      name: nix setup
+      uses: arcnmx/ci/actions/nix/run@v0.7
+      with:
+        attrs: ci.job.ci-check.run.bootstrap
+        quiet: false
     - id: ci-action-build
       name: nix build ci.gh-actions.configFile
       uses: arcnmx/ci/actions/nix/build@v0.7
@@ -29,8 +36,52 @@ jobs:
         args: -u .github/workflows/taimiHUD.yml .ci/workflow.yml
         attrs: nixpkgs.diffutils
         command: diff
-  main:
-    name: taimiHUD-main
+    - id: ci-dirty
+      name: nix test dirty
+      uses: arcnmx/ci/actions/nix/run@v0.7
+      with:
+        attrs: ci.job.ci-check.run.test
+        command: ci-build-dirty
+        quiet: false
+        stdout: ${{ runner.temp }}/ci.build.dirty
+    - id: ci-test
+      name: nix test build
+      uses: arcnmx/ci/actions/nix/run@v0.7
+      with:
+        attrs: ci.job.ci-check.run.test
+        command: ci-build-realise
+        ignore-exit-code: true
+        quiet: false
+        stdin: ${{ runner.temp }}/ci.build.dirty
+    - env:
+        CI_EXIT_CODE: ${{ steps.ci-test.outputs.exit-code }}
+      id: ci-summary
+      name: nix test results
+      uses: arcnmx/ci/actions/nix/run@v0.7
+      with:
+        attrs: ci.job.ci-check.run.test
+        command: ci-build-summarise
+        quiet: false
+        stdin: ${{ runner.temp }}/ci.build.dirty
+        stdout: ${{ runner.temp }}/ci.build.cache
+    - env:
+        CACHIX_SIGNING_KEY: ${{ secrets.CACHIX_SIGNING_KEY }}
+      id: ci-cache
+      if: always()
+      name: nix test cache
+      uses: arcnmx/ci/actions/nix/run@v0.7
+      with:
+        attrs: ci.job.ci-check.run.test
+        command: ci-build-cache
+        quiet: false
+        stdin: ${{ runner.temp }}/ci.build.cache
+  release:
+    if: ${{ (github.event_name != 'push' || (github.event.push.ref == 'refs/heads/main'
+      || github.event.push.ref == 'refs/heads/develop' || startsWith(github.event.push.ref,
+      'refs/tags'))) && always() || false }}
+    name: taimiHUD build --release
+    needs:
+    - ci-check
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -48,13 +99,13 @@ jobs:
       name: nix setup
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.bootstrap
+        attrs: ci.job.release.run.bootstrap
         quiet: false
     - id: ci-dirty
       name: nix test dirty
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.test
+        attrs: ci.job.release.run.test
         command: ci-build-dirty
         quiet: false
         stdout: ${{ runner.temp }}/ci.build.dirty
@@ -62,7 +113,7 @@ jobs:
       name: nix test build
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.test
+        attrs: ci.job.release.run.test
         command: ci-build-realise
         ignore-exit-code: true
         quiet: false
@@ -73,7 +124,7 @@ jobs:
       name: nix test results
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.test
+        attrs: ci.job.release.run.test
         command: ci-build-summarise
         quiet: false
         stdin: ${{ runner.temp }}/ci.build.dirty
@@ -85,7 +136,7 @@ jobs:
       name: nix test cache
       uses: arcnmx/ci/actions/nix/run@v0.7
       with:
-        attrs: ci.job.main.run.test
+        attrs: ci.job.release.run.test
         command: ci-build-cache
         quiet: false
         stdin: ${{ runner.temp }}/ci.build.cache
@@ -93,7 +144,7 @@ jobs:
       name: artifact build
       uses: arcnmx/ci/actions/nix/build@v0.7
       with:
-        attrs: config.jobs.main.artifactPackage
+        attrs: config.jobs.release.artifactPackage
         file: <ci>
         out-link: .ci/artifacts
     - id: artifact-upload
@@ -135,3 +186,4 @@ name: taimiHUD
     tags:
     - v[0-9]+.[0-9]+.[0-9]+
     - v[0-9]+.[0-9]+.[0-9]+-**
+  workflow_dispatch: {}

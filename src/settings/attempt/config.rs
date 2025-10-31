@@ -1,3 +1,5 @@
+#![rustfmt::skip]
+
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use magic_migrate::{MigrateError, TryMigrate};
 use serde::{Deserialize, Serialize};

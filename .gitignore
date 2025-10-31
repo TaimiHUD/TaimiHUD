@@ -2,5 +2,7 @@
 /target
 /.cargo
 /.rustup
+/.pre-commit-config.yaml
+/.rustfmt.yaml
 /.direnv
 /result

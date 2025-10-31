@@ -10,7 +10,12 @@ use {
             RenderEvent,
             TextFont,
         },
-        settings::{state::SaveState, MarkerAutoPlaceSettings, Settings, SquadCondition},
+        settings::{
+            state::{BootstrapState, SaveState},
+            MarkerAutoPlaceSettings,
+            Settings,
+            SquadCondition,
+        },
         with_i18n,
         Controller,
         ControllerEvent,
@@ -28,7 +33,7 @@ use crate::exports::runtime::bindings::TaimiControls;
 #[cfg(feature = "updates")]
 use crate::{
     exports::runtime::update::ResolvedVersion,
-    settings::state::{AddonHostName, BootstrapState, UpdatePreference},
+    settings::state::{AddonHostName, UpdatePreference},
 };
 
 pub struct ConfigTabState {
