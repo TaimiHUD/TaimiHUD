@@ -10,7 +10,7 @@
   features ? [],
   doCheck ? false,
   buildType ? "release",
-  enableBuilt ? builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev),
+  enableBuilt ? (builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev)) || (builtInfo.platform or false == null),
   enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0",
   enableUpdates ? builtInfo != {} || (enableBuilt && (! source ? sourceInfo.dirtyRev)),
   enableStatistics ? false,
@@ -64,9 +64,65 @@
     ++ optional enableSpace "space"
     ++ optional enableUpdates "updates"
     ++ optional enableLibgit "built-info";
+  /*
+    dummySrc = let
+    manifestSrc = builtins.path {
+      inherit (dummySrc) name;
+      path = source;
+      filter = path: type:
+        type
+        == "directory"
+        || builtins.elem (baseNameOf path) [
+          "Cargo.toml"
+          "Cargo.lock"
+          "build.rs"
+        ];
+    };
+    workspaceCrates = [
+      "."
+      "rt/input"
+      "pathing/meta"
+      "pathing/pack"
+      "space/d3d"
+    ];
+  in symlinkJoin {
+    name = "taimihud-src-deps";
+    inherit workspaceCrates;
+    paths = [
+      manifestSrc
+    ];
+    postBuild = ''
+      for crateroot in $workspaceCrates; do
+        if [[ $crateroot = . ]]; then
+          cargosrc=$(readlink -f $out/$crateroot/Cargo.toml)
+          touch $out/$crateroot/src/lib.rs
+
+          rm $out/$crateroot/Cargo.toml
+          sed \
+            -e '/^.* path = "/d' \
+            -e '/dep:taimi/d' \
+            -e '/"taimi_.*\?\//d' \
+            $cargosrc > $out/$crateroot/Cargo.toml
+
+          # ensure lockfile is writable
+          # (it will try to remove workspace members .-.)
+          rm $out/$crateroot/Cargo.lock
+          cat $(dirname $cargosrc)/Cargo.lock > $out/$crateroot/Cargo.lock
+        else
+          # remove from workspace members list
+          sed -i \
+            -e "s|^  \"$crateroot\",$||" \
+            $out/Cargo.toml
+          rm $out/$crateroot/Cargo.toml
+        fi
+      done
+    '';
+  };
+  */
 in
   craneLib.buildPackage ({
       src = source;
+      #inherit dummySrc;
       strictDeps = true;
       ${
         if cargoArtifacts != null
@@ -97,7 +153,6 @@ in
         ]
         ++ optional enableLibgit libgit2'build;
 
-      inherit doCheck;
       ${
         if doCheck
         then "cargoBuildCommand"

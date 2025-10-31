@@ -55,14 +55,25 @@
     in {
       # TaimiHUD Package
       packages = {
-        taimiHUD = callPackage ./package.nix {
+        taimiHUD-develop = callPackage ./package.nix {
           source = self;
+          builtInfo = {
+            ref = null;
+            rev = null;
+            shortRev = null;
+            dirty = false;
+            platform = null;
+          };
+        };
+        taimiHUD = packages.taimiHUD-develop.override {
+          inherit (packages.taimiHUD-develop) cargoArtifacts;
+          builtInfo = {};
         };
         taimiHUD-debug = packages.taimiHUD.override {
+          cargoArtifacts = null;
           buildType = "dev";
         };
         taimiHUD-check = packages.taimiHUD.override {
-          inherit (packages.taimiHUD) cargoArtifacts;
           doCheck = true;
         };
 

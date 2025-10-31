@@ -6,12 +6,15 @@ version = "0.1.0"
 edition = "2021"
 autobins = false
 
-[lints]
-workspace = true
+[lib]
+path = "src/lib.rs"
 
 [[example]]
 name = "print_pack"
 path = "src/bin/print_pack.rs"
+
+[lints]
+workspace = true
 
 [features]
 default = [
