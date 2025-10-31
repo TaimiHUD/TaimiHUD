@@ -64,14 +64,6 @@ impl KeyInput {
     }
 
     pub fn to_event(self) -> (u32, usize, isize) {
-        #[cfg(deleteme)]
-        let msg = {
-            let as_mod = self.vk_as_mod();
-            // a dummy so it isn't unrecognized isn't necessary, but is more correct...
-            #[cfg(debug_assertions)]
-            let as_mod = as_mod.any().unwrap_or(KeyState::SHIFT);
-            as_mod.event_msg(self.down)
-        };
         let msg = {
             let as_mod = self.vk_as_mod();
             match as_mod.intersects(KeyState::BUTTON) {

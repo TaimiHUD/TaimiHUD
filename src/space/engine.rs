@@ -79,19 +79,6 @@ pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
     SettingsDirty,
-    #[cfg(deleteme)]
-    PathingToggle,
-    #[cfg(deleteme)]
-    MapToggle(MapContext),
-    #[cfg(deleteme)]
-    DisabledPaths(HashSet<String>),
-    #[cfg(deleteme)]
-    PackLoad {
-        pack: Arc<taimi_pack::Pack>,
-        loader: super::pack::LoaderBox,
-    },
-    #[cfg(deleteme)]
-    PackUnloadAll,
     GameplayStatus {
         gameplay: GameplayState,
         trans: GameplayTransition,
@@ -146,8 +133,6 @@ pub struct Engine {
     pub packs: PackCollection,
 
     settings: Option<PathingSettings>,
-    #[cfg(deleteme)]
-    settings_dirty: bool,
 }
 
 impl Engine {
@@ -206,8 +191,6 @@ impl Engine {
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
-            #[cfg(deleteme)]
-            settings_dirty: false,
         };
 
         #[cfg(feature = "space-ecs")]
@@ -400,65 +383,8 @@ impl Engine {
             Ok(event) => {
                 use SpaceEvent::*;
                 match event {
-                    #[cfg(deleteme)]
-                    DisabledPaths(disabled_paths) => {
-                        self.packs.active_festivals = self.map_settings(|s| {
-                            Festival::all()
-                                .filter(|&f| {
-                                    s.get_festival_preference(f).unwrap_or(machine.festival_active(f))
-                                })
-                                .collect()
-                        });
-                        self.packs.disable_paths(disabled_paths);
-                    },
                     SettingsDirty => {
                         self.settings = None;
-                    },
-                    #[cfg(deleteme)]
-                    PathingToggle => {
-                        let res = self
-                            .map_settings_mut(|s| {
-                                let visible = !s.space.visible_space();
-                                s.space.visible_space = Some(visible);
-                                visible
-                            })
-                            .context("toggle paths");
-                        #[cfg(feature = "goggles")]
-                        match &res {
-                            _ if !goggles::is_enabled() => (),
-                            Ok(false) => goggles::clear_lens(),
-                            Ok(true) => self.goggles_enter(false),
-                            _ => (),
-                        }
-                        if let Err(e) = res {
-                            log::warn!("{e:#}");
-                        }
-                    },
-                    #[cfg(deleteme)]
-                    MapToggle(cx) => {
-                        if let Err(e) = self
-                            .map_settings_mut(|s| match cx {
-                                MapContext::Minimap =>
-                                    s.space.visible_map_mini = Some(!s.space.visible_minimap()),
-                                MapContext::Global =>
-                                    s.space.visible_map_world = Some(!s.space.visible_worldmap()),
-                            })
-                            .context("toggle map paths")
-                        {
-                            log::warn!("{e:#}");
-                        }
-                    },
-                    #[cfg(deleteme)]
-                    PackLoad { pack, loader } => {
-                        let pack_idx = self.packs.add_pack(pack, loader);
-                        if let Err(e) = self.packs.load_pack(&self.render_backend.device, pack_idx) {
-                            log::error!("{e:#}");
-                        }
-                    },
-                    #[cfg(deleteme)]
-                    PackUnloadAll => {
-                        log::info!("Unloading all paths...");
-                        self.packs.clear();
                     },
                     GameplayStatus { gameplay, trans } => {
                         let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
@@ -929,18 +855,6 @@ impl Engine {
             }
         }
 
-        #[cfg(deleteme)]
-        match self.settings_dirty.then(Settings::try_write) {
-            Some(Some(mut settings)) => {
-                if let Some(pathing) = &self.settings {
-                    settings.pathing_mut().space = pathing.space.clone();
-                }
-                self.settings_dirty = false;
-            },
-            Some(None) => log::debug!("settings unavailable for saving"),
-            _ => (),
-        }
-
         Ok(())
     }
 
@@ -1047,33 +961,6 @@ impl Engine {
                 }
                 res
             },
-        }
-    }
-
-    #[cfg(deleteme)]
-    pub fn map_settings_mut<R, F: FnOnce(&mut PathingSettings) -> R>(&mut self, f: F) -> anyhow::Result<R> {
-        let mut fail = None;
-        let s = self.settings.get_or_insert_with(|| {
-            match Settings::read_with_blocking(|s| s.pathing.clone()) {
-                Ok(Some(s)) => s,
-                Ok(None) => {
-                    fail = Some(None);
-                    Default::default()
-                },
-                Err(e) => {
-                    fail = Some(Some(e));
-                    Default::default()
-                },
-            }
-        });
-        match fail {
-            Some(Some(e)) => Err(e),
-            _ => Ok({
-                let res = f(s);
-
-                self.settings_dirty = true;
-                res
-            }),
         }
     }
 

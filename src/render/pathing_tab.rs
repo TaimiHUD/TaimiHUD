@@ -120,11 +120,6 @@ impl PathingConfig {
                 None
             },
             None => {
-                #[cfg(deleteme)]
-                let res = crate::ENGINE
-                    .try_lock()
-                    .ok()
-                    .and_then(|e| e.as_ref().map(|e| e.as_ref().map(drop).map_err(Clone::clone)));
                 match Engine::is_available() {
                     false => {
                         ui.text_wrapped("Load in to the game to get started");

@@ -22,7 +22,7 @@ use {
     anyhow::Context,
     core::num::NonZero,
     glamour::{Angle, Point3, Size2, Vector2, Vector3},
-    std::{cell::RefCell, time::Instant},
+    std::time::Instant,
     taimi_meta::{
         coords::{LocalSpace, ScreenSpace},
         map::MapID,

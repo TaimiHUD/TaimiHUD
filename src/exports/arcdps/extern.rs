@@ -151,8 +151,8 @@ pub unsafe fn new_imgui_frame() {
 pub unsafe fn new_imgui_frame() {}
 
 pub unsafe fn with_imgui<R, F: FnOnce(&'_ Ui<'_>) -> R>(f: F) -> Option<R> {
-    match unsafe { arc_imgui_ui() } {
-        Some(ui) => Some({ f(ui) }),
+    match arc_imgui_ui() {
+        Some(ui) => Some(f(ui)),
         None => None,
     }
 }

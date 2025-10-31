@@ -192,7 +192,7 @@ level = "warn"
 check-cfg = [
   'cfg(todo, values("unused", "unnecessary"))',
   'cfg(todo)',
-  'cfg(taimi_has, values("title"))',
+  'cfg(taimi_has, values("author", "title", "version"))',
 ]
 
 [profile.release]
