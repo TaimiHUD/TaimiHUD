@@ -76,7 +76,7 @@ use {
 };
 
 #[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
+use crate::space::engine::SpaceEvent;
 #[cfg(feature = "goggles")]
 use crate::space::goggles;
 

@@ -220,7 +220,7 @@ impl Engine {
     {
         let enabled = Settings::try_read().map(|s| s.enable_katrender);
 
-        let mut engine = match slot {
+        let engine = match slot {
             None if machine.gameplay.is_initial() || !enabled.unwrap_or(false) => {
                 // if early game loading or charsel, delay init
                 // TODO: make this an option, but have fallback plan if you cause crashes...
@@ -501,7 +501,7 @@ impl Engine {
             trail_width,
             (_obscured_alpha,),
         ) = self.map_settings(|s| {
-            ((
+            (
                 map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
@@ -515,7 +515,7 @@ impl Engine {
                     #[cfg(not(feature = "goggles"))]
                     _ => ((),),
                 },
-            ))
+            )
         });
         for _ in 0..5 {
             // try to get a couple events out of the way at a time
