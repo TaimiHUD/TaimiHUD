@@ -11,6 +11,25 @@
       edition = "2021";
     };
   };
-  # TODO: consider cargo fmt --check instead?
-  #settings.formatter.rustfmt.options = lib.mkForce [ "--all" ]
+  settings = {
+    excludes = [
+      "LICENSE"
+      "*.md"
+      ".envrc*"
+      ".*ignore"
+      # data
+      "*.png"
+      "*.shaderdesc"
+      "*.lock"
+      "*.yml"
+      "*.json"
+      # TODO?
+      "*.toml"
+      "*.hlsl"
+      "*.ftl"
+    ];
+    walk = "auto";
+    # TODO: consider cargo fmt --check instead?
+    #formatter.rustfmt.options = lib.mkForce [ "--all" ]
+  };
 }

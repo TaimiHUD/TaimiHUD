@@ -30,7 +30,8 @@
   #TARGET_CC = "${stdenv.cc.targetPrefix}cc";
   builtInfo' = let
     platform =
-      builtInfo.platform or (
+      builtInfo.platform
+      or (
         if source ? sourceInfo
         then "flake"
         else "nix"

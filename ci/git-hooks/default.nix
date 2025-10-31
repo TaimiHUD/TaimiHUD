@@ -61,7 +61,8 @@ in {
       };
       check = config.config.run.overrideAttrs (old: {
         nativeBuildInputs =
-          old.nativeBuildInputs or []
+          old.nativeBuildInputs
+          or []
           ++ [
             pkgs.gitMinimal
           ];

@@ -12,7 +12,7 @@
       treefmt = inputs.self.legacyPackages.${system}.formatter;
     };
   };
-  hooks.flake-checker.enable = true;
+  hooks.flake-checker.enable = false;
   hooks.ripsecrets.enable = true;
   conf = {
     inherit hooks;

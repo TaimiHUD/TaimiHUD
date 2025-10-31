@@ -8,6 +8,7 @@
 with pkgs;
 with lib; let
   taimiHUD-rs = import ./.;
+  checks = taimiHUD-rs.checks.${pkgs.system};
   packages = taimiHUD-rs.packages.${pkgs.system};
   legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.system};
   taimiHUD = packages.taimiHUD.override {
@@ -141,9 +142,12 @@ in {
     tasks = {
       build.inputs = [taimiHUD];
       cache.inputs = [
+        checks.formatting
+        checks.git-hooks
         taimiHUD
         taimiHUD.cargoArtifacts
         legacyPackages.git-hooks.package
+        legacyPackages.formatter
       ];
     };
     jobs = {
