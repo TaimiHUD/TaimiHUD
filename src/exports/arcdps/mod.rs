@@ -18,6 +18,7 @@ use {
         },
         with_i18n,
     },
+    anyhow::Context,
     arcdps::extras::{ExtrasVersion, UserInfoIter},
     arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
     dpsapi::combat::{CombatArgs, CombatEvent},
@@ -509,6 +510,15 @@ fn get_update_url() -> Option<String> {
     }
 }
 
+/// TODO: is this worthwhile to avoid or no?
+const UPDATE_INDIRECT: bool = false;
+async fn release_update_url(release: rt::update::ResolvedVersion) -> anyhow::Result<Option<url::Url>> {
+    let auth = rt::update::Updater::notify_latest(&release)?;
+    match auth {
+        true => release.dll_url(UPDATE_INDIRECT).await.map(Some),
+        false => Ok(None),
+    }
+}
 pub(crate) fn update_url() -> Option<String> {
     let authorized = rt::update::Updater::get_preference();
     if authorized.will_authorize() == Some(false) {
@@ -516,21 +526,13 @@ pub(crate) fn update_url() -> Option<String> {
         return None
     }
 
-    let release = match rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT) {
-        Err(e) => {
-            log::warn!("Update check failed: {e}");
-            return None
-        },
-        Ok(release) => release,
-    };
-    let dll_url = rt::update::Updater::notify_latest(&release).and_then(|auth| match auth {
-        true => release.dll_url().map(Some),
-        false => Ok(None),
-    });
-    match dll_url {
+    let res =
+        rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT, release_update_url)
+            .context("Update check failed");
+    match res {
         Err(e) => {
             log::warn!("{e:#}");
-            return None
+            None
         },
         Ok(None) => None,
         Ok(Some(dll_url)) => Some(dll_url.as_str().into()),

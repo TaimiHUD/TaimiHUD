@@ -1,11 +1,16 @@
 use {
     crate::{
-        settings::{DirectSource, GitHubSource},
+        settings::{source, DirectSource, GitHubSource, Source},
         ADDON_DIR,
     },
-    reqwest::Response,
+    anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{collections::HashMap, fs::read_to_string as sync_read_to_string, path::PathBuf},
+    std::{
+        collections::HashMap,
+        fs::read_to_string as sync_read_to_string,
+        path::{Path, PathBuf},
+        sync::LazyLock,
+    },
     strum_macros::Display,
     tokio::{
         fs::{create_dir_all, read_to_string, File},
@@ -20,6 +25,10 @@ pub enum SourceKind {
     Pathing,
     Markers,
     Addon,
+    /// Datasource repository
+    ///
+    /// such as https://github.com/TaimiHUD/DataSources
+    DataSources,
     Unspecified,
 }
 
@@ -30,6 +39,7 @@ impl SourceKind {
             &SourceKind::Timers => "timers",
             &SourceKind::Markers => "markers",
             &SourceKind::Pathing => "pathing",
+            &SourceKind::DataSources => "sources",
             &SourceKind::Addon | &SourceKind::Unspecified => unreachable!("No, bad girl."),
         };
         addon_dir.join(type_dir)
@@ -51,57 +61,70 @@ pub enum DeserializedSource {
     Direct(DirectSource),
 }
 
-#[derive(Deserialize, Serialize, Default, Debug)]
+impl DeserializedSource {
+    pub fn as_source(&self) -> &dyn Source {
+        match self {
+            Self::GitHub(s) => s,
+            Self::Direct(s) => s,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Default, Debug, Clone)]
+#[serde(transparent)]
 pub struct SourcesFile(pub HashMap<SourceKind, Vec<DeserializedSource>>);
+pub static SOURCES_SRC: LazyLock<GitHubSource> =
+    LazyLock::new(|| GitHubSource::new_empty("TaimiHUD".into(), "DataSources".into()));
 
 impl SourcesFile {
+    pub const STOCK_SOURCES_TOML: &'static str = include_str!("../../data/sources.toml");
+    pub const FILENAME: &'static str = "sources.toml";
+
     pub async fn download_sources() -> anyhow::Result<Self> {
-        let response: Response = super::source::get(
-            "https://github.com/TaimiHUD/DataSources/releases/latest/download/sources.toml",
-        )
-        .await?;
-        let text = response.text().await?;
-        let sources: HashMap<SourceKind, Vec<DeserializedSource>> = toml::from_str(&text)?;
-        Ok(Self(sources))
+        let req = SOURCES_SRC.request_release_asset_browser(None, Self::FILENAME)?;
+        let context = "downloading sources.toml";
+        let response = source::build_client()?
+            .execute(req)
+            .await
+            .and_then(|res| res.error_for_status())
+            .context(context)?;
+        let text = response.text().await.context(context)?;
+        toml::from_str(&text).context(context)
     }
-    pub fn generate_stock() -> Self {
-        log::info!("Asked to generate stock");
-        let mut inner: HashMap<SourceKind, Vec<DeserializedSource>> = HashMap::new();
-        /*inner.insert(
-            SourceKind::Timers,
-            vec![
-                    DeserializedSource::GitHub(GitHubSource {
-                        owner: "QuitarHero".to_string(),
-                        repository: "Hero-Timers".to_string(),
-                        description: Some("The OG timer pack for BlishHUD!".to_string()),
-                    }),
-                ]
-        );*/
-        Self(inner)
+    pub fn stock() -> Self {
+        let sources = toml::from_str(Self::STOCK_SOURCES_TOML)
+            .context("Stock sources should not fail, please report this bug!");
+        match sources {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("{e:#}");
+                Self::default()
+            },
+        }
     }
-    pub async fn get_sources() -> anyhow::Result<()> {
+
+    pub async fn get_sources() -> anyhow::Result<Self> {
         let addon_dir = &*ADDON_DIR;
         let sources_path = addon_dir.join("sources.toml");
         let sources = match Self::download_sources().await {
             Ok(sources) => sources,
+            Err(e) if sources_path.exists() => return Err(e),
             Err(e) => {
-                log::error!("{:?}", e);
-                Self::generate_stock()
+                log::error!("{e:#}, falling back to stock sources");
+                Self::stock()
             },
         };
         let sources_str = toml::to_string_pretty(&sources)?;
         let mut file = File::create(sources_path).await?;
         file.write_all(sources_str.as_bytes()).await?;
-        Ok(())
+        Ok(sources)
     }
-    pub async fn create_stock() -> anyhow::Result<()> {
-        let addon_dir = &*ADDON_DIR;
-        create_dir_all(addon_dir).await?;
-        let sources_path = addon_dir.join("sources.toml");
-        let sources = Self::generate_stock();
-        let sources_str = toml::to_string_pretty(&sources)?;
-        let mut file = File::create(sources_path).await?;
-        file.write_all(sources_str.as_bytes()).await?;
+    pub async fn create_stock(dest: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = dest.parent() {
+            create_dir_all(parent).await?;
+        }
+        let mut file = File::create_new(dest).await?;
+        file.write_all(Self::STOCK_SOURCES_TOML.as_bytes()).await?;
         Ok(())
     }
 
@@ -114,27 +137,92 @@ impl SourcesFile {
     pub async fn load() -> anyhow::Result<Self> {
         let sources_path = ADDON_DIR.join("sources.toml");
         if !sources_path.exists() {
-            log::info!("Sources file doesn't exist! Creating sources file at {sources_path:?}.");
-            Self::create_stock().await?;
+            Self::create_stock(&sources_path)
+                .await
+                .context("Creating stock sources.toml")?;
         }
-        log::trace!("Attempting to load the sources file at \"{sources_path:?}\".");
-        let file_data = read_to_string(&sources_path).await?;
-        let data: Self = toml::from_str(&file_data)?;
-        log::trace!("Loaded the sources file at \"{sources_path:?}\".");
-        Ok(data)
+        read_to_string(&sources_path)
+            .await
+            .context("reading sources.toml")
+            .and_then(|data| toml::from_str(&data).context("loading sources.toml"))
     }
 
     pub fn downloadless_load() -> anyhow::Result<Self> {
         let sources_path = ADDON_DIR.join("sources.toml");
-        log::trace!("Attempting to load the sources file at \"{sources_path:?}\".");
-        let file_data = sync_read_to_string(&sources_path)?;
-        let data: Self = toml::from_str(&file_data)?;
-        log::trace!("Loaded the sources file at \"{sources_path:?}\".");
-        Ok(data)
+        sync_read_to_string(&sources_path)
+            .context("reading sources.toml")
+            .and_then(|data| toml::from_str(&data).context("loading sources.toml"))
     }
 
-    #[allow(dead_code)]
+    pub fn lookup(&self, kind: SourceKind, name: &str) -> Option<&DeserializedSource> {
+        self.0
+            .get(&kind)
+            .and_then(|sources| sources.iter().find(|s| name == &s.as_source().name()))
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = (SourceKind, DeserializedSource)> {
+        self.0
+            .into_iter()
+            .flat_map(|(kind, sources)| sources.into_iter().map(move |source| (kind, source)))
+    }
+    pub fn iter(&self) -> impl Iterator<Item = (SourceKind, &'_ DeserializedSource)> {
+        self.0
+            .iter()
+            .flat_map(|(&kind, sources)| sources.iter().map(move |source| (kind, source)))
+    }
+    #[cfg(todo = "unused")]
     pub fn get_by_kind(&self, kind: SourceKind) -> Option<&Vec<DeserializedSource>> {
         self.0.get(&kind)
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, Display, Serialize, Hash, Debug, PartialEq, Eq)]
+pub enum RemoteAssetForm {
+    /// Retain download locally
+    File {
+        #[cfg(todo = "unnecessary")]
+        extension: &'static OsStr,
+    },
+    /// Extract download locally
+    Tarball {
+        #[cfg(todo = "unnecessary")]
+        compression: (),
+    },
+    /// Extract download locally
+    #[cfg(todo)]
+    ZipArchive,
+}
+
+impl RemoteAssetForm {
+    pub const FILE: Self = Self::File {};
+    pub const TAR_GZ: Self = Self::Tarball {};
+    #[cfg(todo)]
+    pub const ZIP: Self = Self::ZipArchive {};
+
+    pub const CONTENT_TYPE_BINARY: &'static str = "application/octet-stream";
+
+    pub fn with_asset<P: AsRef<Path>>(kind: SourceKind, filename: P, _content_type: &str) -> Option<Self> {
+        let filename = filename.as_ref();
+        let ext = filename.extension();
+        let is_ext =
+            |matches: &'static str| ext.map(|ext| ext.eq_ignore_ascii_case(matches)).unwrap_or(false);
+        match kind {
+            SourceKind::Addon if is_ext("dll") => Some(Self::FILE),
+            SourceKind::DataSources if is_ext("toml") || is_ext("json") => Some(Self::FILE),
+            SourceKind::Pathing if is_ext("zip") || is_ext("taco") => Some(Self::FILE),
+            #[cfg(todo)]
+            SourceKind::Timers if is_ext("zip") => Some(Self::ZIP),
+            SourceKind::Markers if is_ext("json") || is_ext("markers") => Some(Self::FILE),
+            // TODO: filter out manifest files or hashes etc?
+            SourceKind::Unspecified => Some(Self::FILE),
+            _ => None,
+        }
+    }
+
+    pub fn for_source_archive(self, kind: SourceKind) -> Option<Self> {
+        match kind {
+            SourceKind::Pathing | SourceKind::Timers | SourceKind::Markers => Some(self),
+            _ => None,
+        }
     }
 }

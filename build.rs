@@ -131,6 +131,8 @@ fn apply_built_info() {
                                 let channel = match branch {
                                     "main" => "dev",
                                     "develop" => "develop",
+                                    branch if branch.contains("/") =>
+                                        &*release_channel.insert(branch.replace("/", "-")),
                                     branch => &*release_channel.insert(format!("dev-{branch}")),
                                 };
                                 // TODO?
@@ -206,6 +208,9 @@ fn apply_built_info() {
             println!("cargo::rustc-env={ADDON_VERSION}_PATCH={}", patch.display());
         }
         Some(match release {
+            Some(Err("main")) => "dev".into(),
+            Some(Err("develop")) => "develop".into(),
+            Some(Err(branch)) if branch.contains("/") => branch.replace("/", "-"),
             Some(Err(branch)) => format!("dev-{branch}"),
             Some(Ok(tag)) => tag.into(),
             None => "debug".into(),

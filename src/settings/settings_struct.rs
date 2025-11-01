@@ -1,12 +1,20 @@
 use {
-    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteSource, RemoteState, TimerSettings},
+    super::{
+        ArcSettings,
+        PathingSettings,
+        ProgressBarSettings,
+        RemoteSource,
+        RemoteState,
+        SourcesFile,
+        TimerSettings,
+    },
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::bindings::TaimiControls,
         settings::state::save_state_backup,
         SETTINGS,
     },
-    anyhow::{anyhow, Context},
+    anyhow::Context,
     chrono::{DateTime, Utc},
     futures::stream::StreamExt,
     magic_migrate::TryMigrate,
@@ -284,21 +292,27 @@ impl Settings {
         let settings_arc = SETTINGS
             .get()
             .expect("SettingsLock should've been initialized by now!");
-        let install_dir = {
-            let settings_read_lock = settings_arc.read().await;
-            settings_read_lock.addon_dir.join(source.install_dir())
-        };
-        let tag_name = source.download_latest(state.kind).await?;
+        let (tag_name, install_dest) = source.download_latest(state.kind).await?;
         {
             let mut settings_write_lock = settings_arc.write().await;
             if let Some(dd_mut) = settings_write_lock.get_status_for_mut(&source) {
-                let res = dd_mut.commit_downloaded(tag_name, install_dir).await;
+                match &dd_mut.installed_path {
+                    Some(old) if old != &install_dest => {
+                        let res = dd_mut.remove().await.with_context(|| {
+                            format!("Manual clean-up of prior {source} install may be required")
+                        });
+                        if let Err(e) = res {
+                            log::warn!("{e:#}");
+                        }
+                    },
+                    _ => (),
+                }
+                dd_mut.commit_downloaded(tag_name, install_dest);
                 let _ = settings_write_lock.save().await;
-                res
             } else {
-                Err(anyhow!("GitHub repository \"{}\" not found.", source))
+                anyhow::bail!("GitHub repository \"{}\" not found.", source);
             }
-        }?;
+        }
         Ok(())
     }
 
@@ -355,7 +369,11 @@ impl Settings {
             dirty: Arc::new(AtomicBool::new(false)),
             timers: Default::default(),
             markers: Default::default(),
-            remotes: RemoteState::suggested_sources().unwrap_or_default(),
+            remotes: RemoteState::from_sources(
+                SourcesFile::downloadless_load()
+                    .unwrap_or_else(|_| SourcesFile::stock())
+                    .into_iter(),
+            ),
             progress_bar: Default::default(),
             timers_window_open: false,
             pathing_window_open: false,

@@ -225,7 +225,7 @@ serde_json = "1"
 json-strip-comments = "1"
 strum = "0.27.1"
 strum_macros = "0.27.1"
-reqwest = { version = "0.12.15", default-features = false, features = [ "stream", "rustls-tls-native-roots" ] }
+reqwest = { version = "0.12.15", default-features = false, features = [ "stream", "rustls-tls-native-roots", "json" ] }
 tempfile = "3.19.1"
 bytes = "1.10.1"
 async-compression = { version = "0.4.22", features = [ "tokio", "gzip" ] }

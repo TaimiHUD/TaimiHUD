@@ -3,7 +3,7 @@ mod needs_update;
 pub mod pathing;
 mod progress_bar_config;
 mod settings_struct;
-mod source;
+pub(crate) mod source;
 mod sources;
 pub mod state;
 mod v1;
@@ -21,7 +21,7 @@ pub use {
         SettingsSave,
         SquadCondition,
     },
-    source::{DirectSource, GitHubLatestRelease, GitHubSource, RemoteSource, Source},
-    sources::{DeserializedSource, SourceKind, SourcesFile},
+    source::{DirectSource, GitHubSource, RemoteSource, Source},
+    sources::{DeserializedSource, RemoteAssetForm, SourceKind, SourcesFile},
     v1::{RemoteState, TimerSettings},
 };

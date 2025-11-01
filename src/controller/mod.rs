@@ -271,12 +271,42 @@ impl Controller {
     }
 
     async fn check_sources(&self) -> anyhow::Result<()> {
-        SourcesFile::get_sources().await?;
+        let latest = SourcesFile::get_sources().await?;
         let mut settings_lock = self.settings_write().await;
-        settings_lock.remotes = RemoteState::suggested_sources().unwrap_or_default();
+        for remote in &mut settings_lock.remotes {
+            if remote
+                .datasource_repo
+                .as_ref()
+                .map(|r| &r[..] == SourcesFile::FILENAME)
+                .unwrap_or(true)
+            {
+                let source = remote
+                    .datasource_name
+                    .as_ref()
+                    .and_then(|name| latest.lookup(remote.kind, name))
+                    .or_else(|| latest.lookup(remote.kind, &remote.name()));
+                if let Some(source) = source {
+                    remote.datasource_repo = Some(SourcesFile::FILENAME.into());
+                    remote.datasource_name = Some(source.as_source().name());
+                    remote.source = source.clone();
+                } else {
+                    remote.datasource_repo = None;
+                    remote.datasource_name = None;
+                }
+            }
+        }
+        for (kind, source) in latest.iter() {
+            if RemoteState::lookup_datasource(&settings_lock.remotes, kind, &source.as_source().name())
+                .is_some()
+            {
+                continue
+            }
+            settings_lock
+                .remotes
+                .push(RemoteState::new_from_source(kind, source.clone()));
+        }
         drop(settings_lock);
-        let sources = SourcesFile::load().await?;
-        let _ = SOURCES.set(Arc::new(RwLock::new(sources)));
+        let _ = SOURCES.set(Arc::new(RwLock::new(latest)));
         Ok(())
     }
 

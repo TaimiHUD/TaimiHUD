@@ -5,13 +5,18 @@ use {
         built_info,
         exports::runtime as rt,
         settings::{
+            source::{
+                self,
+                github::{GitHubLatestRelease, GitHubReleaseAsset, GitHubSource},
+            },
             state::{BootstrapState, UpdatePreference},
-            GitHubLatestRelease,
-            GitHubSource,
+            RemoteAssetForm,
+            SourceKind,
         },
     },
     anyhow::{anyhow, Context},
-    std::{fmt, sync::LazyLock, time::Duration},
+    futures::future::TryFutureExt,
+    std::{fmt, future::Future, sync::LazyLock, time::Duration},
     tokio::{runtime, time::timeout},
     url::Url,
 };
@@ -21,6 +26,7 @@ pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
 pub const GIT_REF_RELEASE_PREFIX: &'static str = "refs/tags/v";
 pub const CHANNEL_DEBUG: &'static str = "debug";
 pub const CHANNEL_PRERELEASE: &'static str = "rc";
+pub const DLL_NAME: &'static str = "TaimiHUD.dll";
 
 pub struct ResolvedVersion {
     pub release: GitHubLatestRelease,
@@ -60,11 +66,8 @@ pub fn crate_channel() -> Option<&'static str> {
     }
 }
 
-pub static GH_REPO_SRC: LazyLock<GitHubSource> = LazyLock::new(|| GitHubSource {
-    owner: "TaimiHUD".into(),
-    repository: "TaimiHUD".into(),
-    description: None,
-});
+pub static GH_REPO_SRC: LazyLock<GitHubSource> =
+    LazyLock::new(|| GitHubSource::new_empty("TaimiHUD".into(), "TaimiHUD".into()));
 
 impl ResolvedVersion {
     pub fn with_gh_release(release: GitHubLatestRelease) -> anyhow::Result<Self> {
@@ -114,7 +117,7 @@ impl ResolvedVersion {
             let channel = crate_channel();
             let latest_release = match channel {
                 Some(..) => Ok(None),
-                None => match src.latest_release().await {
+                None => match src.get_release(None).await {
                     Ok(release) if release.prerelease => Ok(None),
                     res => res
                         .and_then(Self::with_gh_release)
@@ -156,32 +159,69 @@ impl ResolvedVersion {
             .and_then(|res| res)
     }
 
-    pub fn latest_release_standalone(patience: Duration) -> anyhow::Result<Self> {
-        Self::latest_gh_release_standalone(&GH_REPO_SRC, patience)
+    pub fn latest_release_standalone<R, Fut, F>(patience: Duration, f: F) -> anyhow::Result<R>
+    where
+        Fut: Future<Output = anyhow::Result<R>>,
+        F: FnOnce(Self) -> Fut,
+    {
+        Self::latest_gh_release_standalone(&GH_REPO_SRC, patience, f)
     }
 
-    pub fn latest_gh_release_standalone(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
+    pub fn latest_gh_release_standalone<R, Fut, F>(
+        src: &GitHubSource,
+        patience: Duration,
+        f: F,
+    ) -> anyhow::Result<R>
+    where
+        Fut: Future<Output = anyhow::Result<R>>,
+        F: FnOnce(Self) -> Fut,
+    {
         let runner = runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .context("Failed to start update check")?;
 
-        runner.block_on(Self::latest_gh_release(src, patience))
+        runner.block_on(Self::latest_gh_release(src, patience).and_then(f))
         //.context("Checking for updates")
     }
 
-    pub fn dll_url(&self) -> anyhow::Result<&Url> {
-        let dll_asset = self
+    pub async fn dll_url(&self, redir_ok: bool) -> anyhow::Result<Url> {
+        let mut dlls = self
             .release
-            .assets
-            .iter()
-            .find(|a| a.name.ends_with(".dll") /*&& a.state == "uploaded"*/);
-
-        dll_asset
-            .and_then(|dll_asset|
-            // asset.url can also work as long as Content-Type is set correctly...
-            dll_asset.browser_download_url.as_ref())
-            .ok_or_else(|| anyhow!("Expected associated dll with release"))
+            .assets_for(SourceKind::Addon)
+            .filter_map(|(asset, form)| match form {
+                RemoteAssetForm::File { .. } => Some(asset),
+                _ => None,
+            });
+        if let Some(asset) = dlls.next() {
+            match asset.download_url().await {
+                Ok(asset) => return Ok(asset),
+                Err(e) => log::error!("{e:#}"),
+            }
+        }
+        log::warn!("unsure of update url for {self}");
+        let req = GH_REPO_SRC.request_release_asset_browser(
+            match self.version_channel() {
+                #[cfg(todo = "unnecessary")]
+                None => None,
+                _ => Some(self.version_id()),
+            },
+            DLL_NAME,
+        )?;
+        let fallback_url = req.url().clone();
+        if redir_ok {
+            return Ok(fallback_url)
+        }
+        let fallback = source::get_location_for(req, GitHubReleaseAsset::REDIR_LIMIT)
+            .await
+            .with_context(|| format!("Expected associated dll with release {self}"));
+        match fallback {
+            Ok(f) => Ok(f),
+            Err(e) => {
+                log::error!("{e:#}");
+                Ok(fallback_url)
+            },
+        }
     }
 
     pub fn is_update(&self) -> bool {
@@ -318,9 +358,11 @@ impl Updater {
     /// returns [`release.is_authorized()`](ResolvedVersion::is_authorized)
     pub fn notify_latest(release: &ResolvedVersion) -> anyhow::Result<bool> {
         log::info!("Latest version is {}", release);
-        let _ = release.dll_url().context("Invalid update found")?;
         if !release.is_update() {
             return Ok(false)
+        }
+        if release.release.assets_for(SourceKind::Addon).next().is_none() {
+            anyhow::bail!("Invalid update found");
         }
 
         Ok(match release.is_authorized() {
@@ -362,7 +404,7 @@ impl Updater {
 
     pub async fn perform(release: &ResolvedVersion) -> rt::RuntimeResult<()> {
         #[cfg(feature = "extension-nexus")]
-        if let Some(res) = crate::exports::nexus::perform_update(release)? {
+        if let Some(res) = crate::exports::nexus::perform_update(release).await? {
             return Ok(res)
         }
 

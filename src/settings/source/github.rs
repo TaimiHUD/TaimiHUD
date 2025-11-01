@@ -1,12 +1,21 @@
 use {
-    super::super::SourceKind,
-    crate::{settings::Source, ADDON_DIR},
-    anyhow::Context,
+    crate::{
+        settings::{source, RemoteAssetForm, Source, SourceKind},
+        ADDON_DIR,
+    },
+    anyhow::{anyhow, Context},
     chrono::{DateTime, Utc},
+    futures::{FutureExt, TryFutureExt},
+    reqwest::{header, Method, Request},
     serde::{Deserialize, Serialize},
     serde_json::Value,
-    std::{fmt, future::Future, ops::Range, pin::Pin},
-    tokio::fs::create_dir_all,
+    std::{
+        fmt,
+        future::Future,
+        ops::Range,
+        path::{Path, PathBuf},
+        pin::Pin,
+    },
     url::Url,
 };
 
@@ -31,6 +40,48 @@ pub struct GitHubReleaseAsset {
     pub updated_at: String,
     #[serde(default)]
     pub browser_download_url: Option<Url>,
+}
+
+impl GitHubReleaseAsset {
+    pub const STATE_UPLOADED: &'static str = "uploaded";
+    pub const REDIR_LIMIT: usize = 3;
+
+    pub async fn download_url(&self) -> anyhow::Result<Url> {
+        #[cfg(todo = "unnecessary")]
+        let req = self.request_browser().unwrap_or_else(|| self.request_content());
+        let req = self.request_content();
+        match source::get_location_for(req, Self::REDIR_LIMIT).await {
+            Err(e) => match self.browser_download_url.clone() {
+                Some(url) => {
+                    log::error!("{e:#}");
+                    Ok(url)
+                },
+                None => Err(e),
+            },
+            Ok(url) => {
+                if url == self.url {
+                    log::warn!("asset url {url} is unlikely to work correctly...");
+                }
+                Ok(url)
+            },
+        }
+    }
+
+    pub fn request_content(&self) -> Request {
+        #[cfg(todo = "unnecessary")]
+        if let Some(req) = self.request_browser() {
+            return req
+        }
+        let mut req = Request::new(Method::GET, self.url.clone());
+        source::insert_header(req.headers_mut(), header::ACCEPT, &self.content_type);
+        req
+    }
+
+    pub fn request_browser(&self) -> Option<Request> {
+        self.browser_download_url
+            .clone()
+            .map(|url| Request::new(Method::GET, url))
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -82,31 +133,101 @@ impl GitHubLatestRelease {
             assets: Vec::new(),
         }
     }
+
+    pub fn assets(&self) -> impl Iterator<Item = &'_ GitHubReleaseAsset> + Clone + '_ {
+        self.assets
+            .iter()
+            .filter(|asset| asset.state == GitHubReleaseAsset::STATE_UPLOADED)
+    }
+
+    pub fn assets_for(
+        &self,
+        kind: SourceKind,
+    ) -> impl Iterator<Item = (&'_ GitHubReleaseAsset, RemoteAssetForm)> + Clone + '_ {
+        self.assets().filter_map(move |asset| {
+            RemoteAssetForm::with_asset(kind, &asset.name, &asset.content_type).map(|form| (asset, form))
+        })
+    }
+
+    pub fn request_tarball(&self) -> Option<Request> {
+        self.tarball_url.clone().map(|url| Request::new(Method::GET, url))
+    }
+
+    pub fn request_zipball(&self) -> Option<Request> {
+        self.zipball_url.clone().map(|url| Request::new(Method::GET, url))
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Hash, Eq, Clone, PartialEq)]
 pub struct GitHubSource {
     pub owner: String,
     pub repository: String,
+    #[serde(default)]
+    #[cfg_attr(todo, serde(skip_serializing_if = "Option::is_none"))]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl fmt::Display for GitHubSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}/{}", self.owner, self.repository)
+        match &self.name {
+            Some(name) => f.write_str(name),
+            None => write!(f, "{}/{}", self.owner, self.repository),
+        }
     }
 }
 
 impl GitHubSource {
-    pub async fn latest_release(&self) -> anyhow::Result<GitHubLatestRelease> {
-        let url = format!("https://api.github.com/repos/{}/releases/latest", self.name());
-        let response = super::get(url).await?;
-        let json_data = response.text().await?;
-        serde_json::from_str(&json_data).context("Deserializing GitHub release")
+    pub const CONTENT_TYPE_GH_JSON: &'static str = "application/vnd.github+json";
+    pub const ACCEPT_GH_JSON: header::HeaderValue =
+        header::HeaderValue::from_static(Self::CONTENT_TYPE_GH_JSON);
+
+    pub fn new_empty(owner: String, repository: String) -> Self {
+        Self {
+            owner,
+            repository,
+            description: None,
+            name: None,
+        }
+    }
+
+    /// Get latest or specific tagged release browser download
+    pub fn request_release_asset_browser(
+        &self,
+        tag: Option<&str>,
+        filename: &str,
+    ) -> Result<Request, url::ParseError> {
+        let Self { owner, repository, .. } = self;
+        let tag = tag.map(source::url_escape);
+        let filename = source::url_escape(filename);
+        let url = match tag {
+            Some(tag) =>
+                format!("https://github.com/{owner}/{repository}/releases/download/{tag}/{filename}"),
+            None => format!("https://github.com/{owner}/{repository}/releases/latest/download/{filename}"),
+        }
+        .parse();
+
+        Ok(Request::new(Method::GET, url?))
+    }
+
+    /// Get latest or specific tagged release metadata
+    pub fn request_release(&self, tag: Option<&str>) -> Result<Request, url::ParseError> {
+        let Self { owner, repository, .. } = self;
+        let tag = tag.map(source::url_escape);
+        let url = match tag {
+            Some(tag) => format!("https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}"),
+            None => format!("https://api.github.com/repos/{owner}/{repository}/releases/latest"),
+        }
+        .parse();
+        let mut req = Request::new(Method::GET, url?);
+        req.headers_mut().insert(header::ACCEPT, Self::ACCEPT_GH_JSON);
+        Ok(req)
     }
 
     pub const RELEASES_RANGE_DEFAULT: Range<usize> = 0..30;
-    pub async fn latest_releases(&self, range: Range<usize>) -> anyhow::Result<Vec<GitHubLatestRelease>> {
+    pub fn request_releases(&self, range: Range<usize>) -> Result<Request, url::ParseError> {
+        let Self { owner, repository, .. } = self;
         let page = match range {
             range if range == Self::RELEASES_RANGE_DEFAULT => None,
             range if range.start == 0 => Some((1, range.end)),
@@ -116,14 +237,35 @@ impl GitHubSource {
                 (page, len)
             }),
         };
-        let url = format!("https://api.github.com/repos/{}/releases", self.name());
+        let url = format!("https://api.github.com/repos/{owner}/{repository}/releases");
         let url = match page {
-            None => url,
-            Some((page, per)) => format!("{url}?page={page}&per_page={per}"),
+            None => url.parse(),
+            Some((page, per)) =>
+                Url::parse_with_params(&url, [("page", page.to_string()), ("per_page", per.to_string())]),
         };
-        let response = super::get(url).await?;
-        let json_data = response.text().await?;
-        serde_json::from_str(&json_data).context("Deserializing GitHub releases")
+        let mut req = Request::new(Method::GET, url?);
+        req.headers_mut().insert(header::ACCEPT, Self::ACCEPT_GH_JSON);
+        Ok(req)
+    }
+
+    pub async fn get_release(&self, tag: Option<&str>) -> anyhow::Result<GitHubLatestRelease> {
+        let req = self.request_release(tag)?;
+        source::build_client()?
+            .execute(req)
+            .map(|res| res.and_then(|res| res.error_for_status()))
+            .and_then(|res| res.json())
+            .await
+            .with_context(|| format!("Deserializing GitHub release for {}", self.repository))
+    }
+
+    pub async fn latest_releases(&self, range: Range<usize>) -> anyhow::Result<Vec<GitHubLatestRelease>> {
+        let req = self.request_releases(range)?;
+        source::build_client()?
+            .execute(req)
+            .map(|res| res.and_then(|res| res.error_for_status()))
+            .and_then(|res| res.json())
+            .await
+            .with_context(|| format!("Deserializing GitHub release for {}", self.repository))
     }
 }
 
@@ -141,27 +283,74 @@ impl Source for GitHubSource {
     }
 
     fn view_url(&self) -> String {
-        format!("https://github.com/{}", self.name())
+        format!("https://github.com/{}/{}", self.owner, self.repository)
     }
 
     fn download_latest(
         &self,
         kind: SourceKind,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + '_>> {
         Box::pin(async move {
             let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
-            create_dir_all(&install_dir).await?;
-            let latest = self.latest_release().await?;
-            if let Some(tarball_url) = latest.tarball_url {
-                super::get_and_extract_tar(&install_dir, tarball_url).await?;
+            let latest = self.get_release(None).await?;
+            let tarball = latest.request_tarball();
+            let tag_name = &latest.tag_name;
+            let mut action = latest
+                .assets_for(kind)
+                .map(|(asset, form)| (asset.request_content(), form, Some(&asset.name)))
+                .chain(tarball.and_then(|tarball| {
+                    RemoteAssetForm::TAR_GZ
+                        .for_source_archive(kind)
+                        .map(|form| (tarball, form, None))
+                }));
+
+            let client = source::build_client()?;
+
+            let mut err = None;
+            while let Some((req, form, fname)) = action.next() {
+                let fname = fname.as_ref().map(Path::new);
+                let mut install_dest = install_dir.clone();
+                // TODO: consider appending tag name to dest?
+                let res = match client.execute(req).await {
+                    Ok(res) => match form {
+                        RemoteAssetForm::Tarball { .. } =>
+                            source::install_remote_tarball(&install_dest, res).await,
+                        RemoteAssetForm::File { .. } => {
+                            if let Some(ext) = fname.and_then(|n| n.extension()) {
+                                let append = install_dest.as_mut_os_string();
+                                append.push(".");
+                                append.push(ext);
+                            }
+                            source::install_remote_file(&install_dest, res).await
+                        },
+                        #[cfg(todo)]
+                        RemoteAssetForm::ZipArchive { .. } => compile_error!("TODO"),
+                    }
+                    .with_context(|| format!("installing into {}", install_dest.display())),
+                    Err(e) => Err(e.into()),
+                };
+                let res = res.with_context(|| {
+                    match (
+                        fname,
+                        format_args!("downloading {}/{}/{tag_name}", self.owner, self.repository),
+                    ) {
+                        (Some(fname), msg) => format!("{msg}/{}", fname.display()),
+                        (None, msg) => msg.to_string(),
+                    }
+                });
+                match res {
+                    Ok(()) => return Ok((tag_name.clone(), install_dest)),
+                    Err(e) if err.is_some() => log::error!("{e:#}"),
+                    Err(e) => err = Some(e),
+                }
             }
-            Ok(latest.tag_name)
+            Err(err.unwrap_or_else(|| anyhow!("no release download found for {tag_name}")))
         })
     }
 
     fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
         Box::pin(async move {
-            let release = self.latest_release().await?;
+            let release = self.get_release(None).await?;
             Ok(release.tag_name)
         })
     }

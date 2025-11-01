@@ -227,12 +227,15 @@ pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>
     Ok(Some(()))
 }
 
-pub fn perform_update(release: &rt::update::ResolvedVersion) -> RuntimeResult<Option<()>> {
+pub async fn perform_update(release: &rt::update::ResolvedVersion) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
 
-    let dll_url = release.dll_url().map_err(|_| "DLL URL missing")?;
+    let dll_url = release.dll_url(false).await.map_err(|e| {
+        log::error!("{e:#}");
+        "DLL URL missing"
+    })?;
     nexus::updater::request_update(SIG, dll_url.as_str());
 
     Ok(Some(()))
