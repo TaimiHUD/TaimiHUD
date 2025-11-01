@@ -3,7 +3,7 @@ use {
         controller::{ControllerEvent, MapId, RtSender},
         exports::runtime::bindings::{TaimiControls, CONTROLS},
         render::{RenderEvent, TextFont},
-        settings::{Settings, SettingsLock},
+        settings::{Settings, SettingsLock, SourceKind},
         timer::{CombatState, Position, TimerFile, TimerMachine},
         TIMERS_DIR,
     },
@@ -51,8 +51,12 @@ impl TimersController {
     async fn load(&self, settings: SettingsLock) -> Vec<Arc<TimerFile>> {
         let settings_lock = settings.read().await;
         let mut timers = Vec::new();
-        for remote in settings_lock.remotes.iter() {
-            timers.extend(remote.load().await);
+        let states = settings_lock
+            .remotes
+            .iter()
+            .filter(|state| state.kind.is(SourceKind::Timers).unwrap_or(true));
+        for remote in states {
+            timers.extend(remote.load_timers().await);
         }
         drop(settings_lock);
         let timers_len = timers.len();

@@ -34,6 +34,14 @@ impl SourceKind {
         };
         addon_dir.join(type_dir)
     }
+
+    pub fn is(&self, kind: Self) -> Option<bool> {
+        match *self {
+            k if k == kind => Some(true),
+            Self::Unspecified => None,
+            _ => Some(false),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Hash, Eq, PartialEq, Debug, Clone)]

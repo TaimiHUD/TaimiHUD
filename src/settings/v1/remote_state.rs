@@ -55,7 +55,7 @@ impl RemoteState {
         self.source().name()
     }
 
-    pub async fn load(&self) -> Vec<Arc<TimerFile>> {
+    pub async fn load_timers(&self) -> Vec<Arc<TimerFile>> {
         let association = self.remote_source();
         if let Some(path) = &self.installed_path {
             TimerFile::load_many(path, association, 100)
