@@ -35,7 +35,7 @@ impl DataSourceTabState {
             .always_auto_resize(true)
             .begin_popup(ui)
         {
-            ui.text_wrapped(fl!("addon-uninstall-modal-title"));
+            ui.text_wrapped(&modal_name);
             ui.dummy([4.0, 4.0]);
             if let Some(path) = &rs.installed_path {
                 let path_string = format!("{}", &path.display());
