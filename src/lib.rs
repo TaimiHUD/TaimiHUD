@@ -419,7 +419,7 @@ fn init() -> Result<(), &'static str> {
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
     use crate::exports::{
-        nexus::{quick_access_add, quick_access_remove_all, register_keybind, unregister_keybinds},
+        nexus::{quick_access_remove_all, register_keybind, unregister_keybinds},
         runtime::bindings::TaimiControls,
     };
 
@@ -514,15 +514,6 @@ fn load_nexus() {
     */
 
     on_unload(quick_access_remove_all);
-    let quick_access_icons = settings::Settings::try_read()
-        .map(|s| s.quick_access_visible)
-        .unwrap_or(TaimiControls::default_quick_access());
-    let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS
-        .into_iter()
-        .filter(|&icon| quick_access_icons.intersects(icon));
-    for icon in quick_access_icons_visible {
-        quick_access_add(icon);
-    }
 
     ACCOUNT_NAME
         .subscribe(event_consume!(<c_char> |name| {

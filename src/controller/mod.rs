@@ -145,6 +145,17 @@ impl Controller {
         Self::shutdown(rt);
     }
 
+    pub async fn late_init(&mut self) {
+        #[cfg(feature = "extension-nexus")]
+        {
+            let qa_icons = {
+                let settings = self.settings.read().await;
+                settings.quick_access_visible
+            };
+            crate::exports::nexus::quick_access_init(qa_icons);
+        }
+    }
+
     pub async fn run(&mut self) {
         let sources = SourcesFile::load().await.expect("Couldn't load sources file");
         let sources = Arc::new(RwLock::new(sources));
@@ -163,6 +174,7 @@ impl Controller {
             .await;
 
         state.render_inherit();
+        state.late_init().await;
 
         loop {
             select! {

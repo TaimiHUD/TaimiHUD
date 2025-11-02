@@ -526,3 +526,12 @@ pub(crate) fn quick_access_button_id(
         },
     })
 }
+
+pub fn quick_access_init(icons: TaimiControls) {
+    let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS
+        .into_iter()
+        .filter(|&icon| icons.intersects(icon));
+    for icon in quick_access_icons_visible {
+        quick_access_add(icon);
+    }
+}
