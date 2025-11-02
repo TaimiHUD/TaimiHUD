@@ -104,12 +104,19 @@ impl FestivalFixup {
         ),
         ("reactif.festivals.slalom_skimmer", Festival::FourWinds),
         ("reactif.festivals.four_winds", Festival::FourWinds),
+        ("legs.festivals.dragonbash", Festival::DragonBash),
+        ("legs.festivals.fotfw", Festival::FourWinds),
+        ("legs.festivals.halloween", Festival::Halloween),
+        ("legs.festivals.lny", Festival::LunarNewYear),
+        ("legs.festivals.sab", Festival::SuperAdventureBox),
+        ("legs.festivals.wintersday", Festival::Wintersday),
     ];
     pub const FESTIVAL_PREFIXES: &'static [&'static str] = &[
         "tw_guides.tw_festivals.separatormenu05",
         "tw_guides.tw_festivals",
         "reactif.festivals.hidden",
         "reactif.festivals",
+        "legs.festivals",
     ];
 
     /// Generally Tuesdays from $(date +%s -d '20??-??-??T09:00:00-07:00')
