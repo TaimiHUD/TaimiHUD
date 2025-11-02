@@ -8,9 +8,15 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+-*"
 
 jobs:
-  build:
+  notify:
     runs-on: ubuntu-latest
     steps:
+      - id: checkout
+        name: git clone
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - name: Get tag message
         id: tag_message
         run: ./ci/get-tag-description.sh
