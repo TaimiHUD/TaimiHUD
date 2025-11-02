@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Get tag message
         id: tag_message
-        run: ./build/get-tag-description.sh
+        run: ./ci/get-tag-description.sh
       - name: Discord Webhook Action
         uses: tsickert/discord-webhook@v5.3.0
         with:
