@@ -196,6 +196,7 @@ pub enum RemoteAssetForm {
 impl RemoteAssetForm {
     pub const FILE: Self = Self::File {};
     pub const TAR_GZ: Self = Self::Tarball {};
+    pub const TAR: Self = Self::Tarball {};
     #[cfg(todo)]
     pub const ZIP: Self = Self::ZipArchive {};
 
@@ -206,12 +207,22 @@ impl RemoteAssetForm {
         let ext = filename.extension();
         let is_ext =
             |matches: &'static str| ext.map(|ext| ext.eq_ignore_ascii_case(matches)).unwrap_or(false);
+        let is_ext2 = |matches: &'static str| {
+            filename
+                .file_stem()
+                .and_then(|n| Path::new(n).extension())
+                .map(|ext| ext.eq_ignore_ascii_case(matches))
+                .unwrap_or(false)
+        };
+        let is_tgz = || is_ext("tgz") || (is_ext("gz") && is_ext2("tar"));
         match kind {
             SourceKind::Addon if is_ext("dll") => Some(Self::FILE),
             SourceKind::DataSources if is_ext("toml") || is_ext("json") => Some(Self::FILE),
             SourceKind::Pathing if is_ext("zip") || is_ext("taco") => Some(Self::FILE),
             #[cfg(todo)]
             SourceKind::Timers if is_ext("zip") => Some(Self::ZIP),
+            SourceKind::Timers if is_tgz() => Some(Self::TAR_GZ),
+            SourceKind::Timers if is_ext("tar") => Some(Self::TAR),
             SourceKind::Markers if is_ext("json") || is_ext("markers") => Some(Self::FILE),
             // TODO: filter out manifest files or hashes etc?
             SourceKind::Unspecified => Some(Self::FILE),
