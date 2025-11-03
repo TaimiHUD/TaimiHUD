@@ -15,7 +15,7 @@ use {
     },
 };
 
-pub static SHADERS_DIR: include_dir::Dir = include_dir!("$CARGO_MANIFEST_DIR/shaders");
+pub static SHADERS_DIR: include_dir::Dir = include_dir!("$CARGO_MANIFEST_DIR/data/shaders");
 
 pub type VertexShaders = HashMap<String, (ShaderV, InputLayout)>;
 pub type PixelShaders = HashMap<String, Option<ShaderP>>;
