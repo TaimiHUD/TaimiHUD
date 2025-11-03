@@ -27,7 +27,7 @@ pub struct TimerFile {
     pub author: String,
     pub icon: RelativePathBuf,
     // I probably don't need to do this, but it's convenient :o
-    #[serde(rename = "map")]
+    #[serde(rename = "map", deserialize_with = "TimerFile::deserialize_map_id")]
     pub map_id: u32,
     pub reset: TimerTrigger,
     pub phases: Vec<TimerPhase>,
@@ -177,5 +177,20 @@ impl TimerFile {
     }
     pub fn author(&self) -> String {
         self.author.replace("\n", "")
+    }
+
+    fn deserialize_map_id<'d, D: serde::Deserializer<'d>>(d: D) -> Result<u32, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum U32 {
+            Value(u32),
+            Oops(String),
+        }
+
+        match U32::deserialize(d) {
+            Err(e) => Err(e),
+            Ok(U32::Value(v)) => Ok(v),
+            Ok(U32::Oops(s)) => s.parse().map_err(serde::de::Error::custom),
+        }
     }
 }
