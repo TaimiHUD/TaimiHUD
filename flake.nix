@@ -141,6 +141,7 @@
         treefmt = self.lib.treefmt.configForSystem system;
         formatter = legacyPackages.treefmt.config.build.wrapper;
       };
+      inherit (legacyPackages) formatter;
       checks = {
         formatting = legacyPackages.treefmt.config.build.check self;
         git-hooks = legacyPackages.git-hooks.check;
