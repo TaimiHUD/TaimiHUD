@@ -1,5 +1,5 @@
 use {
-    std::{collections::BTreeMap, env, fs, path::Path},
+    std::{env, fs, path::Path},
     taimi_pack::{loader, Pack},
 };
 

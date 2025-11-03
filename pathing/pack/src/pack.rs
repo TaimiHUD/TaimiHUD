@@ -441,6 +441,11 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         r#"(?<dup_attr>type)\s*=\s*"(?<dup_attr_v0>[^" ]+)"\s+type\s*=\s*"(?<dup_attr_v1>[^" ]+)""#,
         "|",
         r#"(?<dup_attr1>miniMapVisibility)\s*=\s*"(?<dup_attr1_v0>[^" ]+)".+mapVisibility=[^ ]+ miniMapVisibility="(?<dup_attr1_v1>[^" ]+)""#,
+        // lady elyssa v21.8
+        "|",
+        r#"<MarkerCatego(?<garbage_prefix><MarkerCategory)"#,
+        "|",
+        r#"=="copy="\[(?<copy_rest>&[^"]*)""#,
     );
 
     fn new_regex(pattern: &'static str) -> Regex {
@@ -534,6 +539,13 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                     log::error!("pack contains inconsistent duplicate:  {dup_attr}={dup_attr_v0:?} and {dup_attr}={dup_attr_v1:?}");
                 }
                 let _ = write!(dst, r#"{dup_attr_mid}{dup_attr}="{dup_attr_v0}""#);
+            } else if let Some(garbage_prefix) = caps.name("garbage_prefix") {
+                let garbage_prefix = garbage_prefix.as_str();
+                let _ = dst.write_str(garbage_prefix);
+            } else if let Some(copy_rest) = caps.name("copy_rest") {
+                let copy_rest = copy_rest.as_str();
+                let copy_rest = FIXUP_AMP.replace_all(copy_rest, ReplacementsAmp { rec: true });
+                let _ = write!(dst, r#"==" copy="[{copy_rest}""#);
             } else {
                 replacements_bad(caps, dst)
             }
