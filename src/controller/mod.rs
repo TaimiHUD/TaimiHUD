@@ -65,7 +65,7 @@ use pathing::{PathingController, PathingEvent};
 pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
-pub(crate) type RtSender = Arc<Sender<RenderEvent>>;
+pub(crate) type RtSender = Sender<RenderEvent>;
 
 #[derive(Debug)]
 pub struct Controller {
@@ -98,13 +98,13 @@ impl Controller {
 
     pub fn new(
         receiver: Receiver<ControllerEvent>,
-        rt_sender: Sender<crate::RenderEvent>,
+        rt_sender: Sender<RenderEvent>,
         settings: SettingsLock,
     ) -> Self {
         Self {
             receiver,
             previous_combat_state: Default::default(),
-            rt_sender: Arc::new(rt_sender),
+            rt_sender,
             settings,
             state_bootstrap: BootstrapState::get().subscribe(),
             state_bootstrap_throttle: BootstrapState::watch_initial_delay(),
