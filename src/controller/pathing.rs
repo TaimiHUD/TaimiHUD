@@ -23,8 +23,9 @@ use {
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
-    PathingLoadAll,
-    PathingUnloadAll,
+    ReloadAll,
+    LoadAll,
+    UnloadAll,
     RequestDisabledPaths,
     PathingStateUpdate(String, bool),
     ToggleKatRender,
@@ -42,14 +43,18 @@ impl PathingController {
         drop(settings_lock);
     }
 
-    async fn pathing_load_all(&self) {
-        let res = self.pathing_load_all_inner().await.context("Loading all paths");
+    pub(crate) async fn reload_all(&self) {
+        self.unload_all().await;
+        self.load_all().await
+    }
+    async fn load_all(&self) {
+        let res = self.load_all_inner().await.context("Loading all paths");
         if let Err(e) = res {
             log::error!("{e}");
         }
     }
 
-    async fn pathing_load_all_inner(&self) -> anyhow::Result<()> {
+    async fn load_all_inner(&self) -> anyhow::Result<()> {
         use tokio::fs::read_dir;
 
         let pathing_dir = crate::ADDON_DIR.join("pathing");
@@ -186,7 +191,7 @@ impl PathingController {
         }
     }
 
-    async fn pathing_unload_all(&self) {
+    async fn unload_all(&self) {
         log::info!("Unloading all paths...");
         let context = "Unloading packs from engine";
         let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
@@ -228,8 +233,9 @@ impl PathingController {
     pub(crate) async fn handle_event(&mut self, event: PathingEvent, settings: &SettingsLock) {
         use PathingEvent::*;
         match event {
-            PathingLoadAll => self.pathing_load_all().await,
-            PathingUnloadAll => self.pathing_unload_all().await,
+            ReloadAll => self.reload_all().await,
+            LoadAll => self.load_all().await,
+            UnloadAll => self.unload_all().await,
             RequestDisabledPaths => self.provide_disabled_paths(settings.clone()).await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,

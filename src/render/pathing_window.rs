@@ -214,12 +214,11 @@ impl PathingWindowState {
                         }
                         ui.same_line();
                         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
-                            PathingEvent::PathingUnloadAll.try_send();
-                            PathingEvent::PathingLoadAll.try_send();
+                            PathingEvent::ReloadAll.try_send();
                         }
                         ui.same_line();
                         if with_i18n!("unload-packs", |msg| ui.button(msg)) {
-                            PathingEvent::PathingUnloadAll.try_send();
+                            PathingEvent::UnloadAll.try_send();
                         }
                         if self.filter_open {
                             ui.separator();

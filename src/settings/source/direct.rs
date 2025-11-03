@@ -1,14 +1,14 @@
 use {
     super::super::SourceKind,
     crate::{
-        settings::{RemoteAssetForm, Source},
+        settings::{source::MetadataKey, RemoteAssetForm, Source},
         ADDON_DIR,
     },
     anyhow::{anyhow, Context},
     reqwest::header,
     serde::{Deserialize, Serialize},
     std::{
-        fmt,
+        borrow::Cow,
         future::Future,
         path::{Path, PathBuf},
         pin::Pin,
@@ -20,21 +20,23 @@ use {
 pub struct DirectSource {
     pub name: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default)]
+    #[cfg_attr(todo, serde(skip_serializing_if = "Option::is_none"))]
     pub description: Option<String>,
-}
-
-impl fmt::Display for DirectSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage_url: Option<String>,
 }
 
 impl DirectSource {
-    pub fn id_from_headers(&self, headers: &reqwest::header::HeaderMap) -> anyhow::Result<String> {
+    pub fn id_from_headers(headers: &reqwest::header::HeaderMap) -> anyhow::Result<String> {
         // TODO: prio etag (if not weak/temporary)
         let h = headers
             .get(header::LAST_MODIFIED)
-            .ok_or_else(|| anyhow!("identifying header for {self} missing"))?
+            .ok_or_else(|| anyhow!("identifying header missing"))?
             .to_str()?;
 
         Ok(h.into())
@@ -42,32 +44,41 @@ impl DirectSource {
 }
 
 impl Source for DirectSource {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> Cow<'_, str> {
+        Cow::Borrowed(&self.name)
     }
 
-    fn description(&self) -> Option<String> {
-        self.description.clone()
+    fn get_metadata_str(&self, key: MetadataKey) -> Option<Cow<'_, str>> {
+        match key {
+            MetadataKey::Author => self.author.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::Description => self.description.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::DisplayName => self.display_name.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::HomepageUrl => self.homepage_url.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            _ => None,
+        }
     }
-
-    fn install_dir(&self) -> String {
-        self.name.clone()
-    }
-
-    fn view_url(&self) -> String {
-        self.url.clone()
+    fn has_metadata(&self, key: MetadataKey) -> bool {
+        match key {
+            MetadataKey::Author => self.author.is_some(),
+            MetadataKey::Description => self.description.is_some(),
+            MetadataKey::DisplayName => self.display_name.is_some(),
+            MetadataKey::HomepageUrl => self.homepage_url.is_some(),
+            _ => false,
+        }
     }
 
     fn download_latest(
         &self,
         kind: SourceKind,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + '_>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + Send + '_>> {
         Box::pin(async move {
-            let context = || format!("downloading {self} from {}", &self.url);
+            let context = || format!("downloading {} from {}", &self.name, &self.url);
             let url = self.url.parse::<Url>().with_context(context)?;
             let client = super::build_client()?;
 
-            let mut install_dest = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
+            let mut install_dest = ADDON_DIR
+                .join(kind.get_unpack_dir())
+                .join(&self.install_dir()[..]);
 
             let fname = url.path_segments().and_then(|segs| segs.last()).map(Path::new);
             let form = if let Some(fname) = fname {
@@ -89,7 +100,7 @@ impl Source for DirectSource {
                 req.send().await.and_then(|res| res.error_for_status())
             }
             .with_context(context)?;
-            let id = self.id_from_headers(res.headers()).with_context(context)?;
+            let id = Self::id_from_headers(res.headers()).with_context(context)?;
             match form {
                 RemoteAssetForm::File { .. } => super::install_remote_file(&install_dest, res).await,
                 RemoteAssetForm::Tarball { .. } => super::install_remote_tarball(&install_dest, res).await,
@@ -99,10 +110,10 @@ impl Source for DirectSource {
         })
     }
 
-    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
         Box::pin(async move {
             let response = super::head(&self.url).await?;
-            self.id_from_headers(response.headers())
+            Self::id_from_headers(response.headers())
         })
     }
 }

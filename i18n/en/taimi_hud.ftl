@@ -136,9 +136,9 @@ open-error = { error } opening { $kind }: { $path }
 
 ## Data sources
 
-intro-to-data-sources = Please make sure you fetch the repository before checking for updates.
+intro-to-data-sources = Please make sure you refresh the repository before checking for updates.
 data-sources-tab = Data Sources
-data-source-repo-update = Fetch repository
+data-source-repo-update = Refresh list
 data-source-repo-update-tooltip = Fetch the upstream data sources repository to see downloadable items.
 checking-for-updates = Checking for updates!
 check-for-updates = Check for updates
@@ -155,6 +155,8 @@ update-unknown = Update status unknown; check for updates?
 update-not-required = Update not required; up to date!
 update-available = New version available: { $version }!
 update-error = { error } updating: { $error }!
+download = Download
+install = Install
 attempt-update = Attempt to update anyway?
 settings-unloaded = Settings have not yet loaded!
 

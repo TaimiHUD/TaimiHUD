@@ -1,6 +1,11 @@
 use {
     crate::{
-        settings::{source, RemoteAssetForm, Source, SourceKind},
+        settings::{
+            source::{self, MetadataKey},
+            RemoteAssetForm,
+            Source,
+            SourceKind,
+        },
         ADDON_DIR,
     },
     anyhow::{anyhow, Context},
@@ -10,7 +15,7 @@ use {
     serde::{Deserialize, Serialize},
     serde_json::Value,
     std::{
-        fmt,
+        borrow::Cow,
         future::Future,
         ops::Range,
         path::{Path, PathBuf},
@@ -162,20 +167,17 @@ impl GitHubLatestRelease {
 pub struct GitHubSource {
     pub owner: String,
     pub repository: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     #[serde(default)]
     #[cfg_attr(todo, serde(skip_serializing_if = "Option::is_none"))]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub homepage_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-}
-
-impl fmt::Display for GitHubSource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.name {
-            Some(name) => f.write_str(name),
-            None => write!(f, "{}/{}", self.owner, self.repository),
-        }
-    }
 }
 
 impl GitHubSource {
@@ -187,7 +189,10 @@ impl GitHubSource {
         Self {
             owner,
             repository,
+            author: None,
             description: None,
+            display_name: None,
+            homepage_url: None,
             name: None,
         }
     }
@@ -270,28 +275,52 @@ impl GitHubSource {
 }
 
 impl Source for GitHubSource {
-    fn name(&self) -> String {
-        format!("{}/{}", self.owner, self.repository)
+    fn name(&self) -> Cow<'_, str> {
+        format!("{}/{}", self.owner, self.repository).into()
     }
 
-    fn description(&self) -> Option<String> {
-        self.description.clone()
+    fn get_metadata_str(&self, key: MetadataKey) -> Option<Cow<'_, str>> {
+        match key {
+            MetadataKey::DisplayName => self
+                .display_name
+                .as_ref()
+                .or(self.name.as_ref())
+                .map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::Author => Some(
+                self.author
+                    .as_ref()
+                    .map(|v| Cow::Borrowed(&v[..]))
+                    .unwrap_or(Cow::Borrowed(&self.owner)),
+            ),
+            MetadataKey::Description => self.description.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::HomepageUrl => Some(
+                self.homepage_url
+                    .as_ref()
+                    .map(|v| Cow::Borrowed(&v[..]))
+                    .unwrap_or_else(|| {
+                        format!("https://github.com/{}/{}", self.owner, self.repository).into()
+                    }),
+            ),
+            _ => None,
+        }
     }
-
-    fn install_dir(&self) -> String {
-        format!("{}_{}", self.owner, self.repository)
-    }
-
-    fn view_url(&self) -> String {
-        format!("https://github.com/{}/{}", self.owner, self.repository)
+    fn has_metadata(&self, key: MetadataKey) -> bool {
+        match key {
+            MetadataKey::Author | MetadataKey::HomepageUrl => true,
+            MetadataKey::DisplayName => self.display_name.is_some() || self.name.is_some(),
+            MetadataKey::Description => self.description.is_some(),
+            _ => false,
+        }
     }
 
     fn download_latest(
         &self,
         kind: SourceKind,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + '_>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + Send + '_>> {
         Box::pin(async move {
-            let install_dir = ADDON_DIR.join(kind.get_unpack_dir()).join(self.install_dir());
+            let install_dir = ADDON_DIR
+                .join(kind.get_unpack_dir())
+                .join(&self.install_dir()[..]);
             let latest = self.get_release(None).await?;
             let tarball = latest.request_tarball();
             let tag_name = &latest.tag_name;
@@ -348,7 +377,7 @@ impl Source for GitHubSource {
         })
     }
 
-    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>> {
+    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>> {
         Box::pin(async move {
             let release = self.get_release(None).await?;
             Ok(release.tag_name)

@@ -1,16 +1,8 @@
 use {
-    super::{
-        ArcSettings,
-        PathingSettings,
-        ProgressBarSettings,
-        RemoteSource,
-        RemoteState,
-        SourcesFile,
-        TimerSettings,
-    },
+    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteState, SourcesFile, TimerSettings},
     crate::{
         controller::timers::ProgressBarStyleChange,
-        exports::runtime::bindings::TaimiControls,
+        exports::runtime::{self as rt, bindings::TaimiControls},
         settings::state::save_state_backup,
         SETTINGS,
     },
@@ -260,60 +252,65 @@ impl Settings {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn get_status_for(&self, source: &RemoteSource) -> Option<&RemoteState> {
-        self.remotes.iter().find(|dd| dd.source().name() == source.name())
-    }
-
-    pub fn get_status_for_mut(&mut self, source: &RemoteSource) -> Option<&mut RemoteState> {
-        self.remotes
-            .iter_mut()
-            .find(|dd| dd.source().name() == source.name())
-    }
-
-    pub async fn uninstall_remote(&mut self, source: &RemoteSource) -> anyhow::Result<()> {
-        if let Some(remote) = self
-            .remotes
-            .iter_mut()
-            .find(|dd| dd.source().name() == source.name())
-        {
-            remote.uninstall().await?;
-        }
-        Ok(())
-    }
-
     pub fn set_marker_autoplace_settings(&mut self, maps: &MarkerAutoPlaceSettings) -> anyhow::Result<()> {
         self.marker_autoplace = maps.clone();
         Ok(())
     }
 
-    pub async fn download_latest(state: RemoteState) -> anyhow::Result<()> {
-        let source = state.remote_source();
-        let settings_arc = SETTINGS
-            .get()
-            .expect("SettingsLock should've been initialized by now!");
-        let (tag_name, install_dest) = source.download_latest(state.kind).await?;
-        {
-            let mut settings_write_lock = settings_arc.write().await;
-            if let Some(dd_mut) = settings_write_lock.get_status_for_mut(&source) {
-                match &dd_mut.installed_path {
-                    Some(old) if old != &install_dest => {
-                        let res = dd_mut.remove().await.with_context(|| {
-                            format!("Manual clean-up of prior {source} install may be required")
-                        });
-                        if let Err(e) = res {
-                            log::warn!("{e:#}");
-                        }
-                    },
-                    _ => (),
+    pub async fn download_latest(settings: SettingsLock, mut state: RemoteState) -> anyhow::Result<()> {
+        let res = state.source().download_latest(state.kind).await.with_context(|| {
+            format!(
+                "{} datasource {} failed to install",
+                state.kind,
+                state.source().display_name()
+            )
+        });
+        let mut err = None;
+        if let (Ok((_, install_dest)), Some(old_install)) = (&res, &state.installed_path) {
+            if old_install != install_dest
+                && rt::relative_path(old_install) != rt::relative_path(&install_dest)
+            {
+                let res = state.remove().await.with_context(|| {
+                    format!(
+                        "Manual clean-up of prior {} install may be required",
+                        state.source().name()
+                    )
+                });
+                if let Err(e) = res {
+                    log::warn!("{e:#}");
+                    err = Some(format!("{e}"));
                 }
-                dd_mut.commit_downloaded(tag_name, install_dest);
-                let _ = settings_write_lock.save().await;
-            } else {
-                anyhow::bail!("GitHub repository \"{}\" not found.", source);
             }
         }
-        Ok(())
+        {
+            let mut settings = settings.write().await;
+            let state = match RemoteState::lookup_datasource_mut(
+                &mut settings.remotes,
+                state.kind,
+                &state.datasource_name(),
+            ) {
+                Some(remote) => {
+                    // XXX: be careful of clobbering fields here, but it should be a perfect clone...
+                    *remote = state;
+                    remote
+                },
+                None => {
+                    settings.remotes.push(state);
+                    settings.remotes.last_mut().unwrap()
+                },
+            };
+            let err = err.map(Err).unwrap_or(Ok(()));
+            match res {
+                Ok((tag_name, install_dest)) => {
+                    state.commit_downloaded(Some(tag_name), Some(install_dest), err);
+                    Ok(())
+                },
+                Err(e) => {
+                    state.commit_downloaded(None, None, Err(format!("{e:#}")));
+                    Err(e)
+                },
+            }
+        }
     }
 
     pub fn set_progress_bar(&mut self, style: ProgressBarStyleChange) -> ProgressBarSettings {
@@ -332,29 +329,46 @@ impl Settings {
         self.enable_katrender = !self.enable_katrender;
     }
 
-    pub async fn check_for_updates(everything: bool) -> anyhow::Result<()> {
-        let settings_arc = SETTINGS
-            .get()
-            .expect("SettingsLock should've been initialized by now!");
-        let sources: Vec<(RemoteSource, NeedsUpdate)> = {
-            let settings_read_lock = settings_arc.read().await;
-            let remotes = settings_read_lock
-                .remotes
-                .iter()
-                .filter(|r| everything || r.installed_path.is_some());
-            tokio_stream::iter(remotes)
-                .then(|r| async move { (r.remote_source(), r.needs_update().await) })
-                .collect()
-                .await
-        };
+    pub async fn check_for_updates<F>(settings: SettingsLock, mut filter: F) -> anyhow::Result<()>
+    where
+        F: FnMut(&RemoteState) -> bool,
+    {
+        // XXX: this should just stay as a method on the controller...
+        use crate::controller::Controller;
+
+        let sources: Vec<_> = settings
+            .read()
+            .await
+            .remotes
+            .iter()
+            .filter(move |r| filter(r))
+            .map(|remote| {
+                let name = remote.datasource_name().clone().into_owned();
+                let source = Controller::with_datasource(remote.kind, &name, |source| Some(source.clone()));
+                (
+                    (remote.kind, name),
+                    source.unwrap_or_else(|| remote.source.clone()),
+                )
+            })
+            .collect();
+        let updates: Vec<_> = tokio_stream::iter(sources)
+            .then(|((kind, name), source)| async move {
+                let latest = source.as_source().latest_id().await;
+                ((kind, name), latest)
+            })
+            .collect()
+            .await;
         {
-            let mut settings_write_lock = settings_arc.write().await;
-            for (source, nu) in sources {
-                log::debug!("{} update state: {:?}", source, nu);
-                if let Some(dd) = settings_write_lock.get_status_for_mut(&source) {
-                    log::debug!("Found dd {} update state: {:?}", dd.source(), nu);
-                    dd.needs_update = nu;
-                }
+            let mut settings_write_lock = settings.write().await;
+            for ((kind, name), latest) in updates {
+                let Some(state) =
+                    RemoteState::lookup_datasource_mut(&mut settings_write_lock.remotes, kind, &name)
+                else {
+                    continue
+                };
+                let nu = state.get_needs_update(latest);
+                log::info!("{} update state: {}", name, nu);
+                state.needs_update = nu;
             }
             settings_write_lock.last_checked = Some(Utc::now());
             settings_write_lock.save().await?;

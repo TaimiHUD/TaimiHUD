@@ -294,11 +294,19 @@ impl RenderState {
         ui.same_line();
     }
     pub fn draw_open_path_button<S: AsRef<str> + Display>(ui: &Ui, text: S, path: &Path) {
-        let human = rt::relative_path(path);
-        Self::draw_open_button(ui, text, || path.to_string_lossy(), human.display())
+        Self::draw_open_button(
+            ui,
+            text,
+            || path.to_string_lossy(),
+            || rt::relative_path(path).display(),
+        )
     }
-    pub fn draw_open_button<S, O, TT>(ui: &Ui, text: S, openable: impl FnOnce() -> O, tooltip: TT)
-    where
+    pub fn draw_open_button<S, O, TT>(
+        ui: &Ui,
+        text: S,
+        openable: impl FnOnce() -> O,
+        tooltip: impl FnOnce() -> TT,
+    ) where
         S: AsRef<str> + Display,
         O: Into<String> + Display,
         TT: Display,
@@ -312,7 +320,7 @@ impl RenderState {
             Controller::try_send(ControllerEvent::OpenOpenable(entry_name.clone(), openable.into()));
         }
         if ui.is_item_hovered() {
-            let tooltip = tooltip.to_string();
+            let tooltip = tooltip().to_string();
             ui.tooltip_text(fl!("location", path = tooltip));
         }
     }

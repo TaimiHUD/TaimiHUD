@@ -1,8 +1,5 @@
 use {
-    crate::{
-        settings::RemoteSource,
-        timer::{TimerPhase, TimerTrigger},
-    },
+    crate::timer::{TimerPhase, TimerTrigger},
     anyhow::anyhow,
     glob::Paths,
     relative_path::RelativePathBuf,
@@ -51,17 +48,18 @@ impl TimerFile {
         Ok(glob::glob(path_glob_str)?)
     }
 
-    pub async fn load(path: &PathBuf, source: Option<RemoteSource>) -> anyhow::Result<Arc<Self>> {
+    pub async fn load(path: &PathBuf, source_name: Option<String>) -> anyhow::Result<Arc<Self>> {
         log::trace!("Attempting to load the timer file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let mut data: Self = serde_json::from_str(&file_data)?;
         data.path = Some(path.to_path_buf());
-        data.association = source.map(|x| x.name());
+        data.association = source_name;
         log::trace!("Successfully loaded the timer file at \"{path:?}\".");
         Ok(Arc::new(data))
     }
 
+    /// TODO: why would we not just make [Self::load_many] accept an optional source?
     pub async fn load_many_sourceless(
         load_dir: &Path,
         simultaneous_limit: usize,
@@ -109,7 +107,7 @@ impl TimerFile {
 
     pub async fn load_many(
         load_dir: &Path,
-        source: RemoteSource,
+        source_name: &str,
         simultaneous_limit: usize,
     ) -> anyhow::Result<Vec<Arc<Self>>> {
         log::debug!(
@@ -121,9 +119,9 @@ impl TimerFile {
         while let Some(path) = paths.next() {
             let permit = semaphore.clone().acquire_owned().await?;
             let path = path?.clone();
-            let source = source.clone();
+            let source_name = source_name.to_owned();
             set.spawn(async move {
-                let timer_file = Self::load(&path, Some(source)).await?;
+                let timer_file = Self::load(&path, Some(source_name)).await?;
                 drop(permit);
                 Ok::<Arc<TimerFile>, anyhow::Error>(timer_file)
             });
@@ -148,7 +146,7 @@ impl TimerFile {
             }
         }
         log::debug!(
-            "Finished load_many for {source}, {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
+            "Finished load_many for {source_name}, {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
             timer_files.len()
         );
         Ok(timer_files)

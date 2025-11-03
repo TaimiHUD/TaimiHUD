@@ -8,6 +8,7 @@ use {
             source::{
                 self,
                 github::{GitHubLatestRelease, GitHubReleaseAsset, GitHubSource},
+                Source,
             },
             state::{BootstrapState, UpdatePreference},
             RemoteAssetForm,
@@ -111,7 +112,7 @@ impl ResolvedVersion {
     }
 
     pub async fn latest_gh_release(src: &GitHubSource, patience: Duration) -> anyhow::Result<Self> {
-        log::debug!("Checking for updates at {}...", src);
+        log::debug!("Checking for updates at {}...", src.name());
 
         let check = async move {
             let channel = crate_channel();
@@ -151,7 +152,7 @@ impl ResolvedVersion {
             releases
                 .into_iter()
                 .last()
-                .ok_or_else(|| anyhow!("no {channel} releases found at {src}"))
+                .ok_or_else(|| anyhow!("no {channel} releases found at {}", src.name()))
         };
         timeout(patience, check)
             .await

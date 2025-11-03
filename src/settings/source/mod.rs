@@ -4,8 +4,10 @@ use {
     async_compression::tokio::bufread::GzipDecoder,
     futures::stream::{StreamExt, TryStreamExt},
     reqwest::{header, Client, ClientBuilder, IntoUrl, Request, Response},
+    serde::{Deserialize, Serialize},
     std::{
-        fmt::{Debug, Display},
+        borrow::Cow,
+        fmt::{self, Debug, Display},
         future::Future,
         io,
         path::{Path, PathBuf},
@@ -26,6 +28,7 @@ pub mod github;
 
 pub use {direct::DirectSource, github::GitHubSource};
 
+#[cfg(todo = "unused")]
 pub type RemoteSource = Arc<dyn Source + Send + Sync>;
 
 pub fn new_client() -> ClientBuilder {
@@ -183,14 +186,67 @@ pub async fn install_remote_file(dest: &Path, res: Response) -> anyhow::Result<(
     Ok(())
 }
 
-pub trait Source: Display + Debug {
-    fn description(&self) -> Option<String>;
-    fn name(&self) -> String;
-    fn install_dir(&self) -> String;
-    fn view_url(&self) -> String;
+pub trait Source: Debug {
+    /// (hopefully) unique ID
+    fn name(&self) -> Cow<'_, str>;
+
     fn download_latest(
         &self,
         kind: SourceKind,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + '_>>;
-    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + '_>>;
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<(String, PathBuf)>> + Send + '_>>;
+    fn latest_id(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<String>> + Send + '_>>;
+
+    fn get_metadata_str(&self, key: MetadataKey) -> Option<Cow<'_, str>>;
+    fn has_metadata(&self, key: MetadataKey) -> bool {
+        self.get_metadata_str(key).is_some()
+    }
+    fn install_dir(&self) -> Cow<'_, str> {
+        match self.get_metadata_str(MetadataKey::DirName) {
+            Some(dir) => dir,
+            None => match self.name() {
+                name if name.contains("/") => name.replace("/", "_").into(),
+                name => name.into(),
+            },
+        }
+    }
+    fn display_name(&self) -> Cow<'_, str> {
+        self.get_metadata_str(MetadataKey::DisplayName)
+            .unwrap_or_else(|| self.name().into())
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataKey {
+    Description,
+    DisplayName,
+    Author,
+    HomepageUrl,
+    #[cfg(todo)]
+    AliasNames,
+    #[cfg(todo)]
+    AssetArchive,
+    #[cfg(todo)]
+    AssetExtension,
+    #[cfg(todo)]
+    AssetName,
+    DirName,
+}
+
+impl MetadataKey {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Description => "description",
+            Self::DisplayName => "display_name",
+            Self::Author => "author",
+            Self::HomepageUrl => "homepage_url",
+            Self::DirName => "dir_name",
+        }
+    }
+}
+
+impl Display for MetadataKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }

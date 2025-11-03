@@ -21,7 +21,7 @@ pub use {
         SettingsSave,
         SquadCondition,
     },
-    source::{DirectSource, GitHubSource, RemoteSource, Source},
+    source::{DirectSource, GitHubSource, Source},
     sources::{DeserializedSource, RemoteAssetForm, SourceKind, SourcesFile},
     v1::{RemoteState, TimerSettings},
 };

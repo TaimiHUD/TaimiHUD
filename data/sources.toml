@@ -1,5 +1,8 @@
 [[Markers]]
+author = "BlishHUD Commander's Markers"
 description = "Markers that were embedded into the source code of BlishHUD's Commander's Markers."
+display_name = "Stock Markers"
+homepage_url = "https://github.com/TaimiHUD/CommandersMarkersInternalMarkers"
 name = "BlishHUD Commander's Markers Internal Markers"
 owner = "TaimiHUD"
 repository = "CommandersMarkersInternalMarkers"
@@ -7,18 +10,21 @@ type = "GitHub"
 
 [[Pathing]]
 description = "A collection of xTeh.7146's marker packs."
+homepage_url = "https://github.com/xrandox/TehsTrails"
 name = "Teh's Trails - Map Completion"
 owner = "xrandox"
 repository = "TehsTrails"
 type = "GitHub"
 
 [[Pathing]]
+homepage_url = "https://www.tekkitsworkshop.net"
 name = "Tekkit's All-In-One"
 type = "Direct"
 url = "https://www.tekkitsworkshop.net/downloads/tw_ALL_IN_ONE.taco"
 
 [[Timers]]
 description = "These are timers by QuitarHero created for Charr's Timer Module."
+homepage_url = "https://github.com/QuitarHero/Hero-Timers"
 name = "Hero's Timers"
 owner = "QuitarHero"
 repository = "Hero-Timers"

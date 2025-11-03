@@ -7,7 +7,7 @@ use {
         },
         fl,
         render::RenderState,
-        settings::{NeedsUpdate, RemoteState, Settings},
+        settings::{source::MetadataKey, NeedsUpdate, RemoteState, Settings},
         Controller,
     },
     std::collections::HashMap,
@@ -23,7 +23,7 @@ impl DataSourceTabState {
     }
 
     pub fn draw_uninstall(&self, ui: &Ui, rs: &RemoteState) {
-        let source_text = &rs.source().name();
+        let source_text = rs.source().name().into_owned();
         let modal_name = fl!("addon-uninstall-modal-title", source = source_text);
         if ui.button(&fl!("addon-uninstall-modal-button")) {
             ui.open_popup(&modal_name);
@@ -50,7 +50,10 @@ impl DataSourceTabState {
             token.pop();
             ui.dummy([4.0, 4.0]);
             if ui.button(fl!("addon-uninstall-modal-button")) {
-                Controller::try_send(ControllerEvent::UninstallAddon(rs.remote_source()));
+                Controller::try_send(ControllerEvent::UninstallAddon {
+                    kind: rs.kind,
+                    id: rs.datasource_name().into_owned(),
+                });
                 ui.close_current_popup();
             }
             ui.same_line();
@@ -111,15 +114,31 @@ impl DataSourceTabState {
                 );
                 ui.table_next_column();
                 for download_data in &settings.remotes {
-                    let source = download_data.remote_source();
-                    let source_url = source.view_url();
-                    let source_text = source.to_string();
-                    let pushy = ui.push_id(&source_text);
-                    ui.text(format!("{}", source));
+                    let source = download_data.source();
+                    let pushy = ui.push_id(&source.name());
+                    let display_name = source.display_name();
+                    let author = match source.get_metadata_str(MetadataKey::Author) {
+                        Some(author) if display_name.starts_with(&author[..]) => None,
+                        author => author,
+                    };
+                    ui.text_wrapped(display_name);
+                    if let Some(author) = author {
+                        ui.text("~");
+                        ui.same_line();
+                        ui.text_wrapped(author);
+                    }
+                    if source.has_metadata(MetadataKey::HomepageUrl) {
+                        let url = || {
+                            source
+                                .get_metadata_str(MetadataKey::HomepageUrl)
+                                .unwrap_or_default()
+                        };
+                        RenderState::draw_open_button(ui, fl!("open-button", kind = "homepage"), url, url);
+                    }
                     ui.table_next_column();
                     ui.text(format!("{}", download_data.kind));
                     ui.table_next_column();
-                    if let Some(description) = &source.description() {
+                    if let Some(description) = source.get_metadata_str(MetadataKey::Description) {
                         ui.text_wrapped(description);
                     } else {
                         ui.text_wrapped(fl!("no-description"));
@@ -130,28 +149,35 @@ impl DataSourceTabState {
                     } else {
                         ui.text_wrapped(fl!("version-not-installed"));
                     }
-                    download_data.needs_update.draw(ui);
+                    if download_data.installed_tag.is_some()
+                        || !matches!(download_data.needs_update, Unknown)
+                    {
+                        download_data.needs_update.draw(ui);
+                        if !matches!(download_data.needs_update, Known(false, ..)) {
+                            if ui.button(fl!("check-for-updates")) {
+                                Controller::try_send(ControllerEvent::CheckDataSourceUpdate {
+                                    kind: download_data.kind,
+                                    id: download_data.datasource_name().into_owned(),
+                                });
+                            }
+                        }
+                    }
                     ui.table_next_column();
                     use NeedsUpdate::*;
                     let button_text = match &download_data.needs_update {
-                        Unknown => Some(fl!("attempt-update")),
+                        Known(false, ..) => None,
+                        _ if download_data.installed_path.is_none() => Some(fl!("download")),
+                        Unknown | Error(..) => Some(fl!("attempt-update")),
                         Known(true, _id) => Some(fl!("update")),
-                        Known(false, _id) => None,
-                        Error(_err) => None,
                     };
                     if let Some(button_text) = button_text {
                         if ui.button(button_text) {
                             Controller::try_send(ControllerEvent::DoDataSourceUpdate {
-                                state: download_data.clone(),
+                                kind: download_data.kind,
+                                id: download_data.datasource_name().into_owned(),
                             });
                         }
                     }
-                    RenderState::draw_open_button(
-                        ui,
-                        fl!("open-button", kind = "repository"),
-                        || &source_url,
-                        &source_url,
-                    );
                     if let Some(path) = &download_data.installed_path {
                         RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), path);
                         self.draw_uninstall(ui, download_data);

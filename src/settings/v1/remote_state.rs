@@ -1,12 +1,12 @@
 use {
     crate::{
         exports::runtime as rt,
-        settings::{source::Source, DeserializedSource, NeedsUpdate, RemoteSource, SourceKind},
+        settings::{source::Source, DeserializedSource, NeedsUpdate, SourceKind},
         timer::TimerFile,
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{path::PathBuf, sync::Arc},
+    std::{borrow::Cow, path::PathBuf, sync::Arc},
     tokio::fs::{remove_dir_all, remove_file, symlink_metadata},
 };
 
@@ -42,32 +42,42 @@ impl RemoteState {
         self.source.as_source()
     }
 
-    pub fn remote_source(&self) -> RemoteSource {
-        match &self.source {
-            DeserializedSource::GitHub(s) => Arc::new(s.clone()),
-            DeserializedSource::Direct(s) => Arc::new(s.clone()),
-        }
+    pub fn datasource_name(&self) -> Cow<'_, str> {
+        self.datasource_name
+            .as_ref()
+            .map(|n| Cow::Borrowed(&n[..]))
+            .unwrap_or_else(|| self.source().name())
     }
 
-    pub fn name(&self) -> String {
-        self.source().name()
+    pub fn datasource_name_matches(&self, name: &str) -> bool {
+        let datasource_name = self
+            .datasource_name
+            .as_ref()
+            .map(|datasource_name| datasource_name == name)
+            .unwrap_or(false);
+
+        datasource_name || self.source().name() == name
     }
 
     pub fn lookup_datasource<'a>(sources: &'a [Self], kind: SourceKind, name: &str) -> Option<&'a Self> {
-        sources.iter().find(|s| {
-            s.kind == kind
-                && if let Some(datasource_name) = &s.datasource_name {
-                    datasource_name == name
-                } else {
-                    &s.source().name() == name
-                }
-        })
+        sources
+            .iter()
+            .find(|s| s.kind == kind && s.datasource_name() == name)
+    }
+    pub fn lookup_datasource_mut<'a>(
+        sources: &'a mut [Self],
+        kind: SourceKind,
+        name: &str,
+    ) -> Option<&'a mut Self> {
+        sources
+            .iter_mut()
+            .find(|s| s.kind == kind && s.datasource_name() == name)
     }
 
     pub async fn load_timers(&self) -> Vec<Arc<TimerFile>> {
-        let association = self.remote_source();
+        let association = self.datasource_name();
         if let Some(path) = &self.installed_path {
-            TimerFile::load_many(path, association, 100)
+            TimerFile::load_many(path, &association, 100)
                 .await
                 .expect("Could not load timer file for source {self.source}")
         } else {
@@ -99,7 +109,7 @@ impl RemoteState {
         let removed = self
             .remove()
             .await
-            .with_context(|| format!("uninstalling {}", self.source()));
+            .with_context(|| format!("uninstalling {}", self.source().display_name()));
         if let (path, false) = removed? {
             log::warn!("Uninstalling: {} no longer exists", path.display());
         }
@@ -123,11 +133,8 @@ impl RemoteState {
             .collect()
     }
 
-    pub async fn needs_update(&self) -> NeedsUpdate {
+    pub fn get_needs_update(&self, remote_id: anyhow::Result<String>) -> NeedsUpdate {
         use NeedsUpdate::*;
-        let source = self.source();
-        let remote_id = source.latest_id().await;
-        log::debug!("{:?}", remote_id);
         match remote_id {
             Ok(rid) =>
                 if let Some(lid) = &self.installed_tag {
@@ -136,17 +143,37 @@ impl RemoteState {
                     Known(true, rid)
                 },
             Err(err) => {
-                log::error!("Update check failed: {}", err);
+                log::error!("Update check failed: {err:#}");
                 NeedsUpdate::Error(err.to_string())
             },
         }
     }
-    pub fn commit_downloaded(&mut self, tag_name: String, install_dir: PathBuf) {
-        self.needs_update = NeedsUpdate::Known(false, tag_name.clone());
-        self.installed_tag = Some(tag_name);
-        self.installed_path = Some(match rt::relative_path(&install_dir) {
-            rel if rel != install_dir => rel.to_owned(),
-            _ => install_dir,
-        });
+
+    pub fn commit_downloaded(
+        &mut self,
+        tag_name: Option<String>,
+        installed_path: Option<PathBuf>,
+        status: Result<(), String>,
+    ) {
+        let tag_name = match tag_name {
+            Some(tag_name) => Some(self.installed_tag.insert(tag_name)),
+            None if installed_path.is_some() => {
+                log::info!("install status uncertain?");
+                self.installed_tag = None;
+                None
+            },
+            None => None,
+        };
+        self.needs_update = match (status, tag_name) {
+            (Err(message), _) => NeedsUpdate::Error(message),
+            (Ok(()), Some(tag_name)) => NeedsUpdate::Known(false, tag_name.clone()),
+            (Ok(()), None) => NeedsUpdate::Unknown,
+        };
+        if let Some(installed_path) = installed_path {
+            self.installed_path = Some(match rt::relative_path(&installed_path) {
+                rel if rel != installed_path => rel.to_owned(),
+                _ => installed_path,
+            });
+        }
     }
 }

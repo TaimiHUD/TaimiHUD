@@ -174,7 +174,7 @@ impl Engine {
         schedule.add_systems(handle_marker_timings);
 
         let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
-        PathingController::try_send(PathingEvent::PathingLoadAll);
+        PathingController::try_send(PathingEvent::LoadAll);
 
         let engine = Engine {
             #[cfg(feature = "space-ecs")]

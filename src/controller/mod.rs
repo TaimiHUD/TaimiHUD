@@ -7,11 +7,12 @@ use {
         render::machine::MumblelinkTick,
         settings::{
             state::{BootstrapState, SaveState},
-            RemoteSource,
+            DeserializedSource,
             RemoteState,
             Settings,
             SettingsLock,
             SettingsSave,
+            SourceKind,
             SourcesFile,
         },
         timer::{CombatState, Position},
@@ -284,10 +285,10 @@ impl Controller {
                     .datasource_name
                     .as_ref()
                     .and_then(|name| latest.lookup(remote.kind, name))
-                    .or_else(|| latest.lookup(remote.kind, &remote.name()));
+                    .or_else(|| latest.lookup(remote.kind, &remote.source().name()));
                 if let Some(source) = source {
                     remote.datasource_repo = Some(SourcesFile::FILENAME.into());
-                    remote.datasource_name = Some(source.as_source().name());
+                    remote.datasource_name = Some(source.as_source().name().into_owned());
                     remote.source = source.clone();
                 } else {
                     remote.datasource_repo = None;
@@ -436,11 +437,15 @@ impl Controller {
         }
     }
 
-    async fn check_updates(&mut self, everything: bool) {
+    async fn check_updates(&mut self, filter: Result<(SourceKind, String), bool>) {
+        let settings = self.settings.clone();
         let _ = self.rt_sender.send(RenderEvent::CheckingForUpdates(true)).await;
-        let res = Settings::check_for_updates(everything)
-            .await
-            .context("Controller.check_updates");
+        let res = Settings::check_for_updates(settings, move |remote| match filter {
+            Ok((kind, ref name)) => remote.kind == kind && &remote.datasource_name() == name,
+            Err(everything) => everything || remote.installed_path.is_some(),
+        })
+        .await
+        .context("Controller.check_updates");
         match res {
             Ok(_) => (),
             Err(err) => log::error!("{err:#}"),
@@ -531,17 +536,50 @@ impl Controller {
             .await;
         #[cfg(feature = "markers")]
         self.markers.reload(self.rt_sender.clone()).await;
+        #[cfg(feature = "space")]
+        self.pathing.reload_all().await;
     }
 
-    async fn do_update(&mut self, state: RemoteState) {
-        let name = state.name();
-        match Settings::download_latest(state).await {
-            Ok(_) => (),
-            Err(err) => log::error!("Controller.do_update() error for \"{}\": {}", name, err),
+    pub fn with_datasource<R, F: FnOnce(&DeserializedSource) -> Option<R>>(
+        kind: SourceKind,
+        id: &str,
+        f: F,
+    ) -> Option<R> {
+        match SOURCES.get().map(|sources| sources.read()) {
+            Some(Ok(sources)) => sources.lookup(kind, &id).and_then(f),
+            _ => None,
+        }
+    }
+
+    fn spawn_source_update(&mut self, kind: SourceKind, id: String) {
+        let settings = self.settings.clone();
+        let _ = tokio::spawn(Self::do_update(settings, kind, id));
+    }
+
+    async fn do_update(settings: SettingsLock, kind: SourceKind, id: String) {
+        let state = match RemoteState::lookup_datasource(&settings.read().await.remotes, kind, &id) {
+            Some(state) => Some(state.clone()),
+            None => Self::with_datasource(kind, &id, |source| {
+                Some(RemoteState::new_from_source(kind, source.clone()))
+            }),
         };
-        self.timers
-            .reload(self.settings.clone(), self.rt_sender.clone())
-            .await;
+        let Some(state) = state else {
+            log::warn!("update requested for unknown {kind} datasource {id}?");
+            return
+        };
+        let res = Settings::download_latest(settings, state)
+            .await
+            .with_context(|| format!("controller update for {kind} datasource {id} failed"));
+        match res {
+            Ok(_) => (),
+            Err(err) => log::error!("{err:#}"),
+        };
+        match kind {
+            SourceKind::Timers => TimersController::try_send(TimersEvent::ReloadTimers),
+            SourceKind::Markers => MarkersController::try_send(MarkersEvent::ReloadMarkers),
+            SourceKind::Pathing => PathingController::try_send(PathingEvent::ReloadAll),
+            _ => (),
+        }
     }
 
     async fn set_window_state(&mut self, window: &str, state: Option<bool>) {
@@ -567,11 +605,30 @@ impl Controller {
         drop(settings_lock);
     }
 
-    async fn uninstall_addon(&mut self, source: &RemoteSource) -> anyhow::Result<()> {
-        let mut settings_lock = self.settings_write().await;
-        settings_lock.uninstall_remote(source).await?;
-        drop(settings_lock);
-        Ok(())
+    async fn uninstall_addon(&mut self, kind: SourceKind, id: String) {
+        let settings = self.settings.clone();
+        // XXX: consider spawning...
+        if let Err(e) = Self::uninstall_source(settings, kind, id).await {
+            log::error!("{e:#}");
+        }
+    }
+
+    async fn uninstall_source(settings: SettingsLock, kind: SourceKind, id: String) -> anyhow::Result<()> {
+        let state = RemoteState::lookup_datasource(&settings.read().await.remotes, kind, &id).cloned();
+        let Some(mut state) = state else {
+            log::warn!("cannot uninstall missing {kind} datasource {id}!");
+            return Ok(())
+        };
+        let res = state.uninstall().await;
+
+        {
+            let mut settings = settings.write().await;
+            if let Some(mut remote) = RemoteState::lookup_datasource_mut(&mut settings.remotes, kind, &id) {
+                *remote = state;
+                settings.mark_dirty();
+            }
+        }
+        res
     }
 
     async fn load_texture(&self, rel: RelativePathBuf, base: PathBuf) {
@@ -614,12 +671,13 @@ impl Controller {
             ReloadData => self.reload_data().await,
             SaveSettings => self.save_settings().await,
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
-            UninstallAddon(dd) => self.uninstall_addon(&dd).await?,
+            UninstallAddon { kind, id } => self.uninstall_addon(kind, id).await,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
-            CheckDataSourceUpdates(everything) => self.check_updates(everything).await,
+            CheckDataSourceUpdates(everything) => self.check_updates(Err(everything)).await,
+            CheckDataSourceUpdate { kind, id } => self.check_updates(Ok((kind, id))).await,
             CheckUpdateSources => self.check_sources().await?,
             CheckAddonUpdate(proceed) => self.addon_check_for_updates(proceed).await,
-            DoDataSourceUpdate { state } => self.do_update(state).await,
+            DoDataSourceUpdate { kind, id } => self.spawn_source_update(kind, id),
             WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
@@ -741,18 +799,26 @@ pub enum ControllerEvent {
     // TODO: remove as porting happens - Generic
     WindowState(String, Option<bool>),
     OpenOpenable(String, String),
-    UninstallAddon(RemoteSource),
     CombatEvent {
         src: arcdps::AgentOwned,
         evt: arcEvent,
     },
+    CheckDataSourceUpdates(bool),
+    CheckDataSourceUpdate {
+        kind: SourceKind,
+        id: String,
+    },
     DoDataSourceUpdate {
-        state: RemoteState,
+        kind: SourceKind,
+        id: String,
+    },
+    UninstallAddon {
+        kind: SourceKind,
+        id: String,
     },
     LoadTextureIntegrated(String, Vec<u8>),
     #[strum(to_string = "Load texture {0} from {1:?}")]
     LoadTexture(RelativePathBuf, PathBuf),
-    CheckDataSourceUpdates(bool),
     ReloadData,
     SaveSettings,
     UiTick(MumblelinkTick),
