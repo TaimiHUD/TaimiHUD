@@ -29,6 +29,8 @@ pub struct BootstrapState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_remote_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gh_api_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_dir: Option<OsString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -43,6 +45,7 @@ impl BootstrapState {
         update_host_preference: None,
         update_preference: None,
         update_remote_version: None,
+        gh_api_token: None,
         addon_dir: None,
         language: None,
         log_filter: None,

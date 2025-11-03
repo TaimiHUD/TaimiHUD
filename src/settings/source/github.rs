@@ -2,6 +2,7 @@ use {
     crate::{
         settings::{
             source::{self, MetadataKey},
+            state::BootstrapState,
             RemoteAssetForm,
             Source,
             SourceKind,
@@ -78,7 +79,20 @@ impl GitHubReleaseAsset {
             return req
         }
         let mut req = Request::new(Method::GET, self.url.clone());
-        source::insert_header(req.headers_mut(), header::ACCEPT, &self.content_type);
+        {
+            let headers = req.headers_mut();
+            source::insert_header(headers, header::ACCEPT, &self.content_type);
+            headers.insert(GitHubSource::API_VERSION_HEADER, GitHubSource::API_VERSION);
+            let auth = BootstrapState::read_with(|state| {
+                state
+                    .gh_api_token
+                    .as_ref()
+                    .map(|token| header::HeaderValue::from_str(&format!("Bearer {token}")))
+            });
+            if let Some(Ok(auth)) = auth {
+                headers.insert(header::AUTHORIZATION, auth);
+            }
+        }
         req
     }
 
@@ -184,6 +198,9 @@ impl GitHubSource {
     pub const CONTENT_TYPE_GH_JSON: &'static str = "application/vnd.github+json";
     pub const ACCEPT_GH_JSON: header::HeaderValue =
         header::HeaderValue::from_static(Self::CONTENT_TYPE_GH_JSON);
+    pub const API_VERSION_HEADER: header::HeaderName =
+        header::HeaderName::from_static("x-github-api-version");
+    pub const API_VERSION: header::HeaderValue = header::HeaderValue::from_static("2022-11-28");
 
     pub fn new_empty(owner: String, repository: String) -> Self {
         Self {
