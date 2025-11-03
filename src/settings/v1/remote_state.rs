@@ -1,5 +1,6 @@
 use {
     crate::{
+        exports::runtime as rt,
         settings::{source::Source, DeserializedSource, NeedsUpdate, RemoteSource, SourceKind},
         timer::TimerFile,
     },
@@ -143,6 +144,9 @@ impl RemoteState {
     pub fn commit_downloaded(&mut self, tag_name: String, install_dir: PathBuf) {
         self.needs_update = NeedsUpdate::Known(false, tag_name.clone());
         self.installed_tag = Some(tag_name);
-        self.installed_path = Some(install_dir);
+        self.installed_path = Some(match rt::relative_path(&install_dir) {
+            rel if rel != install_dir => rel.to_owned(),
+            _ => install_dir,
+        });
     }
 }
