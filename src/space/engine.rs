@@ -451,10 +451,12 @@ impl Engine {
                         }
                     },
                     #[cfg(feature = "goggles")]
-                    GogglesRefreshLens { .. } | GogglesClearLens if !goggles::is_enabled() => (),
+                    GogglesClearLens if !goggles::is_enabled() => (),
                     #[cfg(feature = "goggles")]
                     GogglesRefreshLens { force, delay_override } => {
-                        self.goggles_enter(force);
+                        if self.map_settings(|s| s.space.goggles.enabled()) {
+                            self.goggles_enter(force);
+                        }
                         if let (Some(delay_override), Some((delay, ..))) =
                             (delay_override, &mut self.goggles_select_lens_delay)
                         {
