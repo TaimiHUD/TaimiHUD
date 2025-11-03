@@ -62,6 +62,12 @@ pub(crate) mod pathing;
 #[cfg(feature = "space")]
 use pathing::{PathingController, PathingEvent};
 
+#[cfg(feature = "api")]
+pub(crate) mod api;
+
+#[cfg(feature = "api")]
+use api::{ApiController, ApiEvent};
+
 pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
@@ -89,6 +95,7 @@ pub struct Controller {
     timers: TimersController,
     markers: MarkersController,
     pathing: PathingController,
+    api: ApiController,
 }
 
 impl Controller {

@@ -37,6 +37,7 @@ default = [
   "log-filter",
   "render-rt",
   "updates",
+  "api",
 ]
 built-info = [
   #"built/chrono",
@@ -86,6 +87,10 @@ goggles = [
 ]
 
 timers = [
+]
+
+api = [
+  "dep:gw2lib"
 ]
 
 markers = [
@@ -283,6 +288,10 @@ nexus = { workspace = true }
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, features = ["log", "identity"], optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+
+[dependencies.gw2lib]
+optional = true
+version = "3.0.2"
 
 [dependencies.image]
 optional = true
