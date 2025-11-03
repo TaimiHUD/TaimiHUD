@@ -3,7 +3,7 @@ use {
         attributes::{parse_bool, MarkerAttributes},
         pack::{taco_safe_name, PartialItem},
     },
-    anyhow::Context,
+    anyhow::{anyhow, Context},
     bitvec::vec::BitVec,
     indexmap::IndexMap,
     std::sync::Arc,
@@ -31,7 +31,8 @@ impl Category {
         let mut marker_attributes = MarkerAttributes::default();
         let mut attributes_bh = MarkerAttributes::default();
 
-        let mut id = String::new();
+        let mut id = None;
+        let mut bh_id = None;
         let mut display_name = None;
         let mut bh_display_name = None;
         let mut is_separator = None;
@@ -44,7 +45,7 @@ impl Category {
         for attr in attrs {
             let attr_name = &attr.name.local_name;
             let res = if attr_name.eq_ignore_ascii_case("name") {
-                id = taco_safe_name(&attr.value, false);
+                id = Some(attr.value);
                 Ok(())
             } else if attr_name.eq_ignore_ascii_case("displayname") {
                 display_name = Some(attr.value);
@@ -62,7 +63,10 @@ impl Category {
                     .map(|val| default_toggle = Some(val))
                     .map_err(From::from)
             } else if let Some(attr_name) = attr_name.strip_prefix("bh-") {
-                if attr_name.eq_ignore_ascii_case("displayname") {
+                if attr_name.eq_ignore_ascii_case("name") {
+                    bh_id = Some(attr.value);
+                    Ok(())
+                } else if attr_name.eq_ignore_ascii_case("displayname") {
                     bh_display_name = Some(attr.value);
                     Ok(())
                 } else if attr_name.eq_ignore_ascii_case("isseparator") {
@@ -94,6 +98,9 @@ impl Category {
                 log::warn!("{e:#}");
             }
         }
+
+        let name = id.or(bh_id).ok_or_else(|| anyhow!("category missing name"))?;
+        let id = taco_safe_name(&name, false);
 
         let full_id = if let Some(PartialItem::MarkerCategory(cat)) = parse_stack.last() {
             format!("{}.{id}", cat.full_id)
