@@ -426,6 +426,8 @@ fn load_nexus() {
     // Rendering setup
 
     let taimi_window = nexus::gui::render!(|ui| {
+        #[cfg(not(feature = "space"))]
+        RenderState::pre_render();
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
     });
@@ -435,6 +437,7 @@ fn load_nexus() {
     #[cfg(feature = "space")]
     {
         extern "C-unwind" fn nexus_pre_render() {
+            RenderState::pre_render();
             RenderMachine::turn_render_entry()
         }
         let render_callback_pre = register_render(RenderType::PreRender, nexus_pre_render);

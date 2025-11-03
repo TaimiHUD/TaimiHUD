@@ -505,8 +505,11 @@ impl RenderState {
             .unwrap_or(false)
     }
 
-    pub fn render_ui(ui: &Ui) {
+    pub fn pre_render() {
         IS_RENDER_THREAD.set(true);
+    }
+
+    pub fn render_ui(ui: &Ui) {
         let is_running = Self::is_running();
 
         if is_running {

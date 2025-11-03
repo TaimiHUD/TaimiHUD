@@ -303,10 +303,12 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
         return
     }
 
-    RenderMachine::turn_ui_entry(ui);
+    RenderState::pre_render();
 
     #[cfg(feature = "space")]
     RenderMachine::turn_render_entry();
+
+    RenderMachine::turn_ui_entry(ui);
 
     RenderState::render_ui(ui);
 }
