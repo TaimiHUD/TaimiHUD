@@ -19,6 +19,7 @@ save-edit = { save } edited changes
 save-edit-item = { save-edit } to "{ $item }"?
 save-mode = Save mode
 error = Error
+remove = Remove
 unknown = Unknown
 update = Update
 create-arg = Create new { $arg }
@@ -140,7 +141,7 @@ open-error = { error } opening { $kind }: { $path }
 
 intro-to-data-sources = Please make sure you refresh the repository before checking for updates.
 data-sources-tab = Data Sources
-data-source-repo-update = Refresh list
+data-source-repo-update = Refresh sources
 data-source-repo-update-tooltip = Fetch the upstream data sources repository to see downloadable items.
 checking-for-updates = Checking for updates...
 downloading-update = Downloading update...

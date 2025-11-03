@@ -290,7 +290,7 @@ arcdps::export! {
 static RENDER_STATE: Mutex<Option<RenderState>> = Mutex::new(None);
 static RENDER_UNLOAD: Condvar = Condvar::new();
 
-static SOURCES: OnceLock<Arc<RwLock<SourcesFile>>> = OnceLock::new();
+static SOURCES: RwLock<SourcesFile> = RwLock::new(SourcesFile::EMPTY);
 static SETTINGS: OnceLock<SettingsLock> = OnceLock::new();
 
 pub const WINDOW_PRIMARY: &'static str = "primary";

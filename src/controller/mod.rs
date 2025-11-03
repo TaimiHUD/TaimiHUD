@@ -158,9 +158,17 @@ impl Controller {
     }
 
     pub async fn run(&mut self) {
-        let sources = SourcesFile::load().await.expect("Couldn't load sources file");
-        let sources = Arc::new(RwLock::new(sources));
-        let _ = SOURCES.set(sources);
+        let datasources = SourcesFile::load().await.context("Couldn't load sources file");
+        let datasources = match datasources {
+            Ok(datasources) => datasources,
+            Err(e) => {
+                log::error!("{e:#}");
+                SourcesFile::stock()
+            },
+        };
+        if let Ok(mut sources) = SOURCES.write() {
+            *sources = datasources;
+        }
         let state = self;
         let _ = SETTINGS.set(state.settings.clone());
         #[cfg(feature = "timers")]
@@ -296,18 +304,14 @@ impl Controller {
                 }
             }
         }
-        for (kind, source) in latest.iter() {
-            if RemoteState::lookup_datasource(&settings_lock.remotes, kind, &source.as_source().name())
-                .is_some()
-            {
-                continue
-            }
-            settings_lock
-                .remotes
-                .push(RemoteState::new_from_source(kind, source.clone()));
-        }
+        // clear out unnecessary state from outdated or redundant sources
+        settings_lock
+            .remotes
+            .retain(|remote| remote.datasource_repo.is_none() || !remote.is_empty());
         drop(settings_lock);
-        let _ = SOURCES.set(Arc::new(RwLock::new(latest)));
+        if let Ok(mut sources) = SOURCES.write() {
+            *sources = latest;
+        }
         Ok(())
     }
 
@@ -558,8 +562,8 @@ impl Controller {
         id: &str,
         f: F,
     ) -> Option<R> {
-        match SOURCES.get().map(|sources| sources.read()) {
-            Some(Ok(sources)) => sources.lookup(kind, &id).and_then(f),
+        match SOURCES.read() {
+            Ok(sources) => sources.lookup(kind, &id).and_then(f),
             _ => None,
         }
     }
@@ -623,6 +627,13 @@ impl Controller {
         let mut settings_lock = self.settings_write().await;
         settings_lock.toggle_katrender();
         drop(settings_lock);
+    }
+
+    async fn remove_source(&mut self, kind: SourceKind, id: String) {
+        let mut settings = self.settings_write().await;
+        settings
+            .remotes
+            .retain(|remote| remote.kind != kind || !remote.datasource_name_matches(&id));
     }
 
     async fn uninstall_addon(&mut self, kind: SourceKind, id: String) {
@@ -692,6 +703,7 @@ impl Controller {
             SaveSettings => self.save_settings().await,
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
             UninstallAddon { kind, id } => self.uninstall_addon(kind, id).await,
+            RemoveDataSource { kind, id } => self.remove_source(kind, id).await,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
             CheckDataSourceUpdates(everything) => self.check_updates(Err(everything)),
             CheckDataSourceUpdate { kind, id } => self.check_updates(Ok((kind, id))),
@@ -829,6 +841,10 @@ pub enum ControllerEvent {
         id: String,
     },
     DoDataSourceUpdate {
+        kind: SourceKind,
+        id: String,
+    },
+    RemoveDataSource {
         kind: SourceKind,
         id: String,
     },

@@ -383,11 +383,7 @@ impl Settings {
             dirty: Arc::new(AtomicBool::new(false)),
             timers: Default::default(),
             markers: Default::default(),
-            remotes: RemoteState::from_sources(
-                SourcesFile::downloadless_load()
-                    .unwrap_or_else(|_| SourcesFile::stock())
-                    .into_iter(),
-            ),
+            remotes: Default::default(),
             progress_bar: Default::default(),
             timers_window_open: false,
             pathing_window_open: false,

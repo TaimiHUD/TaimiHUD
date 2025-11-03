@@ -7,7 +7,14 @@ use {
         },
         fl,
         render::RenderState,
-        settings::{source::MetadataKey, NeedsUpdate, RemoteState, Settings},
+        settings::{
+            source::{MetadataKey, Source},
+            NeedsUpdate,
+            RemoteState,
+            Settings,
+            SourceKind,
+        },
+        with_i18n,
         Controller,
     },
     std::collections::HashMap,
@@ -16,6 +23,8 @@ use {
 pub struct DataSourceTabState {
     pub checking_for_updates: bool,
     pub downloading_update: bool,
+    pub populated_sources: HashMap<String, (SourceKind, usize)>,
+    pub populated_generation: usize,
 }
 
 impl DataSourceTabState {
@@ -23,6 +32,8 @@ impl DataSourceTabState {
         Self {
             checking_for_updates: false,
             downloading_update: false,
+            populated_sources: Default::default(),
+            populated_generation: Default::default(),
         }
     }
 
@@ -68,134 +79,189 @@ impl DataSourceTabState {
     }
 
     pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        if let Some(settings) = Settings::try_read() {
-            if self.downloading_update {
-                ui.text(fl!("downloading-update"))
-            } else if self.checking_for_updates {
-                ui.text(fl!("checking-for-updates"))
+        let table_token = if self.downloading_update {
+            ui.text(fl!("downloading-update"));
+            None
+        } else if self.checking_for_updates {
+            ui.text(fl!("checking-for-updates"));
+            None
+        } else if let Some(settings) = Settings::try_read() {
+            ui.text(fl!("intro-to-data-sources"));
+            // kat don't you think the naming of this event is a little insane?
+            // plus it's right next to CheckDataSourceUpdates, no? that's weird
+            // SHIP IT :^))))))
+            if ui.button(fl!("data-source-repo-update")) {
+                Controller::try_send(ControllerEvent::CheckUpdateSources);
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(fl!("data-source-repo-update-tooltip"));
+            }
+            ui.same_line();
+            if ui.button(fl!("check-for-updates")) {
+                Controller::try_send(ControllerEvent::CheckDataSourceUpdates(false));
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(fl!("check-for-updates-tooltip"));
+            }
+            ui.same_line();
+            if ui.button(fl!("reload-data-sources")) {
+                Controller::try_send(ControllerEvent::ReloadData);
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(fl!("reload-data-sources-tooltip"));
+            }
+            ui.same_line();
+            if let Some(last_checked) = &settings.last_checked {
+                let time_display = last_checked.format("%F %T %Z").to_string();
+                ui.text(fl!("checked-for-updates-last", time = time_display));
             } else {
-                ui.text(fl!("intro-to-data-sources"));
-                // kat don't you think the naming of this event is a little insane?
-                // plus it's right next to CheckDataSourceUpdates, no? that's weird
-                // SHIP IT :^))))))
-                if ui.button(fl!("data-source-repo-update")) {
-                    Controller::try_send(ControllerEvent::CheckUpdateSources);
-                }
-                if ui.is_item_hovered() {
-                    ui.tooltip_text(fl!("data-source-repo-update-tooltip"));
-                }
-                ui.same_line();
-                if ui.button(fl!("check-for-updates")) {
-                    Controller::try_send(ControllerEvent::CheckDataSourceUpdates(false));
-                }
-                if ui.is_item_hovered() {
-                    ui.tooltip_text(fl!("check-for-updates-tooltip"));
-                }
-                ui.same_line();
-                if ui.button(fl!("reload-data-sources")) {
-                    Controller::try_send(ControllerEvent::ReloadData);
-                }
-                if ui.is_item_hovered() {
-                    ui.tooltip_text(fl!("reload-data-sources-tooltip"));
-                }
-                ui.same_line();
-                if let Some(last_checked) = &settings.last_checked {
-                    let time_display = last_checked.format("%F %T %Z").to_string();
-                    ui.text(fl!("checked-for-updates-last", time = time_display));
+                ui.text(fl!("checked-for-updates-last", time = "Never"));
+            }
+            ui.dummy([8.0, 8.0]);
+            let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+            let table_token = ui.begin_table_header_with_flags(
+                "remotes",
+                [
+                    TableColumnSetup::new(fl!("remote")),
+                    TableColumnSetup::new(fl!("module")),
+                    TableColumnSetup::new(fl!("description")),
+                    TableColumnSetup::new(fl!("update-status")),
+                    TableColumnSetup::new(fl!("actions")),
+                ],
+                table_flags,
+            );
+            ui.table_next_column();
+            self.populated_generation = self.populated_generation.wrapping_add(1);
+            for download_data in &settings.remotes {
+                let source_id = download_data.datasource_name();
+                let source = download_data.source();
+                let pushy = ui.push_id(&source_id);
+                if let Some(source) = self.populated_sources.get_mut(&source_id[..]) {
+                    *source = (download_data.kind, self.populated_generation);
                 } else {
-                    ui.text(fl!("checked-for-updates-last", time = "Never"));
+                    self.populated_sources.insert(
+                        source_id.into_owned(),
+                        (download_data.kind, self.populated_generation),
+                    );
                 }
-                ui.dummy([8.0, 8.0]);
-                let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-                let table_token = ui.begin_table_header_with_flags(
-                    "remotes",
-                    [
-                        TableColumnSetup::new(fl!("remote")),
-                        TableColumnSetup::new(fl!("module")),
-                        TableColumnSetup::new(fl!("description")),
-                        TableColumnSetup::new(fl!("update-status")),
-                        TableColumnSetup::new(fl!("actions")),
-                    ],
-                    table_flags,
-                );
+                self.draw_remote(ui, download_data.kind, source);
                 ui.table_next_column();
-                for download_data in &settings.remotes {
-                    let source = download_data.source();
-                    let pushy = ui.push_id(&source.name());
-                    let display_name = source.display_name();
-                    let author = match source.get_metadata_str(MetadataKey::Author) {
-                        Some(author) if display_name.starts_with(&author[..]) => None,
-                        author => author,
-                    };
-                    ui.text_wrapped(display_name);
-                    if let Some(author) = author {
-                        ui.text("~");
-                        ui.same_line();
-                        ui.text_wrapped(author);
-                    }
-                    if source.has_metadata(MetadataKey::HomepageUrl) {
-                        let url = || {
-                            source
-                                .get_metadata_str(MetadataKey::HomepageUrl)
-                                .unwrap_or_default()
-                        };
-                        RenderState::draw_open_button(ui, fl!("open-button", kind = "homepage"), url, url);
-                    }
-                    ui.table_next_column();
-                    ui.text(format!("{}", download_data.kind));
-                    ui.table_next_column();
-                    if let Some(description) = source.get_metadata_str(MetadataKey::Description) {
-                        ui.text_wrapped(description);
-                    } else {
-                        ui.text_wrapped(fl!("no-description"));
-                    }
-                    ui.table_next_column();
-                    if let Some(installed) = &download_data.installed_tag {
-                        ui.text_wrapped(fl!("version-installed", version = installed));
-                    } else {
-                        ui.text_wrapped(fl!("version-not-installed"));
-                    }
-                    if download_data.installed_tag.is_some()
-                        || !matches!(download_data.needs_update, Unknown)
-                    {
-                        download_data.needs_update.draw(ui);
-                        if !matches!(download_data.needs_update, Known(false, ..)) {
-                            if ui.button(fl!("check-for-updates")) {
-                                Controller::try_send(ControllerEvent::CheckDataSourceUpdate {
-                                    kind: download_data.kind,
-                                    id: download_data.datasource_name().into_owned(),
-                                });
-                            }
-                        }
-                    }
-                    ui.table_next_column();
-                    use NeedsUpdate::*;
-                    let button_text = match &download_data.needs_update {
-                        Known(false, ..) => None,
-                        _ if download_data.installed_path.is_none() => Some(fl!("download")),
-                        Unknown | Error(..) => Some(fl!("attempt-update")),
-                        Known(true, _id) => Some(fl!("update")),
-                    };
-                    if let Some(button_text) = button_text {
-                        if ui.button(button_text) {
-                            Controller::try_send(ControllerEvent::DoDataSourceUpdate {
+                if let Some(installed) = &download_data.installed_tag {
+                    ui.text_wrapped(fl!("version-installed", version = installed));
+                } else {
+                    ui.text_wrapped(fl!("version-not-installed"));
+                }
+                if download_data.installed_tag.is_some() || !matches!(download_data.needs_update, Unknown) {
+                    download_data.needs_update.draw(ui);
+                    if !matches!(download_data.needs_update, Known(false, ..)) {
+                        if ui.button(fl!("check-for-updates")) {
+                            Controller::try_send(ControllerEvent::CheckDataSourceUpdate {
                                 kind: download_data.kind,
                                 id: download_data.datasource_name().into_owned(),
                             });
                         }
                     }
-                    if let Some(path) = &download_data.installed_path {
-                        RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), path);
-                        self.draw_uninstall(ui, download_data);
-                    }
-
-                    ui.table_next_column();
-                    pushy.pop();
                 }
-                drop(table_token);
+                ui.table_next_column();
+                use NeedsUpdate::*;
+                let button_text = match &download_data.needs_update {
+                    Known(false, ..) => None,
+                    _ if download_data.installed_path.is_none() => Some(fl!("download")),
+                    Unknown | Error(..) => Some(fl!("attempt-update")),
+                    Known(true, _id) => Some(fl!("update")),
+                };
+                if let Some(button_text) = button_text {
+                    if ui.button(button_text) {
+                        Controller::try_send(ControllerEvent::DoDataSourceUpdate {
+                            kind: download_data.kind,
+                            id: download_data.datasource_name().into_owned(),
+                        });
+                    }
+                }
+                if let Some(path) = &download_data.installed_path {
+                    RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), path);
+                    self.draw_uninstall(ui, download_data);
+                } else if download_data.datasource_repo.is_none() {
+                    if with_i18n!("remove", |remove| ui.button(remove)) {
+                        Controller::try_send(ControllerEvent::RemoveDataSource {
+                            kind: download_data.kind,
+                            id: download_data.datasource_name().into_owned(),
+                        });
+                    }
+                }
+
+                ui.table_next_column();
+                pushy.pop();
             }
+            table_token
         } else {
             ui.text(fl!("settings-unloaded"));
+            None
+        };
+
+        if let Some(table_token) = table_token {
+            let Ok(sources) = crate::SOURCES.try_read() else { return };
+            for (kind, source) in sources.iter() {
+                let source = source.as_source();
+                if self.populated_sources.get(&source.name()[..])
+                    == Some(&(kind, self.populated_generation))
+                {
+                    continue
+                }
+                let source_name = source.name();
+                let pushy = ui.push_id(&source_name);
+                self.draw_remote(ui, kind, source);
+                ui.table_next_column();
+
+                ui.text_wrapped(fl!("version-not-installed"));
+                ui.table_next_column();
+
+                if with_i18n!("download", |download| ui.button(download)) {
+                    Controller::try_send(ControllerEvent::DoDataSourceUpdate {
+                        kind,
+                        id: source_name.into_owned(),
+                    });
+                }
+                ui.table_next_column();
+                pushy.pop();
+            }
+            drop(table_token);
+        }
+        #[cfg(todo = "unnecessary")]
+        {
+            let populated_generation = self.populated_generation;
+            self.populated_sources
+                .retain(|(_, (_, generation))| generation == populated_generation);
+        }
+    }
+
+    fn draw_remote(&mut self, ui: &Ui, kind: SourceKind, source: &dyn Source) {
+        let display_name = source.display_name();
+        let author = match source.get_metadata_str(MetadataKey::Author) {
+            Some(author) if display_name.starts_with(&author[..]) => None,
+            author => author,
+        };
+        ui.text_wrapped(display_name);
+        if let Some(author) = author {
+            ui.text("~");
+            ui.same_line();
+            ui.text_wrapped(author);
+        }
+        if source.has_metadata(MetadataKey::HomepageUrl) {
+            let url = || {
+                source
+                    .get_metadata_str(MetadataKey::HomepageUrl)
+                    .unwrap_or_default()
+            };
+            RenderState::draw_open_button(ui, fl!("open-button", kind = "homepage"), url, url);
+        }
+        ui.table_next_column();
+        ui.text(format!("{}", kind));
+        ui.table_next_column();
+        if let Some(description) = source.get_metadata_str(MetadataKey::Description) {
+            ui.text_wrapped(description);
+        } else {
+            ui.text_wrapped(fl!("no-description"));
         }
     }
 }

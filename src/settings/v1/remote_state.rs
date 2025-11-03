@@ -74,6 +74,18 @@ impl RemoteState {
             .find(|s| s.kind == kind && s.datasource_name() == name)
     }
 
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self {
+                installed_tag: None,
+                installed_path: None,
+                needs_update: NeedsUpdate::Unknown,
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
     pub async fn load_timers(&self) -> Vec<Arc<TimerFile>> {
         let association = self.datasource_name();
         if let Some(path) = &self.installed_path {
@@ -118,11 +130,7 @@ impl RemoteState {
         Ok(())
     }
 
-    pub fn hardcoded_sources() -> Vec<(&'static str, &'static str, &'static str)> {
-        let hardcoded_sources = [("QuitarHero", "Hero-Timers", "The OG timer pack for BlishHUD!")];
-        hardcoded_sources.into()
-    }
-
+    #[cfg(todo = "unnecessary")]
     pub fn from_sources<S>(sources: S) -> Vec<Self>
     where
         S: IntoIterator<Item = (SourceKind, DeserializedSource)>,

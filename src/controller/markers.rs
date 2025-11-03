@@ -93,7 +93,7 @@ pub(crate) struct MarkersController {
 impl MarkersController {
     async fn load(&mut self, rt_sender: RtSender) -> anyhow::Result<()> {
         let markers_dir = crate::ADDON_DIR.join("markers");
-        if !exists(&markers_dir).expect("Can't check if directory exists") {
+        if !exists(&markers_dir).context("Can't check if directory exists")? {
             create_dir_all(&markers_dir).await?;
         }
         let markers = RuntimeMarkers::load_many(&markers_dir, 100).await?;
@@ -340,7 +340,11 @@ impl MarkersController {
     pub const KEY_INVOKE_DURATION: Duration = Duration::from_millis(50);
 
     pub async fn reload(&mut self, rt_sender: RtSender) {
-        self.load(rt_sender.clone()).await.expect("markers load failed");
+        let res = self.load(rt_sender.clone()).await.context("markers load failed");
+        if let Err(e) = res {
+            log::error!("{e:#}");
+            return
+        }
         let mut map_id_to_markers: HashMap<u32, HashSet<Arc<MarkerSet>>> = HashMap::new();
         let marker_sets: Vec<_> = self.markers.values().flatten().collect();
         for set in marker_sets {

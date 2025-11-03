@@ -6,7 +6,7 @@ use {
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
-        collections::HashMap,
+        collections::BTreeMap,
         fs::read_to_string as sync_read_to_string,
         path::{Path, PathBuf},
         sync::LazyLock,
@@ -18,7 +18,9 @@ use {
     },
 };
 
-#[derive(Clone, Copy, Deserialize, Display, Serialize, Hash, Debug, Default, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Deserialize, Display, Serialize, Hash, Debug, Default, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub enum SourceKind {
     #[default]
     Timers,
@@ -72,11 +74,12 @@ impl DeserializedSource {
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 #[serde(transparent)]
-pub struct SourcesFile(pub HashMap<SourceKind, Vec<DeserializedSource>>);
+pub struct SourcesFile(pub BTreeMap<SourceKind, Vec<DeserializedSource>>);
 pub static SOURCES_SRC: LazyLock<GitHubSource> =
     LazyLock::new(|| GitHubSource::new_empty("TaimiHUD".into(), "DataSources".into()));
 
 impl SourcesFile {
+    pub const EMPTY: Self = Self(BTreeMap::new());
     pub const STOCK_SOURCES_TOML: &'static str = include_str!("../../data/sources.toml");
     pub const FILENAME: &'static str = "sources.toml";
 
