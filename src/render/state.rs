@@ -60,7 +60,10 @@ pub enum RenderEvent {
     AlertReset(Arc<TimerFile>),
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
-    CheckingForUpdates(bool),
+    CheckingForUpdates {
+        checking: bool,
+        downloading: bool,
+    },
     #[allow(dead_code)]
     RenderKeybindUpdate,
     #[cfg(feature = "markers-edit")]
@@ -160,8 +163,10 @@ impl RenderState {
                     ProgressBarUpdate(settings) => {
                         self.timer_window.progress_bar = settings;
                     },
-                    CheckingForUpdates(checking_for_updates) => {
-                        self.primary_window.data_sources_tab.checking_for_updates = checking_for_updates;
+                    CheckingForUpdates { checking, downloading } => {
+                        let sources = &mut self.primary_window.data_sources_tab;
+                        sources.checking_for_updates = checking;
+                        sources.downloading_update = downloading;
                     },
                     TimerData(timers) => {
                         self.primary_window.timer_tab.timer_selection = None;

@@ -437,9 +437,20 @@ impl Controller {
         }
     }
 
-    async fn check_updates(&mut self, filter: Result<(SourceKind, String), bool>) {
+    fn check_updates(&mut self, filter: Result<(SourceKind, String), bool>) {
         let settings = self.settings.clone();
-        let _ = self.rt_sender.send(RenderEvent::CheckingForUpdates(true)).await;
+        let rt_sender = self.rt_sender.clone();
+        let _ = tokio::spawn(Self::check_for_updates(rt_sender, settings, filter));
+    }
+
+    async fn check_for_updates(
+        rt_sender: RtSender,
+        settings: SettingsLock,
+        filter: Result<(SourceKind, String), bool>,
+    ) {
+        let _ = rt_sender
+            .send(RenderEvent::CheckingForUpdates { checking: true, downloading: false })
+            .await;
         let res = Settings::check_for_updates(settings, move |remote| match filter {
             Ok((kind, ref name)) => remote.kind == kind && &remote.datasource_name() == name,
             Err(everything) => everything || remote.installed_path.is_some(),
@@ -450,7 +461,9 @@ impl Controller {
             Ok(_) => (),
             Err(err) => log::error!("{err:#}"),
         }
-        let _ = self.rt_sender.send(RenderEvent::CheckingForUpdates(false)).await;
+        let _ = rt_sender
+            .send(RenderEvent::CheckingForUpdates { checking: false, downloading: false })
+            .await;
     }
 
     async fn save_settings(&mut self) {
@@ -552,11 +565,15 @@ impl Controller {
     }
 
     fn spawn_source_update(&mut self, kind: SourceKind, id: String) {
+        let rt_sender = self.rt_sender.clone();
         let settings = self.settings.clone();
-        let _ = tokio::spawn(Self::do_update(settings, kind, id));
+        let _ = tokio::spawn(Self::do_update(rt_sender, settings, kind, id));
     }
 
-    async fn do_update(settings: SettingsLock, kind: SourceKind, id: String) {
+    async fn do_update(rt_sender: RtSender, settings: SettingsLock, kind: SourceKind, id: String) {
+        let _ = rt_sender
+            .send(RenderEvent::CheckingForUpdates { checking: true, downloading: true })
+            .await;
         let state = match RemoteState::lookup_datasource(&settings.read().await.remotes, kind, &id) {
             Some(state) => Some(state.clone()),
             None => Self::with_datasource(kind, &id, |source| {
@@ -574,6 +591,9 @@ impl Controller {
             Ok(_) => (),
             Err(err) => log::error!("{err:#}"),
         };
+        let _ = rt_sender
+            .send(RenderEvent::CheckingForUpdates { checking: false, downloading: false })
+            .await;
         match kind {
             SourceKind::Timers => TimersController::try_send(TimersEvent::ReloadTimers),
             SourceKind::Markers => MarkersController::try_send(MarkersEvent::ReloadMarkers),
@@ -673,8 +693,8 @@ impl Controller {
             OpenOpenable(key, uri) => self.open_openable(key, uri).await,
             UninstallAddon { kind, id } => self.uninstall_addon(kind, id).await,
             CombatEvent { src, evt } => self.handle_combat_event(src, evt).await,
-            CheckDataSourceUpdates(everything) => self.check_updates(Err(everything)).await,
-            CheckDataSourceUpdate { kind, id } => self.check_updates(Ok((kind, id))).await,
+            CheckDataSourceUpdates(everything) => self.check_updates(Err(everything)),
+            CheckDataSourceUpdate { kind, id } => self.check_updates(Ok((kind, id))),
             CheckUpdateSources => self.check_sources().await?,
             CheckAddonUpdate(proceed) => self.addon_check_for_updates(proceed).await,
             DoDataSourceUpdate { kind, id } => self.spawn_source_update(kind, id),

@@ -15,11 +15,15 @@ use {
 
 pub struct DataSourceTabState {
     pub checking_for_updates: bool,
+    pub downloading_update: bool,
 }
 
 impl DataSourceTabState {
     pub fn new() -> Self {
-        Self { checking_for_updates: false }
+        Self {
+            checking_for_updates: false,
+            downloading_update: false,
+        }
     }
 
     pub fn draw_uninstall(&self, ui: &Ui, rs: &RemoteState) {
@@ -65,7 +69,9 @@ impl DataSourceTabState {
 
     pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
         if let Some(settings) = Settings::try_read() {
-            if self.checking_for_updates {
+            if self.downloading_update {
+                ui.text(fl!("downloading-update"))
+            } else if self.checking_for_updates {
                 ui.text(fl!("checking-for-updates"))
             } else {
                 ui.text(fl!("intro-to-data-sources"));

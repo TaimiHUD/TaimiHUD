@@ -358,7 +358,7 @@ impl Settings {
             })
             .collect()
             .await;
-        {
+        let save = {
             let mut settings_write_lock = settings.write().await;
             for ((kind, name), latest) in updates {
                 let Some(state) =
@@ -371,9 +371,9 @@ impl Settings {
                 state.needs_update = nu;
             }
             settings_write_lock.last_checked = Some(Utc::now());
-            settings_write_lock.save().await?;
-        }
-        Ok(())
+            settings_write_lock.start_save().await?
+        };
+        Self::save_to(&save).await
     }
 
     pub fn new(addon_dir: &Path) -> Self {
