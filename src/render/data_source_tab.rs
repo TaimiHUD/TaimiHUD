@@ -1,12 +1,15 @@
 use {
     crate::{
         controller::ControllerEvent,
+        exports::runtime::{
+            self as rt,
+            imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},
+        },
         fl,
         render::RenderState,
         settings::{NeedsUpdate, RemoteState, Settings},
         Controller,
     },
-    nexus::imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},
     std::collections::HashMap,
 };
 
@@ -27,8 +30,8 @@ impl DataSourceTabState {
         }
         if ui.is_item_hovered() {
             if let Some(path) = &rs.installed_path {
-                let path_string = format!("{}", &path.display());
-                ui.tooltip_text(fl!("location", path = path_string));
+                let rel = rt::relative_path(path).display().to_string();
+                ui.tooltip_text(fl!("location", path = rel));
             }
         }
         if let Some(_token) = PopupModal::new(&modal_name)
@@ -144,20 +147,13 @@ impl DataSourceTabState {
                         }
                     }
                     RenderState::draw_open_button(
-                        state_errors,
                         ui,
                         fl!("open-button", kind = "repository"),
-                        source_url,
+                        || &source_url,
+                        &source_url,
                     );
                     if let Some(path) = &download_data.installed_path {
-                        if let Some(path) = path.to_str() {
-                            RenderState::draw_open_button(
-                                state_errors,
-                                ui,
-                                fl!("open-button", kind = "folder"),
-                                path,
-                            );
-                        }
+                        RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), path);
                         self.draw_uninstall(ui, download_data);
                     }
 

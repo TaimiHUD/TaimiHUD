@@ -35,6 +35,7 @@ use {
     std::{
         cell::Cell,
         collections::HashMap,
+        fmt::Display,
         path::{Path, PathBuf},
         sync::{Arc, MutexGuard},
     },
@@ -292,25 +293,27 @@ impl RenderState {
         Image::new(icon.id, size).build(ui);
         ui.same_line();
     }
-    pub fn draw_open_button<S: AsRef<str> + std::fmt::Display, O: Into<String> + std::fmt::Display>(
-        state_errors: &mut HashMap<String, anyhow::Error>,
-        ui: &Ui,
-        text: S,
-        openable: O,
-    ) {
-        let openable_display = openable.to_string();
-        let text_display = text.to_string();
-        let entry_name = fl!(
-            "open-error",
-            kind = text_display.clone(),
-            path = openable_display.clone()
-        );
+    pub fn draw_open_path_button<S: AsRef<str> + Display>(ui: &Ui, text: S, path: &Path) {
+        let human = rt::relative_path(path);
+        Self::draw_open_button(ui, text, || path.to_string_lossy(), human.display())
+    }
+    pub fn draw_open_button<S, O, TT>(ui: &Ui, text: S, openable: impl FnOnce() -> O, tooltip: TT)
+    where
+        S: AsRef<str> + Display,
+        O: Into<String> + Display,
+        TT: Display,
+    {
         if ui.button(&text) {
+            let openable = openable();
             log::debug!("Triggered open {openable} for {text}");
+            let openable_display = openable.to_string();
+            let text_display = text.to_string();
+            let entry_name = fl!("open-error", kind = text_display, path = openable_display);
             Controller::try_send(ControllerEvent::OpenOpenable(entry_name.clone(), openable.into()));
         }
         if ui.is_item_hovered() {
-            ui.tooltip_text(fl!("location", path = openable_display));
+            let tooltip = tooltip.to_string();
+            ui.tooltip_text(fl!("location", path = tooltip));
         }
     }
 

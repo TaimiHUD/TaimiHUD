@@ -11,6 +11,7 @@ use {
     rand::{rng, seq::SliceRandom},
     std::{
         borrow::Cow,
+        env,
         ffi::CStr,
         fs,
         mem,
@@ -19,6 +20,7 @@ use {
         ptr::{self, NonNull},
         sync::{
             atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
+            LazyLock,
             Mutex,
             Once,
             RwLock,
@@ -115,6 +117,19 @@ pub fn arcdps_available() -> bool {
         #[cfg(not(feature = "extension-arcdps"))]
         _ => false,
     }
+}
+
+pub(crate) static GAME_DIR: LazyLock<Option<PathBuf>> = LazyLock::new(|| env::current_dir().ok());
+
+pub fn relative_path(path: &Path) -> &Path {
+    match path.is_relative() {
+        true => None,
+        false => match *GAME_DIR {
+            Some(ref gamedir) => path.strip_prefix(gamedir).ok(),
+            None => None,
+        },
+    }
+    .unwrap_or(path)
 }
 
 pub fn try_addon_dir() -> RuntimeResult<PathBuf> {

@@ -51,12 +51,7 @@ impl TimerTabState {
     }
 
     fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        RenderState::draw_open_button(
-            state_errors,
-            ui,
-            fl!("open-button", kind = "ad-hoc folder"),
-            TIMERS_DIR.to_string_lossy(),
-        );
+        RenderState::draw_open_path_button(ui, fl!("open-button", kind = "ad-hoc folder"), &TIMERS_DIR);
         ui.same_line();
         if ui.button(fl!("reload-timers")) {
             TimersController::try_send(TimersEvent::ReloadTimers);

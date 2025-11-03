@@ -174,7 +174,6 @@ impl PathingWindowState {
         machine: &mut RenderMachine,
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
-        let mut state_errors = Default::default();
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
             open = settings.pathing_window_open;
@@ -185,11 +184,10 @@ impl PathingWindowState {
                 .opened(&mut open)
                 .build(ui, || {
                     let pathing_dir = crate::ADDON_DIR.join("pathing");
-                    RenderState::draw_open_button(
-                        &mut state_errors,
+                    RenderState::draw_open_path_button(
                         ui,
                         fl!("open-button", kind = "folder"),
-                        pathing_dir.to_string_lossy(),
+                        &pathing_dir,
                     );
                     let rendered_err = if let Some(Ok(engine)) = engine {
                         ui.same_line();
