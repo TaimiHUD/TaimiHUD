@@ -208,6 +208,9 @@ in {
         workflow_dispatch = {};
       };
       jobs = let
+        ifAll = concatMapStringsSep " && " (cond: "(${cond})");
+        ifAny = concatMapStringsSep " || " (cond: "(${cond})");
+        expr = e: "\${{ ${e} }}";
         step = {
           artifact-build = {
             order = 1100;
@@ -249,28 +252,72 @@ in {
           release-upload = {
             order = 1112;
             name = "release";
-            "if" = "startsWith(github.ref, 'refs/tags/v')";
+            "if" = condRelease;
             uses.path = "softprops/action-gh-release@v1";
             "with" = let
-              is_pre = "contains(${real_tag}, '-')";
-              nexus_tag = "${is_pre} && steps.artifact-parse.outputs.release-nexus-tag != ${real_tag} && steps.artifact-parse.outputs.release-nexus-tag";
-              real_tag = "github.ref_name";
               pre_name = "format('{0} ({1}-nexus)', ${real_tag}, ${nexus_tag})";
             in {
               files = release;
-              prerelease = "\${{ ${is_pre} }}";
-              tag_name = "\${{ ${nexus_tag} || ${real_tag} }}";
-              name = "\${{ ${nexus_tag} && ${pre_name} || ${real_tag} }}";
+              prerelease = expr is_pre;
+              tag_name = expr tag_name;
+              name = expr "${nexus_tag} && ${pre_name} || ${real_tag}";
               #target_commitish = channel branch?
             };
           };
+          release-describe = {
+            order = 1113;
+            name = "describe release tag";
+            "if" = condRelease;
+            run = "./ci/get-tag-description.sh";
+            env = {
+              #TAG_REF = expr "github.ref";
+              RELEASE_REF = expr "format('refs/tags/{0}', ${tag_name})";
+            };
+          };
+          release-notify = {
+            order = 1114;
+            name = "notify discord";
+            "if" = condRelease;
+            uses.path = "tsickert/discord-webhook@v5.3.0";
+            "with" = mapAttrs (_: expr) {
+              webhook-url = "secrets.WEBHOOK_URL";
+              embed-title = "steps.tag_message.outputs.TAG_SUBJECT";
+              embed-description = "steps.tag_message.outputs.TAG_BODY";
+              embed-url = "steps.tag_message.outputs.TAG_URL";
+            };
+          };
         };
+        condRelease = ifAll [
+          "github.event_name == 'push'"
+          "startsWith(github.ref, 'refs/tags/v')"
+        ];
+        condCheck = ifAny [
+          "github.event_name != 'pull_request'"
+          "github.event.pull_request.head.repo.fork"
+        ];
+        is_pre = "contains(${real_tag}, '-')";
+        nexus_tag = "${is_pre} && steps.artifact-parse.outputs.release-nexus-tag != ${real_tag} && steps.artifact-parse.outputs.release-nexus-tag";
+        real_tag = "github.ref_name";
+        tag_name = "${nexus_tag} || ${real_tag}";
         confDeploy = {
           name = "${config.name} build --release";
           "if" = let
             notPush = "github.event_name != 'push'";
-            pushAllowed = "github.event.ref == 'refs/heads/main' || github.event.ref == 'refs/heads/develop' || startsWith(github.event.ref, 'refs/heads/v') || startsWith(github.event.ref, 'refs/tags/')";
-          in "\${{ (${notPush} || (${pushAllowed})) && always() }}";
+            longLivedBranches = [
+              "develop"
+              "main"
+              "arc/dev"
+            ];
+            pushAllowed = ifAny (
+              [
+                "startsWith(github.event.ref, 'refs/heads/v')"
+                "startsWith(github.event.ref, 'refs/tags/')"
+              ]
+              ++ map (branch: "github.event.ref == 'refs/heads/${branch}'") longLivedBranches
+            );
+            allowed = ifAny [notPush pushAllowed];
+          in
+            expr (ifAll [allowed "!cancelled()"]);
           permissions = {
             contents = "write";
           };
@@ -278,7 +325,7 @@ in {
           needs = ["ci-check"];
         };
         confDuplicatePr = {
-          "if" = "github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork";
+          "if" = condCheck;
         };
         confCheck = _: {
           imports = [confDuplicatePr];
