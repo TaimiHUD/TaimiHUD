@@ -302,7 +302,13 @@ impl RenderState {
         Self::draw_open_button(
             ui,
             text,
-            || path.to_string_lossy(),
+            || {
+                match path.metadata() {
+                    Ok(m) if !m.is_dir() => path.parent().unwrap_or(path),
+                    _ => path,
+                }
+                .to_string_lossy()
+            },
             || rt::relative_path(path).display(),
         )
     }
