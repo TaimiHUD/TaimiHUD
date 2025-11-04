@@ -178,7 +178,8 @@ jobs:
         tag_name: ${{ contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
           != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag ||
           github.ref_name }}
-    - env:
+    - continue-on-error: true
+      env:
         RELEASE_REF: ${{ format('refs/tags/{0}', contains(github.ref_name, '-') &&
           steps.artifact-parse.outputs.release-nexus-tag != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag
           || github.ref_name) }}
@@ -186,14 +187,15 @@ jobs:
       if: (github.event_name == 'push') && (startsWith(github.ref, 'refs/tags/v'))
       name: describe release tag
       run: ./ci/get-tag-description.sh
-    - id: release-notify
+    - continue-on-error: true
+      id: release-notify
       if: (github.event_name == 'push') && (startsWith(github.ref, 'refs/tags/v'))
       name: notify discord
       uses: tsickert/discord-webhook@v5.3.0
       with:
-        embed-description: ${{ steps.tag_message.outputs.TAG_BODY }}
-        embed-title: ${{ steps.tag_message.outputs.TAG_SUBJECT }}
-        embed-url: ${{ steps.tag_message.outputs.TAG_URL }}
+        embed-description: ${{ steps.release-describe.outputs.TAG_BODY }}
+        embed-title: ${{ steps.release-describe.outputs.TAG_SUBJECT }}
+        embed-url: ${{ steps.release-describe.outputs.TAG_URL }}
         webhook-url: ${{ secrets.WEBHOOK_URL }}
 name: taimiHUD
 'on':

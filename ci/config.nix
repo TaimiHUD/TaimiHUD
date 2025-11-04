@@ -268,6 +268,7 @@ in {
             order = 1113;
             name = "describe release tag";
             "if" = condRelease;
+            continue-on-error = true;
             run = "./ci/get-tag-description.sh";
             env = {
               #TAG_REF = expr "github.ref";
@@ -278,12 +279,13 @@ in {
             order = 1114;
             name = "notify discord";
             "if" = condRelease;
+            continue-on-error = true;
             uses.path = "tsickert/discord-webhook@v5.3.0";
             "with" = mapAttrs (_: expr) {
               webhook-url = "secrets.WEBHOOK_URL";
-              embed-title = "steps.tag_message.outputs.TAG_SUBJECT";
-              embed-description = "steps.tag_message.outputs.TAG_BODY";
-              embed-url = "steps.tag_message.outputs.TAG_URL";
+              embed-title = "steps.release-describe.outputs.TAG_SUBJECT";
+              embed-description = "steps.release-describe.outputs.TAG_BODY";
+              embed-url = "steps.release-describe.outputs.TAG_URL";
             };
           };
         };
