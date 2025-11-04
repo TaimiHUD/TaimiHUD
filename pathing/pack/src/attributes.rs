@@ -368,7 +368,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("behavior") {
             self.taco_behavior = Some(value.parse::<i32>()?.try_into()?);
         } else if attr_name.eq_ignore_ascii_case("achievementid") {
-            self.achievement_id = Some(value.parse()?);
+            self.achievement_id = parse_opt(&value)?;
         } else if attr_name.eq_ignore_ascii_case("achievementbit") {
             self.achievement_bit = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("resetlength") {
@@ -434,6 +434,10 @@ pub fn parse_bool(value: &str) -> anyhow::Result<bool> {
             .map(|i| i != 0)
             .map_err(|_| anyhow!("unexpected bool `{value}`")),
     }
+}
+
+pub fn parse_opt<T: FromStr>(value: &str) -> Result<Option<T>, T::Err> {
+    opt_str(value).map(T::from_str).transpose()
 }
 
 fn opt_str(value: &str) -> Option<&str> {
