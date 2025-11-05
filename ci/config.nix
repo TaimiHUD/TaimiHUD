@@ -134,7 +134,10 @@ in {
     ci.gh-actions = {
       enable = true;
       export = true;
-      checkoutOptions.fetch-depth = 0;
+      checkoutOptions = mkIf (config.id == "release") {
+        fetch-depth = 0;
+        fetch-tags = true;
+      };
     };
     # TODO: add cachix
     cache.cachix.taimihud = {
@@ -239,11 +242,13 @@ in {
             order = 1111;
             name = "artifact parse";
             shell = "bash";
+            # note https://github.com/actions/checkout/issues/290
             run = ''
               NEXUS_TAG_NAME=$(cat ${artifactRoot}/${artifactShare.nexusTagName})
               echo "release-nexus-tag=$NEXUS_TAG_NAME" >> $GITHUB_OUTPUT
               if [[ -n $NEXUS_TAG_NAME && $NEXUS_TAG_NAME != "''${{ github.ref_name }}" ]]; then
                 git fetch origin "refs/tags/$NEXUS_TAG_NAME" || true
+                git fetch -f origin "refs/tags/''${{ github.ref_name }}" || true
                 git tag -f "$NEXUS_TAG_NAME" "''${{ github.ref }}" &&
                 git push -f origin "$NEXUS_TAG_NAME" || true
               fi

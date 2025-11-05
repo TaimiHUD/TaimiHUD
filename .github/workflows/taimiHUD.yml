@@ -12,7 +12,6 @@ jobs:
       name: git clone
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0
         submodules: true
     - id: nix-install
       name: nix install
@@ -92,6 +91,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        fetch-tags: true
         submodules: true
     - id: nix-install
       name: nix install
@@ -159,9 +159,9 @@ jobs:
       run: "NEXUS_TAG_NAME=$(cat .ci/artifacts/share/taimi/release.nexus.tag)\necho\
         \ \"release-nexus-tag=$NEXUS_TAG_NAME\" >> $GITHUB_OUTPUT\nif [[ -n $NEXUS_TAG_NAME\
         \ && $NEXUS_TAG_NAME != \"${{ github.ref_name }}\" ]]; then\n  git fetch origin\
-        \ \"refs/tags/$NEXUS_TAG_NAME\" || true\n  git tag -f \"$NEXUS_TAG_NAME\"\
-        \ \"${{ github.ref }}\" &&\n  git push -f origin \"$NEXUS_TAG_NAME\" || true\n\
-        fi\n"
+        \ \"refs/tags/$NEXUS_TAG_NAME\" || true\n  git fetch -f origin \"refs/tags/${{\
+        \ github.ref_name }}\" || true\n  git tag -f \"$NEXUS_TAG_NAME\" \"${{ github.ref\
+        \ }}\" &&\n  git push -f origin \"$NEXUS_TAG_NAME\" || true\nfi\n"
       shell: bash
     - id: release-upload
       if: (github.event_name == 'push') && (startsWith(github.ref, 'refs/tags/v'))
