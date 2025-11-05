@@ -4,7 +4,7 @@ members = [
   "pathing/pack",
   "pathing/meta",
   "rt/input",
-  "space/d3d",
+  "space/d3d", "api",
 ]
 
 [package]
@@ -337,3 +337,6 @@ bitflags = "2"
 arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
 arcdps_codegen = { git = "https://github.com/arcnmx/arcdps-rs" }
 evtc = { git = "https://github.com/arcnmx/arcdps-rs" }
+
+[patch.crates-io]
+gw2lib = { path = "/home/kat/src/gw2lib/http" }

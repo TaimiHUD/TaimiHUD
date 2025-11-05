@@ -41,8 +41,6 @@ use {
     },
 };
 
-mod generic;
-
 #[cfg(feature = "timers")]
 pub(crate) mod timers;
 
@@ -128,6 +126,7 @@ impl Controller {
             timers: Default::default(),
             markers: Default::default(),
             pathing: Default::default(),
+            api: Default::default(),
         }
     }
 

@@ -9,7 +9,7 @@ use {
         TimerSettings,
     },
     crate::{
-        controller::timers::ProgressBarStyleChange,
+        controller::{api::Gw2ApiKey, timers::ProgressBarStyleChange},
         exports::runtime::bindings::TaimiControls,
         settings::state::save_state_backup,
         SETTINGS,
@@ -135,6 +135,8 @@ impl fmt::Display for MarkerAutoPlaceSettings {
 #[derive(Deserialize, Serialize, TryMigrate, Default, Debug, Clone)]
 #[try_migrate(from = None)]
 pub struct Settings {
+    #[serde(default)]
+    pub api_key: Option<Gw2ApiKey>,
     #[serde(default)]
     pub last_checked: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -364,6 +366,7 @@ impl Settings {
 
     pub fn new(addon_dir: &Path) -> Self {
         Self {
+            api_key: None,
             last_checked: None,
             addon_dir: addon_dir.to_path_buf(),
             dirty: Arc::new(AtomicBool::new(false)),
