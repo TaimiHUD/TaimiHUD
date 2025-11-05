@@ -1,0 +1,36 @@
+[package]
+name = "taimi_api_client"
+authors = [ "kittywitch" ]
+description = "TaimiHUD GW2 API client"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+[[example]]
+name = "achievements"
+path = "src/bin/achievements.rs"
+
+[features]
+default = [
+  "reqwest",
+]
+reqwest = [
+  "dep:reqwest",
+  "dep:tokio",
+]
+
+[dependencies]
+anyhow = "1"
+gw2lib-model = "2"
+log = "0.4"
+serde = "1"
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["json"] }
+tokio = { version = "1", optional = true, default-features = false }
+
+[dev-dependencies]
+env_logger = "0.11"
+tokio-macros = { version = "2", features = [] }

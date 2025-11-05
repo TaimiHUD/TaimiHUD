@@ -1,12 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
+  "api/client",
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
   "rt/ffi",
   "rt/input",
   "rt/sync",
+  "space/d3d",
   "space/d3d",
 ]
 
@@ -57,8 +59,12 @@ statistics = [
 updates = [
   "dep:semver",
 ]
+api = [
+  "dep:taimi_api_client",
+]
 
 space = [
+  "api",
   "dep:itertools",
   "dep:tobj",
   "dep:bevy_ecs",
@@ -291,6 +297,7 @@ regex = "1"
 croner = "3"
 bitvec = { workspace = true }
 
+taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
@@ -354,3 +361,6 @@ bitflags = "2"
 arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
 arcdps_codegen = { git = "https://github.com/arcnmx/arcdps-rs" }
 evtc = { git = "https://github.com/arcnmx/arcdps-rs" }
+
+[patch.crates-io]
+gw2lib-model = { git = "https://github.com/greaka/gw2lib" }
