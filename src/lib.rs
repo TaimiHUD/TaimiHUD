@@ -715,7 +715,6 @@ fn load_language(detected_language: &str) -> rt::RuntimeResult {
 }
 
 pub const ADDON_DIR: rt::AddonDir = rt::AddonDir;
-pub static TIMERS_DIR: LazyLock<PathBuf> = LazyLock::new(|| ADDON_DIR.join("timers"));
 
 fn control_window(window: impl Into<String>, state: Option<bool>) {
     let window = window.into();

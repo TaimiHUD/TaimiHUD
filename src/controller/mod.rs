@@ -554,7 +554,7 @@ impl Controller {
         #[cfg(feature = "markers")]
         self.markers.reload(self.rt_sender.clone()).await;
         #[cfg(feature = "space")]
-        self.pathing.reload_all().await;
+        self.pathing.reload_all(self.settings.clone()).await;
     }
 
     pub fn with_datasource<R, F: FnOnce(&DeserializedSource) -> Option<R>>(

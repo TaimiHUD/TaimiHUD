@@ -1,6 +1,9 @@
 use {
-    crate::timer::{TimerPhase, TimerTrigger},
-    anyhow::anyhow,
+    crate::{
+        exports::runtime as rt,
+        timer::{TimerPhase, TimerTrigger},
+    },
+    anyhow::{anyhow, Context},
     glob::Paths,
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
@@ -48,69 +51,23 @@ impl TimerFile {
         Ok(glob::glob(path_glob_str)?)
     }
 
-    pub async fn load(path: &PathBuf, source_name: Option<String>) -> anyhow::Result<Arc<Self>> {
+    pub async fn load(path: &Path, source_name: Option<String>) -> anyhow::Result<Arc<Self>> {
         log::trace!("Attempting to load the timer file at \"{path:?}\".");
         let mut file_data = read_to_string(path).await?;
         json_strip_comments::strip(&mut file_data)?;
         let mut data: Self = serde_json::from_str(&file_data)?;
-        data.path = Some(path.to_path_buf());
+        data.path = Some(path.to_owned());
         data.association = source_name;
         log::trace!("Successfully loaded the timer file at \"{path:?}\".");
         Ok(Arc::new(data))
     }
 
-    /// TODO: why would we not just make [Self::load_many] accept an optional source?
-    pub async fn load_many_sourceless(
-        load_dir: &Path,
-        simultaneous_limit: usize,
-    ) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!(
-            "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
-        );
-        let mut set = JoinSet::new();
-        let semaphore = Arc::new(Semaphore::new(simultaneous_limit));
-        let mut paths = Self::get_paths(load_dir)?;
-        while let Some(path) = paths.next() {
-            let permit = semaphore.clone().acquire_owned().await?;
-            let path = path?.clone();
-            set.spawn(async move {
-                let timer_file = Self::load(&path, None).await?;
-                drop(permit);
-                Ok::<Arc<TimerFile>, anyhow::Error>(timer_file)
-            });
-        }
-        let mut timer_files = Vec::new();
-        let (mut join_errors, mut load_errors): (usize, usize) = (0, 0);
-        while let Some(timer_file) = set.join_next().await {
-            match timer_file {
-                Ok(res) => match res {
-                    Ok(timer_file) => {
-                        timer_files.push(timer_file);
-                    },
-                    Err(err) => {
-                        load_errors += 1;
-                        log::error!("Timer load_many error for {load_dir:?}: {err}");
-                    },
-                },
-                Err(err) => {
-                    join_errors += 1;
-                    log::error!("Timer load_many join error for {load_dir:?}: {err}");
-                },
-            }
-        }
-        log::debug!(
-            "Finished load_many for sourceless load, {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
-            timer_files.len()
-        );
-        Ok(timer_files)
-    }
-
     pub async fn load_many(
         load_dir: &Path,
-        source_name: &str,
+        source_name: Option<&str>,
         simultaneous_limit: usize,
     ) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!(
+        log::trace!(
             "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
         );
         let mut set = JoinSet::new();
@@ -118,10 +75,13 @@ impl TimerFile {
         let mut paths = Self::get_paths(load_dir)?;
         while let Some(path) = paths.next() {
             let permit = semaphore.clone().acquire_owned().await?;
-            let path = path?.clone();
-            let source_name = source_name.to_owned();
+            let source_name = source_name.map(ToOwned::to_owned);
             set.spawn(async move {
-                let timer_file = Self::load(&path, Some(source_name)).await?;
+                let path = path?;
+                let timer_file = Self::load(&path, source_name).await.with_context(|| {
+                    let path = rt::relative_path(&path);
+                    format!("loading timer {}", path.display())
+                })?;
                 drop(permit);
                 Ok::<Arc<TimerFile>, anyhow::Error>(timer_file)
             });
@@ -136,17 +96,17 @@ impl TimerFile {
                     },
                     Err(err) => {
                         load_errors += 1;
-                        log::error!("Timer load_many error for {load_dir:?}: {err}");
+                        log::error!("{err:#}");
                     },
                 },
                 Err(err) => {
                     join_errors += 1;
-                    log::error!("Timer load_many join error for {load_dir:?}: {err}");
+                    log::error!("Timer load_many join error for {}: {err}", load_dir.display());
                 },
             }
         }
-        log::debug!(
-            "Finished load_many for {source_name}, {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
+        log::trace!(
+            "Finished load_many for {source_name:?}, {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
             timer_files.len()
         );
         Ok(timer_files)

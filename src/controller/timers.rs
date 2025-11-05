@@ -1,16 +1,23 @@
 use {
     crate::{
         controller::{ControllerEvent, MapId, RtSender},
-        exports::runtime::bindings::{TaimiControls, CONTROLS},
+        exports::runtime::{
+            self as rt,
+            bindings::{TaimiControls, CONTROLS},
+        },
         render::{RenderEvent, TextFont},
         settings::{Settings, SettingsLock, SourceKind},
         timer::{CombatState, Position, TimerFile, TimerMachine},
-        TIMERS_DIR,
     },
-    std::{collections::HashMap, fs::exists, sync::Arc},
+    anyhow::Context,
+    futures::stream::StreamExt,
+    std::{collections::HashMap, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::UiState,
-    tokio::{fs::create_dir_all, sync::Mutex},
+    tokio::{
+        fs::{create_dir_all, metadata},
+        sync::Mutex,
+    },
 };
 
 #[derive(Default, Debug)]
@@ -49,34 +56,46 @@ impl TimersController {
     pub const TIMERS_NOTABLE_STATE: UiState = UiState::from_bits_retain(UiState::InCombat.bits());
 
     async fn load(&self, settings: SettingsLock) -> Vec<Arc<TimerFile>> {
-        let settings_lock = settings.read().await;
         let mut timers = Vec::new();
-        let states = settings_lock
-            .remotes
-            .iter()
-            .filter(|state| state.kind.is(SourceKind::Timers).unwrap_or(true));
-        for remote in states {
-            timers.extend(remote.load_timers().await);
+
+        let sources = Settings::read_source_dir(settings, SourceKind::Timers).await;
+        futures::pin_mut!(sources);
+        while let Some(source) = sources.next().await {
+            let source = source.context("Error encountered while loading timer sources");
+
+            let (path, source) = match source {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("{e:#}");
+                    continue
+                },
+            };
+
+            let res = match metadata(&path).await {
+                Ok(m) if m.is_file() => TimerFile::load(&path, source)
+                    .await
+                    .map(|loaded| timers.push(loaded)),
+                _ => TimerFile::load_many(&path, source.as_ref().map(AsRef::as_ref), 100)
+                    .await
+                    .map(|loaded| timers.extend(loaded)),
+            }
+            .with_context(|| {
+                let path = rt::relative_path(&path);
+                format!("Loading timers from {}", path.display())
+            });
+            match res {
+                Err(e) => log::error!("{e:#}"),
+                Ok(()) => (),
+            }
         }
-        drop(settings_lock);
-        let timers_len = timers.len();
-        log::trace!("Total loaded timers: {}", timers_len);
+        log::trace!("Total loaded timers: {}", timers.len());
         timers
     }
 
     pub(crate) async fn setup(&mut self, settings: SettingsLock, rt_sender: RtSender) {
         log::debug!("Preparing to setup timers");
+        let _ = create_dir_all(&SourceKind::Timers.get_user_dir()).await;
         self.timers = self.load(settings).await;
-        if exists(&*TIMERS_DIR).expect("oh no i cant access my own addon dir") {
-            let adhoc_timers = TimerFile::load_many_sourceless(&*TIMERS_DIR, 100)
-                .await
-                .expect("wah");
-            self.timers.extend(adhoc_timers);
-        } else {
-            create_dir_all(&*TIMERS_DIR)
-                .await
-                .expect("Can't create timers dir");
-        }
         for timer in &self.timers {
             if let Some(association) = &timer.association {
                 self.sources_to_timers.entry(association.clone()).or_default();

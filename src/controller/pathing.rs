@@ -3,12 +3,12 @@ use {
         controller::{Controller, ControllerEvent},
         exports::runtime::bindings::{GameControl, GameControls, TaimiControls, CONTROLS},
         render::machine::RenderTaskPriority,
-        settings::{Settings, SettingsLock},
+        settings::{Settings, SettingsLock, SourceKind},
         space::{engine::SpaceEvent, pack::LoaderBox, Engine},
     },
     anyhow::{anyhow, Context},
-    futures::FutureExt,
-    std::{fs::exists, path::PathBuf, sync::Arc},
+    futures::{FutureExt, StreamExt},
+    std::{path::PathBuf, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::MapContext,
     taimi_pack::Pack,
@@ -43,42 +43,47 @@ impl PathingController {
         drop(settings_lock);
     }
 
-    pub(crate) async fn reload_all(&self) {
+    pub(crate) async fn reload_all(&self, settings: SettingsLock) {
         self.unload_all().await;
-        self.load_all().await
+        let res = Self::load_all_inner(settings)
+            .await
+            .context("Reloading all paths");
+        if let Err(e) = res {
+            log::error!("{e:#}");
+        }
     }
-    async fn load_all(&self) {
-        let res = self.load_all_inner().await.context("Loading all paths");
+
+    async fn load_all(&self, settings: SettingsLock) {
+        let res = Self::load_all_inner(settings).await.context("Loading all paths");
         if let Err(e) = res {
             log::error!("{e}");
         }
     }
 
-    async fn load_all_inner(&self) -> anyhow::Result<()> {
-        use tokio::fs::read_dir;
-
-        let pathing_dir = crate::ADDON_DIR.join("pathing");
-        if !exists(&pathing_dir).unwrap_or(false) {
-            create_dir_all(&pathing_dir).await?;
-        }
+    async fn load_all_inner(settings: SettingsLock) -> anyhow::Result<()> {
+        let _ = create_dir_all(SourceKind::Pathing.get_user_dir());
 
         let mut path_loads = tokio::task::JoinSet::new();
 
         log::info!("Pre-loading all paths...");
-        let mut dir = read_dir(pathing_dir).await?;
-        loop {
-            let entry = match dir.next_entry().await {
-                Ok(Some(e)) => e,
-                Ok(None) => break,
+        let dir = Settings::read_source_dir(settings, SourceKind::Pathing).await;
+        futures::pin_mut!(dir);
+        while let Some(entry) = dir.next().await {
+            let (path, _source) = match entry {
+                Ok(e) => e,
                 Err(e) => {
                     log::error!("Failed to list pathing files: {e}");
                     continue
                 },
             };
-            let name = entry.file_name().to_string_lossy().into_owned();
+            // TODO: name could be source? what do we actually use that for, and is it meant to be user-facing or a unique id?
+            let name = path
+                .file_name()
+                .unwrap_or(path.as_ref())
+                .to_string_lossy()
+                .into_owned();
             let context = format!("Loading pathing pack {name}");
             log::debug!("{context}...");
-            let path = entry.path();
             let is_taco = path
                 .extension()
                 .map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
@@ -193,6 +198,12 @@ impl PathingController {
 
     async fn unload_all(&self) {
         log::info!("Unloading all paths...");
+        if let Err(e) = Self::unload_all_inner().await {
+            log::error!("{e:#}");
+        }
+    }
+
+    async fn unload_all_inner() -> anyhow::Result<()> {
         let context = "Unloading packs from engine";
         let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
             let engine = match &mut state.engine {
@@ -203,9 +214,9 @@ impl PathingController {
             Ok(())
         })
         .await;
-        let res = res.map(|res| res.context(context)).context(context);
-        if let Err(e) | Ok(Err(e)) = res {
-            log::error!("{e:#}");
+        match res.map(|res| res.context(context)).context(context) {
+            Err(e) => Err(e),
+            Ok(res) => res,
         }
     }
 
@@ -233,8 +244,8 @@ impl PathingController {
     pub(crate) async fn handle_event(&mut self, event: PathingEvent, settings: &SettingsLock) {
         use PathingEvent::*;
         match event {
-            ReloadAll => self.reload_all().await,
-            LoadAll => self.load_all().await,
+            ReloadAll => self.reload_all(settings.clone()).await,
+            LoadAll => self.load_all(settings.clone()).await,
             UnloadAll => self.unload_all().await,
             RequestDisabledPaths => self.provide_disabled_paths(settings.clone()).await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,

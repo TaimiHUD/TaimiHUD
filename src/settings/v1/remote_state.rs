@@ -2,11 +2,10 @@ use {
     crate::{
         exports::runtime as rt,
         settings::{source::Source, DeserializedSource, NeedsUpdate, SourceKind},
-        timer::TimerFile,
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{borrow::Cow, path::PathBuf, sync::Arc},
+    std::{borrow::Cow, path::PathBuf},
     tokio::fs::{remove_dir_all, remove_file, symlink_metadata},
 };
 
@@ -83,17 +82,6 @@ impl RemoteState {
                 ..
             } => true,
             _ => false,
-        }
-    }
-
-    pub async fn load_timers(&self) -> Vec<Arc<TimerFile>> {
-        let association = self.datasource_name();
-        if let Some(path) = &self.installed_path {
-            TimerFile::load_many(path, &association, 100)
-                .await
-                .expect("Could not load timer file for source {self.source}")
-        } else {
-            Default::default()
         }
     }
 

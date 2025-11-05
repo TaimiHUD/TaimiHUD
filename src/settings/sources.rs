@@ -46,6 +46,10 @@ impl SourceKind {
         };
         addon_dir.join(type_dir)
     }
+    /// Same as [self.get_unpack_dir()] for now
+    pub fn get_user_dir(&self) -> PathBuf {
+        self.get_unpack_dir()
+    }
 
     pub fn is(&self, kind: Self) -> Option<bool> {
         match *self {
@@ -226,6 +230,8 @@ impl RemoteAssetForm {
             SourceKind::Timers if is_ext("zip") => Some(Self::ZIP),
             SourceKind::Timers if is_tgz() => Some(Self::TAR_GZ),
             SourceKind::Timers if is_ext("tar") => Some(Self::TAR),
+            // TODO: would anyone do this, also what if there are more than one?
+            SourceKind::Timers if is_ext("bhtimer") => Some(Self::FILE),
             SourceKind::Markers if is_ext("json") || is_ext("markers") => Some(Self::FILE),
             // TODO: filter out manifest files or hashes etc?
             SourceKind::Unspecified => Some(Self::FILE),

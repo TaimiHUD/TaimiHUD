@@ -1,6 +1,7 @@
 use {
     crate::{
         render::RenderState,
+        settings::SourceKind,
         timer::{BlishVec3, Polytope, Position},
         ADDON_DIR,
         SETTINGS,
@@ -78,7 +79,7 @@ impl RuntimeMarkers {
     }*/
 
     pub async fn load_many(load_dir: &Path, simultaneous_limit: usize) -> anyhow::Result<Vec<Arc<Self>>> {
-        log::debug!(
+        log::trace!(
             "Beginning load_many for {load_dir:?} with a simultaneous open limit of {simultaneous_limit}."
         );
         let mut marker_files = Vec::new();
@@ -113,7 +114,7 @@ impl RuntimeMarkers {
                     },
                 }
             }
-            log::debug!(
+            log::trace!(
                 "Finished load_many for {load_dir:?}: {} succeeded, {join_errors} join errors, {load_errors} other errors.",
                 marker_files.len()
             );
@@ -278,9 +279,9 @@ impl RuntimeMarkers {
     }
 
     pub async fn create(path: &PathBuf, format: MarkerFiletype, ms: MarkerSet) -> anyhow::Result<()> {
-        let markers_dir = ADDON_DIR.join("markers");
+        let markers_dir = SourceKind::Markers.get_user_dir();
         if !exists(&markers_dir)? {
-            create_dir_all(&markers_dir).await?;
+            let _ = create_dir_all(&markers_dir).await;
         }
         let path = markers_dir.join(format!("{}.markers", path.display()));
         match format {

@@ -12,7 +12,7 @@ use {
         },
         marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, RuntimeMarkers},
         render::machine::RenderMachine,
-        settings::{MarkerAutoPlaceSettings, Settings, SettingsLock},
+        settings::{MarkerAutoPlaceSettings, Settings, SettingsLock, SourceKind},
         MumbleIdentityUpdate,
         RenderEvent,
         ACCOUNT_NAME_CELL,
@@ -24,7 +24,6 @@ use {
     rand::Rng,
     std::{
         collections::{HashMap, HashSet},
-        fs::exists,
         path::PathBuf,
         sync::Arc,
     },
@@ -92,10 +91,9 @@ pub(crate) struct MarkersController {
 
 impl MarkersController {
     async fn load(&mut self, rt_sender: RtSender) -> anyhow::Result<()> {
-        let markers_dir = crate::ADDON_DIR.join("markers");
-        if !exists(&markers_dir).context("Can't check if directory exists")? {
-            create_dir_all(&markers_dir).await?;
-        }
+        let markers_dir = SourceKind::Markers.get_user_dir();
+        let _ = create_dir_all(&markers_dir).await;
+        // TODO: update this to use Settings::read_source_dir()...
         let markers = RuntimeMarkers::load_many(&markers_dir, 100).await?;
         let markers = RuntimeMarkers::markers(markers).await;
         let _ = rt_sender.send(RenderEvent::MarkerData(markers.clone())).await;

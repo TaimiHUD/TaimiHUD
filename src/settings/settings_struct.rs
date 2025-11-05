@@ -1,5 +1,5 @@
 use {
-    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteState, SourcesFile, TimerSettings},
+    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteState, SourceKind, TimerSettings},
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
@@ -8,7 +8,7 @@ use {
     },
     anyhow::Context,
     chrono::{DateTime, Utc},
-    futures::stream::StreamExt,
+    futures::stream::{self, StreamExt},
     magic_migrate::TryMigrate,
     nexus::imgui::Ui,
     serde::{Deserialize, Serialize},
@@ -16,15 +16,18 @@ use {
         borrow::Cow,
         collections::{HashMap, HashSet},
         fmt::{self},
+        io,
+        mem::take,
         path::{Path, PathBuf},
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
         },
+        task::Poll,
     },
     strum_macros::EnumIter,
     tokio::{
-        fs::{create_dir_all, read_to_string, try_exists, File},
+        fs::{create_dir_all, read_dir, read_to_string, try_exists, File},
         io::AsyncWriteExt,
         sync::RwLock,
     },
@@ -374,6 +377,72 @@ impl Settings {
             settings_write_lock.start_save().await?
         };
         Self::save_to(&save).await
+    }
+
+    pub async fn read_source_dir(
+        settings: SettingsLock,
+        kind: SourceKind,
+    ) -> impl stream::Stream<Item = io::Result<(PathBuf, Option<String>)>> {
+        let path = kind.get_unpack_dir();
+        // TODO: just poll this inline, why bother prior to poll_next...
+        let mut dir = read_dir(&path).await.map_err(Some);
+
+        let root_relative = rt::relative_path(&path);
+        let mut source_paths: HashMap<PathBuf, String> = settings
+            .read_owned()
+            .await
+            .remotes
+            .iter()
+            .filter(|remote| remote.kind == kind)
+            .filter_map(|remote| {
+                remote.installed_path.as_ref().and_then(|installed| {
+                    let relative = if installed.is_relative() {
+                        installed.strip_prefix(root_relative)
+                    } else {
+                        installed.strip_prefix(&path)
+                    };
+                    #[cfg(todo)]
+                    if installed.parent().is_some() {
+                        // what, are we supposed to care about recursion?
+                        return None
+                    }
+                    relative
+                        .ok()
+                        .map(|rel| (rel.to_owned(), remote.datasource_name().into_owned()))
+                })
+            })
+            .collect();
+        // after iterating over all contents, we'll spit out any remaining sources
+        // (they may be installed outside of this dir, and that's okay!)
+        let mut external_sources = None;
+
+        stream::poll_fn(move |cx| {
+            let dir = match &mut dir {
+                Ok(dir) => dir,
+                Err(e) =>
+                    return match e.take() {
+                        Some(e) if e.kind() == io::ErrorKind::NotFound => Poll::Ready(None),
+                        Some(e) => Poll::Ready(Some(Err(e))),
+                        None => Poll::Ready(None),
+                    },
+            };
+            let entry = match dir.poll_next_entry(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Ok(None)) =>
+                    return Poll::Ready({
+                        let sources =
+                            external_sources.get_or_insert_with(|| take(&mut source_paths).into_iter());
+                        sources.next().map(|(path, source)| Ok((path, Some(source))))
+                    }),
+                Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
+                Poll::Ready(Ok(Some(entry))) => entry,
+            };
+            let path = entry.path();
+            let source = path
+                .file_name()
+                .and_then(|file_name| source_paths.remove(Path::new(&file_name)));
+            Poll::Ready(Some(Ok((path, source))))
+        })
     }
 
     pub fn new(addon_dir: &Path) -> Self {

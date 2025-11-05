@@ -4,9 +4,8 @@ use {
         controller::timers::{TimersController, TimersEvent},
         fl,
         render::RenderState,
-        settings::{Settings, TimerSettings},
+        settings::{Settings, SourceKind, TimerSettings},
         timer::TimerFile,
-        TIMERS_DIR,
     },
     glam::Vec2,
     indexmap::IndexMap,
@@ -51,7 +50,8 @@ impl TimerTabState {
     }
 
     fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
-        RenderState::draw_open_path_button(ui, fl!("open-button", kind = "ad-hoc folder"), &TIMERS_DIR);
+        let timers_dir = SourceKind::Timers.get_user_dir();
+        RenderState::draw_open_path_button(ui, fl!("open-button", kind = "ad-hoc folder"), &timers_dir);
         ui.same_line();
         if ui.button(fl!("reload-timers")) {
             TimersController::try_send(TimersEvent::ReloadTimers);
