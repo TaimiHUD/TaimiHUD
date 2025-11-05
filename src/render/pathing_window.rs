@@ -15,10 +15,13 @@ use {
     bitflags::bitflags,
     nexus::imgui::{
         ChildWindow,
+        Condition,
         Id,
         TableColumnFlags,
         TableColumnSetup,
         TableFlags,
+        TreeNode,
+        TreeNodeFlags,
         Ui,
         Window,
         WindowFlags,
@@ -297,7 +300,12 @@ impl PathingWindowState {
                                 );
                                 ui.table_next_column();
                                 for (name, reason) in &engine.packs.unloaded_packs {
-                                    ui.text(name);
+                                    let node = TreeNode::new(name)
+                                        .flags(TreeNodeFlags::SPAN_AVAIL_WIDTH)
+                                        .frame_padding(true)
+                                        .tree_push_on_open(false)
+                                        .leaf(true)
+                                        .push(ui);
                                     let hovered = ui.is_item_hovered();
                                     match reason {
                                         #[cfg(todo = "unused")]
@@ -305,20 +313,23 @@ impl PathingWindowState {
                                         UnloadedReason::UnknownFormat => {
                                             ui.same_line();
                                             with_i18n!("unknown", |msg| ui.text(msg));
-                                            if hovered || ui.is_item_hovered() {
+                                            if hovered {
                                                 ui.tooltip_text("taco zip or folder expected");
                                             }
                                         },
                                         UnloadedReason::LoadingFailed(reason) => {
                                             ui.same_line();
                                             with_i18n!("error", |msg| ui.text(msg));
-                                            if hovered || ui.is_item_hovered() {
+                                            if hovered {
                                                 ui.tooltip_text(reason);
                                             }
                                         },
                                     }
                                     ui.table_next_column();
                                     ui.table_next_column();
+                                    if let Some(node) = node {
+                                        node.pop()
+                                    }
                                 }
                                 for pack in engine.packs.loaded_packs.values_mut() {
                                     let mut recompute = false;
