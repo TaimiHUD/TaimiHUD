@@ -52,6 +52,7 @@ use {
 
 #[derive(Debug)]
 pub enum UnloadedReason {
+    #[cfg(todo = "unused")]
     Disabled,
     UnknownFormat,
     LoadingFailed(String),
@@ -287,16 +288,15 @@ impl ActivePack {
                 {
                     unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
                 }
-                unbuilt = unbuilt
-                    .frame_padding(true)
-                    .tree_push_on_open(false)
-                    .opened(open_items.contains(&category.full_id), Condition::Always);
+                unbuilt = unbuilt.frame_padding(true).tree_push_on_open(false);
                 if category.is_separator {
                     unbuilt = unbuilt.leaf(true);
                 } else if category.sub_categories.is_empty() {
                     unbuilt = unbuilt.bullet(true);
                 } else {
-                    unbuilt = unbuilt.framed(true);
+                    unbuilt = unbuilt
+                        .framed(true)
+                        .opened(open_items.contains(&category.full_id), Condition::Always);
                 }
                 let tree_token = unbuilt.push(ui);
                 if ui.is_item_hovered() && Self::category_has_tooltip(category) {
@@ -366,7 +366,10 @@ impl ActivePack {
                     }
                 }
                 let mut internal_closure = || {
-                    if !open_items.contains(&category.full_id) {
+                    if !open_items.contains(&category.full_id)
+                        && !category.is_separator
+                        && !category.sub_categories.is_empty()
+                    {
                         open_items.insert(category.full_id.clone());
                     }
                     if !category.sub_categories.is_empty() {
@@ -971,6 +974,10 @@ impl PackCollection {
         self.mark_buffers_dirty();
 
         Ok(())
+    }
+
+    pub fn load_failed(&mut self, name: String, reason: UnloadedReason) {
+        self.unloaded_packs.insert(name, reason);
     }
 
     fn build_active_pack(

@@ -14,7 +14,7 @@ pub(crate) mod pack;
 pub use {
     self::{
         festivals::FestivalFixup,
-        pack::{ActivePack, LoaderBox, PackCollection},
+        pack::{ActivePack, LoaderBox, PackCollection, UnloadedReason},
         poi::PoiScale,
         trail::{TrailScale, TrailTextureMap},
     },

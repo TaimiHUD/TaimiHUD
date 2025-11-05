@@ -4,7 +4,11 @@ use {
         exports::runtime::bindings::{GameControl, GameControls, TaimiControls, CONTROLS},
         render::machine::RenderTaskPriority,
         settings::{Settings, SettingsLock, SourceKind},
-        space::{engine::SpaceEvent, pack::LoaderBox, Engine},
+        space::{
+            engine::SpaceEvent,
+            pack::{LoaderBox, UnloadedReason},
+            Engine,
+        },
     },
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
@@ -104,7 +108,14 @@ impl PathingController {
                         Self::pathing_load_pack(pack, loader, name).await;
                         Ok(())
                     },
-                    Err(e) | Ok(Err(e)) => Err(e),
+                    Err(e) | Ok(Err(e)) => {
+                        Self::pathing_notify_pack_error(
+                            name,
+                            UnloadedReason::LoadingFailed(format!("{e:#}")),
+                        )
+                        .await;
+                        Err(e)
+                    },
                 }
             };
             path_loads.spawn(loader);
@@ -194,6 +205,16 @@ impl PathingController {
         if let Err(e) | Ok(Err(e)) = res {
             log::error!("{e:#}");
         }
+    }
+    async fn pathing_notify_pack_error(name: String, reason: UnloadedReason) {
+        let _ = Controller::run_render(RenderTaskPriority::Normal, move |state| {
+            let engine = match &mut state.engine {
+                Some(Ok(e)) => e,
+                _ => return,
+            };
+            engine.packs.load_failed(name, reason);
+        })
+        .await;
     }
 
     async fn unload_all(&self) {

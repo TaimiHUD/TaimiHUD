@@ -4,7 +4,10 @@ use {
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
         settings::Settings,
-        space::{engine::Engine, pack::ActivePack},
+        space::{
+            engine::Engine,
+            pack::{ActivePack, UnloadedReason},
+        },
         with_i18n,
         Controller,
         ControllerEvent,
@@ -190,27 +193,30 @@ impl PathingWindowState {
                         &pathing_dir,
                     );
                     let rendered_err = if let Some(Ok(engine)) = engine {
-                        ui.same_line();
-                        let button_text = match self.filter_open {
-                            true => fl!("hide-filter"),
-                            false => fl!("show-filter"),
-                        };
-                        if ui.button(button_text) {
-                            self.filter_open = !self.filter_open;
-                        }
-                        ui.same_line();
-                        if ui.button(&fl!("expand-all")) {
-                            for pack in engine.packs.loaded_packs.values() {
-                                let all_categories = &pack.pack.categories.all_categories;
-                                self.open_items
-                                    .extend(all_categories.values().map(|x| x.full_id.clone()));
+                        if !engine.packs.loaded_packs.is_empty() {
+                            ui.same_line();
+                            let button_text = match self.filter_open {
+                                true => fl!("hide-filter"),
+                                false => fl!("show-filter"),
+                            };
+                            if ui.button(button_text) {
+                                self.filter_open = !self.filter_open;
+                            }
+
+                            ui.same_line();
+                            if ui.button(&fl!("expand-all")) {
+                                for pack in engine.packs.loaded_packs.values() {
+                                    let all_categories = &pack.pack.categories.all_categories;
+                                    self.open_items
+                                        .extend(all_categories.values().map(|x| x.full_id.clone()));
+                                }
                             }
                         }
-                        ui.same_line();
-                        if ui.button(&fl!("collapse-all")) {
-                            self.open_items.clear();
-                            ui.separator();
-                            ui.dummy([4.0; 2]);
+                        if !self.open_items.is_empty() {
+                            ui.same_line();
+                            if ui.button(&fl!("collapse-all")) {
+                                self.open_items.clear();
+                            }
                         }
                         ui.same_line();
                         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
@@ -290,6 +296,30 @@ impl PathingWindowState {
                                     table_flags,
                                 );
                                 ui.table_next_column();
+                                for (name, reason) in &engine.packs.unloaded_packs {
+                                    ui.text(name);
+                                    let hovered = ui.is_item_hovered();
+                                    match reason {
+                                        #[cfg(todo = "unused")]
+                                        UnloadedReason::Disabled => compile_error!("TODO"),
+                                        UnloadedReason::UnknownFormat => {
+                                            ui.same_line();
+                                            with_i18n!("unknown", |msg| ui.text(msg));
+                                            if hovered || ui.is_item_hovered() {
+                                                ui.tooltip_text("taco zip or folder expected");
+                                            }
+                                        },
+                                        UnloadedReason::LoadingFailed(reason) => {
+                                            ui.same_line();
+                                            with_i18n!("error", |msg| ui.text(msg));
+                                            if hovered || ui.is_item_hovered() {
+                                                ui.tooltip_text(reason);
+                                            }
+                                        },
+                                    }
+                                    ui.table_next_column();
+                                    ui.table_next_column();
+                                }
                                 for pack in engine.packs.loaded_packs.values_mut() {
                                     let mut recompute = false;
                                     pack.draw_categories(
@@ -306,13 +336,23 @@ impl PathingWindowState {
                                 if let Some(token) = table_token {
                                     token.end();
                                 }
+                                if engine.packs.loaded_packs.is_empty() {
+                                    {
+                                        let _font = RenderState::push_font("big", ui);
+                                        with_i18n!("packs-empty", |msg| ui.text(msg));
+                                    }
+                                    {
+                                        let _font = RenderState::push_font("ui", ui);
+                                        with_i18n!("packs-empty-notice", |notice| ui.text_wrapped(notice));
+                                    }
+                                }
                             });
                         None
                     } else {
-                        engine.map(|e| e.as_ref().err())
+                        Some(engine.map(|e| e.as_ref().err()))
                     };
                     if let Some(e) = rendered_err {
-                        PathingConfig::draw_space_error(ui, machine, e);
+                        PathingConfig::draw_space_error(ui, machine, e.flatten());
                     }
                 });
         }
