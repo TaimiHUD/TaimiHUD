@@ -321,7 +321,7 @@ render-notice-gameplay = Load in to the game to get started
 render-notice-gameplay-initial = Select a character to get started
 render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 packs-empty = No supported files loaded
-packs-empty-notice = Once installed from the Datasources tab or downloaded manually, the "Reload" button should pick them up!
+packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "Reload" button should pick them up!
 
 ## Festivals
 
