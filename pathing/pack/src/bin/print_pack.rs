@@ -24,10 +24,12 @@ fn main() -> anyhow::Result<()> {
     let pack = Pack::load_strict(&mut loader, true)?;
 
     eprintln!(
-        "loaded pack {} with {} trails and {} pois",
+        "loaded pack {} with {} trails and {} pois ({} categories with {} root)",
         pack.name,
         pack.trails.len(),
-        pack.pois.len()
+        pack.pois.len(),
+        pack.categories.all_categories.len(),
+        pack.categories.root_categories.len(),
     );
 
     Ok(())

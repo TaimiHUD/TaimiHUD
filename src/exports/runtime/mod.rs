@@ -19,7 +19,7 @@ use {
         path::{Path, PathBuf},
         ptr::{self, NonNull},
         sync::{
-            atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
+            atomic::{AtomicU8, AtomicI32, AtomicPtr, Ordering},
             LazyLock,
             Mutex,
             Once,
@@ -33,6 +33,7 @@ use {
     },
 };
 
+use crate::Interruption;
 #[cfg(feature = "texture-loader")]
 use crate::TEXTURES;
 
@@ -41,6 +42,7 @@ pub mod alert;
 pub mod allocator;
 pub mod bindings;
 pub mod keyboard;
+pub mod locator;
 pub mod log;
 pub mod mouse;
 pub mod statistics;
@@ -56,6 +58,7 @@ pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
 pub use {
     self::{
         alert::send_alert,
+        locator::Locator,
         mouse::MousePosition,
         statistics::Counter,
         textures::TextureLoader,
@@ -121,6 +124,13 @@ pub fn arcdps_available() -> bool {
 
 pub(crate) static GAME_DIR: LazyLock<Option<PathBuf>> = LazyLock::new(|| env::current_dir().ok());
 
+#[inline]
+pub const fn new_path_const(path: &str) -> &Path {
+    unsafe {
+        mem::transmute(path.as_bytes())
+    }
+}
+
 pub fn relative_path(path: &Path) -> &Path {
     match path.is_relative() {
         true => None,
@@ -146,8 +156,9 @@ pub fn try_addon_dir() -> RuntimeResult<PathBuf> {
     Err(RT_UNAVAILABLE)
 }
 
-pub fn addon_dir_fallback() -> &'static Path {
-    Path::new("addons/Taimi")
+#[inline]
+pub const fn addon_dir_fallback() -> &'static Path {
+    new_path_const("addons/Taimi")
 }
 
 pub(crate) static ADDON_DIR: RwLock<Option<&'static Path>> = RwLock::new(None);
@@ -361,12 +372,15 @@ pub fn is_ingame() -> RuntimeResult<bool> {
     Err(RT_UNAVAILABLE)
 }
 
-static EXIT: AtomicBool = AtomicBool::new(false);
-pub fn is_shutdown() -> bool {
-    EXIT.load(Ordering::Relaxed)
+static EXIT: AtomicU8 = AtomicU8::new(Interruption::NONE);
+pub fn is_shutdown() -> Option<Interruption> {
+    let reason = EXIT.load(Ordering::Relaxed);
+    unsafe {
+        Interruption::from_repr_unchecked(reason)
+    }
 }
-pub fn notify_shutdown() {
-    EXIT.store(true, Ordering::Relaxed);
+pub fn notify_shutdown(reason: Interruption) {
+    EXIT.store(reason.into(), Ordering::Relaxed);
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {

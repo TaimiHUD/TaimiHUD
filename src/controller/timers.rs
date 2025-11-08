@@ -1,5 +1,5 @@
 use {
-    crate::{
+    super::Controller, crate::{
         controller::{ControllerEvent, MapId, RtSender},
         exports::runtime::{
             self as rt,
@@ -8,16 +8,10 @@ use {
         render::{RenderEvent, TextFont},
         settings::{Settings, SettingsLock, SourceKind},
         timer::{CombatState, Position, TimerFile, TimerMachine},
-    },
-    anyhow::Context,
-    futures::stream::StreamExt,
-    std::{collections::HashMap, sync::Arc},
-    strum_macros::Display,
-    taimi_meta::ui::UiState,
-    tokio::{
+    }, anyhow::Context, futures::stream::StreamExt, std::{collections::HashMap, sync::Arc}, strum_macros::Display, taimi_meta::ui::UiState, tokio::{
         fs::{create_dir_all, metadata},
         sync::Mutex,
-    },
+    }
 };
 
 #[derive(Default, Debug)]
@@ -293,6 +287,16 @@ impl TimersController {
         }
     }
 
+    pub(crate) async fn handle_loading_screen(&mut self) {
+        self.reset().await;
+        /*
+        for timer in &mut self.current_timers {
+            timer.cleanup().await;
+        }
+        self.current_timers.clear();
+        */
+    }
+
     pub(crate) async fn handle_combat_event(&mut self, cbt: CombatState) {
         for machine in &mut self.current_timers {
             machine.set_combat_state(cbt);
@@ -318,11 +322,8 @@ impl TimersController {
     }
 
     pub fn try_send(e: TimersEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        let full_e = ControllerEvent::Timers(e);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(full_e);
-        }
+        Controller::with_sender(|sender|
+            sender.timers_try_send(e)
+        );
     }
 }

@@ -144,7 +144,7 @@ pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::k
 mod hotload {
     use {
         super::ExtrasCallbackFns,
-        crate::exports::runtime as rt,
+        crate::{exports::runtime as rt, Interruption},
         anyhow::{anyhow, Context},
         closure_ffi::{
             cc::CUnwind as C,
@@ -175,16 +175,16 @@ mod hotload {
 
         callbacks.leak_unload();
 
-        if !rt::is_shutdown() {
+        if let Some(Interruption::GameQuit) = rt::is_shutdown() {
+            // game quitting, don't bother
+            JIT.leak();
+        } else {
             log::debug!("leaking JIT allocations");
             let res = JIT.abandon().context("Failed to leave extras");
             if let Err(e) = &res {
                 log::warn!("{e:#}");
             }
-        } else {
-            // game quitting, don't bother
-            JIT.leak();
-        };
+        }
     }
 
     pub fn can_reclaim() -> bool {

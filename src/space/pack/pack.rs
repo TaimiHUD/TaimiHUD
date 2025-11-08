@@ -4,7 +4,9 @@ use {
         trail::{ActiveTrail, TrailParams},
     },
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::pathing::{
+            registry::{CategoryIndex, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex}, visible::VisibilityFlags, MapPackInfo, PathingController, PathingEvent, festivals::Festivals,
+        },
         exports::runtime::{
             self as rt,
             imgui::{self, Condition, TreeNode, Ui},
@@ -17,7 +19,7 @@ use {
         },
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{FestivalFixup, MarkerAttributesExt, Pack},
+            pack::{MarkerAttributesExt, Pack},
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
@@ -31,7 +33,7 @@ use {
     glamour::Box3,
     indexmap::IndexMap,
     std::{
-        collections::{BTreeMap, BTreeSet, HashSet},
+        collections::{BTreeSet, HashSet},
         fs::{create_dir_all, read_dir},
         mem,
         path::Path,
@@ -42,7 +44,7 @@ use {
     },
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
     taimi_pack::{
-        attributes::{Festival, MarkerAttributes},
+        attributes::MarkerAttributes,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category,
         Poi,
@@ -50,37 +52,32 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Debug)]
-pub enum UnloadedReason {
-    #[cfg(todo = "unused")]
-    Disabled,
-    UnknownFormat,
-    LoadingFailed(String),
-}
-
-pub type LoaderBox = Box<dyn PackLoaderContext + Send + 'static>;
-
 pub struct ActivePack {
+    #[cfg(deleteme)]
     pub pack: Arc<Pack>,
+    #[cfg(deleteme)]
     loader: LoaderBox,
 
     // Actively loaded data.
+    #[cfg(deleteme)]
     pub enabled_categories: BitVec,
+    #[cfg(deleteme)]
     pub user_category_state: BitVec,
-    pub active_trails: IndexMap<Uuid, ActiveTrail>,
-    pub active_pois: IndexMap<Uuid, ActivePoi>,
+    pub active_trails: Vec<ActiveTrail>,
+    pub active_pois: Vec<ActivePoi>,
     // UI and filter state
+    #[cfg(deleteme)]
     pub available_categories: BitVec,
-    pub copyable_categories: BTreeSet<usize>,
-    pub copyable_pois: BTreeSet<usize>,
+    #[cfg(deleteme)]
+    pub copyable_categories: BTreeSet<CategoryIndex>,
+    #[cfg(deleteme)]
+    pub copyable_pois: BTreeSet<PoiIndex>,
 
     // Internal rendering data.
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
     loaded_textures: BitVec,
     unused_textures: BitVec,
-    dirty_trails: BitVec,
-    dirty_pois: BitVec,
-    render_list_bookmark: Option<usize>,
+    pub render_list_bookmark: Option<usize>,
     render_poi_bookmark: usize,
     poi_bookmark: usize,
     // TODO: Scripting.
@@ -88,46 +85,53 @@ pub struct ActivePack {
 }
 
 impl ActivePack {
-    pub fn new(pack: Arc<Pack>, loader: LoaderBox) -> Self {
-        let enabled_categories: BitVec = pack
-            .categories
-            .all_categories
-            .values()
-            .map(|category| category.default_toggle)
-            .collect();
+    pub fn new<C>(enabled_categories: C) -> Self where
+        C: IntoIterator<Item = bool>,
+    {
+        let enabled_categories: BitVec = BitVec::from_iter(enabled_categories);
 
         ActivePack {
-            loader,
-            pack,
+            #[cfg(deleteme)]
             user_category_state: enabled_categories.clone(),
+            #[cfg(deleteme)]
             enabled_categories,
             active_pois: Default::default(),
             active_trails: Default::default(),
             texture_list: Default::default(),
+            #[cfg(deleteme)]
             available_categories: Default::default(),
+            #[cfg(deleteme)]
             copyable_categories: Default::default(),
+            #[cfg(deleteme)]
             copyable_pois: Default::default(),
             loaded_textures: Default::default(),
             unused_textures: Default::default(),
-            dirty_pois: Default::default(),
-            dirty_trails: Default::default(),
             render_list_bookmark: Default::default(),
             render_poi_bookmark: Default::default(),
             poi_bookmark: Default::default(),
         }
     }
 
+    #[cfg(deleteme)]
+    pub fn init_enabled_categories<C>(&mut self, enabled_categories: C) where
+        C: IntoIterator<Item = bool>,
+    {
+        self.enabled_categories = BitVec::from_iter(enabled_categories);
+        self.user_category_state = self.enabled_categories.clone();
+    }
+
+    #[cfg(deleteme)]
     pub fn load(loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
         let mut loader = Box::new(loader);
         let pack = Pack::load(&mut *loader)?;
         Ok(Self::new(Arc::new(pack), loader))
     }
 
-    pub fn get_copyable_pois(&self) -> Vec<Poi> {
+    pub fn get_copyable_pois(&self, pack: &Pack, info: &MapPackInfo) -> Vec<Poi> {
         let mut current_pois = Vec::new();
-        for (_, poi) in &self.active_pois {
-            if !poi.filtered {
-                let actual_poi = &self.pack.pois[poi.poi_idx];
+        for (poi_idx, poi) in info.pois().zip(self.active_pois.iter()) {
+            if poi.visibility.is_visible() {
+                let actual_poi = &pack.pois[poi_idx.path as usize];
                 if actual_poi.attributes.copy_value.is_some() {
                     let actual_poi = actual_poi.clone();
                     current_pois.push(actual_poi);
@@ -137,9 +141,11 @@ impl ActivePack {
         current_pois
     }
 
+    #[cfg(deleteme)]
     pub fn draw_categories(
         &mut self,
         ui: &Ui,
+        pack: &Pack,
         filter_state: PathingFilterState,
         open_items: &mut HashSet<String>,
         recompute: &mut bool,
@@ -148,15 +154,15 @@ impl ActivePack {
         let map_filter = match filter_state.contains(PathingFilterState::CurrentMap) {
             true => {
                 if self.available_categories.is_empty() {
-                    self.update_available_categories();
+                    self.update_available_categories(pack);
                 }
                 Some(&self.available_categories)
             },
             false => None,
         };
-        let root = &self.pack.categories.root_categories;
+        let root = &pack.categories.root_categories;
         let is_root = true;
-        let all_categories = &self.pack.categories.all_categories;
+        let all_categories = &pack.categories.all_categories;
         let enabled_categories = &mut self.user_category_state;
         for cat_name in root.iter() {
             Self::draw_category(
@@ -170,14 +176,15 @@ impl ActivePack {
                 recompute,
                 search_state,
                 map_filter,
-                (&self.copyable_categories, &self.copyable_pois, &self.pack.pois),
+                (&self.copyable_categories, &self.copyable_pois, &pack.pois),
             );
         }
     }
 
     /// All categories relevant to the current map
-    pub fn update_available_categories(&mut self) {
-        let category_count = self.pack.categories.all_categories.len();
+    #[cfg(deleteme)]
+    pub fn update_available_categories(&mut self, pack: &Pack) {
+        let category_count = pack.categories.all_categories.len();
         let available = &mut self.available_categories;
         available.clear();
         available.reserve(category_count);
@@ -185,23 +192,29 @@ impl ActivePack {
         unsafe {
             available.set_len(category_count);
         }
-        for trail in self.active_trails.values() {
-            available.set(trail.category_idx, true);
+        for trail in &self.active_trails {
+            if trail.category_idx as usize >= category_count {
+                continue
+            }
+            available.set(trail.category_idx as usize, true);
         }
-        for poi in self.active_pois.values() {
-            available.set(poi.category_idx, true);
+        for poi in &self.active_pois {
+            if poi.category_idx as usize >= category_count {
+                continue
+            }
+            available.set(poi.category_idx as usize, true);
         }
         let leaves = available.clone();
         'leafies: for leaf in leaves.iter_ones() {
             // a real tree would probably make this more sane,
             // but it's run once per map so who cares really...
-            let Some((_, category)) = self.pack.categories.all_categories.get_index(leaf) else {
+            let Some((_, category)) = pack.categories.all_categories.get_index(leaf) else {
                 continue 'leafies
             };
             let seps = category.full_id.rmatch_indices(".");
             'parents: for (idx, _) in seps {
                 if let Some(parent) = category.full_id.get(..idx) {
-                    if let Some(parent_idx) = self.pack.categories.all_categories.get_index_of(parent) {
+                    if let Some(parent_idx) = pack.categories.all_categories.get_index_of(parent) {
                         if available[parent_idx] {
                             // we've already been here before
                             break 'parents
@@ -213,6 +226,7 @@ impl ActivePack {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn draw_category(
         ui: &Ui,
         category: &Category,
@@ -224,7 +238,7 @@ impl ActivePack {
         recompute: &mut bool,
         search_state: &PathingSearchState,
         category_filter: Option<&BitVec>,
-        copyable: (&BTreeSet<usize>, &BTreeSet<usize>, &[Poi]),
+        copyable: (&BTreeSet<CategoryIndex>, &BTreeSet<PoiIndex>, &[Poi]),
     ) {
         let push_token = ui.push_id(&category.full_id);
         if category.is_hidden {
@@ -278,7 +292,7 @@ impl ActivePack {
             } else {
                 let (copyable_categories, copyable_pois, pois) = copyable;
                 let has_copyable_pois = category_idx
-                    .map(|idx| copyable_categories.contains(&idx))
+                    .map(|idx| copyable_categories.contains(&(idx as CategoryIndex)))
                     .unwrap_or(false);
 
                 let mut unbuilt = TreeNode::new(&category.display_name);
@@ -323,7 +337,7 @@ impl ActivePack {
                     // TODO: revisit or remove once trigger radius and interaction is working
                     let pois = copyable_pois
                         .iter()
-                        .filter_map(|&poi_idx| pois.get(poi_idx))
+                        .filter_map(|&poi_idx| pois.get(poi_idx as usize))
                         //.filter(|poi| poi.category_idx == idx);
                         .filter(|poi| poi.category == category.full_id);
                     for (i, copyable) in pois.enumerate() {
@@ -408,6 +422,7 @@ impl ActivePack {
         push_token.pop();
     }
 
+    #[cfg(deleteme)]
     fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
         let Some(copy_value) = &attributes.copy_value else { return };
         ui.set_clipboard_text(copy_value);
@@ -416,6 +431,7 @@ impl ActivePack {
         }
     }
 
+    #[cfg(deleteme)]
     fn draw_tooltip_category(ui: &Ui, category: &Category) {
         let desc = match &category.marker_attributes.tip_description {
             Some(desc) if !desc.is_empty() => Some(&desc[..]),
@@ -437,6 +453,7 @@ impl ActivePack {
         }
     }
 
+    #[cfg(deleteme)]
     fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
         let desc = match &attributes.tip_description {
             Some(desc) if !desc.is_empty() => Some(&desc[..]),
@@ -452,6 +469,7 @@ impl ActivePack {
         }
     }
 
+    #[cfg(deleteme)]
     fn category_has_tooltip(category: &Category) -> bool {
         match &category.marker_attributes.tip_description {
             Some(desc) if !desc.is_empty() => return true,
@@ -465,6 +483,7 @@ impl ActivePack {
         false
     }
 
+    #[cfg(deleteme)]
     /// since these aren't intended to be displayed, there's no canon name to use...
     /// if it looks like more than just a location link, we'll try to preview it
     fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
@@ -475,6 +494,7 @@ impl ActivePack {
         false
     }
 
+    #[cfg(deleteme)]
     fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
         use imgui::StyleVar;
 
@@ -493,6 +513,7 @@ impl ActivePack {
         })
     }
 
+    #[cfg(deleteme)]
     fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
         let copy_message = attributes.copy_message.as_ref().map(|m| &m[..]);
         match &attributes.copy_value {
@@ -507,30 +528,32 @@ impl ActivePack {
         }
     }
 
-    pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
+    #[cfg(deleteme)]
+    pub fn disable_paths(&mut self, pack: &Pack, paths: &HashSet<String>, festivals: Festivals) {
         for path in paths {
-            if let Some(idx) = self.pack.categories.all_categories.get_index_of(path) {
+            if let Some(idx) = pack.categories.all_categories.get_index_of(path) {
                 if let Some(mut state) = self.user_category_state.get_mut(idx) {
                     *state = false;
                 }
             }
         }
-        self.recompute_enabled(festivals);
+        self.recompute_enabled(pack, festivals);
     }
 
-    pub fn recompute_enabled(&mut self, festivals: &BTreeSet<Festival>) {
-        let all = &self.pack.categories.all_categories;
-        for root_category_id in &self.pack.categories.root_categories {
+    #[cfg(deleteme)]
+    pub fn recompute_enabled(&mut self, pack: &Pack, festivals: Festivals) {
+        let all = &pack.categories.all_categories;
+        for root_category_id in &pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
                 root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
             }
         }
-        for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
+        for (i, (_, category)) in pack.categories.all_categories.iter().enumerate() {
             if category
                 .marker_attributes
                 .festivals
                 .as_ref()
-                .map(|f| !f.iter().any(|f| festivals.contains(f)))
+                .map(|f| !f.iter().any(|&f| festivals.contains(f.into())))
                 .unwrap_or(false)
             {
                 self.enabled_categories.set(i, false)
@@ -538,9 +561,12 @@ impl ActivePack {
         }
         // in response to update(...), moving update_filters down here where it should actually be
         // effective to save on useless loops
+        #[cfg(deleteme)] {
         self.update_filters();
+        }
     }
 
+    #[cfg(todo)]
     pub fn update(&mut self, render_list: &mut RenderList) {
         // why are we doing 4 for loops over all trails and pois currently active every frame?
         // ::update(...) is a no-op, filters should NOT be changing every frame and even then
@@ -559,7 +585,7 @@ impl ActivePack {
         for trail_idx in self.dirty_trails.iter_ones() {
             let trail = &self.active_trails[trail_idx];
             for i_section in 0..trail.section_bounds.len() {
-                render_list.update(trail.render_bookmark + i_section);
+                render_list.update(trail.render_bookmark as usize + i_section);
             }
         }
         for poi_idx in self.dirty_pois.iter_ones() {
@@ -578,6 +604,7 @@ impl ActivePack {
         PackTextureHandle(idx)
     }
 
+    #[cfg(deleteme)]
     pub fn loader(&mut self) -> &mut dyn PackLoaderContext {
         let loader: &mut (dyn PackLoaderContext + Send) = &mut self.loader;
         loader
@@ -586,6 +613,7 @@ impl ActivePack {
     pub fn get_or_load_texture<'t>(
         &'t mut self,
         handle: PackTextureHandle,
+        loader: &mut dyn PackLoaderContext,
         device: &Dx11Device,
     ) -> anyhow::Result<&'t Arc<Texture>> {
         let PackTextureHandle(idx) = handle;
@@ -596,7 +624,7 @@ impl ActivePack {
 
         let texture = match slot {
             slot_texture @ None => {
-                let data = self.loader.load_asset_dyn(asset)?;
+                let data = loader.load_asset_dyn(asset)?;
                 let image = image::ImageReader::new(data)
                     .with_guessed_format()
                     .map_err(anyhow::Error::from)
@@ -618,165 +646,89 @@ impl ActivePack {
         Ok(texture)
     }
 
-    fn prepare_new_map(
+    fn prepare_new_map<P, T>(
         &mut self,
-        pack_idx: usize,
-        map_id: i32,
-        device: &Dx11Device,
+        pack_idx: PackIndex,
+        pois: P,
+        trails: T,
         render_entities: &mut Vec<RenderEntity>,
-        trail_params: &TrailParams,
-    ) -> anyhow::Result<()> {
+    ) where
+        P: IntoIterator<Item = ActivePoi>,
+        T: IntoIterator<Item = ActiveTrail>,
+    {
         self.clear();
         self.render_list_bookmark = Some(render_entities.len());
 
-        let pack = self.pack.clone();
-
-        let trails = pack
-            .trails
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.map_id == Some(map_id));
-        for (i_trail, pack_trail, ..) in trails {
-            let mut id = pack_trail.guid;
-            if self.active_trails.contains_key(&id) {
-                log::trace!(
-                    "Pack {} contains a duplicate trail GUID `{id}`. \
-                    Randomizing to ensure it may still be rendered.",
-                    pack.name
-                );
-                while self.active_trails.contains_key(&id) {
-                    id = Uuid::new_v4();
-                }
-            }
-
-            let category_idx = pack
-                .categories
-                .all_categories
-                .get_index_of(&pack_trail.category)
-                .unwrap_or(0);
-            let trail = ActiveTrail::build(
-                self,
-                pack_trail,
-                i_trail,
-                category_idx,
-                trail_params,
-                render_entities.len(),
-                device,
-            )
-            .with_context(|| format!("Error loading trail {pack_trail}"));
-            let trail = match trail {
-                Ok(trail) => trail,
-                Err(e) => {
-                    log::warn!("{e:#}");
-                    continue;
-                },
-            };
-
-            let trail_idx = self.active_trails.len();
+        for mut trail in trails {
+            let trail_idx = self.active_trails.len() as TrailIndex;
+            trail.render_bookmark = render_entities.len() as _;
             for i_section in 0..trail.section_bounds.len() {
+                let render_id = RenderId::TrailSection {
+                    pack_idx,
+                    trail_idx,
+                    section: i_section as TrailSectionIndex,
+                };
                 let entity = RenderEntity {
                     bounds: trail.section_bounds[i_section],
-                    position: {
-                        let mut pos = trail.section_bounds[i_section].center();
-                        pos.y += trail.y_offset;
-                        pos
-                    },
+                    position: trail.section_bounds[i_section].center(),
                     // TODO: just sort by y and reverse draw order if camera dir.y is negative? :p
                     // then only intersecting paths are an issue...
                     //draw_ordered: true,
                     draw_ordered: false,
-                    render_id: Some(RenderId::TrailSection {
-                        pack_idx,
-                        trail_idx,
-                        section: i_section,
-                    }),
+                    render_id: match trail.is_empty() {
+                        false => Some(render_id),
+                        true => None,
+                    },
                 };
                 render_entities.push(entity);
             }
 
-            self.active_trails.insert(id, trail);
-            self.dirty_trails.push(false);
+            self.active_trails.push(trail);
         }
 
         self.poi_bookmark = render_entities.len();
 
-        for (i_poi, pack_poi) in pack.pois.iter().enumerate() {
-            if pack_poi.map_id != map_id {
-                continue;
-            }
-            let mut id = pack_poi.guid;
-            if self.active_pois.contains_key(&id) {
-                log::trace!(
-                    "Pack {} contains a duplicate poi GUID `{id}`. \
-                    Randomizing to ensure it may still be rendered.",
-                    self.pack.name
-                );
-                while self.active_pois.contains_key(&id) {
-                    id = Uuid::new_v4();
-                }
-            }
-
-            let category_idx = pack
-                .categories
-                .all_categories
-                .get_index_of(&pack_poi.category)
-                .unwrap_or(0);
-            let poi = ActivePoi::build(self, pack_poi, i_poi, category_idx, device)
-                .with_context(|| format!("Error loading POI {pack_poi}"));
-            let poi = match poi {
-                Ok(poi) => poi,
-                Err(e) => {
-                    log::warn!("{e:#}");
-                    continue;
-                },
-            };
-
-            if pack_poi.attributes.copy_value.is_some() {
-                self.copyable_pois.insert(i_poi);
-                self.copyable_categories.insert(category_idx);
-            }
-
-            let poi_idx = self.active_pois.len();
+        for poi in pois {
+            let poi_idx = self.active_pois.len() as PoiIndex;
             let entity = RenderEntity {
                 bounds: poi.bounds,
                 position: poi.position,
                 draw_ordered: true,
-                render_id: Some(RenderId::Poi { pack_idx, poi_idx }),
+                render_id: match poi.is_empty() {
+                    false => Some(RenderId::Poi { pack_idx, poi_idx }),
+                    true => None,
+                },
             };
             render_entities.push(entity);
-            self.active_pois.insert(id, poi);
-            self.dirty_pois.push(false);
+            self.active_pois.push(poi);
         }
 
         self.cleanup_textures();
 
         //self.recompute_enabled();
-
-        Ok(())
     }
 
+    #[cfg(deleteme)]
     fn update_filters(&mut self) {
-        for (_i, trail) in &mut self.active_trails {
-            let enabled = self.enabled_categories.get(trail.category_idx).map(|b| *b);
-            if enabled.is_none() {
+        for (_i, trail) in self.active_trails.iter_mut().enumerate() {
+            let enabled = self.enabled_categories.get(trail.category_idx as usize).map(|b| *b);
+            if enabled.is_none() && !trail.is_empty() {
                 log::error!(
-                    "unknown category index {} for trail[{_i}] #{}",
+                    "unknown category index {} for trail[{_i}]",
                     trail.category_idx,
-                    trail.trail_idx
                 );
             }
-            trail.filtered = !enabled.unwrap_or(true);
+            trail.visibility.set(VisibilityFlags::TOGGLE, enabled.unwrap_or(true));
         }
-        for (_i, poi) in &mut self.active_pois {
-            let enabled = self.enabled_categories.get(poi.category_idx).map(|b| *b);
-            if enabled.is_none() {
+        for (_i, poi) in self.active_pois.iter_mut().enumerate() {
+            let enabled = self.enabled_categories.get(poi.category_idx as usize).map(|b| *b);
+            if enabled.is_none() && !poi.is_empty() {
                 log::error!(
-                    "unknown category index {} for poi[{_i}] #{}",
+                    "unknown category index {} for poi[{_i}]",
                     poi.category_idx,
-                    poi.poi_idx
                 );
             }
-            poi.filtered = !enabled.unwrap_or(true);
+            poi.visibility.set(VisibilityFlags::TOGGLE, enabled.unwrap_or(true));
         }
     }
 
@@ -785,11 +737,11 @@ impl ActivePack {
         self.unused_textures |= &self.loaded_textures;
         self.active_trails.clear();
         self.active_pois.clear();
-        self.dirty_trails.clear();
-        self.dirty_pois.clear();
+        #[cfg(deleteme)] {
         self.available_categories.clear();
         self.copyable_categories.clear();
         self.copyable_pois.clear();
+        }
         self.render_list_bookmark = None;
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
@@ -810,47 +762,46 @@ impl ActivePack {
 pub struct PackTextureHandle(usize);
 
 pub struct PackCollection {
-    pub loaded_packs: IndexMap<String, ActivePack>,
-    pub unloaded_packs: IndexMap<String, UnloadedReason>,
+    pub loaded_packs: Vec<ActivePack>,
 
+    #[cfg(deleteme)]
     pub current_map: Option<i32>,
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
+    #[cfg(deleteme)]
     pub trail_params: TrailParams,
-
-    festival_categories: BTreeMap<&'static str, Festival>,
-    pub active_festivals: BTreeSet<Festival>,
 }
 
 impl PackCollection {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<PackCollection> {
         let poi_common = PoiCommonRenderData::new(backend)?;
         Ok(PackCollection {
-            loaded_packs: IndexMap::new(),
-            unloaded_packs: IndexMap::new(),
+            loaded_packs: Default::default(),
+            #[cfg(deleteme)]
             current_map: None,
             render_list: RenderListBuilder::default().build(),
+            #[cfg(deleteme)]
             trail_params: TrailParams::default(),
             poi_common,
-            festival_categories: FestivalFixup::festival_categories(),
-            active_festivals: Default::default(),
         })
-    }
-
-    pub fn disable_paths(&mut self, disabled_paths: HashSet<String>) {
-        for (_pn, pack) in &mut self.loaded_packs {
-            pack.disable_paths(&disabled_paths, &self.active_festivals);
-        }
     }
 
     pub fn clear(&mut self) {
         self.loaded_packs.clear();
-        self.unloaded_packs.clear();
 
         self.render_list.clear();
         self.poi_common.clear();
     }
 
+    pub fn pack_mut<'a>(&'a mut self, path: &PackPath) -> &'a mut ActivePack {
+        let index = path.path as usize;
+        if self.loaded_packs.len() <= index {
+            self.loaded_packs.resize_with(index + 1, || ActivePack::new(std::iter::empty()));
+        }
+        &mut self.loaded_packs[index]
+    }
+
+    #[cfg(deleteme)]
     pub fn load_all(&mut self, base_dir: &Path) -> anyhow::Result<()> {
         if !base_dir.exists() {
             create_dir_all(base_dir)?;
@@ -863,6 +814,7 @@ impl PackCollection {
         Ok(())
     }
 
+    #[cfg(deleteme)]
     pub fn load(&mut self, name: &str, path: &Path) {
         let result = if path.is_dir() {
             let loader = DirectoryLoader::new(path);
@@ -889,6 +841,7 @@ impl PackCollection {
         self.loaded_packs.insert(name.into(), pack);
     }
 
+    #[cfg(deleteme)]
     pub fn add_pack(&mut self, pack: Arc<Pack>, loader: LoaderBox) -> usize {
         let name = pack.name.clone();
         let active = ActivePack::new(pack, loader);
@@ -912,60 +865,29 @@ impl PackCollection {
         idx
     }
 
-    #[cfg(todo = "unnecessary")]
-    pub fn fixup_active_pack(&self, pack: &mut ActivePack) {
-        self.fixup_pack(&mut Arc::make_mut(&mut pack.pack))
-    }
-    pub fn fixup_pack(&self, pack: &mut Pack) {
-        for (_name, category) in &mut pack.categories.all_categories {
-            let is_festival = FestivalFixup::FESTIVAL_PREFIXES
-                .iter()
-                .copied()
-                .find(|prefix| category.full_id.starts_with(prefix));
-            match is_festival {
-                Some(prefix) if category.full_id != prefix => (),
-                _ => continue,
-            }
-            let festival = self
-                .festival_categories
-                .iter()
-                .find_map(|(&prefix, &fest)| category.full_id.starts_with(prefix).then_some(fest));
-            if let Some(festival) = festival {
-                Arc::make_mut(&mut category.marker_attributes).festivals = Some(vec![festival]);
-            } else {
-                log::info!("unrecognized festival category: `{}`", category.full_id);
-            }
-        }
-    }
-
-    pub fn load_pack(&mut self, device: &Dx11Device, pack_idx: usize) -> anyhow::Result<()> {
-        let (_, pack) = self
+    pub fn load_pack<P, T>(&mut self, _device: &Dx11Device, pack_idx: PackIndex, pois: P, trails: T) -> anyhow::Result<()> where
+        P: IntoIterator<Item = ActivePoi>,
+        T: IntoIterator<Item = ActiveTrail>,
+    {
+        let pack = self
             .loaded_packs
-            .get_index_mut(pack_idx)
+            .get_mut(pack_idx as usize)
             .with_context(|| format!("unrecognized pack index {pack_idx}"))?;
         if pack.render_list_bookmark.is_some() {
-            log::info!("skipping pack {}, already loaded?", pack.pack.name);
+            log::info!("skipping pack#{pack_idx}, already loaded?");
             return Ok(())
         }
-        let map_id = match self.current_map {
-            Some(map_id) => map_id,
-            None => {
-                log::trace!("delaying pack {} load once in-game", pack.pack.name);
-                return Ok(())
-            },
-        };
 
-        log::debug!("Preparing pack #{pack_idx} {} for rendering...", pack.pack.name);
-        self.build_active_pack(pack_idx, device, None, map_id)?;
+        log::debug!("Preparing pack#{pack_idx} for rendering...");
+        self.build_active_pack(pack_idx, pois, trails, None)?;
 
         if log::log_enabled!(log::Level::Info) {
-            let pack = &self.loaded_packs[pack_idx];
+            let pack = &self.loaded_packs[pack_idx as usize];
             if !pack.active_trails.is_empty() || !pack.active_pois.is_empty() {
                 log::info!(
-                    "Loaded {} trails and {} POIs from pack #{pack_idx} {}",
+                    "Loaded {} trails and {} POIs from pack #{pack_idx}",
                     pack.active_trails.len(),
                     pack.active_pois.len(),
-                    pack.pack.name,
                 );
             }
         }
@@ -976,34 +898,34 @@ impl PackCollection {
         Ok(())
     }
 
+    #[cfg(deleteme)]
     pub fn load_failed(&mut self, name: String, reason: UnloadedReason) {
         self.unloaded_packs.insert(name, reason);
     }
 
-    fn build_active_pack(
+    fn build_active_pack<P, T>(
         &mut self,
-        pack_idx: usize,
-        device: &Dx11Device,
+        pack_idx: PackIndex,
+        pois: P, trails: T,
         render_entities: Option<&mut Vec<RenderEntity>>,
-        map_id: i32,
-    ) -> anyhow::Result<()> {
-        let (_, pack) = self
+    ) -> anyhow::Result<()> where
+        P: IntoIterator<Item = ActivePoi>,
+        T: IntoIterator<Item = ActiveTrail>,
+    {
+        let pack = self
             .loaded_packs
-            .get_index_mut(pack_idx)
+            .get_mut(pack_idx as usize)
             .with_context(|| format!("unrecognized pack index {pack_idx}"))?;
 
         let (entities, inplace) = match render_entities {
             Some(e) => (e, false),
             None => (self.render_list.entities_mut(), true),
         };
-        let res = pack
-            .prepare_new_map(pack_idx, map_id, device, entities, &self.trail_params)
-            .with_context(|| format!("loading pack {} for map {map_id}", pack.pack.name));
+        let res = Ok(pack.prepare_new_map(pack_idx, pois, trails, entities));
+        #[cfg(todo = "unnecessary")]
         if res.is_err() {
-            log::info!(
-                "pack {} failed to load for map {map_id}, disabling...",
-                pack.pack.name
-            );
+            //.with_context(|| format!("loading pack#{pack_idx}"));
+            log::info!("pack#{pack_idx} failed to load, disabling...");
             if let Some(bookmark) = pack.render_list_bookmark {
                 let _ = entities.drain(bookmark..);
                 /*for entity in &mut self.render_list.entities_mut()[bookmark..] {
@@ -1012,8 +934,6 @@ impl PackCollection {
             }
             pack.clear();
             pack.cleanup_textures();
-        } else {
-            pack.recompute_enabled(&self.active_festivals);
         }
         if inplace {
             self.render_list.entities_mut_end();
@@ -1021,53 +941,31 @@ impl PackCollection {
         res
     }
 
-    pub fn prepare_new_map(&mut self, map_id: i32, device: &Dx11Device) -> anyhow::Result<()> {
-        if self.current_map == Some(map_id) {
-            return Ok(());
-        }
-        self.current_map = Some(map_id);
+    pub fn rebuild_active(&mut self, _device: &Dx11Device) -> anyhow::Result<()> {
         let mut render_builder = self.render_list.rebuild();
 
-        let mut succ = false;
-        let mut res = None;
-        let packs_len = self.loaded_packs.len();
-        for pack_idx in 0..packs_len {
-            let pack_res = self
-                .build_active_pack(pack_idx, device, Some(&mut render_builder.entities), map_id)
-                .with_context(|| {
-                    format!(
-                        "Pack {} failed to load",
-                        self.loaded_packs
-                            .get_index(pack_idx)
-                            .map(|(_, p)| &p.pack.name[..])
-                            .unwrap_or("<badidx>")
-                    )
-                });
-            if let Err(e) = pack_res {
-                log::warn!("{e:#}");
-                let _ = res.get_or_insert(e);
-            } else {
-                succ = true;
-            }
-        }
-        match res {
-            Some(e) if !succ => return Err(e.into()),
-            _ => (),
+        for (pack_idx, pack) in self.loaded_packs.iter_mut().enumerate() {
+            let pois = mem::take(&mut pack.active_pois);
+            let trails = mem::take(&mut pack.active_trails);
+            pack.clear();
+            pack.active_pois.reserve_exact(pois.len());
+            pack.active_trails.reserve_exact(trails.len());
+            pack.prepare_new_map(pack_idx as PackIndex, pois, trails, &mut render_builder.entities);
         }
 
         log::info!(
             "Loaded {} trails and {} POIs",
             self.loaded_packs
-                .values()
+                .iter()
                 .map(|p| p.active_trails.len())
                 .sum::<usize>(),
             self.loaded_packs
-                .values()
+                .iter()
                 .map(|p| p.active_pois.len())
                 .sum::<usize>(),
         );
 
-        //let res = self.recreate_buffers(device);
+        //let res = self.recreate_buffers(device)?;
         self.mark_buffers_dirty();
         let res = Ok(());
 
@@ -1086,11 +984,11 @@ impl PackCollection {
         let mut data_map = vec![InstanceBufferData::IDENTITY; 1];
 
         let mut render_poi_bookmark = 1;
-        for pack in self.loaded_packs.values_mut() {
-            data_world.extend(pack.active_pois.values().map(|poi| poi.instance_data()));
+        for pack in &mut self.loaded_packs {
+            data_world.extend(pack.active_pois.iter().map(|poi| poi.instance_data()));
             data_map.extend(
                 pack.active_pois
-                    .values()
+                    .iter()
                     .map(|poi| poi.instance_data_map(machine)),
             );
             pack.render_poi_bookmark = render_poi_bookmark;
@@ -1121,7 +1019,7 @@ impl PackCollection {
 
     fn mark_buffers_dirty(&mut self) {
         self.poi_common.clear();
-        for pack in self.loaded_packs.values_mut() {
+        for pack in &mut self.loaded_packs {
             pack.render_poi_bookmark = 0;
         }
     }
@@ -1136,8 +1034,9 @@ impl PackCollection {
         Ok(())
     }
 
+    #[cfg(todo)]
     pub fn update(&mut self) {
-        for (_, pack) in &mut self.loaded_packs {
+        for pack in &mut self.loaded_packs {
             pack.update(&mut self.render_list);
         }
     }
@@ -1161,7 +1060,7 @@ impl PackCollection {
     }
 
     pub fn draw_entities<'e, E>(
-        loaded_packs: &IndexMap<String, ActivePack>,
+        loaded_packs: &[ActivePack],
         poi_common: &PoiCommonRenderData,
         device_context: &Dx11Context,
         backend: &RenderBackend,
@@ -1180,19 +1079,17 @@ impl PackCollection {
             };
             match render_id {
                 RenderId::TrailSection { pack_idx, trail_idx, section } => {
-                    let trail = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_trails.get_index(trail_idx).and_then(|(_, trail)| {
-                            pack.pack.trails.get(trail.trail_idx).map(|info| (trail, info))
-                        })
+                    let trail = loaded_packs.get(pack_idx as usize).and_then(|pack| {
+                        pack.active_trails.get(trail_idx as usize)
                     });
-                    let (trail, info) = match trail {
+                    let trail = match trail {
                         Some(t) => t,
                         None => {
                             log::error!("Render ID refers to missing trail#{trail_idx} pack#{pack_idx} section#{section}");
                             continue
                         },
                     };
-                    if trail.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
+                    if !trail.visibility.is_visible_for_space() {
                         continue
                     }
                     if shader_state != ShaderState::Trail {
@@ -1202,20 +1099,18 @@ impl PackCollection {
                     trail.draw_section(device_context, section, LocalContext::World);
                 },
                 RenderId::Poi { pack_idx, poi_idx } => {
-                    let poi = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_pois.get_index(poi_idx).and_then(|(_, poi)| {
-                            pack.pack.pois.get(poi.poi_idx).map(|info| (pack, poi, info))
-                        })
-                    });
-                    let (pack, poi, info) = match poi {
-                        Some((pack, _, _)) if pack.render_poi_bookmark == 0 => continue,
+                    let poi = loaded_packs.get(pack_idx as usize).and_then(|pack|
+                        pack.active_pois.get(poi_idx as usize).map(|poi| (pack, poi))
+                    );
+                    let (pack, poi) = match poi {
+                        Some((pack, _)) if pack.render_poi_bookmark == 0 => continue,
                         Some(t) => t,
                         None => {
-                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
+                            log::error!("Render ID refers to missing PoI#{poi_idx} pack#{pack_idx}");
                             continue
                         },
                     };
-                    if poi.filtered || !info.attributes.in_game_visibility.unwrap_or(true) {
+                    if !poi.visibility.is_visible_for_space() {
                         continue
                     }
                     if shader_state != ShaderState::Poi {
@@ -1224,7 +1119,7 @@ impl PackCollection {
                     }
                     poi.draw(
                         device_context,
-                        pack.render_poi_bookmark + poi_idx,
+                        pack.render_poi_bookmark + poi_idx as usize,
                         LocalContext::World,
                     );
                 },
@@ -1243,7 +1138,7 @@ impl PackCollection {
     }
 
     pub fn draw_map_entities<'e, E>(
-        loaded_packs: &IndexMap<String, ActivePack>,
+        loaded_packs: &[ActivePack],
         poi_common: &PoiCommonRenderData,
         device_context: &Dx11Context,
         backend: &RenderBackend,
@@ -1262,24 +1157,18 @@ impl PackCollection {
             };
             match render_id {
                 RenderId::TrailSection { pack_idx, trail_idx, section } => {
-                    let trail = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_trails.get_index(trail_idx).and_then(|(_, trail)| {
-                            pack.pack.trails.get(trail.trail_idx).map(|info| (trail, info))
-                        })
+                    let trail = loaded_packs.get(pack_idx as usize).and_then(|pack| {
+                        pack.active_trails.get(trail_idx as usize)
                     });
-                    let (trail, info) = match trail {
+                    let trail = match trail {
                         Some(t) => t,
                         None => {
                             log::error!("Render ID refers to missing trail#{trail_idx} pack#{pack_idx} section#{section}");
                             continue
                         },
                     };
-                    if trail.filtered || !info.attributes.is_visible_for_map(map) {
+                    if !trail.visibility.is_visible_for_map(map) {
                         continue
-                    }
-                    let scale = info.attributes.scale_on_map_with_zoom;
-                    if scale == Some(false) {
-                        // idk invert .-.
                     }
                     if shader_state == ShaderState::None {
                         backend.shaders.set_named(device_context, "map");
@@ -1291,26 +1180,21 @@ impl PackCollection {
                     trail.draw_section(device_context, section, ctx);
                 },
                 RenderId::Poi { pack_idx, poi_idx } => {
-                    let poi = loaded_packs.get_index(pack_idx).and_then(|(_, pack)| {
-                        pack.active_pois.get_index(poi_idx).and_then(|(_, poi)| {
-                            pack.pack.pois.get(poi.poi_idx).map(|info| (pack, poi, info))
-                        })
-                    });
-                    let (pack, poi, info) = match poi {
-                        Some((pack, _, _)) if pack.render_poi_bookmark == 0 => continue,
+                    let poi = loaded_packs.get(pack_idx as usize).and_then(|pack|
+                        pack.active_pois.get(poi_idx as usize).map(|poi| (pack, poi))
+                    );
+                    let (pack, poi) = match poi {
+                        Some((pack, _)) if pack.render_poi_bookmark == 0 => continue,
                         Some(t) => t,
                         None => {
-                            log::error!("Render ID refers to missing trail#{poi_idx} pack#{pack_idx}");
+                            log::error!("Render ID refers to missing PoI#{poi_idx} pack#{pack_idx}");
                             continue
                         },
                     };
-                    if poi.filtered || !info.attributes.is_visible_for_map(map) {
+                    if !poi.visibility.is_visible_for_map(map) {
                         continue
                     }
-                    let scale = info.attributes.scale_on_map_with_zoom;
-                    if scale == Some(false) {
-                        // idk invert .-.
-                    }
+                    // TODO: handle ScaleOnMapWithZoom and related attrs
                     if shader_state == ShaderState::None {
                         backend.shaders.set_named(device_context, "map");
                         poi_common.set_primitive(device_context);
@@ -1320,7 +1204,7 @@ impl PackCollection {
                         shader_state = ShaderState::Poi;
                         poi_common.set_vertex(device_context, ctx);
                     }
-                    poi.draw(device_context, pack.render_poi_bookmark + poi_idx, ctx);
+                    poi.draw(device_context, pack.render_poi_bookmark + poi_idx as usize, ctx);
                 },
             }
             num_drawn += 1;
@@ -1345,11 +1229,14 @@ impl PackCollection {
     pub fn unload_map(&mut self, _device_context: &Dx11Context, _map_id: u32) -> anyhow::Result<()> {
         //if self.current_map != Some(_map_id) { return }
         self.clear_active();
+        #[cfg(deleteme)] {
         self.current_map = None;
+        }
 
         Ok(())
     }
 
+    #[cfg(todo)]
     pub fn load_map(
         &mut self,
         device: &Dx11Device,
@@ -1361,7 +1248,7 @@ impl PackCollection {
 
     pub fn clear_active(&mut self) {
         self.render_list.clear();
-        for pack in self.loaded_packs.values_mut() {
+        for pack in &mut self.loaded_packs {
             pack.clear();
         }
 
@@ -1369,7 +1256,7 @@ impl PackCollection {
     }
 
     pub fn cleanup_textures(&mut self) {
-        for pack in self.loaded_packs.values_mut() {
+        for pack in &mut self.loaded_packs {
             pack.cleanup_textures();
         }
     }

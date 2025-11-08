@@ -1,6 +1,8 @@
 #[cfg(feature = "extension-nexus")]
 use nexus::rtapi::GroupMemberOwned;
 pub use SquadUpdateType as SquadState;
+use super::Controller;
+
 use {
     crate::{
         account_name_canon,
@@ -604,12 +606,9 @@ impl MarkersController {
     }
 
     pub fn try_send(e: MarkersEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        let full_e = ControllerEvent::Markers(e);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(full_e);
-        }
+        Controller::with_sender(|sender|
+            sender.markers_try_send(e)
+        );
     }
 
     pub(crate) async fn handle_event(

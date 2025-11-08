@@ -456,6 +456,15 @@ pub fn quick_access_remove(icon: TaimiControls) {
     remove_quick_access(identifier);
 }
 
+pub fn quick_access_notify(icons: TaimiControls) {
+    use nexus::quick_access::notify_quick_access;
+    for icon in icons {
+        // TODO: check for first visible or something?
+        let Some((identifier, ..)) = quick_access_button_id(icon) else { continue };
+        notify_quick_access(identifier);
+    }
+}
+
 /// ("BUTTON", "ICON", "HOVER", "keybind")
 pub(crate) fn quick_access_button_id(
     icon: TaimiControls,

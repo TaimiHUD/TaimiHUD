@@ -40,6 +40,7 @@ use {
             markers::{MarkersController, MarkersEvent},
             Controller,
             ControllerEvent,
+            ControllerSender,
         },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
@@ -68,7 +69,7 @@ use {
         path::PathBuf,
         ptr,
         slice,
-        sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
+        sync::{Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
         time::Duration,
     },
@@ -258,7 +259,7 @@ pub mod built_info {
 }
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
-static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
+static CONTROLLER_SENDER: RwLock<ControllerSender> = RwLock::new(ControllerSender::EMPTY);
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
 #[cfg(feature = "extension-nexus")]
 static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
@@ -405,7 +406,7 @@ fn init() -> Result<(), &'static str> {
         }
     }
 
-    let (controller_sender, controller_receiver) = channel::<ControllerEvent>(64);
+    let (controller_sender, controller_receiver) = ControllerSender::new();
     let (render_sender, render_receiver) = channel::<RenderEvent>(48);
 
     let mut render_state = RENDER_STATE.lock().unwrap();
@@ -417,7 +418,7 @@ fn init() -> Result<(), &'static str> {
 
     // muh queues
     *CONTROLLER_THREAD.lock().unwrap() = Some(controller_handler);
-    *CONTROLLER_SENDER.write().unwrap() = Some(controller_sender);
+    *CONTROLLER_SENDER.write().unwrap() = controller_sender;
 
     *render_state = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
@@ -903,15 +904,10 @@ fn notify_quit() {
     // if !RenderState::is_running() { return }
 
     log::info!("Preparing for game exit");
-    rt::notify_shutdown();
+    rt::notify_shutdown(Interruption::GameQuit);
 
     let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
-    let controller_quit = controller_sender
-        .as_ref()
-        .map(|sender| sender.try_send(ControllerEvent::Quit));
-    if let Some(Ok(())) = controller_quit {
-        *controller_sender = None;
-    }
+    controller_sender.exit(Interruption::GameQuit);
 
     TEXTURES.quit();
 
@@ -935,6 +931,41 @@ fn notify_quit() {
             // this seems futile and unlikely to reach the other side but we can try anyway
             let _ = sender.try_send(RenderEvent::Quit);
         }
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Interruption {
+    /// We don't have much time!
+    GameQuit = 1,
+    /// Addon unload or exit requested
+    Shutdown,
+    /// Individualized unload message intended for a specific component,
+    /// take time to cleanly shutdown
+    Temporary,
+    /// idk quit asap
+    Abort,
+    /// Likely due to channel drop or associated component shutdown
+    #[default]
+    Unspecified,
+}
+
+impl Interruption {
+    pub const NONE: u8 = 0;
+    pub const UNSPECIFIED: u8 = Self::Unspecified as u8;
+
+    pub const unsafe fn with_repr_unchecked(value: u8) -> Self {
+        mem::transmute(value)
+    }
+    pub const unsafe fn from_repr_unchecked(value: u8) -> Option<Self> {
+        mem::transmute(value)
+    }
+}
+
+impl From<Interruption> for u8 {
+    fn from(value: Interruption) -> Self {
+        value as u8
     }
 }
 
@@ -971,8 +1002,7 @@ fn unload() {
     let controller_quit = CONTROLLER_SENDER
         .write()
         .unwrap()
-        .take()
-        .map(|sender| sender.try_send(ControllerEvent::Quit));
+        .exit(Interruption::Shutdown);
 
     let confirm_render_unload = {
         #[cfg(feature = "space")]
@@ -995,7 +1025,7 @@ fn unload() {
 
         log::logger().flush();
         match render_quit {
-            _ if rt::is_shutdown() || render_state.is_none() => {
+            _ if matches!(rt::is_shutdown(), Some(Interruption::GameQuit)) || render_state.is_none() => {
                 // it's already gone, nothing more to do here
                 false
             },
@@ -1034,7 +1064,7 @@ fn unload() {
     }
 
     match controller_quit {
-        Some(Ok(())) | None => match controller_handle {
+        Some(true) | None => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 log::logger().flush();
@@ -1046,7 +1076,7 @@ fn unload() {
                 log::warn!("Controller unavailable?");
             },
         },
-        Some(Err(..)) => {
+        Some(false) => {
             log::warn!("Failed to signal controller quit");
         },
     }

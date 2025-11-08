@@ -60,6 +60,8 @@ pub enum RenderEvent {
     AlertReset(Arc<TimerFile>),
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
+    SendClipboard(String),
+    AlertMessage(String),
     CheckingForUpdates {
         checking: bool,
         downloading: bool,
@@ -194,6 +196,14 @@ impl RenderState {
                     },
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(timer);
+                    },
+                    SendClipboard(message) => {
+                        ui.set_clipboard_text(message);
+                    },
+                    AlertMessage(message) => {
+                        if let Err(e) = rt::send_alert(ui, &message) {
+                            log::info!("alert {e}: {message}");
+                        }
                     },
                     #[cfg(any(feature = "markers", feature = "space"))]
                     UiMapOpen(open) =>

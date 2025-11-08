@@ -1,40 +1,35 @@
 use {
     crate::{
-        exports::runtime::Counter,
-        space::{
+        controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, visible::{LoadedTrailGeometry, LoadedTrailSection}}, exports::runtime::Counter, space::{
             pack::{ActivePack, TrailSectionExt},
             resources::{Model, Texture, Vertex},
             DrawSpace,
             LocalContext,
             TextureSpace,
-        },
-    },
-    anyhow::Context,
-    core::f32,
-    glamour::{Box3, Point2, Vec3Swizzles, Vector3},
-    std::sync::Arc,
-    taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
-    taimi_pack::Trail,
+        }
+    }, anyhow::Context, core::f32, glamour::{Box3, Point2, Vec3Swizzles, Vector3}, std::sync::Arc, taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*}, taimi_meta::ui::MapContext, taimi_pack::{PackLoaderContext, Trail}
 };
+use crate::controller::pathing::visible::VisibilityFlags;
 
 pub struct ActiveTrail {
-    pub trail_idx: usize,
-    pub category_idx: usize,
-    pub filtered: bool,
-    pub render_bookmark: usize,
+    #[cfg(todo = "unnecessary")]
+    pub trail_idx: TrailIndex,
+    pub category_idx: CategoryIndex,
+    pub render_bookmark: u32,
+
+    pub visibility: VisibilityFlags,
 
     // Segment data.
     pub section_bounds: Vec<Box3<DrawSpace>>,
 
     // World render data.
-    pub texture: Arc<Texture>,
-    pub section_vbuffer: VertexBuffer,
+    pub texture: Option<Arc<Texture>>,
+    pub section_vbuffer: Option<VertexBuffer>,
     pub section_bookmarks: Vec<u32>,
-
-    pub y_offset: f32,
 }
 
 impl ActiveTrail {
+    #[cfg(deleteme)]
     pub fn build(
         loader: &mut ActivePack,
         trail: &Trail,
@@ -204,6 +199,72 @@ impl ActiveTrail {
         })
     }
 
+    pub fn new(
+        active_pack: &mut ActivePack,
+        loader: &mut dyn PackLoaderContext,
+        texture_name: &str,
+        geometry: LoadedTrailGeometry,
+        sections: &[LoadedTrailSection],
+        visibility: VisibilityFlags,
+        trail_idx: TrailIndex,
+        category_idx: CategoryIndex,
+        render_bookmark: u32,
+        device: &Dx11Device,
+    ) -> anyhow::Result<ActiveTrail> {
+        #[cfg(todo)]
+        let mut y_offset = {
+            // mitigate z-fighting by fudging y values for (hopefully) unique trails
+            let pack_signature = loader.pack.trails.len()
+                + loader.pack.pois.len()
+                + loader.pack.categories.all_categories.len();
+            params.y_offset_for(pack_signature ^ (trail_idx.wrapping_mul(73)))
+        };
+
+        let texture_handle = active_pack.register_texture(texture_name);
+        let texture = active_pack
+            .get_or_load_texture(texture_handle, loader, device)
+            .context("Loading trail texture")?;
+
+        let mut section_bookmark = 0u32;
+        let mut section_bookmarks = Vec::with_capacity(geometry.section_lengths.len());
+        let mut section_bounds = Vec::with_capacity(geometry.section_lengths.len());
+        let mut y_offsets = geometry.y_offsets.into_iter();
+        for (section, &section_len) in sections.iter().zip(&geometry.section_lengths) {
+            if section_len == 0 {
+                continue
+            }
+            let mut bounds = section.bounds;
+            if let Some(y_offset) = y_offsets.next() {
+                bounds.min.y += y_offset;
+                bounds.max.y += y_offset;
+            }
+            section_bookmarks.push(section_bookmark);
+            section_bounds.push(bounds);
+            section_bookmark += section_len;
+        }
+        section_bookmarks.push(section_bookmark);
+
+        if geometry.vertices.is_empty() {
+            log::info!("Empty trail {category_idx}/{trail_idx}");
+        }
+
+        let model = Model::from_vertices(geometry.vertices);
+        let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer")?;
+        STATS_TRAIL_VERTEX_SIZE.increment_by(|| section_vbuffer.size());
+
+        Ok(ActiveTrail {
+            #[cfg(todo = "unnecessary")]
+            trail_idx,
+            category_idx,
+            visibility,
+            section_bounds,
+            texture: Some(texture.clone()),
+            section_vbuffer: Some(section_vbuffer),
+            section_bookmarks,
+            render_bookmark,
+        })
+    }
+
     pub fn update(pack: &mut ActivePack, trail_idx: usize) {
         let _ = pack;
         let _ = trail_idx;
@@ -211,37 +272,70 @@ impl ActiveTrail {
 
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, section: usize, ctx: LocalContext) {
-        self.texture.set(device_context, 0);
+    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionIndex, ctx: LocalContext) {
+        let section = section as usize;
+        if let Some(texture) = &self.texture {
+            texture.set(device_context, 0);
+        }
 
+        if let Some(section_vbuffer) = &self.section_vbuffer {
+            section_vbuffer.set(device_context, 0);
+        }
+        let (start, end) = match self.section_bookmarks.get(section..) {
+            Some(&[start, end, ..]) => (start, end),
+            _ => {
+                log::error!("attempted to draw invalid section#{section} of trail in cat#{}", self.category_idx);
+                return
+            },
+        };
         unsafe {
-            self.section_vbuffer.set(device_context, 0);
             //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {
                 LocalContext::World => device_context.Draw(
-                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
-                    self.section_bookmarks[section],
+                    end - start,
+                    start,
                 ),
                 LocalContext::Map(..) => device_context.DrawInstanced(
-                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
+                    end - start,
                     1,
-                    self.section_bookmarks[section],
+                    start,
                     0,
                 ),
             }
         }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            #[cfg(todo = "unnecessary")]
+            trail_idx: TrailIndex::MAX,
+            category_idx: CategoryIndex::MAX,
+            visibility: VisibilityFlags::empty(),
+            section_bounds: Default::default(),
+            texture: None,
+            section_vbuffer: None,
+            section_bookmarks: Default::default(),
+            render_bookmark: 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.section_bounds.is_empty()
     }
 }
 
 #[cfg(feature = "statistics")]
 impl Drop for ActiveTrail {
     fn drop(&mut self) {
-        STATS_TRAIL_VERTEX_SIZE.decrement_by(|| self.section_vbuffer.size());
+        if let Some(section_vbuffer) = &self.section_vbuffer {
+            STATS_TRAIL_VERTEX_SIZE.decrement_by(|| section_vbuffer.size());
+        }
     }
 }
 
 pub static STATS_TRAIL_VERTEX_SIZE: Counter = Counter::DEFAULT;
 
+#[derive(Debug, Clone)]
 pub struct TrailParams {
     pub resolution: Option<f32>,
     pub width: f32,

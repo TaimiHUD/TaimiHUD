@@ -69,7 +69,13 @@ pub struct CategoryCollection {
 
 impl CategoryCollection {
     pub fn is_empty(&self) -> bool {
-        self.all_categories.is_empty() && self.root_categories.is_empty()
+        self.all_categories.is_empty()
+        // && self.root_categories.is_empty()
+    }
+
+    pub fn root_categories(&self) -> impl Iterator<Item = &Category> {
+        self.root_categories.iter()
+            .filter_map(|c| self.all_categories.get(c))
     }
 }
 
@@ -141,7 +147,7 @@ fn inner_merge_category_attributes(categories: &mut IndexMap<String, Category>, 
     let children = categories[parent].sub_categories.clone();
     for (_, id) in &*children {
         if let Some(category) = categories.get_mut(id) {
-            Arc::make_mut(&mut category.marker_attributes).merge(&attrs);
+            Arc::make_mut(&mut category.marker_attributes).merge(&attrs, true);
         } else {
             log::error!("Inconsistent internal state, missing category `{id}`");
             continue;
@@ -155,13 +161,13 @@ fn apply_marker_attributes(pack: &mut Pack) {
         let Some(category) = pack.categories.all_categories.get(&poi.category) else {
             continue;
         };
-        poi.attributes.merge(&category.marker_attributes);
+        poi.attributes.merge(&category.marker_attributes, true);
     }
     for trail in &mut pack.trails {
         let Some(category) = pack.categories.all_categories.get(&trail.category) else {
             continue;
         };
-        trail.attributes.merge(&category.marker_attributes);
+        trail.attributes.merge(&category.marker_attributes, true);
     }
 }
 

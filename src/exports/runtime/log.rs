@@ -1,14 +1,15 @@
-#[cfg(not(feature = "log-filter"))]
-use anyhow::Context;
 use {
+    anyhow::Context,
     crate::{
         exports::{self, runtime as rt},
         settings::state::BootstrapState,
     },
     log::{Level, LevelFilter, Log, Metadata, Record},
     std::{
+        cell::OnceCell, ops,
         ffi::CStr,
         fmt,
+        cell::RefCell,
         fs,
         io,
         mem::transmute,
@@ -628,5 +629,248 @@ impl Log for DeferredLogger {
 
     fn flush(&self) {
         // TODO: could flush to log file if it happens to be open, but why bother?
+    }
+}
+
+pub fn log_ok<R, E>(level: Level, res: Result<R, E>) -> Option<R> where
+    E: fmt::Display,
+{
+    match res {
+        Ok(res) => Some(res),
+        Err(e) => {
+            log::log!(level, "{e:#}");
+            None
+        },
+    }
+}
+#[inline(always)]
+pub fn debug_ok_with<C, R, E>(context: C, res: Result<R, E>) -> Option<R> where
+    Result<R, E>: anyhow::Context<R, E>,
+    E: Into<anyhow::Error>,
+    C: fmt::Display,
+{
+    if log::log_enabled!(Level::Debug) {
+        let res = anyhow::Context::with_context(res, move || context.to_string());
+        log_ok(Level::Debug, res)
+    } else {
+        res.ok()
+    }
+}
+#[inline(always)]
+pub fn debug_ok<R, E>(res: Result<R, E>) -> Option<R> where
+    E: fmt::Display,
+{
+    if log::log_enabled!(Level::Debug) {
+        log_ok(Level::Debug, res)
+    } else {
+        res.ok()
+    }
+}
+#[inline]
+pub fn info_ok<R, E>(res: Result<R, E>) -> Option<R> where
+    E: fmt::Display,
+{
+    log_ok(Level::Info, res)
+}
+#[inline]
+pub fn warn_ok<R, E>(res: Result<R, E>) -> Option<R> where
+    E: fmt::Display,
+{
+    log_ok(Level::Warn, res)
+}
+#[inline]
+pub fn error_ok<R, E>(res: Result<R, E>) -> Option<R> where
+    E: fmt::Display,
+{
+    log_ok(Level::Error, res)
+}
+
+#[derive(Copy, Clone)]
+pub struct MaybeFmt<F>(pub F);
+impl<F> MaybeFmt<F> {
+    pub const fn with(f: F) -> Self {
+        Self(f)
+    }
+    pub const fn new(f: F) -> Self where
+        F: Fn(&mut fmt::Formatter) -> fmt::Result,
+    {
+        Self::with(f)
+    }
+}
+impl<F> fmt::Display for MaybeFmt<F> where
+    F: Fn(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        (self.0)(f)
+    }
+}
+impl<F> fmt::Debug for MaybeFmt<F> where
+    F: Fn(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+impl<F> From<F> for MaybeFmt<F> {
+    fn from(f: F) -> Self {
+        Self(f)
+    }
+}
+#[derive(Clone)]
+pub struct MaybeFmtMut<F>(pub RefCell<F>);
+impl<F> MaybeFmtMut<F> {
+    pub const UNAVAILABLE: &'static str = "<unavail>";
+    pub const fn with(f: F) -> Self {
+        Self(RefCell::new(f))
+    }
+    pub const fn new(f: F) -> Self where
+        F: FnMut(&mut fmt::Formatter) -> fmt::Result,
+    {
+        Self::with(f)
+    }
+}
+impl<F> fmt::Display for MaybeFmtMut<F> where
+    F: FnMut(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Ok(mut fun) = self.0.try_borrow_mut() {
+            fun(f)
+        } else {
+            f.write_str(Self::UNAVAILABLE)
+        }
+    }
+}
+impl<F> fmt::Debug for MaybeFmtMut<F> where
+    F: FnMut(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+impl<F> From<F> for MaybeFmtMut<F> {
+    fn from(f: F) -> Self {
+        Self::with(f)
+    }
+}
+#[derive(Clone)]
+pub struct MaybeFmtOnce<F>(pub RefCell<Option<F>>);
+impl<F> MaybeFmtOnce<F> {
+    pub const UNAVAILABLE: &'static str = "<unavail>";
+    pub const fn with(f: F) -> Self {
+        Self(RefCell::new(Some(f)))
+    }
+    pub const fn new(f: F) -> Self where
+        F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+    {
+        Self::with(f)
+    }
+}
+impl<F> fmt::Display for MaybeFmtOnce<F> where
+    F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Ok(Some(fun)) = self.0.try_borrow_mut().map(|mut f| f.take()) {
+            fun(f)
+        } else {
+            f.write_str(Self::UNAVAILABLE)
+        }
+    }
+}
+impl<F> fmt::Debug for MaybeFmtOnce<F> where
+    F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+impl<F> From<F> for MaybeFmtOnce<F> {
+    fn from(f: F) -> Self {
+        Self::with(f)
+    }
+}
+
+#[derive(Clone)]
+pub struct StrFmt<F> {
+    pub f: F,
+    pub displayed: OnceCell<Box<str>>,
+}
+impl<F> StrFmt<F> {
+    pub const fn new(f: F) -> Self {
+        Self {
+            f,
+            displayed: OnceCell::new(),
+        }
+    }
+}
+impl<F> StrFmt<F> where
+    F: fmt::Display,
+{
+
+    pub fn get_str(&self) -> &str {
+        self.displayed.get_or_init(|| self.f.to_string().into_boxed_str())
+    }
+
+    pub fn annotate_result<E, T>(&self, res: impl Context<T, E>) -> anyhow::Result<T> {
+        res.with_context(move || self.get_str().to_owned())
+    }
+    pub fn annotate_err<E>(&self, e: E) -> anyhow::Error where
+        E: Into<anyhow::Error>,
+    {
+        e.into().context(self.get_str().to_owned())
+    }
+}
+impl<F> fmt::Display for StrFmt<F> where
+    F: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.get_str())
+    }
+}
+impl<F> fmt::Debug for StrFmt<F> where
+    F: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.f, f)
+    }
+}
+impl<F> AsRef<str> for StrFmt<F> where
+    F: fmt::Display,
+{
+    fn as_ref(&self) -> &str {
+        self.get_str()
+    }
+}
+impl<F> ops::Deref for StrFmt<F> where
+    F: fmt::Display,
+{
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        self.get_str()
+    }
+}
+impl<F> From<F> for StrFmt<F> {
+    fn from(f: F) -> Self {
+        Self::new(f)
+    }
+}
+impl<F> From<StrFmt<F>> for String where
+    F: fmt::Display,
+{
+    fn from(f: StrFmt<F>) -> Self {
+        f.get_str().into()
+    }
+}
+impl<F> From<StrFmt<F>> for Box<str> where
+    F: fmt::Display,
+{
+    fn from(f: StrFmt<F>) -> Self {
+        f.get_str().into()
+    }
+}
+impl<'a, F> From<&'a StrFmt<F>> for &'a str where
+    F: fmt::Display,
+{
+    fn from(f: &'a StrFmt<F>) -> Self {
+        f.get_str()
     }
 }

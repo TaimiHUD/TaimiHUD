@@ -1,17 +1,20 @@
 use {
     crate::{
-        render::machine::{RenderMachine, RenderPosition, RenderPositioning},
-        settings::pathing::CameraSource,
-        space::{pack::FestivalFixup, DrawSpace},
+        controller::pathing::{registry::{MapIndex, PackMapPath, PackPath}, visible::InteractivePoi, SharedMapPackState}, render::{machine::{RenderMachine, RenderPosition, RenderPositioning}, RenderEvent, RenderState}, settings::pathing::CameraSource, space::DrawSpace
     },
-    core::ops::Range,
     glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
-    std::time::SystemTime,
+    std::{collections::BTreeMap, ops::Range, sync::Arc},
     taimi_meta::{
         coords::{camera_view, MapLocalScale, ScreenSpace},
         ui::MapOpen,
     },
-    taimi_pack::attributes::Festival,
+};
+#[cfg(feature = "extension-nexus")]
+use {
+    crate::exports::{
+        nexus::quick_access_notify,
+        runtime::bindings::TaimiControls,
+    },
 };
 
 impl RenderMachine {
@@ -159,16 +162,56 @@ impl RenderMachine {
         }
     }
 
-    pub fn initial_festivals() -> impl Iterator<Item = Festival> {
-        let now = SystemTime::now();
-        FestivalFixup::FESTIVAL_WINDOWS
-            .iter()
-            .filter(move |(_f, window)| window.is_active(now))
-            .map(|&(festival, ..)| festival)
-    }
+    pub fn act_pack_map_changed(&mut self, map_id: MapIndex, mut prev: BTreeMap<PackPath, SharedMapPackState>) {
+        let mut changes = Vec::new();
+        for (path, map) in &self.map_pack_state {
+            let changed_nearby = match prev.get_mut(path) {
+                Some(prev) if prev.interactive_pois_nearby.len() != map.interactive_pois_nearby.len() =>
+                    // probably from a prior map, ignore...
+                    None,
+                Some(prev) => {
+                    prev.interactive_pois_nearby ^= &map.interactive_pois_nearby;
+                    Some(&prev.interactive_pois_nearby)
+                },
+                _ => None,
+            };
+            let changed = map.interactive_pois_nearby.iter().enumerate()
+                .filter_map(|(i, n)| match changed_nearby.as_ref().and_then(|c| c.get(i).map(|c| *c)) {
+                    Some(true) | None => Some((i, *n)),
+                    Some(false) => None,
+                });
+            for (i, nearby) in changed {
+                let Some(ipoi) = map.interactive_pois.get(i) else { continue };
+                changes.push((path.clone(), map.interactive_pois.clone(), i, nearby));
+            }
+        }
 
-    #[inline]
-    pub fn festival_active(&self, festival: Festival) -> bool {
-        self.active_festivals.contains(&festival)
+        let mut new_nearby = false;
+        for (path, ipois, i, nearby) in changes {
+            if nearby {
+                self.act_poi_nearby(path.rel(map_id), (ipois, i));
+            }
+        }
+    }
+    pub fn act_poi_nearby(&mut self, path: PackMapPath, (ipois, i): (Arc<[InteractivePoi]>, usize)) {
+        let Some(ipoi) = ipois.get(i) else { return };
+        if ipoi.is_passive() {
+            #[cfg(feature = "extension-nexus")]
+            quick_access_notify(TaimiControls::QUICK_ACCESS_NOTIFY_PATHING);
+        }
+
+        if ipoi.trigger.auto {
+            #[cfg(todo)]
+            if let Some(info) = &ipoi.info {
+                RenderState::try_send(RenderEvent::AlertMessage(info.message.clone().into()));
+            }
+            if let Some(copy) = &ipoi.copy {
+                let message = copy.message.as_ref().map(|m| &m[..])
+                    .unwrap_or("Copied to clipboard");
+                RenderState::try_send(RenderEvent::SendClipboard(copy.value.clone().into()));
+                RenderState::try_send(RenderEvent::AlertMessage(message.into()));
+            }
+        }
+        // TODO: signify if became "nearby" due to interact!
     }
 }

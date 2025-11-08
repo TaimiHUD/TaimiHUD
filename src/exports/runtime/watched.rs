@@ -1,7 +1,5 @@
 use {
-    serde::{Deserialize, Serialize},
-    std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock},
-    tokio::{sync::watch, time},
+    futures::future, serde::{Deserialize, Serialize}, std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock}, tokio::{sync::watch, time}
 };
 
 #[derive(Debug)]
@@ -18,6 +16,7 @@ impl<T> Watcher<T> {
     pub fn with_opt(value: Option<T>) -> Self {
         value.map(Self::new).unwrap_or(Self::EMPTY)
     }
+    /// TODO: is this guaranteed to work correctly if sender_count() is 0?
     pub fn with_receiver(watch: watch::Receiver<T>) -> Self {
         let mut this = Self::EMPTY;
         this.set_receiver(watch);
@@ -28,6 +27,9 @@ impl<T> Watcher<T> {
         this.set_sender(watch);
         this
     }
+    pub fn subscribe_to(sender: &watch::Sender<T>) -> Self {
+        Self::with_sender(sender.clone())
+    }
 
     pub fn watched(&self) -> Watched<T>
     where
@@ -36,13 +38,15 @@ impl<T> Watcher<T> {
         Watched::with_watcher(self.clone())
     }
 
-    fn sender_to_receiver(sender: watch::Sender<T>) -> watch::Receiver<T> {
+    /// Leaks sender so one tx reference count and one rx ref is "owned"
+    pub fn sender_to_receiver(sender: watch::Sender<T>) -> watch::Receiver<T> {
         let receiver = sender.subscribe();
         mem::forget(sender);
         receiver
     }
-
-    fn receiver_to_sender(receiver: watch::Receiver<T>) -> watch::Sender<T> {
+    #[cfg(todo)]
+    /// the reference semantics involved are too awkward to recommend using this
+    pub unsafe fn receiver_to_sender(receiver: watch::Receiver<T>) -> watch::Sender<T> {
         // TODO: need to determine offset of version vs ptr, but rustc shouldn't shuffle two usize fields right? right?
         let sender = unsafe { mem::transmute_copy(&receiver) };
         mem::forget(receiver);
@@ -57,24 +61,45 @@ impl<T> Watcher<T> {
     }
 
     pub fn init(&self, value: T) -> &watch::Receiver<T> {
-        self.init_receiver(Self::sender_to_receiver(watch::Sender::new(value)))
+        let sender = watch::Sender::new(value);
+        let watch = Self::sender_to_receiver(sender);
+        unsafe {
+            self.init_receiver(watch)
+        }
     }
     pub fn init_sender(&self, sender: watch::Sender<T>) -> &watch::Sender<T> {
-        Self::receiver_as_sender(self.init_receiver(Self::sender_to_receiver(sender)))
+        let watch = Self::sender_to_receiver(sender);
+        let receiver = unsafe { self.init_receiver(watch) };
+        Self::receiver_as_sender(receiver)
     }
 
-    pub fn init_receiver(&self, receiver: watch::Receiver<T>) -> &watch::Receiver<T> {
-        self.watch.get_or_init(|| receiver)
+    /// Must have had reference counts adjusted by [Self::sender_to_receiver]
+    pub unsafe fn init_receiver(&self, watch: watch::Receiver<T>) -> &watch::Receiver<T> {
+        self.watch.get_or_init(|| watch)
     }
 
     pub fn set_sender(&mut self, sender: watch::Sender<T>) {
-        self.set_receiver(Self::sender_to_receiver(sender))
+        let watch = Self::sender_to_receiver(sender);
+        unsafe {
+            self.set_watch(watch)
+        }
     }
-    pub fn set_receiver(&mut self, receiver: watch::Receiver<T>) {
+    fn set_receiver(&mut self, receiver: watch::Receiver<T>) {
+        let sender = Self::receiver_as_sender(&receiver).clone();
+        mem::forget(sender);
+        unsafe {
+            self.set_watch(receiver)
+        }
+    }
+    /// Must have had reference counts adjusted by [Self::sender_to_receiver]
+    pub unsafe fn set_watch(&mut self, w: watch::Receiver<T>) {
         match self.watch.get_mut() {
-            Some(watch) => *watch = receiver,
+            Some(watch) => {
+                let prev = mem::replace(watch, w);
+                Self::receiver_to_parts(prev);
+            },
             None => {
-                self.init_receiver(receiver);
+                self.init_receiver(w);
             },
         }
     }
@@ -93,11 +118,17 @@ impl<T> Watcher<T> {
         }
     }
 
+    /// the inverse of [Self::sender_to_receiver]
+    pub unsafe fn receiver_to_parts(watch: watch::Receiver<T>) -> (watch::Sender<T>, watch::Receiver<T>) {
+        let sender = ptr::read(Self::receiver_as_sender(&watch));
+        (sender, watch)
+    }
+
     pub fn take_parts(&mut self) -> Option<(watch::Sender<T>, watch::Receiver<T>)> {
         let watch = self.watch.take()?;
 
-        let sender = unsafe { ptr::read(Self::receiver_as_sender(&watch)) };
-        Some((sender, watch))
+        let parts = unsafe { Self::receiver_to_parts(watch) };
+        Some(parts)
     }
 
     pub fn into_parts(self) -> Option<(watch::Sender<T>, watch::Receiver<T>)> {
@@ -148,10 +179,13 @@ impl<T> Watcher<T> {
     }
 
     pub async fn when_changed(&mut self) {
-        match self.get_receiver_mut() {
-            None => futures::future::pending().await,
-            Some(watch) => drop(watch.changed().await),
+        if let Some(receiver) = self.get_receiver_mut() {
+            match receiver.changed().await {
+                Ok(()) => return,
+                Err(..) => (),
+            }
         }
+        future::pending().await
     }
     pub async fn watch<F: FnMut(&T) -> bool>(&mut self, cond: F) -> watch::Ref<'_, T> {
         match self.get_receiver_mut() {
@@ -163,7 +197,7 @@ impl<T> Watcher<T> {
             },
             None => (),
         }
-        futures::future::pending().await
+        future::pending().await
     }
 }
 
@@ -269,6 +303,14 @@ impl<T: Clone> Watched<T> {
             cached: Some(value),
         }
     }
+    pub fn subscribe_to(sender: &watch::Sender<T>) -> Self {
+        Self::new_with_watcher(Watcher::subscribe_to(sender))
+    }
+    pub fn start_watching(sender: &watch::Sender<T>) -> Self {
+        let mut watched = Self::new_with_watcher(Watcher::subscribe_to(sender));
+        let _ = watched.watch.try_mark_changed();
+        watched
+    }
 
     pub const fn new_with_watcher(watch: Watcher<T>) -> Self {
         Self { watch, cached: None }
@@ -278,12 +320,56 @@ impl<T: Clone> Watched<T> {
         let cached = watch.try_read().map(|w| (*w).clone());
         Self { watch, cached }
     }
+    pub fn with_sender(sender: watch::Sender<T>) -> Self {
+        Self::new_with_watcher(Watcher::with_sender(sender))
+    }
+    pub fn with_receiver(receiver: watch::Receiver<T>) -> Self {
+        Self::new_with_watcher(Watcher::with_receiver(receiver))
+    }
+    pub fn start_receiving(mut receiver: watch::Receiver<T>) -> Self {
+        receiver.mark_changed();
+        Self::with_receiver(receiver)
+    }
+
+    pub fn try_read_update(&mut self) -> Option<&mut T> {
+        match self.watch.try_read_update().map(|w| w.clone()) {
+            Some(v) => Some(self.cached.insert(v)),
+            None => None,
+        }
+    }
 
     pub fn try_get_mut(&mut self) -> Option<&mut T> {
-        if self.cached.is_none() || self.watch.has_changed() {
-            self.cached = self.watch.try_read_update().map(|w| w.clone());
+        if self.cached.is_none() {
+            match self.watch.try_read().map(|w| w.clone()) {
+                Some(v) => {
+                    let _ = self.cached.insert(v);
+                },
+                None => (),
+            }
         }
         self.cached.as_mut()
+    }
+    pub fn try_read_mut(&mut self) -> Option<&mut T> {
+        if self.cached.is_none() || self.watch.has_changed() {
+            self.try_read_update();
+        }
+        self.cached.as_mut()
+    }
+    pub async fn when_changed(&mut self) -> &mut T {
+        self.watch.when_changed().await;
+        match self.try_read_update() {
+            Some(v) => v,
+            None => future::pending().await,
+        }
+    }
+    pub async fn watch<F: FnMut(&T, &mut Option<T>) -> bool>(&mut self, mut cond: F) -> &mut T {
+        let value =  {
+            let cached = &mut self.cached;
+            self.watch.watch(move |v|
+                cond(v, cached)
+            ).await
+        };
+        self.cached.insert(value.clone())
     }
 }
 

@@ -79,7 +79,7 @@ impl Trail {
         });
 
         // TODO: support bh features properly...
-        attributes.merge(&attributes_bh);
+        attributes.merge(&attributes_bh, false);
 
         Ok(Self {
             category,

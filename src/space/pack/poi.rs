@@ -1,14 +1,12 @@
 use {
     super::{ActivePack, PoiExt},
     crate::{
-        exports::runtime::Counter,
-        render::machine::RenderMachine,
-        space::{
+        controller::pathing::{registry::{CategoryIndex, PoiIndex}, visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::Counter, render::machine::RenderMachine, space::{
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
             DrawSpace,
             LocalContext,
-        },
+        }
     },
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
@@ -21,7 +19,7 @@ use {
         },
         state::PrimitiveTopology,
     },
-    taimi_pack::Poi,
+    taimi_pack::{PackLoaderContext, Poi},
 };
 
 pub struct PoiCommonRenderData {
@@ -162,19 +160,21 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 ];
 
 pub struct ActivePoi {
-    pub poi_idx: usize,
-    pub category_idx: usize,
-    pub filtered: bool,
+    #[cfg(todo = "unnecessary")]
+    pub poi_idx: PoiIndex,
+    pub category_idx: CategoryIndex,
+    pub visibility: VisibilityFlags,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
     pub tint: Vec4,
     pub opacity: f32,
     pub scale: f32,
     pub scale_map: f32,
-    pub icon: Arc<Texture>,
+    pub icon: Option<Arc<Texture>>,
 }
 
 impl ActivePoi {
+    #[cfg(deleteme)]
     pub fn build(
         loader: &mut ActivePack,
         poi: &Poi,
@@ -214,6 +214,58 @@ impl ActivePoi {
         })
     }
 
+    pub fn new(
+        active_pack: &mut ActivePack,
+        loader: &mut dyn PackLoaderContext,
+        visibility: VisibilityFlags,
+        _poi_idx: PoiIndex,
+        poi: &LoadedPoi,
+        icon_name: &str,
+        scale: f32,
+        scale_map: f32,
+        tint: Vec4,
+        opacity: f32,
+        device: &Dx11Device,
+    ) -> anyhow::Result<Self> {
+        let icon_handle = active_pack.register_texture(icon_name);
+        let icon = active_pack
+            .get_or_load_texture(icon_handle, loader, device)
+            .context("Loading poi texture")?;
+
+        Ok(Self {
+            #[cfg(todo = "unnecessary")]
+            poi_idx,
+            category_idx: poi.category,
+            visibility,
+            bounds: poi.bounds,
+            position: poi.position,
+            tint,
+            opacity,
+            scale,
+            scale_map,
+            icon: Some(icon.clone()),
+        })
+    }
+
+    pub fn with_pack_poi(
+        active_pack: &mut ActivePack,
+        loader: &mut dyn PackLoaderContext,
+        visibility: VisibilityFlags,
+        poi_idx: PoiIndex,
+        poi: &LoadedPoi,
+        poi_data: &Poi,
+        device: &Dx11Device,
+    ) -> anyhow::Result<Self> {
+        let icon_name = poi_data
+            .icon_name()
+            .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
+        let scale = poi_data.icon_scale();
+        let scale_map = poi_data.attributes.map_display_size.unwrap_or(20.0);
+        let tint = poi_data.tint();
+        let opacity = poi_data.alpha();
+        Self::new(active_pack, loader, visibility, poi_idx, poi, icon_name, scale, scale_map, tint, opacity, device)
+    }
+
     pub fn tint(&self) -> Vec4 {
         let mut tint = self.tint;
         tint.w *= self.opacity;
@@ -246,7 +298,9 @@ impl ActivePoi {
     }
 
     pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
-        self.icon.set(device_context, 0);
+        if let Some(icon) = &self.icon {
+            icon.set(device_context, 0);
+        }
         let voffset = match ctx {
             LocalContext::World => 0,
             LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,
@@ -263,6 +317,26 @@ impl ActivePoi {
         unsafe {
             device_context.Draw(4, 0);
         }*/
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            #[cfg(todo = "unnecessary")]
+            poi_idx: PoiIndex::MAX,
+            category_idx: CategoryIndex::MAX,
+            visibility: VisibilityFlags::empty(),
+            bounds: Box3::ZERO,
+            position: Point3::ZERO,
+            tint: Vec4::ZERO,
+            opacity: 0.0,
+            scale: 0.0,
+            scale_map: 0.0,
+            icon: None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bounds.is_empty()
     }
 }
 

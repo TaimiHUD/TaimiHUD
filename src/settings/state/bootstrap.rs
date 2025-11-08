@@ -92,8 +92,8 @@ impl BootstrapState {
         }
     }
 
-    pub fn file_path() -> &'static Path {
-        Path::new("addons/Taimi/boot.json")
+    pub const fn file_path() -> &'static Path {
+        rt::new_path_const("addons/Taimi/boot.json")
     }
 
     pub fn read_file(path: &Path) -> io::Result<Self> {

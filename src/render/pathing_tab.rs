@@ -28,6 +28,7 @@ use {
     taimi_pack::attributes::Festival,
 };
 
+use crate::{controller::Controller, settings::pathing::TriggerKind};
 #[cfg(feature = "goggles")]
 use crate::space::engine::{Engine, SpaceEvent};
 
@@ -431,11 +432,13 @@ impl PathingConfig {
             },
         }
 
+        self.draw_interaction_opts(ui);
+
         let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || self.draw_festival_opts(ui, machine));
+            .build(ui, || self.draw_festival_opts(ui));
 
         let advanced = || {
             ui.text_wrapped(&fl!("pathing-config-trail-notice"));
@@ -608,32 +611,75 @@ impl PathingConfig {
         Some(())
     }
 
-    fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let change = Self::get_pathing(|s| {
-            let mut change = None;
-            for festival in Festival::all() {
-                let active = machine.festival_active(festival);
-                let selected = s.get_festival_preference(festival);
-                let name = crate::LANGUAGE_LOADER.get(festival.as_str());
-                let title = match active {
-                    true => fl!("pathing-config-festival-active", festival = name),
-                    false => name,
-                };
-                let selection = Selectable::new(title).selected(selected.unwrap_or(active));
-                if selection.build(ui) {
-                    change = Some((festival, match (selected, active) {
-                        (Some(selected), active) if active == !selected => None,
-                        (Some(selected), ..) => Some(!selected),
-                        (None, active) => Some(!active),
-                    }));
-                }
+    fn draw_festival_opts(&mut self, ui: &Ui) {
+        let Some(festivals) = Controller::with_sender(|s|
+            s.festivals.as_ref().map(|f| f.borrow().clone())
+        ).flatten() else { return };
+        let mut change = None;
+        for festival in Festival::all() {
+            let selected = festivals.get_preference(festival);
+            let active = festivals.active.get(festival);
+            let name = crate::LANGUAGE_LOADER.get(festival.as_str());
+            let title = match active {
+                true => fl!("pathing-config-festival-active", festival = name),
+                false => name,
+            };
+            let selection = Selectable::new(title).selected(selected.unwrap_or(active));
+            if selection.build(ui) {
+                change = Some((festival, match (selected, active) {
+                    (Some(selected), active) if active == !selected => None,
+                    (Some(selected), ..) => Some(!selected),
+                    (None, active) => Some(!active),
+                }));
             }
-            change
-        });
-        if let Some(Some((festival, change))) = change {
-            Self::set_pathing(|s| s.set_festival_preference(festival, change));
-            PathingController::try_send(PathingEvent::RequestDisabledPaths);
         }
+        if let Some((festival, change)) = change {
+            Self::set_pathing(|s| s.set_festival_preference(festival, change));
+        }
+    }
+
+    fn draw_interaction_opts(&mut self, ui: &Ui) -> Option<()> {
+        let (trigger_allow_auto, trigger_allow_interact) =
+            Self::get_pathing(|s| (s.trigger_allow_auto, s.trigger_allow_interact))?;
+
+        let trigger_opts_interact = || {
+            let _id = ui.push_id("trigger_allow_interact");
+            if let Some(set) = self.draw_trigger_opts(ui, trigger_allow_interact) {
+                Self::set_pathing(|s| s.trigger_allow_interact = set);
+            }
+        };
+        let _interaction = TreeNode::new(&fl!("pathing-config-interactions"))
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .build(ui, trigger_opts_interact);
+
+        let trigger_opts_auto = || {
+            let _id = ui.push_id("trigger_allow_auto");
+            with_i18n!("pathing-config-autotrigger-notice", |msg| ui.text_wrapped(msg));
+            let Some(set) = self.draw_trigger_opts(ui, trigger_allow_auto) else { return };
+            Self::set_pathing(|s| s.trigger_allow_auto = set);
+        };
+        ui.indent();
+        let _trigger_auto = with_i18n!("pathing-config-autotrigger", |msg| TreeNode::new(msg)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(false)
+            .build(ui, trigger_opts_auto));
+        ui.unindent();
+
+        Some(())
+    }
+    fn draw_trigger_opts(&mut self, ui: &Ui, mut setting: TriggerKind) -> Option<TriggerKind> {
+        let mut changed = false;
+        for (i, flag) in TriggerKind::SETTINGS_GUI.into_iter().enumerate() {
+            if i % 4 != 0 {
+                ui.same_line();
+            }
+            changed |= with_i18n!(flag.flag_str().unwrap_or_default(), |msg| ui.checkbox_flags(msg, &mut setting, flag));
+        }
+        setting.set(TriggerKind::SETTINGS_TOGGLE_SHOWHIDE, setting.contains(TriggerKind::TOGGLE));
+        changed.then_some(setting)
     }
 
     #[cfg(feature = "goggles")]

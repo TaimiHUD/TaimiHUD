@@ -132,6 +132,12 @@ impl TaimiControls {
             },
     );
 
+    #[cfg(feature = "space")]
+    pub const QUICK_ACCESS_NOTIFY_PATHING: Self = Self::from_bits_retain(
+        Self::WINDOW_PATHING.bits()
+        // | Self::PATHING_SPACE
+    );
+
     pub fn index(self) -> u8 {
         self.bits().trailing_zeros() as u8
     }

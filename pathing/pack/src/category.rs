@@ -4,7 +4,6 @@ use {
         pack::{taco_safe_name, PartialItem},
     },
     anyhow::{anyhow, Context},
-    bitvec::vec::BitVec,
     indexmap::IndexMap,
     std::sync::Arc,
 };
@@ -109,7 +108,7 @@ impl Category {
         };
 
         // TODO: support bh features properly...
-        marker_attributes.merge(&attributes_bh);
+        marker_attributes.merge(&attributes_bh, false);
 
         let marker_attributes = Arc::new(marker_attributes);
         let display_name = display_name.or(bh_display_name).unwrap_or(id.clone());
@@ -129,43 +128,6 @@ impl Category {
         })
     }
 
-    pub fn recompute_enabled(
-        &self,
-        all_categories: &IndexMap<String, Category>,
-        enabled_categories: &mut BitVec,
-        user_category_state: &BitVec,
-        parent: bool,
-    ) {
-        if let Some(idx) = all_categories.get_index_of(&self.full_id) {
-            if let Some(cur) = user_category_state.get(idx) {
-                let res = parent && *cur;
-                if let Some(mut cat) = enabled_categories.get_mut(idx) {
-                    *cat = res;
-                }
-                for (_local, global) in self.sub_categories.iter() {
-                    all_categories[global].recompute_enabled(
-                        all_categories,
-                        enabled_categories,
-                        user_category_state,
-                        res,
-                    );
-                }
-            }
-        }
-    }
-
-    #[cfg(todo = "unused")]
-    pub fn attain_state(
-        &self,
-        all_categories: &IndexMap<String, Category>,
-        state: &mut HashMap<String, bool>,
-    ) {
-        let _ = state.entry(self.full_id.clone()).or_insert(self.default_toggle);
-        for (_local, global) in self.sub_categories.iter() {
-            all_categories[global].attain_state(all_categories, state);
-        }
-    }
-
     pub fn merge(&mut self, mut new: Category) {
         if self.id != new.id || self.full_id != new.full_id {
             log::error!(
@@ -179,7 +141,7 @@ impl Category {
         if Arc::strong_count(&new.marker_attributes) > 1 {
             log::warn!("Multiple owners for category attributes.");
         }
-        Arc::make_mut(&mut new.marker_attributes).merge(&self.marker_attributes);
+        Arc::make_mut(&mut new.marker_attributes).merge(&self.marker_attributes, false);
         self.marker_attributes = new.marker_attributes;
         let self_subs = Arc::make_mut(&mut self.sub_categories);
         for (local_id, full_id) in Arc::make_mut(&mut new.sub_categories).drain(..) {

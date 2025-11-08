@@ -35,7 +35,7 @@ impl Poi {
             let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
                 category = taco_safe_name(&attr.value, true);
                 Ok(())
-            } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
+            } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
                 attr.value.parse().map(|v| map_id = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
                 attr.value.parse().map(|v| pos_x = Some(v)).map_err(From::from)
@@ -75,7 +75,7 @@ impl Poi {
         let guid = guid.unwrap_or_default();
 
         // TODO: support bh features properly...
-        attributes.merge(&attributes_bh);
+        attributes.merge(&attributes_bh, false);
 
         let parent_path = Path::new(asset).parent().map(|p| p.to_string_lossy().into());
         Ok(Poi {

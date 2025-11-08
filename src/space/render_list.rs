@@ -1,5 +1,5 @@
 use {
-    crate::{render::machine::RenderPosition, space::DrawSpace},
+    crate::{controller::pathing::registry::{PackIndex, PoiIndex, TrailIndex, TrailSectionIndex}, render::machine::RenderPosition, space::DrawSpace},
     glamour::{Box3, Intersection, Point3, Vector3, Vector4},
     std::ops::Range,
 };
@@ -31,8 +31,8 @@ impl RenderEntity {
 
 #[derive(Copy, Clone, Debug)]
 pub enum RenderId {
-    TrailSection { pack_idx: usize, trail_idx: usize, section: usize },
-    Poi { pack_idx: usize, poi_idx: usize },
+    TrailSection { pack_idx: PackIndex, trail_idx: TrailIndex, section: TrailSectionIndex },
+    Poi { pack_idx: PackIndex, poi_idx: PoiIndex },
 }
 
 pub struct RenderListBuilder {

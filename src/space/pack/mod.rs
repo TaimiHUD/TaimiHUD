@@ -8,13 +8,11 @@ use {
 pub mod poi;
 pub mod trail;
 
-mod festivals;
 pub(crate) mod pack;
 
 pub use {
     self::{
-        festivals::FestivalFixup,
-        pack::{ActivePack, LoaderBox, PackCollection, UnloadedReason},
+        pack::{ActivePack, PackCollection},
         poi::PoiScale,
         trail::{TrailScale, TrailTextureMap},
     },

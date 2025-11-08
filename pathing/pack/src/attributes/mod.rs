@@ -6,6 +6,8 @@ use {
     xml::name::Name,
 };
 
+pub mod keys;
+
 #[derive(Debug, Clone, Default)]
 /// Attributes for markers. Inherits up the category stack.
 pub struct MarkerAttributes {
@@ -84,7 +86,7 @@ pub struct MarkerAttributes {
 }
 
 impl MarkerAttributes {
-    pub fn merge(&mut self, base: &MarkerAttributes) {
+    pub fn merge(&mut self, base: &MarkerAttributes, child: bool) {
         // === Common === //
         if self.alpha.is_none() {
             self.alpha = base.alpha;
@@ -153,10 +155,10 @@ impl MarkerAttributes {
         if self.billboard_text_color.is_none() {
             self.billboard_text_color = base.billboard_text_color;
         }
-        if self.tip_name.is_none() {
+        if !child && self.tip_name.is_none() {
             self.tip_name = base.tip_name.clone();
         }
-        if self.tip_description.is_none() {
+        if !child && self.tip_description.is_none() {
             self.tip_description = base.tip_description.clone();
         }
         // === Trail-specific === //
@@ -235,10 +237,10 @@ impl MarkerAttributes {
         if self.bounce_duration.is_none() {
             self.bounce_duration = base.bounce_duration;
         }
-        if self.copy_value.is_none() {
+        if !child && self.copy_value.is_none() {
             self.copy_value = base.copy_value.clone();
         }
-        if self.copy_message.is_none() {
+        if !child && self.copy_message.is_none() {
             self.copy_message = base.copy_message.clone();
         }
         if self.toggle_category.is_none() {
@@ -503,8 +505,9 @@ where
     Ok(list)
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CullDirection {
+    #[default]
     None = 0,
     Clockwise = 1,
     CounterClockwise = 2,

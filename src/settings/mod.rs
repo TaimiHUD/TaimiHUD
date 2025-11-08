@@ -4,7 +4,7 @@ pub mod pathing;
 mod progress_bar_config;
 mod settings_struct;
 pub(crate) mod source;
-mod sources;
+pub mod sources;
 pub mod state;
 mod v1;
 
@@ -22,6 +22,6 @@ pub use {
         SquadCondition,
     },
     source::{DirectSource, GitHubSource, Source},
-    sources::{DeserializedSource, RemoteAssetForm, SourceKind, SourcesFile},
+    sources::{DataSourcePath, DeserializedSource, RemoteAssetForm, SourceKind, SourcesFile},
     v1::{RemoteState, TimerSettings},
 };

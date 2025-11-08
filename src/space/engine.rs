@@ -15,7 +15,7 @@ use {
     glam::Vec3,
     glamour::{Box2, Size2, TransformMap},
     std::{
-        collections::{HashMap, HashSet},
+        collections::{BTreeSet, HashMap, HashSet},
         mem,
         num::NonZeroU32,
         sync::Arc,
@@ -476,15 +476,6 @@ impl Engine {
         }
     }
 
-    pub fn disable_paths(&mut self, machine: &RenderMachine, disabled_paths: HashSet<String>) {
-        self.packs.active_festivals = self.map_settings(|s| {
-            Festival::all()
-                .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
-                .collect()
-        });
-        self.packs.disable_paths(disabled_paths);
-    }
-
     #[allow(dead_code)]
     pub fn check_phase_ends() {
         todo!("this is supposed to terminate a phase when there are no more markers, ideally we should actually make something that finds the latest timestamp between sounds, directions, markers, alerts etc");
@@ -538,12 +529,14 @@ impl Engine {
             return Ok(())
         }
 
+        #[cfg(deleteme)] {
         self.packs.trail_params.y_offset = trail_y_offset.unwrap_or(0.0);
         self.packs.trail_params.resolution = Some(trail_resolution);
         self.packs.trail_params.width = trail_width;
+        }
 
         self.packs.prepare(&self.render_backend.device, machine)?;
-        self.packs.update();
+        //self.packs.update();
 
         let render_map = match visible_map {
             Some(true) =>
@@ -905,9 +898,11 @@ impl Engine {
         device_context: &Dx11Context,
         map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
+        #[cfg(deleteme)]
         let res = self
             .packs
             .load_map(&self.render_backend.device, device_context, map_id.get());
+        let res = Ok(());
 
         self.goggles_enter(true);
 

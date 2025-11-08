@@ -119,6 +119,18 @@ impl FestivalFixup {
         "legs.festivals",
     ];
 
+    /// [self.active_festivals](SystemTime::now)
+    pub fn current_festivals() -> Festivals {
+        Self::active_festivals(SystemTime::now())
+    }
+    /// For use as an initial setting, not to be considered reliable
+    pub fn active_festivals(now: SystemTime) -> Festivals {
+        Self::FESTIVAL_WINDOWS.iter()
+            .filter(move |(_f, window)| window.is_active(now))
+            .map(|&(festival, ..)| Festivals::from(festival))
+            .collect()
+    }
+
     /// Generally Tuesdays from $(date +%s -d '20??-??-??T09:00:00-07:00')
     /// to $(date +%s -d '20??-??-??T12:00:00-07:00')
     pub const FESTIVAL_WINDOWS: &'static [(Festival, FestivalWindow)] = &[
@@ -183,5 +195,71 @@ impl FestivalWindow {
             Ok(d) => d <= self.duration(),
             _ => false,
         }
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Festivals: u16 {
+        const LUNAR_NEW_YEAR = 0x01;
+        const SUPER_ADVENTURE_BOX = 0x02;
+        const DRAGON_BASH = 0x04;
+        const FOUR_WINDS = 0x08;
+        const HALLOWEEN = 0x10;
+        const WINTERSDAY = 0x20;
+    }
+}
+
+impl Festivals {
+    pub const fn for_festival(festival: Festival) -> Self {
+        match festival {
+            Festival::LunarNewYear => Self::LUNAR_NEW_YEAR,
+            Festival::SuperAdventureBox => Self::SUPER_ADVENTURE_BOX,
+            Festival::DragonBash => Self::DRAGON_BASH,
+            Festival::FourWinds => Self::FOUR_WINDS,
+            Festival::Halloween => Self::HALLOWEEN,
+            Festival::Wintersday => Self::WINTERSDAY,
+        }
+    }
+
+    pub const fn to_festival(self) -> Option<Festival> {
+        Some(match self {
+            Self::LUNAR_NEW_YEAR => Festival::LunarNewYear,
+            Self::SUPER_ADVENTURE_BOX => Festival::SuperAdventureBox,
+            Self::DRAGON_BASH => Festival::DragonBash,
+            Self::FOUR_WINDS => Festival::FourWinds,
+            Self::HALLOWEEN => Festival::Halloween,
+            Self::WINTERSDAY => Festival::Wintersday,
+            _ => return None,
+        })
+    }
+
+    pub const fn get(&self, festival: Festival) -> bool {
+        self.contains(Self::for_festival(festival))
+    }
+
+    pub fn iter_festivals(self) -> impl Iterator<Item = Festival> {
+        self.into_iter().filter_map(Self::to_festival)
+    }
+}
+
+impl From<Festival> for Festivals {
+    fn from(festival: Festival) -> Self {
+        Self::for_festival(festival)
+    }
+}
+impl From<Option<Festival>> for Festivals {
+    fn from(festival: Option<Festival>) -> Self {
+        festival.map(Into::into).unwrap_or(Self::empty())
+    }
+}
+impl FromIterator<Festival> for Festivals {
+    fn from_iter<T: IntoIterator<Item = Festival>>(iter: T) -> Self {
+        iter.into_iter().map(Self::from).collect()
+    }
+}
+impl<'a> FromIterator<&'a Festival> for Festivals {
+    fn from_iter<T: IntoIterator<Item = &'a Festival>>(iter: T) -> Self {
+        iter.into_iter().map(|&f| Self::from(f)).collect()
     }
 }

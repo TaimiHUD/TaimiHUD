@@ -1,6 +1,12 @@
 #[cfg(feature = "space")]
-use core::ops::Range;
-
+use {
+    crate::{
+        controller::pathing::{registry::PackPath, SharedMapPackInfo, SharedMapPackState},
+        space::engine::{Engine, SpaceEvent},
+    },
+    std::{ops::Range, mem, collections::BTreeMap},
+    tokio::sync::watch,
+};
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
@@ -33,15 +39,12 @@ use {
         },
     },
 };
-
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
-#[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
 
 mod map;
 #[cfg(feature = "markers")]
@@ -75,11 +78,13 @@ pub struct RenderMachine {
     #[cfg(feature = "space")]
     pub depth_range: Option<Range<f32>>,
     #[cfg(feature = "space")]
+    pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
+    #[cfg(feature = "space")]
+    pub map_pack_state: BTreeMap<PackPath, SharedMapPackState>,
+    #[cfg(feature = "space")]
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
-    #[cfg(feature = "space")]
-    pub active_festivals: std::collections::BTreeSet<taimi_pack::attributes::Festival>,
     #[cfg(feature = "extension-nexus")]
     pub rtapi: Option<rt::RealTimeApi>,
     #[cfg(feature = "extension-nexus")]
@@ -138,9 +143,11 @@ impl RenderMachine {
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
             #[cfg(feature = "space")]
-            active_festivals: Self::initial_festivals().collect(),
-            #[cfg(feature = "space")]
             depth_range: None,
+            #[cfg(feature = "space")]
+            pack_info: Controller::with_sender(|s| s.pack_info.as_ref().map(|i| i.clone())).flatten(),
+            #[cfg(feature = "space")]
+            map_pack_state: Default::default(),
             #[cfg(feature = "extension-nexus")]
             rtapi: None,
             #[cfg(feature = "extension-nexus")]
@@ -249,7 +256,11 @@ impl RenderMachine {
             gameplay: gameplay.clone(),
             trans: trans.clone(),
         });
-        Controller::try_send(ControllerEvent::GameplayStatus { gameplay, trans });
+        Controller::with_sender(|sender| {
+            if let Some(tx) = &sender.gameplay {
+                tx.send_replace(gameplay);
+            }
+        });
     }
 
     /// First map load we've seen!
@@ -360,6 +371,23 @@ impl RenderMachine {
 
         if let Some(trans) = gameplay_transition {
             self.act_gameplay_transition(trans);
+        }
+
+        #[cfg(feature = "space")]
+        if let Some(pack_info) = &mut self.pack_info {
+            let pack_map_changed = matches!(pack_info.has_changed(), Ok(true))
+                .then_some(self.gameplay.gameplay_map());
+            if let Some(Some(map_id)) = pack_map_changed {
+                let prev = mem::take(&mut self.map_pack_state);
+                self.map_pack_state = pack_info.borrow_and_update()
+                    .map_state
+                    .iter()
+                    .filter_map(|(path, map)| match path.path == map_id {
+                        true => Some((path.root, map.clone())),
+                        false => None,
+                    }).collect();
+                self.act_pack_map_changed(map_id, prev);
+            }
         }
 
         #[cfg(any(feature = "markers", feature = "space"))]

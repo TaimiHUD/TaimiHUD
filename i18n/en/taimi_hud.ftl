@@ -9,6 +9,7 @@ okay = OK
 delete = Delete
 copy = Copy
 copy-arg = Copy { $arg }
+copied = Copied to clipboard
 save = Save
 quit = Quit
 delete-item = { delete } "{ $item }"?
@@ -65,6 +66,7 @@ default = Default
 disable = Disable
 enabled = { enable }d
 disabled = { disable }d
+unloaded = Unloaded
 author-arg = { author }: { $author }
 reset = Reset
 timer = Timer
@@ -150,7 +152,7 @@ downloading-update = Downloading update...
 check-for-updates = Check for updates
 check-for-updates-tooltip = Check for updates to any data sources. We don't do this automatically to respect your choice on whether or not to make network requests.
 checked-for-updates-last = Last checked for updates at: { $time }
-reload-data-sources = Reload data sources
+reload-data-sources = Reload data
 reload-data-sources-tooltip = Reload items from currently installed data sources. Useful if you have changed the files within them!
 
 remote = Remote
@@ -274,6 +276,7 @@ current-map = Current map
 ignore-root = Ignore root state
 ignore-leaf = Ignore leaf state
 ignore-branch = Ignore branch state
+show-hidden = Show hidden
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
 toggle = Toggle
@@ -323,7 +326,7 @@ render-notice-gameplay = Load in to the game to get started
 render-notice-gameplay-initial = Select a character to get started
 render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 packs-empty = No files loaded
-packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "Reload" button should pick them up!
+packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "{ reload-packs }" button should pick them up!
 
 ## Festivals
 
@@ -334,3 +337,18 @@ superadventurefestival = Super Adventure Box
 lunarnewyear = Lunar New Year
 festivalofthefourwinds = Festival Of The Four Winds
 dragonbash = Dragon Bash
+
+## Interaction
+
+pathing-config-interactions = Interactions
+pathing-config-autotrigger = Auto-trigger
+pathing-config-autotrigger-notice = Additionally allow the following to automatically trigger when in range
+trigger-copy = Copy
+trigger-info = Info popup
+trigger-reset = POI reset
+trigger-toggle = Toggle category
+trigger-show = Show category
+trigger-hide = Hide category
+trigger-script = Scripts
+trigger-behaviour = Dismiss
+trigger-bounce = Animations

@@ -8,17 +8,10 @@ use {
     },
     anyhow::Context,
     std::{
-        borrow::Cow,
-        future::Future,
-        mem,
-        pin::Pin,
-        ptr,
-        sync::{
+        borrow::Cow, fmt, future::Future, mem, pin::Pin, ptr, sync::{
             atomic::{AtomicBool, Ordering},
             Arc,
-        },
-        task::{self, Poll},
-        time::Duration,
+        }, task::{self, Poll}, time::Duration
     },
     tokio::{
         runtime::{Builder, Handle, Runtime},
@@ -78,6 +71,27 @@ impl Controller {
     {
         Self::schedule_render(prio, f).await.await
     }
+    pub async fn try_run_render<R, F: FnOnce(&mut RenderState) -> anyhow::Result<R>>(
+        prio: RenderTaskPriority,
+        f: F,
+    ) -> anyhow::Result<R>
+    where
+        F: Send + 'static,
+        R: Send + 'static,
+    {
+        let res = Self::run_render(prio, f).await;
+        flatten_result_with("render task lost", res)
+    }
+
+    pub async fn try_run_blocking<R, C, F: FnOnce() -> anyhow::Result<R>>(context: C, f: F) -> anyhow::Result<R> where
+        R: Send + 'static,
+        F: Send + 'static,
+        C: fmt::Display,
+    {
+        let res = tokio::task::spawn_blocking(f).await
+            .with_context(|| format!("panicked: {context}"));
+        flatten_result_any(res)
+    }
 
     /// Bring in the render thread onto the runtime
     #[cfg(feature = "render-rt")]
@@ -95,6 +109,23 @@ impl Controller {
     }
     #[cfg(not(feature = "render-rt"))]
     pub(crate) fn render_inherit(&mut self) {}
+}
+
+pub fn flatten_result_any<T>(res: anyhow::Result<anyhow::Result<T>>) -> anyhow::Result<T> {
+    match res {
+        Ok(res) => res,
+        Err(e) => Err(e),
+    }
+}
+pub fn flatten_result<T, E: Into<anyhow::Error>>(res: Result<anyhow::Result<T>, E>) -> anyhow::Result<T> {
+    flatten_result_any(res.map_err(E::into))
+}
+pub fn flatten_result_with<C, T, E: Into<anyhow::Error>>(context: C, res: Result<anyhow::Result<T>, E>) -> anyhow::Result<T> where
+    C: fmt::Display,
+    Result<anyhow::Result<T>, E>: anyhow::Context<anyhow::Result<T>, E>,
+{
+    let res = res.with_context(move || context.to_string());
+    flatten_result_any(res)
 }
 
 pub struct RemoteContext {
