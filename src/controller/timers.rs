@@ -265,7 +265,6 @@ impl TimersController {
         new_map_id: u32,
         rt_sender: RtSender,
     ) {
-        log::info!("Map event reached TimersController!");
         for timer in &mut self.current_timers {
             timer.cleanup().await;
         }

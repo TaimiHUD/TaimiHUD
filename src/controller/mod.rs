@@ -386,7 +386,7 @@ impl Controller {
             Some(map_id) => map_id.get(),
         };
         if Some(new_map_id) != self.map_id {
-            log::info!("Map changed from {:?} to {}", self.map_id, new_map_id);
+            log::debug!("Map changed from {:?} to {}", self.map_id, new_map_id);
             #[cfg(feature = "markers")]
             self.markers
                 .handle_map_event(new_map_id, self.rt_sender.clone())
@@ -412,12 +412,12 @@ impl Controller {
         if is_self {
             match &mut self.agent {
                 Some(agent) if src.name != agent.name => {
-                    log::info!("Character changed from {:?} to {:?}!", agent.name, src.name);
+                    log::trace!("Character changed from {:?} to {:?}!", agent.name, src.name);
                     *agent = src;
                 },
                 Some(_agent) => (),
                 None => {
-                    log::info!("Character selected, {:?}!", src.name);
+                    log::trace!("Character selected, {:?}!", src.name);
                     self.agent = Some(src);
                 },
             };
@@ -654,7 +654,7 @@ impl Controller {
 
         {
             let mut settings = settings.write().await;
-            if let Some(mut remote) = RemoteState::lookup_datasource_mut(&mut settings.remotes, kind, &id) {
+            if let Some(remote) = RemoteState::lookup_datasource_mut(&mut settings.remotes, kind, &id) {
                 *remote = state;
                 settings.mark_dirty();
             }
