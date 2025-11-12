@@ -148,7 +148,7 @@ impl Controller {
 
     pub async fn late_init(&mut self) {
         #[cfg(feature = "extension-nexus")]
-        {
+        if rt::nexus_available() {
             let qa_icons = {
                 let settings = self.settings.read().await;
                 settings.quick_access_visible
