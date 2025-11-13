@@ -87,7 +87,7 @@ PSOutput PSMain(VSOutput input)
     float2 newtex = float2(input.tex.x, 1 - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
     // TODO: just enable depth clipping?
-    if (textureColour.w < DISCARD_ALPHA || input.position.z < DiscardZ) { discard; }
+    //if (textureColour.w < DISCARD_ALPHA || input.position.z < DiscardZ) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
