@@ -204,6 +204,14 @@ impl BootstrapState {
         }
     }
 
+    pub fn gh_api_token(&self) -> Option<&str> {
+        match &self.gh_api_token {
+            None => None,
+            Some(token) if token.is_empty() => None,
+            Some(token) => Some(token),
+        }
+    }
+
     pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
         Self::try_write_with(|state| {
             let mut changed = if state.addon_dir.as_ref().map(|d| d.as_os_str()) != Some(addon_dir.as_ref())

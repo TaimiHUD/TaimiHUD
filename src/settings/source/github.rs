@@ -81,17 +81,9 @@ impl GitHubReleaseAsset {
         let mut req = Request::new(Method::GET, self.url.clone());
         {
             let headers = req.headers_mut();
-            source::insert_header(headers, header::ACCEPT, &self.content_type);
-            headers.insert(GitHubSource::API_VERSION_HEADER, GitHubSource::API_VERSION);
-            let auth = BootstrapState::read_with(|state| {
-                state
-                    .gh_api_token
-                    .as_ref()
-                    .map(|token| header::HeaderValue::from_str(&format!("Bearer {token}")))
-            });
-            if let Some(Ok(auth)) = auth {
-                headers.insert(header::AUTHORIZATION, auth);
-            }
+            //source::insert_header(headers, header::ACCEPT, &self.content_type);
+            source::insert_header(headers, header::ACCEPT, &RemoteAssetForm::CONTENT_TYPE_BINARY);
+            GitHubSource::auth_header(headers);
         }
         req
     }
@@ -243,7 +235,8 @@ impl GitHubSource {
         }
         .parse();
         let mut req = Request::new(Method::GET, url?);
-        req.headers_mut().insert(header::ACCEPT, Self::ACCEPT_GH_JSON);
+        Self::api_header(req.headers_mut());
+        Self::auth_header(req.headers_mut());
         Ok(req)
     }
 
@@ -266,7 +259,8 @@ impl GitHubSource {
                 Url::parse_with_params(&url, [("page", page.to_string()), ("per_page", per.to_string())]),
         };
         let mut req = Request::new(Method::GET, url?);
-        req.headers_mut().insert(header::ACCEPT, Self::ACCEPT_GH_JSON);
+        Self::api_header(req.headers_mut());
+        Self::auth_header(req.headers_mut());
         Ok(req)
     }
 
@@ -288,6 +282,22 @@ impl GitHubSource {
             .and_then(|res| res.json())
             .await
             .with_context(|| format!("Deserializing GitHub release for {}", self.repository))
+    }
+
+    fn api_header(headers: &mut header::HeaderMap) {
+        headers.insert(header::ACCEPT, Self::ACCEPT_GH_JSON);
+        headers.insert(GitHubSource::API_VERSION_HEADER, GitHubSource::API_VERSION);
+    }
+    fn auth_header(headers: &mut header::HeaderMap) {
+        let auth = BootstrapState::read_with(|state| {
+            state
+                .gh_api_token()
+                .as_ref()
+                .map(|token| header::HeaderValue::from_str(&format!("Bearer {token}")))
+        });
+        if let Some(Ok(auth)) = auth {
+            headers.insert(header::AUTHORIZATION, auth);
+        }
     }
 }
 
