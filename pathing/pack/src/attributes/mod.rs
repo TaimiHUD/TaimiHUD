@@ -1,4 +1,5 @@
 use {
+    self::cell::GetAttrDyn,
     crate::{category::id::IdNameBox, pack::taco_xml_to_guid},
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
@@ -14,7 +15,9 @@ pub use self::{
     race::{Race, Races},
 };
 
+pub mod cell;
 pub mod festival;
+pub mod keys;
 pub mod mount;
 pub mod profession;
 pub mod race;
@@ -350,6 +353,193 @@ impl MarkerAttributes {
         self.render_mut().poi.get_or_insert_default()
     }
 }
+impl AsMut<TrailAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut TrailAttributes {
+        self.trail_mut()
+    }
+}
+impl AsMut<PoiAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut PoiAttributes {
+        self.poi_mut()
+    }
+}
+impl AsMut<RenderAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut RenderAttributes {
+        self.render_mut()
+    }
+}
+impl AsMut<FilterAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut FilterAttributes {
+        self.filters_mut()
+    }
+}
+impl AsMut<InteractionAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut InteractionAttributes {
+        self.interaction_mut()
+    }
+}
+impl AsMut<ScriptAttributes> for MarkerAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut ScriptAttributes {
+        self.script_mut()
+    }
+}
+impl GetAttrDyn for MarkerAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        RenderAttributes::holds_attr_dyn(key)
+            || cell::pack_attr!(=id_is_in(key, [
+                keys::EditTag,
+                keys::MinimapVisibility,
+                keys::MapVisibility,
+                keys::InGameVisibility,
+                keys::TipName,
+                keys::TipDescription,
+            ]))
+            || FilterAttributes::holds_attr_dyn(key)
+            || InteractionAttributes::holds_attr_dyn(key)
+            || ScriptAttributes::holds_attr_dyn(key)
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        let has = cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::EditTag,
+            keys::MinimapVisibility,
+            keys::MapVisibility,
+            keys::InGameVisibility,
+            keys::TipName,
+            keys::TipDescription,
+        ] };
+        if let Some(has) = has {
+            has
+        } else if let Some(true) = self.render.as_ref().map(|a| a.has_attr_dyn(key)) {
+            true
+        } else if RenderAttributes::holds_attr_dyn(key) {
+            false
+        } else {
+            self.filters
+                .as_ref()
+                .map(|a| a.has_attr_dyn(key))
+                .unwrap_or(false)
+                || self
+                    .interaction
+                    .as_ref()
+                    .map(|a| a.has_attr_dyn(key))
+                    .unwrap_or(false)
+                || self.script.as_ref().map(|a| a.has_attr_dyn(key)).unwrap_or(false)
+        }
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        let get = cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::EditTag,
+            keys::MinimapVisibility,
+            keys::MapVisibility,
+            keys::InGameVisibility,
+            keys::TipName,
+            keys::TipDescription,
+        ] };
+        if let Some(get) = get {
+            get
+        } else if let Some(Some(render)) = self.render.as_ref().map(|a| a.get_attr_dyn_ref(key)) {
+            Some(render)
+        } else if RenderAttributes::holds_attr_dyn(key) {
+            None
+        } else {
+            self.filters
+                .as_ref()
+                .and_then(|a| a.get_attr_dyn_ref(key))
+                .or_else(|| self.interaction.as_ref().and_then(|a| a.get_attr_dyn_ref(key)))
+                .or_else(|| self.script.as_ref().and_then(|a| a.get_attr_dyn_ref(key)))
+        }
+    }
+    fn get_attr_dyn(&self, key: cell::PackKeyId) -> Option<Cow<'_, dyn cell::AttrKeyValue>> {
+        let get = cell::pack_attr! { imp GetAttrDyn::get_attr_dyn(self, key) in [
+            keys::EditTag,
+            keys::MinimapVisibility,
+            keys::MapVisibility,
+            keys::InGameVisibility,
+            keys::TipName,
+            keys::TipDescription,
+        ] };
+        if let Some(get) = get {
+            get
+        } else if let Some(Some(render)) = self.render.as_ref().map(|a| a.get_attr_dyn(key)) {
+            Some(render)
+        } else if RenderAttributes::holds_attr_dyn(key) {
+            None
+        } else {
+            self.filters
+                .as_ref()
+                .and_then(|a| a.get_attr_dyn(key))
+                .or_else(|| self.interaction.as_ref().and_then(|a| a.get_attr_dyn(key)))
+                .or_else(|| self.script.as_ref().and_then(|a| a.get_attr_dyn(key)))
+        }
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::EditTag,
+            keys::MinimapVisibility,
+            keys::MapVisibility,
+            keys::InGameVisibility,
+            keys::TipName,
+            keys::TipDescription,
+        ] }
+        .chain(self.render.as_ref().into_iter().flat_map(|a| a.iter_attrs_dyn()))
+        .chain(self.filters.as_ref().into_iter().flat_map(|a| a.iter_attrs_dyn()))
+        .chain(
+            self.interaction
+                .as_ref()
+                .into_iter()
+                .flat_map(|a| a.iter_attrs_dyn()),
+        )
+        .chain(self.script.as_ref().into_iter().flat_map(|a| a.iter_attrs_dyn()))
+    }
+}
+impl cell::SetAttrDyn for MarkerAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::EditTag,
+                keys::MinimapVisibility,
+                keys::MapVisibility,
+                keys::InGameVisibility,
+                keys::TipName,
+                keys::TipDescription,
+            ],
+            _ => {
+                if RenderAttributes::holds_attr_dyn(value.id()) {
+                    self.render_mut().set_attr_dyn(value)
+                } else if FilterAttributes::holds_attr_dyn(value.id()) {
+                    self.filters_mut().set_attr_dyn(value)
+                } else if ScriptAttributes::holds_attr_dyn(value.id()) {
+                    self.script_mut().set_attr_dyn(value)
+                } else if self.interaction.is_none() && !InteractionAttributes::holds_attr_dyn(value.id()) {
+                    false
+                } else {
+                    self.interaction_mut().set_attr_dyn(value)
+                }
+            },
+        }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::EditTag} for &struct{MarkerAttributes}.edit_tag? {}
+    impl Attr{keys::MinimapVisibility} for &struct{MarkerAttributes}.minimap_visibility? {}
+    impl Attr{keys::MapVisibility} for &struct{MarkerAttributes}.map_visibility? {}
+    impl Attr{keys::InGameVisibility} for &struct{MarkerAttributes}.in_game_visibility? {}
+    impl Attr{keys::TipName} for &struct{MarkerAttributes}.tip_name? {}
+    impl Attr{keys::TipDescription} for &struct{MarkerAttributes}.tip_description? {}
+
+    impl Attr{keys::EditTag} in Internal{MarkerAttributes} {}
+    impl Attr{keys::MinimapVisibility} in Internal{MarkerAttributes} {}
+    impl Attr{keys::MapVisibility} in Internal{MarkerAttributes} {}
+    impl Attr{keys::InGameVisibility} in Internal{MarkerAttributes} {}
+    impl Attr{keys::TipName} in Internal{MarkerAttributes} {}
+    impl Attr{keys::TipDescription} in Internal{MarkerAttributes} {}
+}
 
 /// Scripting.
 #[derive(Debug, Clone, Default)]
@@ -403,6 +593,70 @@ impl ScriptAttributes {
         }
         Ok(())
     }
+}
+impl GetAttrDyn for ScriptAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::ScriptTick,
+            keys::ScriptFocus,
+            keys::ScriptTrigger,
+            keys::ScriptFilter,
+            keys::ScriptOnce,
+        ]))
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::ScriptTick,
+            keys::ScriptFocus,
+            keys::ScriptTrigger,
+            keys::ScriptFilter,
+            keys::ScriptOnce,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::ScriptTick,
+            keys::ScriptFocus,
+            keys::ScriptTrigger,
+            keys::ScriptFilter,
+            keys::ScriptOnce,
+        ] }
+        .flatten()
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::ScriptTick,
+            keys::ScriptFocus,
+            keys::ScriptTrigger,
+            keys::ScriptFilter,
+            keys::ScriptOnce,
+        ] }
+    }
+}
+impl cell::SetAttrDyn for ScriptAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::ScriptTick,
+            keys::ScriptFocus,
+            keys::ScriptTrigger,
+            keys::ScriptFilter,
+            keys::ScriptOnce,
+        ] }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::ScriptTick} for &struct{ScriptAttributes}.script_tick? {}
+    impl Attr{keys::ScriptFocus} for &struct{ScriptAttributes}.script_focus? {	}
+    impl Attr{keys::ScriptTrigger} for &struct{ScriptAttributes}.script_trigger? {	}
+    impl Attr{keys::ScriptFilter} for &struct{ScriptAttributes}.script_filter? {	}
+    impl Attr{keys::ScriptOnce} for &struct{ScriptAttributes}.script_once? {	}
+
+    impl Attr{keys::ScriptTick} in Internal{ScriptAttributes} {}
+    impl Attr{keys::ScriptFocus} in Internal{ScriptAttributes} {}
+    impl Attr{keys::ScriptTrigger} in Internal{ScriptAttributes} {}
+    impl Attr{keys::ScriptFilter} in Internal{ScriptAttributes} {}
+    impl Attr{keys::ScriptOnce} in Internal{ScriptAttributes} {}
 }
 
 /// Modifiers.
@@ -483,6 +737,189 @@ impl InteractionAttributes {
         }
     }
 }
+impl GetAttrDyn for InteractionAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::Info,
+            keys::InfoRange,
+            keys::Bounce,
+            keys::BounceDelay,
+            keys::BounceHeight,
+            keys::BounceDuration,
+            keys::CopyValue,
+            keys::CopyMessage,
+            keys::ToggleCategory,
+            keys::ResetGuid,
+            keys::ShowCategory,
+            keys::HideCategory,
+            keys::Behaviour,
+            keys::ResetLength,
+            keys::AutoTrigger,
+        ]))
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::Info,
+            keys::InfoRange,
+            keys::Bounce,
+            keys::BounceDelay,
+            keys::BounceHeight,
+            keys::BounceDuration,
+            keys::CopyValue,
+            keys::CopyMessage,
+            keys::ToggleCategory,
+            keys::ResetGuid,
+            keys::ShowCategory,
+            keys::HideCategory,
+            keys::Behaviour,
+            keys::ResetLength,
+            keys::AutoTrigger,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::Info,
+            keys::InfoRange,
+            keys::Bounce,
+            keys::BounceDelay,
+            keys::BounceHeight,
+            keys::BounceDuration,
+            keys::CopyValue,
+            keys::CopyMessage,
+            keys::ToggleCategory,
+            keys::ResetGuid,
+            keys::ShowCategory,
+            keys::HideCategory,
+            keys::Behaviour,
+            keys::ResetLength,
+            keys::AutoTrigger,
+        ] }
+        .flatten()
+    }
+    fn get_attr_dyn(&self, key: cell::PackKeyId) -> Option<Cow<'_, dyn cell::AttrKeyValue>> {
+        let get = cell::pack_attr! { imp GetAttrDyn::get_attr_dyn(self, key) in [
+            keys::Behaviour,
+            keys::ResetGuid,
+        ] };
+        if let Some(get) = get {
+            get
+        } else {
+            self.get_attr_dyn_ref(key).map(Cow::Borrowed)
+        }
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::Info,
+            keys::InfoRange,
+            keys::Bounce,
+            keys::BounceDelay,
+            keys::BounceHeight,
+            keys::BounceDuration,
+            keys::CopyValue,
+            keys::CopyMessage,
+            keys::ToggleCategory,
+            keys::ResetGuid,
+            keys::ShowCategory,
+            keys::HideCategory,
+            keys::Behaviour,
+            keys::ResetLength,
+            keys::AutoTrigger,
+        ] }
+    }
+}
+impl cell::SetAttrDyn for InteractionAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::Info,
+            keys::InfoRange,
+            keys::Bounce,
+            keys::BounceDelay,
+            keys::BounceHeight,
+            keys::BounceDuration,
+            keys::CopyValue,
+            keys::CopyMessage,
+            keys::ToggleCategory,
+            keys::ResetGuid,
+            keys::ShowCategory,
+            keys::HideCategory,
+            keys::Behaviour,
+            keys::ResetLength,
+            keys::AutoTrigger,
+        ] }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::Info} for &struct{InteractionAttributes}.info? {}
+    impl Attr{keys::InfoRange} for &struct{InteractionAttributes}.info_range? {}
+    impl Attr{keys::Bounce} for &struct{InteractionAttributes}.bounce_behavior? {}
+    impl Attr{keys::BounceDelay} for &struct{InteractionAttributes}.bounce_delay? {}
+    impl Attr{keys::BounceHeight} for &struct{InteractionAttributes}.bounce_height? {}
+    impl Attr{keys::BounceDuration} for &struct{InteractionAttributes}.bounce_duration? {}
+    impl Attr{keys::CopyValue} for &struct{InteractionAttributes}.copy_value? {}
+    impl Attr{keys::CopyMessage} for &struct{InteractionAttributes}.copy_message? {}
+    impl Attr{keys::ToggleCategory} for &struct{InteractionAttributes}.toggle_category? {}
+    impl Attr{keys::ShowCategory} for &struct{InteractionAttributes}.show_category? {}
+    impl Attr{keys::HideCategory} for &struct{InteractionAttributes}.hide_category? {}
+    impl Attr{keys::ResetLength} for &struct{InteractionAttributes}.reset_length? {}
+    impl Attr{keys::AutoTrigger} for &struct{InteractionAttributes}.auto_trigger? {}
+
+    impl Attr{keys::Info} in Internal{InteractionAttributes} {}
+    impl Attr{keys::InfoRange} in Internal{InteractionAttributes} {}
+    impl Attr{keys::Bounce} in Internal{InteractionAttributes} {}
+    impl Attr{keys::BounceDelay} in Internal{InteractionAttributes} {}
+    impl Attr{keys::BounceHeight} in Internal{InteractionAttributes} {}
+    impl Attr{keys::BounceDuration} in Internal{InteractionAttributes} {}
+    impl Attr{keys::CopyValue} in Internal{InteractionAttributes} {}
+    impl Attr{keys::CopyMessage} in Internal{InteractionAttributes} {}
+    impl Attr{keys::ToggleCategory} in Internal{InteractionAttributes} {}
+    impl Attr{keys::ShowCategory} in Internal{InteractionAttributes} {}
+    impl Attr{keys::HideCategory} in Internal{InteractionAttributes} {}
+    impl Attr{keys::Behaviour} in Internal{InteractionAttributes} {}
+    impl Attr{keys::ResetGuid} in Internal{InteractionAttributes} {}
+    impl Attr{keys::ResetLength} in Internal{InteractionAttributes} {}
+    impl Attr{keys::AutoTrigger} in Internal{InteractionAttributes} {}
+}
+impl keys::GetAttr<keys::Behaviour> for InteractionAttributes {
+    fn has_attr(&self) -> bool {
+        self.taco_behavior.is_some()
+    }
+    fn get_attr(&self) -> Option<Cow<'_, keys::Behaviour>> {
+        self.taco_behavior.map(keys::Behaviour::from).map(Cow::Owned)
+    }
+    #[cfg(todo)]
+    fn get_attr_ref(&self) -> Option<&keys::Behaviour> {}
+}
+impl keys::SetAttr<keys::Behaviour> for InteractionAttributes {
+    fn set_attr(&mut self, value: keys::Behaviour) {
+        self.taco_behavior = Some(value.into());
+    }
+    fn unset_attr(&mut self) {
+        self.taco_behavior = None;
+    }
+}
+impl keys::GetAttr<keys::ResetGuid> for InteractionAttributes {
+    fn has_attr(&self) -> bool {
+        self.reset_guids.is_some()
+    }
+    fn get_attr(&self) -> Option<Cow<'_, keys::ResetGuid>> {
+        self.reset_guids
+            .as_ref()
+            .map(|g| Cow::Owned(g[..].iter().map(|g| keys::Guid::from(g.clone())).collect()))
+    }
+    #[cfg(todo)]
+    fn get_attr_ref(&self) -> Option<&keys::ResetGuid> {}
+}
+impl keys::SetAttr<keys::ResetGuid> for InteractionAttributes {
+    fn set_attr(&mut self, value: keys::ResetGuid) {
+        self.reset_guids = Some(Arc::new(
+            value.into_iter().map(|g| g.into()).collect::<Box<[_]>>(),
+        ));
+    }
+    fn unset_attr(&mut self) {
+        self.reset_guids = None;
+    }
+}
 
 /// Filters.
 #[derive(Debug, Clone, Default)]
@@ -540,6 +977,88 @@ impl FilterAttributes {
         }
     }
 }
+/// TODO: flag sets
+impl GetAttrDyn for FilterAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::AchievementId,
+            keys::AchievementBit,
+            keys::InvertBehaviour,
+            keys::ScheduleStart,
+            keys::ScheduleDuration,
+            // TODO: flag sets
+        ]))
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::AchievementId,
+            keys::AchievementBit,
+            keys::InvertBehaviour,
+            keys::ScheduleStart,
+            keys::ScheduleDuration,
+            // TODO: flag sets
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::AchievementId,
+            keys::AchievementBit,
+            keys::InvertBehaviour,
+            keys::ScheduleStart,
+            keys::ScheduleDuration,
+            // TODO: flag sets
+        ] }
+        .flatten()
+    }
+    /// TODO: flag sets
+    fn get_attr_dyn(&self, key: cell::PackKeyId) -> Option<Cow<'_, dyn cell::AttrKeyValue>> {
+        self.get_attr_dyn_ref(key).map(Cow::Borrowed).or_else(|| {
+            log::debug!("TODO: FilterAttributes::get_attr_dyn({key})");
+            None
+        })
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::AchievementId,
+            keys::AchievementBit,
+            keys::InvertBehaviour,
+            keys::ScheduleStart,
+            keys::ScheduleDuration,
+            // TODO: flag sets
+        ] }
+    }
+}
+impl cell::SetAttrDyn for FilterAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::AchievementId,
+                keys::AchievementBit,
+                keys::InvertBehaviour,
+                keys::ScheduleStart,
+                keys::ScheduleDuration,
+            ],
+            _ => {
+                log::debug!("TODO: FilterAttributes::set_attr_dyn({})", value.id());
+                false
+            },
+        }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::AchievementId} for &struct{FilterAttributes}.achievement_id? {}
+    impl Attr{keys::AchievementBit} for &struct{FilterAttributes}.achievement_bit? {}
+    impl Attr{keys::InvertBehaviour} for &struct{FilterAttributes}.invert_behavior? {}
+    impl Attr{keys::ScheduleStart} for &struct{FilterAttributes}.schedule? {}
+    impl Attr{keys::ScheduleDuration} for &struct{FilterAttributes}.schedule_duration? {}
+
+    impl Attr{keys::AchievementId} in Internal{FilterAttributes} {}
+    impl Attr{keys::AchievementBit} in Internal{FilterAttributes} {}
+    impl Attr{keys::InvertBehaviour} in Internal{FilterAttributes} {}
+    impl Attr{keys::ScheduleStart} in Internal{FilterAttributes} {}
+    impl Attr{keys::ScheduleDuration} in Internal{FilterAttributes} {}
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RenderAttributes {
@@ -596,6 +1115,118 @@ impl RenderAttributes {
         self.alpha.unwrap_or(1.0)
     }
 }
+impl AsMut<TrailAttributes> for RenderAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut TrailAttributes {
+        self.trail.get_or_insert_default()
+    }
+}
+impl AsMut<PoiAttributes> for RenderAttributes {
+    #[inline]
+    fn as_mut(&mut self) -> &mut PoiAttributes {
+        self.poi.get_or_insert_default()
+    }
+}
+impl GetAttrDyn for RenderAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::Alpha,
+            keys::CanFade,
+            keys::Tint,
+            keys::Cull,
+            keys::FadeNear,
+            keys::FadeFar,
+        ])) || PoiAttributes::holds_attr_dyn(key)
+            || TrailAttributes::holds_attr_dyn(key)
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::Alpha,
+            keys::CanFade,
+            keys::Tint,
+            keys::Cull,
+            keys::FadeNear,
+            keys::FadeFar,
+        ] }
+        .unwrap_or_else(|| {
+            self.trail.as_ref().map(|a| a.has_attr_dyn(key)).unwrap_or(false)
+                || self.poi.as_ref().map(|a| a.has_attr_dyn(key)).unwrap_or(false)
+        })
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::Alpha,
+            keys::CanFade,
+            keys::Tint,
+            keys::Cull,
+            keys::FadeNear,
+            keys::FadeFar,
+        ] }
+        .or_else(|| {
+            self.poi
+                .as_ref()
+                .and_then(|poi| PoiAttributes::holds_attr_dyn(key).then(|| poi.get_attr_dyn_ref(key)))
+        })
+        .or_else(|| {
+            self.trail
+                .as_ref()
+                .and_then(|trail| TrailAttributes::holds_attr_dyn(key).then(|| trail.get_attr_dyn_ref(key)))
+        })
+        .flatten()
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::Alpha,
+            keys::CanFade,
+            keys::Tint,
+            keys::Cull,
+            keys::FadeNear,
+            keys::FadeFar,
+        ] }
+        .chain(self.poi.as_ref().into_iter().flat_map(|a| a.iter_attrs_dyn()))
+        .chain(self.trail.as_ref().into_iter().flat_map(|a| a.iter_attrs_dyn()))
+    }
+}
+impl cell::SetAttrDyn for RenderAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::Alpha,
+                keys::CanFade,
+                keys::Tint,
+                keys::Cull,
+                keys::FadeNear,
+                keys::FadeFar,
+            ],
+            _ => if PoiAttributes::holds_attr_dyn(value.id()) {
+                self.poi.get_or_insert_default()
+                    .set_attr_dyn(value)
+            } else {
+                match &mut self.trail {
+                    None if !TrailAttributes::holds_attr_dyn(value.id()) =>
+                        false,
+                    trail => trail.get_or_insert_default()
+                        .set_attr_dyn(value),
+                }
+            },
+        }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::Alpha} for &struct{RenderAttributes}.alpha? {}
+    impl Attr{keys::CanFade} for &struct{RenderAttributes}.can_fade? {}
+    impl Attr{keys::Tint} for &struct{RenderAttributes}.tint? {}
+    impl Attr{keys::Cull} for &struct{RenderAttributes}.cull? {}
+    impl Attr{keys::FadeNear} for &struct{RenderAttributes}.fade_near? {}
+    impl Attr{keys::FadeFar} for &struct{RenderAttributes}.fade_far? {}
+
+    impl Attr{keys::Alpha} in Internal{RenderAttributes} {}
+    impl Attr{keys::CanFade} in Internal{RenderAttributes} {}
+    impl Attr{keys::Tint} in Internal{RenderAttributes} {}
+    impl Attr{keys::Cull} in Internal{RenderAttributes} {}
+    impl Attr{keys::FadeNear} in Internal{RenderAttributes} {}
+    impl Attr{keys::FadeFar} in Internal{RenderAttributes} {}
+}
 
 /// Trail-specific.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -620,6 +1251,63 @@ impl TrailAttributes {
             self.is_wall = base.is_wall;
         }
     }
+}
+impl GetAttrDyn for TrailAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::AnimSpeed,
+            keys::TextureFile,
+            keys::TrailScale,
+            keys::IsWall,
+        ]))
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::AnimSpeed,
+            keys::TextureFile,
+            keys::TrailScale,
+            keys::IsWall,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::AnimSpeed,
+            keys::TextureFile,
+            keys::TrailScale,
+            keys::IsWall,
+        ] }
+        .flatten()
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::AnimSpeed,
+            keys::TextureFile,
+            keys::TrailScale,
+            keys::IsWall,
+        ] }
+    }
+}
+impl cell::SetAttrDyn for TrailAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::AnimSpeed,
+            keys::TextureFile,
+            keys::TrailScale,
+            keys::IsWall,
+        ] }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::AnimSpeed} for &struct{TrailAttributes}.anim_speed? {}
+    impl Attr{keys::TextureFile} for &struct{TrailAttributes}.texture? {}
+    impl Attr{keys::TrailScale} for &struct{TrailAttributes}.trail_scale? {}
+    impl Attr{keys::IsWall} for &struct{TrailAttributes}.is_wall? {}
+
+    impl Attr{keys::AnimSpeed} in Internal{TrailAttributes} {}
+    impl Attr{keys::TextureFile} in Internal{TrailAttributes} {}
+    impl Attr{keys::TrailScale} in Internal{TrailAttributes} {}
+    impl Attr{keys::IsWall} in Internal{TrailAttributes} {}
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -685,6 +1373,192 @@ impl PoiAttributes {
         Self::ROTATE_UNSET_AXIS,
         Self::ROTATE_UNSET_AXIS,
     );
+}
+impl GetAttrDyn for PoiAttributes {
+    fn holds_attr_dyn(key: cell::PackKeyId) -> bool {
+        cell::pack_attr!(=id_is_in(key, [
+            keys::HeightOffset,
+            keys::IconFile,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::ScaleOnMapWithZoom,
+            keys::MinSize,
+            keys::MaxSize,
+            keys::Occlude,
+            keys::Rotate,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Title, //keys::Text,
+            keys::TitleColour,
+        ]))
+    }
+    fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
+        cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::HeightOffset,
+            keys::IconFile,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::ScaleOnMapWithZoom,
+            keys::MinSize,
+            keys::MaxSize,
+            keys::Occlude,
+            keys::Rotate,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Title, //keys::Text,
+            keys::TitleColour,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: cell::PackKeyId) -> Option<&dyn cell::AttrKeyValue> {
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::HeightOffset,
+            keys::IconFile,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::ScaleOnMapWithZoom,
+            keys::MinSize,
+            keys::MaxSize,
+            keys::Occlude,
+            keys::Rotate,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Title, //keys::Text,
+            keys::TitleColour,
+        ] }
+        .flatten()
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
+        cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::HeightOffset,
+            keys::IconFile,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::ScaleOnMapWithZoom,
+            keys::MinSize,
+            keys::MaxSize,
+            keys::Occlude,
+            keys::Rotate,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Title, //keys::Text,
+            keys::TitleColour,
+        ] }
+    }
+}
+impl cell::SetAttrDyn for PoiAttributes {
+    fn set_attr_dyn(&mut self, value: cell::PackValueCell) -> bool {
+        cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::HeightOffset,
+            keys::IconFile,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::ScaleOnMapWithZoom,
+            keys::MinSize,
+            keys::MaxSize,
+            keys::Occlude,
+            keys::Rotate,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Title, //keys::Text,
+            keys::TitleColour,
+        ] }
+    }
+}
+cell::pack_attr! {
+    impl Attr{keys::HeightOffset} for &struct{PoiAttributes}.height_offset? {}
+    impl Attr{keys::IconFile} for &struct{PoiAttributes}.icon_file? {}
+    impl Attr{keys::IconSize} for &struct{PoiAttributes}.icon_size? {}
+    impl Attr{keys::MapDisplaySize} for &struct{PoiAttributes}.map_display_size? {}
+    impl Attr{keys::ScaleOnMapWithZoom} for &struct{PoiAttributes}.scale_on_map_with_zoom? {}
+    impl Attr{keys::MinSize} for &struct{PoiAttributes}.min_size? {}
+    impl Attr{keys::MaxSize} for &struct{PoiAttributes}.max_size? {}
+    impl Attr{keys::Occlude} for &struct{PoiAttributes}.occlude? {}
+    impl Attr{keys::Rotate} for &struct{PoiAttributes}.rotate? {}
+    impl Attr{keys::Title} for &struct{PoiAttributes}.billboard_text? {}
+    impl Attr{keys::TitleColour} for &struct{PoiAttributes}.billboard_text_color? {}
+
+    impl Attr{keys::HeightOffset} in Internal{PoiAttributes} {}
+    impl Attr{keys::IconFile} in Internal{PoiAttributes} {}
+    impl Attr{keys::IconSize} in Internal{PoiAttributes} {}
+    impl Attr{keys::MapDisplaySize} in Internal{PoiAttributes} {}
+    impl Attr{keys::ScaleOnMapWithZoom} in Internal{PoiAttributes} {}
+    impl Attr{keys::MinSize} in Internal{PoiAttributes} {}
+    impl Attr{keys::MaxSize} in Internal{PoiAttributes} {}
+    impl Attr{keys::Occlude} in Internal{PoiAttributes} {}
+    impl Attr{keys::Rotate} in Internal{PoiAttributes} {}
+    impl Attr{keys::RotateX} in Internal{PoiAttributes} {}
+    impl Attr{keys::RotateY} in Internal{PoiAttributes} {}
+    impl Attr{keys::RotateZ} in Internal{PoiAttributes} {}
+    impl Attr{keys::Title} in Internal{PoiAttributes} {}
+    impl Attr{keys::TitleColour} in Internal{PoiAttributes} {}
+}
+impl keys::GetAttr<keys::RotateX> for PoiAttributes {
+    fn has_attr(&self) -> bool {
+        self.rotate.is_some()
+    }
+    fn get_attr_ref(&self) -> Option<&keys::RotateX> {
+        self.rotate.as_ref().map(|rot| keys::RotateX::from_ref(&rot.x))
+    }
+}
+impl keys::SetAttr<keys::RotateX> for PoiAttributes {
+    fn set_attr(&mut self, value: keys::RotateX) {
+        self.rotate.get_or_insert_default().x = value.into();
+    }
+    fn unset_attr(&mut self) {
+        let is_empty = if let Some(rot) = &mut self.rotate {
+            rot.x = Default::default();
+            *rot == Vec3::ZERO
+        } else {
+            false
+        };
+        if is_empty {
+            self.rotate = None
+        }
+    }
+}
+impl keys::GetAttr<keys::RotateY> for PoiAttributes {
+    fn has_attr(&self) -> bool {
+        self.rotate.is_some()
+    }
+    fn get_attr_ref(&self) -> Option<&keys::RotateY> {
+        self.rotate.as_ref().map(|rot| keys::RotateY::from_ref(&rot.y))
+    }
+}
+impl keys::SetAttr<keys::RotateY> for PoiAttributes {
+    fn set_attr(&mut self, value: keys::RotateY) {
+        self.rotate.get_or_insert_default().y = value.into();
+    }
+    fn unset_attr(&mut self) {
+        let is_empty = if let Some(rot) = &mut self.rotate {
+            rot.y = Default::default();
+            *rot == Vec3::ZERO
+        } else {
+            false
+        };
+        if is_empty {
+            self.rotate = None
+        }
+    }
+}
+impl keys::GetAttr<keys::RotateZ> for PoiAttributes {
+    fn has_attr(&self) -> bool {
+        self.rotate.is_some()
+    }
+    fn get_attr_ref(&self) -> Option<&keys::RotateZ> {
+        self.rotate.as_ref().map(|rot| keys::RotateZ::from_ref(&rot.z))
+    }
+}
+impl keys::SetAttr<keys::RotateZ> for PoiAttributes {
+    fn set_attr(&mut self, value: keys::RotateZ) {
+        self.rotate.get_or_insert_default().z = value.into();
+    }
+    fn unset_attr(&mut self) {
+        let is_empty = if let Some(rot) = &mut self.rotate {
+            rot.z = Default::default();
+            *rot == Vec3::ZERO
+        } else {
+            false
+        };
+        if is_empty {
+            self.rotate = None
+        }
+    }
 }
 
 // TODO: move parse helpers into a separate file and make pub
@@ -779,6 +1653,15 @@ pub enum CullDirection {
     Clockwise = 1,
     CounterClockwise = 2,
 }
+impl CullDirection {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Clockwise => "clockwise",
+            Self::CounterClockwise => "counterclockwise",
+        }
+    }
+}
 
 impl FromStr for CullDirection {
     type Err = anyhow::Error;
@@ -793,6 +1676,26 @@ impl FromStr for CullDirection {
         } else {
             Err(anyhow!("unexpected cull direction `{s}`"))
         }
+    }
+}
+impl fmt::Display for CullDirection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+#[cfg(todo)]
+impl TryFrom<i32> for MapType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Ok(match value {
+            0 => Self::None,
+            1 => Self::Clockwise,
+            2 => Self::CounterClockwise,
+            _ => {
+                anyhow::bail!("unknown cull direction `{value}`");
+            },
+        })
     }
 }
 
@@ -907,6 +1810,7 @@ impl FromStr for MapType {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TacoBehavior {
     AlwaysVisible = 0,
     ReappearOnMapChange = 1,
@@ -916,6 +1820,8 @@ pub enum TacoBehavior {
     ReappearOnMapReset = 5,
     OncePerInstance = 6,
     OnceDailyPerCharacter = 7,
+    /// internal extension
+    TaimiAchievement = 33,
     /// BlishHUD extension.
     ReappearOnWeeklyReset = 101,
 }
@@ -947,7 +1853,14 @@ pub enum BounceBehavior {
     Bounce,
     Rise,
 }
-
+impl BounceBehavior {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bounce => "bounce",
+            Self::Rise => "rise",
+        }
+    }
+}
 impl FromStr for BounceBehavior {
     type Err = anyhow::Error;
 
