@@ -1081,10 +1081,20 @@ fn unload_render_background() {
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
+    use std::sync::Arc;
+
+    let buf;
     let msg = if let Some(m) = e.downcast_ref::<&str>() {
         *m
     } else if let Some(m) = e.downcast_ref::<String>() {
         &m[..]
+    } else if let Some(m) = e.downcast_ref::<Box<str>>() {
+        &m[..]
+    } else if let Some(m) = e.downcast_ref::<Arc<str>>() {
+        &m[..]
+    } else if let Some(m) = e.downcast_ref::<anyhow::Error>() {
+        buf = m.to_string();
+        &buf[..]
     } else {
         "unknown error"
     };
