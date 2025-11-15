@@ -7,6 +7,7 @@ use {
 };
 
 pub mod keys;
+pub mod cell;
 
 #[derive(Debug, Clone, Default)]
 /// Attributes for markers. Inherits up the category stack.
