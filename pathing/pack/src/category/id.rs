@@ -252,6 +252,9 @@ impl IdNameBox {
     pub fn with_arcbox(name: Arc<Box<IdStr>>) -> Self {
         Self { name }
     }
+    pub fn with_arcbox_ref(name: &Arc<Box<IdStr>>) -> &Self {
+        unsafe { mem::transmute(name) }
+    }
     pub fn as_str(&self) -> &IdStr {
         &**self.name
     }
@@ -335,6 +338,11 @@ impl From<&'_ str> for IdNameBox {
 impl From<Box<IdStr>> for IdNameBox {
     fn from(name: Box<IdStr>) -> IdNameBox {
         Self::with_arcbox(Arc::new(name))
+    }
+}
+impl From<Arc<Box<IdStr>>> for IdNameBox {
+    fn from(name: Arc<Box<IdStr>>) -> IdNameBox {
+        Self::with_arcbox(name)
     }
 }
 

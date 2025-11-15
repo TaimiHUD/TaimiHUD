@@ -1,6 +1,19 @@
 use {
     crate::{
-        attributes::{AttrString, MarkerAttributes},
+        attributes::{
+            cell::{
+                pack_attr,
+                AttrKeyValue,
+                GetAttrDyn,
+                PackKeyId,
+                PackValueCell,
+                PackValueDyn,
+                SetAttrDyn,
+            },
+            keys::{self, GetAttr, SetAttr},
+            AttrString,
+            MarkerAttributes,
+        },
         category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
@@ -9,6 +22,7 @@ use {
     core::f32,
     glamour::{Box3, Point3, Size3},
     std::{
+        borrow::Cow,
         fmt,
         io::{self, BufRead, Read},
         mem,
@@ -361,5 +375,106 @@ impl TrailSection {
 
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
+    }
+}
+
+impl Trail {
+    fn holds_attr_dyn_inherent(key: PackKeyId) -> bool {
+        pack_attr!(=id_is_in(key, [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::TrailDataFile,
+        ]))
+    }
+}
+
+impl GetAttrDyn for Trail {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        Self::holds_attr_dyn_inherent(key) || MarkerAttributes::holds_attr_dyn(key)
+    }
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        Self::holds_attr_dyn_inherent(key) || self.attributes.has_attr_dyn(key)
+    }
+    #[inline]
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        let v = pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::TrailDataFile,
+        ] };
+        if let Some(v) = v {
+            v
+        } else {
+            self.attributes.get_attr_dyn_ref(key)
+        }
+    }
+    #[inline]
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        if Self::holds_attr_dyn_inherent(key) {
+            self.get_attr_dyn_ref(key).map(Cow::Borrowed)
+        } else {
+            self.attributes.get_attr_dyn(key)
+        }
+    }
+    #[inline]
+    fn clone_attr_dyn(&self, key: PackKeyId) -> Option<PackValueDyn> {
+        let v = pack_attr! { imp GetAttrDyn::clone_attr_dyn(self, key) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::TrailDataFile,
+        ] };
+        if let Some(v) = v {
+            v
+        } else {
+            self.attributes.clone_attr_dyn(key)
+        }
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::TrailDataFile,
+        ] }
+        .chain(self.attributes.iter_attrs_dyn())
+    }
+}
+impl SetAttrDyn for Trail {
+    #[inline]
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::CategoryRef,
+                keys::Guid,
+                keys::GameMap,
+                keys::TrailDataFile,
+            ],
+            _ =>
+                self.attributes.set_attr_dyn(value),
+        }
+    }
+}
+pack_attr! {
+    impl Attr{keys::CategoryRef} for &struct{Trail}.category {}
+    impl Attr{keys::Guid} for &struct{Trail}.guid {}
+    impl Attr{keys::GameMap} for &struct{Trail}.map_id? {}
+}
+impl GetAttr<keys::TrailDataFile> for Trail {
+    fn has_attr(&self) -> bool {
+        self.trail_path.is_some()
+    }
+    fn get_attr(&self) -> Option<Cow<'_, keys::TrailDataFile>> {
+        self.trail_path.as_ref().map(|p| Cow::Owned(p.into()))
+    }
+}
+impl SetAttr<keys::TrailDataFile> for Trail {
+    fn set_attr(&mut self, value: keys::TrailDataFile) {
+        self.trail_path = Some(value[..].into());
+    }
+    fn unset_attr(&mut self) {
+        self.trail_path = None;
     }
 }
