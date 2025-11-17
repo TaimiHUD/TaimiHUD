@@ -267,19 +267,32 @@ pub fn process_key_bound(change: KeybindChange) {
             return
         }
 
-        interesting_keys = Some(
-            CONTROLS.collect_interesting_keys(
-                // TODO: these should be delayed since we expect to receive a lot of these events at startup...
-                binds
-                    .key_binds
-                    .iter()
-                    .chain(binds.mouse_binds.iter())
-                    .map(|(&(vk, _), &slot)| (slot, VIRTUAL_KEY(vk))),
-            ),
-        );
+        // TODO: these should be delayed since we expect to receive a lot of these events at startup...
+        interesting_keys = Some(collect_bind_controls(binds));
     });
     let Some(interesting_keys) = interesting_keys else { return };
     CONTROLS.set_interesting_keys(interesting_keys);
+}
+
+pub fn collect_bind_controls(binds: &GameBinds) -> KeyPresses {
+    CONTROLS.collect_interesting_keys(
+        binds
+            .key_binds
+            .iter()
+            .chain(binds.mouse_binds.iter())
+            .map(|(&(vk, _), &slot)| (slot, VIRTUAL_KEY(vk))),
+    )
+}
+
+/// Initialize bind interest
+pub fn populate_bind_controls() {
+    let mut interesting_keys = None;
+    read_game_binds(|binds| {
+        interesting_keys = Some(collect_bind_controls(binds));
+    });
+    if let Some(interesting_keys) = interesting_keys {
+        CONTROLS.set_interesting_keys(interesting_keys);
+    }
 }
 
 pub static HELD_KEYS: BitArray<[AtomicU64; keys::KEY_PRESS_BITS / 64], bitvec::order::Lsb0> = BitArray {

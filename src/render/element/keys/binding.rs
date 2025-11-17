@@ -124,14 +124,19 @@ impl KeyBindSelection {
         let changed = self.draw_gamebind(ui, control);
 
         if let Some(new) = changed {
+            let mut saved = true;
             SaveState::write_with(|state| {
                 let game_binds = state.game_binds_mut();
                 match new.take_pending() {
                     Some(Ok(new)) if new.is_empty() => game_binds.remove((control.into(), i8::MIN)),
                     Some(Ok(new)) => game_binds.set(control, i8::MIN, (new.vk.0, new.mods)),
-                    Some(Err(..)) | None => return,
+                    Some(Err(..)) | None => {
+                        saved = false;
+                        return
+                    },
                 }
             });
+            bindings::populate_bind_controls();
         }
     }
     pub fn do_gamebinds<I: IntoIterator>(&mut self, ui: &imgui::Ui, controls: I)

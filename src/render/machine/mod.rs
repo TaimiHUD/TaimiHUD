@@ -217,6 +217,9 @@ impl RenderMachine {
     }
 
     pub fn act_gameplay_transition(&mut self, trans: GameplayTransition) {
+        if trans.was_initial() {
+            self.act_gameplay_initial();
+        }
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
@@ -247,6 +250,12 @@ impl RenderMachine {
             trans: trans.clone(),
         });
         Controller::try_send(ControllerEvent::GameplayStatus { gameplay, trans });
+    }
+
+    /// First map load we've seen!
+    pub fn act_gameplay_initial(&mut self) {
+        log::debug!("loading initial keybinds");
+        rt::bindings::populate_bind_controls();
     }
 
     pub fn act_display_size(&mut self) {

@@ -212,4 +212,8 @@ impl GameplayTransition {
             _ => false,
         }
     }
+
+    pub const fn was_initial(&self) -> bool {
+        matches!(self, Self::Loaded { initial: true, .. })
+    }
 }
