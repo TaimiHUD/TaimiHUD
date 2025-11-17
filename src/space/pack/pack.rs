@@ -19,7 +19,7 @@ use {
         },
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{MarkerAttributesExt, Pack},
+            pack::Pack,
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,

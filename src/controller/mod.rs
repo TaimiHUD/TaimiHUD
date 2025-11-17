@@ -1,7 +1,5 @@
 use std::{future::Future, mem};
-
 use crate::Interruption;
-
 use {
     crate::{
         exports::runtime::{
@@ -48,6 +46,8 @@ use {
 use futures::FutureExt;
 use tokio::task::JoinSet;
 use taimi_meta::ui::GameplayState;
+#[cfg(any(feature = "markers", feature = "space"))]
+use crate::render::machine::MumbleIdentityUpdate;
 
 mod generic;
 
@@ -154,6 +154,11 @@ impl Controller {
                     critical_failure();
                     return
                 };
+                #[cfg(any(feature = "markers", feature = "space"))]
+                let Some(mumble_identity) = receiver.mumble_identity.take() else {
+                    critical_failure();
+                    return
+                };
                 #[cfg(feature = "space")]
                 if let Some(rx) = receiver.pathing.take() {
                     let Some(festivals) = receiver.festivals.take() else {
@@ -165,7 +170,7 @@ impl Controller {
                         return
                     };
                     let loader = Arc::new(pathing::registry::PackLoader::new(settings.clone()));
-                    let mut ctx = pathing::PathingEventContext::new(&loader, rx, gameplay.clone(), festivals, pack_info);
+                    let mut ctx = pathing::PathingEventContext::new(&loader, rx, gameplay.clone(), festivals, pack_info, mumble_identity.clone());
                     let mut pathing = PathingController::new(loader);
                     controllers.spawn(async move {
                         let res = pathing.run(&mut ctx).await
@@ -177,6 +182,10 @@ impl Controller {
                 };
                 if let Some(receiver) = receiver.generic.take() {
                     let mut state = Self::new(receiver, gameplay, rt_sender, settings);
+                    #[cfg(feature = "markers")]
+                    {
+                        state.markers.mumble_identity_rx = Some(mumble_identity);
+                    }
                     controllers.spawn(async move { state.run().await });
                 } else {
                     critical_failure();
@@ -232,6 +241,12 @@ impl Controller {
         state.late_init().await;
 
         loop {
+            let mumble_identity_rx = match () {
+                #[cfg(feature = "markers")]
+                () => state.markers.mumble_identity_rx.as_mut().unwrap().changed(),
+                #[cfg(not(feature = "markers"))]
+                () => futures::future::pending::<()>(),
+            };
             select! {
                 evt = state.receiver.recv() => match evt {
                     Some(evt) => {
@@ -278,6 +293,12 @@ impl Controller {
                     Ok((binds_state, binds_changed)) => {
                         state.handle_keybinds(binds_state, binds_changed).await;
                     },
+                },
+                _ = mumble_identity_rx => {
+                    #[cfg(feature = "markers")]
+                    {
+                        state.markers.handle_mumble_identity();
+                    }
                 },
             }
         }
@@ -907,6 +928,8 @@ impl ControllerEvent {
 #[derive(Debug, Clone, Default)]
 pub struct ControllerSender {
     pub gameplay: Option<watch::Sender<GameplayState>>,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
     #[cfg(feature = "space")]
     pub festivals: Option<watch::Sender<FestivalState>>,
     #[cfg(feature = "space")]
@@ -919,6 +942,8 @@ pub struct ControllerSender {
 impl ControllerSender {
     pub const EMPTY: Self = Self {
         gameplay: None,
+        #[cfg(any(feature = "markers", feature = "space"))]
+        mumble_identity: None,
         #[cfg(feature = "space")]
         festivals: None,
         #[cfg(feature = "space")]
@@ -933,6 +958,8 @@ impl ControllerSender {
         #[cfg(feature = "space")]
         let (pathing, pathing_rx) = mpsc::channel(48);
         let gameplay = watch::Sender::new(GameplayState::INITIAL);
+        #[cfg(any(feature = "markers", feature = "space"))]
+        let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
         #[cfg(feature = "space")]
         let festivals = watch::Sender::new(FestivalState::DEFAULT);
         #[cfg(feature = "space")]
@@ -944,6 +971,8 @@ impl ControllerSender {
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),
+            #[cfg(any(feature = "markers", feature = "space"))]
+            mumble_identity: Some(mumble_identity_rx),
             #[cfg(feature = "space")]
             festivals: Some(festivals.clone()),
             #[cfg(feature = "space")]
@@ -954,6 +983,8 @@ impl ControllerSender {
         };
         let sender = Self {
             gameplay: Some(gameplay),
+            #[cfg(any(feature = "markers", feature = "space"))]
+            mumble_identity: Some(mumble_identity_tx),
             #[cfg(feature = "space")]
             festivals: Some(festivals),
             #[cfg(feature = "space")]
@@ -1022,6 +1053,8 @@ impl ControllerSender {
 
 pub struct ControllerReceiver {
     pub gameplay: Option<watch::Receiver<GameplayState>>,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub mumble_identity: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
     #[cfg(feature = "space")]
     pub festivals: Option<watch::Sender<FestivalState>>,
     #[cfg(feature = "space")]

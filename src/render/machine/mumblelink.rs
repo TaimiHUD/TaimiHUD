@@ -15,6 +15,8 @@ use {
 };
 #[cfg(any(feature = "markers", feature = "space"))]
 use {arcloader_mumblelink::identity::MumbleIdentity, taimi_meta::ui::MapOpen};
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use nexus::event::MumbleIdentityUpdate;
 
 impl RenderMachine {
     pub const LOCAL_UP: Vector3<LocalSpace> = Vector3::Y;
@@ -78,9 +80,11 @@ impl RenderMachine {
                 _ => None,
             };
 
-            #[cfg(feature = "markers")]
-            if let (true, Some(update)) = (self.identity_users.contains(RenderUsers::MARKERS), update) {
-                MarkersController::receive_mumble_identity(update)
+            #[cfg(any(feature = "markers", feature = "space"))]
+            if let Some(update) = update.cloned() {
+                Controller::with_sender(|s| if let Some(tx) = s.mumble_identity.as_ref() {
+                    tx.send_replace(Some(update));
+                });
             }
 
             update

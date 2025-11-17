@@ -5,7 +5,9 @@ use std::{num::NonZero, ops};
 use std::sync::Arc;
 use std::{iter, mem};
 use crate::exports::runtime::Locator;
-use crate::{resources::Vertex, space::{pack::{self as spacepack, trail::TrailParams, PoiExt, TrailSectionExt}, DrawSpace}};
+use crate::space::pack::PackSpace;
+use crate::{resources::Vertex, space::{pack::trail::TrailParams, DrawSpace}};
+use super::filter::MapFilters;
 use super::registry::{CategoryIndex, CategoryPath, CategorySet, LoadedPack, MapIndex, PackCategoryInfo, PackConfig, PoiIndex, PoiPath, RecentlyUsed, TrailPath};
 use super::MapPackInfo;
 use bitflags::bitflags;
@@ -15,8 +17,9 @@ use bitvec::{vec::BitVec, view::BitView};
 use glam::Vec3Swizzles;
 use glamour::{Box3, Point3, Size3, Vector3};
 use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
+use taimi_pack::attributes::keys::Guid;
 use taimi_pack::Category;
-use taimi_pack::{attributes::keys, trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
+use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
 pub use self::{interactive::{InteractivePoi, InteractionEvent, InteractionEventAction}, space::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader}};
 
 mod interactive;
@@ -93,9 +96,19 @@ impl LoadedPoi {
     pub fn coords_for(poi: &Poi) -> (Point3<DrawSpace>, Box3<DrawSpace>) {
         let edge_len = poi.icon_scale();
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
-        let pos = poi.position();
+        let pos = Self::position_for(poi);
         let bounds = Box3::from_origin_and_size(pos, Size3::splat(max_diagonal));
         (pos, bounds)
+    }
+
+    pub fn offset_for(poi: &Poi) -> Point3<PackSpace> {
+        Point3::ZERO.with_y(poi.height_offset())
+    }
+    pub fn marker_position_for(poi: &Poi) -> Point3<PackSpace> {
+        Point3::from_raw(poi.position.into())
+    }
+    pub fn position_for(poi: &Poi) -> Point3<PackSpace> {
+        Self::marker_position_for(poi) + Self::offset_for(poi)
     }
 
     pub fn is_invalid(&self) -> bool {
@@ -259,8 +272,14 @@ impl LoadedTrailSection {
     pub fn with_section(section: &TrailSection) -> Self {
         Self {
             point_count: section.points.len() as _,
-            bounds: section.bounds(),
+            bounds: Self::bounds_for(section),
         }
+    }
+
+    pub fn bounds_for(section: &TrailSection) -> Box3<PackSpace> {
+        let min = section.bounds.min.cast();
+        let max = section.bounds.max.cast();
+        Box3::new(min, max)
     }
 
     pub fn vertices_for(vertices: &mut Vec<Vertex>, section: &TrailSection, scale: f32, is_wall: bool, width: f32, resolution: f32, smoothing: Option<f32>, y_offset: f32) {
@@ -372,10 +391,13 @@ pub struct LoadedMapPack {
     pub map_id: NonZero<MapID>,
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
+    pub poi_guids: Arc<[Guid]>,
     pub interactive_pois: Arc<[InteractivePoi]>,
     pub interactive_pois_nearby: BitVec,
     pub trails: Box<[LoadedTrail]>,
+    pub trail_guids: Box<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
+    pub filters: MapFilters,
 }
 
 impl LoadedMapPack {
@@ -386,8 +408,11 @@ impl LoadedMapPack {
             interactive_pois: Default::default(),
             interactive_pois_nearby: Default::default(),
             pois: Default::default(),
+            poi_guids: Default::default(),
             trails: Default::default(),
+            trail_guids: Default::default(),
             categories: Default::default(),
+            filters: Default::default(),
         }
     }
 
@@ -400,6 +425,10 @@ impl LoadedMapPack {
         let pois = info.pois()
             .map(|path| LoadedPoi::from_pack(path, pack))
             .collect();
+        let poi_guids = info.poi_guid_filter(info.pois())
+            .map(|path|
+                pack.pois.get(path.path as usize).map(|poi| Guid::from(poi.guid)).unwrap_or_default()
+            ).collect();
         let interactive_pois = info.pois().enumerate()
             .map(|(i, path)| InteractivePoi::from_pack(i as PoiIndex, path, pack))
             .filter(|ipoi| !ipoi.is_empty())
@@ -407,13 +436,21 @@ impl LoadedMapPack {
         let trails = info.trails()
             .map(|path| LoadedTrail::from_pack(path, pack))
             .collect();
+        let trail_guids = info.trail_guid_filter(info.trails())
+            .map(|path|
+                pack.trails.get(path.path as usize).map(|trail| Guid::from(trail.guid)).unwrap_or_default()
+            ).collect();
+        let filters = MapFilters::from_pack(info, active);
 
         let mut loaded = Self {
             map_id,
             interactive_pois_nearby: BitVec::new(),
             interactive_pois,
             pois,
+            poi_guids,
             trails,
+            trail_guids,
+            filters,
             categories: Default::default(),
             used: RecentlyUsed::DEFAULT,
         };
@@ -432,6 +469,11 @@ impl LoadedMapPack {
     {
         info.pois().zip(self.pois.iter_mut())
     }
+    pub fn poi_guids<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (PoiPath, &'a Guid)> + 'i where
+        'a: 'i,
+    {
+        info.poi_guid_filter(info.pois()).zip(self.poi_guids.iter())
+    }
     pub fn poi_at<'a>(&'a self, path: PoiPath<&'_ MapPackInfo>) -> Option<&'a LoadedPoi> {
         let info = path.root;
         info.poi_index(path.unscope())
@@ -442,6 +484,7 @@ impl LoadedMapPack {
         info.poi_index(path.unscope())
             .and_then(|i| self.pois.get_mut(i as usize))
     }
+
     pub fn trails<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (TrailPath, &'a LoadedTrail)> + 'i where
         'a: 'i,
     {
@@ -451,6 +494,11 @@ impl LoadedMapPack {
         'a: 'i,
     {
         info.trails().zip(self.trails.iter_mut())
+    }
+    pub fn trail_guids<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (TrailPath, &'a Guid)> + 'i where
+        'a: 'i,
+    {
+        info.trail_guid_filter(info.trails()).zip(&self.trail_guids)
     }
     pub fn trail_at<'a>(&'a self, path: TrailPath<&'_ MapPackInfo>) -> Option<&'a LoadedTrail> {
         let info = path.root;
@@ -462,6 +510,7 @@ impl LoadedMapPack {
         info.trail_index(path.unscope())
             .and_then(|i| self.trails.get_mut(i as usize))
     }
+
     pub fn categories<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where
         'a: 'i,
     {

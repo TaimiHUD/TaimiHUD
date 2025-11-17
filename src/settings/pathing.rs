@@ -14,9 +14,6 @@ pub struct PathingSettings {
     pub space: SpaceSettings,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub festival_filter: Arc<BTreeMap<String, FestivalPreference>>,
-    /// TODO: this is state, not settings...
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub hidden_guid_expiry: Arc<BTreeMap<Guid, u64>>,
     #[serde(default = "TriggerKind::settings_default_auto", skip_serializing_if = "TriggerKind::settings_default_is_auto")]
     pub trigger_allow_auto: TriggerKind,
     #[serde(default = "TriggerKind::settings_default_interact", skip_serializing_if = "TriggerKind::settings_default_is_interact")]
@@ -69,25 +66,12 @@ impl PathingSettings {
     pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {
         Arc::make_mut(&mut self.festival_filter)
     }
-    pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, u64> {
-        Arc::make_mut(&mut self.hidden_guid_expiry)
-    }
-    pub fn set_hidden_guid_expiry(&mut self, guid: Guid, expiry: time::SystemTime) {
-        if let Ok(timestamp) = expiry.duration_since(time::UNIX_EPOCH) {
-            self.hidden_guid_expiry_mut().insert(guid, timestamp.as_secs());
-        }
-    }
-    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
-        self.hidden_guid_expiry.get(guid)
-            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
-    }
 }
 impl Default for PathingSettings {
     fn default() -> Self {
         Self {
             space: Default::default(),
             festival_filter: Default::default(),
-            hidden_guid_expiry: Default::default(),
             trigger_allow_auto: TriggerKind::SETTINGS_DEFAULT_AUTO,
             trigger_allow_interact: TriggerKind::SETTINGS_DEFAULT_INTERACT,
         }
@@ -580,5 +564,53 @@ impl TriggerKind {
     }
     pub const fn settings_default_is_interact(&self) -> bool {
         self.bits() == Self::settings_default_interact().bits()
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingSave {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hidden_guid_expiry: Arc<BTreeMap<Guid, u64>>,
+}
+impl PathingSave {
+    pub fn is_empty(&self) -> bool {
+        if !self.hidden_guid_expiry.is_empty() {
+            return false
+        }
+
+        match self {
+            Self {
+                hidden_guid_expiry: _,
+            } => true,
+        }
+    }
+    pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, u64> {
+        Arc::make_mut(&mut self.hidden_guid_expiry)
+    }
+    pub fn hidden_guid_expire_at(&mut self, guid: Guid, expiry: time::SystemTime) {
+        if let Ok(timestamp) = expiry.duration_since(time::UNIX_EPOCH) {
+            self.hidden_guid_expiry_mut().insert(guid, timestamp.as_secs());
+        }
+    }
+    pub fn hidden_guid_expire(&mut self, guid: &Guid) -> Option<u64> {
+        if self.hidden_guid_expiry.contains_key(guid) {
+            self.hidden_guid_expiry_mut().remove(guid)
+        } else {
+            None
+        }
+    }
+    pub fn hidden_guid_expiry_get(&self, guid: &Guid) -> Option<&u64> {
+        self.hidden_guid_expiry.get(guid)
+    }
+    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
+        self.hidden_guid_expiry.get(guid)
+            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
+    }
+
+    pub(crate) fn is_empty_opt(save: &Option<Self>) -> bool {
+        match save {
+            None => true,
+            Some(pathing) => pathing.is_empty(),
+        }
     }
 }

@@ -4,7 +4,6 @@ use {
 
 // TODO: FromStr, Display
 pub trait AttrKey: fmt::Debug + Clone {
-    #[cfg(todo)]
     type Storage: fmt::Debug + Clone where Self: Sized;
 
     const ATTR: &'static str;
@@ -283,7 +282,6 @@ impl From<Vec4> for Tint {
 }
 
 impl AttrKey for Tint {
-    #[cfg(todo)]
     type Storage = Colour;
     const ATTR: &'static str = "tint";
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR, "color"];
@@ -293,6 +291,38 @@ impl AttrKey for Tint {
 pub struct Point3(pub Vec3);
 
 // TODO: filters: festival, mount, profession, race, specialization, maptype, schedule, schedule-duration, raid
+pack_key! {
+    #[pack(attr = "mount")]
+    pub struct Mounts(pub List<super::Mount>);
+    #[pack(attr = "profession")]
+    pub struct Professions(pub List<super::Profession>);
+    #[pack(attr = "race")]
+    pub struct Races(pub List<super::Race>);
+    #[pack(attr = "specialization")]
+    pub struct Specializations(pub List<Specialization>);
+    #[pack(attr = "maptype")]
+    pub struct MapTypes(pub List<super::MapType>);
+    #[pack(attr = "raid")]
+    pub struct Raids(pub List<Raid>);
+}
+#[derive(Debug, Copy, Clone)]
+pub struct Specialization(pub u32);
+impl FromStr for Specialization {
+    type Err = <u32 as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        value.parse().map(Self)
+    }
+}
+#[derive(Debug, Clone)]
+pub struct Raid(pub String);
+impl FromStr for Raid {
+    type Err = Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self(value.into()))
+    }
+}
 
 // TODO: more attrs are on the category/trail/etc structs, some optional and some required
 
@@ -398,6 +428,7 @@ impl Default for Alpha {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Rotate(pub Vec3);
 impl AttrKey for Rotate {
+    type Storage = Vec3;
     const ATTR: &'static str = "rotate";
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
 }
@@ -480,7 +511,6 @@ impl Behaviour {
     }
 }
 impl AttrKey for Behaviour {
-    #[cfg(todo)]
     type Storage = u8;
     const ATTR: &'static str = "behavior";
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
@@ -595,14 +625,14 @@ pack_key! {
     #[derive(Copy)]
     pub struct HideCategory(pub Bool);
     #[pack(attr = "achievementid")]
-    #[derive(Copy)]
+    #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct AchievementId(pub u32);
     #[pack(attr = "achievementbit")]
-    #[derive(Copy, Default)]
+    #[derive(Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct AchievementBit(pub u16);
     #[pack(attr = "schedule")]
     #[derive(Default)]
-    pub struct Schedule(pub String);
+    pub struct ScheduleStart(pub String);
     #[pack(attr = "schedule-duration")]
     #[derive(Copy, Default)]
     pub struct ScheduleDuration(pub f32);
@@ -670,7 +700,15 @@ impl<G: Into<Guid>> FromIterator<G> for ResetGuid {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Guid(pub Uuid);
+impl Guid {
+    pub const EMPTY: Self = Self(Uuid::nil());
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_nil()
+    }
+}
 impl AttrKey for Guid {
+    type Storage = Uuid;
     const ATTR: &'static str = "guid";
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
 }
@@ -688,12 +726,17 @@ impl FromStr for Guid {
 }
 impl fmt::Display for Guid {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut out = [0u8; 22];
+        let mut out = [0u8; 24];
         let len = base64::engine::general_purpose::STANDARD.encode_slice(&self.0.to_bytes_le(), &mut out)
             .map_err(|_| fmt::Error)?;
         f.write_str(unsafe {
             str::from_utf8_unchecked(out.get_unchecked(..len))
         })
+    }
+}
+impl Default for Guid {
+    fn default() -> Self {
+        Self(Uuid::nil())
     }
 }
 impl From<Uuid> for Guid {
@@ -809,7 +852,6 @@ macro_rules! pack_key {
         }
 
         impl AttrKey for $ident {
-            #[cfg(todo)]
             type Storage = $ty;
             const ATTR: &'static str = $attr;
             const ATTR_NAMES: &'static [&'static str] = &[$attr $(, $($attr_alias),*)?];

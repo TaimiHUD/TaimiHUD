@@ -196,242 +196,60 @@ impl PathingWindowState {
         machine: &mut RenderMachine,
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
-        let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
-            open = settings.pathing_window_open;
+            self.open = settings.pathing_window_open;
         };
-        self.init_watcher();
-        if open {
-            let mut packs_changed = false;
-            if let Some(pack_loader) = &self.pack_loader {
-                let loader_info = self.pack_loader_info.get_or_insert_with(|| {
-                    let mut rx = pack_loader.shared_pack_info.subscribe();
-                    rx.mark_changed();
-                    rx
-                });
-                if let Some(loader_info) = loader_info.has_changed().unwrap_or(false).then(|| loader_info.borrow_and_update()) {
-                    packs_changed = true;
-                };
-
-                let loader_data = self.pack_loader_data.get_or_insert_with(|| {
-                    let mut rx = pack_loader.shared_pack_data.subscribe();
-                    rx.mark_changed();
-                    rx
-                });
-                if let Some(loader_data) = loader_data.has_changed().unwrap_or(false).then(|| loader_data.borrow_and_update()) {
-                    // todo
-                };
-
-                let loader_config = self.pack_loader_config.get_or_insert_with(|| {
-                    let mut rx = pack_loader.shared_pack_config.subscribe();
-                    rx.mark_changed();
-                    rx
-                });
-                if let Some(loader_config) = loader_config.has_changed().unwrap_or(false).then(|| loader_config.borrow_and_update()) {
-                    self.pack_configs.clear();
-                    self.pack_configs.extend(loader_config.iter().enumerate()
-                        .filter_map(|(i, c)| {
-                            let Some(mut c) = c.as_ref().map(Watched::subscribe_to) else { return None };
-                            let _ = c.watch.try_mark_changed();
-                            Some((PackPath::with_path(i as PackIndex), c))
-                        })
-                    );
-                };
-            }
-            for (_path, pack_config) in &mut self.pack_configs {
-                let _ = pack_config.try_read_mut();
-            }
-            if packs_changed {
-                self.refresh_packs();
-            }
-            Window::new(fl!("pathing-window"))
-                .size([300.0, 200.0], Condition::FirstUseEver)
-                .opened(&mut open)
-                .build(ui, || {
-                    let pathing_dir = crate::ADDON_DIR.join("pathing");
-                    RenderState::draw_open_path_button(
-                        ui,
-                        fl!("open-button", kind = "folder"),
-                        &pathing_dir,
-                    );
-                    let rendered_err = if let Some(Ok(engine)) = engine {
-                        if !engine.packs.loaded_packs.is_empty() {
-                            ui.same_line();
-                            let button_text = match self.filter_open {
-                                true => fl!("hide-filter"),
-                                false => fl!("show-filter"),
-                            };
-                            if ui.button(button_text) {
-                                self.filter_open = !self.filter_open;
-                            }
-
-                            if self.open_items.iter().all(|(_, open)| open.not_any()) {
-                                ui.same_line();
-                                if ui.button(&fl!("expand-all")) {
-                                    if let Some(pack_info) = self.pack_info.as_ref().map(|i| i.borrow()) {
-                                        for (path, info) in pack_info.pack_info() {
-                                            let open = self.open_items.entry(path).or_default();
-                                            open.clear();
-                                            if let Some(search_candidates) = self.search_state.candidate_mask.get(&path) {
-                                                open.extend_from_bitslice(search_candidates);
-                                            } else if let Some(current_map) = Self::current_map_filter_of(&self.current_map, path) {
-                                                open.extend_from_bitslice(current_map);
-                                            } else {
-                                                open.resize(info.categories.count(), true);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if self.open_items.iter().any(|(_, open)| open.any()) {
-                            ui.same_line();
-                            if ui.button(&fl!("collapse-all")) {
-                                self.open_items.clear();
-                            }
-                        }
-                        ui.same_line();
-                        if with_i18n!("reload-packs", |msg| ui.button(msg)) {
-                            PathingEvent::ReloadAll.try_send();
-                        }
-                        ui.same_line();
-                        if with_i18n!("unload-packs", |msg| ui.button(msg)) {
-                            PathingEvent::UnloadAll.try_send();
-                        }
-                        if self.filter_open {
-                            ui.separator();
-                            let pushy = ui.push_id("pathing-search");
-                            let mut search_dirty = ui
-                                .input_text("", &mut self.search_state.buffer)
-                                .hint("Search")
-                                .build();
-                            ui.same_line();
-                            if ui.button("X") {
-                                self.search_state.clear();
-                            }
-                            if ui.is_item_hovered() {
-                                ui.tooltip_text(fl!("searchbar-clear"));
-                            }
-                            ui.same_line();
-                            search_dirty |=
-                                ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
-                            ui.same_line();
-                            search_dirty |=
-                                ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
-                            pushy.pop();
-                            ui.dummy([4.0; 2]);
-                            ui.text(fl!("filter-options"));
-                            let filters = PathingFilterState::all()
-                                .iter()
-                                .filter_map(|filter| filter.bit_as_str().map(|name| (filter, name)));
-                            for (i, (flag, filter_name)) in filters.enumerate() {
-                                if i > 0 && i % 3 != 0 {
-                                    ui.same_line();
-                                }
-                                with_i18n!(filter_name, |name| ui.checkbox_flags(
-                                    name,
-                                    &mut self.filter_state,
-                                    flag
-                                ));
-                            }
-                            ui.dummy([4.0; 2]);
-                            ui.separator();
-                            ui.dummy([4.0; 2]);
-
-                            if search_dirty {
-                                self.refresh_search();
-                            }
-                        }
-                        ChildWindow::new("pathing_subwindow")
-                            .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
-                            .size([0.0; 2])
-                            .build(ui, || {
-                                let table_flags =
-                                    TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-                                let table_name = format!("pathing");
-                                let table_token = ui.begin_table_header_with_flags(
-                                    &table_name,
-                                    [
-                                        TableColumnSetup {
-                                            name: &fl!("name"),
-                                            flags: TableColumnFlags::WIDTH_STRETCH,
-                                            init_width_or_weight: 0.0,
-                                            user_id: Id::Str("name"),
-                                        },
-                                        TableColumnSetup {
-                                            name: &fl!("toggle"),
-                                            flags: TableColumnFlags::WIDTH_FIXED,
-                                            init_width_or_weight: 0.0,
-                                            user_id: Id::Str("actions"),
-                                        },
-                                    ],
-                                    table_flags,
-                                );
-                                ui.table_next_column();
-                                let mut any_loaded = false;
-                                let packs: Vec<_> = {
-                                    let Some(pack_info) = &self.pack_info else {
-                                        return
-                                    };
-                                    let pack_info = pack_info.borrow();
-                                    pack_info.pack_info.iter()
-                                        .map(|(&path, info)| {
-                                            let loaded = pack_info.is_loaded(&path);
-                                            (path, info.clone(), loaded)
-                                        })
-                                        .collect()
-                                };
-                                for &(path, ref pack, _loaded) in &packs {
-                                    match pack {
-                                        Ok(info) => {
-                                            self.refresh_state_of(path, &info);
-                                            any_loaded = true;
-                                        },
-                                        Err(unloaded) => {
-                                            if self.draw_unloaded_pack(ui, unloaded.to_string(), Some(&unloaded.reason)) {
-                                                PathingEvent::LoadPack(path).try_send();
-                                            }
-                                        },
-                                    }
-                                }
-                                self.refresh_current_state();
-
-                                for (path, info, is_loaded) in packs {
-                                    let info = match (info, is_loaded) {
-                                        (Ok(info), true) => info,
-                                        (Ok(info), false) => {
-                                            if self.draw_unloaded_pack(ui, info.to_string(), None) {
-                                                PathingEvent::LoadPack(path).try_send();
-                                            }
-                                            continue
-                                        },
-                                        (Err(..), ..) => continue,
-                                    };
-                                    self.draw_pack(ui, path, &info);
-                                }
-                                if let Some(token) = table_token {
-                                    token.end();
-                                }
-                                if !any_loaded {
-                                    {
-                                        let _font = RenderState::push_font("big", ui);
-                                        with_i18n!("packs-empty", |msg| ui.text(msg));
-                                    }
-                                    {
-                                        let _font = RenderState::push_font("ui", ui);
-                                        with_i18n!("packs-empty-notice", |notice| ui.text_wrapped(notice));
-                                    }
-                                }
-                            });
-                        None
-                    } else {
-                        Some(engine.map(|e| e.as_ref().err()))
-                    };
-                    if let Some(e) = rendered_err {
-                        PathingConfig::draw_space_error(ui, machine, e.flatten());
-                    }
-                });
+        if !self.open {
+            return
         }
+        self.init_watcher();
+        let mut packs_changed = false;
+        if let Some(pack_loader) = &self.pack_loader {
+            let loader_info = self.pack_loader_info.get_or_insert_with(|| {
+                let mut rx = pack_loader.shared_pack_info.subscribe();
+                rx.mark_changed();
+                rx
+            });
+            if let Some(loader_info) = loader_info.has_changed().unwrap_or(false).then(|| loader_info.borrow_and_update()) {
+                packs_changed = true;
+            };
+
+            let loader_data = self.pack_loader_data.get_or_insert_with(|| {
+                let mut rx = pack_loader.shared_pack_data.subscribe();
+                rx.mark_changed();
+                rx
+            });
+            if let Some(loader_data) = loader_data.has_changed().unwrap_or(false).then(|| loader_data.borrow_and_update()) {
+                // todo
+            };
+
+            let loader_config = self.pack_loader_config.get_or_insert_with(|| {
+                let mut rx = pack_loader.shared_pack_config.subscribe();
+                rx.mark_changed();
+                rx
+            });
+            if let Some(loader_config) = loader_config.has_changed().unwrap_or(false).then(|| loader_config.borrow_and_update()) {
+                self.pack_configs.clear();
+                self.pack_configs.extend(loader_config.iter().enumerate()
+                    .filter_map(|(i, c)| {
+                        let Some(mut c) = c.as_ref().map(Watched::subscribe_to) else { return None };
+                        let _ = c.watch.try_mark_changed();
+                        Some((PackPath::with_path(i as PackIndex), c))
+                    })
+                );
+            };
+        }
+        for (_path, pack_config) in &mut self.pack_configs {
+            let _ = pack_config.try_read_mut();
+        }
+        if packs_changed {
+            self.refresh_packs();
+        }
+        let mut open = self.open;
+        Window::new(fl!("pathing-window"))
+            .size([300.0, 200.0], Condition::FirstUseEver)
+            .opened(&mut open)
+            .build(ui, || self.draw_window(ui, machine, engine));
 
         if open != self.open {
             ControllerEvent::WindowState(
@@ -444,6 +262,347 @@ impl PathingWindowState {
         if !self.open {
             self.reduce_memory();
         }
+    }
+
+    pub fn draw_window(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        engine: Option<&mut anyhow::Result<Engine>>,
+    ) {
+        let rendered_err = if let Some(Ok(engine)) = engine {
+            self.draw_content(ui, machine, engine);
+            None
+        } else {
+            Some(engine.map(|e| e.as_ref().err()))
+        };
+        if let Some(e) = rendered_err {
+            Self::draw_folder_button(ui);
+            PathingConfig::draw_space_error(ui, machine, e.flatten());
+        }
+    }
+    pub fn draw_content(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        engine: &mut Engine,
+    ) {
+        let Some(_tabs) = ui.tab_bar("pathing") else { return };
+        if let Some(_token) = with_i18n!("enable", |msg| ui.tab_item(msg)) {
+            self.draw_pack_list(ui, machine, engine);
+        }
+        if let Some(_token) = with_i18n!("poi", |msg| ui.tab_item(msg)) {
+            self.draw_pois(ui, machine, engine);
+        }
+    }
+
+    pub fn draw_pack_list(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        engine: &mut Engine,
+    ) {
+        Self::draw_folder_button(ui);
+        if !engine.packs.loaded_packs.is_empty() {
+            ui.same_line();
+            let button_text = match self.filter_open {
+                true => fl!("hide-filter"),
+                false => fl!("show-filter"),
+            };
+            if ui.button(button_text) {
+                self.filter_open = !self.filter_open;
+            }
+
+            if self.open_items.iter().all(|(_, open)| open.not_any()) {
+                ui.same_line();
+                if ui.button(&fl!("expand-all")) {
+                    if let Some(pack_info) = self.pack_info.as_ref().map(|i| i.borrow()) {
+                        for (path, info) in pack_info.pack_info() {
+                            let open = self.open_items.entry(path).or_default();
+                            open.clear();
+                            if let Some(search_candidates) = self.search_state.candidate_mask.get(&path) {
+                                open.extend_from_bitslice(search_candidates);
+                            } else if let Some(current_map) = Self::current_map_filter_of(&self.current_map, path) {
+                                open.extend_from_bitslice(current_map);
+                            } else {
+                                open.resize(info.categories.count(), true);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if self.open_items.iter().any(|(_, open)| open.any()) {
+            ui.same_line();
+            if ui.button(&fl!("collapse-all")) {
+                self.open_items.clear();
+            }
+        }
+        ui.same_line();
+        if with_i18n!("reload-packs", |msg| ui.button(msg)) {
+            PathingEvent::ReloadAll.try_send();
+        }
+        ui.same_line();
+        if with_i18n!("unload-packs", |msg| ui.button(msg)) {
+            PathingEvent::UnloadAll.try_send();
+        }
+        if self.filter_open {
+            ui.separator();
+            let pushy = ui.push_id("pathing-search");
+            let mut search_dirty = ui
+                .input_text("", &mut self.search_state.buffer)
+                .hint("Search")
+                .build();
+            ui.same_line();
+            if ui.button("X") {
+                self.search_state.clear();
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip_text(fl!("searchbar-clear"));
+            }
+            ui.same_line();
+            search_dirty |=
+                ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
+            ui.same_line();
+            search_dirty |=
+                ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
+            pushy.pop();
+            ui.dummy([4.0; 2]);
+            ui.text(fl!("filter-options"));
+            let filters = PathingFilterState::all()
+                .iter()
+                .filter_map(|filter| filter.bit_as_str().map(|name| (filter, name)));
+            for (i, (flag, filter_name)) in filters.enumerate() {
+                if i > 0 && i % 3 != 0 {
+                    ui.same_line();
+                }
+                with_i18n!(filter_name, |name| ui.checkbox_flags(
+                    name,
+                    &mut self.filter_state,
+                    flag
+                ));
+            }
+            ui.dummy([4.0; 2]);
+            ui.separator();
+            ui.dummy([4.0; 2]);
+
+            if search_dirty {
+                self.refresh_search();
+            }
+        }
+        ChildWindow::new("pathing_subwindow")
+            .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
+            .size([0.0; 2])
+            .build(ui, || {
+                let table_flags =
+                    TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+                let table_name = format!("pathing");
+                let table_token = ui.begin_table_header_with_flags(
+                    &table_name,
+                    [
+                        TableColumnSetup {
+                            name: &fl!("name"),
+                            flags: TableColumnFlags::WIDTH_STRETCH,
+                            init_width_or_weight: 0.0,
+                            user_id: Id::Str("name"),
+                        },
+                        TableColumnSetup {
+                            name: &fl!("toggle"),
+                            flags: TableColumnFlags::WIDTH_FIXED,
+                            init_width_or_weight: 0.0,
+                            user_id: Id::Str("actions"),
+                        },
+                    ],
+                    table_flags,
+                );
+                ui.table_next_column();
+                let mut any_loaded = false;
+                let packs: Vec<_> = {
+                    let Some(pack_info) = &self.pack_info else {
+                        return
+                    };
+                    let pack_info = pack_info.borrow();
+                    pack_info.pack_info.iter()
+                        .map(|(&path, info)| {
+                            let loaded = pack_info.is_loaded(&path);
+                            (path, info.clone(), loaded)
+                        })
+                        .collect()
+                };
+                for &(path, ref pack, _loaded) in &packs {
+                    match pack {
+                        Ok(info) => {
+                            self.refresh_state_of(path, &info);
+                            any_loaded = true;
+                        },
+                        Err(unloaded) => {
+                            if self.draw_unloaded_pack(ui, unloaded.to_string(), Some(&unloaded.reason)) {
+                                PathingEvent::LoadPack(path).try_send();
+                            }
+                        },
+                    }
+                }
+                self.refresh_current_state();
+
+                for (path, info, is_loaded) in packs {
+                    let info = match (info, is_loaded) {
+                        (Ok(info), true) => info,
+                        (Ok(info), false) => {
+                            if self.draw_unloaded_pack(ui, info.to_string(), None) {
+                                PathingEvent::LoadPack(path).try_send();
+                            }
+                            continue
+                        },
+                        (Err(..), ..) => continue,
+                    };
+                    self.draw_pack(ui, path, &info);
+                }
+                if let Some(token) = table_token {
+                    token.end();
+                }
+                if !any_loaded {
+                    {
+                        let _font = RenderState::push_font("big", ui);
+                        with_i18n!("packs-empty", |msg| ui.text(msg));
+                    }
+                    {
+                        let _font = RenderState::push_font("ui", ui);
+                        with_i18n!("packs-empty-notice", |notice| ui.text_wrapped(notice));
+                    }
+                }
+            });
+    }
+
+    pub fn draw_pois(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        engine: &mut Engine,
+    ) {
+        use crate::controller::pathing::visible::{InteractionEvent, InteractionEventAction};
+        use crate::controller::pathing::filter::MarkerIndex;
+        let Some(Some(map_id)) = Controller::with_sender(|s| s.gameplay.as_ref().and_then(|g|
+                g.borrow().gameplay_map()
+        )) else { return };
+        let Some(pack_info) = &machine.pack_info else { return };
+        let table_flags =
+            TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+        let table_token = ui.begin_table_header_with_flags(
+            "interactive_pois",
+            [
+                TableColumnSetup {
+                    name: &fl!("name"),
+                    flags: TableColumnFlags::WIDTH_STRETCH,
+                    init_width_or_weight: 0.0,
+                    user_id: Id::Str("name"),
+                },
+                TableColumnSetup {
+                    name: &fl!("category"),
+                    flags: TableColumnFlags::WIDTH_FIXED,
+                    init_width_or_weight: 0.0,
+                    user_id: Id::Str("cat"),
+                },
+            ],
+            table_flags,
+        );
+        ui.table_next_column();
+        for (path, map) in &machine.map_pack_state {
+            let path = path.rel(map_id);
+            let pack_info = pack_info.borrow();
+            let Some(info) = pack_info.map_info.get(&path) else { continue };
+            let ipois = map.interactive_pois.iter().enumerate()
+                .zip(map.interactive_pois_nearby.iter())
+                .filter_map(|((i, ipoi), nearby)| match *nearby {
+                    true => Some((i, ipoi)),
+                    false => None,
+                });
+            for (ipoii, ipoi) in ipois {
+                let loaded_path = ipoi.loaded_index();
+                // TODO: cache this in the refresh .-.
+                let Some(poi_path) = info.pois().nth(loaded_path.path as usize) else { continue };
+                let poi_path = path.rel(poi_path.path);
+                let guid_idx = info.poi_guid_mask()
+                    .take(loaded_path.path as usize)
+                    .filter(|&has| has)
+                    .count();
+                let guid = map.poi_guids.get(guid_idx).cloned();
+
+                ui.text(guid.unwrap_or_default().to_string());
+
+                ui.same_line();
+                if ui.small_button("interact") {
+                    let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                        action: InteractionEventAction::Interact,
+                        path: poi_path.unscope(),
+                        loaded_path: path.rel(loaded_path.path),
+                        interactive_path: Locator::with_path(ipoii as u32),
+                    });
+                }
+                if let Some(r) = &ipoi.reset {
+                    ui.same_line();
+                    if ui.small_button("reset") {
+                        PathingEvent::GuidReset(r.guid.iter().cloned().collect()).try_send();
+                    }
+                }
+                for (i, showhide) in ipoi.show_hide().enumerate() {
+                    if i > 0 {
+                        ui.same_line();
+                    }
+                    if ui.small_button(showhide.action.to_string()) {
+                        let cat_path = showhide.category().pivot(path.root);
+                        PathingEvent::CategorySetToggle(cat_path, showhide.action.tristate()).try_send();
+                    }
+                }
+                if let Some(b) = &ipoi.behaviour {
+                    if ui.small_button("dismiss") {
+                        log::debug!("TODO: dismiss with default duration");
+                        PathingEvent::DismissMarker(poi_path, std::time::Duration::from_secs(5)).try_send();
+                    }
+                }
+                if let Some(b) = &ipoi.copy {
+                    if ui.small_button("copy") {
+                        log::debug!("TODO: copy");
+                    }
+                }
+                if let Some(b) = &ipoi.info {
+                    if ui.small_button("info") {
+                        log::debug!("TODO: info");
+                    }
+                }
+                if let Some(b) = &ipoi.bounce {
+                    if ui.small_button("bounce") {
+                        log::debug!("TODO: bounce");
+                    }
+                }
+                if let Some(b) = &ipoi.script {
+                    if ui.small_button("script") {
+                        log::debug!("TODO: scripts");
+                    }
+                }
+
+                ui.table_next_column();
+                // TODO
+                let hidden = true;
+                if hidden && ui.small_button("unhide") {
+                    if let Some(guid) = guid {
+                        PathingEvent::GuidReset(vec![guid])
+                    } else {
+                        PathingEvent::ResetMarker(path.root.rel(MarkerIndex::Poi(poi_path.path)))
+                    }.try_send();
+                }
+                ui.table_next_column();
+            }
+        }
+        drop(table_token);
+    }
+
+    pub fn draw_folder_button(ui: &Ui) {
+        let pathing_dir = crate::ADDON_DIR.join("pathing");
+        RenderState::draw_open_path_button(
+            ui,
+            fl!("open-button", kind = "folder"),
+            &pathing_dir,
+        );
     }
 
     fn init_watcher(&mut self) {
@@ -957,8 +1116,12 @@ impl PathingWindowState {
                     framed = true;
                     unbuilt = unbuilt.bullet(true);
                 },
-                None =>
-                    framed = true,
+                None => {
+                    framed = true;
+                    // needs to stand out more among branches too..?
+                    // TODO: probably unnecessary once checkboxes become left-aligned
+                    unbuilt = unbuilt.selected(true);
+                },
             }
         }
         if framed {

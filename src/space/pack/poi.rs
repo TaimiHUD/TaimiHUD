@@ -1,5 +1,5 @@
 use {
-    super::{ActivePack, PoiExt},
+    super::ActivePack,
     crate::{
         controller::pathing::{registry::{CategoryIndex, PoiIndex}, visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::Counter, render::machine::RenderMachine, space::{
             dx11::{InstanceBufferData, RenderBackend},

@@ -1,11 +1,14 @@
 use {
     crate::{
         exports::runtime::{self as rt, bindings::GameBinds},
-        settings::state::save_state_backup,
+        settings::{
+            pathing::PathingSave,
+            state::save_state_backup,
+        },
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{fs, io, path::Path, sync::LazyLock},
+    std::{borrow::Cow, fs, io, path::Path, sync::LazyLock},
     tokio::{sync::watch, time},
 };
 
@@ -13,11 +16,16 @@ use {
 pub struct SaveState {
     #[serde(default, skip_serializing_if = "GameBinds::is_empty")]
     pub game_binds: GameBinds,
+    #[serde(default, skip_serializing_if = "PathingSave::is_empty_opt")]
+    pub pathing_state: Option<PathingSave>,
     // TODO: move dpi scaling toggle here maybe?
 }
 
 impl SaveState {
-    pub const EMPTY: Self = Self { game_binds: GameBinds::new() };
+    pub const EMPTY: Self = Self {
+        game_binds: GameBinds::new(),
+        pathing_state: None,
+    };
 
     pub fn new() -> Self {
         Self::EMPTY
@@ -46,8 +54,10 @@ impl SaveState {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            Self { game_binds } if game_binds.is_empty() => true,
-            _ => false,
+            Self { game_binds, .. } if !game_binds.is_empty() => false,
+            Self { pathing_state: Some(pathing), .. } if !pathing.is_empty() => false,
+            Self { pathing_state: _, game_binds: _, .. } =>
+                false
         }
     }
 
@@ -103,8 +113,21 @@ impl SaveState {
     pub fn write_with<F: FnOnce(&mut Self)>(f: F) {
         Self::get().send_modify(f)
     }
+    pub fn try_write_with<F: FnOnce(&mut Self) -> bool>(f: F) -> bool {
+        Self::get().send_if_modified(f)
+    }
 
     pub fn game_binds_mut(&mut self) -> &mut GameBinds {
         &mut self.game_binds
+    }
+
+    pub fn pathing(&self) -> Cow<'_, PathingSave> {
+        match &self.pathing_state {
+            Some(pathing) => Cow::Borrowed(pathing),
+            None => Default::default(),
+        }
+    }
+    pub fn pathing_mut(&mut self) -> &mut PathingSave {
+        self.pathing_state.get_or_insert_default()
     }
 }

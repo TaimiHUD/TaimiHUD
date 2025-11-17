@@ -557,11 +557,13 @@ fn load_nexus() {
     COMBAT_LOCAL.subscribe(combat_callback).revert_on_unload();
 
     // MumbleLink Identity
-    #[cfg(feature = "markers")]
+    #[cfg(any(feature = "markers", feature = "space"))]
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
-            if let Some(mumble_identity) = mumble_identity {
-                MarkersController::receive_mumble_identity(mumble_identity);
+            if let Some(update) = mumble_identity.cloned() {
+                Controller::with_sender(|s| if let Some(tx) = s.mumble_identity.as_ref() {
+                    tx.send_replace(Some(update));
+                });
             }
         }))
         .revert_on_unload();

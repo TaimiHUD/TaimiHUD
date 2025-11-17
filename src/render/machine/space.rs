@@ -199,19 +199,6 @@ impl RenderMachine {
             #[cfg(feature = "extension-nexus")]
             quick_access_notify(TaimiControls::QUICK_ACCESS_NOTIFY_PATHING);
         }
-
-        if ipoi.trigger.auto {
-            #[cfg(todo)]
-            if let Some(info) = &ipoi.info {
-                RenderState::try_send(RenderEvent::AlertMessage(info.message.clone().into()));
-            }
-            if let Some(copy) = &ipoi.copy {
-                let message = copy.message.as_ref().map(|m| &m[..])
-                    .unwrap_or("Copied to clipboard");
-                RenderState::try_send(RenderEvent::SendClipboard(copy.value.clone().into()));
-                RenderState::try_send(RenderEvent::AlertMessage(message.into()));
-            }
-        }
         // TODO: signify if became "nearby" due to interact!
     }
 }

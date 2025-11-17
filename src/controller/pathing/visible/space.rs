@@ -1,28 +1,9 @@
-use anyhow::{anyhow, Context};
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::{num::NonZero, ops};
+use anyhow::Context;
 use std::sync::Arc;
-use std::{iter, mem};
-use crate::controller::pathing::registry::{
-CategoryIndex, CategoryPath, CategorySet, LoadedPack, MapIndex, PackCategoryInfo, PackConfig, PoiIndex, PoiPath, RecentlyUsed, TrailPath,
-    ActivePack, PackPath,
-};
-use crate::exports::runtime::{self as rt};
-use futures::future::TryFutureExt;
-use crate::{resources::Vertex, space::{pack::{self as spacepack, trail::TrailParams, PoiExt, TrailSectionExt}, DrawSpace}};
-use super::{LoadedMapPack, LoadedPoi, LoadedTrail, LoadedTrailGeometry, MapPackInfo};
-use bitflags::bitflags;
-use bitvec::order::Lsb0;
-use bitvec::slice::BitSlice;
-use bitvec::{vec::BitVec, view::BitView};
-use glam::Vec3Swizzles;
-use glamour::{Box3, Point3, Size3, Vector3};
-use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
-use taimi_pack::Category;
-use taimi_pack::{attributes::keys, trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi as PackPoi, Trail as PackTrail};
+use crate::controller::pathing::registry::{PoiPath, TrailPath, ActivePack};
+use crate::space::pack::{self as spacepack, trail::TrailParams};
+use super::{LoadedPoi, LoadedTrail, LoadedTrailGeometry};
+use taimi_pack::{attributes::keys, Poi as PackPoi};
 
 pub struct SpaceLoader<'a> {
     pub active_pack: &'a mut spacepack::ActivePack,

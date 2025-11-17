@@ -1,16 +1,18 @@
 use {
-    self::{festivals::Festivals, registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
+    self::{festivals::Festivals, registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
             engine::SpaceEvent, pack::{poi::ActivePoi, trail::{ActiveTrail, TrailParams}, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, ops, path::{Path, PathBuf}, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext}}, taimi_pack::{
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, MarkerIndex, MarkerPath}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext}}, taimi_pack::{
         attributes::{keys::Guid, Festival}, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, Pack
     }, tokio::{
-        fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, Duration, Interval}
+        fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
     }, tokio_util::sync::ReusableBoxFuture, uuid::Uuid, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedCategory, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
 };
+use crate::render::machine::MumbleIdentityUpdate;
 
 pub mod registry;
 pub mod festivals;
 pub mod visible;
+pub mod filter;
 
 #[derive(Debug, Clone, Display)]
 pub enum PathingEvent {
@@ -33,7 +35,8 @@ pub enum PathingEvent {
     RequestDisabledPaths,
     CategorySetToggle(CategoryPath<PackPath>, Option<bool>),
     GuidReset(Vec<Guid>),
-    DismissMarker(PoiPath<PackPath>, Duration),
+    ResetMarker(MarkerPath<PackPath>),
+    DismissMarker(PoiPath<PackMapPath>, Duration),
     #[cfg(todo)]
     CategoryVisibility(CategoryPath<PackPath>, VisibilityFlags),
     ToggleKatRender,
@@ -50,17 +53,28 @@ pub struct PathingEventContext {
     pub keybinds: TaimiReceiver,
     pub festivals: Watcher<FestivalState>,
     pub pack_info: watch::Sender<SharedMapPackInfo>,
+    pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
     pub pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<Arc<PackConfig>>)> + Send + Unpin + 'static>,
     pub update_tick: Interval,
     pub tasks: JoinSet<Option<PathingEvent>>,
+    pub filter_expiry: BTreeMap<Result<Guid, MarkerPath<PackPath>>, AbortHandle>,
+    pub next_schedule: Pin<Box<Sleep>>,
 
     pub loader_pack_info: watch::Receiver<SharedLoaderPackInfo>,
 
     pub player_pos: Point3<PackSpace>,
+    pub filter_state_signal: bool,
 }
 
 impl PathingEventContext {
-    pub fn new(loader: &Arc<PackLoader>, rx: mpsc::Receiver<PathingEvent>, gameplay: watch::Receiver<GameplayState>, festivals_tx: watch::Sender<FestivalState>, pack_info: watch::Sender<SharedMapPackInfo>) -> Self {
+    pub fn new(
+        loader: &Arc<PackLoader>,
+        rx: mpsc::Receiver<PathingEvent>,
+        gameplay: watch::Receiver<GameplayState>,
+        festivals_tx: watch::Sender<FestivalState>,
+        pack_info: watch::Sender<SharedMapPackInfo>,
+        mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
+    ) -> Self {
         let mut update_tick = interval(PathingController::UPDATE_INTERVAL_RESPONSIVE);
         update_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let rx_interactions = pack_info.borrow().interactions.subscribe();
@@ -72,11 +86,15 @@ impl PathingEventContext {
             active: true,
             festivals: Watcher::with_sender(festivals_tx),
             pack_info,
+            mumble_identity,
             pack_configs: Box::new(stream::pending()),
             update_tick,
             loader_pack_info: loader.shared_pack_info.subscribe(),
             tasks: JoinSet::new(),
+            filter_expiry: BTreeMap::new(),
+            next_schedule: Box::pin(sleep(Self::SCHEDULE_TIMEOUT)),
             player_pos: Point3::INFINITY,
+            filter_state_signal: true,
             rx_interactions,
         }
     }
@@ -174,6 +192,50 @@ impl PathingEventContext {
             _ => None,
         }
     }
+
+    pub fn unexpire(&mut self, item: &Result<Guid, MarkerPath<PackPath>>) -> bool {
+        if let Some(handle) = self.filter_expiry.remove(item) {
+            handle.abort();
+            true
+        } else {
+            false
+        }
+    }
+    pub fn spawn_expire_at<F>(&mut self, item: Result<Guid, MarkerPath<PackPath>>, expiry: SystemTime, duration: Option<Duration>, f: F) where
+        F: Future<Output = Option<PathingEvent>> + Send + 'static,
+    {
+        let now = Instant::now();
+        let deadline = expiry.duration_since(SystemTime::now()).ok()
+            .map(|expiry|
+                now.checked_add(expiry)
+                .or_else(|| duration.and_then(|d| now.checked_add(d)))
+            );
+        let handle = self.tasks.spawn(async move {
+            match deadline {
+                Some(Some(deadline)) => sleep_until(deadline).await,
+                // duration too big means forever...
+                #[cfg(todo = "unnecessary")]
+                Some(None) => future::pending().await,
+                Some(None) => return None,
+                // otherwise expiry is earlier than now, so continue immediately
+                None => (),
+            }
+            f.await
+        });
+        // TODO: there's probably an entry replace api for this...
+        self.unexpire(&item);
+        self.filter_expiry.insert(item, handle);
+    }
+    pub fn expire_at(&mut self, item: Result<Guid, MarkerPath<PackPath>>, expiry: SystemTime, duration: Option<Duration>) {
+        self.spawn_expire_at(item.clone(), expiry, duration, async move {
+            match item {
+                Ok(guid) => Some(PathingEvent::GuidReset(vec![guid])),
+                Err(marker) => Some(PathingEvent::ResetMarker(marker.map_path(Into::into))),
+            }
+        })
+    }
+
+    const SCHEDULE_TIMEOUT: Duration = Duration::from_secs(60 * 60 * 12);
 }
 
 #[derive(Debug)]
@@ -182,6 +244,7 @@ pub struct PathingController {
 
     pub map_pack_info: BTreeMap<PackMapPath, MapPackInfoStorage>,
     pub map_packs: BTreeMap<PackMapPath, LoadedMapPack>,
+    pub filter_state: FilterState,
 }
 
 impl PathingController {
@@ -190,6 +253,7 @@ impl PathingController {
             loader,
             map_pack_info: Default::default(),
             map_packs: Default::default(),
+            filter_state: Default::default(),
         }
     }
 
@@ -280,9 +344,11 @@ impl PathingController {
             },
             gameplay = ctx.gameplay.when_changed() => {
                 let gameplay = gameplay.clone();
+                self.update_filter_state(ctx);
                 self.handle_gameplay(ctx, gameplay).await;
                 if gameplay.gameplay_map().is_some() {
                     ctx.update_tick.reset_after(Self::UPDATE_INTERVAL_RESPONSIVE);
+                    //ctx.filter_state_signal = true;
                 }
             },
             controls = ctx.controls.wait() => if let Ok((controls_state, controls_changed)) = controls {
@@ -293,10 +359,28 @@ impl PathingController {
                 self.handle_keybinds(binds_state, binds_changed).await;
             },
             () = ctx.festivals.when_changed() => {
+                self.filter_state.festival = ctx.festivals.read_update().clone();
+                ctx.filter_state_signal = true;
+            },
+            _ = ctx.next_schedule.as_mut() => {
+                // self.update_filter_state_schedule(ctx);
+                ctx.next_schedule.as_mut().reset(Instant::now() + PathingEventContext::SCHEDULE_TIMEOUT);
+                ctx.filter_state_signal = true;
+            },
+            Ok(..) = ctx.mumble_identity.changed() => {
+                if let Some(identity) = &*ctx.mumble_identity.borrow_and_update() {
+                    self.filter_state.character.update_from_mumblelink(identity);
+                    ctx.filter_state_signal = true;
+                }
+            },
+            _ = future::ready(()), if ctx.filter_state_signal && ctx.gameplay_map().is_some() => {
                 if let Some(map_id) = ctx.gameplay_map() {
-                    let active_festivals = ctx.festivals.read_update().get();
-                    self.provide_disabled_paths(map_id, active_festivals).await;
-                    self.mark_map_state_dirty(ctx, map_id);
+                    ctx.filter_state_signal = false;
+                    self.update_filter_state(ctx);
+                    if self.update_loaded_visibility() {
+                        self.visibility_send(map_id).await;
+                        self.mark_map_state_dirty(ctx, map_id);
+                    }
                 }
             },
             _ = ctx.loader_pack_info.changed() => {
@@ -345,6 +429,11 @@ impl PathingController {
     }
 
     async fn exit(&mut self, ctx: &mut PathingEventContext, reason: Interruption) -> anyhow::Result<()> {
+        #[cfg(todo = "unnecessary")]
+        for handle in ctx.filter_expiry.values() {
+            handle.abort()
+        }
+        ctx.filter_expiry.clear();
         ctx.tasks.abort_all();
         ctx.rx_interactions = broadcast::Sender::new(1).subscribe();
 
@@ -404,6 +493,7 @@ impl PathingController {
                 .enumerate();
             for (i, (ipoi, mut nearby_bit)) in ipois {
                 let prev_nearby = *nearby_bit;
+                #[cfg(todo)]
                 if !ipoi.is_passive() && !prev_nearby {
                     continue
                 }
@@ -705,30 +795,48 @@ impl PathingController {
         }
     }
 
-    async fn handle_guid_reset(&mut self, guids: Vec<Guid>) {
-        let mut settings = self.loader.settings.write().await;
-        for guid in guids {
-            if !settings.pathing().hidden_guid_expiry.contains_key(&guid) {
-                continue
+    fn handle_guid_reset(&mut self, ctx: &mut PathingEventContext, guids: Vec<Guid>) {
+        let dirty = SaveState::try_write_with(|save| {
+            let mut dirty = false;
+            for guid in guids {
+                if save.pathing().hidden_guid_expiry_get(&guid).is_none() {
+                    continue
+                }
+                save.pathing_mut().hidden_guid_expire(&guid);
+                dirty = true;
             }
-            settings.pathing_mut().hidden_guid_expiry_mut().remove(&guid);
+            dirty
+        });
+        if dirty {
+            ctx.filter_state_signal = true;
         }
     }
-    async fn handle_dismiss(&mut self, path: PoiPath<PackPath>, _delay: Duration, expiry: SystemTime) {
+    async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Duration, expiry: SystemTime) {
         let Some(guid) = ({
-            Self::packs().read().await.lookup_ref(&path.root)
+            self.map_pack_info.get(&path.root)
+                .and_then(|info| self.map_packs.get(&path.root)
+                    .map(|map| (map, info))
+                ).and_then(|(map, info)| map.poi_guids(info)
+                    .find(|(p, ..)| p.path == path.path)
+                    .map(|(_, guid)| guid.clone())
+                )
+            /*Self::packs().read().await.lookup_ref(&path.root)
                 .and_then(|pack| pack.active.as_ref())
                 .and_then(|active| active.pack.pois.get(path.path as usize))
                 .and_then(|poi| match poi.guid {
                     guid if guid == Uuid::nil() => None,
                     guid => Some(guid),
-                })
+                })*/
         }) else {
+            // TODO: ctx.expire_at(Err(path.into()), expiry);
             log::warn!("no GUID on {path} to dismiss");
             return
         };
-        let mut settings = self.loader.settings.write().await;
-        settings.pathing_mut().set_hidden_guid_expiry(guid.into(), expiry);
+        ctx.expire_at(Ok(guid.clone().into()), expiry, Some(delay));
+        SaveState::write_with(|save|
+            save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
+        );
+        ctx.filter_state_signal = true;
     }
 
     pub(crate) async fn reload_all(&mut self, ctx: &mut PathingEventContext) {
@@ -1403,15 +1511,61 @@ impl PathingController {
             }
         }
     }
-    async fn update_visibility_with(&mut self, active_festivals: Festivals) {
+    pub fn update_loaded_visibility(&mut self) -> bool {
+        let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
+        let hidden_guids_empty;
+        let hidden_guids = match hidden_guids.as_ref().map(|g| &**g) {
+            Some(h) => h,
+            None => {
+                hidden_guids_empty = BTreeMap::new();
+                &hidden_guids_empty
+            },
+        };
+        let filter_state = &self.filter_state;
+        let mut dirty = false;
         for (path, map_pack) in &mut self.map_packs {
             let Some(map_info) = self.map_pack_info.get(path) else { continue };
 
-            let pois = map_pack.pois.iter_mut()
-                .map(|poi| (poi.category, &mut poi.visibility));
-            let trails = map_pack.trails.iter_mut()
-                .map(|trail| (trail.category, &mut trail.visibility));
-            for (category_index, visibility) in pois.chain(trails) {
+            let map_filters = &map_pack.filters;
+            let mut poi_filters = map_filters.pois.iter().peekable();
+            let mut trail_filters = map_filters.trails.iter().peekable();
+
+            let mut poi_guids = map_pack.poi_guids.iter();
+            let pois = map_info.pois().zip(
+                map_pack.pois.iter_mut()
+                .zip(map_info.poi_guid_mask().map(|guid| guid.then(|| poi_guids.next()).flatten()))
+            );
+            let pois = pois
+                .map(|(poi_path, (poi, guid))| {
+                    let filters = loop {
+                        match poi_filters.peek() {
+                            Some((fp, ..)) if fp.path < poi_path.path => (),
+                            Some((fp, ..)) if fp.path == poi_path.path => break poi_filters.next(),
+                            _ => break None,
+                        };
+                    }.map(|(_p, f)| f);
+                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path.path));
+                    (marker_path, poi.category, &mut poi.visibility, filters, guid)
+                });
+            let mut trail_guids = map_pack.trail_guids.iter();
+            let trails = map_info.trails().zip(
+                map_pack.trails.iter_mut()
+                .zip(map_info.trail_guid_mask().map(|guid| guid.then(|| trail_guids.next()).flatten()))
+            );
+            let trails = trails
+                .map(|(trail_path, (trail, guid))| {
+                    let filters = loop {
+                        match trail_filters.peek() {
+                            Some((fp, ..)) if fp.path < trail_path.path => (),
+                            Some((fp, ..)) if fp.path == trail_path.path => break trail_filters.next(),
+                            _ => break None,
+                        };
+                    }.map(|(_p, f)| f);
+                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path.path));
+                    (marker_path, trail.category, &mut trail.visibility, filters, guid)
+                });
+            for (marker_path, category_index, visibility, filter, guid) in pois.chain(trails) {
+                let prev = *visibility & VisibilityFlags::TOGGLES;
                 *visibility = visibility.restore_default_toggles();
                 let cat_vis = map_info.category_index(CategoryPath::with_path(category_index))
                     .and_then(|i| map_pack.categories.get(i as usize))
@@ -1421,20 +1575,26 @@ impl PathingController {
                     visibility.set_toggles((cat_vis & VisibilityFlags::TOGGLE) | (*visibility & !VisibilityFlags::TOGGLE));
                     visibility.set(VisibilityFlags::TOGGLE, cat_vis.contains(VisibilityFlags::TOGGLE));
                 }
-                #[cfg(todo)]
                 if visibility.is_visible() {
-                    let festivals: Festivals = map_info.categories.festivals.lookup()
-                        .into_iter().flatten().copied().collect();
-                    if !festivals.is_empty() && !festivals.intersects(active_festivals) {
-                        visibility.remove(VisibilityFlags::TOGGLE);
+                    if let Some(filter) = &filter {
+                        if let filter::FILTER_HIDDEN = filter.is_visible(filter_state) {
+                            visibility.remove(VisibilityFlags::TOGGLE);
+                        }
                     }
+                }
+                if visibility.is_visible() {
+                    if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
+                        if let filter::FILTER_HIDDEN = hidden.is_visible(hidden_guids) {
+                            visibility.remove(VisibilityFlags::TOGGLE);
+                        }
+                    }
+                }
+                if *visibility & VisibilityFlags::TOGGLES != prev {
+                    dirty = true;
                 }
             }
         }
-    }
-
-    async fn update_visibility(&mut self, active_festivals: Festivals) {
-        self.update_visibility_with(active_festivals).await;
+        dirty
     }
 
     fn visibility_update(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, Box<[VisibilityFlags]>, Box<[VisibilityFlags]>)> + '_ {
@@ -1447,8 +1607,7 @@ impl PathingController {
             })
     }
 
-    async fn provide_disabled_paths(&mut self, map_id: MapIndex, active_festivals: Festivals) {
-        self.update_visibility(active_festivals).await;
+    async fn visibility_send(&mut self, map_id: MapIndex) {
         let update: Vec<_> = self.visibility_update(map_id).collect();
 
         let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
@@ -1471,6 +1630,40 @@ impl PathingController {
         }).await.context("updating render visibility");
         if let Err(e) | Ok(Err(e)) = res {
             log::error!("{e:#}");
+        }
+    }
+
+    pub fn update_filter_state(&mut self, ctx: &mut PathingEventContext) {
+        #[cfg(todo = "unnecessary")]
+        {
+            self.filter_state.festival = ctx.festivals.read().clone();
+        }
+        if let Ok(ml) = rt::mumble_link_ptr() {
+            self.filter_state.map.update_from_mumblelink_context(&ml);
+            self.filter_state.avatar.update_from_mumblelink_context(&ml);
+            // TODO: self.filter_state.character.update_from_mumblelink(ml);
+        }
+        self.update_filter_state_schedule(ctx);
+    }
+    pub fn update_filter_state_schedule(&mut self, ctx: &mut PathingEventContext) {
+        self.filter_state.schedule.update_time();
+        if let Some(now) = &self.filter_state.schedule.now {
+            if let Some(map_id) = ctx.gameplay_map() {
+                let next_update = self.map_packs.iter_mut()
+                    .filter(|(path, _)| path.path == map_id)
+                    .filter_map(|(_, map)| map.filters.next_schedule_event(&now))
+                    .min();
+                let next = if let Some(next) = next_update {
+                    next.signed_duration_since(now).to_std().ok()
+                } else if ctx.next_schedule.is_elapsed() {
+                    Some(PathingEventContext::SCHEDULE_TIMEOUT)
+                } else {
+                    None
+                };
+                if let Some(next) = next {
+                    ctx.next_schedule.as_mut().reset(Instant::now() + next);
+                }
+            }
         }
     }
 
@@ -1552,8 +1745,8 @@ impl PathingController {
             },
             RequestDisabledPaths => {
                 if let Some(map_id) = ctx.gameplay_map() {
-                    let active_festivals = ctx.festivals.read().get();
-                    self.provide_disabled_paths(map_id, active_festivals).await;
+                    self.update_loaded_visibility();
+                    self.visibility_send(map_id).await;
                     self.mark_map_state_dirty(ctx, map_id);
                 }
             },
@@ -1565,11 +1758,14 @@ impl PathingController {
                 self.handle_toggle(path, state).await;
             },
             GuidReset(guids) => {
-                self.handle_guid_reset(guids).await;
+                self.handle_guid_reset(ctx, guids);
+            },
+            ResetMarker(path) => {
+                ctx.unexpire(&Err(path));
             },
             DismissMarker(path, delay) => {
                 if let Some(expiry) = SystemTime::now().checked_add(delay) {
-                    self.handle_dismiss(path, delay, expiry).await;
+                    self.handle_dismiss(ctx, path, delay, expiry).await;
                 } else {
                     log::error!("unable to determine expiry time for {path} of {delay:?}");
                 }
@@ -1643,11 +1839,11 @@ impl PathingController {
                 let delay = match behaviour.mode {
                     Behaviour::Taco(TacoBehaviour::ResetDaily) => Duration::from_secs({
                         const SOME_DAY: Duration = Duration::from_secs(1754265600);
-                        (SOME_DAY.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64) % DAY.as_secs() as i64
+                        (SOME_DAY.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(DAY.as_secs() as i64)
                     } as u64),
                     Behaviour::Blish(BlishBehaviour::ResetWeekly) => Duration::from_secs({
                         const SOME_WEEK: Duration = Duration::from_secs(1754265600);
-                        (SOME_WEEK.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64) % WEEK.as_secs() as i64
+                        (SOME_WEEK.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(WEEK.as_secs() as i64)
                     } as u64),
                     Behaviour::Taco(TacoBehaviour::ResetDelay) => behaviour.reset_delay.duration(),
                     Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Duration::from_secs(0),
@@ -1664,7 +1860,7 @@ impl PathingController {
                     },
                 };
                 log::info!("hiding marker for {delay:?}");
-                PathingEvent::DismissMarker(loaded_path.root.root.rel(path.path), delay).try_send();
+                PathingEvent::DismissMarker(loaded_path.root.rel(path.path), delay).try_send();
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
@@ -1871,6 +2067,12 @@ pub struct MapPackInfo {
     pub pois: BitVec,
     pub trails: BitVec,
     pub categories: Box<[CategoryIndex]>,
+    /// TODO: not all GUIDs are needed at runtime,
+    /// if for example the marker can't be interacted with
+    #[cfg(todo)]
+    pub poi_guid_mask: BitVec,
+    #[cfg(todo)]
+    pub trail_guid_mask: BitVec,
 }
 
 impl MapPackInfo {
@@ -1991,6 +2193,19 @@ impl MapPackInfo {
         self.pois.iter_ones()
             .map(|i| PoiPath::with_path(i as PoiIndex))
     }
+    #[cfg(todo)]
+    pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
+        self.poi_guid_mask.iter()
+    }
+    pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
+        iter::repeat(true).take(self.poi_count())
+    }
+    pub(crate) fn poi_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a where
+        I: IntoIterator + 'a,
+    {
+        self.poi_guid_mask().zip(iter)
+            .filter_map(|(mask, v)| mask.then_some(v))
+    }
     pub fn poi_index(&self, path: PoiPath) -> Option<PoiIndex> {
         let path = path.path as usize;
         self.pois.iter_ones().position(|p| p == path)
@@ -2002,6 +2217,19 @@ impl MapPackInfo {
     pub fn trails(&self) -> impl Iterator<Item = TrailPath> + '_ {
         self.trails.iter_ones()
             .map(|i| TrailPath::with_path(i as TrailIndex))
+    }
+    #[cfg(todo)]
+    pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
+        self.trail_guid_mask.iter()
+    }
+    pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
+        iter::repeat(true).take(self.trail_count())
+    }
+    pub(crate) fn trail_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a where
+        I: IntoIterator + 'a,
+    {
+        self.trail_guid_mask().zip(iter)
+            .filter_map(|(mask, v)| mask.then_some(v))
     }
     pub fn trail_index(&self, path: TrailPath) -> Option<TrailIndex> {
         let path = path.path as usize;
@@ -2179,6 +2407,7 @@ pub struct SharedMapPackState {
     pub categories: Arc<[LoadedCategory]>,
     pub interactive_pois: Arc<[InteractivePoi]>,
     pub interactive_pois_nearby: BitVec,
+    pub poi_guids: Arc<[Guid]>,
 }
 
 impl SharedMapPackState {
@@ -2189,6 +2418,7 @@ impl SharedMapPackState {
             categories,
             interactive_pois,
             interactive_pois_nearby: map_pack.interactive_pois_nearby.clone(),
+            poi_guids: map_pack.poi_guids.clone(),
         }
     }
     pub fn update_static(&mut self, map_pack: &LoadedMapPack) {

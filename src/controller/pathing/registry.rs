@@ -555,6 +555,7 @@ impl PackLoader {
     }
 
     fn fixup_pack(&self, pack: &mut Pack) {
+        let mut fixed_festival_categories = BTreeMap::new();
         for (_name, category) in &mut pack.categories.all_categories {
             let is_festival = FestivalFixup::FESTIVAL_PREFIXES
                 .iter()
@@ -569,9 +570,31 @@ impl PackLoader {
                 .iter()
                 .find_map(|(&prefix, &fest)| category.full_id.starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                Arc::make_mut(&mut category.marker_attributes).festivals = Some(vec![festival]);
+                let festivals = Arc::make_mut(&mut category.marker_attributes).festivals.insert(vec![festival]);
+                fixed_festival_categories.insert(&category.full_id, festivals.clone());
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
+            }
+        }
+        if !fixed_festival_categories.is_empty() {
+            // TODO: this should be less necessary once a tree of attribute inherits exist...
+            let pois = pack.pois.iter_mut().filter_map(|poi| match fixed_festival_categories.get(&poi.category) {
+                Some(f) => Some((poi, f)),
+                None => None,
+            });
+            for (poi, f) in pois {
+                if poi.attributes.festivals.is_none() {
+                    poi.attributes.festivals = Some(f.clone());
+                }
+            }
+            let trails = pack.trails.iter_mut().filter_map(|trail| match fixed_festival_categories.get(&trail.category) {
+                Some(f) => Some((trail, f)),
+                None => None,
+            });
+            for (trail, f) in trails {
+                if trail.attributes.festivals.is_none() {
+                    trail.attributes.festivals = Some(f.clone());
+                }
             }
         }
     }

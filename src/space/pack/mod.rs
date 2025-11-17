@@ -21,6 +21,7 @@ pub use {
 
 pub type PackSpace = taimi_meta::coords::LocalSpace;
 
+#[cfg(deleteme)]
 pub trait MarkerAttributesExt {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>>;
     fn visibility_for_map(&self, map: MapContext) -> Option<bool>;
@@ -35,6 +36,7 @@ pub trait MarkerAttributesExt {
     }
 }
 
+#[cfg(deleteme)]
 impl MarkerAttributesExt for MarkerAttributes {
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>> {
         match &self.schedule {
@@ -59,12 +61,14 @@ impl MarkerAttributesExt for MarkerAttributes {
     }
 }
 
+#[cfg(deleteme)]
 pub trait PoiExt {
     fn marker_position(&self) -> Point3<PackSpace>;
     fn position(&self) -> Point3<PackSpace>;
     fn offset(&self) -> Vector3<PackSpace>;
 }
 
+#[cfg(deleteme)]
 impl PoiExt for Poi {
     fn offset(&self) -> Vector3<PackSpace> {
         let height_offset = self.height_offset();
@@ -87,10 +91,12 @@ pub trait TrailExt {}
 #[cfg(todo)]
 impl TrailExt for Trail {}
 
+#[cfg(deleteme)]
 pub trait TrailSectionExt {
     fn bounds(&self) -> Box3<PackSpace>;
 }
 
+#[cfg(deleteme)]
 impl TrailSectionExt for TrailSection {
     #[inline]
     fn bounds(&self) -> Box3<PackSpace> {

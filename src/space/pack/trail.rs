@@ -1,13 +1,13 @@
 use {
     crate::{
         controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, visible::{LoadedTrailGeometry, LoadedTrailSection}}, exports::runtime::Counter, space::{
-            pack::{ActivePack, TrailSectionExt},
-            resources::{Model, Texture, Vertex},
+            pack::ActivePack,
+            resources::{Model, Texture},
             DrawSpace,
             LocalContext,
             TextureSpace,
         }
-    }, anyhow::Context, core::f32, glamour::{Box3, Point2, Vec3Swizzles, Vector3}, std::sync::Arc, taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*}, taimi_meta::ui::MapContext, taimi_pack::{PackLoaderContext, Trail}
+    }, anyhow::Context, core::f32, glamour::{Box3, Point2}, std::sync::Arc, taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*}, taimi_pack::PackLoaderContext
 };
 use crate::controller::pathing::visible::VisibilityFlags;
 

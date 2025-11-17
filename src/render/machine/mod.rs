@@ -45,6 +45,8 @@ pub use self::{
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use self::mumblelink::MumbleIdentityUpdate;
 
 mod map;
 #[cfg(feature = "markers")]
