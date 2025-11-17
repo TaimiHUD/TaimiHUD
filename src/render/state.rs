@@ -715,8 +715,10 @@ impl RenderState {
         }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
 
-        #[cfg(todo)]
-        if let Some(mut state) = Self::lock() {}
+        let mut state = Self::lock();
+        if let Some(state) = state.as_mut() {
+            state.machine.act_setup();
+        }
     }
 
     pub fn render_ui<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>)

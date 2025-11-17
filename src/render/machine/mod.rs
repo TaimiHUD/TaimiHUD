@@ -247,7 +247,13 @@ impl RenderMachine {
     }
 
     /// First map load we've seen!
+    ///
+    /// TODO: inconsistent (maybe with rtapi)?
     pub fn act_gameplay_initial(&mut self) {
+        log::debug!("loading initial keybinds");
+        rt::bindings::populate_bind_controls();
+    }
+    pub fn act_setup(&mut self) {
         log::debug!("loading initial keybinds");
         rt::bindings::populate_bind_controls();
     }
