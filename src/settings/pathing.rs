@@ -485,7 +485,7 @@ impl GogglesSettings {
 }
 
 bitflags! {
-    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct TriggerKind: u16 {
         const BEHAVIOUR = 0x0001;
         const COPY = 0x0002;

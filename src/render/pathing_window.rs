@@ -481,6 +481,7 @@ impl PathingWindowState {
     ) {
         use crate::controller::pathing::visible::{InteractionEvent, InteractionEventAction};
         use crate::controller::pathing::filter::MarkerIndex;
+        use crate::settings::pathing::TriggerKind;
         let Some(Some(map_id)) = Controller::with_sender(|s| s.gameplay.as_ref().and_then(|g|
                 g.borrow().gameplay_map()
         )) else { return };
@@ -530,9 +531,9 @@ impl PathingWindowState {
                 ui.text(guid.unwrap_or_default().to_string());
 
                 ui.same_line();
-                if ui.small_button("interact") {
+                if ui.small_button("trigger") {
                     let _ = pack_info.interactions.send(InteractionEvent::Interact {
-                        action: InteractionEventAction::Interact,
+                        action: InteractionEventAction::Trigger,
                         path: poi_path.unscope(),
                         loaded_path: path.rel(loaded_path.path),
                         interactive_path: Locator::with_path(ipoii as u32),
@@ -555,28 +556,54 @@ impl PathingWindowState {
                 }
                 if let Some(b) = &ipoi.behaviour {
                     if ui.small_button("dismiss") {
-                        log::debug!("TODO: dismiss with default duration");
-                        PathingEvent::DismissMarker(poi_path, std::time::Duration::from_secs(5)).try_send();
+                        log::debug!("TODO: dismiss");
+                        //PathingEvent::DismissMarker(poi_path, std::time::Duration::from_secs(5)).try_send();
+                        let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                            action: InteractionEventAction::Manual(TriggerKind::BEHAVIOUR),
+                            path: poi_path.unscope(),
+                            loaded_path: path.rel(loaded_path.path),
+                            interactive_path: Locator::with_path(ipoii as u32),
+                        });
                     }
                 }
                 if let Some(b) = &ipoi.copy {
                     if ui.small_button("copy") {
-                        log::debug!("TODO: copy");
+                        let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                            action: InteractionEventAction::Manual(TriggerKind::COPY),
+                            path: poi_path.unscope(),
+                            loaded_path: path.rel(loaded_path.path),
+                            interactive_path: Locator::with_path(ipoii as u32),
+                        });
                     }
                 }
                 if let Some(b) = &ipoi.info {
                     if ui.small_button("info") {
-                        log::debug!("TODO: info");
+                        let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                            action: InteractionEventAction::Manual(TriggerKind::INFO),
+                            path: poi_path.unscope(),
+                            loaded_path: path.rel(loaded_path.path),
+                            interactive_path: Locator::with_path(ipoii as u32),
+                        });
                     }
                 }
                 if let Some(b) = &ipoi.bounce {
-                    if ui.small_button("bounce") {
-                        log::debug!("TODO: bounce");
+                    if ui.small_button("anim") {
+                        let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                            action: InteractionEventAction::Manual(TriggerKind::BOUNCE),
+                            path: poi_path.unscope(),
+                            loaded_path: path.rel(loaded_path.path),
+                            interactive_path: Locator::with_path(ipoii as u32),
+                        });
                     }
                 }
                 if let Some(b) = &ipoi.script {
                     if ui.small_button("script") {
-                        log::debug!("TODO: scripts");
+                        let _ = pack_info.interactions.send(InteractionEvent::Interact {
+                            action: InteractionEventAction::Manual(TriggerKind::SCRIPT),
+                            path: poi_path.unscope(),
+                            loaded_path: path.rel(loaded_path.path),
+                            interactive_path: Locator::with_path(ipoii as u32),
+                        });
                     }
                 }
 

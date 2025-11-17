@@ -406,8 +406,16 @@ impl PathingController {
                     };
                 },
                 Ok(None) => (),
+                Err(e) if e.is_cancelled() => {
+                    let e = anyhow::Error::from(e).context("pathing task cancelled");
+                    log::debug!("{e:#}");
+                },
                 Err(e) => {
-                    let e = anyhow::Error::from(e).context("pathing task panicked");
+                    let context = match e.is_panic() {
+                        true => "pathing task panicked",
+                        false => "pathing task failed",
+                    };
+                    let e = anyhow::Error::from(e).context(context);
                     log::error!("{e:#}");
                 },
             },
@@ -649,6 +657,10 @@ impl PathingController {
                 self.map_pack_info.insert(key.clone(), MapPackInfoStorage::new(map_pack_info));
                 self.map_packs.insert(key, map_pack);
             }
+        }
+        if !loaded_pack.is_empty() {
+            self.update_loaded_visibility();
+            //ctx.filter_state_signal = true;
         }
         // now notify
         ctx.pack_info.send_if_modified(|shared_info| {
@@ -1815,6 +1827,8 @@ impl PathingController {
             let settings = self.loader.settings.read().await;
             let pathing = settings.pathing();
             match action {
+                InteractionEventAction::Trigger => TriggerKind::all(),
+                InteractionEventAction::Manual(mask) => mask,
                 InteractionEventAction::Interact => pathing.trigger_allow_interact,
                 InteractionEventAction::AutoTrigger => pathing.trigger_allow_auto,
             }

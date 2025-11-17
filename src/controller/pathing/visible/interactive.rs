@@ -1,4 +1,4 @@
-use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, PackMapPath, PoiIndex, PoiPath}, visible::LoadedPoi, MapPackInfo}, exports::runtime::Locator, space::pack::PackSpace};
+use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, PackMapPath, PoiIndex, PoiPath}, visible::LoadedPoi, MapPackInfo}, exports::runtime::Locator, settings::pathing::TriggerKind, space::pack::PackSpace};
 use glamour::Point3;
 use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior}, MarkerAttributes, Pack};
 
@@ -290,6 +290,8 @@ pub enum InteractionEvent {
 pub enum InteractionEventAction {
     Interact,
     AutoTrigger,
+    Trigger,
     #[cfg(todo)]
     Dismiss,
+    Manual(TriggerKind),
 }
