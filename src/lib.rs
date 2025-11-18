@@ -518,6 +518,7 @@ fn load_nexus() {
 
     on_unload(quick_access_remove_all);
 
+    const REQUEST_ACCOUNT_NAME: &'static str = "EV_REQUEST_ACCOUNT_NAME";
     ACCOUNT_NAME
         .subscribe(event_consume!(<c_char> |name| {
             if let Some(name) = name {
@@ -526,6 +527,7 @@ fn load_nexus() {
             }
         }))
         .revert_on_unload();
+    nexus::event::event_raise_notification(REQUEST_ACCOUNT_NAME);
 
     let combat_callback = event_consume!(|cdata: Option<&CombatData>| {
         if let Some(combat_data) = cdata {
