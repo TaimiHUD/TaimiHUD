@@ -735,10 +735,8 @@ impl PathingController {
             return
         };
         let Ok(info) = &pack.pack_info.info else { return };
-        let toggle_dev = state.map(|state| {
-            let cat_vis = !info.categories.disabled.contains(path);
-            cat_vis ^ state
-        });
+        let cat_vis = !info.categories.disabled.contains(path);
+        let toggle_dev = state.map(|state| cat_vis ^ state);
 
         let mut state = state.unwrap_or(false);
         let changed = config.send_if_modified(|config| {
@@ -763,7 +761,7 @@ impl PathingController {
                 );
             if let Some(full_id) = full_id {
                 let mut settings = self.loader.settings.write().await;
-                PathingSettings::pathing_state_update(&mut settings, full_id, state).await;
+                PathingSettings::pathing_state_update(&mut settings, full_id, cat_vis ^ state).await;
             } else {
                 log::warn!("{path} not found for toggle state update");
             }
