@@ -295,7 +295,8 @@ impl GitHubSource {
                 .as_ref()
                 .map(|token| header::HeaderValue::from_str(&format!("Bearer {token}")))
         });
-        if let Some(Ok(auth)) = auth {
+        if let Some(Ok(mut auth)) = auth {
+            auth.set_sensitive(true);
             headers.insert(header::AUTHORIZATION, auth);
         }
     }
