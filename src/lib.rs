@@ -1154,8 +1154,23 @@ fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
     f(msg)
 }
 
-fn log_any_error(name: &str, e: &dyn std::any::Any) {
+pub(crate) fn log_any_error(name: impl std::fmt::Display, e: &dyn std::any::Any) {
+    log_any_error_dyn(&name, e)
+}
+pub(crate) fn log_any_error_dyn(name: &dyn std::fmt::Display, e: &dyn std::any::Any) {
     with_any_error(e, move |e| log::error!("{name} panicked: {e}"))
+}
+pub(crate) fn log_join_error(name: &str, e: tokio::task::JoinError) {
+    if e.is_cancelled() {
+        log::debug!("{name} task cancelled: {e:#}");
+    } else {
+        match e.try_into_panic() {
+            Ok(e) =>
+                log_any_error(format_args!("{name} task"), &e),
+            Err(e) =>
+                log::error!("{name} task failed: {e:#}"),
+        }
+    }
 }
 
 fn panic_hook(info: &panic::PanicHookInfo) {

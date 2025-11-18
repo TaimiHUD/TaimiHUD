@@ -332,7 +332,7 @@ impl PathingController {
     pub const UPDATE_INTERVAL_SLOW: Duration = Duration::from_secs(10);
     pub const UPDATE_INTERVAL_RESPONSIVE: Duration = Duration::from_millis(350);
     /// Don't bother re-scanning if player hasn't moved at least `sqrt(distance)` [metres](PackSpace}
-    pub const UPDATE_DISTANCE_DISTANCE: f32 = 0.5;
+    pub const UPDATE_DISTANCE_DISTANCE: f32 = 0.005;
     async fn turn(&mut self, ctx: &mut PathingEventContext) -> Option<Interruption> {
         if ctx.rx.is_closed() {
             return Some(self.exit_drain(ctx));
@@ -425,18 +425,8 @@ impl PathingController {
                     };
                 },
                 Ok(None) => (),
-                Err(e) if e.is_cancelled() => {
-                    let e = anyhow::Error::from(e).context("pathing task cancelled");
-                    log::debug!("{e:#}");
-                },
-                Err(e) => {
-                    let context = match e.is_panic() {
-                        true => "pathing task panicked",
-                        false => "pathing task failed",
-                    };
-                    let e = anyhow::Error::from(e).context(context);
-                    log::error!("{e:#}");
-                },
+                Err(e) =>
+                    crate::log_join_error("pathing", e),
             },
         }
 
