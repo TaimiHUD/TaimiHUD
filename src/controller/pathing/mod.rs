@@ -242,6 +242,7 @@ impl PathingEventContext {
 pub struct PathingController {
     loader: Arc<PackLoader>,
 
+    pub enabled: bool,
     pub map_pack_info: BTreeMap<PackMapPath, MapPackInfoStorage>,
     pub map_packs: BTreeMap<PackMapPath, LoadedMapPack>,
     pub filter_state: FilterState,
@@ -251,6 +252,7 @@ impl PathingController {
     pub fn new(loader: Arc<PackLoader>) -> Self {
         Self {
             loader,
+            enabled: false,
             map_pack_info: Default::default(),
             map_packs: Default::default(),
             filter_state: Default::default(),
@@ -290,8 +292,10 @@ impl PathingController {
 
     pub async fn setup(&mut self, ctx: &mut PathingEventContext) {
         let settings = &self.loader.settings;
-        let festivals = async move {
+        let mut enabled = false;
+        let festivals = async {
             let settings = settings.read().await;
+            enabled = settings.enable_katrender;
             let (on, off) = settings.pathing().festival_preferences();
             FestivalState {
                 active: festivals::FestivalFixup::current_festivals(),
@@ -316,6 +320,7 @@ impl PathingController {
         let (_preload, festivals, achievements) = tokio::join!(preload, festivals, achievements);
 
         ctx.festivals.set(festivals);
+        self.enabled = enabled;
 
         let achievements = achievements
             .context("loading achievements.json");
@@ -361,7 +366,7 @@ impl PathingController {
                 },
                 Err(broadcast::error::RecvError::Closed) => (),
             },
-            gameplay = ctx.gameplay.when_changed() => {
+            gameplay = ctx.gameplay.when_changed(), if self.enabled => {
                 let gameplay = gameplay.clone();
                 self.update_filter_state(ctx);
                 self.handle_gameplay(ctx, gameplay).await;
@@ -1039,10 +1044,19 @@ impl PathingController {
         Ok(())
     }
 
-    async fn toggle_katrender(&mut self) {
-        let mut settings = self.loader.settings.write().await;
-        settings.toggle_katrender();
-        settings.mark_dirty();
+    async fn toggle_katrender(&mut self, ctx: &mut PathingEventContext) {
+        {
+            let mut settings = self.loader.settings.write().await;
+            settings.toggle_katrender();
+            settings.mark_dirty();
+            self.enabled = settings.enable_katrender;
+        }
+        if self.enabled && ctx.gameplay_map().is_some() {
+            let _ = ctx.gameplay.watch.try_mark_changed();
+        } else if !self.enabled {
+            self.handle_map_leave();
+            self.unload_all(ctx, false).await;
+        }
     }
 
     #[cfg(deleteme)]
@@ -1790,7 +1804,7 @@ impl PathingController {
                     log::error!("unable to determine expiry time for {path} of {delay:?}");
                 }
             },
-            ToggleKatRender => self.toggle_katrender().await,
+            ToggleKatRender => self.toggle_katrender(ctx).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
             FanOut(events) => for e in events {
                 let res = Box::pin(self.handle_event(e, ctx)).await
