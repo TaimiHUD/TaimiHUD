@@ -1065,7 +1065,8 @@ impl PathingWindowState {
             },
         };
         let is_decorative = info.categories.separators.contains(cat_path);
-        let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, false);
+        let is_copyable = info.categories.copyable.contains(cat_path);
+        let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, is_copyable);
         self.category_header_decorate(ui, info, cat_path);
 
         let now_open = tree.is_some();
@@ -1144,10 +1145,11 @@ impl PathingWindowState {
                     unbuilt = unbuilt.bullet(true);
                 },
                 None => {
-                    framed = true;
                     // needs to stand out more among branches too..?
-                    // TODO: probably unnecessary once checkboxes become left-aligned
+                    // TODO: less necessary once checkboxes become left-aligned
                     unbuilt = unbuilt.selected(true);
+                    // would use this but leaf|framed results in strange text alignment...
+                    // framed = true
                 },
             }
         }
