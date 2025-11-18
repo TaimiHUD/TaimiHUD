@@ -173,6 +173,10 @@ in
       # Build without a dependency not provided by wine
       CXXFLAGS_x86_64_pc_windows_gnu = "-Oz -shared -fno-threadsafe-statics";
       CARGO_PROFILE = buildType;
-      #CARGO_BUILD_RUSTFLAGS = ["-C" "linker=${TARGET_CC}"];
+      CARGO_BUILD_RUSTFLAGS = [
+        #"-C" "linker=${TARGET_CC}"
+        # avoid "unimplemented function combase.dll.RoOriginateErrorW, aborting" on wine .-.
+        "--cfg=windows_slim_errors"
+      ];
     }
     // builtInfo')
