@@ -313,7 +313,7 @@ impl PathingWindowState {
                 self.filter_open = !self.filter_open;
             }
 
-            if self.open_items.iter().all(|(_, open)| open.not_any()) {
+            if self.open_items.iter().any(|(_, open)| open.not_all()) {
                 ui.same_line();
                 if ui.button(&fl!("expand-all")) {
                     if let Some(pack_info) = self.pack_info.as_ref().map(|i| i.borrow()) {
@@ -395,10 +395,12 @@ impl PathingWindowState {
             .size([0.0; 2])
             .build(ui, || {
                 let table_flags =
-                    TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+                    TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS | TableFlags::NO_PAD_OUTER_X;
                 let table_name = format!("pathing");
-                let table_token = ui.begin_table_header_with_flags(
+                let table_token = ui.begin_table_with_flags(
                     &table_name,
+                    1,
+                    #[cfg(deleteme)]
                     [
                         TableColumnSetup {
                             name: &fl!("name"),
@@ -910,7 +912,6 @@ impl PathingWindowState {
             },
         }
         ui.table_next_column();
-        ui.table_next_column();
         if let Some(node) = node {
             node.pop();
             !is_button || pressed
@@ -944,7 +945,7 @@ impl PathingWindowState {
                 Some(root) => Cow::Borrowed(&root.display_name),
                 None => Cow::Owned(info.to_string()),
             };
-            let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, false);
+            let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, None);
             if let Some(root_path) = root_path {
                 self.category_header_decorate(ui, info, root_path);
             }
@@ -959,11 +960,13 @@ impl PathingWindowState {
         }
         let state = root_path.map(|root_path| self.item_config_toggle(root_path, info))
             .unwrap_or_else(|| self.pack_config_toggle(path, info));
-        if let Some(toggled) = Self::category_header_finish(ui, Some(state)) {
+        ui.same_line(); ui.dummy([4.0, f32::EPSILON]); ui.same_line();
+        if let Some(toggled) = Self::category_toggle(ui, state) {
             if let Some(root_path) = root_path {
                 self.commit_state(root_path, toggled);
             }
         }
+        Self::category_name_finish(ui);
 
         if tree.is_some() {
             let roots = info.roots.iter()
@@ -1066,7 +1069,18 @@ impl PathingWindowState {
         };
         let is_decorative = info.categories.separators.contains(cat_path);
         let is_copyable = info.categories.copyable.contains(cat_path);
-        let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, is_copyable);
+        let state = match (is_decorative, cat_lonely) {
+            (false, false) => Some(self.item_config_toggle(cat_path, info)),
+            _ => None,
+        };
+        if let Some(state) = state {
+            ui.unindent();
+            if let Some(toggled) = Self::category_toggle(ui, state) {
+                self.commit_state(cat_path, toggled);
+            }
+            ui.same_line();
+        }
+        let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, Some(is_copyable));
         self.category_header_decorate(ui, info, cat_path);
 
         let now_open = tree.is_some();
@@ -1075,14 +1089,10 @@ impl PathingWindowState {
             Self::set_bit(open, None, cat_path.path as usize, now_open);
         }
 
-        // TODO: tooltip, buttons, etc!
+        Self::category_name_finish(ui);
 
-        let state = match (is_decorative, cat_lonely) {
-            (false, false) => Some(self.item_config_toggle(cat_path, info)),
-            _ => None,
-        };
-        if let Some(toggled) = Self::category_header_finish(ui, state) {
-            self.commit_state(cat_path, toggled);
+        if state.is_some() {
+            ui.indent();
         }
 
         if !is_leaf.unwrap_or(true) && tree.is_some() {
@@ -1112,7 +1122,7 @@ impl PathingWindowState {
         open: bool,
         is_leaf: Option<bool>,
         is_decorative: bool,
-        button_interact: bool,
+        button_interact: Option<bool>,
     ) -> (IdStackToken<'u>, Option<TreeNodeToken<'u>>) {
         let push_token = match path {
             Some(path) => ui.push_id(path.path as i32 ^ ((path.root.path as i32) << 20)),
@@ -1120,9 +1130,12 @@ impl PathingWindowState {
         };
 
         let mut unbuilt = TreeNode::new(display_name);
-        if (is_decorative || is_leaf.unwrap_or(true)) && !button_interact
-        {
-            unbuilt = unbuilt.flags(TreeNodeFlags::SPAN_AVAIL_WIDTH);
+        match button_interact {
+            Some(false) if is_decorative || is_leaf.unwrap_or(true) =>
+                unbuilt = unbuilt.flags(TreeNodeFlags::SPAN_AVAIL_WIDTH),
+            None =>
+                unbuilt = unbuilt.allow_item_overlap(true),
+            _ => (),
         }
         unbuilt = unbuilt.frame_padding(true)
             .tree_push_on_open(false)
@@ -1256,18 +1269,19 @@ impl PathingWindowState {
         }
     }
 
-    pub fn category_header_finish<'u>(
+    pub fn category_name_finish<'u>(
         ui: &'u Ui,
-        state: Option<bool>,
+    ) {
+        ui.table_next_column();
+    }
+    pub fn category_toggle<'u>(
+        ui: &'u Ui,
+        mut state: bool,
     ) -> Option<bool> {
-        ui.table_next_column();
         let mut toggled = None;
-        if let Some(mut state) = state {
-            if ui.checkbox("", &mut state) {
-                toggled = Some(state);
-            }
+        if ui.checkbox("", &mut state) {
+            toggled = Some(state);
         }
-        ui.table_next_column();
         toggled
     }
     pub fn category_finish<'u>(
