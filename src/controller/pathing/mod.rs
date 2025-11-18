@@ -299,10 +299,29 @@ impl PathingController {
                 off,
             }
         };
+        let achievements = async move {
+            use tokio::io::AsyncReadExt;
+            if let Ok(mut file) = tokio::fs::File::open(rt::addon_dir().join("achievements.json")).await {
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).await?;
+                serde_json::from_slice::<crate::settings::pathing::PathingAchievementApi>(&data)
+                    .map_err(anyhow::Error::from)
+                    .map(crate::settings::pathing::PathingAchievementSave::from)
+                    .map(Some)
+            } else {
+                Ok(None)
+            }
+        };
         let preload = self.preload_all();
-        let (_preload, festivals) = tokio::join!(preload, festivals);
+        let (_preload, festivals, achievements) = tokio::join!(preload, festivals, achievements);
 
         ctx.festivals.set(festivals);
+
+        let achievements = achievements
+            .context("loading achievements.json");
+        if let Some(Some(achievements)) = rt::log::warn_ok(achievements) {
+            self.filter_state.achievements.status = achievements.into();
+        }
 
         ctx.pack_info.send_if_modified(|shared| {
             shared.shared_loader = Some(self.loader.clone());
@@ -1650,6 +1669,7 @@ impl PathingController {
         {
             self.filter_state.festival = ctx.festivals.read().clone();
         }
+        self.filter_state.achievements.update_from_save();
         if let Ok(ml) = rt::mumble_link_ptr() {
             self.filter_state.map.update_from_mumblelink_context(&ml);
             self.filter_state.avatar.update_from_mumblelink_context(&ml);

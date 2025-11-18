@@ -1,9 +1,5 @@
 use {
-    crate::settings::Settings,
-    bitflags::bitflags,
-    serde::{Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt, sync::Arc, time},
-    strum::{IntoStaticStr, VariantArray},
+    crate::settings::Settings, bitflags::bitflags, bitvec::array::BitArray, serde::{Deserialize, Serialize}, std::{collections::{BTreeMap, BTreeSet}, fmt, sync::Arc, time}, strum::{IntoStaticStr, VariantArray}
 };
 #[cfg(feature = "space")]
 use {taimi_meta::ui::MapContext, taimi_pack::attributes::{keys::Guid, Festival}, crate::controller::pathing::festivals::Festivals};
@@ -571,16 +567,19 @@ impl TriggerKind {
 pub struct PathingSave {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hidden_guid_expiry: Arc<BTreeMap<Guid, u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub per_account: BTreeMap<String, PathingAccountSave>,
 }
 impl PathingSave {
     pub fn is_empty(&self) -> bool {
-        if !self.hidden_guid_expiry.is_empty() {
-            return false
-        }
-
         match self {
+            Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() =>
+                false,
+            Self { per_account, .. } if !Self::is_per_account_empty(per_account) =>
+                false,
             Self {
                 hidden_guid_expiry: _,
+                per_account: _,
             } => true,
         }
     }
@@ -612,5 +611,135 @@ impl PathingSave {
             None => true,
             Some(pathing) => pathing.is_empty(),
         }
+    }
+    pub(crate) fn is_per_account_empty(per_account: &BTreeMap<String, PathingAccountSave>) -> bool {
+        per_account.values().all(|a| a.is_empty())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingAccountSave {
+    #[serde(default, skip_serializing_if = "PathingAchievementSave::is_empty")]
+    pub achievements: Arc<PathingAchievementSave>,
+}
+impl PathingAccountSave {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self { achievements, .. } if !achievements.is_empty() =>
+                false,
+            Self {
+                achievements: _,
+            } => true,
+        }
+    }
+
+    pub fn achievements_mut(&mut self) -> &mut PathingAchievementSave {
+        Arc::make_mut(&mut self.achievements)
+    }
+    pub fn achievement_complete(&mut self, id: AchievementId) {
+        if !self.achievements.progress.contains_key(&id) && !self.achievements.completed.contains(&id) {
+            return
+        }
+        self.achievements_mut().complete(id)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingAchievementSave {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub completed: BTreeSet<AchievementId>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub progress: BTreeMap<AchievementId, AchievementBits>,
+}
+impl PathingAchievementSave {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self { completed, .. } if !completed.is_empty() =>
+                false,
+            Self { progress, .. } if !progress.is_empty() =>
+                false,
+            Self {
+                completed: _,
+                progress: _,
+            } => true,
+        }
+    }
+
+    pub fn complete(&mut self, id: AchievementId) {
+        self.progress.remove(&id);
+        self.completed.insert(id);
+    }
+}
+#[derive(Deserialize)]
+pub struct PathingAchievementApi(Vec<PathingAchievementApiEntry>);
+#[derive(Deserialize)]
+struct PathingAchievementApiEntry {
+    id: AchievementId,
+    done: bool,
+    #[serde(default)]
+    bits: Vec<u8>,
+}
+impl From<PathingAchievementApi> for PathingAchievementSave {
+    fn from(achievements: PathingAchievementApi) -> Self {
+        let mut out = Self::default();
+        for achievement in achievements.0 {
+            if achievement.done {
+                out.complete(achievement.id);
+            } else if !achievement.bits.is_empty() {
+                out.progress.insert(achievement.id, achievement.bits.into_iter().collect());
+            }
+        }
+        out
+    }
+}
+type AchievementId = u32;
+type AchievementBitsRaw = BitArray<[u64; 2]>;
+#[derive(Debug, Clone, Default)]
+#[repr(transparent)]
+pub struct AchievementBits {
+    pub bits: AchievementBitsRaw,
+}
+impl AchievementBits {
+    pub const fn new(bits: AchievementBitsRaw) -> Self {
+        Self { bits }
+    }
+    pub fn iter(&self) -> impl Iterator<Item = u8> + '_ {
+        self.bits.iter_ones().map(|i| i as u8)
+    }
+    pub fn bit_complete(&self, bit: u8) -> bool {
+        self.bits.get(bit as usize).map(|b| *b)
+            .unwrap_or(false)
+    }
+}
+impl FromIterator<u8> for AchievementBits {
+    fn from_iter<I: IntoIterator<Item = u8>>(iter: I) -> Self {
+        let mut bits = Self::default();
+        bits.extend(iter);
+        bits
+    }
+}
+impl Extend<u8> for AchievementBits {
+    fn extend<I: IntoIterator<Item = u8>>(&mut self, bits: I) {
+        for i in bits {
+            let i = i as usize;
+            if let Some(mut b) = self.bits.get_mut(i) {
+                *b = true;
+            } else {
+                log::error!("achievement bit {i} out of range")
+            }
+        }
+    }
+}
+/// TODO: properly
+impl<'de> Deserialize<'de> for AchievementBits {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Vec::<u8>::deserialize(d)
+            .map(|bits| bits.into_iter().collect())
+    }
+}
+/// TODO: properly
+impl Serialize for AchievementBits {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.iter().collect::<Vec<u8>>().serialize(s)
     }
 }

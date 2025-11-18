@@ -1,4 +1,5 @@
 use std::{collections::{BTreeMap, BTreeSet}, fmt, num::NonZero, ops, sync::Arc, time::{Duration, SystemTime}};
+use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::exports::runtime::locator::LocationGet;
 use crate::render::machine::MumbleIdentityUpdate;
 use chrono::{DateTime, TimeDelta};
@@ -128,11 +129,26 @@ impl FilterConfig {
     }
 }
 
-pub type AchievementProgress = u64;
 #[derive(Debug, Clone, Default)]
 pub struct AchievementState {
-    pub completed: BTreeSet<keys::AchievementId>,
-    pub incomplete: BTreeMap<keys::AchievementId, AchievementProgress>,
+    pub status: Arc<PathingAchievementSave>,
+}
+impl AchievementState {
+    pub fn update_from_save(&mut self) {
+        let acc = crate::ACCOUNT_NAME_CELL.get().map(|n| &n[..]);
+        SaveState::read_with(|s| if let Some(p) = &s.pathing_state {
+            let a = p.per_account.get(acc.unwrap_or(""))
+                .or_else(|| if p.per_account.len() <= 1 {
+                    p.per_account.values().next()
+                } else { None });
+
+            if let Some(a) = a {
+                if !Arc::ptr_eq(&self.status, &a.achievements) {
+                    self.status = a.achievements.clone();
+                }
+            }
+        });
+    }
 }
 #[derive(Debug, Clone)]
 pub struct AchievementConfig {
@@ -148,12 +164,12 @@ impl AchievementConfig {
     }
 
     pub fn is_complete(&self, state: &AchievementState) -> bool {
-        if state.completed.contains(&self.id) {
+        if state.status.completed.contains(&self.id.0) {
             return true
         }
         if let Some(bit) = self.bit {
-            if let Some(&progress) = state.incomplete.get(&self.id) {
-                return progress & 1u64.overflowing_shl(bit.0 as u32).0 != 0
+            if let Some(progress) = state.status.progress.get(&self.id.0) {
+                return progress.bit_complete(bit.0)
             }
         }
         false

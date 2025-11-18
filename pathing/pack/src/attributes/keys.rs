@@ -629,7 +629,7 @@ pack_key! {
     pub struct AchievementId(pub u32);
     #[pack(attr = "achievementbit")]
     #[derive(Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct AchievementBit(pub u16);
+    pub struct AchievementBit(pub u8);
     #[pack(attr = "schedule")]
     #[derive(Default)]
     pub struct ScheduleStart(pub String);
