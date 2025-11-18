@@ -2,6 +2,7 @@ use std::{future::Future, mem};
 use crate::Interruption;
 use {
     crate::{
+        controller::api::{ApiController, ApiMessage},
         exports::runtime::{
             self as rt,
             bindings::{TaimiControls, TaimiReceiver, CONTROLS},
@@ -69,6 +70,7 @@ pub(crate) mod pathing;
 #[cfg(feature = "space")]
 use pathing::{FestivalState, SharedMapPackInfo, PathingController, PathingEvent};
 
+pub(crate) mod api;
 pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
@@ -175,6 +177,16 @@ impl Controller {
                     controllers.spawn(async move {
                         let res = pathing.run(&mut ctx).await
                             .context("Pathing control loop");
+                        if let Err(e) = res {
+                            log::error!("{e:#}");
+                        }
+                    });
+                };
+                if let Some(rx) = receiver.api.take() {
+                    let mut api = ApiController::new(rx, settings.clone());
+                    controllers.spawn(async move {
+                        let res = api.run().await
+                            .context("API control loop");
                         if let Err(e) = res {
                             log::error!("{e:#}");
                         }
@@ -935,6 +947,7 @@ pub struct ControllerSender {
     #[cfg(feature = "space")]
     pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
     pub generic: Option<Sender<ControllerEvent>>,
+    pub api: Option<Sender<ApiMessage>>,
     #[cfg(feature = "space")]
     pub pathing: Option<Sender<PathingEvent>>,
 }
@@ -949,12 +962,14 @@ impl ControllerSender {
         #[cfg(feature = "space")]
         pack_info: None,
         generic: None,
+        api: None,
         #[cfg(feature = "space")]
         pathing: None,
     };
 
     pub fn new() -> (Self, ControllerReceiver) {
         let (generic, generic_rx) = mpsc::channel(64);
+        let (api, api_rx) = mpsc::channel(32);
         #[cfg(feature = "space")]
         let (pathing, pathing_rx) = mpsc::channel(48);
         let gameplay = watch::Sender::new(GameplayState::INITIAL);
@@ -978,6 +993,7 @@ impl ControllerSender {
             #[cfg(feature = "space")]
             pack_info: Some(pack_info),
             generic: Some(generic_rx),
+            api: Some(api_rx),
             #[cfg(feature = "space")]
             pathing: Some(pathing_rx),
         };
@@ -990,6 +1006,7 @@ impl ControllerSender {
             #[cfg(feature = "space")]
             pack_info: Some(pack_info_rx),
             generic: Some(generic),
+            api: Some(api),
             #[cfg(feature = "space")]
             pathing: Some(pathing),
         };
@@ -1001,6 +1018,9 @@ impl ControllerSender {
         #[cfg(feature = "space")]
         if let Some(sender) = self.pathing.take() {
             let _ = sender.try_send(PathingEvent::Exit(reason));
+        }
+        if let Some(sender) = self.api.take() {
+            let _ = sender.try_send(ApiMessage::Exit(reason));
         }
         let sent = self.generic.as_ref()?
             .try_send(ControllerEvent::Quit).is_ok();
@@ -1019,6 +1039,11 @@ impl ControllerSender {
 
     pub fn generic_try_send(&self, message: ControllerEvent) -> bool {
         self.generic.as_ref().and_then(move |sender|
+            sender.try_send(message).ok()
+        ).is_some()
+    }
+    pub fn api_try_send(&self, message: ApiMessage) -> bool {
+        self.api.as_ref().and_then(move |sender|
             sender.try_send(message).ok()
         ).is_some()
     }
@@ -1060,6 +1085,7 @@ pub struct ControllerReceiver {
     #[cfg(feature = "space")]
     pub pack_info: Option<watch::Sender<SharedMapPackInfo>>,
     pub generic: Option<Receiver<ControllerEvent>>,
+    pub api: Option<Receiver<ApiMessage>>,
     #[cfg(feature = "space")]
     pub pathing: Option<Receiver<PathingEvent>>,
 }

@@ -280,6 +280,7 @@ closure-ffi = { version = "3", default-features = false, features = ["std"], opt
 jit-allocator2 = { version = "0.2", optional = true }
 
 nexus = { workspace = true }
+gw2lib-model = { workspace = true }
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, features = ["log", "identity"], optional = true }
 arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
@@ -314,6 +315,7 @@ features = [
 [workspace.dependencies]
 arcdps = { git = "https://github.com/zerthox/arcdps-rs" }
 nexus = { git = "https://github.com/zerthox/nexus-rs" }
+gw2lib-model = { git = "https://github.com/greaka/gw2lib" }
 #gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false }
 glam = "0.30"
 glamour = "0.18"

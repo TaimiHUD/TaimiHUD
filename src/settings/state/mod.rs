@@ -7,7 +7,7 @@ mod bootstrap;
 mod save;
 
 pub use self::{
-    bootstrap::{AddonHostName, BootstrapState, UpdatePreference},
+    bootstrap::{AddonHostName, BootstrapState, SavedApiToken, UpdatePreference},
     save::SaveState,
 };
 

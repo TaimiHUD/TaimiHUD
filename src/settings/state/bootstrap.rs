@@ -3,12 +3,7 @@ use {
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
-        ffi::{OsStr, OsString},
-        fmt,
-        fs,
-        io,
-        path::Path,
-        sync::LazyLock,
+        collections::BTreeSet, ffi::{OsStr, OsString}, fmt, fs, io, path::Path, sync::LazyLock
     },
     tokio::{sync::watch, time},
 };
@@ -30,6 +25,8 @@ pub struct BootstrapState {
     pub update_remote_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gh_api_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anet_api_token: Vec<SavedApiToken>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_dir: Option<OsString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,6 +43,7 @@ impl BootstrapState {
         update_preference: None,
         update_remote_version: None,
         gh_api_token: None,
+        anet_api_token: Vec::new(),
         addon_dir: None,
         language: None,
         log_filter: None,
@@ -211,6 +209,28 @@ impl BootstrapState {
             Some(token) => Some(token),
         }
     }
+    pub fn anet_api_token<'a>(&'a self, acc: &str) -> Option<&'a SavedApiToken> {
+        self.anet_api_token.iter().find(|token| token.account_name == acc)
+            .or_else(|| match self.anet_api_token[..] {
+                [ref token] if token.account_name.is_empty() || acc.is_empty() =>
+                    Some(token),
+                _ => None,
+            })
+    }
+    pub fn anet_api_token_mut<'a, F: FnMut(&SavedApiToken) -> bool>(&'a mut self, criteria: F) -> &'a mut SavedApiToken {
+        let idx = self.anet_api_token.iter().position(criteria);
+        let idx = match idx {
+            Some(i) => i,
+            None => {
+                let i = self.anet_api_token.len();
+                self.anet_api_token.push(SavedApiToken::UNAUTHENTICATED);
+                i
+            },
+        };
+        unsafe {
+            self.anet_api_token.get_unchecked_mut(idx)
+        }
+    }
 
     pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
         Self::try_write_with(|state| {
@@ -234,6 +254,81 @@ impl BootstrapState {
             changed
         })
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct SavedApiToken {
+    pub token: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub id: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub account_id: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub account_name: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub locale: String,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub permissions: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_subtoken: bool,
+}
+
+impl SavedApiToken {
+    pub const UNAUTHENTICATED: Self = Self {
+        token: String::new(),
+        base_url: String::new(),
+        id: String::new(),
+        name: String::new(),
+        account_id: String::new(),
+        account_name: String::new(),
+        locale: String::new(),
+        permissions: BTreeSet::new(),
+        is_subtoken: false,
+    };
+
+    pub fn new(token: String) -> Self {
+        Self {
+            token,
+            .. Self::UNAUTHENTICATED
+        }
+    }
+
+    pub const ANET_BASE_URL: &'static str = "https://api.guildwars2.com/";
+    pub fn base_url(&self) -> &str {
+        get_str(&self.base_url)
+            .unwrap_or(Self::ANET_BASE_URL)
+    }
+    pub fn token(&self) -> Option<&str> {
+        get_str(&self.token)
+    }
+    pub fn locale(&self) -> Option<&str> {
+        get_str(&self.locale)
+    }
+    pub fn id(&self) -> Option<&str> {
+        get_str(&self.id)
+    }
+    pub fn name(&self) -> Option<&str> {
+        get_str(&self.name)
+    }
+    pub fn account_id(&self) -> Option<&str> {
+        get_str(&self.account_id)
+    }
+    pub fn account_name(&self) -> Option<&str> {
+        get_str(&self.account_name)
+    }
+}
+fn get_str(s: &str) -> Option<&str> {
+    match s.is_empty() {
+        true => None,
+        false => Some(s),
+    }
+}
+fn is_false(&v: &bool) -> bool {
+    !v
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
