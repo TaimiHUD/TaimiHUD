@@ -1,7 +1,7 @@
 use {
     self::{festivals::Festivals, registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
             engine::SpaceEvent, pack::{poi::ActivePoi, trail::{ActiveTrail, TrailParams}, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext, MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext, UiState}}, taimi_pack::{
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext, MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}}, taimi_pack::{
         attributes::{keys::Guid, Festival}, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, Pack
     }, tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
@@ -343,6 +343,7 @@ impl PathingController {
         if ctx.rx.is_closed() {
             return Some(self.exit_drain(ctx));
         }
+        let mut gameplay_prev = ctx.gameplay.get().into_owned();
         select! {
             e = ctx.rx.recv() => match e {
                 None =>
@@ -369,9 +370,13 @@ impl PathingController {
             },
             gameplay = ctx.gameplay.when_changed(), if self.enabled => {
                 let gameplay = gameplay.clone();
+                let map_id = gameplay.gameplay_map();
+                let trans = map_id.and_then(|map| gameplay_prev.commit_ingame(map.get()))
+                    .or_else(|| gameplay_prev.commit_intermission())
+                    .unwrap_or_else(|| gameplay.latest_transition());
                 self.update_filter_state(ctx);
-                self.handle_gameplay(ctx, gameplay).await;
-                if gameplay.gameplay_map().is_some() {
+                self.handle_gameplay(ctx, gameplay, trans).await;
+                if map_id.is_some() {
                     ctx.update_tick.reset_after(Self::UPDATE_INTERVAL_RESPONSIVE);
                     //ctx.filter_state_signal = true;
                 }
@@ -476,12 +481,23 @@ impl PathingController {
         Ok(())
     }
 
-    pub async fn handle_gameplay(&mut self, ctx: &mut PathingEventContext, state: GameplayState) {
+    pub async fn handle_gameplay(&mut self, ctx: &mut PathingEventContext, state: GameplayState, trans: GameplayTransition) {
         match state {
-            GameplayState::Gameplay { map_id: Some(map_id) } =>
-                self.handle_map_enter(map_id, ctx).await,
+            GameplayState::Gameplay { map_id: Some(map_id) } => {
+                let new_map = match trans {
+                    GameplayTransition::Map { prev_map_id: Some(prev), .. } if prev != map_id => true,
+                    GameplayTransition::Loaded { prev_map_id: Some(prev), .. } if prev != map_id => true,
+                    _ => false,
+                };
+                if new_map {
+                    self.handle_map_leave();
+                }
+                self.handle_map_enter(map_id, ctx).await
+            },
+            #[cfg(todo = "unnecessary")]
             _ =>
                 self.handle_map_leave(),
+            _ => (),
         }
     }
 
@@ -708,7 +724,10 @@ impl PathingController {
     }
 
     pub fn handle_map_leave(&mut self) {
-        self.map_pack_info.clear();
+        #[cfg(deleteme)] {
+            self.map_pack_info.clear();
+        }
+        self.filter_state.hidden.reset_map_leave();
     }
 
     #[cfg(todo)]

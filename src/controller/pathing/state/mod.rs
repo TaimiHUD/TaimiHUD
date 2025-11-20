@@ -64,6 +64,13 @@ impl MarkerState {
             _ => true,
         })
     }
+    pub fn reset_map_leave(&mut self) {
+        self.hidden.retain(|_, hidden| match &hidden.reset {
+            AutoReset::MapChange | AutoReset::Distance =>
+                false,
+            _ => true,
+        })
+    }
 }
 
 /// TODO: could be a map of HideContext?
