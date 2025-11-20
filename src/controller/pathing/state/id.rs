@@ -70,6 +70,11 @@ impl MarkerIndex {
     pub const fn index(self) -> u32 {
         self.repr() & Self::INDEX_MASK
     }
+
+    pub fn variant(self) -> MarkerIndexVariant {
+        MarkerIndexVariant::from_index(self)
+    }
+
     /// Dead space
     pub const fn index_extra(self) -> u32 {
         match self.namespace() {
@@ -124,6 +129,11 @@ impl From<TrailSectionPath<TrailPath>> for MarkerIndex {
         let trail = i.root.path;
         let section = i.path;
         Self::with_trail_section(trail, section)
+    }
+}
+impl<N> From<MarkerPath<N>> for MarkerIndex {
+    fn from(i: MarkerPath<N>) -> Self {
+        i.path
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -323,16 +333,6 @@ impl MarkerId {
 }
 impl<N: MarkerId1> From<MarkerPath<N>> for MarkerId {
     fn from(marker: MarkerPath<N>) -> Self {
-        Self::for_marker(marker)
-    }
-}
-/// TODO: deleteme once MarkerIndex is merged
-impl From<super::super::filter::MarkerPath<PackPath>> for MarkerId {
-    fn from(marker: super::super::filter::MarkerPath<PackPath>) -> Self {
-        let marker = marker.map_path(|p| match p {
-            super::super::filter::MarkerIndex::Poi(poi) => MarkerIndex::with_poi(poi),
-            super::super::filter::MarkerIndex::Trail(trail) => MarkerIndex::with_trail(trail),
-        });
         Self::for_marker(marker)
     }
 }

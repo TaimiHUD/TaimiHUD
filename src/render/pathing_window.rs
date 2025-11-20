@@ -482,7 +482,7 @@ impl PathingWindowState {
         engine: &mut Engine,
     ) {
         use crate::controller::pathing::visible::{InteractionEvent, InteractionEventAction};
-        use crate::controller::pathing::filter::MarkerIndex;
+        use crate::controller::pathing::state::MarkerIndex;
         use crate::settings::pathing::TriggerKind;
         let Some(Some(map_id)) = Controller::with_sender(|s| s.gameplay.as_ref().and_then(|g|
                 g.borrow().gameplay_map()
@@ -616,7 +616,7 @@ impl PathingWindowState {
                     if let Some(guid) = guid {
                         PathingEvent::GuidReset(vec![guid])
                     } else {
-                        PathingEvent::ResetMarker(path.root.rel(MarkerIndex::Poi(poi_path.path)))
+                        PathingEvent::ResetMarker(path.root.rel(MarkerIndex::with_poi(poi_path.path)))
                     }.try_send();
                 }
                 ui.table_next_column();

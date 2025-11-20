@@ -3,7 +3,7 @@ use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
 use taimi_pack::{attributes::{self as attr, keys::{self, Guid}}, MarkerAttributes};
-use super::{festivals::Festivals, registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState}, FestivalState, MapPackInfo};
+use super::{festivals::Festivals, registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
@@ -16,23 +16,6 @@ pub const FILTER_ALLOWED: Option<bool> = None;
 #[cfg(todo = "unused")]
 pub const FILTER_VISIBLE_OVERRIDE: Option<bool> = Some(true);
 pub type FilterAllow = Option<bool>;
-pub type PackMarkerNs = super::registry::PackRegistryNs;
-pub type MarkerPath<N = PackMarkerNs> = Locator<N, MarkerIndex>;
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum MarkerIndex {
-    Poi(PoiIndex),
-    Trail(TrailIndex),
-}
-impl From<PoiIndex> for MarkerIndex {
-    fn from(i: PoiIndex) -> Self {
-        Self::Poi(i)
-    }
-}
-impl From<TrailIndex> for MarkerIndex {
-    fn from(i: TrailIndex) -> Self {
-        Self::Trail(i)
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct MarkerSet {
@@ -40,20 +23,22 @@ pub struct MarkerSet {
     pub trails: BTreeSet<TrailPath>,
 }
 impl MarkerSet {
-    pub fn contains<N, I>(&self, marker: Locator<N, I>) -> bool where
+    pub fn contains<I>(&self, marker: I) -> bool where
         I: Into<MarkerIndex>,
     {
-        match marker.path.into() {
-            MarkerIndex::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
-            MarkerIndex::Trail(trail) => self.trails.contains(&Locator::with_path(trail)),
+        match marker.into().variant() {
+            MarkerIndexVariant::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.contains(&Locator::with_path(trail)),
+            _ => false,
         }
     }
-    pub fn insert<N, I>(&mut self, marker: Locator<N, I>) -> bool where
+    pub fn insert<I>(&mut self, marker: I) -> bool where
         I: Into<MarkerIndex>,
     {
-        match marker.path.into() {
-            MarkerIndex::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
-            MarkerIndex::Trail(trail) => self.trails.insert(Locator::with_path(trail)),
+        match marker.into().variant() {
+            MarkerIndexVariant::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.insert(Locator::with_path(trail)),
+            _ => false,
         }
     }
 }
@@ -660,12 +645,12 @@ impl MapFilters {
             })
             .map(|(path, (mut f, extras))| {
                 if let Some(a) = extras.achievements {
-                    achievements.push((MarkerPath::with_path(MarkerIndex::from(path.path)), a.clone()));
+                    achievements.push((MarkerPath::with_path(MarkerIndex::from(path)), a.clone()));
                     f.push(a as Arc<_>);
                 }
                 #[cfg(feature = "paths-schedule")]
                 if let Some(s) = extras.schedule {
-                    schedules.push((MarkerPath::with_path(MarkerIndex::from(path.path)), s.clone()));
+                    schedules.push((MarkerPath::with_path(MarkerIndex::from(path)), s.clone()));
                     f.push(s as Arc<_>);
                 }
                 (path, f)
@@ -681,12 +666,12 @@ impl MapFilters {
                 !f.is_empty() || !extras.is_empty()
             }).map(|(path, (mut f, extras))| {
                 if let Some(a) = extras.achievements {
-                    achievements.push((MarkerPath::with_path(MarkerIndex::from(path.path)), a.clone()));
+                    achievements.push((MarkerPath::with_path(MarkerIndex::from(path)), a.clone()));
                     f.push(a as Arc<_>);
                 }
                 #[cfg(feature = "paths-schedule")]
                 if let Some(s) = extras.schedule {
-                    schedules.push((MarkerPath::with_path(MarkerIndex::from(path.path)), s.clone()));
+                    schedules.push((MarkerPath::with_path(MarkerIndex::from(path)), s.clone()));
                     f.push(s as Arc<_>);
                 }
                 (path, f)
@@ -706,7 +691,7 @@ impl MapFilters {
         }
     }
 
-    pub fn group_filter_for<N, I>(&self, path: Locator<N, I>, guid: &Guid) -> Option<GroupConfig> where
+    pub fn group_filter_for<I>(&self, path: I, guid: &Guid) -> Option<GroupConfig> where
         I: Into<MarkerIndex>,
     {
         (!guid.is_empty()).then(move || GroupConfig {

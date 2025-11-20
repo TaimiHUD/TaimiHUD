@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant, SystemTime};
 use super::filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter};
 use super::registry::MapIndex;
-pub use self::id::MarkerId;
+pub use self::id::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant};
 
 pub mod id;
 

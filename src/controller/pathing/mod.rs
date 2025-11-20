@@ -1,11 +1,11 @@
 use {
     self::{festivals::Festivals, registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
             engine::SpaceEvent, pack::{poi::ActivePoi, trail::{ActiveTrail, TrailParams}, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, MarkerIndex, MarkerPath}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext, UiState}}, taimi_pack::{
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext, MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext, UiState}}, taimi_pack::{
         attributes::{keys::Guid, Festival}, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, Pack
     }, tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
-    }, tokio_util::sync::ReusableBoxFuture, uuid::Uuid, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedCategory, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
+    }, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedCategory, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
 };
 use crate::render::machine::MumbleIdentityUpdate;
 
@@ -1625,7 +1625,7 @@ impl PathingController {
                             _ => break None,
                         };
                     }.map(|(_p, f)| f);
-                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path.path));
+                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path));
                     (marker_path, poi.category, &mut poi.visibility, filters, guid)
                 });
             let mut trail_guids = map_pack.trail_guids.iter();
@@ -1642,7 +1642,7 @@ impl PathingController {
                             _ => break None,
                         };
                     }.map(|(_p, f)| f);
-                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path.path));
+                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path));
                     (marker_path, trail.category, &mut trail.visibility, filters, guid)
                 });
             for (marker_path, category_index, visibility, filter, guid) in pois.chain(trails) {
@@ -1664,6 +1664,7 @@ impl PathingController {
                     }
                 }
                 if visibility.is_visible() {
+                    let marker_path: MarkerPath = MarkerPath::with_path(marker_path.path);
                     if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
                         if let filter::FILTER_HIDDEN = hidden.is_visible(filter_state) {
                             visibility.remove(VisibilityFlags::TOGGLE);
