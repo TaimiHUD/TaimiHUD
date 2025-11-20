@@ -314,7 +314,7 @@ impl FromStr for Specialization {
         value.parse().map(Self)
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Raid(pub String);
 impl FromStr for Raid {
     type Err = Infallible;
@@ -699,9 +699,16 @@ impl<G: Into<Guid>> FromIterator<G> for ResetGuid {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct Guid(pub Uuid);
 impl Guid {
     pub const EMPTY: Self = Self(Uuid::nil());
+
+    pub const fn from_uuid_ref(uuid: &Uuid) -> &Self {
+        unsafe {
+            mem::transmute(uuid)
+        }
+    }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_nil()

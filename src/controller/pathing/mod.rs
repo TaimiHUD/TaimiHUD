@@ -1,7 +1,7 @@
 use {
     self::{festivals::Festivals, registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
             engine::SpaceEvent, pack::{poi::ActivePoi, trail::{ActiveTrail, TrailParams}, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, MarkerIndex, MarkerPath}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext}}, taimi_pack::{
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, MarkerIndex, MarkerPath}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{GameplayState, MapContext, UiState}}, taimi_pack::{
         attributes::{keys::Guid, Festival}, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, Pack
     }, tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
@@ -13,6 +13,7 @@ pub mod registry;
 pub mod festivals;
 pub mod visible;
 pub mod filter;
+pub mod state;
 
 #[derive(Debug, Clone, Display)]
 pub enum PathingEvent {
@@ -36,7 +37,7 @@ pub enum PathingEvent {
     CategorySetToggle(CategoryPath<PackPath>, Option<bool>),
     GuidReset(Vec<Guid>),
     ResetMarker(MarkerPath<PackPath>),
-    DismissMarker(PoiPath<PackMapPath>, Duration),
+    DismissMarker(PoiPath<PackMapPath>, Option<Duration>, Vec<HideContext>),
     #[cfg(todo)]
     CategoryVisibility(CategoryPath<PackPath>, VisibilityFlags),
     ToggleKatRender,
@@ -573,6 +574,7 @@ impl PathingController {
         }
         if dirty {
             ctx.pack_info.send_if_modified(|_| true);
+            //ctx.filter_state_signal = true;
             PathingEvent::RequestDisabledPaths.try_send();
         }
     }
@@ -820,22 +822,24 @@ impl PathingController {
     }
 
     fn handle_guid_reset(&mut self, ctx: &mut PathingEventContext, guids: Vec<Guid>) {
-        let dirty = SaveState::try_write_with(|save| {
+        SaveState::try_write_with(|save| {
             let mut dirty = false;
             for guid in guids {
-                if save.pathing().hidden_guid_expiry_get(&guid).is_none() {
-                    continue
+                if save.pathing().hidden_guid_expiry_get(&guid).is_some() {
+                    save.pathing_mut().hidden_guid_expire(&guid);
+                    dirty = true;
                 }
-                save.pathing_mut().hidden_guid_expire(&guid);
-                dirty = true;
+                if self.filter_state.hidden.reset(&guid) {
+                    ctx.filter_state_signal = true;
+                }
+                if ctx.unexpire(&Ok(guid)) {
+                    ctx.filter_state_signal = true;
+                }
             }
             dirty
         });
-        if dirty {
-            ctx.filter_state_signal = true;
-        }
     }
-    async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Duration, expiry: SystemTime) {
+    async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Option<Duration>, expiry: Option<SystemTime>, hide_contexts: Vec<HideContext>) {
         let Some(guid) = ({
             self.map_pack_info.get(&path.root)
                 .and_then(|info| self.map_packs.get(&path.root)
@@ -856,10 +860,47 @@ impl PathingController {
             log::warn!("no GUID on {path} to dismiss");
             return
         };
-        ctx.expire_at(Ok(guid.clone().into()), expiry, Some(delay));
-        SaveState::write_with(|save|
-            save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
-        );
+        let hidden = if let Some(expiry) = expiry {
+            ctx.expire_at(Ok(guid.clone().into()), expiry, delay);
+            let expiry_now = std::time::Instant::now();
+            let expiry_std = expiry_now + if let Some(delay) = delay {
+                delay
+            } else {
+                log::warn!("TODO: expiry to instant");
+                Duration::from_secs(2)
+            };
+            self.filter_state.hidden.expire_at(guid.clone(), expiry_std)
+        } else {
+            self.filter_state.hidden.marker_mut(guid.clone())
+        };
+        if !hide_contexts.iter().all(|hide| match hide {
+            HideContext::Local(map) if map.shard.is_none() =>
+                false,
+            _ => true,
+        }) && matches!(&hidden.reset, AutoReset::Never) {
+            hidden.reset = AutoReset::MapChange;
+        }
+        let has_context = !hide_contexts.is_empty();
+        if has_context {
+            hidden.contexts.extend(hide_contexts);
+        }
+        let expiry = match (expiry, delay) {
+            (Some(e), ..) => Some(Some(e)),
+            (None, Some(delay)) =>
+                SystemTime::now().checked_add(delay).map(Some),
+            (None, None) if has_context =>
+                Some(None),
+            (None, None) =>
+                SystemTime::now().checked_add(Duration::MAX).map(Some),
+        }.unwrap_or_else(|| {
+            log::error!("when is the future?");
+            Some(SystemTime::now() + Duration::from_secs(3600 * 24 * 365 * 2))
+        });
+        if let Some(expiry) = expiry {
+            SaveState::write_with(|save| {
+                save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
+            });
+        }
         ctx.filter_state_signal = true;
     }
 
@@ -1546,14 +1587,21 @@ impl PathingController {
     }
     pub fn update_loaded_visibility(&mut self) -> bool {
         let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
-        let hidden_guids_empty;
-        let hidden_guids = match hidden_guids.as_ref().map(|g| &**g) {
-            Some(h) => h,
-            None => {
-                hidden_guids_empty = BTreeMap::new();
-                &hidden_guids_empty
-            },
-        };
+        if let Some(hidden_guids) = hidden_guids {
+            let now = SystemTime::now();
+            let now_mono = std::time::Instant::now();
+            let all_guids = self.map_packs.values()
+                .flat_map(|map| map.poi_guids.iter().chain(map.trail_guids.iter()));
+
+            for guid in all_guids {
+                if self.filter_state.hidden.hidden.contains_key(guid.as_ref()) {
+                    continue
+                }
+                let Some(&expiry_timestamp) = hidden_guids.get(guid) else { continue };
+                self.filter_state.hidden.expire_at_timestamp(guid.clone(), expiry_timestamp, &now, &now_mono);
+            }
+            self.filter_state.hidden.reset_expired(&now_mono);
+        }
         let filter_state = &self.filter_state;
         let mut dirty = false;
         for (path, map_pack) in &mut self.map_packs {
@@ -1617,7 +1665,7 @@ impl PathingController {
                 }
                 if visibility.is_visible() {
                     if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
-                        if let filter::FILTER_HIDDEN = hidden.is_visible(hidden_guids) {
+                        if let filter::FILTER_HIDDEN = hidden.is_visible(filter_state) {
                             visibility.remove(VisibilityFlags::TOGGLE);
                         }
                     }
@@ -1680,24 +1728,38 @@ impl PathingController {
         self.update_filter_state_schedule(ctx);
     }
     pub fn update_filter_state_schedule(&mut self, ctx: &mut PathingEventContext) {
-        self.filter_state.schedule.update_time();
-        if let Some(now) = &self.filter_state.schedule.now {
-            if let Some(map_id) = ctx.gameplay_map() {
-                let next_update = self.map_packs.iter_mut()
-                    .filter(|(path, _)| path.path == map_id)
-                    .filter_map(|(_, map)| map.filters.next_schedule_event(&now))
-                    .min();
-                let next = if let Some(next) = next_update {
-                    next.signed_duration_since(now).to_std().ok()
-                } else if ctx.next_schedule.is_elapsed() {
-                    Some(PathingEventContext::SCHEDULE_TIMEOUT)
-                } else {
-                    None
-                };
-                if let Some(next) = next {
-                    ctx.next_schedule.as_mut().reset(Instant::now() + next);
+        #[cfg(feature = "paths-schedule")]
+        let next_scheduled = {
+            self.filter_state.schedule.update_time();
+            let mut next_scheduled = None;
+            if let Some(now) = &self.filter_state.schedule.now {
+                if let Some(map_id) = ctx.gameplay_map() {
+                    let next_update = self.map_packs.iter_mut()
+                        .filter(|(path, _)| path.path == map_id)
+                        .filter_map(|(_, map)| {
+                            map.filters.next_schedule_event(&now)
+                        })
+                        .min();
+                    next_scheduled = next_update.and_then(|next|
+                        next.signed_duration_since(now).to_std().ok()
+                    );
                 }
             }
+        };
+        let next_expire = self.filter_state.hidden.next_expiry()
+            .and_then(|expiry| expiry.checked_duration_since(std::time::Instant::now()));
+        let next = [
+            #[cfg(feature = "paths-schedule")]
+            next_schedule,
+            next_expire,
+        ].into_iter().flatten().min();
+        let next = next.or(if ctx.next_schedule.is_elapsed() {
+            Some(PathingEventContext::SCHEDULE_TIMEOUT)
+        } else {
+            None
+        });
+        if let Some(next) = next {
+            ctx.next_schedule.as_mut().reset(Instant::now() + next);
         }
     }
 
@@ -1795,11 +1857,12 @@ impl PathingController {
                 self.handle_guid_reset(ctx, guids);
             },
             ResetMarker(path) => {
+                self.filter_state.hidden.reset(state::MarkerId::from(path));
                 ctx.unexpire(&Err(path));
             },
-            DismissMarker(path, delay) => {
-                if let Some(expiry) = SystemTime::now().checked_add(delay) {
-                    self.handle_dismiss(ctx, path, delay, expiry).await;
+            DismissMarker(path, delay, contexts) => {
+                if let Some(expiry) = delay.map(|delay| SystemTime::now().checked_add(delay)) {
+                    self.handle_dismiss(ctx, path, delay, expiry, contexts).await;
                 } else {
                     log::error!("unable to determine expiry time for {path} of {delay:?}");
                 }
@@ -1872,31 +1935,38 @@ impl PathingController {
 
                 use taimi_pack::attributes::keys::{Behaviour, TacoBehaviour, BlishBehaviour};
                 let timestamp = rt::log::error_ok(UNIX_EPOCH.elapsed()).unwrap_or_default();
+                let mut contexts = None;
                 let delay = match behaviour.mode {
-                    Behaviour::Taco(TacoBehaviour::ResetDaily) => Duration::from_secs({
+                    Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => Some(Duration::from_secs({
+                        if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour.mode {
+                            contexts = Some(HideContext::for_character(self.filter_state.character.name.clone()));
+                        }
                         const SOME_DAY: Duration = Duration::from_secs(1754265600);
                         (SOME_DAY.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(DAY.as_secs() as i64)
-                    } as u64),
-                    Behaviour::Blish(BlishBehaviour::ResetWeekly) => Duration::from_secs({
+                    } as u64)),
+                    Behaviour::Blish(BlishBehaviour::ResetWeekly) => Some(Duration::from_secs({
                         const SOME_WEEK: Duration = Duration::from_secs(1754265600);
                         (SOME_WEEK.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(WEEK.as_secs() as i64)
-                    } as u64),
-                    Behaviour::Taco(TacoBehaviour::ResetDelay) => behaviour.reset_delay.duration(),
-                    Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Duration::from_secs(0),
-                    Behaviour::Taco(TacoBehaviour::ResetPermanent) => Duration::MAX,
-                    #[cfg(todo)]
-                    Behaviour::Taco(TacoBehaviour::ResetMap) => x,
-                    #[cfg(todo)]
-                    Behaviour::Taco(TacoBehaviour::ResetInstance) => x,
-                    #[cfg(todo)]
-                    Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => x,
+                    } as u64)),
+                    Behaviour::Taco(TacoBehaviour::ResetDelay) => Some(behaviour.reset_delay.duration()),
+                    Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Some(Duration::from_secs(0)),
+                    Behaviour::Taco(TacoBehaviour::ResetPermanent) => None,
+                    Behaviour::Taco(TacoBehaviour::ResetMap) => {
+                        contexts = Some(HideContext::for_map(loaded_path.root.path, None));
+                        None
+                    },
+                    Behaviour::Taco(TacoBehaviour::ResetInstance) => {
+                        contexts = Some(HideContext::for_map(loaded_path.root.path, NonZero::new(self.filter_state.map.shard_id)));
+                        None
+                    },
                     Behaviour::Taco(behaviour) => {
                         log::debug!("TODO: {behaviour:?}");
-                        HOUR
+                        Some(HOUR)
                     },
                 };
-                log::info!("hiding marker for {delay:?}");
-                PathingEvent::DismissMarker(loaded_path.root.rel(path.path), delay).try_send();
+                log::info!("hiding marker for {delay:?}({contexts:?})");
+                let contexts = contexts.into_iter().collect();
+                PathingEvent::DismissMarker(loaded_path.root.rel(path.path), delay, contexts).try_send();
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
@@ -1994,7 +2064,16 @@ impl PathingController {
     async fn handle_presses(&mut self, ctx: &mut PathingEventContext, state: GameControls, changed: GameControls) {
         let pressed = state & changed;
         if pressed.contains(GameControl::Miscellaneous_Interact) {
-            if let Some(map_id) = ctx.gameplay_map() {
+            // TODO: might still be possible to use if bound to a mouse button maybe?
+            let is_text_input = || rt::mumble_link_ptr().map(|ml| ml.read_ui_state())
+                .map(|state| UiState::from(state).contains(UiState::TextInput))
+                .unwrap_or(false);
+            let map_id = match ctx.gameplay_map() {
+                Some(..) if is_text_input() =>
+                    None,
+                map_id => map_id,
+            };
+            if let Some(map_id) = map_id {
                 self.handle_press_interact(ctx, map_id);
             }
         }

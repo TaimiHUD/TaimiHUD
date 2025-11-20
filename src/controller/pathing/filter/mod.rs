@@ -1,12 +1,15 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt, num::NonZero, ops, sync::Arc, time::{Duration, SystemTime}};
+use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
 use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
-use crate::exports::runtime::locator::LocationGet;
 use crate::render::machine::MumbleIdentityUpdate;
-use chrono::{DateTime, TimeDelta};
-use croner::errors::CronError;
 use crate::exports::runtime::{self as rt, Locator};
 use taimi_pack::{attributes::{self as attr, keys::{self, Guid}}, MarkerAttributes};
-use super::{festivals::Festivals, registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, FestivalState, MapPackInfo};
+use super::{festivals::Festivals, registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState}, FestivalState, MapPackInfo};
+#[cfg(feature = "paths-schedule")]
+use {
+    chrono::{DateTime, TimeDelta},
+    croner::errors::CronError,
+    std::time::Duration,
+};
 
 pub const FILTER_HIDDEN: Option<bool> = Some(false);
 pub const FILTER_ALLOWED: Option<bool> = None;
@@ -55,34 +58,12 @@ impl MarkerSet {
     }
 }
 
-/// TODO: lookup by guid will probably not be common until later..?
-#[cfg(deleteme)]
-#[derive(Debug, Clone, Default)]
-pub struct MarkerGroups {
-    pub groups: BTreeMap<Guid, MarkerSet>,
-    pub inversions: MarkerSet,
-}
-#[cfg(deleteme)]
-impl LocationGet<PackPoiNs, PoiIndex> for MarkerGroups {
-    type LookupGet = Guid;
-    fn lookup_get(&self, loc: &Locator<PackPoiNs, PoiIndex>) -> Option<Self::LookupGet> {
-        self.groups.iter().find(|(_guid, markers)| markers.pois.contains(loc))
-            .map(|(guid, ..)| guid.clone())
-    }
-}
-#[cfg(deleteme)]
-impl LocationGet<PackTrailNs, TrailIndex> for MarkerGroups {
-    type LookupGet = Guid;
-    fn lookup_get(&self, loc: &Locator<PackTrailNs, TrailIndex>) -> Option<Self::LookupGet> {
-        self.groups.iter().find(|(_guid, markers)| markers.trails.contains(loc))
-            .map(|(guid, ..)| guid.clone())
-    }
-}
-
 /// TODO: probably just replacing this with a collection of [keys]
 #[derive(Debug, Clone, Default)]
+#[cfg(deleteme)]
 pub struct FilterConfig {
     pub achievement: Option<AchievementConfig>,
+    #[cfg(feature = "paths-schedule")]
     pub schedule: Option<ScheduleConfig>,
     #[cfg(todo)]
     pub profession: Professions,
@@ -103,17 +84,21 @@ pub struct FilterConfig {
     #[cfg(todo)]
     pub map_type: keys::MapTypes,
 }
+#[cfg(deleteme)]
 impl FilterConfig {
     pub const EMPTY: Self = Self {
         achievement: None,
+        #[cfg(feature = "paths-schedule")]
         schedule: None,
     };
 
     pub fn from_attributes(attrs: &MarkerAttributes) -> Self {
         let achievement = AchievementConfig::from_attributes(attrs);
+        #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten();
         Self {
             achievement,
+            #[cfg(feature = "paths-schedule")]
             schedule,
         }
     }
@@ -127,6 +112,11 @@ impl FilterConfig {
             _ => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RaidState {
+    pub completed: BTreeSet<keys::Raid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -187,11 +177,14 @@ impl MarkerFilter for AchievementConfig {
 }
 
 #[derive(Debug, Clone)]
+#[cfg(feature = "paths-schedule")]
 pub struct ScheduleConfig {
     pub pattern: croner::Cron,
     pub duration: keys::ScheduleDuration,
 }
+#[cfg(feature = "paths-schedule")]
 pub type ScheduleTimezone = chrono::Utc;
+#[cfg(feature = "paths-schedule")]
 impl ScheduleConfig {
     pub fn from_attributes(attrs: &MarkerAttributes) -> Result<Option<Self>, CronError> {
         let Some(schedule) = attrs.schedule.as_ref() else {
@@ -255,6 +248,7 @@ impl ScheduleConfig {
         self.pattern.find_next_occurrence(&point.into(), false)
     }
 }
+#[cfg(feature = "paths-schedule")]
 impl MarkerFilter for ScheduleConfig {
     type State = ScheduleState;
 
@@ -267,15 +261,18 @@ impl MarkerFilter for ScheduleConfig {
     }
 }
 #[derive(Debug, Clone, Default)]
+#[cfg(feature = "paths-schedule")]
 pub struct ScheduleState {
     pub now: Option<DateTime<ScheduleTimezone>>,
 }
+#[cfg(feature = "paths-schedule")]
 impl ScheduleState {
     pub fn update_time(&mut self) {
         self.now = Some(ScheduleTimezone::now());
     }
 }
 
+#[cfg(feature = "paths-schedule")]
 impl fmt::Display for ScheduleConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} for ", self.pattern.describe())?;
@@ -292,31 +289,6 @@ pub trait MarkerFilter {
     fn is_visible(&self, state: &Self::State) -> FilterAllow;
 }
 
-#[cfg(deleteme)]
-pub type MarkerGuid<N = PackMarkerNs> = (Locator<MarkerPath<N>, MarkerIndex>, Guid);
-#[cfg(deleteme)]
-impl MarkerFilter for MarkerGuid {
-    type State = MarkerGroups;
-
-    fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        let &(index, ref guid) = self;
-        let inverted = state.inversions.contains(index);
-        let _markers = match state.groups.get(guid) {
-            Some(group) => group,
-            None => return match inverted {
-                true => FILTER_HIDDEN,
-                false => FILTER_ALLOWED,
-            },
-        };
-        #[cfg(debug_assertions)]
-        debug_assert!(_markers.contains(index));
-        match inverted {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct GroupConfig {
     pub guid: Guid,
@@ -330,12 +302,64 @@ impl GroupConfig {
 }
 /// lazy hack .-.
 impl MarkerFilter for GroupConfig {
-    type State = BTreeMap<Guid, u64>;
+    type State = FilterState;
 
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match state.contains_key(&self.guid) ^ self.inverted {
+        let guid = MarkerId::from_guid_ref(&self.guid);
+        match state.hidden.is_hidden(guid, &state.map, &state.character) ^ self.inverted {
             true => FILTER_HIDDEN,
             false => FILTER_ALLOWED,
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HiddenAlways;
+impl HiddenAlways {
+    pub fn singleton() -> &'static Arc<Self> {
+        static SINGLETON: LazyLock<Arc<HiddenAlways>> = LazyLock::new(|| Arc::new(HiddenAlways));
+        &*SINGLETON
+    }
+}
+impl MarkerFilter for HiddenAlways {
+    type State = ();
+    fn is_visible(&self, _state: &Self::State) -> FilterAllow {
+        FILTER_HIDDEN
+    }
+}
+
+/// Markers that can reappear on map change
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HiddenForMap {
+    pub map: MapIndex,
+    /// optionally tied to a specific instance
+    pub shard: Option<NonZero<u32>>,
+}
+impl MarkerFilter for HiddenForMap {
+    type State = MapMetadata;
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        match *self {
+            Self { map, .. } if Some(map) != state.map_id =>
+                FILTER_ALLOWED,
+            Self { shard: Some(shard), .. } if shard.get() != state.shard_id =>
+                FILTER_ALLOWED,
+            _ => FILTER_HIDDEN,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HiddenForCharacter {
+    pub name: Arc<[u8]>,
+}
+impl MarkerFilter for HiddenForCharacter {
+    type State = CharacterMetadata;
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        if Arc::ptr_eq(&state.name, &self.name) {
+            return FILTER_HIDDEN
+        }
+        match state.name == self.name {
+            false => FILTER_ALLOWED,
+            true => FILTER_HIDDEN,
         }
     }
 }
@@ -414,7 +438,10 @@ impl MarkerFilter for keys::Races {
 impl MarkerFilter for attr::MapType {
     type State = MapMetadata;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        log::debug!("TODO: MarkerFilter for MapType"); FILTER_ALLOWED
+        match state.map_type == *self as i32 {
+            true => FILTER_ALLOWED,
+            false => FILTER_HIDDEN,
+        }
     }
 }
 impl MarkerFilter for keys::MapTypes {
@@ -451,9 +478,12 @@ impl MarkerFilter for keys::Specializations {
     }
 }
 impl MarkerFilter for keys::Raid {
-    type State = MapMetadata;
+    type State = RaidState;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        log::debug!("TODO: MarkerFilter for Raid"); FILTER_ALLOWED
+        match state.completed.contains(self) {
+            true => FILTER_HIDDEN,
+            _ => FILTER_ALLOWED,
+        }
     }
 }
 impl MarkerFilter for keys::Raids {
@@ -484,54 +514,59 @@ impl AvatarMetadata {
 }
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapMetadata {
-    pub raid: i32,
+    pub map_id: Option<MapIndex>,
+    pub shard_id: u32,
     pub map_type: i32,
 }
 impl MapMetadata {
     pub fn from_mumblelink_context(ml: &rt::MumblePtr) -> Self {
-        let map_type = ml.read_map_type() as i32;
-        Self {
-            map_type,
-            raid: Default::default(),
-        }
+        let mut meta = Self::default();
+        meta.update_from_mumblelink_context(ml);
+        meta
     }
     pub fn update_from_mumblelink_context(&mut self, ml: &rt::MumblePtr) {
-        let Self { map_type, raid: _ } = Self::from_mumblelink_context(ml);
-        self.map_type = map_type;
+        self.map_id = NonZero::new(ml.read_map_id());
+        self.shard_id = ml.read_shard_id();
+        self.map_type = ml.read_map_type() as i32;
     }
 }
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterMetadata {
     pub race: Option<attr::Race>,
     pub prof: Option<attr::Profession>,
     pub spec: Option<NonZero<u32>>,
+    pub name: Arc<[u8]>,
 }
 impl CharacterMetadata {
     pub fn from_mumblelink(id: &MumbleIdentityUpdate) -> Self {
-        let race = (id.race as i32).try_into().ok();
-        let prof = (id.profession as i32).try_into().ok();
-        let spec = NonZero::new(id.specialization);
-        Self {
-            race,
-            prof,
-            spec,
-        }
+        let mut meta = Self::default();
+        meta.update_from_mumblelink(id);
+        meta
     }
     pub fn update_from_mumblelink(&mut self, id: &MumbleIdentityUpdate) {
-        *self = Self::from_mumblelink(id);
+        self.race = (id.race as i32).try_into().ok();
+        self.prof = (id.profession as i32).try_into().ok();
+        self.spec = NonZero::new(id.specialization);
+        let name_len = id.name.iter().position(|&c| c == 0)
+            .unwrap_or(id.name.len());
+        let name = unsafe { id.name.get_unchecked(..name_len) };
+        if self.name.len() != name_len || name != &self.name[..] {
+            self.name = name.into();
+        }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct FilterState {
-    #[cfg(deleteme)]
-    pub groups: MarkerGroups,
     pub achievements: AchievementState,
+    pub raids: RaidState,
     pub festival: FestivalState,
     pub map: MapMetadata,
     pub character: CharacterMetadata,
     pub avatar: AvatarMetadata,
+    #[cfg(feature = "paths-schedule")]
     pub schedule: ScheduleState,
+    pub hidden: MarkerState,
 }
 
 pub type FilterStateFilter = Arc<dyn MarkerFilterState>;
@@ -568,13 +603,13 @@ impl<T> MarkerFilter for FilterFor<T> where
         self.0.is_visible(state.as_ref())
     }
 }
-#[cfg(deleteme)]
-impl AsRef<MarkerGroups> for FilterState {
-    fn as_ref(&self) -> &MarkerGroups { &self.groups }
-}
 impl AsRef<AchievementState> for FilterState {
     fn as_ref(&self) -> &AchievementState { &self.achievements }
 }
+impl AsRef<RaidState> for FilterState {
+    fn as_ref(&self) -> &RaidState { &self.raids }
+}
+#[cfg(feature = "paths-schedule")]
 impl AsRef<ScheduleState> for FilterState {
     fn as_ref(&self) -> &ScheduleState { &self.schedule }
 }
@@ -590,11 +625,18 @@ impl AsRef<CharacterMetadata> for FilterState {
 impl AsRef<AvatarMetadata> for FilterState {
     fn as_ref(&self) -> &AvatarMetadata { &self.avatar }
 }
+impl AsRef<()> for FilterState {
+    fn as_ref(&self) -> &() { &() }
+}
+impl AsRef<FilterState> for FilterState {
+    fn as_ref(&self) -> &FilterState { self }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct MapFilters {
     pub pois: Vec<(PoiPath, FilterStateFilters)>,
     pub trails: Vec<(TrailPath, FilterStateFilters)>,
+    #[cfg(feature = "paths-schedule")]
     pub schedules: Vec<(MarkerPath, Arc<ScheduleConfig>)>,
     pub achievements: Vec<(MarkerPath, Arc<AchievementConfig>)>,
     pub inversions: MarkerSet,
@@ -602,6 +644,7 @@ pub struct MapFilters {
 
 impl MapFilters {
     pub fn from_pack(info: &MapPackInfo, active: &ActivePack) -> Self {
+        #[cfg(feature = "paths-schedule")]
         let mut schedules = Vec::new();
         let mut achievements = Vec::new();
         let mut inversions = MarkerSet::default();
@@ -609,18 +652,19 @@ impl MapFilters {
             .filter_map(|path|
                 active.pack.pois.get(path.path as usize).map(|t| (path, t))
             ).map(|(path, poi)| (path, FilterStateFilters::from_attributes(&poi.attributes)))
-            .filter(|(path, (f, (a, s, g)))| {
-                if let Some(GroupConfig { inverted: true, .. }) = g {
+            .filter(|(path, (f, extras))| {
+                if let Some(GroupConfig { inverted: true, .. }) = extras.group {
                     inversions.insert(*path);
                 }
-                !f.is_empty() || a.is_some() || s.is_some()
+                !f.is_empty() || !extras.is_empty()
             })
-            .map(|(path, (mut f, (a, s, _g)))| {
-                if let Some(a) = a {
+            .map(|(path, (mut f, extras))| {
+                if let Some(a) = extras.achievements {
                     achievements.push((MarkerPath::with_path(MarkerIndex::from(path.path)), a.clone()));
                     f.push(a as Arc<_>);
                 }
-                if let Some(s) = s {
+                #[cfg(feature = "paths-schedule")]
+                if let Some(s) = extras.schedule {
                     schedules.push((MarkerPath::with_path(MarkerIndex::from(path.path)), s.clone()));
                     f.push(s as Arc<_>);
                 }
@@ -630,29 +674,33 @@ impl MapFilters {
             .filter_map(|path|
                 active.pack.trails.get(path.path as usize).map(|t| (path, t))
             ).map(|(path, trail)| (path, FilterStateFilters::from_attributes(&trail.attributes)))
-            .filter(|(path, (f, (a, s, g)))| {
-                if let Some(GroupConfig { inverted: true, .. }) = g {
+            .filter(|(path, (f, extras))| {
+                if let Some(GroupConfig { inverted: true, .. }) = extras.group {
                     inversions.insert(*path);
                 }
-                !f.is_empty() || a.is_some() || s.is_some()
-            }).map(|(path, (mut f, (a, s, _g)))| {
-                if let Some(a) = a {
+                !f.is_empty() || !extras.is_empty()
+            }).map(|(path, (mut f, extras))| {
+                if let Some(a) = extras.achievements {
                     achievements.push((MarkerPath::with_path(MarkerIndex::from(path.path)), a.clone()));
                     f.push(a as Arc<_>);
                 }
-                if let Some(s) = s {
+                #[cfg(feature = "paths-schedule")]
+                if let Some(s) = extras.schedule {
                     schedules.push((MarkerPath::with_path(MarkerIndex::from(path.path)), s.clone()));
                     f.push(s as Arc<_>);
                 }
                 (path, f)
             }).collect::<Vec<_>>();
-        schedules.shrink_to_fit();
         achievements.shrink_to_fit();
 
         Self {
             pois,
             trails,
-            schedules,
+            #[cfg(feature = "paths-schedule")]
+            schedules: {
+                schedules.shrink_to_fit();
+                schedules
+            },
             achievements,
             inversions,
         }
@@ -667,22 +715,43 @@ impl MapFilters {
         })
     }
 
+    #[cfg(feature = "paths-schedule")]
     pub fn next_schedule_event(&mut self, now: &DateTime<ScheduleTimezone>) -> Option<DateTime<ScheduleTimezone>> {
         self.schedules.iter()
             .filter_map(|(_, schedule)| schedule.next_schedule_change(now))
             .min()
     }
 }
-
+#[derive(Clone, Default)]
+pub struct FilterStateExtras {
+    pub achievements: Option<Arc<AchievementConfig>>,
+    pub group: Option<GroupConfig>,
+    #[cfg(feature = "paths-schedule")]
+    pub schedule: Option<Arc<ScheduleConfig>>,
+}
+impl FilterStateExtras {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self {
+                achievements: None,
+                group: None,
+                #[cfg(feature = "paths-schedule")]
+                schedule: None,
+            } => true,
+            _ => false,
+        }
+    }
+}
 #[derive(Clone, Default)]
 pub struct FilterStateFilters {
     pub filters: Vec<FilterStateFilter>,
 }
 
 impl FilterStateFilters {
-    pub fn from_attributes(attrs: &MarkerAttributes) -> (Self, (Option<Arc<AchievementConfig>>, Option<Arc<ScheduleConfig>>, Option<GroupConfig>)) {
+    pub fn from_attributes(attrs: &MarkerAttributes) -> (Self, FilterStateExtras) {
         let achievements = AchievementConfig::from_attributes(attrs)
             .map(Arc::new);
+        #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten()
             .map(Arc::new);
         let festivals = attrs.festivals.as_ref().map(|f| f.iter().copied().collect::<Festivals>())
@@ -720,7 +789,13 @@ impl FilterStateFilters {
             _ => None,
         };
 
-        (Self { filters }, (achievements, schedule, group))
+        let extras = FilterStateExtras {
+            achievements,
+            group,
+            #[cfg(feature = "paths-schedule")]
+            schedule,
+        };
+        (Self { filters }, extras)
     }
 }
 
@@ -757,18 +832,4 @@ impl ops::DerefMut for FilterStateFilters {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.filters
     }
-}
-
-pub enum BehaviourReset {
-    LeaveRange,
-    MapChange {
-        id: MapIndex,
-    },
-    MapInstance {
-        id: MapIndex,
-        shard: u32,
-    },
-    DailyCharacter {
-        character: String,
-    },
 }

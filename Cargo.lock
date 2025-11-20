@@ -3464,6 +3464,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3748,6 +3754,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
+ "sha1_smol",
  "strum 0.27.1",
  "strum_macros 0.27.1",
  "sync-unsafe-cell",
