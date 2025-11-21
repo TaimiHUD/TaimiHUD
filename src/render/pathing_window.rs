@@ -865,8 +865,9 @@ impl PathingWindowState {
         let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
         let Some((_, cat)) = active.pack.categories.all_categories.get_index(path.path as usize) else { return None };
 
-        let copy_value = cat.marker_attributes.copy_value.clone()?;
-        let copy_message = match cat.marker_attributes.copy_message.as_ref() {
+        let interaction = cat.marker_attributes.interaction.as_ref()?;
+        let copy_value = interaction.copy_value.clone()?;
+        let copy_message = match interaction.copy_message.as_ref() {
             Some(m) if m.is_empty() => None,
             m => m,
         };

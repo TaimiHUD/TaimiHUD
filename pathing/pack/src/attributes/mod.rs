@@ -4,7 +4,7 @@ use {
         pack::taco_xml_to_guid,
     },
     anyhow::{anyhow, Context},
-    std::{fmt, str::FromStr, sync::Arc},
+    std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
     uuid::Uuid,
     xml::name::Name,
 };
@@ -56,7 +56,6 @@ pub struct MarkerAttributes {
     pub height_offset: Option<f32>,
     pub icon_file: Option<AttrString>,
     pub icon_size: Option<f32>,
-    pub invert_behavior: Option<bool>,
     pub map_display_size: Option<f32>,
     pub scale_on_map_with_zoom: Option<bool>,
     pub min_size: Option<f32>,
@@ -87,31 +86,15 @@ pub struct MarkerAttributes {
 
     /// Taco Behaviors.
     pub taco_behavior: Option<TacoBehavior>,
+    pub invert_behavior: Option<bool>,
     pub achievement_id: Option<i32>,
     pub achievement_bit: Option<i32>,
     pub reset_length: Option<f32>,
     pub auto_trigger: Option<bool>,
 
-    /// Modifiers.
-    pub info: Option<AttrString>,
-    pub info_range: Option<f32>,
-    pub bounce_behavior: Option<BounceBehavior>,
-    pub bounce_delay: Option<f32>,
-    pub bounce_height: Option<f32>,
-    pub bounce_duration: Option<f32>,
-    pub copy_value: Option<AttrString>,
-    pub copy_message: Option<AttrString>,
-    pub toggle_category: Option<IdNameBox>,
-    pub reset_guids: Option<AttrList<Uuid>>,
-    pub show_category: Option<IdNameBox>,
-    pub hide_category: Option<IdNameBox>,
+    pub interaction: Option<Box<InteractionAttributes>>,
 
-    /// Scripting.
-    pub script_tick: Option<AttrString>,
-    pub script_focus: Option<AttrString>,
-    pub script_trigger: Option<AttrString>,
-    pub script_filter: Option<AttrString>,
-    pub script_once: Option<AttrString>,
+    pub script: Option<Box<ScriptAttributes>>,
 }
 
 impl MarkerAttributes {
@@ -248,57 +231,12 @@ impl MarkerAttributes {
             self.auto_trigger = base.auto_trigger;
         }
         // === Modifiers === //
-        if self.info.is_none() {
-            self.info = base.info.clone();
-        }
-        if self.info_range.is_none() {
-            self.info_range = base.info_range;
-        }
-        if self.bounce_behavior.is_none() {
-            self.bounce_behavior = base.bounce_behavior;
-        }
-        if self.bounce_delay.is_none() {
-            self.bounce_delay = base.bounce_delay;
-        }
-        if self.bounce_height.is_none() {
-            self.bounce_height = base.bounce_height;
-        }
-        if self.bounce_duration.is_none() {
-            self.bounce_duration = base.bounce_duration;
-        }
-        if !child && self.copy_value.is_none() {
-            self.copy_value = base.copy_value.clone();
-        }
-        if !child && self.copy_message.is_none() {
-            self.copy_message = base.copy_message.clone();
-        }
-        if self.toggle_category.is_none() {
-            self.toggle_category = base.toggle_category.clone();
-        }
-        if self.reset_guids.is_none() {
-            self.reset_guids = base.reset_guids.clone();
-        }
-        if self.show_category.is_none() {
-            self.show_category = base.show_category.clone();
-        }
-        if self.hide_category.is_none() {
-            self.hide_category = base.hide_category.clone();
+        if let Some(interaction) = &base.interaction {
+            self.interaction_mut().merge(&interaction, child);
         }
         // === Scripting === //
-        if self.script_tick.is_none() {
-            self.script_tick = base.script_tick.clone();
-        }
-        if self.script_focus.is_none() {
-            self.script_focus = base.script_focus.clone();
-        }
-        if self.script_trigger.is_none() {
-            self.script_trigger = base.script_trigger.clone();
-        }
-        if self.script_filter.is_none() {
-            self.script_filter = base.script_filter.clone();
-        }
-        if self.script_once.is_none() {
-            self.script_once = base.script_once.clone();
+        if let Some(script) = &base.script {
+            self.script_mut().merge(script);
         }
     }
 
@@ -408,36 +346,103 @@ impl MarkerAttributes {
             self.auto_trigger = Some(parse_bool(&value)?);
         // === Modifiers === //
         } else if attr_name.eq_ignore_ascii_case("info") {
-            self.info = Some(string_into(value));
+            self.interaction_mut().info = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("inforange")
             || attr_name.eq_ignore_ascii_case("triggerrange")
         {
-            self.info_range = Some(value.parse()?);
+            self.interaction_mut().info_range = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce") {
-            self.bounce_behavior = Some(value.parse()?);
+            self.interaction_mut().bounce_behavior = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-delay") {
-            self.bounce_delay = Some(value.parse()?);
+            self.interaction_mut().bounce_delay = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-height") {
-            self.bounce_height = Some(value.parse()?);
+            self.interaction_mut().bounce_height = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-duration") {
-            self.bounce_duration = Some(value.parse()?);
+            self.interaction_mut().bounce_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("copy") {
-            self.copy_value = Some(string_into(value));
+            self.interaction_mut().copy_value = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("copy-message") {
-            self.copy_message = Some(string_into(value));
+            self.interaction_mut().copy_message = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("toggle")
             || attr_name.eq_ignore_ascii_case("togglecategory")
         {
-            self.toggle_category = Some(value.into());
+            self.interaction_mut().toggle_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
             let guids = value.split(',').map(|g| taco_xml_to_guid(g.trim_ascii()));
-            self.reset_guids = Some(list_into(guids.collect::<Box<[_]>>()));
+            self.interaction_mut().reset_guids = Some(list_into(guids.collect::<Box<[_]>>()));
         } else if attr_name.eq_ignore_ascii_case("show") {
-            self.show_category = Some(value.into());
+            self.interaction_mut().show_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("hide") {
-            self.hide_category = Some(value.into());
+            self.interaction_mut().hide_category = Some(value.into());
         // === Scripting === //
-        } else if attr_name.eq_ignore_ascii_case("script-tick") {
+        } else if ScriptAttributes::interested_in_key(attr_name) {
+            match self.script_mut().try_add(attr_name, value) {
+                Ok(()) => (),
+                Err(..) => return Ok(false),
+            }
+        } else {
+            return Ok(false)
+        }
+        Ok(true)
+    }
+
+    pub fn script(&self) -> Cow<'_, ScriptAttributes> {
+        match &self.script {
+            Some(s) => Cow::Borrowed(s),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn script_mut(&mut self) -> &mut ScriptAttributes {
+        self.script.get_or_insert_default()
+    }
+    pub fn interaction(&self) -> Cow<'_, InteractionAttributes> {
+        match &self.interaction {
+            Some(i) => Cow::Borrowed(i),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn interaction_mut(&mut self) -> &mut InteractionAttributes {
+        self.interaction.get_or_insert_default()
+    }
+}
+
+/// Scripting.
+#[derive(Debug, Clone, Default)]
+pub struct ScriptAttributes {
+    pub script_tick: Option<AttrString>,
+    pub script_focus: Option<AttrString>,
+    pub script_trigger: Option<AttrString>,
+    pub script_filter: Option<AttrString>,
+    pub script_once: Option<AttrString>,
+}
+impl ScriptAttributes {
+    pub fn merge(&mut self, base: &ScriptAttributes) {
+        if self.script_tick.is_none() {
+            self.script_tick = base.script_tick.clone();
+        }
+        if self.script_focus.is_none() {
+            self.script_focus = base.script_focus.clone();
+        }
+        if self.script_trigger.is_none() {
+            self.script_trigger = base.script_trigger.clone();
+        }
+        if self.script_filter.is_none() {
+            self.script_filter = base.script_filter.clone();
+        }
+        if self.script_once.is_none() {
+            self.script_once = base.script_once.clone();
+        }
+    }
+
+    const PREFIX: &'static str = "script-";
+    pub fn interested_in_key(attr_name: &str) -> bool {
+        attr_name.get(..Self::PREFIX.len())
+            .map(|a| a.eq_ignore_ascii_case(Self::PREFIX))
+            .unwrap_or(false)
+    }
+
+    pub fn try_add(&mut self, attr_name: &str, value: String) -> Result<(), String> {
+        if attr_name.eq_ignore_ascii_case("script-tick") {
             self.script_tick = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("script-focus") {
             self.script_focus = Some(string_into(value));
@@ -448,9 +453,67 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("script-once") {
             self.script_once = Some(string_into(value));
         } else {
-            return Ok(false)
+            return Err(value)
         }
-        Ok(true)
+        Ok(())
+    }
+}
+
+/// Modifiers.
+#[derive(Debug, Clone, Default)]
+pub struct InteractionAttributes {
+    pub info: Option<AttrString>,
+    pub info_range: Option<f32>,
+    pub bounce_behavior: Option<BounceBehavior>,
+    pub bounce_delay: Option<f32>,
+    pub bounce_height: Option<f32>,
+    pub bounce_duration: Option<f32>,
+    pub copy_value: Option<AttrString>,
+    pub copy_message: Option<AttrString>,
+    pub toggle_category: Option<IdNameBox>,
+    pub reset_guids: Option<AttrList<Uuid>>,
+    pub show_category: Option<IdNameBox>,
+    pub hide_category: Option<IdNameBox>,
+}
+
+impl InteractionAttributes {
+    pub fn merge(&mut self, base: &InteractionAttributes, child: bool) {
+        if self.info.is_none() {
+            self.info = base.info.clone();
+        }
+        if self.info_range.is_none() {
+            self.info_range = base.info_range;
+        }
+        if self.bounce_behavior.is_none() {
+            self.bounce_behavior = base.bounce_behavior;
+        }
+        if self.bounce_delay.is_none() {
+            self.bounce_delay = base.bounce_delay;
+        }
+        if self.bounce_height.is_none() {
+            self.bounce_height = base.bounce_height;
+        }
+        if self.bounce_duration.is_none() {
+            self.bounce_duration = base.bounce_duration;
+        }
+        if !child && self.copy_value.is_none() {
+            self.copy_value = base.copy_value.clone();
+        }
+        if !child && self.copy_message.is_none() {
+            self.copy_message = base.copy_message.clone();
+        }
+        if self.toggle_category.is_none() {
+            self.toggle_category = base.toggle_category.clone();
+        }
+        if self.reset_guids.is_none() {
+            self.reset_guids = base.reset_guids.clone();
+        }
+        if self.show_category.is_none() {
+            self.show_category = base.show_category.clone();
+        }
+        if self.hide_category.is_none() {
+            self.hide_category = base.hide_category.clone();
+        }
     }
 }
 

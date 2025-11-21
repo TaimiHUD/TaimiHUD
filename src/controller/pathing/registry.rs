@@ -860,7 +860,7 @@ impl PackCategoryInfo {
                 cat.is_separator().then_some(i),
                 cat.is_hidden().then_some(i),
                 (!cat.default_toggle()).then_some(i),
-                cat.marker_attributes.copy_value.is_some().then_some(i),
+                cat.marker_attributes.interaction.as_ref().map(|i| i.copy_value.is_some()).unwrap_or(false).then_some(i),
             )).collect();
 
         Self {

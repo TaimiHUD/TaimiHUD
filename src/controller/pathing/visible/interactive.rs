@@ -1,6 +1,6 @@
 use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, PackMapPath, PoiIndex, PoiPath}, visible::LoadedPoi, MapPackInfo}, exports::runtime::Locator, settings::pathing::TriggerKind, space::pack::PackSpace};
 use glamour::Point3;
-use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior}, MarkerAttributes, Pack};
+use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior, ScriptAttributes}, MarkerAttributes, Pack};
 
 #[derive(Debug, Clone, Default)]
 pub struct InteractivePoi {
@@ -42,10 +42,11 @@ impl InteractivePoi {
             return Self::INVALID
         };
         let attrs = &poi.attributes;
+        let interaction = attrs.interaction();
 
         let trigger = TriggerConfig {
             auto: attrs.auto_trigger.unwrap_or_default(),
-            radius: attrs.info_range.map(keys::TriggerRange::from).unwrap_or_default().into(),
+            radius: interaction.info_range.map(keys::TriggerRange::from).unwrap_or_default().into(),
         };
         let behaviour = attrs.taco_behavior.as_ref()
             .and_then(|b| match b {
@@ -56,44 +57,45 @@ impl InteractivePoi {
                 invert: attrs.invert_behavior.unwrap_or_default(),
                 reset_delay: attrs.reset_length.map(Into::into).unwrap_or_default(),
             });
-        let info = attrs.info.as_ref().map(|info| InfoConfig {
+        let info = interaction.info.as_ref().map(|info| InfoConfig {
             message: info.clone().into(),
         });
-        let copy = attrs.copy_value.as_ref().map(|value| CopyConfig {
+        let copy = interaction.copy_value.as_ref().map(|value| CopyConfig {
             value: value.clone().into(),
-            message: attrs.copy_message.clone().map(Into::into),
+            message: interaction.copy_message.clone().map(Into::into),
         });
-        let show = attrs.show_category.as_ref().and_then(|cat|
+        let show = interaction.show_category.as_ref().and_then(|cat|
             pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Show,
         });
-        let hide = attrs.hide_category.as_ref().and_then(|cat|
+        let hide = interaction.hide_category.as_ref().and_then(|cat|
             pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Hide,
         });
-        let toggle = attrs.toggle_category.as_ref().and_then(|cat|
+        let toggle = interaction.toggle_category.as_ref().and_then(|cat|
             pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Toggle,
         });
-        let reset = attrs.reset_guids.as_ref().map(|guids| ResetConfig {
+        let reset = interaction.reset_guids.as_ref().map(|guids| ResetConfig {
             guid: guids.iter().copied().collect(),
         });
-        let bounce = attrs.bounce_behavior.as_ref().map(|behaviour| BounceConfig {
+        let bounce = interaction.bounce_behavior.as_ref().map(|behaviour| BounceConfig {
             behaviour: behaviour.clone().into(),
-            delay: attrs.bounce_delay.map(Into::into).unwrap_or_default(),
-            duration: attrs.bounce_duration.map(Into::into).unwrap_or_default(),
-            height: attrs.bounce_height.map(Into::into).unwrap_or_default(),
+            delay: interaction.bounce_delay.map(Into::into).unwrap_or_default(),
+            duration: interaction.bounce_duration.map(Into::into).unwrap_or_default(),
+            height: interaction.bounce_height.map(Into::into).unwrap_or_default(),
         });
-        let script = match ScriptConfig::from_marker_attributes(attrs) {
-            script if script.is_empty() =>
+        let script = match attrs.script.as_ref().map(|a| ScriptConfig::from_script_attributes(a)) {
+            None => None,
+            Some(script) if script.is_empty() =>
                 None,
-            script => Some(script),
+            Some(script) => Some(script),
         };
         Self {
             index,
@@ -217,7 +219,7 @@ pub struct ScriptConfig {
     pub once: Option<keys::Script>,
 }
 impl ScriptConfig {
-    pub fn from_marker_attributes(attrs: &MarkerAttributes) -> Self {
+    pub fn from_script_attributes(attrs: &ScriptAttributes) -> Self {
         Self {
             tick: attrs.script_tick.clone().map(Into::into),
             focus: attrs.script_focus.clone().map(Into::into),
