@@ -64,19 +64,19 @@ impl InteractivePoi {
             message: attrs.copy_message.clone().map(Into::into),
         });
         let show = attrs.show_category.as_ref().and_then(|cat|
-            pack.categories.all_categories.get_index_of(cat)
+            pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Show,
         });
-        let hide = attrs.show_category.as_ref().and_then(|cat|
-            pack.categories.all_categories.get_index_of(cat)
+        let hide = attrs.hide_category.as_ref().and_then(|cat|
+            pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Hide,
         });
         let toggle = attrs.toggle_category.as_ref().and_then(|cat|
-            pack.categories.all_categories.get_index_of(cat)
+            pack.categories.all_categories.get_index_of(cat.as_id())
         ).map(|cat| ShowHideConfig {
             category_index: cat as CategoryIndex,
             action: ShowHideAction::Toggle,

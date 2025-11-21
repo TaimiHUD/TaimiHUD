@@ -3,13 +3,16 @@ use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
 use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes};
-use super::{registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
+use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath}, state::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
     croner::errors::CronError,
     std::time::Duration,
 };
+pub use self::hidden::{MarkerState, HideContext, AutoReset};
+
+pub mod hidden;
 
 pub const FILTER_HIDDEN: Option<bool> = Some(false);
 pub const FILTER_ALLOWED: Option<bool> = None;
@@ -378,7 +381,7 @@ impl MarkerFilter for attr::Mount {
 impl MarkerFilter for keys::Mounts {
     type State = <attr::Mount as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.iter().all(|mount| mount.is_visible(state) != FILTER_HIDDEN) {
+        match self.0.iter_mounts().all(|mount| mount.is_visible(state) != FILTER_HIDDEN) {
             true => FILTER_ALLOWED,
             false => FILTER_HIDDEN,
         }
@@ -396,7 +399,7 @@ impl MarkerFilter for attr::Profession {
 impl MarkerFilter for keys::Professions {
     type State = <attr::Profession as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.iter().all(|prof| prof.is_visible(state) != FILTER_HIDDEN) {
+        match self.0.iter_professions().all(|prof| prof.is_visible(state) != FILTER_HIDDEN) {
             true => FILTER_ALLOWED,
             false => FILTER_HIDDEN,
         }
@@ -414,7 +417,7 @@ impl MarkerFilter for attr::Race {
 impl MarkerFilter for keys::Races {
     type State = <attr::Race as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.iter().all(|race| race.is_visible(state) != FILTER_HIDDEN) {
+        match self.0.iter_races().all(|race| race.is_visible(state) != FILTER_HIDDEN) {
             true => FILTER_ALLOWED,
             false => FILTER_HIDDEN,
         }
@@ -739,17 +742,17 @@ impl FilterStateFilters {
         #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten()
             .map(Arc::new);
-        let festivals = attrs.festivals.as_ref().map(|f| f.iter().copied().collect::<attr::Festivals>())
+        let festivals = attrs.festivals.clone()
             .and_then(|f| match f.is_empty() {
                 false => Some(f),
                 true => None,
             })
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let mounts = attrs.mounts.clone().map(keys::List::from_iter).map(keys::Mounts::from)
+        let mounts = attrs.mounts.clone().map(keys::Mounts)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let races = attrs.races.clone().map(keys::List::from_iter).map(keys::Races::from)
+        let races = attrs.races.clone().map(keys::Races)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let professions = attrs.professions.clone().map(keys::List::from_iter).map(keys::Professions::from)
+        let professions = attrs.professions.clone().map(keys::Professions)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
         let specializations = attrs.specializations.as_ref()
             .map(|s| s.iter().map(|&s| keys::Specialization(s as u32)).collect())

@@ -1,15 +1,41 @@
 use {
-    crate::pack::taco_xml_to_guid,
+    crate::{
+        category::id::IdNameBox,
+        pack::taco_xml_to_guid,
+    },
     anyhow::{anyhow, Context},
-    std::{fmt, str::FromStr},
+    std::{fmt, str::FromStr, sync::Arc},
     uuid::Uuid,
     xml::name::Name,
 };
-pub use self::festival::{Festival, Festivals};
+pub use self::{
+    festival::{Festival, Festivals},
+    profession::{Profession, Professions},
+    race::{Race, Races},
+    mount::{Mount, Mounts},
+};
 
 pub mod keys;
 pub mod cell;
 pub mod festival;
+pub mod profession;
+pub mod race;
+pub mod mount;
+
+pub type AttrString = Arc<Box<str>>;
+fn string_into(s: impl Into<Box<str>>) -> AttrString {
+    Arc::new(s.into())
+}
+#[cfg(todo)]
+pub type AttrString = Arc<str>;
+#[cfg(todo)]
+fn string_into(s: impl Into<Arc<str>>) -> AttrString {
+    s.into()
+}
+pub type AttrList<T> = Arc<Box<[T]>>;
+fn list_into<T>(l: impl Into<Box<[T]>>) -> AttrList<T> {
+    Arc::new(l.into())
+}
 
 #[derive(Debug, Clone, Default)]
 /// Attributes for markers. Inherits up the category stack.
@@ -28,7 +54,7 @@ pub struct MarkerAttributes {
 
     // POI-specific.
     pub height_offset: Option<f32>,
-    pub icon_file: Option<String>,
+    pub icon_file: Option<AttrString>,
     pub icon_size: Option<f32>,
     pub invert_behavior: Option<bool>,
     pub map_display_size: Option<f32>,
@@ -37,27 +63,27 @@ pub struct MarkerAttributes {
     pub max_size: Option<f32>,
     pub occlude: Option<bool>,
     pub rotate: Option<glam::Vec3>,
-    pub billboard_text: Option<String>,
+    pub billboard_text: Option<AttrString>,
     pub billboard_text_color: Option<glam::Vec4>,
-    pub tip_name: Option<String>,
-    pub tip_description: Option<String>,
+    pub tip_name: Option<AttrString>,
+    pub tip_description: Option<AttrString>,
 
     // Trail-specific.
     pub anim_speed: Option<f32>,
-    pub texture: Option<String>,
+    pub texture: Option<AttrString>,
     pub trail_scale: Option<f32>,
     pub is_wall: Option<bool>,
 
     // Filters.
-    pub festivals: Option<Vec<Festival>>,
-    pub mounts: Option<Vec<Mount>>,
-    pub professions: Option<Vec<Profession>>,
-    pub races: Option<Vec<Race>>,
-    pub specializations: Option<Vec<i32>>,
-    pub map_types: Option<Vec<MapType>>,
-    pub schedule: Option<String>,
+    pub festivals: Option<Festivals>,
+    pub mounts: Option<Mounts>,
+    pub professions: Option<Professions>,
+    pub races: Option<Races>,
+    pub specializations: Option<AttrList<i32>>,
+    pub map_types: Option<AttrList<MapType>>,
+    pub schedule: Option<AttrString>,
     pub schedule_duration: Option<f32>,
-    pub raids: Option<Vec<String>>,
+    pub raids: Option<AttrList<String>>,
 
     /// Taco Behaviors.
     pub taco_behavior: Option<TacoBehavior>,
@@ -67,25 +93,25 @@ pub struct MarkerAttributes {
     pub auto_trigger: Option<bool>,
 
     /// Modifiers.
-    pub info: Option<String>,
+    pub info: Option<AttrString>,
     pub info_range: Option<f32>,
     pub bounce_behavior: Option<BounceBehavior>,
     pub bounce_delay: Option<f32>,
     pub bounce_height: Option<f32>,
     pub bounce_duration: Option<f32>,
-    pub copy_value: Option<String>,
-    pub copy_message: Option<String>,
-    pub toggle_category: Option<String>,
-    pub reset_guids: Option<Vec<Uuid>>,
-    pub show_category: Option<String>,
-    pub hide_category: Option<String>,
+    pub copy_value: Option<AttrString>,
+    pub copy_message: Option<AttrString>,
+    pub toggle_category: Option<IdNameBox>,
+    pub reset_guids: Option<AttrList<Uuid>>,
+    pub show_category: Option<IdNameBox>,
+    pub hide_category: Option<IdNameBox>,
 
     /// Scripting.
-    pub script_tick: Option<String>,
-    pub script_focus: Option<String>,
-    pub script_trigger: Option<String>,
-    pub script_filter: Option<String>,
-    pub script_once: Option<String>,
+    pub script_tick: Option<AttrString>,
+    pub script_focus: Option<AttrString>,
+    pub script_trigger: Option<AttrString>,
+    pub script_filter: Option<AttrString>,
+    pub script_once: Option<AttrString>,
 }
 
 impl MarkerAttributes {
@@ -305,7 +331,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
             self.height_offset = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            self.icon_file = Some(value);
+            self.icon_file = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
             self.icon_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
@@ -333,42 +359,42 @@ impl MarkerAttributes {
             self.rotate.get_or_insert_default().z = z;
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title") {
             if self.billboard_text.is_none() || !value.is_empty() {
-                self.billboard_text = Some(value);
+                self.billboard_text = Some(string_into(value));
             }
         } else if attr_name.eq_ignore_ascii_case("title-color") {
             self.billboard_text_color = opt_str(&value).map(parse_color).transpose()?;
         } else if attr_name.eq_ignore_ascii_case("tip-name") {
-            self.tip_name = Some(value);
+            self.tip_name = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("tip-description") {
-            self.tip_description = Some(value);
+            self.tip_description = Some(string_into(value));
         // === Trail-specific === //
         } else if attr_name.eq_ignore_ascii_case("animspeed") {
             self.anim_speed = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("texture") {
-            self.texture = Some(value);
+            self.texture = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("trailscale") {
             self.trail_scale = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iswall") {
             self.is_wall = Some(parse_bool(&value)?);
         // === Filters === //
         } else if attr_name.eq_ignore_ascii_case("festival") {
-            self.festivals = Some(parse_list(&value)?);
+            self.festivals = Some(parse_list::<Festival>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("mount") {
-            self.mounts = Some(parse_list(&value)?);
+            self.mounts = Some(parse_list::<Mount>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("profession") {
-            self.professions = Some(parse_list(&value)?);
+            self.professions = Some(parse_list::<Profession>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("race") {
-            self.races = Some(parse_list(&value)?);
+            self.races = Some(parse_list::<Race>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("specialization") {
-            self.specializations = Some(parse_list(&value)?);
+            self.specializations = Some(list_into(parse_list(&value)?));
         } else if attr_name.eq_ignore_ascii_case("maptype") {
-            self.map_types = Some(parse_list(&value)?);
+            self.map_types = Some(list_into(parse_list(&value)?));
         } else if attr_name.eq_ignore_ascii_case("schedule") {
-            self.schedule = Some(value);
+            self.schedule = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("schedule-duration") {
             self.schedule_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("raid") {
-            self.raids = Some(parse_list(&value)?);
+            self.raids = Some(list_into(parse_list(&value)?));
         // === Taco Behaviors === //
         } else if attr_name.eq_ignore_ascii_case("behavior") {
             self.taco_behavior = Some(value.parse::<i32>()?.try_into()?);
@@ -382,7 +408,7 @@ impl MarkerAttributes {
             self.auto_trigger = Some(parse_bool(&value)?);
         // === Modifiers === //
         } else if attr_name.eq_ignore_ascii_case("info") {
-            self.info = Some(value);
+            self.info = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("inforange")
             || attr_name.eq_ignore_ascii_case("triggerrange")
         {
@@ -396,31 +422,31 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("bounce-duration") {
             self.bounce_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("copy") {
-            self.copy_value = Some(value);
+            self.copy_value = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("copy-message") {
-            self.copy_message = Some(value);
+            self.copy_message = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("toggle")
             || attr_name.eq_ignore_ascii_case("togglecategory")
         {
-            self.toggle_category = Some(value);
+            self.toggle_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
             let guids = value.split(',').map(|g| taco_xml_to_guid(g.trim_ascii()));
-            self.reset_guids = Some(guids.collect());
+            self.reset_guids = Some(list_into(guids.collect::<Box<[_]>>()));
         } else if attr_name.eq_ignore_ascii_case("show") {
-            self.show_category = Some(value);
+            self.show_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("hide") {
-            self.hide_category = Some(value);
+            self.hide_category = Some(value.into());
         // === Scripting === //
         } else if attr_name.eq_ignore_ascii_case("script-tick") {
-            self.script_tick = Some(value);
+            self.script_tick = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("script-focus") {
-            self.script_focus = Some(value);
+            self.script_focus = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("script-trigger") {
-            self.script_trigger = Some(value);
+            self.script_trigger = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("script-filter") {
-            self.script_filter = Some(value);
+            self.script_filter = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("script-once") {
-            self.script_once = Some(value);
+            self.script_once = Some(string_into(value));
         } else {
             return Ok(false)
         }
@@ -528,196 +554,6 @@ impl FromStr for CullDirection {
             Ok(CullDirection::CounterClockwise)
         } else {
             Err(anyhow!("unexpected cull direction `{s}`"))
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Mount {
-    None = 0,
-    Jackal = 1,
-    Griffon = 2,
-    Springer = 3,
-    Skimmer = 4,
-    Raptor = 5,
-    RollerBeetle = 6,
-    Warclaw = 7,
-    Skyscale = 8,
-    Skiff = 9,
-    SiegeTurtle = 10,
-}
-
-impl TryFrom<i32> for Mount {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        use Mount::*;
-        Ok(match value {
-            0 => None,
-            1 => Jackal,
-            2 => Griffon,
-            3 => Springer,
-            4 => Skimmer,
-            5 => Raptor,
-            6 => RollerBeetle,
-            7 => Warclaw,
-            8 => Skyscale,
-            9 => Skiff,
-            10 => SiegeTurtle,
-            _ => {
-                anyhow::bail!("unknown mount `{value}`")
-            },
-        })
-    }
-}
-
-impl FromStr for Mount {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Mount::*;
-        if let Ok(i) = s.parse::<i32>() {
-            i.try_into()
-        } else if s.eq_ignore_ascii_case("none") {
-            Ok(None)
-        } else if s.eq_ignore_ascii_case("jackal") {
-            Ok(Jackal)
-        } else if s.eq_ignore_ascii_case("griffon") {
-            Ok(Griffon)
-        } else if s.eq_ignore_ascii_case("springer") {
-            Ok(Springer)
-        } else if s.eq_ignore_ascii_case("skimmer") {
-            Ok(Skimmer)
-        } else if s.eq_ignore_ascii_case("raptor") {
-            Ok(Raptor)
-        } else if s.eq_ignore_ascii_case("rollerbeetle") {
-            Ok(RollerBeetle)
-        } else if s.eq_ignore_ascii_case("warclaw") {
-            Ok(Warclaw)
-        } else if s.eq_ignore_ascii_case("skyscale") {
-            Ok(Skyscale)
-        } else if s.eq_ignore_ascii_case("skiff") {
-            Ok(Skiff)
-        } else if s.eq_ignore_ascii_case("siegeturtle") {
-            Ok(SiegeTurtle)
-        } else {
-            Err(anyhow!("unknown mount `{s}`"))
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Profession {
-    Guardian = 1,
-    Warrior = 2,
-    Engineer = 3,
-    Ranger = 4,
-    Thief = 5,
-    Elementalist = 6,
-    Mesmer = 7,
-    Necromancer = 8,
-    Revenant = 9,
-}
-
-impl TryFrom<i32> for Profession {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        use Profession::*;
-        Ok(match value {
-            1 => Guardian,
-            2 => Warrior,
-            3 => Engineer,
-            4 => Ranger,
-            5 => Thief,
-            6 => Elementalist,
-            7 => Mesmer,
-            8 => Necromancer,
-            9 => Revenant,
-            _ => {
-                anyhow::bail!("unknown profession `{value}`")
-            },
-        })
-    }
-}
-
-impl FromStr for Profession {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Profession::*;
-        if let Ok(i) = s.parse::<i32>() {
-            i.try_into()
-        } else if s.eq_ignore_ascii_case("guardian") {
-            Ok(Guardian)
-        } else if s.eq_ignore_ascii_case("warrior") {
-            Ok(Warrior)
-        } else if s.eq_ignore_ascii_case("Engineer") {
-            Ok(Engineer)
-        } else if s.eq_ignore_ascii_case("ranger") {
-            Ok(Ranger)
-        } else if s.eq_ignore_ascii_case("thief") {
-            Ok(Thief)
-        } else if s.eq_ignore_ascii_case("elementalist") {
-            Ok(Elementalist)
-        } else if s.eq_ignore_ascii_case("mesmer") {
-            Ok(Mesmer)
-        } else if s.eq_ignore_ascii_case("necromancer") {
-            Ok(Necromancer)
-        } else if s.eq_ignore_ascii_case("revenant") {
-            Ok(Revenant)
-        } else {
-            Err(anyhow!("unknown profession `{s}`"))
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Race {
-    Asura = 0,
-    Charr = 1,
-    Human = 2,
-    Norn = 3,
-    Sylvari = 4,
-}
-
-impl TryFrom<i32> for Race {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        use Race::*;
-        Ok(match value {
-            0 => Asura,
-            1 => Charr,
-            2 => Human,
-            3 => Norn,
-            4 => Sylvari,
-            _ => {
-                anyhow::bail!("unknown race `{value}`");
-            },
-        })
-    }
-}
-
-impl FromStr for Race {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Race::*;
-        if let Ok(i) = s.parse::<i32>() {
-            i.try_into()
-        } else if s.eq_ignore_ascii_case("asura") {
-            Ok(Asura)
-        } else if s.eq_ignore_ascii_case("charr") {
-            Ok(Charr)
-        } else if s.eq_ignore_ascii_case("human") {
-            Ok(Human)
-        } else if s.eq_ignore_ascii_case("norn") {
-            Ok(Norn)
-        } else if s.eq_ignore_ascii_case("sylvari") {
-            Ok(Sylvari)
-        } else {
-            Err(anyhow!("unknown race `{s}`"))
         }
     }
 }

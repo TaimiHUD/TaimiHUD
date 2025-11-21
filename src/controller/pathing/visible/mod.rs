@@ -42,7 +42,7 @@ impl LoadedCategory {
         };
 
         let mut visibility = VisibilityFlags::DEFAULTS;
-        visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle);
+        visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
         visibility.set_defaults_from_attributes(&category.marker_attributes);
 
         Self {
@@ -74,9 +74,9 @@ impl LoadedPoi {
         let mut visibility = VisibilityFlags::DEFAULTS;
         let category = match () {
             #[cfg(todo)]
-            _ => pack.categories.all_categories.get_index_of(&poi.category).map(|c| c as CategoryIndex),
-            _ => pack.categories.all_categories.get_full(&poi.category).map(|(index, _, category)| {
-                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle);
+            _ => pack.categories.all_categories.get_index_of(poi.category.as_id()).map(|c| c as CategoryIndex),
+            _ => pack.categories.all_categories.get_full(poi.category.as_id()).map(|(index, _, category)| {
+                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
                 #[cfg(todo = "unnecessary")]
                 visibility.set_defaults_from_attributes(&category.marker_attributes);
                 index as CategoryIndex
@@ -155,9 +155,9 @@ impl LoadedTrail {
         let mut visibility = VisibilityFlags::DEFAULTS;
         let category = match () {
             #[cfg(todo)]
-            _ => pack.categories.all_categories.get_index_of(&trail.category).map(|c| c as CategoryIndex),
-            _ => pack.categories.all_categories.get_full(&trail.category).map(|(index, _, category)| {
-                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle);
+            _ => pack.categories.all_categories.get_index_of(trail.category.as_id()).map(|c| c as CategoryIndex),
+            _ => pack.categories.all_categories.get_full(trail.category.as_id()).map(|(index, _, category)| {
+                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
                 #[cfg(todo = "unnecessary")]
                 visibility.set_defaults_from_attributes(&category.marker_attributes);
                 index as CategoryIndex
@@ -817,7 +817,7 @@ impl VisibilityFlags {
 
     pub fn from_pack_category(category: &Category) -> Self {
         let mut flags = Self::from_attributes(&category.marker_attributes);
-        if category.default_toggle {
+        if category.default_toggle() {
             flags.insert(Self::TOGGLE);
         }
         flags

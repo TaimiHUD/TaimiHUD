@@ -1,5 +1,5 @@
 use {
-    super::TacoBehavior, crate::attributes::{BounceBehavior, CullDirection}, base64::Engine as _, glam::{Vec3, Vec4}, std::{convert::Infallible, fmt, io, mem, ops, slice, str::FromStr, sync::Arc, time::Duration}, uuid::Uuid
+    super::TacoBehavior, crate::attributes::{AttrString, BounceBehavior, CullDirection}, base64::Engine as _, glam::{Vec3, Vec4}, std::{convert::Infallible, fmt, io, mem, ops, slice, str::FromStr, sync::Arc, time::Duration}, uuid::Uuid,
 };
 
 // TODO: FromStr, Display
@@ -47,9 +47,9 @@ impl<S: AsRef<str>> From<S> for TextureFile {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Script(pub Arc<str>);
-impl From<String> for Script {
-    fn from(s: String) -> Self {
+pub struct Script(pub AttrString);
+impl From<AttrString> for Script {
+    fn from(s: AttrString) -> Self {
         Self(s.into())
     }
 }
@@ -57,7 +57,7 @@ impl FromStr for Script {
     type Err = Infallible;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(Self(value.into()))
+        Ok(Self(super::string_into(value)))
     }
 }
 
@@ -290,14 +290,7 @@ impl AttrKey for Tint {
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Point3(pub Vec3);
 
-// TODO: filters: festival, mount, profession, race, specialization, maptype, schedule, schedule-duration, raid
 pack_key! {
-    #[pack(attr = "mount")]
-    pub struct Mounts(pub List<super::Mount>);
-    #[pack(attr = "profession")]
-    pub struct Professions(pub List<super::Profession>);
-    #[pack(attr = "race")]
-    pub struct Races(pub List<super::Race>);
     #[pack(attr = "specialization")]
     pub struct Specializations(pub List<Specialization>);
     #[pack(attr = "maptype")]
@@ -321,6 +314,53 @@ impl FromStr for Raid {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(Self(value.into()))
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Mounts(pub super::Mounts);
+impl AttrKey for Mounts {
+    type Storage = super::Mounts;
+    const ATTR: &'static str = "mount";
+    const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
+}
+impl FromStr for Mounts {
+    type Err = <List<super::Mount> as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        List::<super::Mount>::from_str(value)
+            .map(|mounts| Self(mounts.into_iter().collect()))
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Professions(pub super::Professions);
+impl AttrKey for Professions {
+    type Storage = super::Professions;
+    const ATTR: &'static str = "profession";
+    const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
+}
+impl FromStr for Professions {
+    type Err = <List<super::Profession> as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        List::<super::Profession>::from_str(value)
+            .map(|mounts| Self(mounts.into_iter().collect()))
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Races(pub super::Races);
+impl AttrKey for Races {
+    type Storage = super::Races;
+    const ATTR: &'static str = "race";
+    const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
+}
+impl FromStr for Races {
+    type Err = <List<super::Race> as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        List::<super::Race>::from_str(value)
+            .map(|mounts| Self(mounts.into_iter().collect()))
     }
 }
 
@@ -379,16 +419,16 @@ pack_key! {
     /// Billboard text
     ///
     /// alias for [Title]?
-    pub struct Text(pub String);
+    pub struct Text(pub AttrString);
     #[pack(attr = "title")]
-    pub struct Title(pub String);
+    pub struct Title(pub AttrString);
     #[pack(attr = "title-color")]
     #[derive(Copy)]
     pub struct TitleColour(pub Colour);
     #[pack(attr = "tip-name")]
-    pub struct TipName(pub String);
+    pub struct TipName(pub AttrString);
     #[pack(attr = "tip-description")]
-    pub struct TipDescription(pub String);
+    pub struct TipDescription(pub AttrString);
 }
 
 impl IconSize {
@@ -557,7 +597,7 @@ pack_key! {
     #[derive(Copy)]
     pub struct AnimSpeed(pub f32);
     #[pack(attr = "traildata")]
-    pub struct TrailDataFile(pub String);
+    pub struct TrailDataFile(pub AttrString);
     #[pack(attr = "texture")]
     pub struct TextureFile(pub File);
     #[pack(attr = "trailscale")]
@@ -580,7 +620,7 @@ pack_key! {
     #[derive(Copy, Default)]
     pub struct IsSeparator(pub Bool);
     #[pack(attr = "displayname")]
-    pub struct DisplayName(pub String);
+    pub struct DisplayName(pub AttrString);
 }
 impl Default for DefaultToggle {
     fn default() -> Self {
@@ -591,14 +631,14 @@ impl Default for DefaultToggle {
 // Modifiers
 pack_key! {
     #[pack(attr = "type")]
-    pub struct CategoryRef(pub String);
+    pub struct CategoryRef(pub AttrString);
     #[pack(attr = "name")]
-    pub struct NameId(pub String);
+    pub struct NameId(pub AttrString);
     #[pack(attr = "mapid")]
     #[derive(Copy)]
     pub struct GameMap(pub u32);
     #[pack(attr = "info")]
-    pub struct Info(pub String);
+    pub struct Info(pub AttrString);
     #[pack(attr = "inforange")]
     #[derive(Copy)]
     /// Similar to [TriggerRange] but treat with higher priority
@@ -610,9 +650,9 @@ pack_key! {
     #[derive(Copy)]
     pub struct AutoTrigger(pub f32);
     #[pack(attr = "copy")]
-    pub struct CopyValue(pub String);
+    pub struct CopyValue(pub AttrString);
     #[pack(attr = "copy-message")]
-    pub struct CopyMessage(pub String);
+    pub struct CopyMessage(pub AttrString);
     #[pack(attr = "category", aliases("togglecategory"))]
     #[derive(Copy)]
     pub struct ToggleCategory(pub Bool);
@@ -632,7 +672,7 @@ pack_key! {
     pub struct AchievementBit(pub u8);
     #[pack(attr = "schedule")]
     #[derive(Default)]
-    pub struct ScheduleStart(pub String);
+    pub struct ScheduleStart(pub AttrString);
     #[pack(attr = "schedule-duration")]
     #[derive(Copy, Default)]
     pub struct ScheduleDuration(pub f32);
@@ -769,6 +809,57 @@ impl serde::Serialize for Guid {
 macro_rules! pack_key {
     () => {};
     (
+        $(#[$($meta:tt)*])*
+        $vis:vis struct $ident:ident(
+            $(#[$($meta_field:tt)*])*
+            $($field:tt)*
+        );
+        $($rest:tt)*
+    ) => {
+        pack_key! {
+            @pack
+            $(#[$($meta)*])*
+            $vis struct $ident(
+                $(#[$($meta_field)*])*
+                $($field)*
+            );
+            $($rest)*
+        }
+        pack_key! {
+            @fromstr
+            struct $ident(
+                $($field)*
+            );
+        }
+    };
+    (@fromstr
+        $vis:vis struct $ident:ident(
+            $vis_field:vis AttrString
+        );
+    ) => {
+        impl FromStr for $ident {
+            type Err = Infallible;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(Self(super::string_into(s)))
+            }
+        }
+    };
+    (@fromstr
+        $vis:vis struct $ident:ident(
+            $vis_field:vis $ty:ty
+        );
+    ) => {
+        impl FromStr for $ident {
+            type Err = <$ty as FromStr>::Err;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                <$ty as FromStr>::from_str(s)
+                    .map(Self)
+            }
+        }
+    };
+    (@pack
         #[pack(attr = $attr:literal $(, aliases($($attr_alias:literal),*))?)]
         $(#[$meta:meta])*
         $vis:vis struct $ident:ident(
@@ -847,14 +938,6 @@ macro_rules! pack_key {
         impl ops::DerefMut for $ident {
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
-            }
-        }
-        impl FromStr for $ident {
-            type Err = <$ty as FromStr>::Err;
-
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                <$ty as FromStr>::from_str(s)
-                    .map(Self)
             }
         }
 

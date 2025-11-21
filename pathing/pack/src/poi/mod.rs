@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::MarkerAttributes,
+        category::id::IdNameBox,
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
@@ -10,9 +11,9 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Poi {
-    pub category: String,
+    pub category: IdNameBox,
     pub guid: Uuid,
     pub map_id: i32,
     pub position: Point3,
@@ -79,7 +80,7 @@ impl Poi {
 
         let parent_path = Path::new(asset).parent().map(|p| p.to_string_lossy().into());
         Ok(Poi {
-            category,
+            category: category.into(),
             guid,
             map_id,
             position,

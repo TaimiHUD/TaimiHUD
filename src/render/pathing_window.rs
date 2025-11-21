@@ -1,9 +1,9 @@
 use {
     crate::{
-        controller::pathing::{registry::{CategoryIndex, CategoryPath, LoadedPack, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent, SharedMapPackInfo, UnloadedPack}, exports::runtime::{self as rt, Watched, imgui::{
+        controller::pathing::{registry::{CategoryIndex, CategoryPath, LoadedPack, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, ChildWindow, Condition, Id, IdStackToken, MouseButton, StyleVar, TableColumnFlags, TableColumnSetup, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, Window, WindowFlags
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, bitflags::bitflags, bitvec::{slice::BitSlice, vec::BitVec}, regex::{Regex, RegexBuilder}, std::{borrow::Cow, collections::{btree_map, BTreeMap, BTreeSet, HashSet}, num::NonZero, str::FromStr, sync::Arc}, taimi_pack::{Category, MarkerAttributes, Pack},
+    }, bitflags::bitflags, bitvec::{slice::BitSlice, vec::BitVec}, regex::{Regex, RegexBuilder}, std::{borrow::Cow, collections::{btree_map, BTreeMap, BTreeSet, HashSet}, num::NonZero, str::FromStr, sync::Arc}, taimi_pack::{Category, attributes::AttrString, MarkerAttributes, Pack},
     tokio::sync::watch,
 };
 
@@ -101,17 +101,14 @@ impl PathingSearchState {
             }
 
             for (idx, (full_id, category)) in pack.categories.all_categories.iter().enumerate() {
-                if self.matches_name(&category.display_name) || self.matches_name(&category.id) {
+                if self.matches_name(&category.display_name) || self.matches_name(category.id().as_str()) {
                     let mask = self.candidate_mask.entry(path).or_default();
                     self.search_candidates.insert(full_id.into());
                     mask.set(idx, true);
-                    let separators = full_id.rmatch_indices(".");
-                    for (idx, _eu) in separators {
-                        if let Some(sub_id) = full_id.get(..idx) {
-                            self.search_candidates.insert(sub_id.into());
-                            if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
-                                mask.set(parent_idx, true);
-                            }
+                    for sub_id in full_id.as_id().ancestors() {
+                        self.search_candidates.insert(sub_id.into());
+                        if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
+                            mask.set(parent_idx, true);
                         }
                     }
                 }
@@ -156,9 +153,9 @@ pub struct PathingWindowState {
     pub open_items: BTreeMap<PackPath, BitVec>,
     pub current_state: BTreeMap<PackPath, BitVec>,
     pub current_map: BTreeMap<PackMapPath, BitVec>,
-    pub category_names: BTreeMap<CategoryPath<PackPath>, Option<String>>,
-    pub category_tips: BTreeMap<CategoryPath<PackPath>, Option<(String, String)>>,
-    pub category_copy: BTreeMap<CategoryPath<PackPath>, Option<(String, String)>>,
+    pub category_names: BTreeMap<CategoryPath<PackPath>, Option<Arc<str>>>,
+    pub category_tips: BTreeMap<CategoryPath<PackPath>, Option<(AttrString, AttrString)>>,
+    pub category_copy: BTreeMap<CategoryPath<PackPath>, Option<(AttrString, AttrString)>>,
     pub pack_configs: BTreeMap<PackPath, Watched<Arc<PackConfig>>>,
     pub search_state: PathingSearchState,
     pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
@@ -824,13 +821,13 @@ impl PathingWindowState {
         search_filter && map_filter && filter
     }
 
-    fn get_category_display_name(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<Option<String>> {
+    fn get_category_display_name(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<Option<Arc<str>>> {
         PackLoader::shared_pack_active(packs?, path.root)
             .map(|active| active.pack.categories.all_categories.get_index(path.path as usize)
                 .map(|(_id, cat)| cat.display_name.clone())
             )
     }
-    fn category_display_name<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, category_names: &'a mut BTreeMap<CategoryPath<PackPath>, Option<String>>, info: &PackInfo, path: CategoryPath<PackPath>) -> Option<&'a str> {
+    fn category_display_name<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, category_names: &'a mut BTreeMap<CategoryPath<PackPath>, Option<Arc<str>>>, info: &PackInfo, path: CategoryPath<PackPath>) -> Option<&'a str> {
         let entry = match category_names.entry(path) {
             btree_map::Entry::Occupied(e) => return e.into_mut().as_ref().map(|s| &s[..]),
             btree_map::Entry::Vacant(e) => e,
@@ -841,7 +838,7 @@ impl PathingWindowState {
             .map(|s| &s[..])
     }
 
-    fn get_category_tip(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(String, String)> {
+    fn get_category_tip(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(AttrString, AttrString)> {
         let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
         let Some((_, cat)) = active.pack.categories.all_categories.get_index(path.path as usize) else { return None };
 
@@ -851,7 +848,7 @@ impl PathingWindowState {
         };
         let tip_name = match cat.marker_attributes.tip_name.as_ref() {
             Some(title) if title.is_empty() => None,
-            Some(title) if cat.display_name.starts_with(title) => None,
+            Some(title) if cat.display_name.starts_with(&title[..]) => None,
             t => t,
         };
 
@@ -864,7 +861,7 @@ impl PathingWindowState {
         }
     }
 
-    fn get_category_copy(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(String, String)> {
+    fn get_category_copy(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(AttrString, AttrString)> {
         let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
         let Some((_, cat)) = active.pack.categories.all_categories.get_index(path.path as usize) else { return None };
 
@@ -941,9 +938,13 @@ impl PathingWindowState {
                 _ => None,
             };
             open = self.is_open(path, root_path.map(|root| CategoryPath::with_path(root.path)));
+            let fallback_name;
             let display_name = match primary_root {
-                Some(root) => Cow::Borrowed(&root.display_name),
-                None => Cow::Owned(info.to_string()),
+                Some(root) => &root.display_name[..],
+                None => {
+                    fallback_name = info.to_string();
+                    &fallback_name[..]
+                },
             };
             let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, None);
             if let Some(root_path) = root_path {
@@ -1195,7 +1196,7 @@ impl PathingWindowState {
                 if let Some((copy_value, copy_message)) = self.category_copy.entry(path)
                     .or_insert_with(|| Self::get_category_copy(pack_data().as_ref().map(|d| &**d), info, path))
                 {
-                    Self::copy_copyable(ui, copy_value, copy_message);
+                    Self::copy_copyable(ui, &copy_value[..], &copy_message[..]);
                 }
             } else if ui.is_item_hovered() {
                 let display_name = display_name.get_or_insert(
@@ -1209,7 +1210,7 @@ impl PathingWindowState {
                     .or_insert_with(|| Self::get_category_tip(pack_data().as_ref().map(|d| &**d), info, path));
                 Self::draw_tooltip(ui, display_name.unwrap_or(Self::NAME_TEMPLATE), || {
                     if let Some((title, desc)) = tip {
-                        Self::draw_tooltip_category(ui, display_name.unwrap_or_default(), title, desc);
+                        Self::draw_tooltip_category(ui, display_name.unwrap_or_default(), &title[..], &desc[..]);
                     }
                     if let Some((copy_value, copy_message)) = self.category_copy.entry(path)
                         .or_insert_with(|| Self::get_category_copy(pack_data().as_ref().map(|d| &**d), info, path))
@@ -1217,8 +1218,8 @@ impl PathingWindowState {
                         Self::draw_tooltip_copyable(
                             ui,
                             display_name.unwrap_or_default(),
-                            copy_value,
-                            copy_message,
+                            &copy_value[..],
+                            &copy_message[..],
                         );
                     }
                 });
@@ -1237,7 +1238,7 @@ impl PathingWindowState {
                 _ => None,
             });
             Self::draw_tooltip(ui, display_name.unwrap_or(Self::NAME_TEMPLATE), || {
-                Self::draw_tooltip_category(ui, display_name.unwrap_or_default(), title, desc);
+                Self::draw_tooltip_category(ui, display_name.unwrap_or_default(), &title[..], &desc[..]);
             });
         }
     }
@@ -1500,10 +1501,10 @@ impl PathingWindowState {
 
         if let Some(title) = &attributes.tip_name {
             let _title_font = desc.map(|_| RenderState::push_font("big", ui));
-            ui.text(title);
+            ui.text(&title[..]);
         }
         if let Some(desc) = &attributes.tip_description {
-            ui.text_wrapped(desc);
+            ui.text_wrapped(&desc[..]);
         }
     }
 

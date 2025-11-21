@@ -8,8 +8,8 @@ use {
             engine::SpaceEvent,
             Engine,
         },
-    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, futures::{future, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{ops, cmp, collections::{btree_set, BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, future::Future, hash, iter, mem, num::NonZero, path::{Path, PathBuf}, ptr, sync::{Arc, Weak}}, strum_macros::Display, taimi_meta::{map::MapID, ui::MapContext}, taimi_pack::{
-        attributes::Festival, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, pack::CategoryCollection, trail::TrailData, Pack
+    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, futures::{future, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{btree_set, BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, future::Future, hash, iter, mem, num::NonZero, ops, path::{Path, PathBuf}, ptr, sync::{Arc, Weak}}, strum_macros::Display, taimi_meta::{map::MapID, ui::MapContext}, taimi_pack::{
+        attributes::Festival, category::{id::{AsFullId, CategoryId}, Category}, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, pack::CategoryCollection, trail::TrailData, Pack
     }, tokio::{
         fs::create_dir_all,
         sync::{watch, Mutex},
@@ -560,17 +560,17 @@ impl PackLoader {
             let is_festival = FestivalFixup::FESTIVAL_PREFIXES
                 .iter()
                 .copied()
-                .find(|prefix| category.full_id.starts_with(prefix));
+                .find(|&prefix| category.full_id.id_starts_with(prefix));
             match is_festival {
-                Some(prefix) if category.full_id != prefix => (),
+                Some(prefix) if category.full_id.as_id() != prefix => (),
                 _ => continue,
             }
             let festival = self
                 .festival_categories
                 .iter()
-                .find_map(|(&prefix, &fest)| category.full_id.starts_with(prefix).then_some(fest));
+                .find_map(|(&prefix, &fest)| category.full_id.id_starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                let festivals = Arc::make_mut(&mut category.marker_attributes).festivals.insert(vec![festival]);
+                let festivals = Arc::make_mut(&mut category.marker_attributes).festivals.insert(festival.into());
                 fixed_festival_categories.insert(&category.full_id, festivals.clone());
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
@@ -578,7 +578,7 @@ impl PackLoader {
         }
         if !fixed_festival_categories.is_empty() {
             // TODO: this should be less necessary once a tree of attribute inherits exist...
-            let pois = pack.pois.iter_mut().filter_map(|poi| match fixed_festival_categories.get(&poi.category) {
+            let pois = pack.pois.iter_mut().filter_map(|poi| match fixed_festival_categories.get(poi.category.as_id()) {
                 Some(f) => Some((poi, f)),
                 None => None,
             });
@@ -587,7 +587,7 @@ impl PackLoader {
                     poi.attributes.festivals = Some(f.clone());
                 }
             }
-            let trails = pack.trails.iter_mut().filter_map(|trail| match fixed_festival_categories.get(&trail.category) {
+            let trails = pack.trails.iter_mut().filter_map(|trail| match fixed_festival_categories.get(trail.category.as_id()) {
                 Some(f) => Some((trail, f)),
                 None => None,
             });
@@ -790,7 +790,7 @@ impl PackInfo {
         let not_lonely = {
             let pois = pack.pois.iter().map(|m| &m.category);
             let trails = pack.trails.iter().map(|m| &m.category);
-            pois.chain(trails).filter_map(|c| pack.categories.all_categories.get_index_of(c))
+            pois.chain(trails).filter_map(|c| pack.categories.all_categories.get_index_of(c.as_id()))
                 .map(|i| CategoryPath::with_path(i as CategoryIndex))
         };
         categories.fill_lonely(not_lonely);
@@ -857,9 +857,9 @@ impl PackCategoryInfo {
         let (separators, hidden, disabled, copyable) = collection.all_categories.values().enumerate()
             .map(|(i, cat)| (i as CategoryIndex, cat))
             .map(|(i, cat)| (
-                cat.is_separator.then_some(i),
-                cat.is_hidden.then_some(i),
-                (!cat.default_toggle).then_some(i),
+                cat.is_separator().then_some(i),
+                cat.is_hidden().then_some(i),
+                (!cat.default_toggle()).then_some(i),
                 cat.marker_attributes.copy_value.is_some().then_some(i),
             )).collect();
 
@@ -978,10 +978,10 @@ impl PackCategoryInfo {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackRoot {
     pub index: CategoryIndex,
-    pub id: String,
+    pub id: CategoryId,
     pub hidden: bool,
     pub separator: bool,
-    pub display_name: String,
+    pub display_name: Arc<str>,
     pub child_count: usize,
 }
 
@@ -993,10 +993,10 @@ impl PackRoot {
         }
         Self {
             index: path.path,
-            id: category.id.clone(),
+            id: category.full_id.clone(),
             display_name: category.display_name.clone(),
-            hidden: category.is_hidden,
-            separator: category.is_separator,
+            hidden: category.is_hidden(),
+            separator: category.is_separator(),
             child_count: category.sub_categories.len(),
         }
     }
@@ -1054,9 +1054,9 @@ impl PackCategory {
         cats.resize(collection.all_categories.len(), PackCategory::EMPTY);
         for (idx, (_name, category)) in collection.all_categories.iter().enumerate() {
             let path: CategoryPath = CategoryPath::with_path(idx as CategoryIndex);
-            let mut children = category.sub_categories.iter().filter_map(|(_id, child_full_id)| match collection.all_categories.get_full(child_full_id) {
+            let mut children = category.child_ids().filter_map(|child_full_id| match collection.all_categories.get_full(child_full_id) {
                 None => {
-                    log::warn!("child category {_id} of {_name} not found");
+                    log::warn!("child category {child_full_id} of {_name} not found");
                     None
                 },
                 Some((child_index, _child_full_id, _child)) => {
@@ -1118,6 +1118,7 @@ pub struct PackConfig {
 impl PackConfig {
     pub fn fill_settings(&mut self, pack: &Pack, pathing: &PathingSettings, disabled_paths: &HashSet<String>) {
         for id in disabled_paths {
+            let id = &id[..];
             let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else { continue };
             let path = CategoryPath::with_path(i as CategoryIndex);
             let settings_vis = VisibilityFlags::visible(false);
@@ -1132,10 +1133,10 @@ impl PackConfig {
         let disabled_compat = true;
         if disabled_compat {
             let disabled_cats = pack.categories.all_categories.iter().enumerate()
-                .filter(|(_, (_, cat))| !cat.default_toggle);
+                .filter(|(_, (_, cat))| !cat.default_toggle());
             for (i, (full_id, _disabled_cat)) in disabled_cats {
                 let path = CategoryPath::with_path(i as CategoryIndex);
-                if !disabled_paths.contains(full_id) {
+                if !disabled_paths.contains(&full_id.id_to_str()[..]) {
                     let mut vis = self.category_visibility.get(&path)
                         .copied()
                         .unwrap_or(VisibilityFlags::empty());

@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::MarkerAttributes,
+        category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid},
     },
@@ -18,7 +19,7 @@ use {
 
 #[derive(Debug, Clone)]
 pub struct Trail {
-    pub category: String,
+    pub category: IdNameBox,
     pub guid: Uuid,
     pub attributes: MarkerAttributes,
     pub parent_path: Option<String>,
@@ -82,7 +83,7 @@ impl Trail {
         attributes.merge(&attributes_bh, false);
 
         Ok(Self {
-            category,
+            category: category.into(),
             guid,
             attributes,
             parent_path,

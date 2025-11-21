@@ -1,9 +1,14 @@
 use {
-    crate::{category::Category, loader::PackLoaderContext, poi::Poi, trail::Trail},
+    crate::{
+        category::{id::{CategoryId, FullIdRef}, Category},
+        loader::PackLoaderContext, poi::Poi, trail::Trail,
+    },
     anyhow::Context,
     indexmap::{map::Entry, IndexMap, IndexSet},
     std::{
         fmt,
+        mem,
+        iter,
         io::{Cursor, Read as _},
         sync::Arc,
     },
@@ -62,9 +67,9 @@ impl Pack {
 #[derive(Debug, Clone, Default)]
 pub struct CategoryCollection {
     /// Map full_id -> Category
-    pub all_categories: IndexMap<String, Category>,
+    pub all_categories: IndexMap<CategoryId, Category>,
     /// List of root categories.
-    pub root_categories: IndexSet<String>,
+    pub root_categories: IndexSet<CategoryId>,
 }
 
 impl CategoryCollection {
@@ -79,16 +84,35 @@ impl CategoryCollection {
     }
 }
 
-pub fn taco_safe_name(value: &str, is_full: bool) -> String {
-    let mut result = String::with_capacity(value.len());
-    for c in value.chars() {
-        if c.is_ascii_alphanumeric() || (is_full && c == '.') {
-            result.push(c);
-        } else {
-            result.push('_');
-        }
+fn taco_safe_char(is_full: bool, c: char) -> bool {
+    c.is_ascii_alphanumeric() || (is_full && c == '.')
+}
+pub fn to_taco_safe_name<V: AsRef<str>>(value: V, is_full: bool) -> Result<V, String> {
+    let mut result = None::<String>;
+    let s = value.as_ref();
+    let mut segments = s.split(|c| !taco_safe_char(is_full, c))
+        .peekable();
+    while let Some(segment) = segments.next() {
+        let result = match &mut result {
+            None if segments.peek().is_none() =>
+                continue,
+            Some(result) => {
+                result.push('_');
+                result
+            },
+            result @ None => result.insert(String::with_capacity(s.len())),
+        };
+        result.push_str(segment);
     }
-    result
+    match result {
+        Some(r) => Err(r),
+        None => Ok(value),
+    }
+}
+pub fn taco_safe_name(value: &str, is_full: bool) -> String {
+    to_taco_safe_name(value, is_full)
+        .map(String::from)
+        .unwrap_or_else(|safe| safe)
 }
 
 pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
@@ -142,31 +166,69 @@ fn merge_category_attributes(pack: &mut Pack) {
     }
 }
 
-fn inner_merge_category_attributes(categories: &mut IndexMap<String, Category>, parent: &str) {
-    let attrs = categories[parent].marker_attributes.clone();
-    let children = categories[parent].sub_categories.clone();
-    for (_, id) in &*children {
-        if let Some(category) = categories.get_mut(id) {
+fn inner_merge_category_attributes(categories: &mut IndexMap<CategoryId, Category>, parent_id: &FullIdRef) {
+    use indexmap::map::MutableKeys;
+
+    let error = "Inconsistent internal state, missing category";
+    let Some((parent_index, _, parent)) = categories.get_full_mut(parent_id) else {
+        log::error!("{error} parent {:?}", parent_id.as_str());
+        return
+    };
+    let attrs = parent.marker_attributes.clone();
+    let mut children = mem::take(&mut parent.sub_categories);
+    for id in children.iter_mut() {
+        let child_index = if let Some((child_index, _child_id, category)) = categories.get_full_mut2(id) {
             Arc::make_mut(&mut category.marker_attributes).merge(&attrs, true);
+            child_index
         } else {
-            log::error!("Inconsistent internal state, missing category `{id}`");
+            log::error!("{error} child {:?}", id.as_str());
             continue;
-        }
+        };
+
         inner_merge_category_attributes(categories, id);
+
+        let child_id = categories.get_index(child_index)
+            .map(|(_, child)| child.full_id.clone());
+        if let Some(child_id) = child_id {
+            *id = child_id;
+        }
+    }
+    if let Some((id, parent)) = categories.get_index_mut2(parent_index) {
+        // deduplicate all child ID allocations...
+        parent.sub_categories = children;
+        // ... then pick a child to truncate for parent ID
+        let id_redundant = parent.full_id.is_full_id();
+        let child_id = id_redundant.then_some(parent.sub_categories.first())
+            .and_then(|id| id.cloned());
+        if let Some(child_id) = child_id {
+            let truncated = unsafe {
+                CategoryId::new_unchecked(child_id.inner().clone(), parent.full_id.len())
+            };
+            debug_assert_eq!(&parent.full_id, &truncated);
+            parent.full_id = truncated;
+        }
+        // finally deduplicate map keys too
+        *id = parent.full_id.clone();
     }
 }
 
 fn apply_marker_attributes(pack: &mut Pack) {
     for poi in &mut pack.pois {
-        let Some(category) = pack.categories.all_categories.get(&poi.category) else {
+        let Some(category) = pack.categories.all_categories.get(&poi.category[..]) else {
             continue;
         };
+        if let Some(id) = category.full_id.as_full_id() {
+            poi.category = id.clone();
+        }
         poi.attributes.merge(&category.marker_attributes, true);
     }
     for trail in &mut pack.trails {
-        let Some(category) = pack.categories.all_categories.get(&trail.category) else {
+        let Some(category) = pack.categories.all_categories.get(&trail.category[..]) else {
             continue;
         };
+        if let Some(id) = category.full_id.as_full_id() {
+            trail.category = id.clone();
+        }
         trail.attributes.merge(&category.marker_attributes, true);
     }
 }
@@ -307,8 +369,7 @@ fn inner_parse_pack_def(
                                 pack.categories.root_categories.insert(category.full_id.clone());
                             },
                             Some(PartialItem::MarkerCategory(parent)) => {
-                                let subs = Arc::make_mut(&mut parent.sub_categories);
-                                subs.insert(category.id.clone(), category.full_id.clone());
+                                parent.append_children(iter::once(category.full_id.clone()));
                             },
                             _ => anyhow::bail!("Inconsistent internal state"),
                         }

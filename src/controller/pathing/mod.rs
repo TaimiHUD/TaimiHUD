@@ -1,13 +1,15 @@
+use taimi_pack::category::id::FullIdRef;
+
 use {
-    self::{registry::{CategoryIndex, LoadedPack, LoaderBox, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::{Controller, ControllerEvent}, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind}, space::{
-            engine::SpaceEvent, pack::{poi::ActivePoi, trail::{ActiveTrail, TrailParams}, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter}, futures::{future, stream::{self, BoxStream, FusedStream, SelectAll}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{AutoReset, HideContext, MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, btree_set, BTreeMap, BTreeSet, BinaryHeap, HashSet}, error::Error as StdError, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::{map::MapID, ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}}, taimi_pack::{
-        attributes::{keys::Guid, Festival, Festivals}, category::Category, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, Pack
-    }, tokio::{
+    self::{registry::{CategoryIndex, LoadedPack, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::Controller, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, PathingSettings, Settings, SourceKind}, space::{
+            engine::SpaceEvent, pack::{trail::TrailParams, PackSpace}, Engine
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, AutoReset, HideContext}, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, BTreeMap, BTreeSet, BinaryHeap}, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+    tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
     }, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedCategory, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
 };
 use crate::render::machine::MumbleIdentityUpdate;
+pub use self::state::shared::{SharedMapPackInfo, SharedMapPackState};
 
 pub mod registry;
 pub mod festivals;
@@ -787,7 +789,7 @@ impl PathingController {
                 );
             if let Some(full_id) = full_id {
                 let mut settings = self.loader.settings.write().await;
-                PathingSettings::pathing_state_update(&mut settings, full_id, cat_vis ^ state).await;
+                PathingSettings::pathing_state_update(&mut settings, full_id.to_string(), cat_vis ^ state).await;
             } else {
                 log::warn!("{path} not found for toggle state update");
             }
@@ -1942,7 +1944,7 @@ impl PathingController {
         let blocked = "trigger settings blocked";
         if let InteractivePoi { info: Some(info), .. } = ipoi {
             if allowed.contains(TriggerKind::INFO) {
-                ctx.spawn_alert(info.message.clone().into(), Duration::from_secs(10));
+                ctx.spawn_alert(info.message.clone()[..].into(), Duration::from_secs(10));
             } else {
                 log::info!("{blocked} info popup");
             }
@@ -1993,8 +1995,8 @@ impl PathingController {
         }
         if let InteractivePoi { copy: Some(copy), .. } = ipoi {
             if allowed.contains(TriggerKind::COPY) {
-                RenderState::try_send(RenderEvent::SendClipboard(copy.value.clone().into()));
-                let msg = copy.message.clone().map(String::from)
+                RenderState::try_send(RenderEvent::SendClipboard(copy.value[..].into()));
+                let msg = copy.message.clone().map(|m| String::from(&m[..]))
                     .unwrap_or_else(|| crate::fl!("copied").into());
                 let message = format!("{msg}\n\n{:?}", &copy.value.0[..]);
                 ctx.spawn_alert(message, Duration::from_secs(6));
@@ -2230,7 +2232,7 @@ impl MapPackInfo {
             let category_estimate = active.pack.categories.all_categories.len() / 32;
             Vec::<CategoryIndex>::with_capacity(category_estimate)
         };
-        let mut insert_cat = |category: &str| -> bool {
+        let mut insert_cat = |category: &FullIdRef| -> bool {
             if let Some(idx) = active.pack.categories.all_categories.get_index_of(category) {
                 let idx = idx as CategoryIndex;
                 let insert = categories.partition_point(|&i| i < idx);
@@ -2245,12 +2247,12 @@ impl MapPackInfo {
                 true
             }
         };
-        let mut filter_mapid = |map_id: i32, mut category: &str| -> bool {
+        let mut filter_mapid = |map_id: i32, mut category: &FullIdRef| -> bool {
             if map_id == id32 {
                 loop {
                     if !insert_cat(category) { break }
-                    category = match category.rsplit_once('.') {
-                        Some((parent, ..)) => parent,
+                    category = match category.parent() {
+                        Some(parent) => parent,
                         None => break,
                     };
                 }
@@ -2261,7 +2263,7 @@ impl MapPackInfo {
         };
         let mut pois = BitVec::new();
         let mut active_pois = active.pack.pois.iter().enumerate()
-            .filter(|(_i, poi)| filter_mapid(poi.map_id, &poi.category))
+            .filter(|(_i, poi)| filter_mapid(poi.map_id, poi.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
         if let Some(i) = active_pois.next() {
@@ -2285,7 +2287,7 @@ impl MapPackInfo {
             .collect::<BitVec>();
         let mut trails = BitVec::new();
         let mut active_trails = active.pack.trails.iter().enumerate()
-            .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), &trail.category))
+            .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), trail.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
         if let Some(i) = active_trails.next() {
@@ -2434,137 +2436,6 @@ impl FestivalState {
 
     pub fn get(&self) -> Festivals {
         (self.active | self.on) & !self.off
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SharedMapPackInfo {
-    pub shared_loader: Option<Arc<PackLoader>>,
-    pub interactions: broadcast::Sender<InteractionEvent>,
-    pub pack_info: BTreeMap<PackPath, Result<Arc<PackInfo>, UnloadedPack>>,
-    pub pack_loaded: BTreeSet<PackPath>,
-    pub map_info: BTreeMap<PackMapPath, Arc<MapPackInfo>>,
-    pub map_state: BTreeMap<PackMapPath, SharedMapPackState>,
-}
-
-impl SharedMapPackInfo {
-    pub const INTERACTIONS_BUFFER_LEN: usize = 48;
-
-    pub fn map_info_with<R, F: FnOnce(PackMapPath, &Arc<MapPackInfo>) -> R>(path: PackPath, f: F) -> Option<R> {
-        Controller::with_sender(|s| {
-            let map_id = s.gameplay.as_ref().and_then(|g| g.borrow().gameplay_map());
-            map_id.and_then(|map_id| {
-                let path = path.rel(map_id);
-                s.pack_info.as_ref().and_then(|pack_info|
-                    pack_info.borrow().map_info.get(&path)
-                        .map(|info| f(path, info))
-                )
-            })
-        }).flatten()
-    }
-
-    fn update_pack(&mut self, path: PackPath, pack: &LoadedPack) {
-        if let Some(..) = pack.active {
-            self.pack_loaded.insert(path.clone());
-        } else {
-            self.pack_loaded.remove(&path);
-        }
-
-        match self.pack_info.get(&path) {
-            Some(shared_info) => {
-                let shared_info = shared_info.as_ref().map(Arc::as_ptr)
-                    .map_err(|r| &r.reason);
-                let pack_info = pack.info.as_ref().map(Arc::as_ptr);
-                if pack_info == shared_info {
-                    return
-                }
-            },
-            None => (),
-        }
-
-        let info = match pack.info.clone() {
-            Ok(info) => Ok(info),
-            Err(reason) => Err(UnloadedPack {
-                path: pack.path.to_path_buf(),
-                reason,
-            }),
-        };
-        self.pack_info.insert(path, info);
-    }
-
-    pub fn is_loaded(&self, path: &PackPath) -> bool {
-        self.pack_loaded.contains(path)
-    }
-
-    #[cfg(todo = "unused")]
-    pub fn unloaded_pack_info(&self) -> impl Iterator<Item = (PackPath, &UnloadedPack)> + '_ {
-        self.pack_info.iter().filter_map(|(&path, info)|
-            info.as_ref().err().map(|e| (path, e))
-        )
-    }
-    pub fn pack_info(&self) -> impl Iterator<Item = (PackPath, &Arc<PackInfo>)> + '_ {
-        self.pack_info.iter().filter_map(|(&path, info)|
-            info.as_ref().ok().map(|e| (path, e))
-        )
-    }
-}
-
-impl Default for SharedMapPackInfo {
-    fn default() -> Self {
-        Self {
-            shared_loader: Default::default(),
-            interactions: broadcast::Sender::new(Self::INTERACTIONS_BUFFER_LEN),
-            pack_info: Default::default(),
-            pack_loaded: Default::default(),
-            map_info: Default::default(),
-            map_state: Default::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnloadedPack {
-    pub path: PathBuf,
-    pub reason: UnloadedReason,
-}
-
-impl fmt::Display for UnloadedPack {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let name = self.path.file_name()
-            .map(Path::new)
-            .unwrap_or_else(|| rt::relative_path(&self.path));
-        write!(f, "{}", name.display())
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SharedMapPackState {
-    pub categories: Arc<[LoadedCategory]>,
-    pub interactive_pois: Arc<[InteractivePoi]>,
-    pub interactive_pois_nearby: BitVec,
-    pub poi_guids: Arc<[Guid]>,
-}
-
-impl SharedMapPackState {
-    pub fn with_loaded(map_pack: &LoadedMapPack) -> Self {
-        let categories = map_pack.categories.clone();
-        let interactive_pois = map_pack.interactive_pois.clone();
-        Self {
-            categories,
-            interactive_pois,
-            interactive_pois_nearby: map_pack.interactive_pois_nearby.clone(),
-            poi_guids: map_pack.poi_guids.clone(),
-        }
-    }
-    pub fn update_static(&mut self, map_pack: &LoadedMapPack) {
-        self.categories = map_pack.categories.clone();
-        self.interactive_pois = map_pack.interactive_pois.clone();
-    }
-
-    pub fn categories<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where
-        'a: 'i,
-    {
-        info.categories().zip(self.categories.iter())
     }
 }
 
