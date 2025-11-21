@@ -2,8 +2,8 @@ use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
 use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
-use taimi_pack::{attributes::{self as attr, keys::{self, Guid}}, MarkerAttributes};
-use super::{festivals::Festivals, registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
+use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes};
+use super::{registry::{ActivePack, MapIndex, PackPoiNs, PackTrailNs, PoiIndex, PoiPath, TrailIndex, TrailPath}, state::{MarkerId, MarkerState, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
@@ -59,7 +59,7 @@ pub struct FilterConfig {
     #[cfg(todo)]
     pub mount: Mounts,
     #[cfg(todo)]
-    pub festival: Festivals,
+    pub festival: attr::Festivals,
     #[cfg(todo)]
     pub raid: Raids,
     #[cfg(todo)]
@@ -352,10 +352,10 @@ impl MarkerFilter for HiddenForCharacter {
 impl MarkerFilter for attr::Festival {
     type State = FestivalState;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        Festivals::from(*self).is_visible(state)
+        attr::Festivals::from(*self).is_visible(state)
     }
 }
-impl MarkerFilter for Festivals {
+impl MarkerFilter for attr::Festivals {
     type State = FestivalState;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
         let state = state.get();
@@ -739,7 +739,7 @@ impl FilterStateFilters {
         #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten()
             .map(Arc::new);
-        let festivals = attrs.festivals.as_ref().map(|f| f.iter().copied().collect::<Festivals>())
+        let festivals = attrs.festivals.as_ref().map(|f| f.iter().copied().collect::<attr::Festivals>())
             .and_then(|f| match f.is_empty() {
                 false => Some(f),
                 true => None,

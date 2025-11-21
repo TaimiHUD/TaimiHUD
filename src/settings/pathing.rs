@@ -2,7 +2,7 @@ use {
     crate::settings::Settings, bitflags::bitflags, bitvec::array::BitArray, serde::{Deserialize, Serialize}, std::{collections::{BTreeMap, BTreeSet}, fmt, sync::Arc, time}, strum::{IntoStaticStr, VariantArray}
 };
 #[cfg(feature = "space")]
-use {taimi_meta::ui::MapContext, taimi_pack::attributes::{keys::Guid, Festival}, crate::controller::pathing::festivals::Festivals};
+use {taimi_meta::ui::MapContext, taimi_pack::attributes::{keys::Guid, Festival, Festivals}};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PathingSettings {

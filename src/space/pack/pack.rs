@@ -1,77 +1,38 @@
 use {
     super::{
         poi::{ActivePoi, PoiCommonRenderData},
-        trail::{ActiveTrail, TrailParams},
+        trail::ActiveTrail,
     },
     crate::{
-        controller::pathing::{
-            registry::{CategoryIndex, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex}, visible::VisibilityFlags, MapPackInfo, PathingController, PathingEvent, festivals::Festivals,
-        },
-        exports::runtime::{
-            self as rt,
-            imgui::{self, Condition, TreeNode, Ui},
-        },
-        fl,
-        render::{
-            machine::{RenderMachine, RenderPosition},
-            pathing_window::{PathingFilterState, PathingSearchState},
-            RenderState,
-        },
+        controller::pathing::registry::{PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
+        render::machine::{RenderMachine, RenderPosition},
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::Pack,
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
             LocalContext,
             MapContext,
         },
-        with_i18n,
     },
     anyhow::{anyhow, Context},
     bitvec::vec::BitVec,
     glamour::Box3,
     indexmap::IndexMap,
     std::{
-        collections::{BTreeSet, HashSet},
-        fs::{create_dir_all, read_dir},
         mem,
-        path::Path,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
         },
     },
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
-    taimi_pack::{
-        attributes::MarkerAttributes,
-        loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
-        Category,
-        Poi,
-    },
-    uuid::Uuid,
+    taimi_pack::loader::PackLoaderContext,
 };
 
 pub struct ActivePack {
-    #[cfg(deleteme)]
-    pub pack: Arc<Pack>,
-    #[cfg(deleteme)]
-    loader: LoaderBox,
-
-    // Actively loaded data.
-    #[cfg(deleteme)]
-    pub enabled_categories: BitVec,
-    #[cfg(deleteme)]
-    pub user_category_state: BitVec,
     pub active_trails: Vec<ActiveTrail>,
     pub active_pois: Vec<ActivePoi>,
-    // UI and filter state
-    #[cfg(deleteme)]
-    pub available_categories: BitVec,
-    #[cfg(deleteme)]
-    pub copyable_categories: BTreeSet<CategoryIndex>,
-    #[cfg(deleteme)]
-    pub copyable_pois: BTreeSet<PoiIndex>,
 
     // Internal rendering data.
     texture_list: IndexMap<String, Option<Arc<Texture>>>,
@@ -85,484 +46,16 @@ pub struct ActivePack {
 }
 
 impl ActivePack {
-    pub fn new<C>(enabled_categories: C) -> Self where
-        C: IntoIterator<Item = bool>,
-    {
-        let enabled_categories: BitVec = BitVec::from_iter(enabled_categories);
-
+    pub fn new() -> Self {
         ActivePack {
-            #[cfg(deleteme)]
-            user_category_state: enabled_categories.clone(),
-            #[cfg(deleteme)]
-            enabled_categories,
             active_pois: Default::default(),
             active_trails: Default::default(),
             texture_list: Default::default(),
-            #[cfg(deleteme)]
-            available_categories: Default::default(),
-            #[cfg(deleteme)]
-            copyable_categories: Default::default(),
-            #[cfg(deleteme)]
-            copyable_pois: Default::default(),
             loaded_textures: Default::default(),
             unused_textures: Default::default(),
             render_list_bookmark: Default::default(),
             render_poi_bookmark: Default::default(),
             poi_bookmark: Default::default(),
-        }
-    }
-
-    #[cfg(deleteme)]
-    pub fn init_enabled_categories<C>(&mut self, enabled_categories: C) where
-        C: IntoIterator<Item = bool>,
-    {
-        self.enabled_categories = BitVec::from_iter(enabled_categories);
-        self.user_category_state = self.enabled_categories.clone();
-    }
-
-    #[cfg(deleteme)]
-    pub fn load(loader: impl PackLoaderContext + Send + 'static) -> anyhow::Result<ActivePack> {
-        let mut loader = Box::new(loader);
-        let pack = Pack::load(&mut *loader)?;
-        Ok(Self::new(Arc::new(pack), loader))
-    }
-
-    pub fn get_copyable_pois(&self, pack: &Pack, info: &MapPackInfo) -> Vec<Poi> {
-        let mut current_pois = Vec::new();
-        for (poi_idx, poi) in info.pois().zip(self.active_pois.iter()) {
-            if poi.visibility.is_visible() {
-                let actual_poi = &pack.pois[poi_idx.path as usize];
-                if actual_poi.attributes.copy_value.is_some() {
-                    let actual_poi = actual_poi.clone();
-                    current_pois.push(actual_poi);
-                }
-            }
-        }
-        current_pois
-    }
-
-    #[cfg(deleteme)]
-    pub fn draw_categories(
-        &mut self,
-        ui: &Ui,
-        pack: &Pack,
-        filter_state: PathingFilterState,
-        open_items: &mut HashSet<String>,
-        recompute: &mut bool,
-        search_state: &PathingSearchState,
-    ) {
-        let map_filter = match filter_state.contains(PathingFilterState::CurrentMap) {
-            true => {
-                if self.available_categories.is_empty() {
-                    self.update_available_categories(pack);
-                }
-                Some(&self.available_categories)
-            },
-            false => None,
-        };
-        let root = &pack.categories.root_categories;
-        let is_root = true;
-        let all_categories = &pack.categories.all_categories;
-        let enabled_categories = &mut self.user_category_state;
-        for cat_name in root.iter() {
-            Self::draw_category(
-                ui,
-                &all_categories[cat_name],
-                all_categories,
-                enabled_categories,
-                filter_state,
-                open_items,
-                is_root,
-                recompute,
-                search_state,
-                map_filter,
-                (&self.copyable_categories, &self.copyable_pois, &pack.pois),
-            );
-        }
-    }
-
-    /// All categories relevant to the current map
-    #[cfg(deleteme)]
-    pub fn update_available_categories(&mut self, pack: &Pack) {
-        let category_count = pack.categories.all_categories.len();
-        let available = &mut self.available_categories;
-        available.clear();
-        available.reserve(category_count);
-        available.set_uninitialized(false);
-        unsafe {
-            available.set_len(category_count);
-        }
-        for trail in &self.active_trails {
-            if trail.category_idx as usize >= category_count {
-                continue
-            }
-            available.set(trail.category_idx as usize, true);
-        }
-        for poi in &self.active_pois {
-            if poi.category_idx as usize >= category_count {
-                continue
-            }
-            available.set(poi.category_idx as usize, true);
-        }
-        let leaves = available.clone();
-        'leafies: for leaf in leaves.iter_ones() {
-            // a real tree would probably make this more sane,
-            // but it's run once per map so who cares really...
-            let Some((_, category)) = pack.categories.all_categories.get_index(leaf) else {
-                continue 'leafies
-            };
-            let seps = category.full_id.rmatch_indices(".");
-            'parents: for (idx, _) in seps {
-                if let Some(parent) = category.full_id.get(..idx) {
-                    if let Some(parent_idx) = pack.categories.all_categories.get_index_of(parent) {
-                        if available[parent_idx] {
-                            // we've already been here before
-                            break 'parents
-                        }
-                        available.set(parent_idx, true)
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(deleteme)]
-    pub fn draw_category(
-        ui: &Ui,
-        category: &Category,
-        all_categories: &IndexMap<String, Category>,
-        state: &mut BitVec,
-        filter_state: PathingFilterState,
-        open_items: &mut HashSet<String>,
-        is_root: bool,
-        recompute: &mut bool,
-        search_state: &PathingSearchState,
-        category_filter: Option<&BitVec>,
-        copyable: (&BTreeSet<CategoryIndex>, &BTreeSet<PoiIndex>, &[Poi]),
-    ) {
-        let push_token = ui.push_id(&category.full_id);
-        if category.is_hidden {
-            push_token.pop();
-            return;
-        }
-        let mut display = true;
-        let category_idx = all_categories.get_index_of(&category.full_id);
-        if let Some(idx) = category_idx {
-            if let Some(substate) = state.get(idx) {
-                let enabled_filter = *substate && filter_state.contains(PathingFilterState::Enabled);
-                let disabled_filter = !*substate && filter_state.contains(PathingFilterState::Disabled);
-                let is_root_filter = is_root && filter_state.contains(PathingFilterState::IgnoreRoot);
-                let is_leaf = category.sub_categories.is_empty();
-                let is_branch = !is_leaf;
-                let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
-                let is_branch_filter =
-                    is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
-                let search_filter = search_state.matches_id(&category.full_id);
-                let category_filter = category_filter
-                    .and_then(|f| f.get(idx).map(|b| *b))
-                    .unwrap_or(true);
-                let filter =
-                    enabled_filter | disabled_filter | is_root_filter | is_leaf_filter | is_branch_filter;
-                display = search_filter && category_filter && filter;
-            }
-        }
-        if display {
-            let is_copyable = match &category.marker_attributes.copy_value {
-                Some(value) if category.sub_categories.is_empty() && !category.is_separator => Some(value),
-                _ => None,
-            };
-            if let Some(..) = is_copyable {
-                ui.indent();
-                if ui.small_button(&fl!("copy-arg", arg = (&category.display_name[..]))) {
-                    Self::copy_copyable(ui, &category.marker_attributes);
-                }
-                if ui.is_item_hovered() {
-                    Self::draw_tooltip(ui, &category.display_name, || {
-                        Self::draw_tooltip_category(ui, category);
-                        Self::draw_tooltip_copyable(
-                            ui,
-                            &category.marker_attributes,
-                            Some(&category.display_name),
-                        );
-                    });
-                }
-                ui.unindent();
-                ui.table_next_column();
-                ui.table_next_column();
-            } else {
-                let (copyable_categories, copyable_pois, pois) = copyable;
-                let has_copyable_pois = category_idx
-                    .map(|idx| copyable_categories.contains(&(idx as CategoryIndex)))
-                    .unwrap_or(false);
-
-                let mut unbuilt = TreeNode::new(&category.display_name);
-                if (category.is_separator || category.sub_categories.is_empty())
-                    && category.marker_attributes.copy_value.is_none()
-                    && !has_copyable_pois
-                {
-                    unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
-                }
-                unbuilt = unbuilt.frame_padding(true).tree_push_on_open(false);
-                if category.is_separator {
-                    unbuilt = unbuilt.leaf(true);
-                } else if category.sub_categories.is_empty() {
-                    unbuilt = unbuilt.bullet(true);
-                } else {
-                    unbuilt = unbuilt
-                        .framed(true)
-                        .opened(open_items.contains(&category.full_id), Condition::Always);
-                }
-                let tree_token = unbuilt.push(ui);
-                if ui.is_item_hovered() && Self::category_has_tooltip(category) {
-                    Self::draw_tooltip(ui, &category.display_name, || {
-                        Self::draw_tooltip_category(ui, category);
-                    });
-                }
-                if category.marker_attributes.copy_value.is_some() {
-                    ui.same_line();
-                    if with_i18n!("copy", |copy| ui.small_button(copy)) {
-                        Self::copy_copyable(ui, &category.marker_attributes);
-                    }
-                    if ui.is_item_hovered() {
-                        Self::draw_tooltip(ui, &category.display_name, || {
-                            Self::draw_tooltip_copyable(
-                                ui,
-                                &category.marker_attributes,
-                                Some(&category.display_name),
-                            );
-                        });
-                    }
-                }
-                if has_copyable_pois {
-                    // TODO: revisit or remove once trigger radius and interaction is working
-                    let pois = copyable_pois
-                        .iter()
-                        .filter_map(|&poi_idx| pois.get(poi_idx as usize))
-                        //.filter(|poi| poi.category_idx == idx);
-                        .filter(|poi| poi.category == category.full_id);
-                    for (i, copyable) in pois.enumerate() {
-                        if i % 4 != 3 {
-                            ui.same_line();
-                        }
-                        let copied = match &copyable.attributes.tip_name {
-                            Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
-                            None => with_i18n!("copy", |copy| ui.small_button(copy)),
-                        };
-                        if copied {
-                            Self::copy_copyable(ui, &copyable.attributes);
-                        }
-                        if ui.is_item_hovered() {
-                            let template = copyable
-                                .attributes
-                                .tip_name
-                                .as_ref()
-                                .map(|n| &n[..])
-                                .unwrap_or("Generic Copyable Marker Name");
-                            Self::draw_tooltip(ui, template, || {
-                                Self::draw_tooltip_poi(ui, &copyable.attributes);
-                                Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
-                            });
-                        }
-                    }
-                }
-                ui.table_next_column();
-                if !category.is_separator {
-                    if let Some(idx) = all_categories.get_index_of(&category.full_id) {
-                        if let Some(mut substate) = state.get_mut(idx) {
-                            if ui.checkbox("", &mut substate) {
-                                *recompute = true;
-                                PathingController::try_send(PathingEvent::PathingStateUpdate(
-                                    category.full_id.clone(),
-                                    *substate,
-                                ));
-                            };
-                        }
-                    }
-                }
-                let mut internal_closure = || {
-                    if !open_items.contains(&category.full_id)
-                        && !category.is_separator
-                        && !category.sub_categories.is_empty()
-                    {
-                        open_items.insert(category.full_id.clone());
-                    }
-                    if !category.sub_categories.is_empty() {
-                        ui.indent(); //_by(1.0);
-                    }
-                    for (_local, global) in category.sub_categories.iter() {
-                        Self::draw_category(
-                            ui,
-                            &all_categories[global],
-                            all_categories,
-                            state,
-                            filter_state,
-                            open_items,
-                            false,
-                            recompute,
-                            search_state,
-                            category_filter,
-                            copyable,
-                        );
-                    }
-                    if !category.sub_categories.is_empty() {
-                        ui.unindent(); //_by(1.0);
-                    }
-                };
-                ui.table_next_column();
-                if let Some(token) = tree_token {
-                    internal_closure();
-                    token.pop();
-                } else {
-                    if open_items.contains(&category.full_id) {
-                        open_items.remove(&category.full_id);
-                    }
-                }
-            }
-        }
-        push_token.pop();
-    }
-
-    #[cfg(deleteme)]
-    fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
-        let Some(copy_value) = &attributes.copy_value else { return };
-        ui.set_clipboard_text(copy_value);
-        if let Some(copy_message) = &attributes.copy_message {
-            let _ = rt::send_alert(ui, copy_message);
-        }
-    }
-
-    #[cfg(deleteme)]
-    fn draw_tooltip_category(ui: &Ui, category: &Category) {
-        let desc = match &category.marker_attributes.tip_description {
-            Some(desc) if !desc.is_empty() => Some(&desc[..]),
-            _ => None,
-        };
-        let title = match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
-                Some(&title[..]),
-            _ => None,
-        };
-
-        if let Some(title) = title {
-            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
-            ui.text(title);
-        }
-
-        if let Some(tip) = desc {
-            ui.text_wrapped(tip);
-        }
-    }
-
-    #[cfg(deleteme)]
-    fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
-        let desc = match &attributes.tip_description {
-            Some(desc) if !desc.is_empty() => Some(&desc[..]),
-            _ => None,
-        };
-
-        if let Some(title) = &attributes.tip_name {
-            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
-            ui.text(title);
-        }
-        if let Some(desc) = &attributes.tip_description {
-            ui.text_wrapped(desc);
-        }
-    }
-
-    #[cfg(deleteme)]
-    fn category_has_tooltip(category: &Category) -> bool {
-        match &category.marker_attributes.tip_description {
-            Some(desc) if !desc.is_empty() => return true,
-            _ => (),
-        }
-        match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) => return true,
-            _ => (),
-        }
-
-        false
-    }
-
-    #[cfg(deleteme)]
-    /// since these aren't intended to be displayed, there's no canon name to use...
-    /// if it looks like more than just a location link, we'll try to preview it
-    fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
-        let Some(copy_value) = attributes.copy_value.as_ref() else { return false };
-        if !copy_value.starts_with('[') || !copy_value.ends_with(']') {
-            return true
-        }
-        false
-    }
-
-    #[cfg(deleteme)]
-    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
-        use imgui::StyleVar;
-
-        let _id = ui.push_id("category_tooltip");
-        let [minwidth, lineheight] = ui.calc_text_size(title_template);
-        unsafe {
-            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
-        };
-        let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
-        ui.tooltip(|| {
-            {
-                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
-                ui.dummy([minwidth, f32::EPSILON]);
-            }
-            f()
-        })
-    }
-
-    #[cfg(deleteme)]
-    fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
-        let copy_message = attributes.copy_message.as_ref().map(|m| &m[..]);
-        match &attributes.copy_value {
-            Some(copy_value)
-                if (display_name.is_none() || copy_message.is_none())
-                    && Self::copyable_value_has_message(attributes) =>
-                ui.text_wrapped(&format!("\"{copy_value}\"")),
-            _ => (),
-        }
-        if let Some(copy_message) = copy_message {
-            ui.text_wrapped(copy_message);
-        }
-    }
-
-    #[cfg(deleteme)]
-    pub fn disable_paths(&mut self, pack: &Pack, paths: &HashSet<String>, festivals: Festivals) {
-        for path in paths {
-            if let Some(idx) = pack.categories.all_categories.get_index_of(path) {
-                if let Some(mut state) = self.user_category_state.get_mut(idx) {
-                    *state = false;
-                }
-            }
-        }
-        self.recompute_enabled(pack, festivals);
-    }
-
-    #[cfg(deleteme)]
-    pub fn recompute_enabled(&mut self, pack: &Pack, festivals: Festivals) {
-        let all = &pack.categories.all_categories;
-        for root_category_id in &pack.categories.root_categories {
-            if let Some(root) = all.get(root_category_id) {
-                root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
-            }
-        }
-        for (i, (_, category)) in pack.categories.all_categories.iter().enumerate() {
-            if category
-                .marker_attributes
-                .festivals
-                .as_ref()
-                .map(|f| !f.iter().any(|&f| festivals.contains(f.into())))
-                .unwrap_or(false)
-            {
-                self.enabled_categories.set(i, false)
-            }
-        }
-        // in response to update(...), moving update_filters down here where it should actually be
-        // effective to save on useless loops
-        #[cfg(deleteme)] {
-        self.update_filters();
         }
     }
 
@@ -602,12 +95,6 @@ impl ActivePack {
         self.unused_textures.push(false);
         let idx = self.texture_list.insert_full(asset.to_string(), None).0;
         PackTextureHandle(idx)
-    }
-
-    #[cfg(deleteme)]
-    pub fn loader(&mut self) -> &mut dyn PackLoaderContext {
-        let loader: &mut (dyn PackLoaderContext + Send) = &mut self.loader;
-        loader
     }
 
     pub fn get_or_load_texture<'t>(
@@ -708,40 +195,11 @@ impl ActivePack {
         //self.recompute_enabled();
     }
 
-    #[cfg(deleteme)]
-    fn update_filters(&mut self) {
-        for (_i, trail) in self.active_trails.iter_mut().enumerate() {
-            let enabled = self.enabled_categories.get(trail.category_idx as usize).map(|b| *b);
-            if enabled.is_none() && !trail.is_empty() {
-                log::error!(
-                    "unknown category index {} for trail[{_i}]",
-                    trail.category_idx,
-                );
-            }
-            trail.visibility.set(VisibilityFlags::TOGGLE, enabled.unwrap_or(true));
-        }
-        for (_i, poi) in self.active_pois.iter_mut().enumerate() {
-            let enabled = self.enabled_categories.get(poi.category_idx as usize).map(|b| *b);
-            if enabled.is_none() && !poi.is_empty() {
-                log::error!(
-                    "unknown category index {} for poi[{_i}]",
-                    poi.category_idx,
-                );
-            }
-            poi.visibility.set(VisibilityFlags::TOGGLE, enabled.unwrap_or(true));
-        }
-    }
-
     pub fn clear(&mut self) {
         //self.unused_textures.copy_from_bitslice(&self.loaded_textures);
         self.unused_textures |= &self.loaded_textures;
         self.active_trails.clear();
         self.active_pois.clear();
-        #[cfg(deleteme)] {
-        self.available_categories.clear();
-        self.copyable_categories.clear();
-        self.copyable_pois.clear();
-        }
         self.render_list_bookmark = None;
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
@@ -764,12 +222,8 @@ pub struct PackTextureHandle(usize);
 pub struct PackCollection {
     pub loaded_packs: Vec<ActivePack>,
 
-    #[cfg(deleteme)]
-    pub current_map: Option<i32>,
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
-    #[cfg(deleteme)]
-    pub trail_params: TrailParams,
 }
 
 impl PackCollection {
@@ -777,11 +231,7 @@ impl PackCollection {
         let poi_common = PoiCommonRenderData::new(backend)?;
         Ok(PackCollection {
             loaded_packs: Default::default(),
-            #[cfg(deleteme)]
-            current_map: None,
             render_list: RenderListBuilder::default().build(),
-            #[cfg(deleteme)]
-            trail_params: TrailParams::default(),
             poi_common,
         })
     }
@@ -796,73 +246,9 @@ impl PackCollection {
     pub fn pack_mut<'a>(&'a mut self, path: &PackPath) -> &'a mut ActivePack {
         let index = path.path as usize;
         if self.loaded_packs.len() <= index {
-            self.loaded_packs.resize_with(index + 1, || ActivePack::new(std::iter::empty()));
+            self.loaded_packs.resize_with(index + 1, || ActivePack::new());
         }
         &mut self.loaded_packs[index]
-    }
-
-    #[cfg(deleteme)]
-    pub fn load_all(&mut self, base_dir: &Path) -> anyhow::Result<()> {
-        if !base_dir.exists() {
-            create_dir_all(base_dir)?;
-        }
-        self.clear();
-        for entry in read_dir(base_dir)? {
-            let entry = entry?;
-            self.load(&entry.file_name().to_string_lossy(), &entry.path());
-        }
-        Ok(())
-    }
-
-    #[cfg(deleteme)]
-    pub fn load(&mut self, name: &str, path: &Path) {
-        let result = if path.is_dir() {
-            let loader = DirectoryLoader::new(path);
-            ActivePack::load(loader)
-        } else {
-            match path.extension().map(|e| e.as_encoded_bytes()) {
-                Some(e) if e.eq_ignore_ascii_case(b"taco") =>
-                    ZipLoader::new(path).and_then(ActivePack::load),
-                _ => {
-                    self.unloaded_packs
-                        .insert(name.into(), UnloadedReason::UnknownFormat);
-                    return;
-                },
-            }
-        };
-        let pack = match result {
-            Ok(pack) => pack,
-            Err(e) => {
-                self.unloaded_packs
-                    .insert(name.into(), UnloadedReason::LoadingFailed(format!("{e:?}")));
-                return;
-            },
-        };
-        self.loaded_packs.insert(name.into(), pack);
-    }
-
-    #[cfg(deleteme)]
-    pub fn add_pack(&mut self, pack: Arc<Pack>, loader: LoaderBox) -> usize {
-        let name = pack.name.clone();
-        let active = ActivePack::new(pack, loader);
-        let (idx, old) = self.loaded_packs.insert_full(name, active);
-        if let Some(pack) = old {
-            log::info!("Pack {} reloaded", pack.pack.name);
-            if let Some(bookmark) = pack.render_list_bookmark {
-                let end = bookmark + pack.active_pois.len() + pack.active_trails.len();
-                for e in self
-                    .render_list
-                    .entities_mut()
-                    .get_mut(bookmark..end)
-                    .into_iter()
-                    .flatten()
-                {
-                    e.disable();
-                }
-            }
-            drop(pack);
-        }
-        idx
     }
 
     pub fn load_pack<P, T>(&mut self, _device: &Dx11Device, pack_idx: PackIndex, pois: P, trails: T) -> anyhow::Result<()> where
@@ -896,11 +282,6 @@ impl PackCollection {
         self.mark_buffers_dirty();
 
         Ok(())
-    }
-
-    #[cfg(deleteme)]
-    pub fn load_failed(&mut self, name: String, reason: UnloadedReason) {
-        self.unloaded_packs.insert(name, reason);
     }
 
     fn build_active_pack<P, T>(
@@ -1227,11 +608,7 @@ impl PackCollection {
     }
 
     pub fn unload_map(&mut self, _device_context: &Dx11Context, _map_id: u32) -> anyhow::Result<()> {
-        //if self.current_map != Some(_map_id) { return }
         self.clear_active();
-        #[cfg(deleteme)] {
-        self.current_map = None;
-        }
 
         Ok(())
     }

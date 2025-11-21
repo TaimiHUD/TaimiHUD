@@ -5,9 +5,11 @@ use {
     uuid::Uuid,
     xml::name::Name,
 };
+pub use self::festival::{Festival, Festivals};
 
 pub mod keys;
 pub mod cell;
+pub mod festival;
 
 #[derive(Debug, Clone, Default)]
 /// Attributes for markers. Inherits up the category stack.
@@ -527,79 +529,6 @@ impl FromStr for CullDirection {
         } else {
             Err(anyhow!("unexpected cull direction `{s}`"))
         }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
-pub enum Festival {
-    Halloween,
-    Wintersday,
-    #[cfg_attr(feature = "serde", serde(rename = "superadventurefestival"))]
-    SuperAdventureBox,
-    LunarNewYear,
-    #[cfg_attr(feature = "serde", serde(rename = "festivalofthefourwinds"))]
-    FourWinds,
-    DragonBash,
-}
-
-impl Festival {
-    pub const ALL: &'static [Self] = &[
-        Self::LunarNewYear,
-        Self::SuperAdventureBox,
-        Self::DragonBash,
-        Self::FourWinds,
-        Self::Halloween,
-        Self::Wintersday,
-    ];
-
-    pub fn all() -> impl Iterator<Item = Self> + Clone {
-        Self::ALL.iter().copied()
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Halloween => "halloween",
-            Self::Wintersday => "wintersday",
-            Self::SuperAdventureBox => "superadventurefestival",
-            Self::LunarNewYear => "lunarnewyear",
-            Self::FourWinds => "festivalofthefourwinds",
-            Self::DragonBash => "dragonbash",
-        }
-    }
-}
-
-impl FromStr for Festival {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("halloween") {
-            Ok(Self::Halloween)
-        } else if s.eq_ignore_ascii_case("wintersday") {
-            Ok(Self::Wintersday)
-        } else if s.eq_ignore_ascii_case("superadventurefestival") {
-            Ok(Self::SuperAdventureBox)
-        } else if s.eq_ignore_ascii_case("lunarnewyear") {
-            Ok(Self::LunarNewYear)
-        } else if s.eq_ignore_ascii_case("festivalofthefourwinds") {
-            Ok(Self::FourWinds)
-        } else if s.eq_ignore_ascii_case("dragonbash") {
-            Ok(Self::DragonBash)
-        } else {
-            Err(anyhow!("unexpected festival `{s}`"))
-        }
-    }
-}
-
-impl AsRef<str> for Festival {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl Into<String> for Festival {
-    fn into(self) -> String {
-        self.as_str().into()
     }
 }
 
