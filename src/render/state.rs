@@ -515,8 +515,19 @@ impl RenderState {
             .unwrap_or(false)
     }
 
-    pub fn pre_render() {
-        IS_RENDER_THREAD.set(true);
+    pub fn pre_render() -> bool {
+        let ready = IS_RENDER_THREAD.replace(true);
+        ready || !Self::is_running()
+    }
+
+    pub fn render_setup(_ui: &Ui) {
+        if !Self::is_running() {
+            return
+        }
+        crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
+
+        #[cfg(todo)]
+        if let Some(mut state) = Self::lock() {}
     }
 
     pub fn render_ui(ui: &Ui) {

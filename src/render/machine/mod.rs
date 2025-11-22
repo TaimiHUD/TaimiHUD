@@ -308,6 +308,10 @@ impl RenderMachine {
         }
     }
 
+    pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_lines256";
+    pub const TEXTURE_LOGO_BIN: &'static [u8] =
+        include_bytes!("../../../data/textures/logotype-lines-256.png");
+
     pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]
         let controls_changed = self.controls.update().map(|(&state, changes)| (state, changes));

@@ -439,7 +439,9 @@ fn load_nexus() {
 
     let taimi_window = nexus::gui::render!(|ui| {
         #[cfg(not(feature = "space"))]
-        RenderState::pre_render();
+        if !RenderState::pre_render() {
+            RenderState::render_setup(ui);
+        }
         RenderMachine::turn_ui_entry(ui);
         RenderState::render_ui(ui);
     });
@@ -449,8 +451,13 @@ fn load_nexus() {
     #[cfg(feature = "space")]
     {
         extern "C-unwind" fn nexus_pre_render() {
-            RenderState::pre_render();
-            RenderMachine::turn_render_entry()
+            let render_ready = RenderState::pre_render();
+            RenderMachine::turn_render_entry();
+            if !render_ready {
+                #[cfg(feature = "extension-nexus-codegen")]
+                let ui = unsafe { nexus::ui() };
+                RenderState::render_setup(ui);
+            }
         }
         let render_callback_pre = register_render(RenderType::PreRender, nexus_pre_render);
         *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
