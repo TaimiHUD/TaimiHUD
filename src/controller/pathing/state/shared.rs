@@ -45,7 +45,7 @@ impl SharedMapPackInfo {
             Some(shared_info) => {
                 let shared_info = shared_info.as_ref().map(Arc::as_ptr)
                     .map_err(|r| &r.reason);
-                let pack_info = pack.info.as_ref().map(Arc::as_ptr);
+                let pack_info = pack.info.info.as_ref().map(Arc::as_ptr);
                 if pack_info == shared_info {
                     return
                 }
@@ -53,10 +53,10 @@ impl SharedMapPackInfo {
             None => (),
         }
 
-        let info = match pack.info.clone() {
+        let info = match pack.info.info.clone() {
             Ok(info) => Ok(info),
             Err(reason) => Err(UnloadedPack {
-                path: pack.path.to_path_buf(),
+                path: pack.info.path.to_path_buf(),
                 reason,
             }),
         };

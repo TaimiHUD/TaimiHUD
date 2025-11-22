@@ -34,21 +34,6 @@ impl LoadedCategory {
     pub const INVALID: Self = Self {
         visibility: VisibilityFlags::empty(),
     };
-
-    #[cfg(deleteme)]
-    pub fn from_pack(path: CategoryPath, pack: &Pack) -> Self {
-        let Some((_name, category)) = pack.categories.all_categories.get_index(path.path as usize) else {
-            return Self::INVALID
-        };
-
-        let mut visibility = VisibilityFlags::DEFAULTS;
-        visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
-        visibility.set_defaults_from_attributes(&category.marker_attributes);
-
-        Self {
-            visibility: visibility.restore_default_toggles(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -655,54 +640,6 @@ impl LoadedMapPack {
         }
     }
 
-    #[cfg(deleteme)]
-    pub fn update_categories(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig) -> CategorySet {
-        let Some((_, cat)) = self.categories_mut(info).find(|(p, _)| p.path == path.path) else { return None };
-        let mut children = Vec::new();
-        let mut damage = CategorySet::default();
-        let category_max = info.category_max_count();
-        children.extend(iter::once(path).chain(categories.children_of(path)));
-        while let Some(child) = children.pop() {
-            if child.path >= category_max {
-                continue
-            }
-            if !damage.insert_index(child.path) {
-                // shouldn't really happen...
-                continue
-            }
-            children.extend(categories.children_of(child));
-        }
-        Some(damage)
-    }
-
-    #[cfg(deleteme)]
-    pub fn update_visibility(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, path: CategoryPath, state: VisibilityFlags) -> Option<CategorySet> {
-        let Some((_, cat)) = self.categories_mut(info).find(|(p, _)| p.path == path.path) else { return None };
-        let prev = cat.visibility;
-        cat.visibility.set_toggles(state);
-        if prev != cat.visibility {
-            let mut children = Vec::new();
-            let mut damage = CategorySet::default();
-            let category_max = info.category_max_count();
-            children.extend(iter::once(path).chain(categories.children_of(path)));
-            while let Some(child) = children.pop() {
-                if child.path >= category_max {
-                    continue
-                }
-                if !damage.insert_index(child.path) {
-                    // shouldn't really happen...
-                    continue
-                }
-                children.extend(categories.children_of(child));
-            }
-            Some(damage)
-        } else { None }
-    }
-
-    #[cfg(deleteme)]
-    pub fn apply_category_damage(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, damage: &CategorySet) {
-        self.apply_category_visibility(info, categories, Some(damage));
-    }
     pub fn apply_category_visibility(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, damage: Option<&CategorySet>) {
         let range = 0..info.category_max_count();
         let mut category_state: BitVec = BitVec::with_capacity(range.end as usize);

@@ -397,21 +397,6 @@ impl PathingWindowState {
                 let table_token = ui.begin_table_with_flags(
                     &table_name,
                     1,
-                    #[cfg(deleteme)]
-                    [
-                        TableColumnSetup {
-                            name: &fl!("name"),
-                            flags: TableColumnFlags::WIDTH_STRETCH,
-                            init_width_or_weight: 0.0,
-                            user_id: Id::Str("name"),
-                        },
-                        TableColumnSetup {
-                            name: &fl!("toggle"),
-                            flags: TableColumnFlags::WIDTH_FIXED,
-                            init_width_or_weight: 0.0,
-                            user_id: Id::Str("actions"),
-                        },
-                    ],
                     table_flags,
                 );
                 ui.table_next_column();
@@ -716,8 +701,6 @@ impl PathingWindowState {
                     log::error!("category count ({}) mismatch! {category_path}", state.len());
                     continue
                 }
-                #[cfg(deleteme)]
-                let vis_effective = cat.visibility.is_visible();
                 let vis_configured = cat.visibility.contains(VisibilityFlags::DEFAULT_TOGGLE);
                 state.set(index, vis_configured);
             }
@@ -1426,44 +1409,6 @@ impl PathingWindowState {
         (push_token, tree_token)
     }
 
-    #[cfg(todo)]
-    pub fn draw_category<'u>() {
-        if category.is_hidden {
-            return
-        }
-        let (_id_token, tree_token) = self.draw_category_header();
-        if let Some(_token) = tree_token {
-            if !open_items.contains(&category.full_id)
-                && !category.is_separator
-                && !category.sub_categories.is_empty()
-            {
-                open_items.insert(category.full_id.clone());
-            }
-            if !category.sub_categories.is_empty() {
-                ui.indent(); //_by(1.0);
-            }
-            for (_local, global) in category.sub_categories.iter() {
-                Self::draw_category(
-                    ui,
-                    path,
-                    &all_categories[global],
-                    all_categories,
-                    state,
-                    filter_state,
-                    open_items,
-                    false,
-                    recompute,
-                    search_state,
-                    category_filter,
-                    copyable,
-                );
-            }
-            if !category.sub_categories.is_empty() {
-                ui.unindent(); //_by(1.0);
-            }
-        }
-    }
-
     fn copy_copyable(ui: &Ui, copy_value: &str, copy_message: &str) {
         if !copy_value.is_empty() {
             ui.set_clipboard_text(copy_value);
@@ -1507,25 +1452,6 @@ impl PathingWindowState {
         if let Some(desc) = &attributes.tip_description {
             ui.text_wrapped(&desc[..]);
         }
-    }
-
-    #[cfg(deleteme)]
-    fn category_has_tooltip<N, D>(display_name: &str, tip_name: Option<N>, tip_description: Option<D>) -> bool where
-        N: AsRef<str>,
-        D: AsRef<str>,
-    {
-        let tip_description = tip_description.as_ref().map(AsRef::as_ref);
-        match tip_description {
-            Some(desc) if !desc.is_empty() => return true,
-            _ => (),
-        }
-        let tip_name = tip_name.as_ref().map(AsRef::as_ref);
-        match tip_name {
-            Some(title) if !title.is_empty() && !display_name.starts_with(title) => return true,
-            _ => (),
-        }
-
-        false
     }
 
     /// since these aren't intended to be displayed, there's no canon name to use...

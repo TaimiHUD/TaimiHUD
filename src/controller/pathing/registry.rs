@@ -1,20 +1,12 @@
 use {
     super::{festivals::FestivalFixup, visible::{VisibilityFlagSet, VisibilityFlags}}, crate::{
-        controller::{Controller, ControllerEvent},
-        exports::runtime::{self as rt, bindings::{GameControl, GameControls, TaimiControls, CONTROLS}, locator::{LocationMut, LocationRef}, Locator},
-        render::machine::RenderTaskPriority,
-        settings::{DataSourcePath, PathingSettings, Settings, SettingsLock, SourceKind},
-        space::{
-            engine::SpaceEvent,
-            Engine,
-        },
-    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, futures::{future, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{btree_set, BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, future::Future, hash, iter, mem, num::NonZero, ops, path::{Path, PathBuf}, ptr, sync::{Arc, Weak}}, strum_macros::Display, taimi_meta::{map::MapID, ui::MapContext}, taimi_pack::{
+        controller::Controller,
+        exports::runtime::{self as rt, locator::{LocationMut, LocationRef}, Locator},
+        settings::{DataSourcePath, PathingSettings, SettingsLock},
+    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, futures::{future, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{btree_set, BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, future::Future, hash, iter, mem, num::NonZero, path::{Path, PathBuf}, ptr, sync::{Arc, Weak}}, taimi_meta::map::MapID, taimi_pack::{
         attributes::Festival, category::{id::{AsFullId, CategoryId}, Category}, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, pack::CategoryCollection, trail::TrailData, Pack
-    }, tokio::{
-        fs::create_dir_all,
-        sync::{watch, Mutex},
-        time::{sleep, Duration},
-    }, tokio_util::sync::ReusableBoxFuture,
+    }, tokio::sync::{watch, Mutex},
+    tokio_util::sync::ReusableBoxFuture,
 };
 #[cfg(doc)]
 use taimi_pack::attributes::keys;
@@ -46,7 +38,7 @@ impl PackRegistry {
         })
     }
     pub fn unloaded_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, Result<&'a Arc<PackInfo>, &'a UnloadedReason>)> {
-        self.all_packs().filter_map(|(path, pack)| match &pack.info {
+        self.all_packs().filter_map(|(path, pack)| match &pack.info.info {
             Err(reason) => Some((path, pack, Err(reason))),
             Ok(info) if pack.active.is_none() => Some((path, pack, Ok(info))),
             Ok(..) => None,
@@ -55,7 +47,7 @@ impl PackRegistry {
 
     pub fn packs_for_map(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &LoadedPack)> {
         self.all_packs()
-            .filter(move |(_, pack)| match &pack.info {
+            .filter(move |(_, pack)| match &pack.info.info {
                 Ok(info) => info.maps.contains(map_id),
                 _ => false,
             })
@@ -68,7 +60,7 @@ impl PackRegistry {
         stream::iter(self.all_packs_mut())
             .map(move |(path, pack)| async move {
                 match pack.activate(manager).await {
-                    Ok(..) => match &pack.info {
+                    Ok(..) => match &pack.info.info {
                         Ok(info) if info.maps.contains(map_id) =>
                             Some((path, pack)),
                         _ => None,
@@ -85,11 +77,11 @@ impl PackRegistry {
     pub fn preload<P>(&mut self, path: P, datasource: Option<DataSourcePath>, manager: &PackLoader) -> PackPath where
         P : AsRef<Path> + Into<PathBuf>,
     {
-        if let Some((i, pack)) = self.packs.iter_mut().enumerate().find(|(_, p)| p.path.as_ref() == path.as_ref()) {
+        if let Some((i, pack)) = self.packs.iter_mut().enumerate().find(|(_, p)| p.info.path.as_ref() == path.as_ref()) {
             // ?
-            pack.datasource = datasource;
+            pack.info.datasource = datasource;
             let path = PackPath::with_path(i as PackIndex);
-            manager.shared_update_pack_info(path, &pack.pack_info);
+            manager.shared_update_pack_info(path, &pack.info);
             return path
         }
 
@@ -98,7 +90,7 @@ impl PackRegistry {
         self.packs.push(LoadedPack::new_unloaded(index, path.into(), datasource));
         if let Some(pack) = self.packs.last() {
             // dumb if :<
-            manager.shared_update_pack_info(pack.index, &pack.pack_info);
+            manager.shared_update_pack_info(pack.info.index, &pack.info);
         }
         index
     }
@@ -203,7 +195,7 @@ impl fmt::Display for MapNs {
 
 #[derive(Debug)]
 pub struct LoadedPack {
-    pub pack_info: LoadedPackInfo,
+    pub info: LoadedPackInfo,
     pub active: Option<Arc<ActivePack>>,
     pub config: Option<watch::Sender<Arc<PackConfig>>>,
 }
@@ -211,7 +203,7 @@ pub struct LoadedPack {
 impl LoadedPack {
     pub fn new_unloaded(index: PackPath, path: PathBuf, datasource: Option<DataSourcePath>) -> Self {
         Self {
-            pack_info: LoadedPackInfo {
+            info: LoadedPackInfo {
                 index,
                 path: path.into(),
                 datasource,
@@ -225,68 +217,15 @@ impl LoadedPack {
     /// Free up memory related to this pack when not in use
     pub fn deactivate(&mut self, manager: &PackLoader) {
         let _ = self.active.take();
-        manager.shared_update_pack_active(self.pack_info.index, None);
+        manager.shared_update_pack_active(self.info.index, None);
     }
 
     pub fn mark_reload(&mut self, manager: &PackLoader) {
-        if let Err(reason) = &mut self.info {
+        if let Err(reason) = &mut self.info.info {
             *reason = UnloadedReason::Pending;
-            manager.shared_update_pack_info(self.pack_info.index, &self.pack_info);
+            manager.shared_update_pack_info(self.info.index, &self.info);
         }
         self.deactivate(manager);
-    }
-
-    #[cfg(deleteme)]
-    pub async fn activate(&mut self, manager: &PackLoader) -> anyhow::Result<Option<()>> {
-        if self.active.is_some() {
-            return Ok(Some(()))
-        }
-
-        let (pack, format) = {
-            let (format, context) = match &self.info {
-                Ok(info) => (
-                    Some(info.format),
-                    format!("Reloading pack {info}"),
-                ),
-                Err(UnloadedReason::Pending) => {
-                    let name = self.path.file_name()
-                        .map(Path::new)
-                        .unwrap_or_else(|| rt::relative_path(&self.path));
-                    (
-                        PackFormat::guess_for_path(&self.path),
-                        format!("Loading pack {}", name.display()),
-                    )
-                },
-                Err(_reason) => return Ok(None),
-            };
-
-            match format {
-                Some(format) => {
-                    let loader = format.loader_for_path(self.path.clone()).await;
-                    let pack = match loader {
-                        Ok(loader) => manager.load_pack(loader).await,
-                        Err(e) => Err(e),
-                    }.context(context);
-                    (pack, format)
-                },
-                None => {
-                    self.info = Err(UnloadedReason::UnknownFormat);
-                    return Err(anyhow!("unknown pack format").context(context))
-                },
-            }
-        };
-        match pack {
-            Err(e) => {
-                let err = anyhow!("{e:#}");
-                self.info = Err(UnloadedReason::LoadingFailed(e));
-                Err(err)
-            },
-            Ok(pack) => {
-                self.info = Ok(PackInfo::from_pack(&pack.pack, format));
-                self.active = Some(pack);
-                Ok(Some(()))
-            },
-        }
     }
 
     pub fn activate_start(&mut self) -> anyhow::Result<Option<(PackFormat, String, Option<bool>)>> {
@@ -294,17 +233,17 @@ impl LoadedPack {
             return Ok(None)
         }
 
-        let (format, context) = match &self.info {
+        let (format, context) = match &self.info.info {
             Ok(info) => (
                 Some(info.format),
                 format!("Reloading pack {info}"),
             ),
             Err(UnloadedReason::Pending) => {
-                let name = self.path.file_name()
+                let name = self.info.path.file_name()
                     .map(Path::new)
-                    .unwrap_or_else(|| rt::relative_path(&self.path));
+                    .unwrap_or_else(|| rt::relative_path(&self.info.path));
                 (
-                    PackFormat::guess_for_path(&self.path),
+                    PackFormat::guess_for_path(&self.info.path),
                     format!("Loading pack {}", name.display()),
                 )
             },
@@ -322,7 +261,7 @@ impl LoadedPack {
                 Ok(Some((format, context, wants_config)))
             },
             None => {
-                self.info = Err(UnloadedReason::UnknownFormat);
+                self.info.info = Err(UnloadedReason::UnknownFormat);
                 Err(anyhow!("unknown pack format").context(context))
             },
         }
@@ -363,21 +302,21 @@ impl LoadedPack {
                 #[cfg(todo)]
                 let e = e.into_boxed_dyn_error().into();
                 let e: Arc<dyn StdError + Send + Sync> = Box::<dyn StdError + Send + Sync>::from(e).into();
-                self.pack_info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
-                manager.shared_update_pack_info(self.pack_info.index, &self.pack_info);
+                self.info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
+                manager.shared_update_pack_info(self.info.index, &self.info);
                 Err(e.into())
             },
             Ok((pack, info, config)) => {
-                self.pack_info.info = Ok(info);
+                self.info.info = Ok(info);
                 let active = self.active.insert(pack);
                 if let Some(config) = config {
                     let update_config = self.config.is_none();
                     Self::try_update_config_inner(&mut self.config, config);
                     if update_config {
-                        manager.shared_update_pack_config(self.pack_info.index, self.config.as_ref());
+                        manager.shared_update_pack_config(self.info.index, self.config.as_ref());
                     }
                 }
-                manager.shared_update_pack_active(self.pack_info.index, Some(active));
+                manager.shared_update_pack_active(self.info.index, Some(active));
                 Ok(())
             },
         }
@@ -388,7 +327,7 @@ impl LoadedPack {
             None => return Ok(None),
             Some(activate) => activate,
         };
-        let res = Self::activate_load(activate, self.path.to_path_buf(), manager).await;
+        let res = Self::activate_load(activate, self.info.path.to_path_buf(), manager).await;
         self.activate_finish(res, manager).map(Some)
     }
 
@@ -438,36 +377,23 @@ impl LoadedPack {
     }
     pub fn get_info(&self) -> Option<(Arc<PackInfo>, Arc<PackConfig>)> {
         let config = self.config.as_ref().map(|c| c.borrow().clone());
-        self.info.as_ref().ok().cloned()
+        self.info.info.as_ref().ok().cloned()
             .map(|i| (i, config.unwrap_or_default()))
     }
 }
 
 impl fmt::Display for LoadedPack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Ok(info) = &self.info {
+        if let Ok(info) = &self.info.info {
             fmt::Display::fmt(info, f)
-        } else if let Some(datasource) = &self.datasource {
+        } else if let Some(datasource) = &self.info.datasource {
             fmt::Display::fmt(&datasource.path, f)
         } else {
-            let name = self.path.file_name()
+            let name = self.info.path.file_name()
                 .map(Path::new)
-                .unwrap_or_else(|| rt::relative_path(&self.path));
+                .unwrap_or_else(|| rt::relative_path(&self.info.path));
             fmt::Display::fmt(&name.display(), f)
         }
-    }
-}
-
-/// TODO: deleteme and rename field to `info`
-impl ops::Deref for LoadedPack {
-    type Target = LoadedPackInfo;
-    fn deref(&self) -> &Self::Target {
-        &self.pack_info
-    }
-}
-impl ops::DerefMut for LoadedPack {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.pack_info
     }
 }
 

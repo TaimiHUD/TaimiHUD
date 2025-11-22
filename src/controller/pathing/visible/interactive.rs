@@ -1,6 +1,6 @@
 use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, PackMapPath, PoiIndex, PoiPath}, visible::LoadedPoi, MapPackInfo}, exports::runtime::Locator, settings::pathing::TriggerKind, space::pack::PackSpace};
 use glamour::Point3;
-use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior, ScriptAttributes}, MarkerAttributes, Pack};
+use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior, ScriptAttributes}, Pack};
 
 #[derive(Debug, Clone, Default)]
 pub struct InteractivePoi {

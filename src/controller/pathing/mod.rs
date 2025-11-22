@@ -1,12 +1,12 @@
 use taimi_pack::category::id::FullIdRef;
 
 use {
-    self::{registry::{CategoryIndex, LoadedPack, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex, UnloadedReason}, visible::LoadedMapPack}, crate::{controller::Controller, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, PathingSettings, Settings, SourceKind}, space::{
+    self::{registry::{CategoryIndex, LoadedPack, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex}, visible::LoadedMapPack}, crate::{controller::Controller, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, PathingSettings, Settings, SourceKind}, space::{
             engine::SpaceEvent, pack::{trail::TrailParams, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, AutoReset, HideContext}, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackInfo, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, BTreeMap, BTreeSet, BinaryHeap}, fmt, future::Future, iter, num::NonZero, ops, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, AutoReset, HideContext}, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, BTreeMap, BinaryHeap}, future::Future, iter, num::NonZero, ops, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::{keys::Guid, Festival, Festivals},
     tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
-    }, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedCategory, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
+    }, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
 };
 use crate::render::machine::MumbleIdentityUpdate;
 pub use self::state::shared::{SharedMapPackInfo, SharedMapPackState};
@@ -100,29 +100,6 @@ impl PathingEventContext {
             filter_state_signal: true,
             rx_interactions,
         }
-    }
-
-    #[cfg(deleteme)]
-    pub async fn pack_changes(pack_configs: &mut [(watch::Receiver<PackConfig>, ReusableBoxFuture<'static, Result<(), watch::error::RecvError>>)]) -> PackPath {
-        let amt = pack_configs.len();
-        #[cfg(todo)]
-        loop {
-            for (i, c) in pack_configs.iter_mut().enumerate() {
-                let r = c.changed().await;
-                ready = Some((PackPath::with_path(i as PackIndex), r));
-            }
-            let mut ready = stream::iter(pack_configs.iter_mut().enumerate().map(|(i, (_, c))|
-                c.map(move |c| (PackPath::with_path(i as PackIndex), c))
-            )).buffer_unordered(amt);
-            #[cfg(deleteme)]
-            let ready = Box::pin(ready).next().await;
-            match ready.next().await {
-                Some((p, Ok(()))) => return p,
-                Some((_p, Err(..))) => (),
-                None => break,
-            }
-        }
-        future::pending().await
     }
 
     pub fn spawn<F>(&mut self, f: F) -> AbortHandle where
@@ -669,7 +646,7 @@ impl PathingController {
                 let map_pack_info = Arc::new(map_pack_info);
                 // TODO: swap out for a load_from_pack here?
                 let mut map_pack = LoadedMapPack::from_pack(map_id, &map_pack_info, pack);
-                if let Ok(info) = &pack.info {
+                if let Ok(info) = &pack.info.info {
                     pack.with_config(|config| {
                         let _damage = map_pack.update_category_config(&map_pack_info, &info.categories, config)
                             .map_err(drop);
@@ -726,9 +703,6 @@ impl PathingController {
     }
 
     pub fn handle_map_leave(&mut self) {
-        #[cfg(deleteme)] {
-            self.map_pack_info.clear();
-        }
         self.filter_state.hidden.reset_map_leave();
     }
 
@@ -740,7 +714,7 @@ impl PathingController {
             log::error!("can't update {path}={}, no config state?", state.bits());
             return
         };
-        let Ok(info) = &pack.pack_info.info else { return };
+        let Ok(info) = &pack.info.info else { return };
         let cat_vis = info.categories.visibility.get_for(path)
             .unwrap_or(VisibilityFlags::TOGGLES);
         let state_dev = cat_vis ^ state;
@@ -762,7 +736,7 @@ impl PathingController {
             log::error!("can't update {path}={state:?}, no config state?");
             return
         };
-        let Ok(info) = &pack.pack_info.info else { return };
+        let Ok(info) = &pack.info.info else { return };
         let cat_vis = !info.categories.disabled.contains(path);
         let toggle_dev = state.map(|state| cat_vis ^ state);
 
@@ -793,52 +767,6 @@ impl PathingController {
             } else {
                 log::warn!("{path} not found for toggle state update");
             }
-        }
-    }
-
-    #[cfg(deleteme)]
-    async fn handle_vis(&mut self, ctx: &mut PathingEventContext, path: CategoryPath<PackPath>, state: VisibilityFlags) {
-        let map_path = ctx.gameplay.borrow().gameplay_map()
-            .map(|map_id| path.swap(map_id));
-        if let Some((map_path, map, info)) = map_path.and_then(|map_path|
-            self.map_pack_info.get(&map_path).and_then(|info|
-                self.map_packs.get_mut(&map_path).map(|map| (map_path, map, info))
-            )
-        ) {
-            let mut state_dirty = false;
-            if let Some(pack_info) = Self::packs().read().await
-                .lookup_ref(&path.root)
-                .and_then(|pack| pack.info.as_ref().ok())
-            {
-                if let Some(damage) = map.update_visibility(info, &pack_info.categories, path.unscope(), state) {
-                    state_dirty = !damage.is_empty();
-                    map.apply_category_damage(info, &pack_info.categories, &damage);
-                }
-            }
-
-            if state_dirty {
-                // or self.prepare_pack().await?
-                PathingEvent::PreparePack(path.root).try_send();
-                ctx.pack_info.send_modify(|pack_info| {
-                    if let Some(shared_map) = pack_info.map_state.get_mut(&map_path) {
-                        shared_map.categories = map.categories.clone();
-                    }
-                });
-            }
-        }
-
-        // TODO: if state_dirty?
-        let full_id = Self::packs().read().await.lookup_ref(&path.root)
-            .and_then(|loaded|
-                loaded.active.as_ref()
-                    .and_then(|active| active.pack.categories.all_categories.get_index(path.path as usize))
-                    .map(|(_id, cat)| cat.full_id.clone()),
-            );
-        if let Some(full_id) = full_id {
-            let mut settings = self.settings.write().await;
-            crate::settings::PathingSettings::pathing_state_update(&mut settings, full_id, state.is_visible()).await;
-        } else {
-            log::warn!("{path} not found for toggle state update");
         }
     }
 
@@ -1008,104 +936,6 @@ impl PathingController {
         }
     }
 
-    #[cfg(deleteme)]
-    async fn load_all_inner(settings: SettingsLock) -> anyhow::Result<()> {
-        let _ = create_dir_all(SourceKind::Pathing.get_user_dir()).await;
-
-        let mut path_loads = tokio::task::JoinSet::new();
-
-        log::info!("Pre-loading all paths...");
-        let dir = Settings::read_source_dir(settings, SourceKind::Pathing).await;
-        futures::pin_mut!(dir);
-        while let Some(entry) = dir.next().await {
-            let (path, datasource) = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    log::error!("Failed to list pathing files: {e}");
-                    continue
-                },
-            };
-            // TODO: name could be source? what do we actually use that for, and is it meant to be user-facing or a unique id?
-            let name = path
-                .file_name()
-                .unwrap_or(path.as_ref())
-                .to_string_lossy()
-                .into_owned();
-            let context = format!("Loading pathing pack {name}");
-            log::debug!("{context}...");
-            let is_taco = path
-                .extension()
-                .map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
-            let is_taco = path.is_file() || is_taco.unwrap_or(false);
-            let loader = move || {
-                match is_taco {
-                    true => Self::pathing_load_taco(path),
-                    false => Self::pathing_load_dir(path),
-                }
-                .context(context)
-            };
-            let loader = async move {
-                let res = tokio::task::spawn_blocking(loader)
-                    .await
-                    .context("Path load panicked");
-                match res {
-                    Ok(Ok((pack, loader))) => {
-                        Self::pathing_load_pack(pack, loader, name).await;
-                        Ok(())
-                    },
-                    Err(e) | Ok(Err(e)) => {
-                        Self::pathing_notify_pack_error(
-                            name,
-                            UnloadedReason::LoadingFailed(anyhow!("{e:#}")),
-                        )
-                        .await;
-                        Err(e)
-                    },
-                }
-            };
-            path_loads.spawn(loader);
-        }
-
-        tokio::spawn(async move {
-            let mut disabled_paths_dirty = false;
-            loop {
-                let pack_load = path_loads.join_next();
-                let res = if disabled_paths_dirty {
-                    // throttle repeated state event if packs load quickly enough...
-                    let timeout = sleep(Duration::from_millis(174)).fuse();
-                    tokio::pin!(timeout);
-                    tokio::pin!(pack_load);
-                    loop {
-                        select! {
-                            res = &mut pack_load => break res,
-                            _ = &mut timeout => {
-                                // this will take a while, so emit the pending update
-                                Self::try_send(PathingEvent::RequestDisabledPaths);
-                                disabled_paths_dirty = false;
-                            },
-                        }
-                    }
-                } else {
-                    pack_load.await
-                }
-                .map(|r| r.context("Path load panicked"));
-                match res {
-                    None => break,
-                    Some(Err(e) | Ok(Err(e))) => log::error!("{e:#}"),
-                    Some(Ok(Ok(()))) => disabled_paths_dirty = true,
-                }
-            }
-
-            // TODO: sender+await, or ideally just make this unnecessary
-
-            if disabled_paths_dirty {
-                Self::try_send(PathingEvent::RequestDisabledPaths);
-            }
-        });
-
-        Ok(())
-    }
-
     async fn toggle_katrender(&mut self, ctx: &mut PathingEventContext) {
         {
             let mut settings = self.loader.settings.write().await;
@@ -1119,57 +949,6 @@ impl PathingController {
             self.handle_map_leave();
             self.unload_all(ctx, false).await;
         }
-    }
-
-    #[cfg(deleteme)]
-    fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
-        use taimi_pack::loader::ZipLoader;
-        let mut loader = ZipLoader::new(&path)?;
-        let pack = Pack::load(&mut loader)?;
-        Ok((pack, Box::new(loader)))
-    }
-
-    #[cfg(deleteme)]
-    fn pathing_load_dir(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
-        use taimi_pack::loader::DirectoryLoader;
-        let mut loader = DirectoryLoader::new(path);
-        let pack = Pack::load(&mut loader)?;
-        Ok((pack, Box::new(loader)))
-    }
-
-    #[cfg(deleteme)]
-    async fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
-        let context = format!("Loading pack {name} onto engine");
-        if pack.name.is_empty() {
-            pack.name = name;
-        }
-        let res = Controller::run_render(RenderTaskPriority::High, move |state| {
-            let engine = match &mut state.engine {
-                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                None => return Ok(()),
-            }?;
-            let pack = Arc::new(pack);
-            let pack_idx = engine.packs.add_pack(pack, loader);
-            engine.packs.load_pack(&engine.render_backend.device, pack_idx)
-        })
-        .await;
-        let res = res
-            .map(|res| res.context(context))
-            .context("Submitting pack to engine");
-        if let Err(e) | Ok(Err(e)) = res {
-            log::error!("{e:#}");
-        }
-    }
-    #[cfg(deleteme)]
-    async fn pathing_notify_pack_error(name: String, reason: UnloadedReason) {
-        let _ = Controller::run_render(RenderTaskPriority::Normal, move |state| {
-            let engine = match &mut state.engine {
-                Some(Ok(e)) => e,
-                _ => return,
-            };
-            engine.packs.load_failed(name, reason);
-        })
-        .await;
     }
 
     async fn unload_all(&mut self, ctx: &mut PathingEventContext, remove: bool) {
@@ -1218,165 +997,6 @@ impl PathingController {
             }
         }
         res.map(drop)
-    }
-
-    #[cfg(deleteme)]
-    async fn prepare_pack(&mut self, path: PackPath, ctx: &mut PathingEventContext) -> anyhow::Result<()> {
-        let gameplay = ctx.gameplay.watch.receiver().clone();
-        let setup = {
-            let Some(map_id) = ctx.gameplay_map() else {
-                log::warn!("no active map to prepare pack {path} for");
-                return Ok(())
-            };
-            let trail_params = self.trail_params().await;
-            let key = path.rel(map_id);
-            let Some(map_pack_info) = self.map_pack_info.get(&key) else {
-                anyhow::bail!("map pack data for {path} on {map_id} not loaded?");
-            };
-            let Some(map_pack) = self.map_packs.get_mut(&key) else {
-                anyhow::bail!("map pack data for {path} on {map_id} not loaded?");
-            };
-            let packs = Self::packs().read().await;
-            let Some(pack) = packs.lookup_ref(&path) else {
-                anyhow::bail!("pack {path} disappeared???")
-            };
-            let Some(active) = &pack.active else {
-                anyhow::bail!("can't prepare pack {path} if it's not loaded")
-            };
-
-            let mut pois = Vec::with_capacity(map_pack_info.poi_count());
-            for (poi_path, poi) in map_pack.pois(map_pack_info) {
-                let pack_poi = active.pack.pois.get(poi_path.path as usize)
-                    .and_then(|poi| poi.icon_name().map(|icon| (poi, icon)));
-                let setup = pack_poi.map(|(poi, icon)| SpacePoiBuilder {
-                    icon_file: icon.into(),
-                    scale: poi.attributes.icon_size.map(Into::into).unwrap_or_default(),
-                    scale_map: poi.attributes.map_display_size.map(Into::into).unwrap_or_default(),
-                    tint: poi.attributes.tint.map(Into::into).unwrap_or_default(),
-                    opacity: poi.attributes.alpha.map(Into::into).unwrap_or_default(),
-                });
-                let is_copy = pack_poi.and_then(|(poi, _)| poi.attributes.copy_value.as_ref()).is_some();
-                pois.push((poi_path, poi.clone(), setup, is_copy));
-            }
-            pois.shrink_to_fit();
-
-            let mut trails = Vec::with_capacity(map_pack_info.trail_count());
-            for (trail_path, trail) in map_pack.trails_mut(map_pack_info) {
-                let Some(texture_name) = active.pack.trails.get(trail_path.path as usize).and_then(|pack_trail|
-                    pack_trail.texture_name().map(String::from)
-                ) else {
-                    log::info!("trail#{trail_path} missing texture");
-                    trails.push((trail_path, trail.clone(), None));
-                    continue;
-                };
-                let trail_data = match active.load_trail_data(trail_path.path).await {
-                    Ok(trail_data) => trail_data,
-                    Err(e) => {
-                        log::error!("{e:#}");
-                        trails.push((trail_path, trail.clone(), None));
-                        continue
-                    },
-                };
-                trail.populate_data(&trail_data);
-                // TODO: spawn_blocking all this and parallelize, also dispatch to render thread incrementally as data comes in
-                let geometry = trail.vertices_for(&trail_data, &trail_params);
-                let setup = SpaceTrailBuilder {
-                    geometry,
-                    texture_file: texture_name.into(),
-                };
-                trails.push((trail_path, trail.clone(), Some(setup)));
-            }
-            trails.shrink_to_fit();
-
-            (map_id, pois, trails)
-        };
-        let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
-            let Some(Ok(engine)) = &mut state.engine else { return Ok(()) };
-            let (setup_map_id, setup_pois, setup_trails) = setup;
-            let map_id = {
-                let map = gameplay.borrow().gameplay_map();
-                drop(gameplay);
-                map
-            };
-            match map_id {
-                Some(map_id) if map_id == setup_map_id => (),
-                map_id => {
-                    log::warn!("prepared pack {path} for map#{setup_map_id}, but now {map_id:?}");
-                    return Ok(())
-                },
-            }
-            let packs = Self::packs().blocking_read();
-            let Some(pack) = packs.lookup_ref(&path) else {
-                anyhow::bail!("pack {path} disappeared???")
-            };
-            let Some(active) = &pack.active else {
-                anyhow::bail!("can't prepare pack {path} if it's not loaded")
-            };
-            // TODO: sanity check that we still want to load this?
-            let spacepack = engine.packs.pack_mut(&path);
-            #[cfg(deleteme)]
-            if spacepack.enabled_categories.is_empty() {
-                spacepack.init_enabled_categories(
-                    active.pack.categories.all_categories.values().map(|c| c.default_toggle)
-                );
-            }
-            let needs_rebuild = spacepack.render_list_bookmark.is_some();
-            spacepack.clear();
-
-            let mut loader = active.loader.blocking_lock();
-            let mut loader = SpaceLoader {
-                active_pack: spacepack,
-                loader: &mut *loader,
-                device: &engine.render_backend.device,
-            };
-            let mut copyable_pois = BTreeSet::new();
-            let mut copyable_categories = BTreeSet::new();
-            // XXX: this whole PackCollection type needs a rework, so collect to vec for now...
-            let pois = setup_pois.into_iter().map(|(path, poi, setup, is_copy)| {
-                if is_copy {
-                    copyable_pois.insert(path.path);
-                    copyable_categories.insert(poi.category);
-                }
-                let poi = setup.map(|setup| setup.build(path, &mut loader, &poi));
-                match poi {
-                    Some(Ok(poi)) => poi,
-                    Some(Err(e)) => {
-                        log::warn!("Preparing PoI#{path}: {e:#}");
-                        SpacePoiBuilder::build_empty()
-                    },
-                    None =>
-                        SpacePoiBuilder::build_empty(),
-                }
-            }).collect::<Vec<_>>();
-            let trails = setup_trails.into_iter().map(|(path, trail, setup)| {
-                let trail = setup.map(|setup| setup.build(path, &mut loader, &trail));
-                if let Some(Err(e)) = &trail {
-                    log::warn!("Preparing trail#{path}: {e:#}");
-                }
-                match trail {
-                    Some(Ok(trail)) => trail,
-                    _ =>
-                        SpaceTrailBuilder::build_empty(),
-                }
-            }).collect::<Vec<_>>();
-            #[cfg(deleteme)] {
-            spacepack.copyable_pois = copyable_pois;
-            spacepack.copyable_categories = copyable_categories;
-            }
-            if needs_rebuild {
-                spacepack.active_pois = pois;
-                spacepack.active_trails = trails;
-                engine.packs.rebuild_active(&engine.render_backend.device)
-            } else {
-                engine.packs.load_pack(&engine.render_backend.device, path.path, pois, trails)
-            }
-        })
-        .await;
-
-        match res.map_err(anyhow::Error::from) {
-            Err(e) | Ok(Err(e)) => Err(e),
-            Ok(Ok(())) => Ok(())
-        }.context("Preparing pack for render")
     }
 
     pub async fn setup_pack(&mut self,
@@ -1803,34 +1423,6 @@ impl PathingController {
         });
     }
 
-    #[cfg(deleteme)]
-    async fn provide_disabled_paths(&self, active_festivals: Festivals) {
-        let settings_lock = self.settings.read().await;
-        let disabled_paths = settings_lock.disabled_paths.clone();
-        drop(settings_lock);
-
-        let context = "Providing disabled paths to engine";
-        let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
-            let engine = match &mut state.engine {
-                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                None => return Ok(()),
-            }?;
-            for (path, _loaded, active) in Self::packs().blocking_read().active_packs() {
-                let Some(pack) = engine.packs.loaded_packs.get_mut(path.path as usize) else {
-                    // TODO: disable all? when does this happen?
-                    continue
-                };
-                pack.disable_paths(&active.pack, &disabled_paths, active_festivals);
-            }
-            Ok(())
-        })
-        .await;
-        let res = res.map(|res| res.context(context)).context(context);
-        if let Err(e) | Ok(Err(e)) = res {
-            log::error!("{e:#}");
-        }
-    }
-
     pub(crate) async fn handle_event(&mut self, event: PathingEvent, ctx: &mut PathingEventContext) -> anyhow::Result<Option<Interruption>> {
         use PathingEvent::*;
         match event {
@@ -1840,9 +1432,6 @@ impl PathingController {
             UnloadAll => self.unload_all(ctx, true).await,
             LoadPack(path) =>
                 return self.load_pack(path, ctx).await.map(|()| None),
-            #[cfg(deleteme)]
-            PreparePack(path) =>
-                return self.prepare_pack(path, ctx).await.map(|()| None),
             PreparePack(path) => {
                 if let Some(map_id) = ctx.gameplay_map() {
                     log::debug!("TODO: change prepare type to include mapid?");
@@ -2274,17 +1863,8 @@ impl MapPackInfo {
         for i in active_pois {
             pois.set(i, true);
         }
-        #[cfg(todo)]
-        let trails = active.pack.trails.iter().enumerate()
-            .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), &trail.category))
-            .map(|(i, _)| i)
-            .collect::<BitVec>();
         // TODO: use some sort of space-efficient encoding like RLE for these masks
         // even just an initial offset or vec of bit group lengths (pos/neg for 0 vs 1) would help?
-        #[cfg(deleteme)]
-        let pois = active.pack.pois.iter()
-            .map(|poi| filter_mapid(poi.map_id, &poi.category))
-            .collect::<BitVec>();
         let mut trails = BitVec::new();
         let mut active_trails = active.pack.trails.iter().enumerate()
             .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), trail.category.as_ref()))
