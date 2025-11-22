@@ -1,12 +1,13 @@
 use {
     super::ActivePack,
     crate::{
-        controller::pathing::{registry::{CategoryIndex, PoiIndex}, visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::Counter, render::machine::RenderMachine, space::{
+        controller::pathing::{registry::{CategoryIndex, PoiIndex}, visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::{self as rt, Counter}, render::machine::RenderMachine, space::{
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
             DrawSpace,
             LocalContext,
-        }
+        },
+        TEXTURES,
     },
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
@@ -35,6 +36,8 @@ pub struct PoiCommonRenderData {
 
     pub world_ib: Option<BufferOf<InstanceBufferData>>,
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
+
+    pub fallback_texture: Option<Arc<Texture>>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -60,6 +63,7 @@ impl PoiCommonRenderData {
             quad_vb,
             map_ib: None,
             world_ib: None,
+            fallback_texture: None,
         })
     }
 
@@ -125,6 +129,12 @@ impl PoiCommonRenderData {
     pub fn clear(&mut self) {
         let _ = self.world_ib.take();
         let _ = self.map_ib.take();
+    }
+
+    pub fn update(&mut self, _device: &Dx11Device) {
+        if self.fallback_texture.is_none() {
+            self.fallback_texture = TEXTURES.lookup_resource(RenderMachine::TEXTURE_LOGO_KEY).flatten();
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -230,7 +240,8 @@ impl ActivePoi {
         let icon_handle = active_pack.register_texture(icon_name);
         let icon = active_pack
             .get_or_load_texture(icon_handle, loader, device)
-            .context("Loading poi texture")?;
+            .context("Loading poi texture")
+            .cloned();
 
         Ok(Self {
             #[cfg(todo = "unnecessary")]
@@ -243,7 +254,7 @@ impl ActivePoi {
             opacity,
             scale,
             scale_map,
-            icon: Some(icon.clone()),
+            icon: rt::log::warn_ok(icon),
         })
     }
 
@@ -297,10 +308,16 @@ impl ActivePoi {
         let _ = poi_idx;
     }
 
-    pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
-        if let Some(icon) = &self.icon {
-            icon.set(device_context, 0);
+    pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
+        let texture = self.icon.as_ref()
+            .or_else(|| common.fallback_texture.as_ref());
+        if let Some(texture) = texture {
+            texture.set(device_context, 0);
         }
+    }
+
+    /// PREREQUISITES: Poi shaders and texture must already be set.
+    pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
         let voffset = match ctx {
             LocalContext::World => 0,
             LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,

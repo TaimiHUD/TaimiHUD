@@ -411,6 +411,7 @@ impl PackCollection {
         self.poi_common.is_empty() {
             self.recreate_buffers(device, machine)?;
         }
+        self.poi_common.update(device);
 
         Ok(())
     }
@@ -477,6 +478,7 @@ impl PackCollection {
                         shader_state = ShaderState::Trail;
                         backend.shaders.set_named(device_context, "trail");
                     }
+                    trail.bind_texture(device_context, poi_common, LocalContext::World);
                     trail.draw_section(device_context, section, LocalContext::World);
                 },
                 RenderId::Poi { pack_idx, poi_idx } => {
@@ -498,6 +500,7 @@ impl PackCollection {
                         shader_state = ShaderState::Poi;
                         poi_common.set(device_context);
                     }
+                    poi.bind_texture(device_context, poi_common, LocalContext::World);
                     poi.draw(
                         device_context,
                         pack.render_poi_bookmark + poi_idx as usize,
@@ -558,6 +561,7 @@ impl PackCollection {
                     }
                     if shader_state != ShaderState::Trail {}
                     shader_state = ShaderState::Trail;
+                    trail.bind_texture(device_context, poi_common, ctx);
                     trail.draw_section(device_context, section, ctx);
                 },
                 RenderId::Poi { pack_idx, poi_idx } => {
@@ -585,6 +589,7 @@ impl PackCollection {
                         shader_state = ShaderState::Poi;
                         poi_common.set_vertex(device_context, ctx);
                     }
+                    poi.bind_texture(device_context, poi_common, ctx);
                     poi.draw(device_context, pack.render_poi_bookmark + poi_idx as usize, ctx);
                 },
             }

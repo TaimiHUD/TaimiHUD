@@ -1,7 +1,7 @@
 use {
     crate::{
-        controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, visible::{LoadedTrailGeometry, LoadedTrailSection}}, exports::runtime::Counter, space::{
-            pack::ActivePack,
+        controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, visible::{LoadedTrailGeometry, LoadedTrailSection}}, exports::runtime::{self as rt, Counter}, space::{
+            pack::{poi::PoiCommonRenderData, ActivePack},
             resources::{Model, Texture},
             DrawSpace,
             LocalContext,
@@ -223,7 +223,8 @@ impl ActiveTrail {
         let texture_handle = active_pack.register_texture(texture_name);
         let texture = active_pack
             .get_or_load_texture(texture_handle, loader, device)
-            .context("Loading trail texture")?;
+            .context("Loading trail texture")
+            .cloned();
 
         let mut section_bookmark = 0u32;
         let mut section_bookmarks = Vec::with_capacity(geometry.section_lengths.len());
@@ -258,7 +259,7 @@ impl ActiveTrail {
             category_idx,
             visibility,
             section_bounds,
-            texture: Some(texture.clone()),
+            texture: rt::log::warn_ok(texture),
             section_vbuffer: Some(section_vbuffer),
             section_bookmarks,
             render_bookmark,
@@ -270,13 +271,17 @@ impl ActiveTrail {
         let _ = trail_idx;
     }
 
-    /// Draw a trail segment.
-    /// PREREQUISITES: Trail shaders must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionIndex, ctx: LocalContext) {
-        let section = section as usize;
-        if let Some(texture) = &self.texture {
+    pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
+        let texture = self.texture.as_ref()
+            .or_else(|| common.fallback_texture.as_ref());
+        if let Some(texture) = texture {
             texture.set(device_context, 0);
         }
+    }
+    /// Draw a trail segment.
+    /// PREREQUISITES: Trail shaders and texture must already be set.
+    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionIndex, ctx: LocalContext) {
+        let section = section as usize;
 
         if let Some(section_vbuffer) = &self.section_vbuffer {
             section_vbuffer.set(device_context, 0);
