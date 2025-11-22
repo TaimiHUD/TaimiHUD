@@ -4,12 +4,13 @@ use {
         built_info,
         exports::runtime as rt,
         fl,
-        render::RenderState,
+        render::{machine::RenderMachine, RenderState},
         Controller,
         ControllerEvent,
         TEXTURES,
     },
-    nexus::imgui::{StyleColor, TableColumnSetup, Ui},
+    glam::Vec2,
+    nexus::imgui::{Image, StyleColor, TableColumnSetup, Ui},
 };
 
 pub struct InfoTabState {
@@ -37,6 +38,7 @@ impl InfoTabState {
             _ => rt::CRATE_VERSION,
         };
 
+        let cursor_top = ui.cursor_screen_pos();
         let project_heading = format!(
             "{}, {} by {}",
             crate::exports::addon_title!(),
@@ -44,6 +46,45 @@ impl InfoTabState {
             self.authors
         );
         RenderState::font_text("big", ui, &project_heading);
+
+        let wrap_limit = if let Some(Some(logo)) = TEXTURES.lookup_imgui(RenderMachine::TEXTURE_LOGO_KEY) {
+            const MIN_LOGO_WIDTH: f32 = 128.0;
+            const LOGO_UV1: Vec2 = Vec2::new(1.0, 0.5);
+            let heading_right = ui.item_rect_max()[0];
+            let cursor_restore = Vec2::from_array(ui.cursor_screen_pos());
+            let avail = Vec2::from_array(ui.content_region_avail());
+            let logo_size = Vec2::from_array(logo.size) * LOGO_UV1;
+            let size = match avail.x * 0.4 {
+                max_logo_width if max_logo_width < MIN_LOGO_WIDTH => None,
+                max_logo_width if max_logo_width < logo_size.x => Some(Vec2::new(
+                    max_logo_width,
+                    logo_size.y * max_logo_width / logo_size.x,
+                )),
+                _ => Some(logo_size),
+            };
+            if let Some(size) = size {
+                let right_align = ui.window_pos()[0] + avail.x - size.x;
+                let logo_pos = match avail.x - (heading_right - cursor_restore.x) {
+                    heading_avail if heading_avail > logo_size.x => Vec2::from_array(cursor_top)
+                        //.with_x(heading_right)
+                        .with_x(right_align),
+                    _ => cursor_restore.with_x(right_align),
+                };
+                ui.set_cursor_screen_pos(logo_pos.to_array());
+                Image::new(logo.id, size.to_array())
+                    .uv1(LOGO_UV1.to_array())
+                    .build(ui);
+                let wrap_y = ui.item_rect_max()[1];
+                ui.set_cursor_screen_pos(cursor_restore.to_array());
+                let logo_pos_x = logo_pos.x - ui.window_pos()[0];
+                let wrap_limit = ui.push_text_wrap_pos_with_pos(logo_pos_x);
+                Some((wrap_limit, wrap_y))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let in_ci = match built_info::CI_PLATFORM {
             Some(platform) => format!(" via {platform}"),
@@ -77,7 +118,17 @@ impl InfoTabState {
         let description = env!("CARGO_PKG_DESCRIPTION");
         ui.text_wrapped(description);
         ui.dummy([4.0, 4.0]);
+
         ui.text_wrapped(&fl!("keybind-triggers"));
+
+        if let Some((wrap_limit, wrap_y)) = wrap_limit {
+            wrap_limit.pop(ui);
+            let pos = ui.cursor_screen_pos();
+            if wrap_y > pos[1] {
+                ui.set_cursor_screen_pos([pos[0], wrap_y])
+            }
+        }
+
         ui.separator();
         RenderState::font_text("ui", ui, &fl!("active-timer-phases"));
         let table_token = ui.begin_table_header("phase_states", [
