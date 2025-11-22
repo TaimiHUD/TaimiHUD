@@ -458,16 +458,16 @@ impl Controller {
     }
 
     async fn handle_map_event(&mut self, gameplay: GameplayState) {
-        let new_map_id = match gameplay.gameplay_map() {
-            None => {
-                if self.map_id.is_some() {
-                    self.map_id = None;
-                    #[cfg(feature = "timers")]
-                    self.timers.handle_loading_screen().await;
-                }
+        let new_map_id = match gameplay {
+            GameplayState::Intermission { next_map_id, .. } if next_map_id.map(|id| id.get()) != self.map_id && self.map_id.is_some() => {
+                self.map_id = None;
+                #[cfg(feature = "timers")]
+                self.timers.handle_loading_screen().await;
                 return
             },
-            Some(map_id) => map_id.get(),
+            GameplayState::Gameplay { map_id: Some(map_id), .. } => map_id.get(),
+            _ =>
+                return,
         };
         if Some(new_map_id) != self.map_id {
             log::debug!("Map changed from {:?} to {}", self.map_id, new_map_id);

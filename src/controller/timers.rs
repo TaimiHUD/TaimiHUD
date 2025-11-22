@@ -288,6 +288,9 @@ impl TimersController {
     }
 
     pub(crate) async fn handle_loading_screen(&mut self) {
+        // TODO: when RTAPI isn't present, this will count "cinematic" sequences
+        // (vistas or whenever arcdps auto-hides for example) as a loading screen
+        // could cause problems with multi-phase fights involving cutscenes?
         self.reset().await;
         /*
         for timer in &mut self.current_timers {
