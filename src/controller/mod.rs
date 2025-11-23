@@ -638,7 +638,7 @@ impl Controller {
         #[cfg(feature = "markers")]
         self.markers.reload(self.rt_sender.clone()).await;
         #[cfg(feature = "space")]
-        PathingController::try_send(PathingEvent::ReloadAll);
+        PathingEvent::ReloadAll(true).try_send();
     }
 
     pub fn with_datasource<R, F: FnOnce(&DeserializedSource) -> Option<R>>(
@@ -685,7 +685,11 @@ impl Controller {
         match kind {
             SourceKind::Timers => TimersController::try_send(TimersEvent::ReloadTimers),
             SourceKind::Markers => MarkersController::try_send(MarkersEvent::ReloadMarkers),
-            SourceKind::Pathing => PathingController::try_send(PathingEvent::ReloadAll),
+            SourceKind::Pathing => {
+                // TODO: if new pack, ReloadAll(false)
+                // TODO: if existing pack, ReloadPack(path) instead
+                PathingController::try_send(PathingEvent::ReloadAll(true))
+            },
             _ => (),
         }
     }

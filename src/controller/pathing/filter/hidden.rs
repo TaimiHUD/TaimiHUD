@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant, SystemTime};
 use crate::controller::pathing::{
     filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter},
-    registry::MapIndex,
-    state::MarkerId,
+    registry::{MapIndex, MarkerId},
 };
 
 #[derive(Debug, Clone, Default, Hash)]
@@ -57,7 +56,7 @@ impl MarkerState {
         entry.reset = AutoReset::expiry_with_timestamp(expiry_timestamp, now, now_mono);
     }
 
-    pub fn reset_expired(&mut self, now_mono: &Instant) {
+    pub fn reset_expired(&mut self, now_mono: &std::time::Instant) {
         self.hidden.retain(|_, hidden| match &hidden.reset {
             AutoReset::Expiry { expiry } if expiry <= now_mono =>
                 false,

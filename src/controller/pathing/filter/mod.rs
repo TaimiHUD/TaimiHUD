@@ -3,7 +3,7 @@ use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
 use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes};
-use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath}, state::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
+use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},

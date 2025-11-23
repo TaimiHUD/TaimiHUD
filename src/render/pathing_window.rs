@@ -1,7 +1,7 @@
 use {
     crate::{
         controller::pathing::{registry::{CategoryIndex, CategoryPath, LoadedPack, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
-            sys as imgui_sys, ChildWindow, Condition, Id, IdStackToken, MouseButton, StyleVar, TableColumnFlags, TableColumnSetup, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, Window, WindowFlags
+            sys as imgui_sys, ChildWindow, Condition, Id, IdStackToken, MouseButton, StyleVar, TableColumnFlags, TableColumnSetup, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, Window, WindowFlags, Selectable,
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
     }, bitflags::bitflags, bitvec::{slice::BitSlice, vec::BitVec}, regex::{Regex, RegexBuilder}, std::{borrow::Cow, collections::{btree_map, BTreeMap, BTreeSet, HashSet}, num::NonZero, str::FromStr, sync::Arc}, taimi_pack::{Category, attributes::AttrString, MarkerAttributes, Pack},
     tokio::sync::watch,
@@ -337,11 +337,18 @@ impl PathingWindowState {
         }
         ui.same_line();
         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
-            PathingEvent::ReloadAll.try_send();
+            PathingEvent::ReloadAll(false).try_send();
+        }
+        #[cfg(todo)]
+        {
+            ui.same_line();
+            if ui.button("close-all") {
+                PathingEvent::UnloadAll(false).try_send();
+            }
         }
         ui.same_line();
         if with_i18n!("unload-packs", |msg| ui.button(msg)) {
-            PathingEvent::UnloadAll.try_send();
+            PathingEvent::UnloadAll(true).try_send();
         }
         if self.filter_open {
             ui.separator();
@@ -464,7 +471,7 @@ impl PathingWindowState {
         engine: &mut Engine,
     ) {
         use crate::controller::pathing::visible::{InteractionEvent, InteractionEventAction};
-        use crate::controller::pathing::state::MarkerIndex;
+        use crate::controller::pathing::registry::MarkerIndex;
         use crate::settings::pathing::TriggerKind;
         let Some(Some(map_id)) = Controller::with_sender(|s| s.gameplay.as_ref().and_then(|g|
                 g.borrow().gameplay_map()
@@ -858,6 +865,9 @@ impl PathingWindowState {
     }
 
     pub fn draw_unloaded_pack(&mut self, ui: &Ui, name: String, reason: Option<&UnloadedReason>) -> bool {
+        if let Some(UnloadedReason::Gravestone) = reason {
+            return false
+        }
         let is_button = reason.is_some();
         let node = TreeNode::new(name)
             .flags(TreeNodeFlags::SPAN_AVAIL_WIDTH)
@@ -870,8 +880,10 @@ impl PathingWindowState {
         // TODO: hovered?
         let pressed = is_button && ui.is_item_clicked() && ui.is_mouse_released(MouseButton::Left);
         match reason {
-            #[cfg(todo = "unused")]
-            UnloadedReason::Disabled => compile_error!("TODO"),
+            Some(UnloadedReason::Disabled) | Some(UnloadedReason::Gravestone) => {
+                ui.same_line();
+                with_i18n!("disabled", |msg| ui.text(msg));
+            },
             Some(UnloadedReason::Pending) | None => {
                 ui.same_line();
                 with_i18n!("unloaded", |msg| ui.text(msg));
@@ -913,6 +925,23 @@ impl PathingWindowState {
             }
         }
 
+        ui.popup("pack-context", || {
+            let action_close = with_i18n!("close", |msg| Selectable::new(msg)
+                .build(ui)
+            );
+            let action_unload = with_i18n!("unload-pack", |msg| Selectable::new(msg)
+                .build(ui)
+            );
+            let action_reload = with_i18n!("reload-pack", |msg| Selectable::new(msg)
+                .build(ui)
+            );
+            if action_unload || action_close {
+                PathingEvent::UnloadPack(path, action_unload).try_send();
+            } else if action_reload {
+                PathingEvent::ReloadPack(path, false).try_send();
+            }
+        });
+
         let open;
         let (root_path, (_id, tree)) = {
             let primary_root = info.primary_root();
@@ -931,6 +960,9 @@ impl PathingWindowState {
                 },
             };
             let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, None);
+            if ui.is_item_clicked_with_button(MouseButton::Right) {
+                ui.open_popup("pack-context");
+            }
             if let Some(root_path) = root_path {
                 self.category_header_decorate(ui, info, root_path);
             }

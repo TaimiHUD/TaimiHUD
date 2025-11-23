@@ -1,15 +1,18 @@
 use taimi_pack::category::id::FullIdRef;
 
 use {
-    self::{registry::{CategoryIndex, LoadedPack, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex}, visible::LoadedMapPack}, crate::{controller::Controller, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::{FestivalPreference, TriggerKind}, state::SaveState, PathingSettings, Settings, SourceKind}, space::{
+    self::{registry::{CategoryIndex, LoadedPack, PackLoader, PackPath, PackRegistry, PoiIndex, RecentlyUsed, TrailIndex}, visible::LoadedMapPack}, crate::{controller::Controller, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, locator::{LocationMut, LocationRef}, watched::{Watched, Watcher}, Locator}, render::{machine::RenderTaskPriority, RenderEvent, RenderState}, settings::{pathing::TriggerKind, state::SaveState, PathingSettings, Settings, SourceKind}, space::{
             engine::SpaceEvent, pack::{trail::TrailParams, PackSpace}, Engine
-        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, AutoReset, HideContext}, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath}, state::{MarkerIndex, MarkerPath}, std::{cmp, collections::{btree_map, BTreeMap, BinaryHeap}, future::Future, iter, num::NonZero, ops, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+        }, Interruption}, anyhow::{anyhow, Context}, bitvec::vec::BitVec, filter::{FilterState, MarkerFilter, AutoReset, HideContext}, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, registry::{CategoryPath, MapIndex, PackConfig, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath, MarkerIndex, MarkerPath, MarkerId}, std::{cmp, collections::{btree_map, BTreeMap, BinaryHeap}, future::Future, iter, num::NonZero, ops, pin::Pin, sync::Arc, time::{SystemTime, UNIX_EPOCH}}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::keys::Guid,
     tokio::{
         fs::create_dir_all, select, sync::{broadcast, mpsc, watch, RwLock}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
     }, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder, VisibilityFlags}
 };
 use crate::render::machine::MumbleIdentityUpdate;
-pub use self::state::shared::{SharedMapPackInfo, SharedMapPackState};
+pub use self::{
+    festivals::FestivalState,
+    state::shared::{SharedMapPackInfo, SharedMapPackState},
+};
 
 pub mod registry;
 pub mod festivals;
@@ -20,9 +23,11 @@ pub mod state;
 #[derive(Debug, Clone, Display)]
 pub enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
-    ReloadAll,
+    ReloadAll(bool),
+    ReloadPack(PackPath, bool),
     LoadAll,
-    UnloadAll,
+    UnloadAll(bool),
+    UnloadPack(PackPath, bool),
     LoadPack(PackPath),
     /// Post-load
     PreparePack(PackPath),
@@ -853,9 +858,15 @@ impl PathingController {
         ctx.filter_state_signal = true;
     }
 
-    pub(crate) async fn reload_all(&mut self, ctx: &mut PathingEventContext) {
-        self.unload_all(ctx, false).await;
+    pub(crate) async fn reload_all(&mut self, ctx: &mut PathingEventContext, remove: bool) {
+        self.unload_all(ctx, remove).await;
         self.load_all(ctx).await;
+    }
+    pub(crate) async fn reload_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath, remove: bool) {
+        self.unload_pack(ctx, path, remove).await;
+        let res = self.load_pack(ctx, path).await
+            .with_context(|| format!("reloading {path}"));
+        let _ = rt::log::error_ok(res);
     }
 
     async fn load_all(&mut self, ctx: &mut PathingEventContext) {
@@ -968,7 +979,7 @@ impl PathingController {
             ctx.pack_info.send_modify(|pack_info| {
                 pack_info.map_info.clear();
                 pack_info.map_state.clear();
-                if let Some(packs) = remove_packs {
+                if let Some(packs) = &remove_packs {
                     for (path, pack) in packs.all_packs() {
                         pack_info.update_pack(path, pack);
                     }
@@ -979,7 +990,34 @@ impl PathingController {
         }
     }
 
-    async fn load_pack(&mut self, path: PackPath, ctx: &mut PathingEventContext) -> anyhow::Result<()> {
+    async fn unload_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath, remove: bool) {
+        log::debug!("Unloading {path}...");
+        if let Err(e) = Self::unload_pack_inner(self.loader.clone(), path, remove).await {
+            log::error!("{e:#}");
+        }
+        self.map_packs.retain(|k, _| k.root != path);
+        if remove {
+            self.map_pack_info.retain(|k, _| k.root != path);
+        }
+        {
+            let remove_packs = match remove {
+                false => None,
+                true => Some(Self::packs().read().await),
+            };
+            let remove_pack = remove_packs.as_ref()
+                .and_then(|packs| packs.lookup_ref(&path));
+            ctx.pack_info.send_modify(|pack_info| {
+                pack_info.map_info.retain(|k, _| k.root != path);
+                pack_info.map_state.retain(|k, _| k.root != path);
+                if let Some(pack) = remove_pack {
+                    pack_info.update_pack(path, pack);
+                } else {
+                    pack_info.pack_info.remove(&path);
+                }
+            });
+        }
+    }
+    async fn load_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath) -> anyhow::Result<()> {
         let mut packs = Self::packs().write().await;
         let pack = packs.lookup_mut(&path).ok_or_else(|| anyhow!("pack {path} does not exist"))?;
         let res = pack.activate(&self.loader).await;
@@ -1169,6 +1207,34 @@ impl PathingController {
             }
             if remove {
                 packs.packs.clear();
+            }
+        }
+        match res.map(|res| res.context(context)).context(context) {
+            Err(e) => Err(e),
+            Ok(res) => res,
+        }
+    }
+
+    async fn unload_pack_inner(loader: Arc<PackLoader>, path: PackPath, remove: bool) -> anyhow::Result<()> {
+        let context = "Unloading pack from engine";
+        let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
+            let engine = match &mut state.engine {
+                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
+                None => return Ok(()),
+            }?;
+            engine.packs.deactivate(path.path, true);
+            Ok(())
+        })
+        .await;
+        {
+            let mut packs = Self::packs().write().await;
+            if let Some(pack) = packs.lookup_mut(&path) {
+                pack.deactivate(&loader);
+                if remove {
+                    pack.mark_dead(&loader);
+                } else {
+                    pack.mark_reload(&loader);
+                }
             }
         }
         match res.map(|res| res.context(context)).context(context) {
@@ -1427,11 +1493,14 @@ impl PathingController {
         use PathingEvent::*;
         match event {
             Exit(reason) => return Ok(Some(reason)),
-            ReloadAll => self.reload_all(ctx).await,
+            ReloadAll(remove) => self.reload_all(ctx, remove).await,
+            ReloadPack(path, remove) => self.reload_pack(ctx, path, remove).await,
             LoadAll => self.load_all(ctx).await,
-            UnloadAll => self.unload_all(ctx, true).await,
+            UnloadAll(remove) => self.unload_all(ctx, remove).await,
+            UnloadPack(path, remove) =>
+                self.unload_pack(ctx, path, remove).await,
             LoadPack(path) =>
-                return self.load_pack(path, ctx).await.map(|()| None),
+                return self.load_pack(ctx, path).await.map(|()| None),
             PreparePack(path) => {
                 if let Some(map_id) = ctx.gameplay_map() {
                     log::debug!("TODO: change prepare type to include mapid?");
@@ -1468,7 +1537,7 @@ impl PathingController {
                 self.handle_guid_reset(ctx, guids);
             },
             ResetMarker(path) => {
-                self.filter_state.hidden.reset(state::MarkerId::from(path));
+                self.filter_state.hidden.reset(MarkerId::from(path));
                 ctx.unexpire(&Err(path));
             },
             DismissMarker(path, delay, contexts) => {
@@ -1543,6 +1612,7 @@ impl PathingController {
                 const HOUR: Duration = Duration::from_secs(3600);
                 const DAY: Duration = Duration::from_secs(HOUR.as_secs() * 24);
                 const WEEK: Duration = Duration::from_secs(DAY.as_secs() * 7);
+                const MANY_WEEKS: Duration = Duration::from_secs(WEEK.as_secs() * 52);
 
                 use taimi_pack::attributes::keys::{Behaviour, TacoBehaviour, BlishBehaviour};
                 let timestamp = rt::log::error_ok(UNIX_EPOCH.elapsed()).unwrap_or_default();
@@ -1552,11 +1622,11 @@ impl PathingController {
                         if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour.mode {
                             contexts = Some(HideContext::for_character(self.filter_state.character.name.clone()));
                         }
-                        const SOME_DAY: Duration = Duration::from_secs(1754265600);
+                        const SOME_DAY: Duration = Duration::from_secs(1754265600 - MANY_WEEKS.as_secs() * 13);
                         (SOME_DAY.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(DAY.as_secs() as i64)
                     } as u64)),
                     Behaviour::Blish(BlishBehaviour::ResetWeekly) => Some(Duration::from_secs({
-                        const SOME_WEEK: Duration = Duration::from_secs(1754265600);
+                        const SOME_WEEK: Duration = Duration::from_secs(1754265600 - MANY_WEEKS.as_secs() * 13);
                         (SOME_WEEK.as_secs() as i64).wrapping_sub(timestamp.as_secs() as i64).wrapping_rem_euclid(WEEK.as_secs() as i64)
                     } as u64)),
                     Behaviour::Taco(TacoBehaviour::ResetDelay) => Some(behaviour.reset_delay.duration()),
@@ -1970,52 +2040,6 @@ impl MapPackInfo {
     pub fn category_index(&self, path: CategoryPath) -> Option<CategoryIndex> {
         self.categories[..].iter().position(|&c| c == path.path)
             .map(|i| i as CategoryIndex)
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FestivalState {
-    pub active: Festivals,
-    pub on: Festivals,
-    pub off: Festivals,
-}
-
-impl FestivalState {
-    pub const DEFAULT: Self = Self {
-        active: Festivals::empty(),
-        on: Festivals::empty(),
-        off: Festivals::empty(),
-    };
-
-    pub fn update_preferences(&mut self, (on, off): (Festivals, Festivals)) {
-        self.on = on;
-        self.off = off;
-    }
-    pub fn set_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
-        let festival = Festivals::from(festival);
-        self.on.remove(festival);
-        self.off.remove(festival);
-        match pref {
-            Some(true) =>
-                self.on.insert(festival),
-            Some(false) =>
-                self.off.insert(festival),
-            None => (),
-        }
-    }
-
-    pub fn get_preference(&self, festival: Festival) -> Option<FestivalPreference> {
-        if self.off.get(festival) {
-            Some(false)
-        } else if self.on.get(festival) {
-            Some(true)
-        } else {
-            None
-        }
-    }
-
-    pub fn get(&self) -> Festivals {
-        (self.active | self.on) & !self.off
     }
 }
 

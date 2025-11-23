@@ -628,6 +628,25 @@ impl PackCollection {
         self.prepare_new_map(map_id as i32, device)
     }
 
+    pub fn deactivate(&mut self, pack_idx: PackIndex, cleanup: bool) {
+        let Some(pack) = self.loaded_packs.get_mut(pack_idx as usize) else { return };
+        if let Some(bookmark) = pack.render_list_bookmark {
+            let bookmark_end = pack.poi_bookmark + pack.active_pois.len();
+            let render_list = self.render_list.entities_mut();
+            if bookmark_end >= render_list.len() {
+                let _ = render_list.drain(bookmark..);
+            } else {
+                for entity in &mut render_list[bookmark..bookmark_end] {
+                    entity.disable();
+                }
+            }
+        }
+        pack.clear();
+        if cleanup {
+            pack.cleanup_textures();
+        }
+    }
+
     pub fn clear_active(&mut self) {
         self.render_list.clear();
         for pack in &mut self.loaded_packs {
