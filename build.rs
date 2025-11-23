@@ -81,6 +81,7 @@ fn apply_built_info() {
             ci.unwrap_or("").into()
         }
     };
+    let imperative_build = pkg_build == "local";
     let release_channel = if let Some(pkg_version) =
         pkg_version.as_ref().and_then(|v| v.parse::<Version>().ok())
     {
@@ -249,8 +250,9 @@ fn apply_built_info() {
     };
     println!("cargo::rustc-cfg=taimi_has={:?}", "author");
     println!("cargo::rustc-env={ADDON_AUTHOR}={addon_author}");
-    if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() {
+    if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() && !imperative_build {
         // hack around inability to customize these...
+        // (causes spurious rebuilds)
         println!("cargo::rustc-env=CARGO_PKG_AUTHORS={addon_author}");
     }
 }
