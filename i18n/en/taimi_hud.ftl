@@ -119,6 +119,19 @@ gamebinds = Game Bindings
 keybind = Keybind
 gamebind-notice = Set these to match your Controls settings in-game. These may be automatically detected when arcdps-unofficial-extras is installed.
 
+## API Config
+
+api-tab = API
+api-notice = An API key token allows you to opt in to personalized features such as hiding completed achievement markers. The `progression` and `characters` permissions are recommended.
+api-token-label = Token
+api-setup-open = Link Account
+api-link = "https://account.arena.net/applications"
+api-status-setup = Adding API key...
+api-refresh = Refresh...
+api-refresh-achievements = Achievements
+api-refresh-raids = Raid Clears
+api-permissions = Permissions
+
 ## Windows
 
 primary-window = TaimiHUD
