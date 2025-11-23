@@ -5,7 +5,7 @@ use {
         exports::runtime::{self as rt, bindings},
         fl,
         render::{
-            element::{keys::KeyBindSelection, language::LanguageSelection},
+            element::{keys::KeyBindSelection, language::LanguageSelection, token::ApiTokenInput},
             machine::RenderMachine,
             RenderEvent,
             TextFont,
@@ -350,8 +350,7 @@ pub struct ConfigUpdateState {
     preference: UpdatePreference,
     remote_version: Option<String>,
     remote_version_release: Option<ResolvedVersion>,
-    gh_api_token: bool,
-    gh_api_token_buffer: String,
+    gh_api_token: ApiTokenInput,
     changed: watch::Receiver<BootstrapState>,
 }
 
@@ -363,8 +362,7 @@ impl ConfigUpdateState {
             preference: UpdatePreference::ASK,
             remote_version: Default::default(),
             remote_version_release: Default::default(),
-            gh_api_token: false,
-            gh_api_token_buffer: Default::default(),
+            gh_api_token: ApiTokenInput::new(),
             changed: BootstrapState::get().subscribe(),
         };
         state.sync_state();
@@ -377,7 +375,7 @@ impl ConfigUpdateState {
         self.host_preference = state.update_host_preference().clone();
         //self.preference = state.update_preference().clone();
         self.remote_version = state.update_remote_version.clone();
-        self.gh_api_token = state.gh_api_token.is_some();
+        self.gh_api_token.update_preview(state.gh_api_token.is_some());
         self.remote_version_release = self
             .remote_version
             .clone()
@@ -468,23 +466,20 @@ impl ConfigUpdateState {
             });
         }
 
-        let gh_api_token = with_i18n!("gh-api-token", |label| ui
-            .input_text(&label, &mut self.gh_api_token_buffer)
-            .enter_returns_true(true)
-            .auto_select_all(true)
-            .password(true)
-            .build());
-        if gh_api_token {
-            let gh_api_token = self.gh_api_token_buffer.clone();
-            self.gh_api_token_buffer.clear();
+        let gh_api_token = {
+            let changed = self.gh_api_token.draw_input(ui, "gh-api-token");
+            if !changed && ui.is_item_hovered() {
+                with_i18n!("gh-api-token-notice", |msg| ui.tooltip_text(&msg));
+            }
+            self.gh_api_token.draw_finish(ui, changed)
+        };
+        if let Some(token) = gh_api_token {
             BootstrapState::write_with(|state| {
-                state.gh_api_token = match gh_api_token.is_empty() {
-                    false => Some(gh_api_token),
+                state.gh_api_token = match token.is_empty() {
+                    false => Some(token),
                     true => None,
                 };
             });
-        } else if ui.is_item_hovered() {
-            with_i18n!("gh-api-token-notice", |msg| ui.tooltip_text(&msg));
         }
     }
 }
