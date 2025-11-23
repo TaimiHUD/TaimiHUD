@@ -329,8 +329,7 @@ impl RenderState {
             let text_display = text.to_string();
             let entry_name = fl!("open-error", kind = text_display, path = openable_display);
             Controller::try_send(ControllerEvent::OpenOpenable(entry_name.clone(), openable.into()));
-        }
-        if ui.is_item_hovered() {
+        } else if ui.is_item_hovered() {
             let tooltip = tooltip().to_string();
             ui.tooltip_text(fl!("location", path = tooltip));
         }
