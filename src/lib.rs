@@ -61,6 +61,7 @@ use {
     settings::SourcesFile,
     std::{
         borrow::Cow,
+        collections::BTreeSet,
         ffi::{c_char, CStr},
         mem,
         panic,
@@ -135,6 +136,7 @@ macro_rules! fl {
     }};
 }
 
+static I18N_WARN_ONCE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 pub fn with_i18n<R, F>(message_id: &str, f: F) -> R
 where
     F: FnOnce(Cow<str>) -> R,
@@ -155,7 +157,17 @@ where
         (Some(Some(r)), _) => r,
         (Some(None), Some(f)) => f(LANGUAGE_LOADER.get(message_id).into()),
         (None, Some(f)) => {
-            log::debug!("missing static i18n message {message_id}");
+            let warn_once = match I18N_WARN_ONCE.try_lock() {
+                Ok(once) if once.contains(message_id) => false,
+                Ok(mut once) => {
+                    once.insert(message_id.into());
+                    true
+                },
+                Err(..) => false,
+            };
+            if warn_once {
+                log::debug!("missing i18n message {message_id}");
+            }
             f(Cow::Borrowed(message_id))
         },
         (_, None) => unreachable!("with_message calls once"),
