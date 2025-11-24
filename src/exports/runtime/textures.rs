@@ -349,7 +349,7 @@ impl TextureLoader {
 
             let key = match &request {
                 TextureRequest::Shutdown => {
-                    log::info!("texture loader received shutdown request");
+                    log::debug!("texture loader received shutdown request");
                     break
                 },
                 TextureRequest::LoadFile { key, .. } | TextureRequest::LoadBytes { key, .. } => key.clone(),
@@ -530,7 +530,7 @@ impl TextureRequest {
         let image = image
             .with_guessed_format()
             .with_context(|| format!("loading texture {key}"))?;
-        log::info!("Loading {:?} texture for {key}", image.format());
+        log::debug!("Loading {:?} texture for {key}", image.format());
 
         let image = image
             .decode()
