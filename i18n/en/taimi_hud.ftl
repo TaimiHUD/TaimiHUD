@@ -33,6 +33,7 @@ data = Data
 object = Object
 files = Files
 clear = Clear
+refresh = Refresh
 refresh-files = Refresh files
 # as in 3D
 model = Model

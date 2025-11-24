@@ -336,13 +336,16 @@ impl PathingWindowState {
             }
         }
         ui.same_line();
+        if with_i18n!("refresh", |msg| ui.button(msg)) {
+            PathingEvent::LoadAll.try_send();
+        }
+        ui.same_line();
         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
             PathingEvent::ReloadAll(false).try_send();
         }
-        #[cfg(todo)]
         {
             ui.same_line();
-            if ui.button("close-all") {
+            if ui.button("later") {
                 PathingEvent::UnloadAll(false).try_send();
             }
         }
@@ -869,6 +872,7 @@ impl PathingWindowState {
             return false
         }
         let is_button = reason.is_some();
+        let _id = ui.push_id(&name);
         let node = TreeNode::new(name)
             .flags(TreeNodeFlags::SPAN_AVAIL_WIDTH)
             .frame_padding(true)
@@ -878,7 +882,7 @@ impl PathingWindowState {
             .push(ui);
         let hovered = ui.is_item_hovered();
         // TODO: hovered?
-        let pressed = is_button && ui.is_item_clicked() && ui.is_mouse_released(MouseButton::Left);
+        let pressed = is_button && ui.is_item_clicked() /*&& ui.is_mouse_released(MouseButton::Left)*/;
         match reason {
             Some(UnloadedReason::Disabled) | Some(UnloadedReason::Gravestone) => {
                 ui.same_line();
@@ -926,22 +930,22 @@ impl PathingWindowState {
         }
 
         ui.popup("pack-context", || {
-            let action_close = with_i18n!("close", |msg| Selectable::new(msg)
-                .build(ui)
-            );
+            let action_later = Selectable::new("later")
+                .build(ui);
             let action_unload = with_i18n!("unload-pack", |msg| Selectable::new(msg)
                 .build(ui)
             );
             let action_reload = with_i18n!("reload-pack", |msg| Selectable::new(msg)
                 .build(ui)
             );
-            if action_unload || action_close {
+            if action_unload || action_later {
                 PathingEvent::UnloadPack(path, action_unload).try_send();
             } else if action_reload {
                 PathingEvent::ReloadPack(path, false).try_send();
             }
         });
 
+        let open_context;
         let open;
         let (root_path, (_id, tree)) = {
             let primary_root = info.primary_root();
@@ -960,9 +964,7 @@ impl PathingWindowState {
                 },
             };
             let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, None);
-            if ui.is_item_clicked_with_button(MouseButton::Right) {
-                ui.open_popup("pack-context");
-            }
+            open_context = ui.is_item_clicked_with_button(MouseButton::Right);
             if let Some(root_path) = root_path {
                 self.category_header_decorate(ui, info, root_path);
             }
@@ -1007,6 +1009,10 @@ impl PathingWindowState {
             }
         }
         Self::category_finish(ui, tree);
+        _id.end();
+        if open_context {
+            ui.open_popup("pack-context");
+        }
     }
 
     pub fn is_open(&self, path: PackPath, category: Option<CategoryPath>) -> bool {

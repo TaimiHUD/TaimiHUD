@@ -640,6 +640,7 @@ impl PackCollection {
                     entity.disable();
                 }
             }
+            self.render_list.entities_mut_end();
         }
         pack.clear();
         if cleanup {

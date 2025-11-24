@@ -178,6 +178,9 @@ impl LoadedPack {
 
     pub fn mark_reload(&mut self, manager: &PackLoader) {
         if let Err(reason) = &mut self.info.info {
+            if !reason.can_reload() {
+                return
+            }
             *reason = UnloadedReason::Pending;
             manager.shared_update_pack_info(self.info.index, &self.info);
         }
@@ -650,6 +653,14 @@ pub enum UnloadedReason {
 }
 
 impl UnloadedReason {
+    pub fn can_reload(&self) -> bool {
+        match self {
+            UnloadedReason::Gravestone | UnloadedReason::Disabled =>
+                false,
+            _ => true,
+        }
+    }
+
     fn discriminant(&self) -> u8 {
         match self {
             Self::Pending => 1,

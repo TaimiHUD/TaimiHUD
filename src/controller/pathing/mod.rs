@@ -605,11 +605,21 @@ impl PathingController {
         self.load_maps_for(map_id, ctx).await;
     }
     async fn load_maps_for(&mut self, map_id: MapIndex, ctx: &mut PathingEventContext) {
-        let loaded_pack = self.load_packs_for(map_id, ctx).await;
+        let (loaded_pack, inactive_packs, large_batch) = self.load_packs_for(map_id, ctx).await;
 
+        let space_reload = (!large_batch).then(|| loaded_pack.clone());
         let res = Controller::run_render(RenderTaskPriority::High, move |state| {
             let Some(Ok(engine)) = &mut state.engine else { return };
-            engine.packs.clear_active();
+            let deactivate_packs = match space_reload {
+                None => {
+                    engine.packs.clear_active();
+                    return
+                },
+                Some(packs) => packs,
+            };
+            for path in deactivate_packs.iter().chain(&inactive_packs) {
+                engine.packs.deactivate(path.path, false);
+            }
         }).await.context("pre-clearing render list");
         let _ = rt::log::warn_ok(res);
 
@@ -618,7 +628,7 @@ impl PathingController {
         }
     }
 
-    async fn load_packs_for(&mut self, map_id: MapIndex, ctx: &mut PathingEventContext) -> Vec<PackPath> {
+    async fn load_packs_for(&mut self, map_id: MapIndex, ctx: &mut PathingEventContext) -> (Vec<PackPath>, Vec<PackPath>, bool) {
         let mut packs = Self::packs().write().await;
         let mut loaded_pack = Vec::new();
         {
@@ -679,15 +689,25 @@ impl PathingController {
             //ctx.filter_state_signal = true;
         }
         // now notify
+        let mut active_count = 0;
+        let mut inactive = Vec::new();
         ctx.pack_info.send_if_modified(|shared_info| {
             for (path, loaded) in packs.all_packs() {
+                if let Ok(info) = &loaded.info.info {
+                    if info.maps.contains(map_id) {
+                        active_count += 1;
+                    } else {
+                        inactive.push(path);
+                    }
+                }
                 if !loaded_pack.contains(&path) {
                     shared_info.update_pack(path, loaded);
                 }
             }
             !loaded_pack.is_empty()
         });
-        loaded_pack
+        let large_batch = loaded_pack.len() >= active_count * 2 / 5;
+        (loaded_pack, inactive, large_batch)
     }
 
     pub async fn handle_map_pack(&mut self, path: PackPath, map_id: MapIndex, ctx: &mut PathingEventContext) {
@@ -973,8 +993,8 @@ impl PathingController {
         }
         {
             let remove_packs = match remove {
-                false => None,
-                true => Some(Self::packs().read().await),
+                true => None,
+                false => Some(Self::packs().read().await),
             };
             ctx.pack_info.send_modify(|pack_info| {
                 pack_info.map_info.clear();
@@ -1001,8 +1021,8 @@ impl PathingController {
         }
         {
             let remove_packs = match remove {
-                false => None,
-                true => Some(Self::packs().read().await),
+                true => None,
+                false => Some(Self::packs().read().await),
             };
             let remove_pack = remove_packs.as_ref()
                 .and_then(|packs| packs.lookup_ref(&path));
@@ -1018,17 +1038,20 @@ impl PathingController {
         }
     }
     async fn load_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath) -> anyhow::Result<()> {
-        let mut packs = Self::packs().write().await;
-        let pack = packs.lookup_mut(&path).ok_or_else(|| anyhow!("pack {path} does not exist"))?;
-        let res = pack.activate(&self.loader).await;
-        if let Ok(Some(())) | Err(..) = &res {
-            let pack = &*pack;
-            let is_loaded = matches!(&res, Ok(Some(())));
-            ctx.pack_info.send_if_modified(|shared_info| {
-                shared_info.update_pack(path.clone(), pack);
-                is_loaded
-            });
-        }
+        let res = {
+            let mut packs = Self::packs().write().await;
+            let pack = packs.lookup_mut(&path).ok_or_else(|| anyhow!("pack {path} does not exist"))?;
+            let res = pack.activate(&self.loader).await;
+            if let Ok(Some(())) | Err(..) = &res {
+                let pack = &*pack;
+                let is_loaded = matches!(&res, Ok(Some(())));
+                ctx.pack_info.send_if_modified(|shared_info| {
+                    shared_info.update_pack(path.clone(), pack);
+                    is_loaded
+                });
+            }
+            res
+        };
         if let Ok(Some(())) = &res {
             if let Some(..) = ctx.gameplay_map() {
                 PathingEvent::PreparePack(path).try_send();
