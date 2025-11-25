@@ -297,3 +297,15 @@ pub enum InteractionEventAction {
     Dismiss,
     Manual(TriggerKind),
 }
+
+impl InteractionEventAction {
+    /// Natural in-game events require extra processing for it to act reasonable
+    pub fn is_natural(&self) -> bool {
+        match self {
+            Self::Interact | Self::AutoTrigger =>
+                true,
+            // anything triggered intentionally (via UI usually) is fair game
+            Self::Trigger | Self::Manual(..) => false,
+        }
+    }
+}

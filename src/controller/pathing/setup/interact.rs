@@ -16,10 +16,11 @@ use {
 
 impl PathingController {
     pub(super) async fn handle_interaction(&mut self, ctx: &mut PathingEventContext, event: InteractionEvent) {
-        let (path, loaded_path, ipoi, action) = match event {
+        let (path, loaded_path, ipoi, lpoi, action) = match event {
             InteractionEvent::Nearby { path, loaded_path, interactive_path } => {
                 let Some(map) = self.map_packs.get(&loaded_path.root) else { return };
                 let Some(ipoi) = map.interactive_pois.get(interactive_path.path as usize) else { return };
+                let lpoi = map.pois.get(loaded_path.path as usize);
                 let auto_trigger_configured = || {
                     log::debug!("TODO: auto-trigger setting");
                     true
@@ -29,7 +30,7 @@ impl PathingController {
                 } else {
                     return
                 };
-                (path, loaded_path, ipoi, action)
+                (path, loaded_path, ipoi, lpoi, action)
             },
             InteractionEvent::Gone { .. } => {
                 // remove on-screen info maybe?
@@ -38,16 +39,28 @@ impl PathingController {
             InteractionEvent::Interact { action, path, loaded_path, interactive_path } => {
                 let Some(map) = self.map_packs.get(&loaded_path.root) else { return };
                 let Some(ipoi) = map.interactive_pois.get(interactive_path.path as usize) else { return };
-                (path, loaded_path, ipoi, action)
+                let lpoi = map.pois.get(loaded_path.path as usize);
+                (path, loaded_path, ipoi, lpoi, action)
             },
         };
 
         let allowed = {
             let settings = self.loader.settings.read().await;
             let pathing = settings.pathing();
+            let is_filtered = || {
+                if lpoi.as_ref().map(|lpoi| !lpoi.visibility.is_visible()).unwrap_or(false) {
+                    return true
+                }
+                log::debug!("TODO: POI autoreset filter");
+                false
+            };
             match action {
                 InteractionEventAction::Trigger => TriggerKind::all(),
                 InteractionEventAction::Manual(mask) => mask,
+                action if action.is_natural() && is_filtered() => {
+                    log::debug!("ignoring filtered POI interaction for {loaded_path}");
+                    return
+                },
                 InteractionEventAction::Interact => pathing.trigger_allow_interact,
                 InteractionEventAction::AutoTrigger => pathing.trigger_allow_auto,
             }
