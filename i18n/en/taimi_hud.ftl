@@ -213,7 +213,6 @@ nexus = Nexus
 
 reload-markers = Reload { markers }
 marker-tab = { marker-window }
-pathing-tab = { pathing-config }
 marker = Marker
 markers = { marker }s
 markers-place = Place { markers }
@@ -276,10 +275,12 @@ reset-timers = { reset } { timers }
 
 ## Pathing
 
+pathing-tab = { pathing-config }
 pathing = Pathing
 trail = Trail
 poi = POI
 space = KatRender
+#pack = Pack
 reload-pack = Reload
 reload-packs = {reload-pack}
 unload-packs = Unload All
@@ -296,6 +297,11 @@ show-hidden = Show hidden
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
 toggle = Toggle
+enable-all = Enable all
+disable-all = Disable all
+isolate = Isolate
+hide = Hide
+unhide = Unhide
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing (Experimental)
 pathing-config-minimap = Minimap Options

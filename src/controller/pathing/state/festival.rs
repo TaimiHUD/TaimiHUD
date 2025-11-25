@@ -1,4 +1,7 @@
-use taimi_pack::attributes::{Festivals, Festival};
+use {
+    crate::settings::pathing::FestivalPreference,
+    taimi_pack::attributes::{Festivals, Festival},
+};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FestivalState {

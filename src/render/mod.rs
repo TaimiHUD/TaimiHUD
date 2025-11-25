@@ -1,3 +1,5 @@
+#![allow(irrefutable_let_patterns)]
+
 #[cfg(feature = "extension-arcdps")]
 pub mod arc;
 pub mod api_tab;

@@ -163,6 +163,10 @@ pub struct PathingWindowState {
     pub pack_loader_info: Option<watch::Receiver<SharedLoaderPackInfo>>,
     pub pack_loader_data: Option<watch::Receiver<SharedLoaderPackData>>,
     pub pack_loader_config: Option<watch::Receiver<SharedLoaderPackConfig>>,
+    // draw stack state...
+    act_selected_pack_active: Option<bool>,
+    act_selected_category: Option<(CategoryPath<PackPath>, Option<bool>, bool, bool)>,
+    act_selected_category_open: bool,
 }
 
 impl PathingWindowState {
@@ -184,6 +188,9 @@ impl PathingWindowState {
             pack_loader_info: Default::default(),
             pack_loader_data: Default::default(),
             pack_loader_config: Default::default(),
+            act_selected_pack_active: Default::default(),
+            act_selected_category: Default::default(),
+            act_selected_category_open: Default::default(),
         }
     }
 
@@ -242,13 +249,14 @@ impl PathingWindowState {
         if packs_changed {
             self.refresh_packs();
         }
-        let mut open = self.open;
+        let open_prev = self.open;
+        let mut open = open_prev;
         Window::new(fl!("pathing-window"))
             .size([300.0, 200.0], Condition::FirstUseEver)
             .opened(&mut open)
             .build(ui, || self.draw_window(ui, machine, engine));
 
-        if open != self.open {
+        if open != open_prev {
             ControllerEvent::WindowState(
                 crate::WINDOW_PATHING.into(),
                 Some(open),
@@ -267,29 +275,29 @@ impl PathingWindowState {
         machine: &mut RenderMachine,
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
-        let rendered_err = if let Some(Ok(engine)) = engine {
-            self.draw_content(ui, machine, engine);
+        let rendered_err = if let Some(Ok(..)) = engine {
             None
         } else {
-            Some(engine.map(|e| e.as_ref().err()))
+            Some(engine.as_ref().map(|e| e.as_ref().err()))
         };
         if let Some(e) = rendered_err {
             Self::draw_folder_button(ui);
             PathingConfig::draw_space_error(ui, machine, e.flatten());
         }
+        self.draw_content(ui, machine, engine);
     }
     pub fn draw_content(
         &mut self,
         ui: &Ui,
         machine: &mut RenderMachine,
-        engine: &mut Engine,
+        mut engine: Option<&mut anyhow::Result<Engine>>,
     ) {
         let Some(_tabs) = ui.tab_bar("pathing") else { return };
         if let Some(_token) = with_i18n!("enable", |msg| ui.tab_item(msg)) {
-            self.draw_pack_list(ui, machine, engine);
+            self.draw_pack_list(ui, machine, engine.take());
         }
         if let Some(_token) = with_i18n!("poi", |msg| ui.tab_item(msg)) {
-            self.draw_pois(ui, machine, engine);
+            self.draw_pois(ui, machine, engine.take());
         }
     }
 
@@ -297,10 +305,19 @@ impl PathingWindowState {
         &mut self,
         ui: &Ui,
         machine: &mut RenderMachine,
-        engine: &mut Engine,
+        _engine: Option<&mut anyhow::Result<Engine>>,
     ) {
         Self::draw_folder_button(ui);
-        if !engine.packs.loaded_packs.is_empty() {
+        let (has_packs, has_packs_loaded) = if let Some(pack_info) = &self.pack_info {
+            let pack_info = pack_info.borrow();
+            let has_packs = !pack_info.pack_info.is_empty();
+            let has_loaded = pack_info.pack_info.iter()
+                .any(|(path, pack)|
+                    pack.is_ok() && pack_info.is_loaded(path)
+                );
+            (has_packs, has_loaded)
+        } else { (false, false) };
+        if has_packs_loaded {
             ui.same_line();
             let button_text = match self.filter_open {
                 true => fl!("hide-filter"),
@@ -328,11 +345,11 @@ impl PathingWindowState {
                     }
                 }
             }
-        }
-        if self.open_items.iter().any(|(_, open)| open.any()) {
-            ui.same_line();
-            if ui.button(&fl!("collapse-all")) {
-                self.open_items.clear();
+            if self.open_items.iter().any(|(_, open)| open.any()) {
+                ui.same_line();
+                if ui.button(&fl!("collapse-all")) {
+                    self.open_items.clear();
+                }
             }
         }
         ui.same_line();
@@ -353,7 +370,20 @@ impl PathingWindowState {
         if with_i18n!("unload-packs", |msg| ui.button(msg)) {
             PathingEvent::UnloadAll(true).try_send();
         }
-        if self.filter_open {
+        {
+            ui.same_line();
+            if ui.button("lowmem") {
+                self.open = false;
+                PathingEvent::LowMemory.try_send();
+                ControllerEvent::WindowState(
+                    crate::WINDOW_PATHING.into(),
+                    Some(self.open),
+                ).try_send();
+                self.reduce_memory();
+                return
+            }
+        }
+        if has_packs_loaded && self.filter_open {
             ui.separator();
             let pushy = ui.push_id("pathing-search");
             let mut search_dirty = ui
@@ -396,6 +426,10 @@ impl PathingWindowState {
             if search_dirty {
                 self.refresh_search();
             }
+        }
+        if !has_packs {
+            Self::draw_empty_notice(ui);
+            return
         }
         ChildWindow::new("pathing_subwindow")
             .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
@@ -455,23 +489,25 @@ impl PathingWindowState {
                     token.end();
                 }
                 if !any_loaded {
-                    {
-                        let _font = RenderState::push_font("big", ui);
-                        with_i18n!("packs-empty", |msg| ui.text(msg));
-                    }
-                    {
-                        let _font = RenderState::push_font("ui", ui);
-                        with_i18n!("packs-empty-notice", |notice| ui.text_wrapped(notice));
-                    }
+                    Self::draw_empty_notice(ui);
                 }
             });
+    }
+
+    fn draw_empty_notice(ui: &Ui) {
+        if let _font = RenderState::push_font("big", ui) {
+            with_i18n!("packs-empty", |msg| ui.text(msg));
+        }
+        if let _font = RenderState::push_font("ui", ui) {
+            with_i18n!("packs-empty-notice", |notice| ui.text_wrapped(notice));
+        }
     }
 
     pub fn draw_pois(
         &mut self,
         ui: &Ui,
         machine: &mut RenderMachine,
-        engine: &mut Engine,
+        _engine: Option<&mut anyhow::Result<Engine>>,
     ) {
         use crate::controller::pathing::visible::{InteractionEvent, InteractionEventAction};
         use crate::controller::pathing::registry::MarkerIndex;
@@ -919,6 +955,7 @@ impl PathingWindowState {
 
     pub fn draw_pack(&mut self, ui: &Ui, path: PackPath, info: &PackInfo) {
         let _pack_id = ui.push_id(path.path as i32);
+        self.act_selected_category_open = false;
 
         let map_path = Controller::with_sender(|s|
             s.gameplay.as_ref().and_then(|g| g.borrow().gameplay_map())
@@ -928,22 +965,6 @@ impl PathingWindowState {
                 self.refresh_current_map(map_path);
             }
         }
-
-        ui.popup("pack-context", || {
-            let action_later = Selectable::new("later")
-                .build(ui);
-            let action_unload = with_i18n!("unload-pack", |msg| Selectable::new(msg)
-                .build(ui)
-            );
-            let action_reload = with_i18n!("reload-pack", |msg| Selectable::new(msg)
-                .build(ui)
-            );
-            if action_unload || action_later {
-                PathingEvent::UnloadPack(path, action_unload).try_send();
-            } else if action_reload {
-                PathingEvent::ReloadPack(path, false).try_send();
-            }
-        });
 
         let open_context;
         let open;
@@ -1010,7 +1031,27 @@ impl PathingWindowState {
         }
         Self::category_finish(ui, tree);
         _id.end();
-        if open_context {
+
+        ui.popup("cat-context", || {
+            if let Some(cat) = self.act_selected_category {
+                self.menu_category_item(ui, cat);
+            }
+        });
+        ui.popup("pack-context", || {
+            self.menu_pack(ui, path);
+            if let Some(root_path) = root_path {
+                ui.separator();
+                if let _font = RenderState::push_font("ui", ui) {
+                    with_i18n!("category", |header| ui.text(&header));
+                }
+                ui.separator();
+                self.menu_category(ui, root_path, Some(state), open);
+            }
+        });
+        if self.act_selected_category_open {
+            ui.open_popup("cat-context");
+        } else if open_context {
+            self.act_selected_pack_active = None;
             ui.open_popup("pack-context");
         }
     }
@@ -1104,6 +1145,10 @@ impl PathingWindowState {
             ui.same_line();
         }
         let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, Some(is_copyable));
+        if !self.act_selected_category_open && ui.is_item_clicked_with_button(MouseButton::Right) {
+            self.act_selected_category = Some((cat_path, state, open, is_copyable));
+            self.act_selected_category_open = true;
+        }
         self.category_header_decorate(ui, info, cat_path);
 
         let now_open = tree.is_some();
@@ -1132,7 +1177,7 @@ impl PathingWindowState {
             let display_name = {
                 Self::category_display_name(&self.pack_loader_data, &mut self.category_names, info, child_path)
                 .map(|name| name.to_owned())
-            }.unwrap_or_else(|| format!("#{}", cat_path.path));
+            }.unwrap_or_else(|| format!("#{}", child.path));
             self.draw_category(ui, info, (child_path, map_path), &display_name);
         }
     }
@@ -1525,5 +1570,91 @@ impl PathingWindowState {
         if !copy_message.is_empty() {
             ui.text_wrapped(copy_message);
         }
+    }
+
+    pub fn menu_pack_unloaded(&mut self, ui: &Ui, path: PackPath) {
+        let action_remove = with_i18n!("remove", |label| Selectable::new(&label).build(ui));
+        let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(ui));
+        if action_reload {
+            PathingEvent::ReloadPack(path, true).try_send();
+        } else if action_remove {
+            PathingEvent::UnloadPack(path, true).try_send();
+        }
+    }
+    pub fn menu_pack(&mut self, ui: &Ui, path: PackPath) {
+        //with_i18n!("pack", |header| ui.text(&header));
+        let action_later = Selectable::new("later")
+            .build(ui);
+        let is_loaded = match self.act_selected_pack_active {
+            Some(active) => active,
+            ref mut active @ None => match PathingController::packs().try_read() {
+                Ok(packs) => *active.insert(packs.lookup_ref(&path)
+                    .and_then(|pack| pack.active.as_ref())
+                    .is_some()
+                ),
+                Err(..) => false,
+            },
+        };
+        let action_unload = match is_loaded {
+            true => with_i18n!("unload-pack", |msg| Selectable::new(msg).build(ui)),
+            false => false,
+        };
+        let action_reload = with_i18n!("reload-pack", |msg| Selectable::new(msg)
+            .build(ui)
+        );
+        if action_unload || action_later {
+            PathingEvent::UnloadPack(path, action_unload).try_send();
+        } else if action_reload {
+            PathingEvent::ReloadPack(path, false).try_send();
+        }
+    }
+    pub fn menu_category(&mut self, ui: &Ui, path: CategoryPath<PackPath>, state: Option<bool>, open: bool) {
+        if let Some(_state) = state {
+            let action_toggle = with_i18n!("toggle", |msg| Selectable::new(msg).build(ui));
+            let action_enable_all = with_i18n!("enable-all", |msg| Selectable::new(msg).build(ui));
+            let action_disable_all = with_i18n!("disable-all", |msg| Selectable::new(msg).build(ui));
+            let action_reset = with_i18n!("reset", |msg| Selectable::new(msg).build(ui));
+            let action_isolate = with_i18n!("isolate", |msg| Selectable::new(msg).build(ui));
+
+            if action_toggle {
+                PathingEvent::CategorySetToggle(path, None);
+                log::debug!("TODO: cat:toggle")
+            } else if action_enable_all {
+                log::debug!("TODO: cat:enable_all")
+            } else if action_disable_all {
+                log::debug!("TODO: cat:disable_all")
+            } else if action_reset {
+                log::debug!("TODO: cat:reset")
+            } else if action_isolate {
+                log::debug!("TODO: cat:isolate")
+            }
+            ui.separator();
+        }
+
+        // TODO
+        let any_collapsed = true;
+        let action_expand_all = if any_collapsed {
+            with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        let action_collapse_all = if open {
+            with_i18n!("collapse-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        // TODO
+        let hidden = false;
+        let action_hide = with_i18n(if hidden { "unhide" } else { "hide"}, |msg| Selectable::new(msg).build(ui));
+
+        if action_hide {
+            log::debug!("TODO: cat:{}", if hidden { "unhide" } else { "hide" });
+        } else if action_expand_all {
+            log::debug!("TODO: cat:expand");
+        } else if action_collapse_all {
+            log::debug!("TODO: cat:collapse");
+        }
+
+        ui.separator();
+        // TODO: category stats
+    }
+    pub fn menu_category_item(&mut self, ui: &Ui, (path, state, open, copyable): (CategoryPath<PackPath>, Option<bool>, bool, bool)) {
+        self.menu_category(ui, path, state, open);
     }
 }

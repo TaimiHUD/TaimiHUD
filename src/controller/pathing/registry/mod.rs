@@ -42,12 +42,20 @@ impl PackRegistry {
         self.packs.iter_mut().enumerate()
             .map(|(path, pack)| (PackPath::with_path(path as PackIndex), pack))
     }
+    #[cfg(todo = "unused")]
+    pub fn loaded_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, &'a Arc<PackInfo>)> {
+        self.all_packs().filter_map(|(path, pack)| match &pack.info.info {
+            Ok(info) => Some((path, pack, info)),
+            Err(..) => None,
+        })
+    }
     pub fn active_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, &'a Arc<ActivePack>)> {
         self.all_packs().filter_map(|(path, pack)| match &pack.active {
             Some(active) => Some((path, pack, active)),
             None => None,
         })
     }
+    #[cfg(todo = "unused")]
     pub fn unloaded_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, Result<&'a Arc<PackInfo>, &'a UnloadedReason>)> {
         self.all_packs().filter_map(|(path, pack)| match &pack.info.info {
             Err(reason) => Some((path, pack, Err(reason))),
@@ -58,31 +66,41 @@ impl PackRegistry {
 
     pub fn packs_for_map(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &LoadedPack)> {
         self.all_packs()
-            .filter(move |(_, pack)| match &pack.info.info {
-                Ok(info) => info.maps.contains(map_id),
-                _ => false,
-            })
+            .filter(move |(_, pack)| pack.any_enabled_for_map(map_id))
+    }
+    pub fn packs_for_map_mut(&mut self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &mut LoadedPack)> {
+        self.all_packs_mut()
+            .filter(move |(_, pack)| pack.any_enabled_for_map(map_id))
     }
 
     pub const CONCURRENT_LOAD_LIMIT: usize = 8;
     pub fn load_packs_for_map<'a, 'm>(&'a mut self, manager: &'m PackLoader, map_id: MapIndex) -> impl Stream<Item = (PackPath, &'a mut LoadedPack)> + 'm where
         'a: 'm,
     {
-        stream::iter(self.all_packs_mut())
-            .map(move |(path, pack)| async move {
-                match pack.activate(manager).await {
-                    Ok(..) => match &pack.info.info {
-                        Ok(info) if info.maps.contains(map_id) =>
-                            Some((path, pack)),
-                        _ => None,
-                    },
+        stream::iter(self.packs_for_map_mut(map_id))
+            .map(move |(path, pack)| {
+                let pack = async move {
+                    let on_map = pack.pack_info(manager).await.is_some()
+                        && pack.any_enabled_for_map(map_id);
+                    on_map.then_some(pack)
+                };
+                (path, pack)
+            }).map(move |(path, pack)| async move {
+                let Some(pack) = pack.await else { return (path, None) };
+                let pack = match pack.activate(manager).await {
                     Err(e) => {
                         log::error!("{e:#}");
                         None
                     },
-                }
+                    Ok(Some(())) if !pack.any_enabled_for_map(map_id) =>
+                        None,
+                    Ok(..) if pack.info.info.is_err() =>
+                        None,
+                    Ok(..) => Some(pack),
+                };
+                (path, pack)
             }).buffer_unordered(Self::CONCURRENT_LOAD_LIMIT)
-            .filter_map(|res| future::ready(res))
+            .filter_map(|(path, res)| future::ready(res.map(|pack| (path, pack))))
     }
 
     pub fn preload<P>(&mut self, path: P, datasource: Option<DataSourcePath>, manager: &PackLoader) -> PackPath where
@@ -197,6 +215,40 @@ impl LoadedPack {
         let config = self.config.as_ref().map(|c| c.borrow().clone());
         self.info.info.as_ref().ok().cloned()
             .map(|i| (i, config.unwrap_or_default()))
+    }
+
+    /// Early check for whether a pack is disabled and can be skipped during load
+    pub fn any_enabled(&self) -> bool {
+        let info = match &self.info.info {
+            Ok(info) => info,
+            // generally assume so if info is missing at this point
+            Err(reason) =>
+                return reason.can_reload(),
+        };
+        let config = self.config.as_ref().map(|c| c.borrow());
+        let Some(config) = config else { return true };
+        config.any_enabled(&info.categories)
+    }
+    pub fn any_enabled_for_map(&self, map_id: MapIndex) -> bool {
+        let on_map = match &self.info.info {
+            Ok(info) => info.maps.contains(map_id),
+            Err(UnloadedReason::Pending) => {
+                // don't know yet, this shouldn't happen often...
+                log::debug!("unsure whether {self} is on map {map_id}");
+                true
+            },
+            Err(..) => false,
+        };
+        on_map && self.any_enabled()
+    }
+
+    pub async fn pack_info(&mut self, manager: &'_ PackLoader) -> Option<&Arc<PackInfo>> {
+        let try_load = matches!(&self.info.info, Err(UnloadedReason::Pending));
+        if try_load {
+            let res = self.activate(manager).await;
+            let _ = rt::log::error_ok(res);
+        }
+        self.info.info.as_ref().ok()
     }
 }
 
@@ -639,6 +691,20 @@ impl PackConfig {
         } else {
             self.category_visibility.insert(path, value);
         }
+    }
+
+    /// if false, indicates the pack is disabled (all roots are disabled)
+    pub fn any_enabled(&self, categories: &PackCategoryInfo) -> bool {
+        if categories.roots.is_empty() {
+            // empty pack? *shrug*
+            return true
+        }
+        categories.root_paths()
+            .any(|path| {
+                let default_toggle = !categories.disabled.contains(path);
+                let deviation = self.visibility_deviation_for(path).is_visible();
+                default_toggle ^ deviation
+            })
     }
 }
 
