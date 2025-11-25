@@ -464,7 +464,7 @@ impl PathingWindowState {
                             any_loaded = true;
                         },
                         Err(unloaded) => {
-                            if self.draw_unloaded_pack(ui, unloaded.to_string(), Some(&unloaded.reason)) {
+                            if self.draw_unloaded_pack(ui, path, unloaded.to_string(), Some(&unloaded.reason)) {
                                 PathingEvent::LoadPack(path).try_send();
                             }
                         },
@@ -476,7 +476,7 @@ impl PathingWindowState {
                     let info = match (info, is_loaded) {
                         (Ok(info), true) => info,
                         (Ok(info), false) => {
-                            if self.draw_unloaded_pack(ui, info.to_string(), None) {
+                            if self.draw_unloaded_pack(ui, path, info.to_string(), None) {
                                 PathingEvent::LoadPack(path).try_send();
                             }
                             continue
@@ -903,12 +903,15 @@ impl PathingWindowState {
         Some((copy_value, copy_message.cloned().unwrap_or_default()))
     }
 
-    pub fn draw_unloaded_pack(&mut self, ui: &Ui, name: String, reason: Option<&UnloadedReason>) -> bool {
+    pub fn draw_unloaded_pack(&mut self, ui: &Ui, path: PackPath, name: String, reason: Option<&UnloadedReason>) -> bool {
         if let Some(UnloadedReason::Gravestone) = reason {
             return false
         }
         let is_button = reason.is_some();
         let _id = ui.push_id(&name);
+        ui.popup("pack-context-unloaded", || {
+            self.menu_pack_unloaded(ui, path);
+        });
         let node = TreeNode::new(name)
             .flags(TreeNodeFlags::SPAN_AVAIL_WIDTH)
             .frame_padding(true)
@@ -919,6 +922,8 @@ impl PathingWindowState {
         let hovered = ui.is_item_hovered();
         // TODO: hovered?
         let pressed = is_button && ui.is_item_clicked() /*&& ui.is_mouse_released(MouseButton::Left)*/;
+        let open_context = ui.is_item_clicked_with_button(MouseButton::Right);
+
         match reason {
             Some(UnloadedReason::Disabled) | Some(UnloadedReason::Gravestone) => {
                 ui.same_line();
@@ -945,12 +950,16 @@ impl PathingWindowState {
             },
         }
         ui.table_next_column();
-        if let Some(node) = node {
+        let res = if let Some(node) = node {
             node.pop();
             !is_button || pressed
         } else {
             pressed
+        };
+        if open_context {
+            ui.open_popup("pack-context-unloaded");
         }
+        res
     }
 
     pub fn draw_pack(&mut self, ui: &Ui, path: PackPath, info: &PackInfo) {
