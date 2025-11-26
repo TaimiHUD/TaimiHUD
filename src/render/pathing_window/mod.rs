@@ -1,3 +1,5 @@
+use crate::controller::pathing::registry::MarkerPath;
+
 use {
     crate::{
         controller::pathing::{registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo}, visible::VisibilityFlags, PathingController, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
@@ -19,9 +21,10 @@ pub struct PathingWindowState {
     pub open_items: BTreeMap<PackPath, BitVec>,
     pub current_state: BTreeMap<PackPath, BitVec>,
     pub current_map: BTreeMap<PackMapPath, BitVec>,
-    pub category_names: BTreeMap<CategoryPath<PackPath>, Option<Arc<str>>>,
-    pub category_tips: BTreeMap<CategoryPath<PackPath>, Option<(AttrString, AttrString)>>,
-    pub category_copy: BTreeMap<CategoryPath<PackPath>, Option<(AttrString, AttrString)>>,
+    pub category_names: BTreeMap<MarkerPath<PackPath>, Option<Arc<str>>>,
+    pub category_tips: BTreeMap<MarkerPath<PackPath>, Option<(AttrString, AttrString)>>,
+    pub category_copy: BTreeMap<MarkerPath<PackPath>, Option<(AttrString, AttrString)>>,
+    pub cache_info: BTreeMap<MarkerPath<PackPath>, Option<AttrString>>,
     pub pack_configs: BTreeMap<PackPath, Watched<Arc<PackConfig>>>,
     pub search_state: PathingSearchState,
     pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
@@ -50,6 +53,7 @@ impl PathingWindowState {
             category_names: Default::default(),
             category_tips: Default::default(),
             category_copy: Default::default(),
+            cache_info: Default::default(),
             pack_loader: Default::default(),
             pack_loader_info: Default::default(),
             pack_loader_data: Default::default(),
@@ -74,6 +78,7 @@ impl PathingWindowState {
         }
         self.init_watcher();
         let mut packs_changed = false;
+        let mut maps_info_changed = false;
         if let Some(pack_loader) = &self.pack_loader {
             let loader_info = self.pack_loader_info.get_or_insert_with(|| {
                 let mut rx = pack_loader.shared_pack_info.subscribe();
@@ -91,6 +96,7 @@ impl PathingWindowState {
             });
             if let Some(loader_data) = loader_data.has_changed().unwrap_or(false).then(|| loader_data.borrow_and_update()) {
                 // todo
+                maps_info_changed = true;
             };
 
             let loader_config = self.pack_loader_config.get_or_insert_with(|| {
@@ -111,6 +117,9 @@ impl PathingWindowState {
         }
         for (_path, pack_config) in &mut self.pack_configs {
             let _ = pack_config.try_read_mut();
+        }
+        if maps_info_changed {
+            self.refresh_maps_info();
         }
         if packs_changed {
             self.refresh_packs();
@@ -214,12 +223,14 @@ impl PathingWindowState {
         self.category_names.clear();
         self.category_tips.clear();
         self.category_copy.clear();
+        self.cache_info.clear();
     }
 
     fn refresh_packs(&mut self) {
         self.category_names.clear();
         self.category_tips.clear();
         self.category_copy.clear();
+        self.cache_info.clear();
         for current_map in self.current_map.values_mut() {
             current_map.clear();
         }
@@ -227,6 +238,12 @@ impl PathingWindowState {
             current_state.clear();
         }
         let Some(pack_info) = &self.pack_info else { return };
+    }
+    fn refresh_maps_info(&mut self) {
+        self.category_names.retain(|_, v| v.is_some());
+        self.category_tips.retain(|_, v| v.is_some());
+        self.category_copy.retain(|_, v| v.is_some());
+        self.cache_info.retain(|_, v| v.is_some());
     }
 
     fn refresh_search(&mut self) {

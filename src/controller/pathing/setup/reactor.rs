@@ -1,23 +1,12 @@
 use {
     crate::{
         controller::{
-            Controller,
             pathing::{
-                PathingController,
-                FestivalState,
-                setup::{SetupPoi, SetupTrail},
-                state::shared::SharedMapPackInfo,
-                registry::{PackLoader, PackPath},
-                visible::{InteractionEvent, LoadedTrail},
-                filter::HideContext,
-                registry::{CategoryPath, MapIndex, PackConfig, PackMapPath, PoiPath, SharedLoaderPackInfo, TrailPath, MarkerPath, MarkerId},
-            },
-        },
-        render::machine::MumbleIdentityUpdate,
-        exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::RenderTaskPriority, RenderState}, space::pack::PackSpace,
-        Interruption,
+                registry::{CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::HideContext, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
+            }, Controller
+        }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
     },
-    anyhow::Context, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, std::{collections::BTreeMap, future::Future, pin::Pin, sync::Arc, time::SystemTime}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::keys::Guid,
+    anyhow::Context, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, std::{collections::BTreeMap, future::Future, iter, pin::Pin, sync::Arc, time::SystemTime}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::keys::Guid,
     tokio::{
         select, sync::{broadcast, mpsc, watch}, task::{AbortHandle, JoinSet}, time::{interval, sleep, sleep_until, Duration, Instant, Interval, Sleep}
     },
@@ -193,6 +182,7 @@ impl PathingController {
                 self.unload_pack(ctx, path, remove).await,
             LoadPack(path) =>
                 return self.load_pack(ctx, path).await.map(|_| None),
+            #[cfg(deleteme)]
             PreparePack(path) => {
                 if let Some(map_id) = ctx.gameplay_map() {
                     log::debug!("TODO: change prepare type to include mapid?");
@@ -229,8 +219,19 @@ impl PathingController {
                 self.handle_guid_reset(ctx, guids);
             },
             ResetMarker(path) => {
-                self.filter_state.hidden.reset(MarkerId::from(path));
-                ctx.unexpire(&Err(path));
+                let map_path = ctx.gameplay_map()
+                    .map(|map_id| path.map_root(|r| r.rel(map_id)));
+                let marker_ids = iter::once(MarkerId::from(path))
+                    .chain(map_path.map(MarkerId::from));
+                let mut dirty = false;
+                for marker_id in marker_ids {
+                    dirty |= self.filter_state.hidden.reset(MarkerId::from(path));
+                    dirty |= ctx.unexpire(&marker_id);
+                }
+                if dirty {
+                    self.mark_hidden_dirty(ctx, map_path.map(|p| p.root));
+                    ctx.filter_state_signal = true;
+                }
             },
             DismissMarker(path, delay, contexts) => {
                 if let Some(expiry) = delay.map(|delay| SystemTime::now().checked_add(delay)) {
@@ -345,7 +346,7 @@ pub struct PathingEventContext {
     pub pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<Arc<PackConfig>>)> + Send + Unpin + 'static>,
     pub update_tick: Interval,
     pub tasks: JoinSet<Option<PathingEvent>>,
-    pub filter_expiry: BTreeMap<Result<Guid, MarkerPath<PackPath>>, AbortHandle>,
+    pub filter_expiry: BTreeMap<MarkerId, AbortHandle>,
     pub next_schedule: Pin<Box<Sleep>>,
 
     pub loader_pack_info: watch::Receiver<SharedLoaderPackInfo>,
@@ -458,15 +459,15 @@ impl PathingEventContext {
         }
     }
 
-    pub fn unexpire(&mut self, item: &Result<Guid, MarkerPath<PackPath>>) -> bool {
-        if let Some(handle) = self.filter_expiry.remove(item) {
+    pub fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
+        if let Some(handle) = self.filter_expiry.remove(item.as_ref()) {
             handle.abort();
             true
         } else {
             false
         }
     }
-    pub fn spawn_expire_at<F>(&mut self, item: Result<Guid, MarkerPath<PackPath>>, expiry: SystemTime, duration: Option<Duration>, f: F) where
+    pub fn spawn_expire_at<F>(&mut self, item: MarkerId, expiry: SystemTime, duration: Option<Duration>, f: F) where
         F: Future<Output = Option<PathingEvent>> + Send + 'static,
     {
         let now = Instant::now();
@@ -491,11 +492,11 @@ impl PathingEventContext {
         self.unexpire(&item);
         self.filter_expiry.insert(item, handle);
     }
-    pub fn expire_at(&mut self, item: Result<Guid, MarkerPath<PackPath>>, expiry: SystemTime, duration: Option<Duration>) {
+    pub fn expire_at(&mut self, item: MarkerId, expiry: SystemTime, duration: Option<Duration>) {
         self.spawn_expire_at(item.clone(), expiry, duration, async move {
-            match item {
-                Ok(guid) => Some(PathingEvent::GuidReset(vec![guid])),
-                Err(marker) => Some(PathingEvent::ResetMarker(marker.map_path(Into::into))),
+            match item.marker_path() {
+                Some(marker) => Some(PathingEvent::ResetMarker(marker)),
+                _ => Some(PathingEvent::GuidReset(vec![item.into()])),
             }
         })
     }
@@ -513,6 +514,7 @@ pub enum PathingEvent {
     UnloadPack(PackPath, bool),
     LoadPack(PackPath),
     /// Post-load
+    #[cfg(deleteme)]
     PreparePack(PackPath),
     SetupTrails {
         path: PackMapPath,

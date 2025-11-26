@@ -170,8 +170,9 @@ impl RenderMachine {
                     // probably from a prior map, ignore...
                     None,
                 Some(prev) => {
-                    prev.interactive_pois_nearby ^= &map.interactive_pois_nearby;
-                    Some(&prev.interactive_pois_nearby)
+                    let nearby = Arc::make_mut(&mut prev.interactive_pois_nearby);
+                    *nearby ^= &*map.interactive_pois_nearby;
+                    Some(&*nearby)
                 },
                 _ => None,
             };
@@ -181,11 +182,17 @@ impl RenderMachine {
                     Some(false) => None,
                 });
             for (i, nearby) in changed {
+                #[cfg(todo)]
                 let Some(ipoi) = map.interactive_pois.get(i) else { continue };
-                changes.push((path.clone(), map.interactive_pois.clone(), i, nearby));
+                #[cfg(todo)]
+                let ipois = map.interactive_pois.clone();
+                let ipois = ();
+
+                changes.push((path.clone(), ipois, i, nearby));
             }
         }
 
+        #[cfg(todo)]
         let mut new_nearby = false;
         for (path, ipois, i, nearby) in changes {
             if nearby {
@@ -193,8 +200,10 @@ impl RenderMachine {
             }
         }
     }
-    pub fn act_poi_nearby(&mut self, path: PackMapPath, (ipois, i): (Arc<[InteractivePoi]>, usize)) {
+    pub fn act_poi_nearby(&mut self, path: PackMapPath, (ipois, i): ((), usize)) {
+        #[cfg(todo)]
         let Some(ipoi) = ipois.get(i) else { return };
+        #[cfg(todo)]
         if ipoi.is_passive() {
             #[cfg(feature = "extension-nexus")]
             quick_access_notify(TaimiControls::QUICK_ACCESS_NOTIFY_PATHING);

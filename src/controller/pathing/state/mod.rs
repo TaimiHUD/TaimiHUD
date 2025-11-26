@@ -6,6 +6,7 @@ use {
 pub mod info;
 pub mod shared;
 pub mod festival;
+pub mod hidden;
 
 #[derive(Debug, Clone)]
 pub struct MapPackInfoStorage {

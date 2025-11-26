@@ -2,7 +2,7 @@ use std::{borrow::Borrow, fmt, iter, mem};
 use uuid::Uuid;
 use crate::exports::runtime::Locator;
 use taimi_pack::attributes::keys::Guid;
-use crate::controller::pathing::registry::{MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath};
+use crate::controller::pathing::registry::{CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackMarkerNs;
@@ -24,6 +24,7 @@ impl MarkerIndex {
     pub const INDEX_INVALID: u32 = Self::INDEX_MASK;
     pub const INDEX_MAX: u32 = Self::INDEX_MASK - 1;
     pub const INDEX_MAX_POI: u32 = Self::max_index_from(PoiIndex::MAX as u32);
+    pub const INDEX_MAX_CAT: u32 = Self::max_index_from(CategoryIndex::MAX as u32);
     pub const INDEX_MAX_TRAIL: u32 = Self::max_index_from(TrailIndex::MAX as u32);
     pub const EXTRA_INVALID_TRAIL: u32 = (Self::INDEX_MASK >> Self::EXTRA_MASK_TRAIL.trailing_zeros());
     pub const EXTRA_MAX_TRAIL: u32 = Self::EXTRA_INVALID_TRAIL - 1;
@@ -33,6 +34,7 @@ impl MarkerIndex {
     pub const NS_UNK: MarkerIndexNamespace = 0x0000_0000;
     pub const NS_POI: MarkerIndexNamespace = 0x2000_0000;
     pub const NS_TRAIL: MarkerIndexNamespace = 0x4000_0000;
+    pub const NS_CAT: MarkerIndexNamespace = 0x6000_0000;
 
     #[inline(always)]
     pub const fn repr(self) -> u32 {
@@ -57,6 +59,9 @@ impl MarkerIndex {
     }
     pub const fn with_trail(trail: TrailIndex) -> Self {
         Self::with_parts(Self::NS_TRAIL, trail as u32)
+    }
+    pub const fn with_category(cat: CategoryIndex) -> Self {
+        Self::with_parts(Self::NS_CAT, cat as u32)
     }
     pub fn with_trail_section(trail: TrailIndex, section: TrailSectionIndex) -> Self {
         let section = ((section as u32) + 1).min(Self::EXTRA_MAX_TRAIL);
@@ -119,6 +124,11 @@ impl From<PoiPath> for MarkerIndex {
         Self::with_poi(i.path)
     }
 }
+impl From<CategoryPath> for MarkerIndex {
+    fn from(i: CategoryPath) -> Self {
+        Self::with_category(i.path)
+    }
+}
 impl From<TrailPath> for MarkerIndex {
     fn from(i: TrailPath) -> Self {
         Self::with_trail(i.path)
@@ -141,6 +151,7 @@ pub enum MarkerIndexVariant {
     Trail(TrailIndex),
     TrailSection(TrailIndex, TrailSectionIndex),
     Poi(PoiIndex),
+    Category(CategoryIndex),
     Invalid(MarkerIndexNamespace),
     Unknown(MarkerIndex),
 }
@@ -149,6 +160,8 @@ impl MarkerIndexVariant {
         match (index.namespace(), index.index()) {
             (MarkerIndex::NS_POI, poi @ 0..=MarkerIndex::INDEX_MAX_POI) =>
                 Self::Poi(poi as PoiIndex),
+            (MarkerIndex::NS_CAT, cat @ 0..=MarkerIndex::INDEX_MAX_CAT) =>
+                Self::Category(cat as CategoryIndex),
             (MarkerIndex::NS_TRAIL, trail @ 0..=MarkerIndex::INDEX_MAX_TRAIL) =>
                 Self::Trail(trail as TrailIndex),
             (MarkerIndex::NS_TRAIL, trail) => {
@@ -162,14 +175,19 @@ impl MarkerIndexVariant {
         }
     }
 }
-impl<N> From<TrailPath<N>> for MarkerIndexVariant {
-    fn from(i: TrailPath<N>) -> Self {
+impl From<TrailPath> for MarkerIndexVariant {
+    fn from(i: TrailPath) -> Self {
         Self::Trail(i.path)
     }
 }
-impl<N> From<PoiPath<N>> for MarkerIndexVariant {
-    fn from(i: PoiPath<N>) -> Self {
+impl From<PoiPath> for MarkerIndexVariant {
+    fn from(i: PoiPath) -> Self {
         Self::Poi(i.path)
+    }
+}
+impl From<CategoryPath> for MarkerIndexVariant {
+    fn from(i: CategoryPath) -> Self {
+        Self::Category(i.path)
     }
 }
 impl<N> From<MarkerPath<N>> for MarkerIndexVariant {
@@ -344,6 +362,16 @@ impl From<Guid> for MarkerId {
 impl From<Uuid> for MarkerId {
     fn from(id: Uuid) -> Self {
         Self::with_uuid(id)
+    }
+}
+impl From<MarkerId> for Guid {
+    fn from(id: MarkerId) -> Self {
+        id.guid
+    }
+}
+impl From<MarkerId> for Uuid {
+    fn from(id: MarkerId) -> Self {
+        id.guid.0
     }
 }
 impl AsRef<Guid> for MarkerId {

@@ -1,10 +1,10 @@
 use {
-    super::{PathingWindowState, PathingFilterState},
+    super::{PathingFilterState, PathingWindowState},
     crate::{
-        controller::pathing::{registry::{CategoryIndex, CategoryPath, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackData, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent}, exports::runtime::{imgui::{
-            ChildWindow, Condition, IdStackToken, MouseButton, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, WindowFlags, Selectable,
+        controller::pathing::{registry::{CategoryIndex, CategoryPath, MarkerIndex, MarkerIndexVariant, MarkerPath, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackData, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent}, exports::runtime::{imgui::{
+            ChildWindow, Condition, IdStackToken, MouseButton, Selectable, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, WindowFlags
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, RenderState}, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, std::{collections::{btree_map, BTreeMap},  sync::Arc}, taimi_pack::attributes::AttrString,
+    }, std::{collections::{btree_map, BTreeMap},  sync::Arc}, taimi_pack::{attributes::AttrString, MarkerAttributes},
     tokio::sync::watch,
 };
 
@@ -220,28 +220,75 @@ impl PathingWindowState {
                 .map(|(_id, cat)| cat.display_name.clone())
             )
     }
-    fn category_display_name<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, category_names: &'a mut BTreeMap<CategoryPath<PackPath>, Option<Arc<str>>>, info: &PackInfo, path: CategoryPath<PackPath>) -> Option<&'a str> {
-        let entry = match category_names.entry(path) {
+    pub(super) fn marker_display_name<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, names: &'a mut BTreeMap<MarkerPath<PackPath>, Option<Arc<str>>>, info: &PackInfo, path: MarkerPath<PackPath>) -> Option<&'a str> {
+        let entry = match names.entry(path) {
             btree_map::Entry::Occupied(e) => return e.into_mut().as_ref().map(|s| &s[..]),
             btree_map::Entry::Vacant(e) => e,
         };
-        Self::get_category_display_name(packs.as_ref().map(|d| d.borrow()).as_ref().map(|d| &**d), info, path)
-            .map(|name| entry.insert(name).as_ref())
+        let packs = packs.as_ref().map(|d| d.borrow());
+        let packs = packs.as_ref().map(|d| &**d);
+        match path.path.variant() {
+            MarkerIndexVariant::Category(idx) =>
+                Self::get_category_display_name(packs, info, path.swap(idx)),
+            MarkerIndexVariant::Poi(idx) => {
+                let idx = idx as usize;
+                let tip_name = match Self::get_marker_tip(packs, info, path) {
+                    Some((tip, _desc)) if !tip.is_empty() =>
+                        Some(Some(Arc::from(&tip[..]))),
+                    _ => None,
+                };
+                let get_display_name = || {
+                    let active = PackLoader::shared_pack_active(packs?, path.root)?;
+                    Some(active.pack.pois.get(idx).and_then(|poi|
+                        // TODO: idk what this is but it could be useful maybe kinda?
+                        poi.attributes.billboard_text.as_ref().map(|text| Arc::from(&text[..]))
+                        .or_else(||
+                            active.pack.categories.all_categories.get(poi.category.as_id()).map(|cat| cat.display_name.clone())
+                        )
+                        //.or_else(|| poi.attributes.icon_file)
+                    ))
+                };
+                tip_name.or_else(get_display_name)
+            },
+            _ => {
+                log::debug!("unimplemented");
+                return None
+            },
+        }.map(|name| entry.insert(name).as_ref())
             .unwrap_or(None)
             .map(|s| &s[..])
     }
+    fn category_display_name<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, category_names: &'a mut BTreeMap<MarkerPath<PackPath>, Option<Arc<str>>>, info: &PackInfo, path: CategoryPath<PackPath>) -> Option<&'a str> {
+        Self::marker_display_name(packs, category_names, info, path.map_path(MarkerIndex::with_category))
+    }
 
-    fn get_category_tip(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(AttrString, AttrString)> {
+    pub(super) fn get_marker_tip(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<(AttrString, AttrString)> {
         let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
-        let Some((_, cat)) = active.pack.categories.all_categories.get_index(path.path as usize) else { return None };
-
-        let tip_description = match cat.marker_attributes.tip_description.as_ref() {
+        match path.path.variant() {
+            MarkerIndexVariant::Category(path) => {
+                let Some((_, cat)) = active.pack.categories.all_categories.get_index(path as usize) else { return None };
+                let get_display_name = || &cat.display_name[..];
+                Self::get_marker_tip_inner(&cat.marker_attributes, &get_display_name)
+            },
+            MarkerIndexVariant::Poi(path) => {
+                let Some(poi) = active.pack.pois.get(path as usize) else { return None };
+                let get_display_name = || active.pack.categories.all_categories.get(poi.category.as_id()).map(|cat| &cat.display_name[..]).unwrap_or("");
+                Self::get_marker_tip_inner(&poi.attributes, &get_display_name)
+            },
+            _ => {
+                log::debug!("unimplemented");
+                None
+            },
+        }
+    }
+    fn get_marker_tip_inner<'a>(attrs: &'a MarkerAttributes, display_name: &dyn Fn() -> &'a str) -> Option<(AttrString, AttrString)> {
+        let tip_description = match attrs.tip_description.as_ref() {
             Some(desc) if desc.is_empty() => None,
             d => d,
         };
-        let tip_name = match cat.marker_attributes.tip_name.as_ref() {
+        let tip_name = match attrs.tip_name.as_ref() {
             Some(title) if title.is_empty() => None,
-            Some(title) if cat.display_name.starts_with(&title[..]) => None,
+            Some(title) if display_name().starts_with(&title[..]) => None,
             t => t,
         };
 
@@ -254,11 +301,25 @@ impl PathingWindowState {
         }
     }
 
-    fn get_category_copy(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<(AttrString, AttrString)> {
+    pub(super) fn get_marker_copy(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<(AttrString, AttrString)> {
         let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
-        let Some((_, cat)) = active.pack.categories.all_categories.get_index(path.path as usize) else { return None };
-
-        let interaction = cat.marker_attributes.interaction.as_ref()?;
+        match path.path.variant() {
+            MarkerIndexVariant::Category(path) => {
+                let Some((_, cat)) = active.pack.categories.all_categories.get_index(path as usize) else { return None };
+                Self::get_marker_copy_inner(&cat.marker_attributes)
+            },
+            MarkerIndexVariant::Poi(path) => {
+                let Some(poi) = active.pack.pois.get(path as usize) else { return None };
+                Self::get_marker_copy_inner(&poi.attributes)
+            },
+            _ => {
+                log::debug!("unimplemented");
+                None
+            },
+        }
+    }
+    fn get_marker_copy_inner(attrs: &MarkerAttributes) -> Option<(AttrString, AttrString)> {
+        let interaction = attrs.interaction.as_ref()?;
         let copy_value = interaction.copy_value.clone()?;
         let copy_message = match interaction.copy_message.as_ref() {
             Some(m) if m.is_empty() => None,
@@ -267,11 +328,51 @@ impl PathingWindowState {
         Some((copy_value, copy_message.cloned().unwrap_or_default()))
     }
 
-    pub fn draw_unloaded_pack(&mut self, ui: &Ui, path: PackPath, name: String, reason: Option<&UnloadedReason>) -> bool {
-        if let Some(UnloadedReason::Gravestone) = reason {
-            return false
+    pub(super) fn get_marker_info(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<Option<AttrString>> {
+        let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
+        match path.path.variant() {
+            #[cfg(todo = "unnecessary")]
+            MarkerIndexVariant::Category(path) => (),
+            MarkerIndexVariant::Poi(path) => {
+                let Some(poi) = active.pack.pois.get(path as usize) else { return None };
+                Some(Self::get_marker_info_inner(&poi.attributes))
+            },
+            _ => {
+                log::debug!("unimplemented");
+                None
+            },
         }
-        let is_button = reason.is_some();
+    }
+    fn get_marker_info_inner(attrs: &MarkerAttributes) -> Option<AttrString> {
+        let info = attrs.interaction.as_ref()
+            .and_then(|i| i.info.as_ref());
+        match info {
+            Some(info) if info.is_empty() => None,
+            info => info.cloned(),
+        }
+    }
+    pub(super) fn marker_info<'a>(packs: &Option<watch::Receiver<SharedLoaderPackData>>, cache: &'a mut BTreeMap<MarkerPath<PackPath>, Option<AttrString>>, info: &PackInfo, path: MarkerPath<PackPath>) -> Option<&'a str> {
+        let entry = match cache.entry(path) {
+            btree_map::Entry::Occupied(e) => return e.into_mut().as_ref().map(|s| &s[..]),
+            btree_map::Entry::Vacant(e) => e,
+        };
+        let packs = packs.as_ref().map(|d| d.borrow());
+        let packs = packs.as_ref().map(|d| &**d);
+        let info = Self::get_marker_info(packs, info, path).flatten();
+        entry.insert(info).as_ref()
+            .map(|s| &s[..])
+    }
+
+    pub fn draw_unloaded_pack(&mut self, ui: &Ui, path: PackPath, name: String, reason: Option<&UnloadedReason>) -> bool {
+        let is_button = match reason {
+            Some(UnloadedReason::Gravestone) =>
+                return false,
+            | Some(UnloadedReason::Loading | UnloadedReason::Pending)
+            | None
+            =>
+                false,
+            Some(..) => true,
+        };
         let _id = ui.push_id(&name);
         ui.popup("pack-context-unloaded", || {
             self.menu_pack_unloaded(ui, path);
@@ -289,9 +390,13 @@ impl PathingWindowState {
         let open_context = ui.is_item_clicked_with_button(MouseButton::Right);
 
         match reason {
-            Some(UnloadedReason::Disabled) | Some(UnloadedReason::Gravestone) => {
+            Some(UnloadedReason::Disabled | UnloadedReason::Gravestone) => {
                 ui.same_line();
                 with_i18n!("disabled", |msg| ui.text(msg));
+            },
+            Some(UnloadedReason::Loading) => {
+                ui.same_line();
+                with_i18n!("loading", |msg| ui.text(msg));
             },
             Some(UnloadedReason::Pending) | None => {
                 ui.same_line();
@@ -616,7 +721,7 @@ impl PathingWindowState {
         (push_token, tree_token)
     }
 
-    const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";
+    pub(super) const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";
     /// Draw buttons and tooltips and stuff on top
     pub fn category_header_decorate<'u>(
         &mut self,
@@ -628,13 +733,14 @@ impl PathingWindowState {
         let is_copyable = info.categories.copyable.contains(path);
         let hovered = ui.is_item_hovered();
         let mut show_tip = hovered;
+        let marker_path = path.map_path(MarkerIndex::with_category);
         let pack_data = self.pack_loader_data.as_ref();
         let pack_data = || pack_data.map(|d| d.borrow());
         if is_copyable {
             ui.same_line();
             if ui.small_button(&fl!("copy")) {
-                if let Some((copy_value, copy_message)) = self.category_copy.entry(path)
-                    .or_insert_with(|| Self::get_category_copy(pack_data().as_ref().map(|d| &**d), info, path))
+                if let Some((copy_value, copy_message)) = self.category_copy.entry(marker_path)
+                    .or_insert_with(|| Self::get_marker_copy(pack_data().as_ref().map(|d| &**d), info, marker_path))
                 {
                     Self::copy_copyable(ui, &copy_value[..], &copy_message[..]);
                 }
@@ -646,14 +752,14 @@ impl PathingWindowState {
                     s if !s.is_empty() => Some(&s[..]),
                     _ => None,
                 });
-                let tip = self.category_tips.entry(path)
-                    .or_insert_with(|| Self::get_category_tip(pack_data().as_ref().map(|d| &**d), info, path));
+                let tip = self.category_tips.entry(marker_path)
+                    .or_insert_with(|| Self::get_marker_tip(pack_data().as_ref().map(|d| &**d), info, marker_path));
                 Self::draw_tooltip(ui, display_name.unwrap_or(Self::NAME_TEMPLATE), || {
                     if let Some((title, desc)) = tip {
                         Self::draw_tooltip_category(ui, display_name.unwrap_or_default(), &title[..], &desc[..]);
                     }
-                    if let Some((copy_value, copy_message)) = self.category_copy.entry(path)
-                        .or_insert_with(|| Self::get_category_copy(pack_data().as_ref().map(|d| &**d), info, path))
+                    if let Some((copy_value, copy_message)) = self.category_copy.entry(marker_path)
+                        .or_insert_with(|| Self::get_marker_copy(pack_data().as_ref().map(|d| &**d), info, marker_path))
                     {
                         Self::draw_tooltip_copyable(
                             ui,
@@ -667,8 +773,8 @@ impl PathingWindowState {
             }
         }
         if let Some(Some((title, desc))) = show_tip.then(||
-            self.category_tips.entry(path)
-                .or_insert_with(|| Self::get_category_tip(pack_data().as_ref().map(|d| &**d), info, path))
+            self.category_tips.entry(marker_path)
+                .or_insert_with(|| Self::get_marker_tip(pack_data().as_ref().map(|d| &**d), info, marker_path))
         ) {
             let display_name = display_name.get_or_insert(
                 Self::category_display_name(&self.pack_loader_data, &mut self.category_names, info, path)
@@ -716,7 +822,7 @@ impl PathingWindowState {
         drop(tree);
     }
 
-    fn draw_tooltip_category(ui: &Ui, display_name: &str, title: &str, desc: &str) {
+    pub(super) fn draw_tooltip_category(ui: &Ui, display_name: &str, title: &str, desc: &str) {
         let desc = match desc {
             desc if !desc.is_empty() => Some(&desc[..]),
             _ => None,
@@ -735,6 +841,20 @@ impl PathingWindowState {
         if let Some(tip) = desc {
             ui.text_wrapped(tip);
         }
+    }
+
+    pub(super) fn draw_title_text_truncate(ui: &Ui, text: &str) {
+        let header = text.split_once(['\n', '.'])
+            .map(|(header, _rest)| header)
+            .unwrap_or(text);
+        let header = match header.len() {
+            0 => text,
+            _ => header,
+        };
+        #[cfg(todo)]
+        let sz = ui.calc_text_size(header);
+        let _wrap = ui.push_text_wrap_pos_with_pos(-1.0);
+        ui.text_wrapped(header);
     }
 
     pub fn menu_pack_unloaded(&mut self, ui: &Ui, path: PackPath) {

@@ -47,12 +47,12 @@ impl<N, L> Locator<N, L> {
         self.map_path_with(move |_, p| f(p))
     }
 
-    pub fn map_root_with<R: Into<N>, F: FnOnce(N, &L) -> R>(self, f: F) -> Locator<R, L> {
+    pub fn map_root_with<R, F: FnOnce(N, &L) -> R>(self, f: F) -> Locator<R, L> {
         let Self { root, path } = self;
         let root = f(root, &path);
         Locator::with_parts(root, path)
     }
-    pub fn map_root<R: Into<N>, F: FnOnce(N) -> R>(self, f: F) -> Locator<R, L> {
+    pub fn map_root<R, F: FnOnce(N) -> R>(self, f: F) -> Locator<R, L> {
         self.map_root_with(move |r, _| f(r))
     }
 

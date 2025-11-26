@@ -1,27 +1,31 @@
-use std::fmt;
+use std::{fmt, ops};
 use std::path::Path;
 use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc};
+use crate::controller::pathing::registry::{MarkerId, PackRegistryNs};
 use crate::exports::runtime as rt;
-use crate::controller::pathing::visible::InteractivePoi;
+use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
 use bitvec::vec::BitVec;
 use tokio::sync::broadcast;
 use taimi_pack::attributes::keys::Guid;
 
+use super::hidden::MarkerState;
+
+/// TODO: rename to SharedPacks or something?
 #[derive(Debug, Clone)]
 pub struct SharedMapPackInfo {
     pub shared_loader: Option<Arc<PackLoader>>,
     pub interactions: broadcast::Sender<InteractionEvent>,
     pub pack_info: BTreeMap<PackPath, Result<Arc<PackInfo>, UnloadedPack>>,
     pub pack_loaded: BTreeSet<PackPath>,
-    pub map_info: BTreeMap<PackMapPath, Arc<MapPackInfo>>,
+    pub map_info: BTreeMap<PackMapPath, SharedMapPackLoaded>,
     pub map_state: BTreeMap<PackMapPath, SharedMapPackState>,
 }
 
 impl SharedMapPackInfo {
     pub const INTERACTIONS_BUFFER_LEN: usize = 48;
 
-    pub fn map_info_with<R, F: FnOnce(PackMapPath, &Arc<MapPackInfo>) -> R>(path: PackPath, f: F) -> Option<R> {
+    pub fn map_info_with<R, F: FnOnce(PackMapPath, &SharedMapPackLoaded) -> R>(path: PackPath, f: F) -> Option<R> {
         Controller::with_sender(|s| {
             let map_id = s.gameplay.as_ref().and_then(|g| g.borrow().gameplay_map());
             map_id.and_then(|map_id| {
@@ -108,33 +112,102 @@ impl fmt::Display for UnloadedPack {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SharedMapPackLoaded {
+    pub info: Arc<MapPackInfo>,
+    pub interactive_pois: Arc<[InteractivePoi]>,
+    pub poi_guids: Arc<[Guid]>,
+}
+impl SharedMapPackLoaded {
+    pub fn with_info(info: Arc<MapPackInfo>) -> Self {
+        Self {
+            interactive_pois: Default::default(),
+            poi_guids: Default::default(),
+            info,
+        }
+    }
+
+    pub fn with_loaded(info: Arc<MapPackInfo>, map_pack: &LoadedMapPack) -> Self {
+        Self {
+            interactive_pois: map_pack.interactive_pois.clone(),
+            poi_guids: map_pack.poi_guids.clone(),
+            info,
+        }
+    }
+    pub fn update_with(&mut self, map_pack: &LoadedMapPack) {
+        self.interactive_pois = map_pack.interactive_pois.clone();
+        self.poi_guids = map_pack.poi_guids.clone();
+    }
+}
+impl ops::Deref for SharedMapPackLoaded {
+    type Target = MapPackInfo;
+    fn deref(&self) -> &Self::Target {
+        &self.info
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SharedMapPackState {
     pub categories: Arc<[LoadedCategory]>,
-    pub interactive_pois: Arc<[InteractivePoi]>,
-    pub interactive_pois_nearby: BitVec,
-    pub poi_guids: Arc<[Guid]>,
+    pub interactive_pois_nearby: Arc<BitVec>,
+    pub interactive_poi_pois: Arc<[LoadedPoi]>,
+    pub hidden_markers: Arc<[MarkerId]>,
 }
 
 impl SharedMapPackState {
-    pub fn with_loaded(map_pack: &LoadedMapPack) -> Self {
-        let categories = map_pack.categories.clone();
-        let interactive_pois = map_pack.interactive_pois.clone();
+    pub fn with_static(path: PackMapPath, map_pack: &LoadedMapPack) -> Self {
         Self {
-            categories,
-            interactive_pois,
-            interactive_pois_nearby: map_pack.interactive_pois_nearby.clone(),
-            poi_guids: map_pack.poi_guids.clone(),
+            categories: map_pack.categories.clone(),
+            interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
+            interactive_poi_pois: Self::interactive_pois_from(map_pack),
+            hidden_markers: Default::default(),
+        }
+    }
+    pub fn with_loaded(path: PackMapPath, map_pack: &LoadedMapPack, state: &MarkerState) -> Self {
+        Self {
+            categories: map_pack.categories.clone(),
+            interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
+            interactive_poi_pois: Self::interactive_pois_from(map_pack),
+            hidden_markers: Self::hidden_markers_from(path, state, map_pack),
         }
     }
     pub fn update_static(&mut self, map_pack: &LoadedMapPack) {
         self.categories = map_pack.categories.clone();
-        self.interactive_pois = map_pack.interactive_pois.clone();
+    }
+    pub fn update_with_loaded(&mut self, map_pack: &LoadedMapPack) {
+        self.interactive_pois_nearby = Arc::new(map_pack.interactive_pois_nearby.clone());
+        self.interactive_poi_pois = Self::interactive_pois_from(map_pack);
+    }
+    pub fn update_with_hidden(&mut self, path: PackMapPath, state: &MarkerState, map_pack: &LoadedMapPack) -> bool {
+        self.hidden_markers = Self::hidden_markers_from(path, state, map_pack);
+        // TODO: check if changed?
+        true
     }
 
     pub fn categories<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where
         'a: 'i,
     {
         info.categories().zip(self.categories.iter())
+    }
+
+    pub(crate) fn interactive_pois_from(map_pack: &LoadedMapPack) -> Arc<[LoadedPoi]> {
+        map_pack.interactive_pois.iter()
+            .map(|ipoi| map_pack.pois.get(ipoi.loaded_index().path as usize)
+                .cloned()
+                .unwrap_or(LoadedPoi::INVALID)
+            ).collect()
+    }
+    fn hidden_markers_from(map_path: PackMapPath, state: &MarkerState, map_pack: &LoadedMapPack) -> Arc<[MarkerId]> {
+        let pack_path = map_path.root;
+        state.hidden.keys()
+            .filter(|id| match id {
+                id if id.marker_path::<PackPath>().map(|path| path.root == pack_path).unwrap_or(false) =>
+                    true,
+                id if id.marker_path::<PackMapPath>().map(|path| path.root == map_path).unwrap_or(false) =>
+                    true,
+                _ => map_pack.poi_guids.contains(id.as_ref()),
+            })
+            .cloned()
+            .collect()
     }
 }

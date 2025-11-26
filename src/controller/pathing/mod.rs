@@ -14,7 +14,7 @@ use {
 };
 pub use self::{
     state::{
-        shared::{SharedMapPackInfo, SharedMapPackState},
+        shared::{SharedMapPackInfo, SharedMapPackLoaded, SharedMapPackState},
         festival::FestivalState,
     },
     setup::{PathingEvent, PathingEventContext},

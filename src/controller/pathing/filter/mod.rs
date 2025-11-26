@@ -1,4 +1,5 @@
 use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
+use crate::controller::pathing::state::hidden::MarkerState;
 use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
@@ -10,9 +11,6 @@ use {
     croner::errors::CronError,
     std::time::Duration,
 };
-pub use self::hidden::{MarkerState, HideContext, AutoReset};
-
-pub mod hidden;
 
 pub const FILTER_HIDDEN: Option<bool> = Some(false);
 pub const FILTER_ALLOWED: Option<bool> = None;

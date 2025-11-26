@@ -5,13 +5,13 @@ use {
             PathingEventContext,
             PathingEvent,
             registry::MapIndex,
-            filter::HideContext,
+            state::hidden::HideContext,
             visible::{InteractionEvent, InteractionEventAction, InteractivePoi},
             registry::PoiIndex,
         },
         exports::runtime::{self as rt, Locator}, render::{RenderEvent, RenderState}, settings::pathing::TriggerKind,
     },
-    std::{cmp, collections::BinaryHeap, num::NonZero, time::{Duration, UNIX_EPOCH}},
+    std::{cmp, collections::BinaryHeap, num::NonZero, sync::Arc, time::{Duration, UNIX_EPOCH}},
 };
 
 impl PathingController {
@@ -274,7 +274,7 @@ impl PathingController {
                 }
             }
             if !updated.is_empty() {
-                nearby_changes.push((path, map.interactive_pois_nearby.clone(), updated));
+                nearby_changes.push((path, Arc::new(map.interactive_pois_nearby.clone()), updated));
             }
         }
         if !nearby_changes.is_empty() {

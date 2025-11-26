@@ -1,11 +1,17 @@
 #[cfg(doc)]
 use taimi_pack::attributes::keys;
+use tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockWriteGuard};
+use crate::exports::runtime::locator::LocationMut;
+
 use {
     crate::{
         exports::runtime as rt,
         settings::{DataSourcePath, PathingSettings},
         controller::pathing::visible::{VisibilityFlagSet, VisibilityFlags},
-    }, bitvec::vec::BitVec, futures::{future, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, hash, iter, path::{Path, PathBuf}, ptr, sync::Arc}, taimi_meta::map::MapID, taimi_pack::{
+    },
+    anyhow::anyhow,
+    bitvec::vec::BitVec,
+    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, hash, iter, path::{Path, PathBuf}, ptr, sync::Arc}, taimi_meta::map::MapID, taimi_pack::{
         category::{id::{AsFullId, CategoryId}, Category}, pack::CategoryCollection, Pack
     }, tokio::sync::watch,
     tokio_util::sync::ReusableBoxFuture,
@@ -32,6 +38,11 @@ impl PackRegistry {
         Self {
             packs: Vec::new(),
         }
+    }
+
+    pub fn all_paths(&self) -> impl Iterator<Item = PackPath> + Clone {
+        let len = self.packs.len();
+        (0..len).into_iter().map(|path| PackPath::with_path(path as PackIndex))
     }
 
     pub fn all_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack)> {
@@ -74,33 +85,84 @@ impl PackRegistry {
     }
 
     pub const CONCURRENT_LOAD_LIMIT: usize = 8;
-    pub fn load_packs_for_map<'a, 'm>(&'a mut self, manager: &'m PackLoader, map_id: MapIndex) -> impl Stream<Item = (PackPath, &'a mut LoadedPack)> + 'm where
+    pub async fn load_packs_for_map<'a, 'm>(registry: &'a RwLock<Self>, manager: &'m PackLoader, map_id: MapIndex) -> impl Stream<Item = (PackPath, RwLockMappedWriteGuard<'a, LoadedPack>)> + 'm where
         'a: 'm,
     {
-        stream::iter(self.packs_for_map_mut(map_id))
-            .map(move |(path, pack)| {
-                let pack = async move {
-                    let on_map = pack.pack_info(manager).await.is_some()
-                        && pack.any_enabled_for_map(map_id);
-                    on_map.then_some(pack)
-                };
-                (path, pack)
-            }).map(move |(path, pack)| async move {
-                let Some(pack) = pack.await else { return (path, None) };
-                let pack = match pack.activate(manager).await {
-                    Err(e) => {
-                        log::error!("{e:#}");
-                        None
-                    },
-                    Ok(Some(())) if !pack.any_enabled_for_map(map_id) =>
-                        None,
-                    Ok(..) if pack.info.info.is_err() =>
-                        None,
-                    Ok(..) => Some(pack),
-                };
+        let map_packs = {
+            let registry = registry.read().await;
+            let pack_paths =registry.all_paths();
+            let map_packs: BitVec = registry.all_packs()
+                .map(|(_path, pack)| pack.any_enabled_for_map(map_id))
+                .collect();
+            pack_paths
+                .zip(map_packs.into_iter())
+                .filter_map(|(path, enabled)| enabled.then_some(path))
+        };
+        stream::iter(map_packs)
+            .map(move |path| async move {
+                let pack = Self::load_pack(registry, manager, path).await;
                 (path, pack)
             }).buffer_unordered(Self::CONCURRENT_LOAD_LIMIT)
-            .filter_map(|(path, res)| future::ready(res.map(|pack| (path, pack))))
+            .filter_map(move |(path, pack)| future::ready(match pack {
+                Err(e) => {
+                    log::error!("{e:#}");
+                    None
+                },
+                Ok(pack) if !pack.any_enabled_for_map(map_id) =>
+                    None,
+                Ok(pack) if pack.info.info.is_err() =>
+                    None,
+                Ok(pack) => Some((path, pack)),
+            }))
+    }
+
+    pub async fn load_pack<'a, 'm>(registry: &'a RwLock<Self>, manager: &'m PackLoader, path: PackPath) -> anyhow::Result<RwLockMappedWriteGuard<'a, LoadedPack>> {
+        let pack = {
+            let pack = RwLockWriteGuard::try_map(
+                registry.write().await,
+                |r| r.lookup_mut(&path),
+            );
+            let pack = match pack {
+                Ok(pack) => Some(pack),
+                Err(_reg) => None,
+            };
+
+            let start = match pack {
+                Some(mut pack) => match pack.activate_start().transpose() {
+                    None => Either::Left(Some(pack)),
+                    Some(start) => Either::Right(
+                        start.map(|start| (start, pack.info.path.clone()))
+                    ),
+                },
+                pack => Either::Left(pack),
+            };
+            match start {
+                Either::Left(pack) => Either::Left(future::ready(Ok(pack))),
+                Either::Right(start) => Either::Right(async move {
+                    let (start, filepath) = start?;
+
+                    let res = LoadedPack::activate_load(start, filepath.to_path_buf(), manager).await;
+
+                    let pack = RwLockWriteGuard::try_map(
+                        registry.write().await,
+                        |r| r.lookup_mut(&path),
+                    ).ok();
+                    match pack {
+                        Some(mut pack) => pack.activate_finish(res, manager)
+                            .map(move |()| Some(pack)),
+                        // shouldn't happen but...
+                        None => match res {
+                            Err(e) => Err(e),
+                            Ok(..) => Ok(None),
+                        },
+                    }
+                }),
+            }
+        };
+        match pack.await.transpose() {
+            None => Err(anyhow!("pack {path} does not exist")),
+            Some(res) => res,
+        }
     }
 
     pub fn preload<P>(&mut self, path: P, datasource: Option<DataSourcePath>, manager: &PackLoader) -> PackPath where
@@ -200,6 +262,14 @@ impl LoadedPack {
                 return
             }
             *reason = UnloadedReason::Pending;
+            manager.shared_update_pack_info(self.info.index, &self.info);
+        }
+        self.deactivate(manager);
+    }
+
+    pub fn mark_loading(&mut self, manager: &PackLoader) {
+        if let Err(reason) = &mut self.info.info {
+            *reason = UnloadedReason::Loading;
             manager.shared_update_pack_info(self.info.index, &self.info);
         }
         self.deactivate(manager);
@@ -714,6 +784,7 @@ pub enum UnloadedReason {
     /// Reserved index will not be reused
     Gravestone,
     Pending,
+    Loading,
     UnknownFormat,
     LoadingFailed(Arc<dyn StdError + Send + Sync>),
 }
@@ -721,7 +792,7 @@ pub enum UnloadedReason {
 impl UnloadedReason {
     pub fn can_reload(&self) -> bool {
         match self {
-            UnloadedReason::Gravestone | UnloadedReason::Disabled =>
+            UnloadedReason::Gravestone | UnloadedReason::Disabled | UnloadedReason::Loading =>
                 false,
             _ => true,
         }
@@ -730,10 +801,11 @@ impl UnloadedReason {
     fn discriminant(&self) -> u8 {
         match self {
             Self::Pending => 1,
-            Self::Disabled => 2,
-            Self::Gravestone => 3,
-            Self::UnknownFormat => 4,
-            Self::LoadingFailed(..) => 5,
+            Self::Loading => 2,
+            Self::Disabled => 3,
+            Self::Gravestone => 4,
+            Self::UnknownFormat => 5,
+            Self::LoadingFailed(..) => 6,
         }
     }
 }
@@ -742,7 +814,12 @@ impl Eq for UnloadedReason {}
 impl PartialEq for UnloadedReason {
     fn eq(&self, rhs: &Self) -> bool {
         match (self, rhs) {
-            (Self::Pending, Self::Pending) | (Self::UnknownFormat, Self::UnknownFormat) =>
+            | (Self::Pending, Self::Pending)
+            | (Self::Loading, Self::Loading)
+            | (Self::Disabled, Self::Disabled)
+            | (Self::Gravestone, Self::Gravestone)
+            | (Self::UnknownFormat, Self::UnknownFormat)
+            =>
                 true,
             (Self::LoadingFailed(e), Self::LoadingFailed(rhs)) => Arc::ptr_eq(e, rhs),
             _ => false,
@@ -782,6 +859,8 @@ impl fmt::Display for UnloadedReason {
                 f.write_str("removed"),
             Self::Pending =>
                 f.write_str("not yet loaded"),
+            Self::Loading =>
+                f.write_str("loading"),
             Self::UnknownFormat =>
                 f.write_str("expected TacO zip or folder"),
             Self::LoadingFailed(e) =>

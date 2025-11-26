@@ -35,6 +35,7 @@ files = Files
 clear = Clear
 refresh = Refresh
 refresh-files = Refresh files
+loading = Loading
 # as in 3D
 model = Model
 revert = Revert
@@ -285,6 +286,7 @@ reload-pack = Reload
 reload-packs = {reload-pack}
 unload-packs = Unload All
 unload-pack = Unload
+
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
 show-filter = Show filter options
@@ -296,12 +298,18 @@ ignore-branch = Ignore branch state
 show-hidden = Show hidden
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
+
 toggle = Toggle
 enable-all = Enable all
 disable-all = Disable all
 isolate = Isolate
 hide = Hide
 unhide = Unhide
+
+pois-nearby = Nearby
+pois-map = On-map
+#pois-hidden = Hidden
+
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing (Experimental)
 pathing-config-minimap = Minimap Options

@@ -1,10 +1,7 @@
 use {
     crate::{
         controller::pathing::{
-            PathingController,
-            PathingEventContext,
-            registry::{PackMapPath, PoiPath},
-            filter::{AutoReset, HideContext},
+            registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, state::hidden::{AutoReset, HideContext}, PathingController, PathingEventContext
         },
         exports::runtime as rt, settings::state::SaveState,
     },
@@ -23,9 +20,10 @@ impl PathingController {
                     dirty = true;
                 }
                 if self.filter_state.hidden.reset(&guid) {
+                    self.mark_hidden_dirty(ctx, None);
                     ctx.filter_state_signal = true;
                 }
-                if ctx.unexpire(&Ok(guid)) {
+                if ctx.unexpire(&guid) {
                     ctx.filter_state_signal = true;
                 }
             }
@@ -33,7 +31,7 @@ impl PathingController {
         });
     }
     pub(super) async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Option<Duration>, expiry: Option<SystemTime>, hide_contexts: Vec<HideContext>) {
-        let Some(guid) = ({
+        let guid = {
             self.map_pack_info.get(&path.root)
                 .and_then(|info| self.map_packs.get(&path.root)
                     .map(|map| (map, info))
@@ -48,13 +46,21 @@ impl PathingController {
                     guid if guid == Uuid::nil() => None,
                     guid => Some(guid),
                 })*/
-        }) else {
-            // TODO: ctx.expire_at(Err(path.into()), expiry);
-            log::warn!("no GUID on {path} to dismiss");
-            return
+        };
+        let id = match guid {
+            Some(guid) => MarkerId::from(guid),
+            None => {
+                let path = path.map_path(MarkerIndex::with_poi);
+                match &hide_contexts {
+                    #[cfg(todo)]
+                    c if c.iter().any(|c| matches!(c, HideContext::Local(..))) =>
+                        MarkerId::for_marker(path),
+                    _ => MarkerId::for_marker(path.map_root(|map_path| map_path.root)),
+                }
+            },
         };
         let hidden = if let Some(expiry) = expiry {
-            ctx.expire_at(Ok(guid.clone().into()), expiry, delay);
+            ctx.expire_at(id.clone(), expiry, delay);
             let expiry_now = std::time::Instant::now();
             let expiry_std = expiry_now + if let Some(delay) = delay {
                 delay
@@ -62,9 +68,9 @@ impl PathingController {
                 log::warn!("TODO: expiry to instant");
                 Duration::from_secs(2)
             };
-            self.filter_state.hidden.expire_at(guid.clone(), expiry_std)
+            self.filter_state.hidden.expire_at(id.clone(), expiry_std)
         } else {
-            self.filter_state.hidden.marker_mut(guid.clone())
+            self.filter_state.hidden.marker_mut(id.clone())
         };
         if !hide_contexts.iter().all(|hide| match hide {
             HideContext::Local(map) if map.shard.is_none() =>
@@ -91,10 +97,11 @@ impl PathingController {
         });
         if let Some(expiry) = expiry {
             SaveState::write_with(|save| {
-                save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
+                save.pathing_mut().hidden_guid_expire_at(id.into(), expiry)
             });
         }
         ctx.filter_state_signal = true;
+        self.mark_hidden_dirty(ctx, Some(path.root));
     }
 
     pub fn update_filter_state(&mut self, ctx: &mut PathingEventContext) {
@@ -144,5 +151,29 @@ impl PathingController {
         if let Some(next) = next {
             ctx.next_schedule.as_mut().reset(Instant::now() + next);
         }
+    }
+
+    pub fn mark_hidden_dirty(&self, ctx: &mut PathingEventContext, path: Option<PackMapPath>) {
+        let state = &self.filter_state.hidden;
+        let map_packs = &self.map_packs;
+        ctx.pack_info.send_if_modified(|shared| {
+            let mut updated = false;
+            let shared_map = path
+                .and_then(|path| shared.map_state.get_mut(&path)
+                    .map(|shared_map| (path, shared_map))
+                );
+            if let Some((path, shared_map)) = shared_map {
+                if let Some(map_pack) = map_packs.get(&path) {
+                    updated = shared_map.update_with_hidden(path, state, map_pack);
+                }
+            } else {
+                for (&path, shared_map) in &mut shared.map_state {
+                    if let Some(map_pack) = map_packs.get(&path) {
+                        updated |= shared_map.update_with_hidden(path, state, map_pack);
+                    }
+                }
+            }
+            updated
+        });
     }
 }
