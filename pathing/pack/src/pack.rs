@@ -435,7 +435,12 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         "|",
         r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
         "|",
-        r#"(?<attr_nospace>fadeNear|zpos)\s*=\s*""#,
+        r#""(?<attr_nospace>"#,
+        // reactif-fr
+        "fadeNear|zpos",
+        // linus voe
+        "|GUID",
+        r#")\s*=\s*""#,
         // rediche's WvW marker pack
         "|",
         r#"(?<dup_attr>type)\s*=\s*"(?<dup_attr_v0>[^" ]+)"\s+type\s*=\s*"(?<dup_attr_v1>[^" ]+)""#,
@@ -521,7 +526,7 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                 dst.push_str(replacement);
             } else if let Some(attr_nospace) = caps.name("attr_nospace") {
                 let attr_nospace = attr_nospace.as_str();
-                let _ = write!(dst, " {attr_nospace}=\"");
+                let _ = write!(dst, "\" {attr_nospace}=\"");
             } else if let (Some(dup_attr), Some(dup_attr_v0), Some(dup_attr_v1)) = (
                 caps.name("dup_attr").or_else(|| caps.name("dup_attr1")),
                 caps.name("dup_attr_v0").or_else(|| caps.name("dup_attr1_v0")),
