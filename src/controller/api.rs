@@ -251,9 +251,10 @@ impl ApiController {
         }
     }
     pub fn account_info_path(account_name: &str, endpoint: ApiAccountInfo) -> PathBuf {
-        Self::account_path(account_name)
-            .join(format!("{endpoint}.json"))
+        let path = Self::account_path(account_name);
+        rt::path_join(path, endpoint.filename())
     }
+
     pub fn account_info_request(client: &ApiClient, endpoint: ApiAccountInfo) -> anyhow::Result<Request> {
         match endpoint {
             ApiAccountInfo::Achievements =>
@@ -282,6 +283,11 @@ pub enum ApiAccountInfo {
     /// Weekly raid clears
     #[strum(serialize = "raids")]
     RaidClears,
+}
+impl ApiAccountInfo {
+    pub fn filename(self) -> impl fmt::Display + Into<String> {
+        rt::log::MaybeFmt::new(move |f| write!(f, "{self}.json"))
+    }
 }
 impl fmt::Display for ApiAccountInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

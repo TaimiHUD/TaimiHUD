@@ -142,6 +142,32 @@ pub fn relative_path(path: &Path) -> &Path {
     .unwrap_or(path)
 }
 
+pub fn path_join_append_mut(path: &mut PathBuf) -> &mut std::ffi::OsString {
+    let mut path = path.as_mut_os_string();
+    match &mut path {
+        #[cfg(todo = "unnecessary")]
+        path if path.ends_with("/") =>
+            (),
+        path =>
+            path.push(std::path::MAIN_SEPARATOR_STR),
+    }
+    path
+}
+pub fn path_join_append<D: std::fmt::Display>(path: &mut PathBuf, join: D) {
+    use std::fmt::Write;
+
+    let path = path_join_append_mut(path);
+    let _res = write!(path, "{join}");
+    #[cfg(debug_assertions)]
+    if let Err(_e) = _res {
+        ::log::error!("path_join_append to {path:?} should never fail");
+    }
+}
+pub fn path_join<D: std::fmt::Display>(mut path: PathBuf, join: D) -> PathBuf {
+    path_join_append(&mut path, join);
+    path
+}
+
 pub fn try_addon_dir() -> RuntimeResult<PathBuf> {
     #[cfg(feature = "extension-nexus")]
     if let Some(path) = exports::nexus::addon_dir()? {

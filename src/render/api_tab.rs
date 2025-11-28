@@ -54,6 +54,33 @@ impl ApiTabState {
             let _ = rt::send_alert(ui, "clearing all tokens...");
             ApiMessage::TokenClear.try_send();
         }
+
+        #[cfg(feature = "paths")]
+        {
+            use crate::{
+                controller::pathing::PathingEvent,
+                space::Engine,
+            };
+            ui.separator();
+
+            let pathing_active = Engine::is_available();
+            let tree_token = with_i18n!("pathing", |label| rt::imgui::TreeNode::new(&label)
+                .opened(pathing_active, rt::imgui::Condition::Once)
+                .framed(true)
+                .frame_padding(true)
+                .push(ui)
+            );
+            if let Some(_tree) = tree_token {
+                if with_i18n!("reload-data-sources", |label| ui.button(&label)) {
+                    PathingEvent::AccountInfoReload(None);
+                }
+                ui.same_line();
+                if with_i18n!("refresh", |label| ui.button(&label)) {
+                    PathingEvent::AccountInfoRefresh(None);
+                }
+            }
+        }
+
     }
 
     pub fn sync_boot(&mut self) {
