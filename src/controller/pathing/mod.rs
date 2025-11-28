@@ -8,7 +8,10 @@ use {
         visible::LoadedMapPack,
         filter::FilterState,
     },
-    crate::space::pack::trail::TrailParams,
+    crate::{
+        controller::api::ApiAccountInfo,
+        space::pack::trail::TrailParams,
+    },
     std::{collections::BTreeMap, sync::Arc},
     tokio::sync::RwLock,
 };
@@ -25,7 +28,7 @@ pub mod festivals;
 pub mod visible;
 pub mod filter;
 pub mod state;
-pub mod setup;
+mod setup;
 
 #[derive(Debug)]
 pub struct PathingController {
@@ -52,6 +55,11 @@ impl PathingController {
         static PACKS: RwLock<PackRegistry> = RwLock::const_new(PackRegistry::new());
         &PACKS
     }
+
+    pub const API_ENDPOINTS: &'static [ApiAccountInfo] = &[
+        ApiAccountInfo::Achievements,
+        ApiAccountInfo::RaidClears,
+    ];
 
     pub async fn trail_params(&self) -> TrailParams {
         let settings = self.loader.settings.read().await;

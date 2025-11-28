@@ -1,23 +1,10 @@
 use {
-    anyhow::Context,
     crate::{
         exports::{self, runtime as rt},
         settings::state::BootstrapState,
-    },
-    log::{Level, LevelFilter, Log, Metadata, Record},
-    std::{
-        cell::OnceCell, ops,
-        ffi::CStr,
-        fmt,
-        cell::RefCell,
-        fs,
-        io,
-        mem::transmute,
-        path::PathBuf,
-        slice,
-        sync::{LazyLock, Mutex, OnceLock, TryLockError},
-        time,
-    },
+    }, anyhow::Context, log::{Level, LevelFilter, Log, Metadata, Record}, std::{
+        cell::{Cell, OnceCell, RefCell}, ffi::CStr, fmt, fs, io, mem::transmute, ops, path::PathBuf, slice, sync::{LazyLock, Mutex, OnceLock, TryLockError}, time
+    }
 };
 
 pub static LOG_FILTER: LazyLock<LogFilter> = LazyLock::new(|| {
@@ -686,7 +673,7 @@ pub fn error_ok<R, E>(res: Result<R, E>) -> Option<R> where
 }
 
 #[derive(Copy, Clone)]
-pub struct MaybeFmt<F>(pub F);
+pub struct MaybeFmt<F = FormatterFn>(pub F);
 impl<F> MaybeFmt<F> {
     pub const fn with(f: F) -> Self {
         Self(f)
@@ -695,6 +682,18 @@ impl<F> MaybeFmt<F> {
         F: Fn(&mut fmt::Formatter) -> fmt::Result,
     {
         Self::with(f)
+    }
+    pub const fn wrap_lazy_fn<'a, R, FN>(f: FN) -> impl Fn(&mut fmt::Formatter) -> fmt::Result + 'a where
+        FN: Fn() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        move |fmt| fmt.write_str(f().as_ref())
+    }
+    pub const fn lazy_fn<'a, R>(f: F) -> impl fmt::Display + Into<String> + 'a where
+        F: Fn() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        MaybeFmt::new(Self::wrap_lazy_fn::<R, F>(f))
     }
 }
 impl<F> fmt::Display for MaybeFmt<F> where
@@ -716,10 +715,27 @@ impl<F> From<F> for MaybeFmt<F> {
         Self(f)
     }
 }
+impl<F> From<MaybeFmt<F>> for String where
+    F: Fn(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn from(f: MaybeFmt<F>) -> Self {
+        f.to_string()
+    }
+}
+pub const UNAVAILABLE: &'static str = "<unavail>";
+pub type FormatterFn = fn(&mut fmt::Formatter) -> fmt::Result;
+pub fn fmt_unavailable(f: &mut fmt::Formatter) -> fmt::Result {
+    f.write_str(UNAVAILABLE)
+}
+pub fn fmt_default<S: Default + AsRef<str>>(f: &mut fmt::Formatter) -> fmt::Result {
+    f.write_str(S::default().as_ref())
+}
+impl MaybeFmt<FormatterFn> {
+    pub const UNAVAILABLE: Self = Self::with(fmt_unavailable);
+}
 #[derive(Clone)]
-pub struct MaybeFmtMut<F>(pub RefCell<F>);
+pub struct MaybeFmtMut<F = FormatterFn>(pub RefCell<F>);
 impl<F> MaybeFmtMut<F> {
-    pub const UNAVAILABLE: &'static str = "<unavail>";
     pub const fn with(f: F) -> Self {
         Self(RefCell::new(f))
     }
@@ -728,6 +744,21 @@ impl<F> MaybeFmtMut<F> {
     {
         Self::with(f)
     }
+    pub const fn wrap_lazy_fnmut<'a, R, FN>(mut f: FN) -> impl FnMut(&mut fmt::Formatter) -> fmt::Result + 'a where
+        FN: FnMut() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        move |fmt| fmt.write_str(f().as_ref())
+    }
+    pub const fn lazy_fnmut<'a, R>(f: F) -> impl fmt::Display + Into<String> + 'a where
+        F: FnMut() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        MaybeFmtMut::new(Self::wrap_lazy_fnmut::<R, F>(f))
+    }
+}
+impl MaybeFmtMut<FormatterFn> {
+    pub const UNAVAILABLE: Self = Self::with(fmt_unavailable);
 }
 impl<F> fmt::Display for MaybeFmtMut<F> where
     F: FnMut(&mut fmt::Formatter) -> fmt::Result,
@@ -736,7 +767,7 @@ impl<F> fmt::Display for MaybeFmtMut<F> where
         if let Ok(mut fun) = self.0.try_borrow_mut() {
             fun(f)
         } else {
-            f.write_str(Self::UNAVAILABLE)
+            f.write_str(UNAVAILABLE)
         }
     }
 }
@@ -752,27 +783,53 @@ impl<F> From<F> for MaybeFmtMut<F> {
         Self::with(f)
     }
 }
-#[derive(Clone)]
-pub struct MaybeFmtOnce<F>(pub RefCell<Option<F>>);
+impl<F> From<MaybeFmtMut<F>> for String where
+    F: FnMut(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn from(f: MaybeFmtMut<F>) -> Self {
+        f.to_string()
+    }
+}
+pub struct MaybeFmtOnce<F = FormatterFn>(pub Cell<Option<F>>);
 impl<F> MaybeFmtOnce<F> {
-    pub const UNAVAILABLE: &'static str = "<unavail>";
+    pub const EMPTY: Self = Self(Cell::new(None));
+
     pub const fn with(f: F) -> Self {
-        Self(RefCell::new(Some(f)))
+        Self(Cell::new(Some(f)))
     }
     pub const fn new(f: F) -> Self where
         F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
     {
         Self::with(f)
     }
+    pub const fn wrap_lazy_fnonce<'a, R, FN>(f: FN) -> impl FnOnce(&mut fmt::Formatter) -> fmt::Result + 'a where
+        FN: FnOnce() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        move |fmt| fmt.write_str(f().as_ref())
+    }
+    pub const fn lazy_fnonce<'a, R>(f: F) -> impl fmt::Display + Into<String> + 'a where
+        F: FnOnce() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        MaybeFmtOnce::new(Self::wrap_lazy_fnonce::<R, F>(f))
+    }
+
+    pub fn take(&self) -> Self {
+        Self(Cell::new(self.0.take()))
+    }
+}
+impl MaybeFmtOnce<FormatterFn> {
+    pub const UNAVAILABLE: Self = Self::with(fmt_unavailable);
 }
 impl<F> fmt::Display for MaybeFmtOnce<F> where
     F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Ok(Some(fun)) = self.0.try_borrow_mut().map(|mut f| f.take()) {
+        if let Some(fun) = self.0.take() {
             fun(f)
         } else {
-            f.write_str(Self::UNAVAILABLE)
+            f.write_str(UNAVAILABLE)
         }
     }
 }
@@ -788,11 +845,18 @@ impl<F> From<F> for MaybeFmtOnce<F> {
         Self::with(f)
     }
 }
+impl<F> From<MaybeFmtOnce<F>> for String where
+    F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+{
+    fn from(f: MaybeFmtOnce<F>) -> Self {
+        f.to_string()
+    }
+}
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct StrFmt<F> {
-    pub f: F,
-    pub displayed: OnceCell<Box<str>>,
+    f: F,
+    displayed: OnceCell<Box<str>>,
 }
 impl<F> StrFmt<F> {
     pub const fn new(f: F) -> Self {
@@ -801,13 +865,54 @@ impl<F> StrFmt<F> {
             displayed: OnceCell::new(),
         }
     }
+    pub fn from_str<S: Into<Box<str>>>(s: S) -> Self where
+        F: Default,
+    {
+        let s = s.into();
+        let this = Self::default();
+        let _ = this.displayed.set(s);
+        this
+    }
+}
+impl StrFmt<MaybeFmt<FormatterFn>> {
+    pub const UNAVAILABLE: Self = Self::new(MaybeFmt::UNAVAILABLE);
+}
+impl<F> StrFmt<MaybeFmt<F>> {
+    pub const fn fmt_f(f: F) -> Self where
+        F: Fn(&mut fmt::Formatter) -> fmt::Result,
+    {
+        Self::new(MaybeFmt::with(f))
+    }
+
+    pub const fn lazy_f<'a, R>(f: F) -> impl fmt::Display + Into<String> + 'a where
+        F: Fn() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        StrFmt::new(MaybeFmt::lazy_fn(f))
+    }
+}
+impl<F> StrFmt<MaybeFmtOnce<F>> {
+    pub const fn fmt_fn(f: F) -> Self where
+        F: FnOnce(&mut fmt::Formatter) -> fmt::Result,
+    {
+        Self::new(MaybeFmtOnce::with(f))
+    }
+    pub const fn lazy_fn<'a, R>(f: F) -> impl fmt::Display + Into<String> + 'a where
+        F: FnOnce() -> R + 'a,
+        R: AsRef<str> + Into<String>,
+    {
+        StrFmt::new(MaybeFmtOnce::lazy_fnonce(f))
+    }
 }
 impl<F> StrFmt<F> where
     F: fmt::Display,
 {
-
     pub fn get_str(&self) -> &str {
         self.displayed.get_or_init(|| self.f.to_string().into_boxed_str())
+    }
+    pub fn try_get_str(&self) -> Option<&str> {
+        self.displayed.get()
+            .map(|s| &s[..])
     }
 
     pub fn annotate_result<E, T>(&self, res: impl Context<T, E>) -> anyhow::Result<T> {

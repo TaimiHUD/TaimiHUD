@@ -100,16 +100,35 @@ impl FilterConfig {
     }
 }
 
+/// TODO: impl Deserialize here
 #[derive(Debug, Clone, Default)]
 pub struct RaidState {
     pub completed: BTreeSet<keys::Raid>,
 }
+impl RaidState {
+    pub fn new<I>(completed: I) -> Self where
+        I: IntoIterator,
+        I::Item: Into<keys::Raid>,
+    {
+        Self {
+            completed: completed.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 
+/// TODO: impl Deserialize here
 #[derive(Debug, Clone, Default)]
 pub struct AchievementState {
     pub status: Arc<PathingAchievementSave>,
 }
 impl AchievementState {
+    pub fn new(status: impl Into<Arc<PathingAchievementSave>>) -> Self {
+        Self {
+            status: status.into(),
+        }
+    }
+    /// see [crate::settings::pathing::PathingAccountSave]
+    #[cfg(todo)]
     pub fn update_from_save(&mut self) {
         let acc = crate::ACCOUNT_NAME_CELL.get().map(|n| &n[..]);
         SaveState::read_with(|s| if let Some(p) = &s.pathing_state {

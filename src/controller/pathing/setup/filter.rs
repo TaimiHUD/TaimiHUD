@@ -1,13 +1,11 @@
 use {
-    crate::{
-        controller::pathing::{
-            registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, state::hidden::{AutoReset, HideContext}, PathingController, PathingEventContext
-        },
-        exports::runtime as rt, settings::state::SaveState,
-    },
-    std::time::SystemTime,
-    taimi_pack::attributes::keys::Guid,
-    tokio::time::{Duration, Instant},
+    anyhow::Context,
+    super::PathingEvent, crate::{
+        controller::{api::{ApiAccountInfo, ApiController, ApiMessage}, pathing::{
+            filter::{AchievementState, RaidState}, registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, setup::PathingTaskBox, state::hidden::{AutoReset, HideContext}, PathingController, PathingEventContext
+        }},
+        exports::runtime as rt, settings::{pathing::{PathingAchievementApi, PathingAchievementSave}, state::SaveState},
+    }, bitvec::array::BitArray, futures::future::Either, std::{future::Future, path::{Path, PathBuf}, time::SystemTime}, taimi_pack::attributes::keys::{self, Guid}, tokio::{fs, io::AsyncReadExt, time::{Duration, Instant}},
 };
 
 impl PathingController {
@@ -117,8 +115,8 @@ impl PathingController {
         #[cfg(todo = "unnecessary")]
         {
             self.filter_state.festival = ctx.festivals.read().clone();
+            self.filter_state.achievements.update_from_save();
         }
-        self.filter_state.achievements.update_from_save();
         if let Ok(ml) = rt::mumble_link_ptr() {
             self.filter_state.map.update_from_mumblelink_context(&ml);
             self.filter_state.avatar.update_from_mumblelink_context(&ml);
@@ -184,5 +182,111 @@ impl PathingController {
             }
             updated
         });
+    }
+
+    /// TODO: this
+    /// (assuming false as long as any data exists for now)
+    pub fn api_info_outdated(&mut self, endpoint: ApiAccountInfo) -> bool {
+        match endpoint {
+            #[cfg(todo)]
+            ApiAccountInfo::RaidClears => last_updated < start_of_week || recently_left_raid_map,
+            #[cfg(todo)]
+            ApiAccountInfo::Achievements => last_updated < settings.achievement_update_period_id || recently_left_story_map,
+            _ => false,
+        }
+    }
+    /// list of paths to load or populate with given api token
+    pub fn api_setup_get(&mut self, _ctx: &mut PathingEventContext) -> impl Future<Output = Vec<(ApiAccountInfo, Either<PathBuf, Option<String>>)>> + 'static {
+        let (account_name, token_id) = match ApiController::current_account_token() {
+            Ok(token) if token.id().is_none() => (
+                Some(token.account_name),
+                None,
+            ),
+            Ok(token) => (
+                Some(token.account_name),
+                Some(token.id),
+            ),
+            Err(account_name) => (
+                account_name,
+                None,
+            ),
+        };
+
+        let mut outdated: BitArray<[u32; 1]> = Default::default();
+        for (&endpoint, mut outdated) in Self::API_ENDPOINTS.iter().zip(outdated.iter_mut()) {
+            *outdated = self.api_info_outdated(endpoint);
+        }
+        async move {
+            let mut res = Vec::with_capacity(Self::API_ENDPOINTS.len());
+            if let Some(acc) = &account_name {
+                let mut account_path = ApiController::account_path(&acc);
+                for (&endpoint, outdated) in Self::API_ENDPOINTS.into_iter().zip(outdated) {
+                    rt::path_join_append(&mut account_path, endpoint.filename());
+                    let missing = fs::try_exists(&account_path).await.ok() == Some(false);
+                    if !missing {
+                        res.push((endpoint, Either::Right(token_id.clone())));
+                    }
+                    if missing || (token_id.is_some() && outdated) {
+                        res.push((endpoint, Either::Left(account_path.clone())));
+                    };
+                    account_path.pop();
+                }
+            }
+            res
+        }
+    }
+    pub(super) fn api_setup_get_each((endpoint, missing): (ApiAccountInfo, Either<PathBuf, Option<String>>)) -> Option<PathingTaskBox> {
+        match missing {
+            Either::Left(load_path) =>
+                return Some(Box::pin(Self::api_load_info_from(endpoint, load_path))),
+            Either::Right(Some(token_id)) => {
+                ApiMessage::RefreshAccount {
+                    endpoint,
+                    token_id: Some(token_id),
+                }.try_send();
+            },
+            Either::Right(None) => (),
+        }
+        None
+    }
+    pub(super) async fn api_load_info_from(endpoint: ApiAccountInfo, path: PathBuf) -> Option<PathingEvent> {
+        let res = match endpoint {
+            ApiAccountInfo::RaidClears => {
+                Self::api_load_info_from_raids(path).await
+                    .map(PathingEvent::AccountInfoRaidClears)
+            },
+            ApiAccountInfo::Achievements => {
+                Self::api_load_info_from_achievements(path).await
+                    .map(PathingEvent::AccountInfoAchievements)
+            },
+        }.with_context(|| format!("parsing account {endpoint}"));
+
+        rt::log::error_ok(res)
+    }
+    async fn api_load_info_from_achievements(path: PathBuf) -> anyhow::Result<AchievementState> {
+        let achievements = Self::deserialize_path::<PathingAchievementApi>(&path).await
+            .map(PathingAchievementSave::from)?;
+        Ok(AchievementState::new(achievements))
+    }
+    async fn api_load_info_from_raids(path: PathBuf) -> anyhow::Result<RaidState> {
+        let clears = Self::deserialize_path::<Vec<keys::Raid>>(&path).await?;
+        Ok(RaidState::new(clears))
+    }
+    async fn deserialize_path<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+        let mut f = fs::File::open(path).await?;
+        let mut data = Vec::with_capacity(match () {
+            #[cfg(windows)]
+            () => {
+                use std::os::windows::fs::MetadataExt;
+                f.metadata().await.ok().and_then(|meta|
+                    meta.file_size().try_into().ok()
+                )
+            },
+            #[cfg(not(windows))]
+                _ => None::<usize>,
+        }.unwrap_or(0x1000));
+        f.read_to_end(&mut data).await?;
+        serde_json::from_slice::<T>(&data)
+            .map_err(anyhow::Error::from)
     }
 }

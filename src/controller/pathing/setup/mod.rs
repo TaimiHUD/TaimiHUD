@@ -21,7 +21,7 @@ use {
     tokio::fs::create_dir_all,
 };
 pub use self::{
-    reactor::{PathingEventContext, PathingEvent},
+    reactor::{PathingEventContext, PathingEvent, PathingTaskBox},
     space::{SetupPoi, SetupTrail},
 };
 
@@ -33,6 +33,8 @@ mod interact;
 
 impl PathingController {
     pub async fn setup(&mut self, ctx: &mut PathingEventContext) {
+        let api_setup = self.api_setup_get(ctx);
+
         let settings = &self.loader.settings;
         let mut enabled = false;
         let festivals = async {
@@ -45,30 +47,18 @@ impl PathingController {
                 off,
             }
         };
-        let achievements = async move {
-            use tokio::io::AsyncReadExt;
-            if let Ok(mut file) = tokio::fs::File::open(rt::addon_dir().join("achievements.json")).await {
-                let mut data = Vec::new();
-                file.read_to_end(&mut data).await?;
-                serde_json::from_slice::<crate::settings::pathing::PathingAchievementApi>(&data)
-                    .map_err(anyhow::Error::from)
-                    .map(crate::settings::pathing::PathingAchievementSave::from)
-                    .map(Some)
-            } else {
-                Ok(None)
-            }
-        };
         let preload = self.preload_all();
-        let (_preload, festivals, achievements) = tokio::join!(preload, festivals, achievements);
+        let (_preload, festivals, api_setup) = tokio::join!(preload, festivals, api_setup);
 
         ctx.festivals.set(festivals);
-        self.enabled = enabled;
 
-        let achievements = achievements
-            .context("loading achievements.json");
-        if let Some(Some(achievements)) = rt::log::warn_ok(achievements) {
-            self.filter_state.achievements.status = achievements.into();
+        for api_setup in api_setup {
+            if let Some(task) = Self::api_setup_get_each(api_setup) {
+                ctx.tasks.spawn(task);
+            }
         }
+
+        self.enabled = enabled;
 
         ctx.pack_info.send_if_modified(|shared| {
             shared.shared_loader = Some(self.loader.clone());

@@ -308,6 +308,8 @@ impl FromStr for Specialization {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Raid(pub String);
 impl FromStr for Raid {
     type Err = Infallible;

@@ -622,23 +622,29 @@ impl PathingSave {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PathingAccountSave {
+    /// if api controller just keeps a cached response around, why bother?
+    #[cfg(todo)]
     #[serde(default, skip_serializing_if = "PathingAchievementSave::is_empty")]
     pub achievements: Arc<PathingAchievementSave>,
 }
 impl PathingAccountSave {
     pub fn is_empty(&self) -> bool {
         match self {
+            #[cfg(todo)]
             Self { achievements, .. } if !achievements.is_empty() =>
                 false,
             Self {
+                #[cfg(todo)]
                 achievements: _,
             } => true,
         }
     }
 
+    #[cfg(todo)]
     pub fn achievements_mut(&mut self) -> &mut PathingAchievementSave {
         Arc::make_mut(&mut self.achievements)
     }
+    #[cfg(todo)]
     pub fn achievement_complete(&mut self, id: AchievementId) {
         if !self.achievements.progress.contains_key(&id) && !self.achievements.completed.contains(&id) {
             return

@@ -2,6 +2,7 @@ use {
     crate::{
         controller::{
             pathing::{
+                filter,
                 registry::{CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::{AutoReset, HideContext}, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
             }, Controller
         }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
@@ -239,6 +240,12 @@ impl PathingController {
                 } else {
                     log::error!("unable to determine expiry time for {path} of {delay:?}");
                 }
+            },
+            AccountInfoAchievements(achievements) => {
+                self.filter_state.achievements = achievements;
+            },
+            AccountInfoRaidClears(raids) => {
+                self.filter_state.raids = raids;
             },
             ToggleKatRender => self.toggle_katrender(ctx).await,
             LowMemory => self.lowmem_activate(ctx).await,
@@ -532,10 +539,12 @@ pub enum PathingEvent {
     DismissMarker(PoiPath<PackMapPath>, Option<Duration>, Vec<HideContext>, Option<AutoReset>),
     #[cfg(todo)]
     CategoryVisibility(CategoryPath<PackPath>, VisibilityFlags),
+    AccountInfoRaidClears(filter::RaidState),
+    AccountInfoAchievements(filter::AchievementState),
     ToggleKatRender,
     LowMemory,
     Exit(Interruption),
-    FanOut(Vec<PathingEvent>)
+    FanOut(Vec<PathingEvent>),
 }
 
 impl PathingEvent {
@@ -549,3 +558,5 @@ impl PathingEvent {
         Self::VisibleToggle { context: Some(context), set: None }
     }
 }
+
+pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;

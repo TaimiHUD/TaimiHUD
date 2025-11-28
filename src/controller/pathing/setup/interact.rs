@@ -83,16 +83,73 @@ impl PathingController {
             }
         };
 
+        let mut took_action = None;
         let blocked = "trigger settings blocked";
         if let InteractivePoi { info: Some(info), .. } = ipoi {
-            if allowed.contains(TriggerKind::INFO) {
+            let allowed = allowed.contains(TriggerKind::INFO);
+            *took_action.get_or_insert_default() |= allowed;
+            if allowed {
                 ctx.spawn_alert(info.message.clone()[..].into(), Duration::from_secs(10));
             } else {
                 log::info!("{blocked} info popup");
             }
         }
+        if let InteractivePoi { copy: Some(copy), .. } = ipoi {
+            let allowed = allowed.contains(TriggerKind::COPY);
+            *took_action.get_or_insert_default() |= allowed;
+            if allowed {
+                RenderState::try_send(RenderEvent::SendClipboard(copy.value[..].into()));
+                let msg = copy.message.clone().map(|m| String::from(&m[..]))
+                    .unwrap_or_else(|| crate::fl!("copied").into());
+                let message = format!("{msg}\n\n{:?}", &copy.value.0[..]);
+                ctx.spawn_alert(message, Duration::from_secs(6));
+            } else {
+                log::info!("{blocked} copy");
+            }
+        }
+        for show_hide in ipoi.show_hide() {
+            let allowed = allowed.contains(TriggerKind::TOGGLE);
+            *took_action.get_or_insert_default() |= allowed;
+            if allowed {
+                let cat_path = show_hide.category().pivot(loaded_path.root.root);
+                // TODO: spawn instead to ensure it arrives?
+                PathingEvent::CategorySetToggle(cat_path, show_hide.action.tristate()).try_send();
+            } else {
+                log::info!("{blocked} {}", show_hide.action);
+            }
+        }
+        if let InteractivePoi { reset: Some(reset), .. } = ipoi {
+            let allowed = allowed.contains(TriggerKind::RESET);
+            *took_action.get_or_insert_default() |= allowed;
+            if allowed {
+                PathingEvent::GuidReset(reset.guid.iter().cloned().collect()).try_send();
+            } else {
+                log::info!("{blocked} reset");
+            }
+        }
+        if let InteractivePoi { script: Some(..), .. } = ipoi {
+            let allowed = allowed.contains(TriggerKind::SCRIPT);
+            *took_action.get_or_insert_default() |= allowed;
+            if allowed {
+                log::debug!("TODO: interact script");
+            } else {
+                log::info!("{blocked} script");
+            }
+        }
+        if let InteractivePoi { bounce: Some(..), .. } = ipoi {
+            if allowed.contains(TriggerKind::BOUNCE) {
+                log::debug!("TODO: interact bounce anim");
+            } else {
+                log::info!("{blocked} animation");
+            }
+        }
+
         if let Some(behaviour) = behaviour {
-            if allowed.contains(TriggerKind::BEHAVIOUR) {
+            let organic = match action.is_natural() {
+                true => took_action.unwrap_or(true),
+                false => true,
+            };
+            if allowed.contains(TriggerKind::BEHAVIOUR) && organic {
                 const HOUR: Duration = Duration::from_secs(3600);
                 const DAY: Duration = Duration::from_secs(HOUR.as_secs() * 24);
                 const WEEK: Duration = Duration::from_secs(DAY.as_secs() * 7);
@@ -140,50 +197,7 @@ impl PathingController {
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
-        }
-        if let InteractivePoi { copy: Some(copy), .. } = ipoi {
-            if allowed.contains(TriggerKind::COPY) {
-                RenderState::try_send(RenderEvent::SendClipboard(copy.value[..].into()));
-                let msg = copy.message.clone().map(|m| String::from(&m[..]))
-                    .unwrap_or_else(|| crate::fl!("copied").into());
-                let message = format!("{msg}\n\n{:?}", &copy.value.0[..]);
-                ctx.spawn_alert(message, Duration::from_secs(6));
-            } else {
-                log::info!("{blocked} copy");
-            }
-        }
-        for show_hide in ipoi.show_hide() {
-            if allowed.contains(TriggerKind::TOGGLE) {
-                let cat_path = show_hide.category().pivot(loaded_path.root.root);
-                // TODO: spawn instead to ensure it arrives?
-                PathingEvent::CategorySetToggle(cat_path, show_hide.action.tristate()).try_send();
-            } else {
-                log::info!("{blocked} {}", show_hide.action);
-            }
-        }
-        if let InteractivePoi { reset: Some(reset), .. } = ipoi {
-            if allowed.contains(TriggerKind::RESET) {
-                PathingEvent::GuidReset(reset.guid.iter().cloned().collect()).try_send();
-            } else {
-                log::info!("{blocked} reset");
-            }
-        }
-        if let InteractivePoi { script: Some(..), .. } = ipoi {
-            if allowed.contains(TriggerKind::SCRIPT) {
-                log::debug!("TODO: interact script");
-            } else {
-                log::info!("{blocked} script");
-            }
-        }
-        if let InteractivePoi { bounce: Some(..), .. } = ipoi {
-            if allowed.contains(TriggerKind::BOUNCE) {
-                log::debug!("TODO: interact bounce anim");
-            } else {
-                log::info!("{blocked} animation");
-            }
-        }
-
-        if behaviour.is_none() && action.is_natural() {
+        } else if action.is_natural() && took_action.unwrap_or(false) {
             let context = vec![HideContext::for_map(loaded_path.root.path, None)];
             PathingEvent::DismissMarker(loaded_path.root.rel(path.path), Some(Self::INTERACT_COOLDOWN), context, Some(AutoReset::Distance)).try_send();
         }

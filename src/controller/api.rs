@@ -223,6 +223,22 @@ impl ApiController {
         Ok(())
     }
 
+    pub fn current_account_token() -> Result<SavedApiToken, Option<String>> {
+        let account_name = crate::ACCOUNT_NAME_CELL.get()
+            .map(|acc| &acc[..]);
+        let token = BootstrapState::read_with(|s|
+            s.anet_api_token(account_name.unwrap_or(""))
+                .and_then(|token| token.account_name()
+                    .map(|_| token.clone())
+                )
+        );
+        match token {
+            Some(token) if account_name.is_none() || account_name == Some(&token.account_name[..]) =>
+                Ok(token),
+            _ => Err(account_name.map(ToOwned::to_owned)),
+        }
+    }
+
     pub fn account_path(account_name: &str) -> PathBuf {
         let parent = rt::addon_dir()
             .join("anet")
