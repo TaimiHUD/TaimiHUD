@@ -11,26 +11,30 @@ use {
 };
 
 impl PathingController {
-    pub(super) fn handle_guid_reset(&mut self, ctx: &mut PathingEventContext, guids: Vec<Guid>) {
+    pub(super) fn handle_guid_reset<'g, G>(&mut self, ctx: &mut PathingEventContext, guids: G) where
+        G: IntoIterator<Item = &'g Guid> + Clone,
+    {
         SaveState::try_write_with(|save| {
             let mut dirty = false;
-            for guid in guids {
+            for guid in guids.clone() {
                 if save.pathing().hidden_guid_expiry_get(&guid).is_some() {
                     save.pathing_mut().hidden_guid_expire(&guid);
                     dirty = true;
                 }
-                if self.filter_state.hidden.reset(&guid) {
-                    self.mark_hidden_dirty(ctx, None);
-                    ctx.filter_state_signal = true;
-                }
-                if ctx.unexpire(&guid) {
-                    ctx.filter_state_signal = true;
-                }
             }
             dirty
         });
+        for guid in guids {
+            if self.filter_state.hidden.reset(&guid) {
+                self.mark_hidden_dirty(ctx, None);
+                ctx.filter_state_signal = true;
+            }
+            if ctx.unexpire(&guid) {
+                ctx.filter_state_signal = true;
+            }
+        }
     }
-    pub(super) async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Option<Duration>, expiry: Option<SystemTime>, hide_contexts: Vec<HideContext>) {
+    pub(super) async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Option<Duration>, expiry: Option<SystemTime>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
         let guid = {
             self.map_pack_info.get(&path.root)
                 .and_then(|info| self.map_packs.get(&path.root)
@@ -48,7 +52,7 @@ impl PathingController {
                 })*/
         };
         let id = match guid {
-            Some(guid) => MarkerId::from(guid),
+            Some(guid) => MarkerId::from(guid.clone()),
             None => {
                 let path = path.map_path(MarkerIndex::with_poi);
                 match &hide_contexts {
@@ -72,7 +76,9 @@ impl PathingController {
         } else {
             self.filter_state.hidden.marker_mut(id.clone())
         };
-        if !hide_contexts.iter().all(|hide| match hide {
+        if let Some(reset) = &reset {
+            hidden.reset = reset.clone();
+        } else if !hide_contexts.iter().all(|hide| match hide {
             HideContext::Local(map) if map.shard.is_none() =>
                 false,
             _ => true,
@@ -83,21 +89,24 @@ impl PathingController {
         if has_context {
             hidden.contexts.extend(hide_contexts);
         }
-        let expiry = match (expiry, delay) {
-            (Some(e), ..) => Some(Some(e)),
-            (None, Some(delay)) =>
-                SystemTime::now().checked_add(delay).map(Some),
-            (None, None) if has_context =>
+        let expiry = match (expiry, delay, reset) {
+            // TODO: this is a mess
+            (_, _, Some(AutoReset::Distance | AutoReset::MapChange)) =>
                 Some(None),
-            (None, None) =>
+            (None, None, _) if has_context =>
+                Some(None),
+            (Some(e), ..) => Some(Some(e)),
+            (None, Some(delay), _) =>
+                SystemTime::now().checked_add(delay).map(Some),
+            (None, None, _) =>
                 SystemTime::now().checked_add(Duration::MAX).map(Some),
         }.unwrap_or_else(|| {
             log::error!("when is the future?");
             Some(SystemTime::now() + Duration::from_secs(3600 * 24 * 365 * 2))
         });
-        if let Some(expiry) = expiry {
+        if let (Some(expiry), Some(guid)) = (expiry, guid) {
             SaveState::write_with(|save| {
-                save.pathing_mut().hidden_guid_expire_at(id.into(), expiry)
+                save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
             });
         }
         ctx.filter_state_signal = true;

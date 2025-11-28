@@ -49,14 +49,16 @@ impl InteractivePoi {
             radius: interaction.info_range.map(keys::TriggerRange::from).unwrap_or_default().into(),
         };
         let behaviour = attrs.taco_behavior.as_ref()
-            .and_then(|b| match b {
-                TacoBehavior::AlwaysVisible => None,
-                b => Some(b),
-            }).map(|behaviour| BehaviourConfig {
+            .map(|behaviour| BehaviourConfig {
                 mode: behaviour.clone().into(),
                 invert: attrs.invert_behavior.unwrap_or_default(),
                 reset_delay: attrs.reset_length.map(Into::into).unwrap_or_default(),
             });
+        let behaviour = match behaviour {
+            Some(behaviour) if behaviour.is_empty() =>
+                None,
+            behaviour => behaviour,
+        };
         let info = interaction.info.as_ref().map(|info| InfoConfig {
             message: info.clone().into(),
         });
@@ -91,11 +93,11 @@ impl InteractivePoi {
             duration: interaction.bounce_duration.map(Into::into).unwrap_or_default(),
             height: interaction.bounce_height.map(Into::into).unwrap_or_default(),
         });
-        let script = match attrs.script.as_ref().map(|a| ScriptConfig::from_script_attributes(a)) {
-            None => None,
+        let script = attrs.script.as_ref().map(|a| ScriptConfig::from_script_attributes(a));
+        let script = match script {
             Some(script) if script.is_empty() =>
                 None,
-            Some(script) => Some(script),
+            script => script,
         };
         Self {
             index,
@@ -202,11 +204,34 @@ pub struct BounceConfig {
     pub height: keys::BounceHeight,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct BehaviourConfig {
     pub mode: keys::Behaviour,
     pub invert: bool,
     pub reset_delay: keys::ResetLength,
+}
+impl BehaviourConfig {
+    pub fn new<M: Into<keys::Behaviour>>(mode: M) -> Self {
+        Self {
+            mode: mode.into(),
+            invert: false,
+            reset_delay: Default::default(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self { mode, .. } if !mode.is_empty() =>
+                false,
+            Self { invert: true, .. } =>
+                false,
+            Self {
+                mode: _,
+                reset_delay: _,
+                invert: _,
+            } =>
+                true,
+        }
+    }
 }
 
 /// TODO
@@ -268,7 +293,7 @@ impl TriggerConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum InteractionEvent {
     Nearby {
         path: PoiPath,
@@ -288,13 +313,12 @@ pub enum InteractionEvent {
     },
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum InteractionEventAction {
     Interact,
     AutoTrigger,
     Trigger,
-    #[cfg(todo)]
-    Dismiss,
+    Dismiss(BehaviourConfig),
     Manual(TriggerKind),
 }
 
@@ -305,7 +329,7 @@ impl InteractionEventAction {
             Self::Interact | Self::AutoTrigger =>
                 true,
             // anything triggered intentionally (via UI usually) is fair game
-            Self::Trigger | Self::Manual(..) => false,
+            Self::Trigger | Self::Manual(..) | Self::Dismiss(..) => false,
         }
     }
 }

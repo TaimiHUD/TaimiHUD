@@ -380,7 +380,7 @@ pack_key! {
     #[derive(Copy, Default)]
     pub struct InvertBehaviour(pub Bool);
     #[pack(attr = "resetlength")]
-    #[derive(Copy, Default)]
+    #[derive(Copy, Default, PartialEq, PartialOrd)]
     pub struct ResetLength(pub f32);
     #[pack(attr = "mapdisplaysize")]
     #[derive(Copy)]
@@ -526,6 +526,9 @@ pub enum TacoBehaviour {
     ResetDailyPerCharacter = 7,
 }
 impl TacoBehaviour {
+    pub const fn value(self) -> u8 {
+        self as u8
+    }
     pub const unsafe fn from_value_unchecked(value: u8) -> Self {
         mem::transmute(value)
     }
@@ -536,6 +539,9 @@ pub enum BlishBehaviour {
     ResetWeekly = 101,
 }
 impl BlishBehaviour {
+    pub const fn value(self) -> u8 {
+        self as u8
+    }
     pub const unsafe fn from_value_unchecked(value: u8) -> Self {
         mem::transmute(value)
     }
@@ -546,6 +552,24 @@ pub enum Behaviour {
     Blish(BlishBehaviour),
 }
 impl Behaviour {
+    pub const ALL: &'static [Self] = &[
+        Self::Taco(TacoBehaviour::AlwaysVisible),
+        Self::Taco(TacoBehaviour::ResetVisit),
+        Self::Taco(TacoBehaviour::ResetDaily),
+        Self::Taco(TacoBehaviour::ResetPermanent),
+        Self::Taco(TacoBehaviour::ResetDelay),
+        Self::Taco(TacoBehaviour::ResetMap),
+        Self::Taco(TacoBehaviour::ResetInstance),
+        Self::Taco(TacoBehaviour::ResetDailyPerCharacter),
+        Self::Blish(BlishBehaviour::ResetWeekly),
+    ];
+
+    pub const fn value(self) -> u8 {
+        match self {
+            Self::Taco(behaviour) => behaviour.value(),
+            Self::Blish(behaviour) => behaviour.value(),
+        }
+    }
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::Taco(TacoBehaviour::AlwaysVisible))
     }

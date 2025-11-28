@@ -36,6 +36,9 @@ pub struct PathingWindowState {
     act_selected_pack_active: Option<bool>,
     act_selected_category: Option<(CategoryPath<PackPath>, Option<bool>, bool, bool)>,
     act_selected_category_open: bool,
+    act_selected_poi: Option<self::interact::RenderInteractivePoi>,
+    act_selected_poi_open: bool,
+    act_selected_poi_delay: Option<f32>,
 }
 
 impl PathingWindowState {
@@ -61,6 +64,9 @@ impl PathingWindowState {
             act_selected_pack_active: Default::default(),
             act_selected_category: Default::default(),
             act_selected_category_open: Default::default(),
+            act_selected_poi: Default::default(),
+            act_selected_poi_open: Default::default(),
+            act_selected_poi_delay: None,
         }
     }
 

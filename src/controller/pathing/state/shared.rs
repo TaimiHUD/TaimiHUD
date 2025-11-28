@@ -1,7 +1,7 @@
 use std::{fmt, ops};
 use std::path::Path;
 use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc};
-use crate::controller::pathing::registry::{MarkerId, PackRegistryNs};
+use crate::controller::pathing::registry::{MarkerId, PackRegistryNs, PoiPath};
 use crate::exports::runtime as rt;
 use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
@@ -137,6 +137,21 @@ impl SharedMapPackLoaded {
     pub fn update_with(&mut self, map_pack: &LoadedMapPack) {
         self.interactive_pois = map_pack.interactive_pois.clone();
         self.poi_guids = map_pack.poi_guids.clone();
+    }
+
+    pub fn poi_guids<'a>(&'a self) -> impl Iterator<Item = (PoiPath, Option<&'a Guid>)> + 'a {
+        let mut poi_guids = self.poi_guids.iter();
+        self.info.pois()
+            .zip(self.info.poi_guid_mask())
+            .map(move |(path, mask)| {
+                (
+                    path,
+                    match mask {
+                        true => poi_guids.next(),
+                        false => None,
+                    },
+                )
+            })
     }
 }
 impl ops::Deref for SharedMapPackLoaded {

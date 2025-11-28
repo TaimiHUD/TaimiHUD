@@ -29,7 +29,7 @@ impl RenderEntity {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RenderId {
     TrailSection { pack_idx: PackIndex, trail_idx: TrailIndex, section: TrailSectionIndex },
     Poi { pack_idx: PackIndex, poi_idx: PoiIndex },
@@ -175,6 +175,16 @@ impl RenderList {
     ) -> impl Iterator<Item = &'rs RenderEntity> + 'rs {
         // TODO: select_visible_entities?
         self.entities.iter().filter(move |e| bounds.intersects(&e.bounds))
+    }
+
+    pub fn find_entity(&self, id: &RenderId) -> Option<usize> {
+        self.entities.iter().position(|e| e.render_id.as_ref() == Some(id))
+    }
+    pub fn find_dist(&self, idx: usize) -> Option<(usize, i32)> {
+        self.draw_order_heap.iter()
+            .enumerate()
+            .find(|(i, he)| he.idx == idx)
+            .map(|(i, he)| (i, he.cam_dist))
     }
 
     /// TODO: on drop, rebuild spatial map - for now just call [self.end_entities_mut()]

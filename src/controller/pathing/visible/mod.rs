@@ -20,7 +20,7 @@ use taimi_pack::Category;
 use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
 pub use self::{interactive::{InteractivePoi, InteractionEvent, InteractionEventAction}, space::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader}};
 
-mod interactive;
+pub mod interactive;
 mod space;
 
 #[derive(Debug, Clone, Default)]

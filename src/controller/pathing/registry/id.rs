@@ -348,6 +348,10 @@ impl MarkerId {
     pub const fn as_bytes(&self) -> &[u8; 16] {
         &self.guid.0.as_bytes()
     }
+
+    pub fn variant(&self) -> IdVariant {
+        IdVariant::from_uuid(self.as_ref())
+    }
 }
 impl<N: MarkerId1> From<MarkerPath<N>> for MarkerId {
     fn from(marker: MarkerPath<N>) -> Self {
@@ -472,6 +476,7 @@ impl FromMarkerId1 for PackMapPath {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IdVariant {
     /// [Uuid::nil()]
     Empty,
@@ -489,7 +494,7 @@ pub enum IdVariant {
     MarkerUnscoped(MarkerPath),
 }
 impl IdVariant {
-    pub fn from_uuid(uuid: Uuid) -> Self {
+    pub fn from_uuid(uuid: &Uuid) -> Self {
         match (uuid.get_variant(), uuid.get_version_num()) {
             (uuid::Variant::NCS, 0) =>
                 Self::Empty,
@@ -498,7 +503,7 @@ impl IdVariant {
             (uuid::Variant::RFC4122, 5) =>
                 Self::PackRef,
             (uuid::Variant::RFC4122, 8) => {
-                let id = MarkerId::with_uuid(uuid);
+                let id = MarkerId::from_uuid_ref(uuid);
                 let ns01 = id.ns01();
                 match ns01.1 {
                     MarkerId::NS1_REGISTRY => id.marker_path().map(Self::MarkerUnscoped),

@@ -462,12 +462,13 @@ impl PathingWindowState {
                     &fallback_name[..]
                 },
             };
+            let id = self.category_header_prestart(ui, root_path, &display_name);
             let token = self.category_header_start(ui, root_path, &display_name, open, Some(false), false, None);
             open_context = ui.is_item_clicked_with_button(MouseButton::Right);
             if let Some(root_path) = root_path {
                 self.category_header_decorate(ui, info, root_path);
             }
-            (root_path, token)
+            (root_path, (id, token))
         };
         if let Some(root_path) = &root_path {
             let now_open = tree.is_some();
@@ -615,6 +616,7 @@ impl PathingWindowState {
             (false, false) => Some(self.item_config_toggle(cat_path, info)),
             _ => None,
         };
+        let _id = self.category_header_prestart(ui, Some(cat_path), &display_name);
         if let Some(state) = state {
             ui.unindent();
             if let Some(toggled) = Self::category_toggle(ui, state) {
@@ -622,7 +624,7 @@ impl PathingWindowState {
             }
             ui.same_line();
         }
-        let (_id, tree) = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, Some(is_copyable));
+        let tree = self.category_header_start(ui, Some(cat_path), &display_name, open, is_leaf, is_decorative, Some(is_copyable));
         if !self.act_selected_category_open && ui.is_item_clicked_with_button(MouseButton::Right) {
             self.act_selected_category = Some((cat_path, state, open, is_copyable));
             self.act_selected_category_open = true;
@@ -660,6 +662,19 @@ impl PathingWindowState {
         }
     }
 
+    pub fn category_header_prestart<'u>(
+        &mut self,
+        ui: &'u Ui,
+        path: Option<CategoryPath<PackPath>>,
+        display_name: &str,
+    ) -> IdStackToken<'u> {
+        let push_token = match path {
+            Some(path) => ui.push_id(path.path as i32 ^ ((path.root.path as i32) << 20)),
+            _ => ui.push_id(display_name),
+        };
+
+        push_token
+    }
     pub fn category_header_start<'u>(
         &mut self,
         ui: &'u Ui,
@@ -669,12 +684,7 @@ impl PathingWindowState {
         is_leaf: Option<bool>,
         is_decorative: bool,
         button_interact: Option<bool>,
-    ) -> (IdStackToken<'u>, Option<TreeNodeToken<'u>>) {
-        let push_token = match path {
-            Some(path) => ui.push_id(path.path as i32 ^ ((path.root.path as i32) << 20)),
-            _ => ui.push_id(display_name),
-        };
-
+    ) -> Option<TreeNodeToken<'u>> {
         let mut unbuilt = TreeNode::new(display_name);
         match button_interact {
             Some(false) if is_decorative || is_leaf.unwrap_or(true) =>
@@ -718,7 +728,7 @@ impl PathingWindowState {
                 .opened(open, if path.is_some() { Condition::Always } else { Condition::Once });
         }
         let tree_token = unbuilt.push(ui);
-        (push_token, tree_token)
+        tree_token
     }
 
     pub(super) const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";

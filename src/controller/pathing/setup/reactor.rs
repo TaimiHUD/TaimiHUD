@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             pathing::{
-                registry::{CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::HideContext, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
+                registry::{CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::{AutoReset, HideContext}, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
             }, Controller
         }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
     },
@@ -216,7 +216,7 @@ impl PathingController {
                 self.handle_toggle(path, state).await;
             },
             GuidReset(guids) => {
-                self.handle_guid_reset(ctx, guids);
+                self.handle_guid_reset(ctx, &guids);
             },
             ResetMarker(path) => {
                 let map_path = ctx.gameplay_map()
@@ -233,9 +233,9 @@ impl PathingController {
                     ctx.filter_state_signal = true;
                 }
             },
-            DismissMarker(path, delay, contexts) => {
+            DismissMarker(path, delay, contexts, reset) => {
                 if let Some(expiry) = delay.map(|delay| SystemTime::now().checked_add(delay)) {
-                    self.handle_dismiss(ctx, path, delay, expiry, contexts).await;
+                    self.handle_dismiss(ctx, path, delay, expiry, contexts, reset).await;
                 } else {
                     log::error!("unable to determine expiry time for {path} of {delay:?}");
                 }
@@ -529,7 +529,7 @@ pub enum PathingEvent {
     CategorySetToggle(CategoryPath<PackPath>, Option<bool>),
     GuidReset(Vec<Guid>),
     ResetMarker(MarkerPath<PackPath>),
-    DismissMarker(PoiPath<PackMapPath>, Option<Duration>, Vec<HideContext>),
+    DismissMarker(PoiPath<PackMapPath>, Option<Duration>, Vec<HideContext>, Option<AutoReset>),
     #[cfg(todo)]
     CategoryVisibility(CategoryPath<PackPath>, VisibilityFlags),
     ToggleKatRender,

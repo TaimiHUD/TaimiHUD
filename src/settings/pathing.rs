@@ -543,6 +543,9 @@ impl TriggerKind {
             Self::TOGGLE.bits() | Self::SHOW.bits() | Self::HIDE.bits() |
             Self::BOUNCE.bits()
     );
+    pub const DISMISS: Self = Self::from_bits_retain(
+        Self::BEHAVIOUR.bits() | Self::BOUNCE.bits()
+    );
     pub const fn settings_default_auto() -> Self {
         Self::SETTINGS_DEFAULT_AUTO
     }

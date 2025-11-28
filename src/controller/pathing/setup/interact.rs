@@ -1,13 +1,7 @@
 use {
     crate::{
         controller::pathing::{
-            PathingController,
-            PathingEventContext,
-            PathingEvent,
-            registry::MapIndex,
-            state::hidden::HideContext,
-            visible::{InteractionEvent, InteractionEventAction, InteractivePoi},
-            registry::PoiIndex,
+            registry::{MapIndex, MarkerId, MarkerIndex, PoiIndex}, state::hidden::{AutoReset, HideContext}, visible::{InteractionEvent, InteractionEventAction, InteractivePoi}, PathingController, PathingEvent, PathingEventContext
         },
         exports::runtime::{self as rt, Locator}, render::{RenderEvent, RenderState}, settings::pathing::TriggerKind,
     },
@@ -15,6 +9,8 @@ use {
 };
 
 impl PathingController {
+    const INTERACT_COOLDOWN: Duration = Duration::from_secs(120);
+
     pub(super) async fn handle_interaction(&mut self, ctx: &mut PathingEventContext, event: InteractionEvent) {
         let (path, loaded_path, ipoi, lpoi, action) = match event {
             InteractionEvent::Nearby { path, loaded_path, interactive_path } => {
@@ -32,7 +28,23 @@ impl PathingController {
                 };
                 (path, loaded_path, ipoi, lpoi, action)
             },
-            InteractionEvent::Gone { .. } => {
+            InteractionEvent::Gone { path, loaded_path, interactive_path: _ } => {
+                let Some(map_info) = self.map_pack_info.get(&loaded_path.root) else { return };
+                let Some(map) = self.map_packs.get(&loaded_path.root) else { return };
+                let marker_path = loaded_path.root.root.rel(MarkerIndex::with_poi(path.path));
+                // TODO: nth with option variant
+                let guid = map.poi_guids(map_info)
+                    .find(|(p, _)| p.path == path.path)
+                    .map(|(_, guid)| guid.clone());
+                let mut removed = self.handle_interaction_end(ctx, &MarkerId::for_marker(marker_path));
+                if let Some(guid) = guid {
+                    removed |= self.handle_interaction_end(ctx, guid.as_ref());
+                }
+                if removed {
+                    ctx.filter_state_signal = true;
+                    self.mark_hidden_dirty(ctx, Some(loaded_path.root));
+                }
+
                 // remove on-screen info maybe?
                 return
             },
@@ -44,6 +56,7 @@ impl PathingController {
             },
         };
 
+        let mut behaviour = ipoi.behaviour.as_ref();
         let allowed = {
             let settings = self.loader.settings.read().await;
             let pathing = settings.pathing();
@@ -56,6 +69,10 @@ impl PathingController {
             };
             match action {
                 InteractionEventAction::Trigger => TriggerKind::all(),
+                InteractionEventAction::Dismiss(ref config) => {
+                    behaviour = Some(config);
+                    TriggerKind::DISMISS
+                },
                 InteractionEventAction::Manual(mask) => mask,
                 action if action.is_natural() && is_filtered() => {
                     log::debug!("ignoring filtered POI interaction for {loaded_path}");
@@ -74,7 +91,7 @@ impl PathingController {
                 log::info!("{blocked} info popup");
             }
         }
-        if let InteractivePoi { behaviour: Some(behaviour), .. } = ipoi {
+        if let Some(behaviour) = behaviour {
             if allowed.contains(TriggerKind::BEHAVIOUR) {
                 const HOUR: Duration = Duration::from_secs(3600);
                 const DAY: Duration = Duration::from_secs(HOUR.as_secs() * 24);
@@ -84,6 +101,7 @@ impl PathingController {
                 use taimi_pack::attributes::keys::{Behaviour, TacoBehaviour, BlishBehaviour};
                 let timestamp = rt::log::error_ok(UNIX_EPOCH.elapsed()).unwrap_or_default();
                 let mut contexts = None;
+                let mut reset = None;
                 let delay = match behaviour.mode {
                     Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => Some(Duration::from_secs({
                         if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour.mode {
@@ -98,9 +116,13 @@ impl PathingController {
                     } as u64)),
                     Behaviour::Taco(TacoBehaviour::ResetDelay) => Some(behaviour.reset_delay.duration()),
                     Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Some(Duration::from_secs(0)),
-                    Behaviour::Taco(TacoBehaviour::ResetPermanent) => None,
+                    Behaviour::Taco(TacoBehaviour::ResetPermanent) => {
+                        reset = Some(AutoReset::Never);
+                        None
+                    },
                     Behaviour::Taco(TacoBehaviour::ResetMap) => {
                         contexts = Some(HideContext::for_map(loaded_path.root.path, None));
+                        reset = Some(AutoReset::MapChange);
                         None
                     },
                     Behaviour::Taco(TacoBehaviour::ResetInstance) => {
@@ -114,7 +136,7 @@ impl PathingController {
                 };
                 log::info!("hiding marker for {delay:?}({contexts:?})");
                 let contexts = contexts.into_iter().collect();
-                PathingEvent::DismissMarker(loaded_path.root.rel(path.path), delay, contexts).try_send();
+                PathingEvent::DismissMarker(loaded_path.root.rel(path.path), delay, contexts, reset).try_send();
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
@@ -160,6 +182,24 @@ impl PathingController {
                 log::info!("{blocked} animation");
             }
         }
+
+        if behaviour.is_none() && action.is_natural() {
+            let context = vec![HideContext::for_map(loaded_path.root.path, None)];
+            PathingEvent::DismissMarker(loaded_path.root.rel(path.path), Some(Self::INTERACT_COOLDOWN), context, Some(AutoReset::Distance)).try_send();
+        }
+    }
+
+    fn handle_interaction_end(&mut self, _ctx: &mut PathingEventContext, marker_id: &MarkerId) -> bool {
+        let Some(hidden) = self.filter_state.hidden.hidden.get(marker_id) else {
+            return false
+        };
+        match hidden.reset {
+            AutoReset::Distance => (),
+            AutoReset::Never | AutoReset::Expiry { .. } | AutoReset::MapChange =>
+                return false,
+        }
+
+        self.filter_state.hidden.hidden.remove(marker_id).is_some()
     }
 
     pub(super) fn handle_press_interact(&mut self, ctx: &mut PathingEventContext, map_id: MapIndex) {
