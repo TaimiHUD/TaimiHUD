@@ -1,10 +1,10 @@
 use {
     super::{PathingFilterState, PathingWindowState},
     crate::{
-        controller::pathing::{registry::{CategoryIndex, CategoryPath, MarkerIndex, MarkerIndexVariant, MarkerPath, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackData, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent}, exports::runtime::{imgui::{
+        controller::pathing::{registry::{CategorySet, CategoryIndex, CategoryPath, MarkerIndex, MarkerIndexVariant, MarkerPath, PackConfig, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackData, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent}, exports::runtime::{imgui::{
             ChildWindow, Condition, IdStackToken, MouseButton, Selectable, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, WindowFlags
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, RenderState}, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, std::{collections::{btree_map, BTreeMap},  sync::Arc}, taimi_pack::{attributes::AttrString, MarkerAttributes},
+    }, std::{collections::{btree_map, BTreeMap}, iter, sync::Arc}, taimi_pack::{attributes::AttrString, MarkerAttributes},
     tokio::sync::watch,
 };
 
@@ -513,7 +513,7 @@ impl PathingWindowState {
 
         ui.popup("cat-context", || {
             if let Some(cat) = self.act_selected_category {
-                self.menu_category_item(ui, cat);
+                self.menu_category_item(ui, info, cat);
             }
         });
         ui.popup("pack-context", || {
@@ -524,7 +524,7 @@ impl PathingWindowState {
                     with_i18n!("category", |header| ui.text(&header));
                 }
                 ui.separator();
-                self.menu_category(ui, root_path, Some(state), open);
+                self.menu_category(ui, info, root_path, Some(state), open);
             }
         });
         if self.act_selected_category_open {
@@ -903,25 +903,89 @@ impl PathingWindowState {
             PathingEvent::ReloadPack(path, false).try_send();
         }
     }
-    pub fn menu_category(&mut self, ui: &Ui, path: CategoryPath<PackPath>, state: Option<bool>, open: bool) {
+    pub fn menu_category(&mut self, ui: &Ui, info: &PackInfo, path: CategoryPath<PackPath>, state: Option<bool>, open: bool) {
         if let Some(_state) = state {
             let action_toggle = with_i18n!("toggle", |msg| Selectable::new(msg).build(ui));
             let action_enable_all = with_i18n!("enable-all", |msg| Selectable::new(msg).build(ui));
             let action_disable_all = with_i18n!("disable-all", |msg| Selectable::new(msg).build(ui));
-            let action_reset = with_i18n!("reset", |msg| Selectable::new(msg).build(ui));
+            let action_reset_all = with_i18n!("reset-all", |msg| Selectable::new(msg).build(ui));
+            ui.separator();
             let action_isolate = with_i18n!("isolate", |msg| Selectable::new(msg).build(ui));
+            let action_unisolate = with_i18n!("unisolate", |msg| Selectable::new(msg).build(ui));
+            ui.separator();
+            let action_enable_to = with_i18n!("enable-to", |msg| Selectable::new(msg).build(ui));
+            let action_disable_to = with_i18n!("disable-to", |msg| Selectable::new(msg).build(ui));
+            let action_all = if action_enable_all {
+                Some(Some(true))
+            } else if action_disable_all {
+                Some(Some(false))
+            } else if action_reset_all {
+                Some(None)
+            } else {
+                None
+            };
+            let action_parents = if action_enable_to {
+                Some(true)
+            } else if action_disable_to {
+                Some(false)
+            } else {
+                None
+            };
+            let action_isolate = if action_isolate {
+                Some(Some(None))
+            } else if action_unisolate {
+                Some(None)
+            } else {
+                None
+            };
 
             if action_toggle {
-                PathingEvent::CategorySetToggle(path, None);
-                log::debug!("TODO: cat:toggle")
-            } else if action_enable_all {
-                log::debug!("TODO: cat:enable_all")
-            } else if action_disable_all {
-                log::debug!("TODO: cat:disable_all")
-            } else if action_reset {
-                log::debug!("TODO: cat:reset")
-            } else if action_isolate {
-                log::debug!("TODO: cat:isolate")
+                #[cfg(todo = "deleteme")]
+                PathingEvent::CategorySetToggle(path, None).try_send();
+                self.act_categories_select(&info, path.root, iter::once(path.unscope()), None);
+            } else if let Some(action_all) = action_all {
+                let categories = &info.categories;
+                let cat_path = path.unscope();
+                let paths = categories.descendents_of(cat_path)
+                    .chain(iter::once(cat_path));
+                match action_all {
+                    Some(enable) =>
+                        self.act_categories_select(&info, path.root, paths, Some(enable)),
+                    None =>
+                        self.act_categories_reset(&info, path.root, paths),
+                }
+            } else if let Some(parents_enable) = action_parents {
+                let categories = &info.categories;
+                let cat_path = path.unscope();
+                let paths = categories.parents_of(cat_path)
+                    .chain(iter::once(cat_path));
+                self.act_categories_select(&info, path.root, paths, Some(parents_enable));
+            } else if let Some(isolate) = action_isolate {
+                let categories = &info.categories;
+                let cat_path = path.unscope();
+                let cat_info = categories.info_of(cat_path)
+                    .map(|cat| {
+                        let oldest = cat.parent()
+                            .map(CategoryPath::with_path)
+                            .and_then(|parent| categories.firstborn_of(parent));
+                        (cat, oldest)
+                    });
+                let oldest = cat_info.and_then(|(cat, oldest)|
+                    oldest.or(cat.sibling()
+                        .map(CategoryPath::with_path)
+                    )
+                );
+                let paths = oldest.into_iter()
+                    .flat_map(|oldest| categories.younger_siblings_of(oldest)
+                        .chain(iter::once(oldest))
+                        .filter(|&s| s != cat_path)
+                    );
+                match isolate {
+                    Some(state) =>
+                        self.act_categories_isolate(&info, path.root, paths, state.ok_or(cat_path)),
+                    None =>
+                        self.act_categories_reset(&info, path.root, paths),
+                }
             }
             ui.separator();
         }
@@ -949,7 +1013,91 @@ impl PathingWindowState {
         ui.separator();
         // TODO: category stats
     }
-    pub fn menu_category_item(&mut self, ui: &Ui, (path, state, open, copyable): (CategoryPath<PackPath>, Option<bool>, bool, bool)) {
-        self.menu_category(ui, path, state, open);
+    pub fn menu_category_item(&mut self, ui: &Ui, info: &PackInfo, (path, state, open, copyable): (CategoryPath<PackPath>, Option<bool>, bool, bool)) {
+        self.menu_category(ui, info, path, state, open);
+    }
+
+    /// enable=None to toggle paths
+    pub fn act_categories_select<I>(&self, info: &PackInfo, pack_path: PackPath, paths: I, enable: Option<bool>) where
+        I: IntoIterator<Item = CategoryPath>,
+    {
+        let paths = paths.into_iter().map(|path|
+            (path, enable)
+        );
+        self.act_categories_set(info, pack_path, paths)
+    }
+
+    pub fn act_categories_reset<I>(&self, info: &PackInfo, pack_path: PackPath, paths: I) where
+        I: IntoIterator<Item = CategoryPath>,
+    {
+        let paths = paths.into_iter().map(|path|
+            (path, Some(!info.categories.disabled.contains(path)))
+        );
+        self.act_categories_set(info, pack_path, paths)
+    }
+
+    /// enable=Err(target) to toggle all paths to the *opposite* state of target
+    pub fn act_categories_isolate<I>(&self, info: &PackInfo, pack_path: PackPath, paths: I, enable: Result<bool, CategoryPath>) where
+        I: IntoIterator<Item = CategoryPath>,
+    {
+        let enable = match enable {
+            Ok(enable) => enable,
+            Err(target) => !self.item_config_toggle(target.pivot(pack_path), info),
+        };
+        self.act_categories_select(info, pack_path, paths, Some(enable))
+    }
+
+    pub fn act_categories_set<I>(&self, info: &PackInfo, pack_path: PackPath, paths: I) where
+        I: IntoIterator<Item = (CategoryPath, Option<bool>)>,
+    {
+        let config = self.pack_configs.get(&pack_path);
+        let Some(config) = config else {
+            log::warn!("cannot toggle categories for unloaded pack {info}");
+            return
+        };
+        #[cfg(todo = "unnecessary")]
+        let Some(config) = &config.cached else { return default };
+        let mut dirty_cats = CategorySet::default();
+        config.watch.sender().send_if_modified(|config| {
+            let mut config_mut = None::<&mut PackConfig>;
+            let mut config = Some(config);
+            for (path, target_state) in paths {
+                let default = !info.categories.disabled.contains(path);
+                let mut dev = match (&mut config, &mut config_mut) {
+                    (Some(config), None) => &***config,
+                    (None, Some(config)) => &*config,
+                    #[cfg(todo)]
+                    _ => unsafe { unreachable_unchecked() },
+                    _ => continue,
+                }.visibility_deviation_for(path);
+                let dev_prev_state = dev.is_visible();
+                let dev_target_state = match target_state {
+                    Some(target) => target ^ default,
+                    None => !dev_prev_state,
+                };
+                if dev_prev_state == dev_target_state {
+                    continue
+                } else {
+                    dev.toggle(VisibilityFlags::TOGGLE);
+                }
+                let config = match (config.take(), &mut config_mut) {
+                    (Some(config), out @ None) =>
+                        out.insert(Arc::make_mut(config)),
+                    (None, Some(ref mut config)) => config,
+                    #[cfg(todo)]
+                    _ => unsafe { unreachable_unchecked() },
+                    _ => continue,
+                };
+                #[cfg(todo = "unnecessary")]
+                dev.set(VisibilityFlags::TOGGLE, dev_target_state);
+                config.set_visibility_deviation(path, dev);
+                dirty_cats.insert(path);
+            }
+            // return !dirty_cats.is_empty()
+            config_mut.is_some()
+        });
+        if !dirty_cats.is_empty() {
+            PathingEvent::CategoryCommitVisibility(pack_path, dirty_cats).try_send();
+        }
     }
 }

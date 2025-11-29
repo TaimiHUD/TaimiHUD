@@ -72,11 +72,17 @@ impl PathingSearchState {
     pub fn clear(&mut self) {
         self.buffer.clear();
         self.matcher = None;
+        self.clear_matches();
+    }
+    pub fn clear_matches(&mut self) {
         self.search_candidates.clear();
         self.candidate_mask.clear();
     }
 
-    pub fn commit<'p, P: Iterator<Item = (PackPath, &'p Pack)>>(&mut self, packs: P) {
+    pub fn commit<'p, P, I>(&mut self, packs: I) where
+        I: IntoIterator<Item = (PackPath, P)>,
+        P: AsRef<Pack>,
+    {
         self.search_candidates.clear();
         if self.buffer.is_empty() {
             return
@@ -94,6 +100,7 @@ impl PathingSearchState {
         };
 
         for (path, pack) in packs {
+            let pack = pack.as_ref();
             {
                 let mask = self.candidate_mask.entry(path).or_default();
                 mask.clear();

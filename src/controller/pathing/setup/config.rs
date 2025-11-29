@@ -1,17 +1,9 @@
 use {
     crate::{
         controller::{
-            Controller,
             pathing::{
-                PathingController,
-                PathingEventContext,
-                PathingEvent,
-                filter,
-                registry::{CategoryPath, MapIndex, MarkerIndex, MarkerPath},
-                filter::MarkerFilter,
-                visible::VisibilityFlags,
-                registry::PackPath,
-            },
+                filter::{self, MarkerFilter}, registry::{CategoryPath, CategorySet, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath}, visible::VisibilityFlags, PathingController, PathingEvent, PathingEventContext
+            }, Controller
         },
         exports::runtime::locator::LocationRef,
         render::machine::RenderTaskPriority,
@@ -21,7 +13,7 @@ use {
         },
     },
     anyhow::Context,
-    std::{sync::Arc, time::SystemTime},
+    std::{iter, sync::Arc, time::SystemTime},
     taimi_meta::ui::MapContext,
 };
 
@@ -101,15 +93,57 @@ impl PathingController {
         });
 
         if changed {
-            let full_id = Self::packs().read().await.lookup_ref(&path.root)
-                .and_then(|loaded|
-                    loaded.active.as_ref()
-                        .and_then(|active| active.pack.categories.all_categories.get_index(path.path as usize))
-                        .map(|(_id, cat)| cat.full_id.clone()),
-                );
+            let changes = iter::once((path.unscope(), cat_vis ^ state));
+            self.category_commit_vis_set(path.root, changes).await;
+        }
+    }
+    pub(super) async fn category_commit_vis<C>(&self, pack_path: PackPath, dirty_cats: C) where
+        C: IntoIterator<Item = CategoryPath>,
+    {
+        // TODO: much better ways to get this ugh... even via registry above is fine ugh... or make an accessor..?
+        let categories = PackLoader::shared_pack_at(&self.loader.shared_pack_info.borrow(), pack_path)
+            .and_then(|pack_info| pack_info.info.as_ref().ok()
+                .map(|info| info.categories.clone())
+            );
+        let config = PackLoader::shared_pack_at(&self.loader.shared_pack_config.borrow(), pack_path)
+            .and_then(|config| config.as_ref()
+                .map(|config| config.borrow().clone())
+            );
+        let (Some(categories), Some(config)) = (categories, config) else {
+            log::error!("cannot save category settings for unloaded {pack_path}");
+            return
+        };
+        let changes = dirty_cats.into_iter()
+            .map(|path| {
+                let default = !categories.disabled.contains(path);
+                let vis = config.visibility_deviation_for(path);
+                let state = vis.is_visible() ^ default;
+                (path, state)
+            });
+        self.category_commit_vis_set(pack_path, changes).await
+    }
+    pub(super) async fn category_commit_vis_set<C>(&self, pack_path: PackPath, dirty_cats: C) where
+        C: IntoIterator<Item = (CategoryPath, bool)>,
+    {
+        #[cfg(todo)]
+        if dirty_cats.is_empty() {
+            return
+        }
+        let packs = Self::packs().read().await;
+        let Some(loaded) = packs.lookup_ref(&pack_path) else {
+            return
+        };
+        let mut settings = None;
+        for (path, vis_state) in dirty_cats {
+            let full_id =loaded.active.as_ref()
+                    .and_then(|active| active.pack.categories.all_categories.get_index(path.path as usize))
+                    .map(|(_id, cat)| cat.full_id.clone());
             if let Some(full_id) = full_id {
-                let mut settings = self.loader.settings.write().await;
-                PathingSettings::pathing_state_update(&mut settings, full_id.to_string(), cat_vis ^ state).await;
+                let settings = match &mut settings {
+                    Some(s) => s,
+                    s @ None => s.insert(self.loader.settings.write().await),
+                };
+                PathingSettings::pathing_state_update(settings, full_id.to_string(), vis_state).await;
             } else {
                 log::warn!("{path} not found for toggle state update");
             }

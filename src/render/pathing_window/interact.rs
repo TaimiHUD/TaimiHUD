@@ -279,7 +279,7 @@ impl PathingWindowState {
 
         ui.separator();
         let action_dismiss_open = with_i18n!("trigger-behaviour", |label| Selectable::new(label)
-            .flags(SelectableFlags::DONT_CLOSE_POPUPS)
+            .close_popups(false)
             .build(ui));
         match action_dismiss_open.then(|| self.act_selected_poi_delay.take()) {
             Some(Some(..)) => {
@@ -300,7 +300,8 @@ impl PathingWindowState {
                 match behaviour {
                     keys::Behaviour::Taco(keys::TacoBehaviour::ResetDelay) => {
                         ui.indent();
-                        let _ = ui.input_float("hours", delay);
+                        let _ = ui.input_float("hours", delay)
+                            .build();
                         ui.unindent();
                     },
                     _ => (),

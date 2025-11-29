@@ -1,16 +1,8 @@
 use {
-    crate::controller::pathing::{
-        PathingController,
-        PathingEventContext,
-        PathingEvent,
-        registry::{PackMapPath, PoiPath, TrailPath},
-        visible::{LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder},
-    },
-    crate::{
-        exports::runtime::{self as rt, locator::LocationRef},
-        render::{machine::RenderTaskPriority, RenderState},
-    },
-    futures::{stream, FutureExt, StreamExt, future::Future},
+    crate::{controller::pathing::{
+        registry::{ActivePack, PackLoader, PackMapPath, PoiPath, TrailPath}, visible::{LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder}, PathingController, PathingEvent, PathingEventContext
+    }, exports::runtime::{self as rt, locator::LocationRef}, render::{machine::RenderTaskPriority, RenderState}},
+    futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::Weak,
 };
 
 impl PathingController {
@@ -20,6 +12,13 @@ impl PathingController {
         setup_trails: Vec<SetupTrail>,
         setup_pois: Option<Vec<SetupPoi>>,
     ) -> anyhow::Result<()> {
+        let active_weak = {
+            let pack_data = self.loader.shared_pack_data.borrow();
+            PackLoader::shared_pack_at(&pack_data, path.root).cloned()
+        };
+        let Some(active_weak) = active_weak else {
+            anyhow::bail!("cannot setup for unloaded {path}")
+        };
         let setup_map_id = path.path;
         let setup = move |state: &mut RenderState| -> anyhow::Result<()> {
             let Some(Ok(engine)) = &mut state.engine else { return Ok(()) };
@@ -41,13 +40,10 @@ impl PathingController {
             spacepack.clear();
 
             let loader = {
-                let packs = Self::packs().blocking_read();
-                let Some(pack) = packs.lookup_ref(&path.root) else {
-                    anyhow::bail!("pack {path} disappeared???")
-                };
-                let Some(active) = &pack.active else {
+                let Some(active) = Weak::upgrade(&active_weak) else {
                     anyhow::bail!("can't prepare pack {path} if it's not loaded")
                 };
+                drop(active_weak);
                 active.loader.clone()
             };
             let mut loader = loader.blocking_lock();

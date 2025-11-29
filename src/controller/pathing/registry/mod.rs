@@ -533,19 +533,94 @@ impl PackCategoryInfo {
         self.all.get(path.path as usize).copied()
     }
 
+    /// immediate, see [self.descendents_of] for recursion
     pub fn children_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
-        let mut next = self.info_of(path).and_then(|c| c.child());
+        let firstborn = self.firstborn_of(path).into_iter();
+        firstborn.flat_map(|firstborn| iter::once(firstborn)
+            .chain(self.younger_siblings_of(firstborn))
+        )
+    }
+
+    /// DFS, excludes the path itself
+    pub fn descendents_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
+        let mut cycle_limit = self.all.len();
+        let target = self.info_of(path);
+        let firstborn = target.and_then(|c| c.child());
+        let mut stack: Vec<CategoryPath> = match &target {
+            #[cfg(todo = "unnecessary")]
+            Some(info) if firstborn.is_some() => {
+                // rough count of categories under a root...
+                let amt = (self.all.len() - self.lonely.len()) / self.roots.len();
+                let depth = match info.parent() {
+                    Some(p) => self.parents_of(p).count(),
+                    None => 0,
+                } + 1;
+                let stride = self.younger_siblings_of(path).count();
+                #[cfg(todo = "unnecessary")]
+                let mut child_cap = amt / 4;
+
+                let cap = 0x40;
+                let cap = match amt.checked_ilog2() {
+                    Some(est) => {
+                        let depth_rem = est.saturating_sub(depth) + 1;
+                        #[cfg(todo = "unnecessary")]
+                        child_cap = 2usize.ipow2(depth_rem).min(self.all.len());
+                        (depth_rem + 1) * 2
+                    },
+                    None => cap,
+                };
+                (
+                    Vec::with_capacity(cap),
+                    #[cfg(todo = "unnecessary")]
+                    CategorySet::with_capacity(child_cap),
+                )
+            },
+            Some(..) if firstborn.is_some() =>
+                Vec::with_capacity(0x40),
+            _ => Vec::new(),
+        };
+        if let Some(firstborn) = firstborn {
+            stack.push(CategoryPath::with_path(firstborn));
+        }
         iter::from_fn(move || {
-            let current = CategoryPath::with_path(next.take()?);
-            next = self.info_of(current).and_then(|c| c.sibling());
+            loop {
+                let next = stack.pop()?;
+                match cycle_limit.checked_sub(1) {
+                    Some(l) =>
+                        cycle_limit = l,
+                    None => {
+                        // who knows, mistakes and/or corruption can happen!
+                        log::error!("category descendents exceeded cycle limit, stuck at {next} while {} deep", stack.len());
+                        return None
+                    },
+                }
+                let Some(next_info) = self.info_of(next) else { continue };
+                if let Some(sibling) = next_info.sibling() {
+                    stack.push(CategoryPath::with_path(sibling));
+                }
+                if let Some(child) = next_info.child() {
+                    stack.push(CategoryPath::with_path(child));
+                }
+                break Some(next)
+            }
+        })
+    }
+
+    /// TODO: rename to ancestors_of
+    pub fn parents_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
+        let mut next = self.parent_of(path);
+        iter::from_fn(move || {
+            let current = next.take()?;
+            next = self.parent_of(current);
             Some(current)
         })
     }
-    pub fn parents_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
-        let mut next = self.info_of(path).and_then(|c| c.parent());
+
+    pub fn younger_siblings_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
+        let mut next = self.sibling_of(path);
         iter::from_fn(move || {
-            let current = CategoryPath::with_path(next.take()?);
-            next = self.info_of(current).and_then(|c| c.parent());
+            let current = next.take()?;
+            next = self.sibling_of(current);
             Some(current)
         })
     }
@@ -556,6 +631,10 @@ impl PackCategoryInfo {
     }
     pub fn sibling_of(&self, path: CategoryPath) -> Option<CategoryPath> {
         self.info_of(path).and_then(|c| c.sibling())
+            .map(CategoryPath::with_path)
+    }
+    pub fn firstborn_of(&self, path: CategoryPath) -> Option<CategoryPath> {
+        self.info_of(path).and_then(|c| c.child())
             .map(CategoryPath::with_path)
     }
 

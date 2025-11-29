@@ -65,6 +65,9 @@ impl<N> LocationGet<N, MapID> for MapSet {
 pub struct CategorySet(BTreeSet<CategoryIndex>);
 
 impl CategorySet {
+    pub fn empty() -> Self {
+        Self::default()
+    }
     pub fn insert_index<C: Into<CategoryIndex>>(&mut self, index: C) -> bool {
         self.0.insert(index.into())
     }
@@ -86,6 +89,9 @@ impl CategorySet {
     }
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     pub fn iter<'a>(&'a self) -> <&'a Self as IntoIterator>::IntoIter {

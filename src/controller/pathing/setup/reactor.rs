@@ -1,9 +1,9 @@
 use {
     crate::{
         controller::{
-            pathing::{
+            api::ApiAccountInfo, pathing::{
                 filter,
-                registry::{CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::{AutoReset, HideContext}, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
+                registry::{CategorySet, CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::{AutoReset, HideContext}, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
             }, Controller
         }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
     },
@@ -216,6 +216,11 @@ impl PathingController {
             CategorySetToggle(path, state) => {
                 self.handle_toggle(path, state).await;
             },
+            CategoryCommitVisibility(pack_path, changed) => {
+                let changed = changed.into_iter()
+                    .map(CategoryPath::with_path);
+                self.category_commit_vis(pack_path, changed).await;
+            },
             GuidReset(guids) => {
                 self.handle_guid_reset(ctx, &guids);
             },
@@ -247,6 +252,10 @@ impl PathingController {
             AccountInfoRaidClears(raids) => {
                 self.filter_state.raids = raids;
             },
+            AccountInfoReload(endpoint) =>
+                self.api_info_reload(ctx, endpoint),
+            AccountInfoRefresh(endpoint) =>
+                self.api_info_refresh(ctx, endpoint),
             ToggleKatRender => self.toggle_katrender(ctx).await,
             LowMemory => self.lowmem_activate(ctx).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
@@ -314,6 +323,9 @@ impl PathingController {
                         self.handle_map_suspend(ctx);
                     }
                     self.handle_map_leave(ctx);
+                }
+                if let GameplayTransition::Loaded { initial: true, .. } = trans {
+                    self.api_reload(ctx).await;
                 }
                 self.handle_map_enter(map_id, ctx).await
             },
@@ -534,6 +546,7 @@ pub enum PathingEvent {
     },
     RequestDisabledPaths,
     CategorySetToggle(CategoryPath<PackPath>, Option<bool>),
+    CategoryCommitVisibility(PackPath, CategorySet),
     GuidReset(Vec<Guid>),
     ResetMarker(MarkerPath<PackPath>),
     DismissMarker(PoiPath<PackMapPath>, Option<Duration>, Vec<HideContext>, Option<AutoReset>),
@@ -541,6 +554,8 @@ pub enum PathingEvent {
     CategoryVisibility(CategoryPath<PackPath>, VisibilityFlags),
     AccountInfoRaidClears(filter::RaidState),
     AccountInfoAchievements(filter::AchievementState),
+    AccountInfoReload(Option<ApiAccountInfo>),
+    AccountInfoRefresh(Option<ApiAccountInfo>),
     ToggleKatRender,
     LowMemory,
     Exit(Interruption),

@@ -2,9 +2,7 @@ use {
     crate::{
         controller::pathing::{
             PathingController,
-            FestivalState,
             state::shared::{SharedMapPackState, SharedMapPackLoaded},
-            festivals::FestivalFixup,
             state::{
                 MapPackInfoStorage,
                 info::MapPackInfo,
@@ -17,7 +15,7 @@ use {
         exports::runtime::{self as rt, locator::{LocationMut, LocationRef}, Locator},
         render::{machine::RenderTaskPriority, RenderState},
         settings::{Settings, SourceKind},
-    }, anyhow::{anyhow, Context}, futures::StreamExt, std::{collections::btree_map, sync::Arc},
+    }, anyhow::Context, futures::StreamExt, std::{collections::btree_map, sync::Arc},
     tokio::fs::create_dir_all,
 };
 pub use self::{
@@ -36,29 +34,25 @@ impl PathingController {
         let api_setup = self.api_setup_get(ctx);
 
         let settings = &self.loader.settings;
-        let mut enabled = false;
-        let festivals = async {
+        let get_settings = async {
             let settings = settings.read().await;
-            enabled = settings.enable_katrender;
-            let (on, off) = settings.pathing().festival_preferences();
-            FestivalState {
-                active: FestivalFixup::current_festivals(),
-                on,
-                off,
-            }
+            let enabled = settings.enable_katrender;
+            let festivals = Self::get_festival_state(&settings.pathing());
+            (enabled, festivals)
         };
         let preload = self.preload_all();
-        let (_preload, festivals, api_setup) = tokio::join!(preload, festivals, api_setup);
+        let (_preload, get_settings, api_setup) = tokio::join!(preload, get_settings, api_setup);
 
-        ctx.festivals.set(festivals);
+        if let (enabled, festivals) = get_settings {
+            self.enabled = enabled;
+            ctx.festivals.set(festivals);
+        }
 
         for api_setup in api_setup {
             if let Some(task) = Self::api_setup_get_each(api_setup) {
                 ctx.tasks.spawn(task);
             }
         }
-
-        self.enabled = enabled;
 
         ctx.pack_info.send_if_modified(|shared| {
             shared.shared_loader = Some(self.loader.clone());

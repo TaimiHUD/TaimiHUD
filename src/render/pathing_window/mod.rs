@@ -1,11 +1,9 @@
-use crate::controller::pathing::registry::MarkerPath;
-
 use {
     crate::{
-        controller::pathing::{registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo}, visible::VisibilityFlags, PathingController, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
+        controller::pathing::{registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, MarkerPath}, visible::VisibilityFlags, PathingController, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, Condition, StyleVar, Ui, Window,
         }}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, bitvec::{slice::BitSlice, vec::BitVec}, std::{collections::BTreeMap, sync::Arc}, taimi_pack::attributes::{AttrString, MarkerAttributes},
+    }, bitvec::{slice::BitSlice, vec::BitVec}, std::{collections::BTreeMap, sync::{Arc, Weak}}, taimi_pack::attributes::{AttrString, MarkerAttributes},
     tokio::sync::watch,
 };
 pub use self::filter::{PathingFilterState, PathingSearchState};
@@ -253,8 +251,17 @@ impl PathingWindowState {
     }
 
     fn refresh_search(&mut self) {
-        let packs = PathingController::packs().blocking_read();
-        let packs = packs.active_packs().map(|(path, _, pack)| (path, &*pack.pack));
+        let packs: Box<[_]> = {
+            let Some(packs) = self.pack_loader_data.as_ref().map(|data| data.borrow()) else {
+                self.search_state.clear_matches();
+                return
+            };
+            PackLoader::shared_packs(packs.iter())
+                .filter_map(|(path, data)| Weak::upgrade(data).map(|data|
+                    (path, data)
+                )).collect()
+        };
+        let packs = packs.iter().map(|(p, d)| (*p, &**d));
         self.search_state.commit(packs);
     }
 

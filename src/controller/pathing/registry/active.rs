@@ -451,5 +451,15 @@ impl fmt::Debug for ActivePack {
             .finish()
     }
 }
+impl AsRef<ActivePack> for ActivePack {
+    fn as_ref(&self) -> &ActivePack {
+        self
+    }
+}
+impl AsRef<Pack> for ActivePack {
+    fn as_ref(&self) -> &Pack {
+        &self.pack
+    }
+}
 
 pub type LoaderBox = Box<dyn PackLoaderContext + Send + 'static>;

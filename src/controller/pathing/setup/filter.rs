@@ -1,11 +1,10 @@
 use {
-    anyhow::Context,
-    super::PathingEvent, crate::{
+    crate::{
         controller::{api::{ApiAccountInfo, ApiController, ApiMessage}, pathing::{
-            filter::{AchievementState, RaidState}, registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, setup::PathingTaskBox, state::hidden::{AutoReset, HideContext}, PathingController, PathingEventContext
+            festivals::FestivalFixup, filter::{AchievementState, RaidState}, registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, setup::PathingTaskBox, state::hidden::{AutoReset, HideContext}, FestivalState, PathingController, PathingEvent, PathingEventContext
         }},
-        exports::runtime as rt, settings::{pathing::{PathingAchievementApi, PathingAchievementSave}, state::SaveState},
-    }, bitvec::array::BitArray, futures::future::Either, std::{future::Future, path::{Path, PathBuf}, time::SystemTime}, taimi_pack::attributes::keys::{self, Guid}, tokio::{fs, io::AsyncReadExt, time::{Duration, Instant}},
+        exports::runtime as rt, settings::{pathing::{PathingAchievementApi, PathingAchievementSave}, state::SaveState, PathingSettings},
+    }, anyhow::Context, bitvec::array::BitArray, futures::future::Either, std::{future::Future, path::{Path, PathBuf}, time::SystemTime}, taimi_pack::attributes::keys::{self, Guid}, tokio::{fs, io::AsyncReadExt, time::{Duration, Instant}}
 };
 
 impl PathingController {
@@ -184,6 +183,15 @@ impl PathingController {
         });
     }
 
+    pub(super) fn get_festival_state(pathing: &PathingSettings) -> FestivalState {
+        let (on, off) = pathing.festival_preferences();
+        FestivalState {
+            active: FestivalFixup::current_festivals(),
+            on,
+            off,
+        }
+    }
+
     /// TODO: this
     /// (assuming false as long as any data exists for now)
     pub fn api_info_outdated(&mut self, endpoint: ApiAccountInfo) -> bool {
@@ -196,7 +204,7 @@ impl PathingController {
         }
     }
     /// list of paths to load or populate with given api token
-    pub fn api_setup_get(&mut self, _ctx: &mut PathingEventContext) -> impl Future<Output = Vec<(ApiAccountInfo, Either<PathBuf, Option<String>>)>> + 'static {
+    pub(super) fn api_setup_get(&mut self, _ctx: &mut PathingEventContext) -> impl Future<Output = Vec<(ApiAccountInfo, Either<PathBuf, Option<String>>)>> + 'static {
         let (account_name, token_id) = match ApiController::current_account_token() {
             Ok(token) if token.id().is_none() => (
                 Some(token.account_name),
@@ -235,6 +243,61 @@ impl PathingController {
             res
         }
     }
+    pub(super) async fn api_reload(&mut self, ctx: &mut PathingEventContext) {
+        if crate::ACCOUNT_NAME_CELL.get().is_none() {
+            // TODO: remove this once we actually register for an event that populates it...
+            // and remove the hacky call to this from initial gameplay load
+            log::debug!("TODO: still unsure of account name...");
+            return
+        }
+        let api_setup = self.api_setup_get(ctx).await;
+        let reloads = api_setup.into_iter()
+            .filter_map(|(endpoint, missing)| match missing {
+                Either::Left(load_path) => Some((endpoint, load_path)),
+                Either::Right(..) => None,
+            });
+        for (endpoint, load_path) in reloads {
+            ctx.tasks.spawn(Self::api_load_info_from(endpoint, load_path));
+        }
+    }
+    pub(super) fn api_info_reload(&mut self, ctx: &mut PathingEventContext, endpoint: Option<ApiAccountInfo>) {
+        let account = ApiController::current_account_token();
+        let account_name = match &account {
+            Ok(token) => token.account_name(),
+            Err(name) => name.as_ref().map(|n| &n[..]),
+        };
+        let Some(account_name) = account_name else {
+            log::warn!("can't refresh due to unknown account name");
+            return
+        };
+        let endpoints = match endpoint {
+            Some(..) => &[],
+            None => Self::API_ENDPOINTS,
+        }.iter().chain(endpoint.iter());
+        for &endpoint in endpoints {
+            let path = ApiController::account_info_path(account_name, endpoint);
+            ctx.tasks.spawn(Self::api_load_info_from(endpoint, path));
+        }
+    }
+
+    pub(super) fn api_info_refresh(&mut self, _ctx: &mut PathingEventContext, endpoint: Option<ApiAccountInfo>) {
+        let account = ApiController::current_account_token();
+        let token_id = account.as_ref().ok()
+            .map(|acc| acc.id())
+            .flatten()
+            .map(ToOwned::to_owned);
+        let endpoints = match endpoint {
+            Some(..) => &[],
+            None => Self::API_ENDPOINTS,
+        }.iter().chain(endpoint.iter());
+        for &endpoint in endpoints {
+            ApiMessage::RefreshAccount {
+                endpoint,
+                token_id: token_id.clone(),
+            }.try_send();
+        }
+    }
+
     pub(super) fn api_setup_get_each((endpoint, missing): (ApiAccountInfo, Either<PathBuf, Option<String>>)) -> Option<PathingTaskBox> {
         match missing {
             Either::Left(load_path) =>
@@ -261,7 +324,7 @@ impl PathingController {
             },
         }.with_context(|| format!("parsing account {endpoint}"));
 
-        rt::log::error_ok(res)
+        rt::log::warn_ok(res)
     }
     async fn api_load_info_from_achievements(path: PathBuf) -> anyhow::Result<AchievementState> {
         let achievements = Self::deserialize_path::<PathingAchievementApi>(&path).await

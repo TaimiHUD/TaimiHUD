@@ -302,7 +302,11 @@ case-insensitive = Ignore case
 toggle = Toggle
 enable-all = Enable all
 disable-all = Disable all
+enable-to = Enable above
+disable-to = Disable to
+reset-all = Reset all
 isolate = Isolate
+unisolate = Reset adjacent
 hide = Hide
 unhide = Unhide
 
