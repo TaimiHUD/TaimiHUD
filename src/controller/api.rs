@@ -346,9 +346,9 @@ impl ApiClient {
         })
     }
 
-    /// https://wiki.guildwars2.com/wiki/API:2#Schemas
+    /// <https://wiki.guildwars2.com/wiki/API:2#Schemas>
     ///
-    /// https://api.guildwars2.com/v2.json?v=latest
+    /// <https://api.guildwars2.com/v2.json?v=latest>
     pub const V2_SCHEMA_VERSION: &'static str = "2025-08-29T01:00:00.000Z";
     /// Query argument `?v=`[Self::V2_SCHEMA_VERSION]
     pub const V2_SCHEMA_KEY: &'static str = "v";
