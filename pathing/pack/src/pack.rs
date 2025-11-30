@@ -128,7 +128,7 @@ pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
     })
 }
 
-/// I hate this. See: https://github.com/blish-hud/Pathing/blob/main/Utility/AttributeParsingUtil.cs#L39
+/// I hate this. See: <https://github.com/blish-hud/Pathing/blob/25b65248c7861e585b2e80a52ffb7fd4ddb371d5/Utility/AttributeParsingUtil.cs#L39>
 pub fn taco_xml_to_guid(value: &str) -> Uuid {
     use base64::{engine::general_purpose, Engine as _};
     let mut raw_guid = [0u8; 16];

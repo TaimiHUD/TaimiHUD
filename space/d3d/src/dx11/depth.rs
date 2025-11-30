@@ -62,7 +62,7 @@ impl DepthState {
         StencilFailOp: StencilOp::KEEP,
         StencilPassOp: StencilOp::KEEP,
     };
-    /// depth=[D3D11_COMPARISON_LESS](ComparisonFunc::Less), stencil=[off](Self::STENCILOP_DEFAULT)
+    /// depth=[D3D11_COMPARISON_LESS](ComparisonFunc::Lt), stencil=[off](Self::STENCILOP_DEFAULT)
     pub const DESC_DEFAULT: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
         DepthEnable: BOOL(1),
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ALL,

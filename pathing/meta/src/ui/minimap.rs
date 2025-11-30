@@ -32,7 +32,7 @@ impl MapUnit for MinimapSpace {
     }
 }
 
-/// See also: [MinimapSpace](crate::coords::MinimapSpace)
+/// See also: [MinimapSpace]
 #[derive(Debug, Default, PartialOrd, Ord, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum MinimapPlacement {
     #[default]
