@@ -275,7 +275,7 @@ impl PathingController {
 
     pub const UPDATE_INTERVAL_SLOW: Duration = Duration::from_secs(10);
     pub const UPDATE_INTERVAL_RESPONSIVE: Duration = Duration::from_millis(350);
-    /// Don't bother re-scanning if player hasn't moved at least `sqrt(distance)` [metres](PackSpace}
+    /// Don't bother re-scanning if player hasn't moved at least `sqrt(distance)` [metres](PackSpace)
     pub const UPDATE_DISTANCE_DISTANCE: f32 = 0.005;
     pub(super) async fn handle_update_tick(&mut self, ctx: &mut PathingEventContext, map_id: MapIndex) {
         // TODO: skip all processing if feature is disabled in settings
