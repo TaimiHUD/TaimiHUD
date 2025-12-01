@@ -15,6 +15,7 @@ workspace = true
 default = [
   "serde",
   "mumblelink-nexus",
+  "spatial",
 ]
 map-cache = [
   "serde",
@@ -42,6 +43,15 @@ serde = [
   "glam/serde",
   "glamour/serde",
 ]
+spatial = [
+  "dep:bvh",
+  "dep:nalgebra",
+  "dep:mint",
+  #"bvh?/serde",
+  "glamour/mint",
+  "nalgebra/convert-mint",
+  #"glam/mint",
+]
 gzip = [
   "dep:async-compression",
   "async-compression/gzip",
@@ -61,6 +71,9 @@ glamour = { workspace = true }
 num-traits = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+bvh = { version = "0.11", default-features = false, optional = true }
+nalgebra = { version = "0.33", default-features = false, features = ["convert-mint", "mint"], optional = true }
+mint = { version = "0.5", optional = true }
 
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 # keep version in sync with nexus dependency

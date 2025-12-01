@@ -73,6 +73,7 @@ space = [
   #"space-ecs",
   "paths",
   "dep:taimi_meta",
+  "taimi_meta/spatial",
   "dep:taimi_pack",
   "dep:taimi_d3d",
 ]

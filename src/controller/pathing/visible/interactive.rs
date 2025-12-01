@@ -1,6 +1,6 @@
 use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, PackMapPath, PoiIndex, PoiPath}, visible::LoadedPoi, MapPackInfo}, exports::runtime::Locator, settings::pathing::TriggerKind, space::pack::PackSpace};
 use glamour::Point3;
-use taimi_pack::{attributes::{keys::{self, ShowHideAction}, TacoBehavior, ScriptAttributes}, Pack};
+use taimi_pack::{attributes::{keys::{self, ShowHideAction}, ScriptAttributes}, Pack};
 
 #[derive(Debug, Clone, Default)]
 pub struct InteractivePoi {
@@ -275,6 +275,11 @@ pub struct TriggerConfig {
     pub auto: bool,
 }
 impl TriggerConfig {
+    pub const INVALID: Self = Self {
+        auto: false,
+        radius: keys::TriggerRange(f32::NAN),
+    };
+
     pub fn new(radius: keys::TriggerRange, auto: bool) -> Self {
         Self {
             radius,
@@ -333,3 +338,10 @@ impl InteractionEventAction {
         }
     }
 }
+
+/// TODO: Arc around this for sharing?
+pub type TriggerBounds = taimi_meta::spatial::BvhEntities<
+    taimi_meta::spatial::BvhShape<
+        taimi_meta::spatial::TriggerBoundsInfo
+    >
+>;
