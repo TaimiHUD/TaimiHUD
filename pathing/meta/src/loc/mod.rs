@@ -1,6 +1,7 @@
 use core::fmt;
 
 pub mod packs;
+pub mod indexed;
 
 /// Generic resource reference
 #[derive(Debug, Copy, Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash)]
