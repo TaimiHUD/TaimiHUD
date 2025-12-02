@@ -274,6 +274,7 @@ impl PathingController {
                         pack_info.update_pack(path, pack);
                     }
                 } else {
+                    #[cfg(deleteme)]
                     pack_info.pack_info.clear();
                 }
             });
@@ -300,6 +301,7 @@ impl PathingController {
                 if let Some(pack) = remove_pack {
                     pack_info.update_pack(path, pack);
                 } else {
+                    #[cfg(deleteme)]
                     pack_info.pack_info.remove(&path);
                 }
             });

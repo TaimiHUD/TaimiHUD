@@ -1,14 +1,15 @@
-use std::{fmt, ops};
+use std::{fmt, iter, ops};
 use std::path::Path;
-use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::{Arc, Weak}};
 use crate::controller::pathing::{
     state::hidden::MarkerState,
-    registry::{MarkerId, PackRegistryNs, PoiPath},
+    registry::{MarkerId, PoiPath},
 };
 use crate::exports::runtime as rt;
 use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
 use bitvec::vec::BitVec;
+use taimi_meta::loc::packs::PackIndex;
 use tokio::sync::broadcast;
 use taimi_pack::attributes::keys::Guid;
 pub use self::loader::{
@@ -22,7 +23,9 @@ mod loader;
 pub struct SharedMapPackInfo {
     pub shared_loader: Option<Arc<PackLoader>>,
     pub interactions: broadcast::Sender<InteractionEvent>,
+    #[cfg(deleteme)]
     pub pack_info: BTreeMap<PackPath, Result<Arc<PackInfo>, UnloadedPack>>,
+    #[cfg(deleteme)]
     pub pack_loaded: BTreeSet<PackPath>,
     pub map_info: BTreeMap<PackMapPath, SharedMapPackLoaded>,
     pub map_state: BTreeMap<PackMapPath, SharedMapPackState>,
@@ -44,6 +47,7 @@ impl SharedMapPackInfo {
         }).flatten()
     }
 
+    #[cfg(deleteme)]
     pub(crate) fn update_pack(&mut self, path: PackPath, pack: &LoadedPack) {
         if let Some(..) = pack.active {
             self.pack_loaded.insert(path.clone());
@@ -72,9 +76,21 @@ impl SharedMapPackInfo {
         };
         self.pack_info.insert(path, info);
     }
+    #[deprecated]
+    pub(crate) fn update_pack(&mut self, path: PackPath, pack: &LoadedPack) {
+    }
 
+    #[cfg(deleteme)]
     pub fn is_loaded(&self, path: &PackPath) -> bool {
         self.pack_loaded.contains(path)
+    }
+    /// TODO: Weak::ptr_eq(&Weak::new())?
+    #[deprecated]
+    pub fn is_loaded(&self, path: &PackPath) -> bool {
+        let Some(loader) = &self.shared_loader else { return false };
+        SharedPacks::pack_at(&loader.shared.data.borrow(), *path)
+            .map(|data| Weak::strong_count(data) > 0)
+            .unwrap_or(false)
     }
 
     #[cfg(todo = "unused")]
@@ -83,10 +99,32 @@ impl SharedMapPackInfo {
             info.as_ref().err().map(|e| (path, e))
         )
     }
+    #[cfg(deleteme)]
     pub fn pack_info(&self) -> impl Iterator<Item = (PackPath, &Arc<PackInfo>)> + '_ {
         self.pack_info.iter().filter_map(|(&path, info)|
             info.as_ref().ok().map(|e| (path, e))
         )
+    }
+    #[deprecated]
+    pub fn pack_info(&self) -> impl Iterator<Item = (PackPath, Arc<PackInfo>)> + '_ {
+        let mut info = self.shared_loader.as_ref()
+            .map(|loader| loader.shared.info.borrow());
+        let mut i = 0usize;
+        iter::from_fn(move || {
+            if info.as_ref().map(|info| info.len() > i).unwrap_or(true) {
+                let _ = info.take();
+                return None
+            }
+            let pack_info = info.as_ref().and_then(|info|
+                info.get(i)
+            ).and_then(|info|
+                info.info.as_ref().ok()
+            );
+            i += 1;
+            Some(pack_info.map(|info|
+                (PackPath::with_path(i as PackIndex), info.clone())
+            ))
+        }).filter_map(|i| i)
     }
 }
 
@@ -95,7 +133,9 @@ impl Default for SharedMapPackInfo {
         Self {
             shared_loader: Default::default(),
             interactions: broadcast::Sender::new(Self::INTERACTIONS_BUFFER_LEN),
+            #[cfg(deleteme)]
             pack_info: Default::default(),
+            #[cfg(deleteme)]
             pack_loaded: Default::default(),
             map_info: Default::default(),
             map_state: Default::default(),
@@ -103,12 +143,14 @@ impl Default for SharedMapPackInfo {
     }
 }
 
+#[cfg(deleteme)]
 #[derive(Debug, Clone)]
 pub struct UnloadedPack {
     pub path: PathBuf,
     pub reason: UnloadedReason,
 }
 
+#[cfg(deleteme)]
 impl fmt::Display for UnloadedPack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let name = self.path.file_name()

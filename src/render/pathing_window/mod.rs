@@ -316,13 +316,16 @@ impl PathingWindowState {
             return
         }
 
+        let Some(pack_loader) = &self.pack_loader else { return };
+        let categories = SharedPacks::pack_at(&pack_loader.shared.info.borrow(), path.root)
+            .and_then(|i| i.info.as_ref().ok())
+            .map(|info| info.categories.clone());
         let Some(pack_info) = &self.pack_info else { return };
         let pack_info = pack_info.borrow();
-        let (Some(Ok(pack_info)), Some(map_info)) = (
-            pack_info.pack_info.get(&path.root),
-            pack_info.map_info.get(&path),
-        ) else { return };
-        filter.resize(pack_info.categories.count(), false);
+        let Some(map_info) = pack_info.map_info.get(&path) else { return };
+        if let Some(categories) = &categories {
+            filter.resize(categories.count(), false);
+        }
 
         #[cfg(todo = "unnecessary")]
         {
