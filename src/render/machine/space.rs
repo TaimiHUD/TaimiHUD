@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::pathing::{registry::{MapIndex, PackMapPath, PackPath}, visible::InteractivePoi, SharedMapPackState}, render::{machine::{RenderMachine, RenderPosition, RenderPositioning}, RenderEvent, RenderState}, settings::pathing::CameraSource, space::DrawSpace
+        controller::pathing::{registry::{MapIndex, PackMapPath, PackPath}, visible::InteractivePoi, shared::SharedMapPackState}, render::{machine::{RenderMachine, RenderPosition, RenderPositioning}, RenderEvent, RenderState}, settings::pathing::CameraSource, space::DrawSpace
     },
     glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
     std::{collections::BTreeMap, ops::Range, sync::Arc},

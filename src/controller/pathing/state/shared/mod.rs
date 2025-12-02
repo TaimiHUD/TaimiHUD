@@ -1,15 +1,21 @@
 use std::{fmt, ops};
 use std::path::Path;
 use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc};
-use crate::controller::pathing::registry::{MarkerId, PackRegistryNs, PoiPath};
+use crate::controller::pathing::{
+    state::hidden::MarkerState,
+    registry::{MarkerId, PackRegistryNs, PoiPath},
+};
 use crate::exports::runtime as rt;
 use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
 use bitvec::vec::BitVec;
 use tokio::sync::broadcast;
 use taimi_pack::attributes::keys::Guid;
+pub use self::loader::{
+    SharedPacks, SharedLoaderPackData, SharedLoaderPackInfo, SharedLoaderPackConfig,
+};
 
-use super::hidden::MarkerState;
+mod loader;
 
 /// TODO: rename to SharedPacks or something?
 #[derive(Debug, Clone)]

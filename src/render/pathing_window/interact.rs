@@ -7,12 +7,19 @@ use {
     super::PathingWindowState,
     crate::{
         controller::pathing::{registry::PoiPath, visible::interactive::BehaviourConfig, PathingEvent}, exports::runtime::{imgui::{
-            TableToken, TreeNode, Selectable, SelectableFlags, MouseButton, Condition,
+            TableToken, TreeNode, Selectable, MouseButton, Condition,
             Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui,
         }, Locator}, with_i18n, render::machine::RenderMachine, space::engine::Engine, Controller,
     },
 };
-use crate::{controller::pathing::{registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex}, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, VisibilityFlags}, SharedMapPackLoaded, SharedMapPackState}, space::{render_list::RenderId, DrawSpace}};
+use crate::{
+    controller::pathing::{
+        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex},
+        visible::{InteractionEvent, InteractionEventAction, InteractivePoi, VisibilityFlags},
+        shared::{SharedMapPackLoaded, SharedMapPackState},
+    },
+    space::{render_list::RenderId, DrawSpace},
+};
 use crate::controller::pathing::registry::MarkerIndex;
 use crate::settings::pathing::TriggerKind;
 

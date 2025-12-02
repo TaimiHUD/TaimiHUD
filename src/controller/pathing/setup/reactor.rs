@@ -3,7 +3,12 @@ use {
         controller::{
             api::ApiAccountInfo, pathing::{
                 filter,
-                registry::{CategorySet, CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, SharedLoaderPackInfo, TrailPath}, setup::{SetupPoi, SetupTrail}, state::{hidden::{AutoReset, HideContext}, shared::SharedMapPackInfo}, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
+                registry::{CategorySet, CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, TrailPath},
+                setup::{SetupPoi, SetupTrail},
+                state::{
+                    hidden::{AutoReset, HideContext},
+                    shared::{SharedMapPackInfo, SharedLoaderPackInfo},
+                }, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
             }, Controller
         }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
     },
@@ -397,7 +402,7 @@ impl PathingEventContext {
             mumble_identity,
             pack_configs: Box::new(stream::pending()),
             update_tick,
-            loader_pack_info: loader.shared_pack_info.subscribe(),
+            loader_pack_info: loader.shared.info.subscribe(),
             tasks: JoinSet::new(),
             filter_expiry: BTreeMap::new(),
             next_schedule: Box::pin(sleep(Self::SCHEDULE_TIMEOUT)),

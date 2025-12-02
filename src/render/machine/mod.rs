@@ -1,7 +1,7 @@
 #[cfg(feature = "space")]
 use {
     crate::{
-        controller::pathing::{registry::PackPath, SharedMapPackInfo, SharedMapPackState},
+        controller::pathing::{registry::PackPath, shared::{SharedMapPackInfo, SharedMapPackState}},
         space::engine::{Engine, SpaceEvent},
     },
     std::{ops::Range, mem, collections::BTreeMap},

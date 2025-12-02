@@ -1,9 +1,13 @@
 use {
     crate::{
-        controller::pathing::{registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, MarkerPath}, visible::VisibilityFlags, PathingController, SharedMapPackInfo}, exports::runtime::{self as rt, Watched, imgui::{
+        controller::pathing::{
+            registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, MarkerPath},
+            visible::VisibilityFlags,
+            shared::{SharedPacks, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, SharedMapPackInfo},
+        }, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, Condition, StyleVar, Ui, Window,
         }}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, bitvec::{slice::BitSlice, vec::BitVec}, std::{collections::BTreeMap, sync::{Arc, Weak}}, taimi_pack::attributes::{AttrString, MarkerAttributes},
+    }, bitvec::{slice::BitSlice, vec::BitVec}, std::{collections::BTreeMap, sync::{Arc, Weak}}, taimi_pack::attributes::AttrString,
     tokio::sync::watch,
 };
 pub use self::filter::{PathingFilterState, PathingSearchState};
@@ -85,7 +89,7 @@ impl PathingWindowState {
         let mut maps_info_changed = false;
         if let Some(pack_loader) = &self.pack_loader {
             let loader_info = self.pack_loader_info.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared_pack_info.subscribe();
+                let mut rx = pack_loader.shared.info.subscribe();
                 rx.mark_changed();
                 rx
             });
@@ -94,7 +98,7 @@ impl PathingWindowState {
             };
 
             let loader_data = self.pack_loader_data.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared_pack_data.subscribe();
+                let mut rx = pack_loader.shared.data.subscribe();
                 rx.mark_changed();
                 rx
             });
@@ -104,7 +108,7 @@ impl PathingWindowState {
             };
 
             let loader_config = self.pack_loader_config.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared_pack_config.subscribe();
+                let mut rx = pack_loader.shared.config.subscribe();
                 rx.mark_changed();
                 rx
             });
@@ -256,7 +260,7 @@ impl PathingWindowState {
                 self.search_state.clear_matches();
                 return
             };
-            PackLoader::shared_packs(packs.iter())
+            SharedPacks::packs(packs.iter())
                 .filter_map(|(path, data)| Weak::upgrade(data).map(|data|
                     (path, data)
                 )).collect()

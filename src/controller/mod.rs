@@ -68,7 +68,7 @@ use markers::{MarkersController, MarkersEvent};
 pub(crate) mod pathing;
 
 #[cfg(feature = "space")]
-use pathing::{FestivalState, SharedMapPackInfo, PathingController, PathingEvent};
+use pathing::{FestivalState, shared::SharedMapPackInfo, PathingController, PathingEvent};
 
 pub(crate) mod api;
 pub(crate) mod runtime;

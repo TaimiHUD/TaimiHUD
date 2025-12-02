@@ -1,7 +1,13 @@
 use {
     super::{PathingFilterState, PathingWindowState},
     crate::{
-        controller::pathing::{registry::{CategorySet, CategoryIndex, CategoryPath, MarkerIndex, MarkerIndexVariant, MarkerPath, PackConfig, PackInfo, PackLoader, PackMapPath, PackPath, PackRoot, SharedLoaderPackData, UnloadedReason}, visible::VisibilityFlags, PathingController, PathingEvent}, exports::runtime::{imgui::{
+        controller::pathing::{
+            registry::{CategorySet, CategoryIndex, CategoryPath, MarkerIndex, MarkerIndexVariant, MarkerPath, PackConfig, PackInfo, PackMapPath, PackPath, PackRoot, UnloadedReason},
+            shared::SharedLoaderPackData,
+            visible::VisibilityFlags,
+            PathingController, PathingEvent,
+            SharedPacks,
+        }, exports::runtime::{imgui::{
             ChildWindow, Condition, IdStackToken, MouseButton, Selectable, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, WindowFlags
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, RenderState}, space::engine::Engine, with_i18n, Controller, ControllerEvent
     }, std::{collections::{btree_map, BTreeMap}, iter, sync::Arc}, taimi_pack::{attributes::AttrString, MarkerAttributes},
@@ -215,7 +221,7 @@ impl PathingWindowState {
     }
 
     fn get_category_display_name(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: CategoryPath<PackPath>) -> Option<Option<Arc<str>>> {
-        PackLoader::shared_pack_active(packs?, path.root)
+        SharedPacks::pack_active(packs?, path.root)
             .map(|active| active.pack.categories.all_categories.get_index(path.path as usize)
                 .map(|(_id, cat)| cat.display_name.clone())
             )
@@ -238,7 +244,7 @@ impl PathingWindowState {
                     _ => None,
                 };
                 let get_display_name = || {
-                    let active = PackLoader::shared_pack_active(packs?, path.root)?;
+                    let active = SharedPacks::pack_active(packs?, path.root)?;
                     Some(active.pack.pois.get(idx).and_then(|poi|
                         // TODO: idk what this is but it could be useful maybe kinda?
                         poi.attributes.billboard_text.as_ref().map(|text| Arc::from(&text[..]))
@@ -263,7 +269,7 @@ impl PathingWindowState {
     }
 
     pub(super) fn get_marker_tip(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<(AttrString, AttrString)> {
-        let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
+        let Some(active) = SharedPacks::pack_active(packs?, path.root) else { return None };
         match path.path.variant() {
             MarkerIndexVariant::Category(path) => {
                 let Some((_, cat)) = active.pack.categories.all_categories.get_index(path as usize) else { return None };
@@ -302,7 +308,7 @@ impl PathingWindowState {
     }
 
     pub(super) fn get_marker_copy(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<(AttrString, AttrString)> {
-        let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
+        let Some(active) = SharedPacks::pack_active(packs?, path.root) else { return None };
         match path.path.variant() {
             MarkerIndexVariant::Category(path) => {
                 let Some((_, cat)) = active.pack.categories.all_categories.get_index(path as usize) else { return None };
@@ -329,7 +335,7 @@ impl PathingWindowState {
     }
 
     pub(super) fn get_marker_info(packs: Option<&SharedLoaderPackData>, _info: &PackInfo, path: MarkerPath<PackPath>) -> Option<Option<AttrString>> {
-        let Some(active) = PackLoader::shared_pack_active(packs?, path.root) else { return None };
+        let Some(active) = SharedPacks::pack_active(packs?, path.root) else { return None };
         match path.path.variant() {
             #[cfg(todo = "unnecessary")]
             MarkerIndexVariant::Category(path) => (),

@@ -1,6 +1,9 @@
 use {
     crate::{controller::pathing::{
-        registry::{ActivePack, PackLoader, PackMapPath, PoiPath, TrailPath}, visible::{LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder}, PathingController, PathingEvent, PathingEventContext
+        registry::{PackMapPath, PoiPath, TrailPath},
+        visible::{LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder},
+        shared::SharedPacks,
+        PathingController, PathingEvent, PathingEventContext,
     }, exports::runtime::{self as rt, locator::LocationRef}, render::{machine::RenderTaskPriority, RenderState}},
     futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::Weak,
 };
@@ -13,8 +16,8 @@ impl PathingController {
         setup_pois: Option<Vec<SetupPoi>>,
     ) -> anyhow::Result<()> {
         let active_weak = {
-            let pack_data = self.loader.shared_pack_data.borrow();
-            PackLoader::shared_pack_at(&pack_data, path.root).cloned()
+            let pack_data = self.loader.shared.data.borrow();
+            SharedPacks::pack_at(&pack_data, path.root).cloned()
         };
         let Some(active_weak) = active_weak else {
             anyhow::bail!("cannot setup for unloaded {path}")

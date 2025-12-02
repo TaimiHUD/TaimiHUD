@@ -9,15 +9,16 @@ use {
                     PackInfo,
                     PackConfig,
                     TrailIndex,
-                    LoadedPackInfo, LoadedPack, UnloadedReason,
+                    LoadedPack, UnloadedReason,
                 },
+                state::shared::SharedPacks,
             },
         },
         exports::runtime as rt,
         settings::SettingsLock,
     },
     anyhow::{anyhow, Context},
-    std::{collections::BTreeMap, error::Error as StdError, fmt, future::Future, iter, mem, path::{Path, PathBuf}, sync::{Arc, Weak}},
+    std::{collections::BTreeMap, error::Error as StdError, fmt, future::Future, path::{Path, PathBuf}, sync::{Arc, Weak}},
     taimi_pack::{
         attributes::Festival, category::id::AsFullId, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, trail::TrailData, Pack
     }, tokio::sync::{watch, Mutex},
@@ -99,7 +100,7 @@ impl LoadedPack {
                 let e = e.into_boxed_dyn_error().into();
                 let e: Arc<dyn StdError + Send + Sync> = Box::<dyn StdError + Send + Sync>::from(e).into();
                 self.info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
-                manager.shared_update_pack_info(self.info.index, &self.info);
+                manager.shared.update_pack_info(self.info.index, &self.info);
                 Err(e.into())
             },
             Ok((pack, info, config)) => {
@@ -109,10 +110,10 @@ impl LoadedPack {
                     let update_config = self.config.is_none();
                     Self::try_update_config_inner(&mut self.config, config);
                     if update_config {
-                        manager.shared_update_pack_config(self.info.index, self.config.as_ref());
+                        manager.shared.update_pack_config(self.info.index, self.config.as_ref());
                     }
                 }
-                manager.shared_update_pack_active(self.info.index, Some(active));
+                manager.shared.update_pack_active(self.info.index, Some(active));
                 Ok(())
             },
         }
@@ -214,17 +215,12 @@ impl fmt::Display for PackFormat {
     }
 }
 
-pub type SharedLoaderPackInfo = Box<[LoadedPackInfo]>;
-pub type SharedLoaderPackData = Box<[Weak<ActivePack>]>;
-pub type SharedLoaderPackConfig = Box<[Option<watch::Sender<Arc<PackConfig>>>]>;
 #[derive(Debug)]
 pub struct PackLoader {
     pub settings: SettingsLock,
     pub festival_categories: BTreeMap<&'static str, Festival>,
 
-    pub shared_pack_info: watch::Sender<SharedLoaderPackInfo>,
-    pub shared_pack_data: watch::Sender<SharedLoaderPackData>,
-    pub shared_pack_config: watch::Sender<SharedLoaderPackConfig>,
+    pub shared: SharedPacks,
 }
 
 impl PackLoader {
@@ -232,9 +228,7 @@ impl PackLoader {
         Self {
             settings,
             festival_categories: FestivalFixup::festival_categories(),
-            shared_pack_info: Default::default(),
-            shared_pack_data: Default::default(),
-            shared_pack_config: Default::default(),
+            shared: SharedPacks::new(),
         }
     }
 
@@ -292,101 +286,6 @@ impl PackLoader {
                 }
             }
         }
-    }
-
-    pub fn shared_packs<I: IntoIterator>(packs: I) -> impl Iterator<Item = (PackPath, I::Item)> {
-        packs.into_iter().enumerate()
-            .map(|(i, p)| (PackPath::with_path(i as PackIndex), p))
-    }
-
-    pub fn shared_pack_at<D>(packs: &[D], path: PackPath) -> Option<&D> {
-        let idx = path.path as usize;
-        packs.get(idx)
-    }
-    pub fn try_shared_pack_active(packs: &[Weak<ActivePack>], path: PackPath) -> Option<Arc<ActivePack>> {
-        Self::shared_pack_at(packs, path)
-            .and_then(Weak::upgrade)
-    }
-    /// TODO: keeping this as a marker to indicate the loader may be able to load on-demand later on
-    /// (and anything still using this probably wants to switch to that instead)
-    pub fn shared_pack_active(packs: &[Weak<ActivePack>], path: PackPath) -> Option<Arc<ActivePack>> {
-        Self::try_shared_pack_active(packs, path)
-    }
-
-    pub fn shared_update_pack_info(&self, path: PackPath, pack: &LoadedPackInfo) {
-        self.shared_pack_info.send_if_modified(|shared| {
-            let idx = path.path as usize;
-            let amt = shared.len();
-            match shared.get_mut(idx) {
-                Some(out) => match *out == *pack {
-                    true => false,
-                    false => {
-                        out.clone_from(pack);
-                        true
-                    },
-                },
-                None if idx == amt => {
-                    let info = Vec::from(mem::take(shared));
-                    *shared = info.into_iter()
-                        .chain(iter::once(pack.clone()))
-                        .collect();
-                    true
-                },
-                None => {
-                    log::error!("shared updates incomplete, can't reach {}", pack.index);
-                    false
-                },
-            }
-        });
-    }
-
-    pub fn shared_update_pack_config(&self, path: PackPath, config: Option<&watch::Sender<Arc<PackConfig>>>) {
-        let Some(config) = config else { return };
-        let idx = path.path as usize;
-        self.shared_pack_config.send_if_modified(|shared| match shared.get_mut(idx) {
-            Some(Some(out)) if config.same_channel(out) =>
-                false,
-            Some(out) => {
-                *out = Some(config.clone());
-                true
-            },
-            None => {
-                let mut configs = Vec::from(mem::take(shared));
-                configs.resize_with(idx, || None);
-                configs.push(Some(config.clone()));
-                *shared = configs.into_boxed_slice();
-                true
-            },
-        });
-    }
-
-    pub fn shared_update_pack_active(&self, path: PackPath, pack: Option<&Arc<ActivePack>>) {
-        self.shared_pack_data.send_if_modified(|shared| {
-            let pack_shared = || pack.map(Arc::downgrade).unwrap_or(Weak::new());
-            let idx = path.path as usize;
-            match shared.get_mut(idx) {
-                Some(out) => {
-                    match pack.map(Arc::as_ptr) {
-                        Some(p) if p == Weak::as_ptr(out) =>
-                            false,
-                        None if Weak::ptr_eq(&*out, &Weak::new()) =>
-                            false,
-                        _ => {
-                            *out = pack_shared();
-                            true
-                        },
-                    }
-                },
-                None => {
-                    let mut info = Vec::from(mem::take(shared));
-                    info.resize_with(idx, || Weak::new());
-                    *shared = info.into_iter()
-                        .chain(iter::once(pack_shared()))
-                        .collect();
-                    true
-                },
-            }
-        });
     }
 }
 

@@ -2,7 +2,10 @@ use {
     crate::{
         controller::{
             pathing::{
-                filter::{self, MarkerFilter}, registry::{CategoryPath, CategorySet, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath}, visible::VisibilityFlags, PathingController, PathingEvent, PathingEventContext
+                filter::{self, MarkerFilter},
+                registry::{CategoryPath, CategorySet, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath},
+                state::shared::SharedPacks,
+                visible::VisibilityFlags, PathingController, PathingEvent, PathingEventContext
             }, Controller
         },
         exports::runtime::locator::LocationRef,
@@ -101,11 +104,11 @@ impl PathingController {
         C: IntoIterator<Item = CategoryPath>,
     {
         // TODO: much better ways to get this ugh... even via registry above is fine ugh... or make an accessor..?
-        let categories = PackLoader::shared_pack_at(&self.loader.shared_pack_info.borrow(), pack_path)
+        let categories = SharedPacks::pack_at(&self.loader.shared.info.borrow(), pack_path)
             .and_then(|pack_info| pack_info.info.as_ref().ok()
                 .map(|info| info.categories.clone())
             );
-        let config = PackLoader::shared_pack_at(&self.loader.shared_pack_config.borrow(), pack_path)
+        let config = SharedPacks::pack_at(&self.loader.shared.config.borrow(), pack_path)
             .and_then(|config| config.as_ref()
                 .map(|config| config.borrow().clone())
             );
