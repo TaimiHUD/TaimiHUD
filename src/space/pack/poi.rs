@@ -271,7 +271,7 @@ impl ActivePoi {
             .icon_name()
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
         let scale = poi_data.icon_scale();
-        let scale_map = poi_data.attributes.map_display_size.unwrap_or(20.0);
+        let scale_map = poi_data.attributes.poi().map_display_size.unwrap_or(20.0);
         let tint = poi_data.tint();
         let opacity = poi_data.alpha();
         Self::new(active_pack, loader, visibility, poi_idx, poi, icon_name, scale, scale_map, tint, opacity, device)

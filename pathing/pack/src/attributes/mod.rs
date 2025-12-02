@@ -41,54 +41,19 @@ fn list_into<T>(l: impl Into<Box<[T]>>) -> AttrList<T> {
 /// Attributes for markers. Inherits up the category stack.
 pub struct MarkerAttributes {
     // Common.
-    pub alpha: Option<f32>,
-    pub can_fade: Option<bool>,
-    pub tint: Option<glam::Vec4>,
-    pub cull: Option<CullDirection>,
     pub edit_tag: Option<i32>,
-    pub fade_near: Option<f32>,
-    pub fade_far: Option<f32>,
     pub minimap_visibility: Option<bool>,
     pub map_visibility: Option<bool>,
     pub in_game_visibility: Option<bool>,
-
-    // POI-specific.
-    pub height_offset: Option<f32>,
-    pub icon_file: Option<AttrString>,
-    pub icon_size: Option<f32>,
-    pub map_display_size: Option<f32>,
-    pub scale_on_map_with_zoom: Option<bool>,
-    pub min_size: Option<f32>,
-    pub max_size: Option<f32>,
-    pub occlude: Option<bool>,
-    pub rotate: Option<glam::Vec3>,
-    pub billboard_text: Option<AttrString>,
-    pub billboard_text_color: Option<glam::Vec4>,
     pub tip_name: Option<AttrString>,
     pub tip_description: Option<AttrString>,
+    pub render: Option<Box<RenderAttributes>>,
 
-    // Trail-specific.
-    pub anim_speed: Option<f32>,
-    pub texture: Option<AttrString>,
-    pub trail_scale: Option<f32>,
-    pub is_wall: Option<bool>,
-
-    // Filters.
-    pub festivals: Option<Festivals>,
-    pub mounts: Option<Mounts>,
-    pub professions: Option<Professions>,
-    pub races: Option<Races>,
-    pub specializations: Option<AttrList<i32>>,
-    pub map_types: Option<AttrList<MapType>>,
-    pub schedule: Option<AttrString>,
-    pub schedule_duration: Option<f32>,
-    pub raids: Option<AttrList<String>>,
+    pub filters: Option<Box<FilterAttributes>>,
 
     /// Taco Behaviors.
     pub taco_behavior: Option<TacoBehavior>,
     pub invert_behavior: Option<bool>,
-    pub achievement_id: Option<i32>,
-    pub achievement_bit: Option<i32>,
     pub reset_length: Option<f32>,
     pub auto_trigger: Option<bool>,
 
@@ -100,26 +65,11 @@ pub struct MarkerAttributes {
 impl MarkerAttributes {
     pub fn merge(&mut self, base: &MarkerAttributes, child: bool) {
         // === Common === //
-        if self.alpha.is_none() {
-            self.alpha = base.alpha;
-        }
-        if self.can_fade.is_none() {
-            self.can_fade = base.can_fade;
-        }
-        if self.tint.is_none() {
-            self.tint = base.tint;
-        }
-        if self.cull.is_none() {
-            self.cull = base.cull;
+        if let Some(render) = &base.render {
+            self.render_mut().merge(&render);
         }
         if self.edit_tag.is_none() {
             self.edit_tag = base.edit_tag;
-        }
-        if self.fade_near.is_none() {
-            self.fade_near = base.fade_near;
-        }
-        if self.fade_far.is_none() {
-            self.fade_far = base.fade_far;
         }
         if self.minimap_visibility.is_none() {
             self.minimap_visibility = base.minimap_visibility;
@@ -130,99 +80,22 @@ impl MarkerAttributes {
         if self.in_game_visibility.is_none() {
             self.in_game_visibility = base.in_game_visibility;
         }
-        // === POI-specific === //
-        if self.height_offset.is_none() {
-            self.height_offset = base.height_offset;
-        }
-        if self.icon_file.is_none() {
-            self.icon_file = base.icon_file.clone();
-        }
-        if self.icon_size.is_none() {
-            self.icon_size = base.icon_size;
-        }
-        if self.invert_behavior.is_none() {
-            self.invert_behavior = base.invert_behavior;
-        }
-        if self.map_display_size.is_none() {
-            self.map_display_size = base.map_display_size;
-        }
-        if self.scale_on_map_with_zoom.is_none() {
-            self.scale_on_map_with_zoom = base.scale_on_map_with_zoom;
-        }
-        if self.min_size.is_none() {
-            self.min_size = base.min_size;
-        }
-        if self.max_size.is_none() {
-            self.max_size = base.max_size;
-        }
-        if self.occlude.is_none() {
-            self.occlude = base.occlude;
-        }
-        if self.rotate.is_none() {
-            self.rotate = base.rotate;
-        }
-        if self.billboard_text.is_none() {
-            self.billboard_text = base.billboard_text.clone();
-        }
-        if self.billboard_text_color.is_none() {
-            self.billboard_text_color = base.billboard_text_color;
-        }
         if !child && self.tip_name.is_none() {
             self.tip_name = base.tip_name.clone();
         }
         if !child && self.tip_description.is_none() {
             self.tip_description = base.tip_description.clone();
         }
-        // === Trail-specific === //
-        if self.anim_speed.is_none() {
-            self.anim_speed = base.anim_speed;
-        }
-        if self.texture.is_none() {
-            self.texture = base.texture.clone();
-        }
-        if self.trail_scale.is_none() {
-            self.trail_scale = base.trail_scale;
-        }
-        if self.is_wall.is_none() {
-            self.is_wall = base.is_wall;
-        }
         // === Filters === //
-        if self.festivals.is_none() {
-            self.festivals = base.festivals.clone();
-        }
-        if self.mounts.is_none() {
-            self.mounts = base.mounts.clone();
-        }
-        if self.professions.is_none() {
-            self.professions = base.professions.clone();
-        }
-        if self.races.is_none() {
-            self.races = base.races.clone();
-        }
-        if self.specializations.is_none() {
-            self.specializations = base.specializations.clone();
-        }
-        if self.map_types.is_none() {
-            self.map_types = base.map_types.clone();
-        }
-        if self.schedule.is_none() {
-            self.schedule = base.schedule.clone();
-        }
-        if self.schedule_duration.is_none() {
-            self.schedule_duration = base.schedule_duration;
-        }
-        if self.raids.is_none() {
-            self.raids = base.raids.clone();
+        if let Some(filters) = &base.filters {
+            self.filters_mut().merge(&filters);
         }
         // === Taco Behaviors === //
         if self.taco_behavior.is_none() {
             self.taco_behavior = base.taco_behavior;
         }
-        if self.achievement_id.is_none() {
-            self.achievement_id = base.achievement_id;
-        }
-        if self.achievement_bit.is_none() {
-            self.achievement_bit = base.achievement_bit;
+        if self.invert_behavior.is_none() {
+            self.invert_behavior = base.invert_behavior;
         }
         if self.reset_length.is_none() {
             self.reset_length = base.reset_length;
@@ -244,21 +117,21 @@ impl MarkerAttributes {
         let attr_name = &name.local_name.trim_start_matches("bh-");
         // === Common === //
         if attr_name.eq_ignore_ascii_case("alpha") {
-            self.alpha = Some(value.parse()?);
+            self.render_mut().alpha = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("canfade") {
-            self.can_fade = Some(parse_bool(&value)?);
+            self.render_mut().can_fade = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint") {
             if let Some(tint) = opt_str(&value).map(parse_color).transpose()? {
-                self.tint = Some(tint);
+                self.render_mut().tint = Some(tint);
             }
         } else if attr_name.eq_ignore_ascii_case("cull") {
-            self.cull = Some(value.parse()?);
+            self.render_mut().cull = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("edittag") {
             self.edit_tag = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("fadenear") {
-            self.fade_near = Some(value.parse()?);
+            self.render_mut().fade_near = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("fadefar") {
-            self.fade_far = Some(value.parse()?);
+            self.render_mut().fade_far = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("minimapvisibility") {
             self.minimap_visibility = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mapvisibility") {
@@ -267,79 +140,79 @@ impl MarkerAttributes {
             self.in_game_visibility = Some(parse_bool(&value)?);
         // === POI-specific === //
         } else if attr_name.eq_ignore_ascii_case("heightoffset") {
-            self.height_offset = Some(value.parse()?);
+            self.poi_mut().height_offset = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iconfile") {
-            self.icon_file = Some(string_into(value));
+            self.poi_mut().icon_file = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
-            self.icon_size = Some(value.parse()?);
+            self.poi_mut().icon_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
             self.invert_behavior = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mapdisplaysize") {
-            self.map_display_size = Some(value.parse()?);
+            self.poi_mut().map_display_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("scaleonmapwithzoom") {
-            self.scale_on_map_with_zoom = Some(parse_bool(&value)?);
+            self.poi_mut().scale_on_map_with_zoom = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("minsize") {
-            self.min_size = Some(value.parse()?);
+            self.poi_mut().min_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("maxsize") {
-            self.max_size = Some(value.parse()?);
+            self.poi_mut().max_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("occlude") {
-            self.occlude = Some(parse_bool(&value)?);
+            self.poi_mut().occlude = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("rotate") {
-            self.rotate = Some(glam::Vec3::from_array(parse_array(&value)?));
+            self.poi_mut().rotate = Some(glam::Vec3::from_array(parse_array(&value)?));
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
             let x = value.parse()?;
-            self.rotate.get_or_insert_default().x = x;
+            self.poi_mut().rotate.get_or_insert_default().x = x;
         } else if attr_name.eq_ignore_ascii_case("rotate-y") {
             let y = value.parse()?;
-            self.rotate.get_or_insert_default().y = y;
+            self.poi_mut().rotate.get_or_insert_default().y = y;
         } else if attr_name.eq_ignore_ascii_case("rotate-z") {
             let z = value.parse()?;
-            self.rotate.get_or_insert_default().z = z;
+            self.poi_mut().rotate.get_or_insert_default().z = z;
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title") {
-            if self.billboard_text.is_none() || !value.is_empty() {
-                self.billboard_text = Some(string_into(value));
+            if self.poi().billboard_text.is_none() || !value.is_empty() {
+                self.poi_mut().billboard_text = Some(string_into(value));
             }
         } else if attr_name.eq_ignore_ascii_case("title-color") {
-            self.billboard_text_color = opt_str(&value).map(parse_color).transpose()?;
+            self.poi_mut().billboard_text_color = opt_str(&value).map(parse_color).transpose()?;
         } else if attr_name.eq_ignore_ascii_case("tip-name") {
             self.tip_name = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("tip-description") {
             self.tip_description = Some(string_into(value));
         // === Trail-specific === //
         } else if attr_name.eq_ignore_ascii_case("animspeed") {
-            self.anim_speed = Some(value.parse()?);
+            self.trail_mut().anim_speed = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("texture") {
-            self.texture = Some(string_into(value));
+            self.trail_mut().texture = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("trailscale") {
-            self.trail_scale = Some(value.parse()?);
+            self.trail_mut().trail_scale = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("iswall") {
-            self.is_wall = Some(parse_bool(&value)?);
+            self.trail_mut().is_wall = Some(parse_bool(&value)?);
         // === Filters === //
         } else if attr_name.eq_ignore_ascii_case("festival") {
-            self.festivals = Some(parse_list::<Festival>(&value)?.into_iter().collect());
+            self.filters_mut().festivals = Some(parse_list::<Festival>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("mount") {
-            self.mounts = Some(parse_list::<Mount>(&value)?.into_iter().collect());
+            self.filters_mut().mounts = Some(parse_list::<Mount>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("profession") {
-            self.professions = Some(parse_list::<Profession>(&value)?.into_iter().collect());
+            self.filters_mut().professions = Some(parse_list::<Profession>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("race") {
-            self.races = Some(parse_list::<Race>(&value)?.into_iter().collect());
+            self.filters_mut().races = Some(parse_list::<Race>(&value)?.into_iter().collect());
         } else if attr_name.eq_ignore_ascii_case("specialization") {
-            self.specializations = Some(list_into(parse_list(&value)?));
+            self.filters_mut().specializations = Some(list_into(parse_list(&value)?));
         } else if attr_name.eq_ignore_ascii_case("maptype") {
-            self.map_types = Some(list_into(parse_list(&value)?));
+            self.filters_mut().map_types = Some(list_into(parse_list(&value)?));
         } else if attr_name.eq_ignore_ascii_case("schedule") {
-            self.schedule = Some(string_into(value));
+            self.filters_mut().schedule = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("schedule-duration") {
-            self.schedule_duration = Some(value.parse()?);
+            self.filters_mut().schedule_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("raid") {
-            self.raids = Some(list_into(parse_list(&value)?));
+            self.filters_mut().raids = Some(list_into(parse_list(&value)?));
         // === Taco Behaviors === //
         } else if attr_name.eq_ignore_ascii_case("behavior") {
             self.taco_behavior = Some(value.parse::<i32>()?.try_into()?);
         } else if attr_name.eq_ignore_ascii_case("achievementid") {
-            self.achievement_id = parse_opt(&value)?;
+            self.filters_mut().achievement_id = parse_opt(&value)?;
         } else if attr_name.eq_ignore_ascii_case("achievementbit") {
-            self.achievement_bit = Some(value.parse()?);
+            self.filters_mut().achievement_bit = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("resetlength") {
             self.reset_length = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("autotrigger") {
@@ -404,6 +277,46 @@ impl MarkerAttributes {
     pub fn interaction_mut(&mut self) -> &mut InteractionAttributes {
         self.interaction.get_or_insert_default()
     }
+    pub fn filters(&self) -> Cow<'_, FilterAttributes> {
+        match &self.filters {
+            Some(i) => Cow::Borrowed(i),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn filters_mut(&mut self) -> &mut FilterAttributes {
+        self.filters.get_or_insert_default()
+    }
+    pub fn render(&self) -> Cow<'_, RenderAttributes> {
+        match &self.render {
+            Some(i) => Cow::Borrowed(i),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn render_mut(&mut self) -> &mut RenderAttributes {
+        self.render.get_or_insert_default()
+    }
+    pub fn trail(&self) -> Cow<'_, TrailAttributes> {
+        let trail = self.render.as_ref()
+            .map(|render| &render.trail);
+        match trail {
+            Some(i) => Cow::Borrowed(i),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn trail_mut(&mut self) -> &mut TrailAttributes {
+        &mut self.render_mut().trail
+    }
+    pub fn poi(&self) -> Cow<'_, PoiAttributes> {
+        let poi = self.render.as_ref()
+            .and_then(|render| render.poi.as_ref());
+        match poi {
+            Some(i) => Cow::Borrowed(i),
+            None => Cow::Owned(Default::default()),
+        }
+    }
+    pub fn poi_mut(&mut self) -> &mut PoiAttributes {
+        self.render_mut().poi.get_or_insert_default()
+    }
 }
 
 /// Scripting.
@@ -416,7 +329,7 @@ pub struct ScriptAttributes {
     pub script_once: Option<AttrString>,
 }
 impl ScriptAttributes {
-    pub fn merge(&mut self, base: &ScriptAttributes) {
+    pub fn merge(&mut self, base: &Self) {
         if self.script_tick.is_none() {
             self.script_tick = base.script_tick.clone();
         }
@@ -477,7 +390,7 @@ pub struct InteractionAttributes {
 }
 
 impl InteractionAttributes {
-    pub fn merge(&mut self, base: &InteractionAttributes, child: bool) {
+    pub fn merge(&mut self, base: &Self, child: bool) {
         if self.info.is_none() {
             self.info = base.info.clone();
         }
@@ -513,6 +426,176 @@ impl InteractionAttributes {
         }
         if self.hide_category.is_none() {
             self.hide_category = base.hide_category.clone();
+        }
+    }
+}
+
+/// Filters.
+#[derive(Debug, Clone, Default)]
+pub struct FilterAttributes {
+    pub festivals: Option<Festivals>,
+    pub mounts: Option<Mounts>,
+    pub professions: Option<Professions>,
+    pub races: Option<Races>,
+    pub specializations: Option<AttrList<i32>>,
+    pub map_types: Option<AttrList<MapType>>,
+    pub schedule: Option<AttrString>,
+    pub schedule_duration: Option<f32>,
+    pub raids: Option<AttrList<String>>,
+    pub achievement_id: Option<i32>,
+    pub achievement_bit: Option<i32>,
+}
+impl FilterAttributes {
+    pub fn merge(&mut self, base: &Self) {
+        if self.festivals.is_none() {
+            self.festivals = base.festivals.clone();
+        }
+        if self.mounts.is_none() {
+            self.mounts = base.mounts.clone();
+        }
+        if self.professions.is_none() {
+            self.professions = base.professions.clone();
+        }
+        if self.races.is_none() {
+            self.races = base.races.clone();
+        }
+        if self.specializations.is_none() {
+            self.specializations = base.specializations.clone();
+        }
+        if self.map_types.is_none() {
+            self.map_types = base.map_types.clone();
+        }
+        if self.schedule.is_none() {
+            self.schedule = base.schedule.clone();
+        }
+        if self.schedule_duration.is_none() {
+            self.schedule_duration = base.schedule_duration;
+        }
+        if self.raids.is_none() {
+            self.raids = base.raids.clone();
+        }
+        if self.achievement_id.is_none() {
+            self.achievement_id = base.achievement_id;
+        }
+        if self.achievement_bit.is_none() {
+            self.achievement_bit = base.achievement_bit;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RenderAttributes {
+    pub alpha: Option<f32>,
+    pub can_fade: Option<bool>,
+    pub tint: Option<glam::Vec4>,
+    pub cull: Option<CullDirection>,
+    pub fade_near: Option<f32>,
+    pub fade_far: Option<f32>,
+    pub trail: TrailAttributes,
+    pub poi: Option<Box<PoiAttributes>>,
+}
+impl RenderAttributes {
+    pub fn merge(&mut self, base: &Self) {
+        if self.alpha.is_none() {
+            self.alpha = base.alpha;
+        }
+        if self.can_fade.is_none() {
+            self.can_fade = base.can_fade;
+        }
+        if self.tint.is_none() {
+            self.tint = base.tint;
+        }
+        if self.cull.is_none() {
+            self.cull = base.cull;
+        }
+        if self.fade_near.is_none() {
+            self.fade_near = base.fade_near;
+        }
+        if self.fade_far.is_none() {
+            self.fade_far = base.fade_far;
+        }
+        // === POI-specific === //
+        if let Some(poi) = &base.poi {
+            self.poi.get_or_insert_default().merge(&poi);
+        }
+        // === Trail-specific === //
+        self.trail.merge(&base.trail);
+    }
+}
+
+/// Trail-specific.
+#[derive(Debug, Clone, Default)]
+pub struct TrailAttributes {
+    pub anim_speed: Option<f32>,
+    pub texture: Option<AttrString>,
+    pub trail_scale: Option<f32>,
+    pub is_wall: Option<bool>,
+}
+impl TrailAttributes {
+    pub fn merge(&mut self, base: &Self) {
+        if self.anim_speed.is_none() {
+            self.anim_speed = base.anim_speed;
+        }
+        if self.texture.is_none() {
+            self.texture = base.texture.clone();
+        }
+        if self.trail_scale.is_none() {
+            self.trail_scale = base.trail_scale;
+        }
+        if self.is_wall.is_none() {
+            self.is_wall = base.is_wall;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PoiAttributes {
+    pub height_offset: Option<f32>,
+    pub icon_file: Option<AttrString>,
+    pub icon_size: Option<f32>,
+    pub map_display_size: Option<f32>,
+    pub scale_on_map_with_zoom: Option<bool>,
+    pub min_size: Option<f32>,
+    pub max_size: Option<f32>,
+    pub occlude: Option<bool>,
+    pub rotate: Option<glam::Vec3>,
+    pub billboard_text: Option<AttrString>,
+    pub billboard_text_color: Option<glam::Vec4>,
+}
+impl PoiAttributes {
+    pub fn merge(&mut self, base: &Self) {
+        if self.height_offset.is_none() {
+            self.height_offset = base.height_offset;
+        }
+        if self.icon_file.is_none() {
+            self.icon_file = base.icon_file.clone();
+        }
+        if self.icon_size.is_none() {
+            self.icon_size = base.icon_size;
+        }
+        if self.map_display_size.is_none() {
+            self.map_display_size = base.map_display_size;
+        }
+        if self.scale_on_map_with_zoom.is_none() {
+            self.scale_on_map_with_zoom = base.scale_on_map_with_zoom;
+        }
+        if self.min_size.is_none() {
+            self.min_size = base.min_size;
+        }
+        if self.max_size.is_none() {
+            self.max_size = base.max_size;
+        }
+        if self.occlude.is_none() {
+            self.occlude = base.occlude;
+        }
+        if self.rotate.is_none() {
+            self.rotate = base.rotate;
+        }
+        if self.billboard_text.is_none() {
+            self.billboard_text = base.billboard_text.clone();
+        }
+        if self.billboard_text_color.is_none() {
+            self.billboard_text_color = base.billboard_text_color;
         }
     }
 }

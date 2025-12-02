@@ -91,27 +91,30 @@ impl Poi {
 
     #[inline]
     pub fn icon_name(&self) -> Option<&str> {
-        self.attributes.icon_file.as_ref().map(|s| &s[..])
+        self.attributes.render.as_ref()
+            .and_then(|render| render.poi.as_ref())
+            .and_then(|poi| poi.icon_file.as_ref())
+            .map(|s| &s[..])
     }
 
     #[inline]
     pub fn height_offset(&self) -> f32 {
-        self.attributes.height_offset.unwrap_or(1.5)
+        self.attributes.poi().height_offset.unwrap_or(1.5)
     }
 
     #[inline]
     pub fn icon_scale(&self) -> f32 {
-        self.attributes.icon_size.unwrap_or(1.0)
+        self.attributes.poi().icon_size.unwrap_or(1.0)
     }
 
     #[inline]
     pub fn tint(&self) -> Vec4 {
-        self.attributes.tint.unwrap_or(Vec4::ONE)
+        self.attributes.render().tint.unwrap_or(Vec4::ONE)
     }
 
     #[inline]
     pub fn alpha(&self) -> f32 {
-        self.attributes.alpha.unwrap_or(1.0)
+        self.attributes.render().alpha.unwrap_or(1.0)
     }
 }
 

@@ -245,7 +245,10 @@ impl PathingWindowState {
                     let active = SharedPacks::pack_active(packs?, path.root)?;
                     Some(active.pack.pois.get(idx).and_then(|poi|
                         // TODO: idk what this is but it could be useful maybe kinda?
-                        poi.attributes.billboard_text.as_ref().map(|text| Arc::from(&text[..]))
+                        poi.attributes.render.as_ref()
+                        .and_then(|render| render.poi.as_ref())
+                        .and_then(|poi| poi.billboard_text.as_ref())
+                        .map(|text| Arc::from(&text[..]))
                         .or_else(||
                             active.pack.categories.all_categories.get(poi.category.as_id()).map(|cat| cat.display_name.clone())
                         )

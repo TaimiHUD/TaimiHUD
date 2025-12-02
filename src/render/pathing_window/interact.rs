@@ -228,7 +228,9 @@ impl PathingWindowState {
                 let Some(map_info) = self.pack_info.as_ref().and_then(|i| i.borrow().map_info.get(&map_path).cloned()) else { continue };
                 let textures = map_info.info.pois().enumerate()
                     .filter_map(|(i, path)| active.pack.pois.get(path.path as usize)
-                        .and_then(|poi| poi.attributes.icon_file.as_ref())
+                        .and_then(|poi| poi.attributes.render.as_ref())
+                        .and_then(|render| render.poi.as_ref())
+                        .and_then(|poi| poi.icon_file.as_ref())
                         .map(|texture| (texture, (pack_path.rel(path), i)))
                     )
                     //.chain(active.pack.trails.iter().filter_map(|trail| trail.attributes.texture.as_ref()))

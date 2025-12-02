@@ -31,12 +31,15 @@ impl SpacePoiBuilder {
     }
 
     pub fn from_pack(poi: &PackPoi) -> Option<Self> {
+        let render = poi.attributes.render.as_ref()?;
+        let attrs = render.poi.as_ref()?;
         Some(SpacePoiBuilder {
-            icon_file: poi.icon_name()?.into(),
-            scale: poi.attributes.icon_size.map(Into::into).unwrap_or_default(),
-            scale_map: poi.attributes.map_display_size.map(Into::into).unwrap_or_default(),
-            tint: poi.attributes.tint.map(Into::into).unwrap_or_default(),
-            opacity: poi.attributes.alpha.map(Into::into).unwrap_or_default(),
+            // TODO: allow empty?
+            icon_file: keys::IconFile(keys::File(attrs.icon_file.as_ref()?.clone())),
+            scale: attrs.icon_size.map(Into::into).unwrap_or_default(),
+            scale_map: attrs.map_display_size.map(Into::into).unwrap_or_default(),
+            tint: render.tint.map(Into::into).unwrap_or_default(),
+            opacity: render.alpha.map(Into::into).unwrap_or_default(),
         })
     }
 }
@@ -70,7 +73,9 @@ impl SpaceTrailBuilder {
         let Some(pack_trail) = active.pack.trails.get(path.path as usize) else {
             anyhow::bail!("expected trail to exist")
         };
-        let Some(texture_name) = pack_trail.texture_name().map(String::from) else {
+        let render = pack_trail.attributes.render.as_ref();
+        let Some(texture_name) = render.as_ref().and_then(|render| render.trail.texture.clone()) else {
+            // TODO: allow empty?
             anyhow::bail!("no texture specified")
         };
         let trail_data = active.load_trail_data(path.path).await?;
@@ -81,7 +86,7 @@ impl SpaceTrailBuilder {
         }).await?;
         let setup = SpaceTrailBuilder {
             geometry,
-            texture_file: texture_name.into(),
+            texture_file: keys::TextureFile(keys::File(texture_name)),
         };
         Ok(setup)
     }

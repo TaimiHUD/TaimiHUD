@@ -3,7 +3,7 @@ use crate::controller::pathing::state::hidden::MarkerState;
 use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
-use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes};
+use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes, FilterAttributes};
 use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
@@ -151,7 +151,7 @@ pub struct AchievementConfig {
     pub bit: Option<keys::AchievementBit>,
 }
 impl AchievementConfig {
-    pub fn from_attributes(attrs: &MarkerAttributes) -> Option<Self> {
+    pub fn from_attributes(attrs: &FilterAttributes) -> Option<Self> {
         attrs.achievement_id.map(|id| Self {
             id: id.into(),
             bit: attrs.achievement_bit.map(keys::AchievementBit::from),
@@ -754,28 +754,30 @@ pub struct FilterStateFilters {
 
 impl FilterStateFilters {
     pub fn from_attributes(attrs: &MarkerAttributes) -> (Self, FilterStateExtras) {
-        let achievements = AchievementConfig::from_attributes(attrs)
+        let filters = attrs.filters.as_ref()
+            .map(|f| &**f);
+        let achievements = filters.and_then(AchievementConfig::from_attributes)
             .map(Arc::new);
         #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten()
             .map(Arc::new);
-        let festivals = attrs.festivals.clone()
+        let festivals = filters.and_then(|f| f.festivals.clone())
             .and_then(|f| match f.is_empty() {
                 false => Some(f),
                 true => None,
             })
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let mounts = attrs.mounts.clone().map(keys::Mounts)
+        let mounts = filters.and_then(|f| f.mounts.clone()).map(keys::Mounts)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let races = attrs.races.clone().map(keys::Races)
+        let races = filters.and_then(|f| f.races.clone()).map(keys::Races)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let professions = attrs.professions.clone().map(keys::Professions)
+        let professions = filters.and_then(|f| f.professions.clone()).map(keys::Professions)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let specializations = attrs.specializations.as_ref()
+        let specializations = filters.and_then(|f| f.specializations.as_ref())
             .map(|s| s.iter().map(|&s| keys::Specialization(s as u32)).collect())
             .map(keys::Specializations)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let raids = attrs.raids.as_ref()
+        let raids = filters.and_then(|f| f.raids.as_ref())
             .map(|s| s.iter().cloned().map(keys::Raid).collect())
             .map(keys::Raids)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);

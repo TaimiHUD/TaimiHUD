@@ -259,7 +259,7 @@ impl PackLoader {
                 .iter()
                 .find_map(|(&prefix, &fest)| category.full_id.id_starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                let festivals = Arc::make_mut(&mut category.marker_attributes).festivals.insert(festival.into());
+                let festivals = Arc::make_mut(&mut category.marker_attributes).filters_mut().festivals.insert(festival.into());
                 fixed_festival_categories.insert(&category.full_id, festivals.clone());
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
@@ -272,8 +272,9 @@ impl PackLoader {
                 None => None,
             });
             for (poi, f) in pois {
-                if poi.attributes.festivals.is_none() {
-                    poi.attributes.festivals = Some(f.clone());
+                let filters = poi.attributes.filters_mut();
+                if filters.festivals.is_none() {
+                    filters.festivals = Some(f.clone());
                 }
             }
             let trails = pack.trails.iter_mut().filter_map(|trail| match fixed_festival_categories.get(trail.category.as_id()) {
@@ -281,8 +282,9 @@ impl PackLoader {
                 None => None,
             });
             for (trail, f) in trails {
-                if trail.attributes.festivals.is_none() {
-                    trail.attributes.festivals = Some(f.clone());
+                let filters = trail.attributes.filters_mut();
+                if filters.festivals.is_none() {
+                    filters.festivals = Some(f.clone());
                 }
             }
         }
