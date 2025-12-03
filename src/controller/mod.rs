@@ -68,7 +68,7 @@ use markers::{MarkersController, MarkersEvent};
 pub(crate) mod pathing;
 
 #[cfg(feature = "space")]
-use pathing::{FestivalState, shared::SharedMapPackInfo, PathingController, PathingEvent};
+use pathing::{shared::{PathingSender, PathingReceiver}, PathingController, PathingEvent};
 
 pub(crate) mod api;
 pub(crate) mod runtime;
@@ -163,16 +163,7 @@ impl Controller {
                 };
                 #[cfg(feature = "space")]
                 if let Some(rx) = receiver.pathing.take() {
-                    let Some(festivals) = receiver.festivals.take() else {
-                        critical_failure();
-                        return
-                    };
-                    let Some(pack_info) = receiver.pack_info.take() else {
-                        critical_failure();
-                        return
-                    };
-                    let loader = Arc::new(pathing::registry::PackLoader::new(settings.clone()));
-                    let mut ctx = pathing::PathingEventContext::new(&loader, rx, gameplay.clone(), festivals, pack_info, mumble_identity.clone());
+                    let (mut ctx, loader) = pathing::PathingEventContext::new(rx, settings.clone());
                     let mut pathing = PathingController::new(loader);
                     controllers.spawn(async move {
                         let res = pathing.run(&mut ctx).await
@@ -946,14 +937,10 @@ pub struct ControllerSender {
     pub gameplay: Option<watch::Sender<GameplayState>>,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
-    #[cfg(feature = "space")]
-    pub festivals: Option<watch::Sender<FestivalState>>,
-    #[cfg(feature = "space")]
-    pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
     pub generic: Option<Sender<ControllerEvent>>,
     pub api: Option<Sender<ApiMessage>>,
     #[cfg(feature = "space")]
-    pub pathing: Option<Sender<PathingEvent>>,
+    pub pathing: Option<PathingSender>,
 }
 
 impl ControllerSender {
@@ -961,10 +948,6 @@ impl ControllerSender {
         gameplay: None,
         #[cfg(any(feature = "markers", feature = "space"))]
         mumble_identity: None,
-        #[cfg(feature = "space")]
-        festivals: None,
-        #[cfg(feature = "space")]
-        pack_info: None,
         generic: None,
         api: None,
         #[cfg(feature = "space")]
@@ -974,28 +957,16 @@ impl ControllerSender {
     pub fn new() -> (Self, ControllerReceiver) {
         let (generic, generic_rx) = mpsc::channel(64);
         let (api, api_rx) = mpsc::channel(32);
-        #[cfg(feature = "space")]
-        let (pathing, pathing_rx) = mpsc::channel(48);
         let gameplay = watch::Sender::new(GameplayState::INITIAL);
         #[cfg(any(feature = "markers", feature = "space"))]
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
-        #[cfg(feature = "space")]
-        let festivals = watch::Sender::new(FestivalState::DEFAULT);
-        #[cfg(feature = "space")]
-        let (pack_info, pack_info_rx) = {
-            let pack_info = watch::Sender::new(Default::default());
-            let pack_info_rx = pack_info.subscribe();
-            (pack_info, pack_info_rx)
-        };
+        #[cfg(feature = "paths")]
+        let (pathing, pathing_rx) = PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone());
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),
             #[cfg(any(feature = "markers", feature = "space"))]
             mumble_identity: Some(mumble_identity_rx),
-            #[cfg(feature = "space")]
-            festivals: Some(festivals.clone()),
-            #[cfg(feature = "space")]
-            pack_info: Some(pack_info),
             generic: Some(generic_rx),
             api: Some(api_rx),
             #[cfg(feature = "space")]
@@ -1005,10 +976,6 @@ impl ControllerSender {
             gameplay: Some(gameplay),
             #[cfg(any(feature = "markers", feature = "space"))]
             mumble_identity: Some(mumble_identity_tx),
-            #[cfg(feature = "space")]
-            festivals: Some(festivals),
-            #[cfg(feature = "space")]
-            pack_info: Some(pack_info_rx),
             generic: Some(generic),
             api: Some(api),
             #[cfg(feature = "space")]
@@ -1021,7 +988,7 @@ impl ControllerSender {
     pub fn exit(&mut self, reason: Interruption) -> Option<bool> {
         #[cfg(feature = "space")]
         if let Some(sender) = self.pathing.take() {
-            let _ = sender.try_send(PathingEvent::Exit(reason));
+            let _ = sender.command.try_send(PathingEvent::Exit(reason));
         }
         if let Some(sender) = self.api.take() {
             let _ = sender.try_send(ApiMessage::Exit(reason));
@@ -1068,14 +1035,14 @@ impl ControllerSender {
 
     #[cfg(feature = "space")]
     pub fn pathing_try_send(&self, message: PathingEvent) -> bool {
-        self.pathing.as_ref().and_then(move |sender|
-            sender.try_send(message).ok()
+        self.pathing.as_ref().and_then(move |pathing|
+            pathing.command.try_send(message).ok()
         ).is_some()
     }
     #[cfg(feature = "space")]
     pub fn pathing_blocking_send(&self, message: PathingEvent) -> bool {
-        self.pathing.as_ref().and_then(move |sender|
-            sender.blocking_send(message).ok()
+        self.pathing.as_ref().and_then(move |pathing|
+            pathing.command.blocking_send(message).ok()
         ).is_some()
     }
 }
@@ -1084,12 +1051,8 @@ pub struct ControllerReceiver {
     pub gameplay: Option<watch::Receiver<GameplayState>>,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
-    #[cfg(feature = "space")]
-    pub festivals: Option<watch::Sender<FestivalState>>,
-    #[cfg(feature = "space")]
-    pub pack_info: Option<watch::Sender<SharedMapPackInfo>>,
     pub generic: Option<Receiver<ControllerEvent>>,
     pub api: Option<Receiver<ApiMessage>>,
     #[cfg(feature = "space")]
-    pub pathing: Option<Receiver<PathingEvent>>,
+    pub pathing: Option<PathingReceiver>,
 }

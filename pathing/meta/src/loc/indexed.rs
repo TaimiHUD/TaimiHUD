@@ -1,6 +1,8 @@
 use {
-    crate::loc::{Locator, LocationGet, LocationMut, LocationRef},
-    core::{iter, marker::PhantomData, ops},
+    crate::loc::{LocationGet, LocationMut, LocationRef, Locator},
+    core::{borrow::Borrow, cmp, hash::Hash, iter, marker::PhantomData, mem, ops},
+    std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc},
+    num_traits::AsPrimitive,
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,14 +87,14 @@ impl<N, P, T> IndexedList<N, P, T> {
     #[inline(always)]
     pub fn at<'a>(&'a self, path: P) -> Option<<&'a T as IntoIterator>::Item> where
         &'a T: IntoIterator,
-        P: num_traits::AsPrimitive<usize> + Copy + 'static,
+        P: AsPrimitive<usize> + Copy + 'static,
     {
         self.nth(path.as_())
     }
     #[inline(always)]
     pub fn at_mut<'a>(&'a mut self, path: P) -> Option<<&'a mut T as IntoIterator>::Item> where
         &'a mut T: IntoIterator,
-        P: num_traits::AsPrimitive<usize> + Copy + 'static,
+        P: AsPrimitive<usize> + Copy + 'static,
     {
         self.nth_mut(path.as_())
     }
@@ -109,11 +111,35 @@ impl<N, P, T> IndexedList<N, P, T> {
     {
         self.values_mut().nth(index)
     }
+    pub fn lookup_extend_with<'a, E, F: FnMut() -> E>(&'a mut self, path: P, default: F) -> <&'a mut T as IntoIterator>::Item where
+        T: TaimiExtend<E>,
+        &'a mut T: IntoIterator,
+        P: AsPrimitive<usize> + Copy + 'static,
+    {
+        self.extend_to_with(path.as_(), default)
+    }
+    pub fn extend_to_with<'a, E, F: FnMut() -> E>(&'a mut self, index: usize, mut default: F) -> <&'a mut T as IntoIterator>::Item where
+        T: TaimiExtend<E>,
+        &'a mut T: IntoIterator,
+    {
+        let len = self.data.current_len();
+        if let Some(diff) = index.checked_sub(len) {
+            self.data.extend_from((0..=diff).map(|_| default()));
+        }
+        match self.values_mut().nth(index) {
+            #[cfg(debug_assertions)]
+            v => v.unwrap(),
+            #[cfg(not(debug_assertions))]
+            v => unsafe {
+                v.unwrap_unchecked()
+            },
+        }
+    }
 }
 impl<N, P, T> IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
-    usize: num_traits::AsPrimitive<P>,
+    usize: AsPrimitive<P>,
 {
     #[inline(always)]
     pub fn paths<'a>(&'a self) -> LocatorRelIter<N, EnumerateAs<P, ops::Range<usize>>> where
@@ -124,6 +150,24 @@ impl<N, P, T> IndexedList<N, P, T> where
         LocatorRelIter::new(self.root.clone(),
             EnumerateAs::<P, _>::new(0..len)
         )
+    }
+
+    #[inline]
+    pub fn position<'a, F: FnMut(<&'a T as IntoIterator>::Item) -> bool>(&'a self, pred: F) -> Option<Locator<N, P>> where
+        &'a T: IntoIterator,
+    {
+        let root = self.root.clone();
+        self.values().position(pred)
+            .map(|idx| Locator::with_parts(root, idx.as_()))
+    }
+    #[inline]
+    pub fn rposition<'a, F: FnMut(<&'a T as IntoIterator>::Item) -> bool>(&'a self, pred: F) -> Option<Locator<N, P>> where
+        &'a T: IntoIterator,
+        <&'a T as IntoIterator>::IntoIter: ExactSizeIterator + DoubleEndedIterator,
+    {
+        let root = self.root.clone();
+        self.values().rposition(pred)
+            .map(|idx| Locator::with_parts(root, idx.as_()))
     }
 
     #[inline]
@@ -152,7 +196,7 @@ impl<N, P, T> IndexedList<N, P, T> where
 impl<'a, N, P, T> IntoIterator for &'a IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
-    usize: num_traits::AsPrimitive<P>,
+    usize: AsPrimitive<P>,
     &'a T: IntoIterator,
 {
     type Item = (Locator<N, P>, <&'a T as IntoIterator>::Item);
@@ -165,7 +209,7 @@ impl<'a, N, P, T> IntoIterator for &'a IndexedList<N, P, T> where
 impl<'a, N, P, T> IntoIterator for &'a mut IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
-    usize: num_traits::AsPrimitive<P>,
+    usize: AsPrimitive<P>,
     &'a mut T: IntoIterator,
 {
     type Item = (Locator<N, P>, <&'a mut T as IntoIterator>::Item);
@@ -178,7 +222,7 @@ impl<'a, N, P, T> IntoIterator for &'a mut IndexedList<N, P, T> where
 impl<N, P, T> IntoIterator for IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
-    usize: num_traits::AsPrimitive<P>,
+    usize: AsPrimitive<P>,
     T: IntoIterator,
 {
     type Item = (Locator<N, P>, <T as IntoIterator>::Item);
@@ -190,7 +234,7 @@ impl<N, P, T> IntoIterator for IndexedList<N, P, T> where
 }
 impl<N, P, T, TI> LocationGet<N, P> for IndexedList<N, P, T> where
     for<'a> &'a T: IntoIterator<Item = TI>,
-    P: num_traits::AsPrimitive<usize> + Copy + 'static,
+    P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
     TI: 'static,
 {
@@ -205,7 +249,7 @@ impl<N, P, T, TI> LocationGet<N, P> for IndexedList<N, P, T> where
 }
 impl<N, P, T, TI> LocationRef<N, P> for IndexedList<N, P, T> where
     for<'a> &'a T: IntoIterator<Item = &'a TI>,
-    P: num_traits::AsPrimitive<usize> + Copy + 'static,
+    P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
 {
     type LookupRef = TI;
@@ -220,7 +264,7 @@ impl<N, P, T, TI> LocationRef<N, P> for IndexedList<N, P, T> where
 impl<N, P, T> LocationMut<N, P> for IndexedList<N, P, T> where
     for<'a> &'a mut T: IntoIterator<Item = &'a mut <Self as LocationRef<N, P>>::LookupRef>,
     Self: LocationRef<N, P>,
-    P: num_traits::AsPrimitive<usize> + Copy + 'static,
+    P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
 {
     fn lookup_mut(&mut self, loc: &'_ Locator<N, P>) -> Option<&mut Self::LookupRef> {
@@ -468,17 +512,17 @@ impl<P, I> LocatorPathAs<P, I> {
 }
 impl<P, IN, IP> LocatorPathAs<P, Locator<IN, IP>> where
     P: Copy + 'static,
-    IP: num_traits::AsPrimitive<P>,
+    IP: AsPrimitive<P>,
 {
     pub fn path_as(self) -> Locator<IN, P> {
-        self.iter.map_path(num_traits::AsPrimitive::as_)
+        self.iter.map_path(AsPrimitive::as_)
     }
 }
 impl_iter_wrap! {
     impl{IN, IP, P, I} Iterator for LocatorPathAs<P, I>, I
         where{
             P: Copy + 'static,
-            IP: num_traits::AsPrimitive<P>,
+            IP: AsPrimitive<P>,
             I: Iterator<Item = Locator<IN, IP>>,
         }
     {
@@ -491,7 +535,7 @@ impl_iter_wrap! {
     impl{IN, IP, P, I} DoubleEndedIterator for LocatorPathAs<P, I>, I
         where{
             P: Copy + 'static,
-            IP: num_traits::AsPrimitive<P>,
+            IP: AsPrimitive<P>,
             I: Iterator<Item = Locator<IN, IP>>,
         }
     {
@@ -528,12 +572,12 @@ impl<P, I, E> EnumerateAs<P, I> where
     I: Iterator,
     iter::Enumerate<I>: Iterator<Item = (E, I::Item)>,
     P: Copy + 'static,
-    E: num_traits::AsPrimitive<P>,
+    E: AsPrimitive<P>,
 {
     #[inline(always)]
     pub fn map_item(item: <iter::Enumerate<I> as Iterator>::Item) -> (P, I::Item) {
         let (e, i) = item;
-        (num_traits::AsPrimitive::as_(e), i)
+        (AsPrimitive::as_(e), i)
     }
 }
 impl_iter_wrap! {
@@ -542,7 +586,7 @@ impl_iter_wrap! {
             I: Iterator,
             iter::Enumerate<I>: Iterator<Item = (E, I::Item)>,
             P: Copy + 'static,
-            E: num_traits::AsPrimitive<P>,
+            E: AsPrimitive<P>,
         }
     {
         type Item = (P, I::Item);
@@ -556,7 +600,7 @@ impl_iter_wrap! {
             I: Iterator,
             iter::Enumerate<I>: Iterator<Item = (E, I::Item)>,
             P: Copy + 'static,
-            E: num_traits::AsPrimitive<P>,
+            E: AsPrimitive<P>,
         }
     {
         let iter = |&mut this| &mut this.iter;
@@ -875,3 +919,129 @@ macro_rules! impl_iter_wrap {
     };
 }
 use impl_iter_wrap;
+
+pub trait TaimiExtend<T> {
+    fn current_len(&self) -> usize;
+    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I);
+}
+/// specialization :<
+#[cfg(todo)]
+impl<C, T> TaimiExtend<T> for C where
+    C: Extend<T>,
+{
+    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        Extend::extend(self, items)
+    }
+}
+impl<T, E> TaimiExtend<T> for Vec<E> where
+    T: Into<E>,
+{
+    fn current_len(&self) -> usize { self.len() }
+    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        Extend::extend(self, items.into_iter().map(Into::into))
+    }
+}
+impl<T, E> TaimiExtend<T> for Box<[E]> where
+    T: Into<E>,
+{
+    fn current_len(&self) -> usize { self.len() }
+    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        let mut collection = Vec::from(mem::take(self));
+        collection.extend_from(items);
+        *self = collection.into_boxed_slice();
+    }
+}
+impl<T, E> TaimiExtend<T> for Arc<[E]> where
+    T: Into<E>,
+    E: Clone,
+{
+    fn current_len(&self) -> usize { self.len() }
+    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        let mut collection = Vec::from(&self[..]);
+        collection.extend_from(items);
+        *self = collection.into();
+    }
+}
+pub trait TaimiSet<T: ?Sized> {
+    fn set_contains(&self, elem: &T) -> bool;
+}
+impl<K, V, T: ?Sized> TaimiSet<T> for HashMap<K, V> where
+    K: Borrow<T> + Hash + Eq,
+    T: Hash + Eq,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        self.contains_key(elem)
+    }
+}
+impl<K, V, T: ?Sized> TaimiSet<T> for BTreeMap<K, V> where
+    K: Borrow<T> + Ord,
+    T: Ord,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        self.contains_key(elem)
+    }
+}
+impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
+    K: Borrow<T> + Ord,
+    T: Ord,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        self.set_contains(elem)
+    }
+}
+impl<E, T: ?Sized> TaimiSet<T> for [E] where
+    E: PartialEq<T>,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        self.iter().any(|e| e == elem)
+    }
+}
+impl<E, T: ?Sized> TaimiSet<T> for Vec<E> where
+    [E]: TaimiSet<T>,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        TaimiSet::set_contains(&self[..], elem)
+    }
+}
+impl<E, T: ?Sized> TaimiSet<T> for Box<[E]> where
+    [E]: TaimiSet<T>,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        TaimiSet::set_contains(&self[..], elem)
+    }
+}
+impl<E, T: ?Sized> TaimiSet<T> for Arc<[E]> where
+    [E]: TaimiSet<T>,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        TaimiSet::set_contains(&self[..], elem)
+    }
+}
+impl<C: ?Sized + TaimiSet<T>, T: ?Sized> TaimiSet<T> for &'_ C {
+    fn set_contains(&self, elem: &T) -> bool {
+        TaimiSet::set_contains(*self, elem)
+    }
+}
+impl<C: ?Sized + TaimiSet<T>, T: ?Sized> TaimiSet<T> for &'_ mut C {
+    fn set_contains(&self, elem: &T) -> bool {
+        TaimiSet::set_contains(*self, elem)
+    }
+}
+/// `true` contains everything, `false` has nothing
+impl<T: ?Sized> TaimiSet<T> for bool {
+    fn set_contains(&self, _elem: &T) -> bool {
+        *self
+    }
+}
+impl<C: /*?Sized +*/ TaimiSet<T>, T: ?Sized> TaimiSet<T> for cmp::Reverse<C> {
+    fn set_contains(&self, elem: &T) -> bool {
+        !self.0.set_contains(elem)
+    }
+}
+impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,) where
+    C: PartialEq<T>,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        &self.0 == elem
+    }
+}

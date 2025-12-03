@@ -172,7 +172,7 @@ impl PackRegistry {
             // ?
             pack.info.datasource = datasource;
             let path = PackPath::with_path(i as PackIndex);
-            manager.shared.update_pack_info(path, &pack.info);
+            manager.shared.packs.update_pack_info(path, &pack.info);
             return path
         }
 
@@ -181,7 +181,7 @@ impl PackRegistry {
         self.packs.push(LoadedPack::new_unloaded(index, path.into(), datasource));
         if let Some(pack) = self.packs.last() {
             // dumb if :<
-            manager.shared.update_pack_info(pack.info.index, &pack.info);
+            manager.shared.packs.update_pack_info(pack.info.index, &pack.info);
         }
         index
     }
@@ -245,14 +245,14 @@ impl LoadedPack {
     /// Free up memory related to this pack when not in use
     pub fn deactivate(&mut self, manager: &PackLoader) {
         let _ = self.active.take();
-        manager.shared.update_pack_active(self.info.index, None);
+        manager.shared.packs.update_pack_active(self.info.index, None);
     }
 
     /// leave a gravestone marker so our index is never used again
     pub fn mark_dead(&mut self, manager: &PackLoader) {
         let _ = self.config.take();
         self.info = LoadedPackInfo::gravestone(self.info.index);
-        manager.shared.update_pack_info(self.info.index, &self.info);
+        manager.shared.packs.update_pack_info(self.info.index, &self.info);
         self.deactivate(manager);
     }
 
@@ -262,7 +262,7 @@ impl LoadedPack {
                 return
             }
             *reason = UnloadedReason::Pending;
-            manager.shared.update_pack_info(self.info.index, &self.info);
+            manager.shared.packs.update_pack_info(self.info.index, &self.info);
         }
         self.deactivate(manager);
     }
@@ -270,7 +270,7 @@ impl LoadedPack {
     pub fn mark_loading(&mut self, manager: &PackLoader) {
         if let Err(reason) = &mut self.info.info {
             *reason = UnloadedReason::Loading;
-            manager.shared.update_pack_info(self.info.index, &self.info);
+            manager.shared.packs.update_pack_info(self.info.index, &self.info);
         }
         self.deactivate(manager);
     }

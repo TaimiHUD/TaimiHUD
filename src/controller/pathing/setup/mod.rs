@@ -2,7 +2,6 @@ use {
     crate::{
         controller::pathing::{
             PathingController,
-            state::shared::{SharedMapPackState, SharedMapPackLoaded},
             state::{
                 MapPackInfoStorage,
                 info::MapPackInfo,
@@ -12,10 +11,10 @@ use {
             visible::LoadedMapPack,
         },
         controller::Controller,
-        exports::runtime::{self as rt, locator::{LocationMut, LocationRef}, Locator},
+        exports::runtime::{self as rt, locator::LocationMut, Locator},
         render::{machine::RenderTaskPriority, RenderState},
         settings::{Settings, SourceKind},
-    }, anyhow::Context, futures::StreamExt, std::{collections::btree_map, sync::Arc},
+    }, anyhow::Context, futures::StreamExt, std::sync::Arc,
     tokio::fs::create_dir_all,
 };
 pub use self::{
@@ -53,11 +52,6 @@ impl PathingController {
                 ctx.tasks.spawn(task);
             }
         }
-
-        ctx.pack_info.send_if_modified(|shared| {
-            shared.shared_loader = Some(self.loader.clone());
-            true
-        });
     }
 
     const USED_THRESHOLD_MAP_INFO: u32 = 4;
@@ -94,7 +88,7 @@ impl PathingController {
 
     async fn load_packs_for(&mut self, ctx: &mut PathingEventContext, map_id: MapIndex) -> Vec<PackPath> {
         // defer update until all are loaded
-        let defer_notify = true;
+        let defer_notify = false;
         let mut loaded_pack = Vec::new();
         {
             let load_packs = PackRegistry::load_packs_for_map(Self::packs(), &self.loader, map_id).await;
@@ -128,15 +122,9 @@ impl PathingController {
             }
         }
         // now notify
-        let packs = Self::packs().read().await;
-        ctx.pack_info.send_if_modified(|shared_info| {
-            for (path, loaded) in packs.all_packs() {
-                // if loaded_pack.contains(&path) ?
-                shared_info.update_pack(path, loaded);
-            }
-            // !loaded_pack.is_empty()
-            defer_notify
-        });
+        if defer_notify {
+            ctx.shared.update_map_notify(map_id);
+        }
         loaded_pack
     }
 
@@ -150,13 +138,7 @@ impl PathingController {
         let map_pack_info = MapPackInfo::with_pack(pack, map_id);
         let map_pack_info = match map_pack_info.get() {
             Some(map_pack_info) => map_pack_info,
-            None => return {
-                ctx.pack_info.send_if_modified(|shared_info| {
-                    shared_info.update_pack(path.clone(), pack);
-                    notify
-                });
-                Ok(None)
-            },
+            None => return Ok(None),
         };
         let map_pack_info = Arc::new(map_pack_info);
         // TODO: swap out for a load_from_pack here?
@@ -172,12 +154,7 @@ impl PathingController {
                 map_pack.refresh_categories(&map_pack_info, &info.categories, config, None);
             });
         }
-        ctx.pack_info.send_if_modified(|shared_info| {
-            shared_info.update_pack(path.clone(), pack);
-            shared_info.map_info.insert(key.clone(), SharedMapPackLoaded::with_loaded(map_pack_info.clone(), &map_pack));
-            shared_info.map_state.insert(key.clone(), SharedMapPackState::with_static(key, &map_pack));
-            notify
-        });
+        ctx.shared.update_map(key, &map_pack_info, &map_pack, notify);
         Ok(Some((map_pack_info, map_pack)))
     }
 
@@ -261,24 +238,7 @@ impl PathingController {
         if remove {
             self.map_pack_info.clear();
         }
-        {
-            let remove_packs = match remove {
-                true => None,
-                false => Some(Self::packs().read().await),
-            };
-            ctx.pack_info.send_modify(|pack_info| {
-                pack_info.map_info.clear();
-                pack_info.map_state.clear();
-                if let Some(packs) = &remove_packs {
-                    for (path, pack) in packs.all_packs() {
-                        pack_info.update_pack(path, pack);
-                    }
-                } else {
-                    #[cfg(deleteme)]
-                    pack_info.pack_info.clear();
-                }
-            });
-        }
+        ctx.shared.clear_maps_for_packs(true, true);
     }
 
     async fn unload_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath, remove: bool) {
@@ -288,24 +248,7 @@ impl PathingController {
         if remove {
             self.map_pack_info.retain(|k, _| k.root != path);
         }
-        {
-            let remove_packs = match remove {
-                true => None,
-                false => Some(Self::packs().read().await),
-            };
-            let remove_pack = remove_packs.as_ref()
-                .and_then(|packs| packs.lookup_ref(&path));
-            ctx.pack_info.send_modify(|pack_info| {
-                pack_info.map_info.retain(|k, _| k.root != path);
-                pack_info.map_state.retain(|k, _| k.root != path);
-                if let Some(pack) = remove_pack {
-                    pack_info.update_pack(path, pack);
-                } else {
-                    #[cfg(deleteme)]
-                    pack_info.pack_info.remove(&path);
-                }
-            });
-        }
+        ctx.shared.clear_maps_for_packs((&path,), true);
     }
     async fn load_pack(&mut self, ctx: &mut PathingEventContext, path: PackPath) -> anyhow::Result<Option<()>> {
         let pack = PackRegistry::load_pack(Self::packs(), &self.loader, path).await;
@@ -368,22 +311,23 @@ impl PathingController {
     }
 
     fn mark_map_state_dirty(&self, ctx: &mut PathingEventContext, map_id: MapIndex) {
-        ctx.pack_info.send_if_modified(|pack_info| {
-            pack_info.map_state.retain(|path, _| path.path == map_id);
-            for (path, map_pack) in self.map_packs.iter().filter(|(path, _)| path.path == map_id) {
-                // TODO: skip update if unchanged etc
-                match pack_info.map_state.entry(path.clone()) {
-                    btree_map::Entry::Occupied(mut e) => {
-                        e.get_mut().update_static(map_pack);
-                        e.get_mut().update_with_loaded(map_pack);
-                        e.get_mut().update_with_hidden(*path, &self.filter_state.hidden, map_pack);
-                    },
-                    btree_map::Entry::Vacant(e) => {
-                        e.insert(SharedMapPackState::with_loaded(*path, map_pack, &self.filter_state.hidden));
-                    },
-                }
+        ctx.shared.maps.send_if_modified(|shared_maps| {
+            // shared_maps.update_prune_maps(&Locator::with_parts(Wildcard, map_id));
+             shared_maps.update_prune_maps(&self.map_pack_info)
+        });
+        ctx.shared.gameplay.send_if_modified(|shared_map| {
+            let mut dirty = false;
+            let Some(shared_map) = shared_map.get_mut(map_id) else { return dirty };
+            for (path, shared_state, _shared_info) in shared_map.iter_state_mut() {
+                let Some(map_pack) = self.map_packs.get(&path) else {
+                    log::debug!("INCONSISTENT missing state for shared map {path}");
+                    continue
+                };
+                dirty |= shared_state.update_static(map_pack);
+                dirty |= shared_state.update_with_loaded(map_pack);
+                dirty |= shared_state.update_with_hidden(path, &self.filter_state.hidden, map_pack);
             }
-            true
+            dirty
         });
     }
 

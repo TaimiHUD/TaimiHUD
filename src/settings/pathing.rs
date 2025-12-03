@@ -50,8 +50,8 @@ impl PathingSettings {
                 festival_filter.insert(festival.into(), pref);
             },
         }
-        crate::Controller::with_sender(|s| if let Some(festivals) = &s.festivals {
-            festivals.send_if_modified(|festivals| {
+        crate::Controller::with_sender(|s| if let Some(p) = &s.pathing {
+            p.festivals.send_if_modified(|festivals| {
                 let prev = festivals.get();
                 festivals.set_preference(festival, pref);
                 prev != festivals.get()

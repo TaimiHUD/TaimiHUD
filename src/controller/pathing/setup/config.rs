@@ -3,7 +3,7 @@ use {
         controller::{
             pathing::{
                 filter::{self, MarkerFilter},
-                registry::{CategoryPath, CategorySet, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath},
+                registry::{CategoryPath, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath},
                 state::shared::SharedPacks,
                 visible::VisibilityFlags, PathingController, PathingEvent, PathingEventContext
             }, Controller
@@ -34,14 +34,16 @@ impl PathingController {
                 map.refresh_categories(&map_info, &info.categories, &config, damage.err().as_ref());
             }
             dirty = true;
-            ctx.pack_info.send_if_modified(|shared_info| {
-                let Some(map) = shared_info.map_state.get_mut(map_path) else { return false };
-                map.categories = map.categories.clone();
+            ctx.shared.gameplay.send_if_modified(|shared_map| {
+                let Some(shared_state) = shared_map.get_state_mut(*map_path) else {
+                    return false
+                };
+                shared_state.categories = map.categories.clone();
                 false
             });
         }
         if dirty {
-            ctx.pack_info.send_if_modified(|_| true);
+            ctx.shared.gameplay.send_if_modified(|_| true);
             //ctx.filter_state_signal = true;
             PathingEvent::RequestDisabledPaths.try_send();
         }
@@ -70,15 +72,21 @@ impl PathingController {
         });
     }
 
-    pub(super) async fn handle_toggle(&mut self, path: CategoryPath<PackPath>, state: Option<bool>) {
-        let packs = Self::packs().read().await;
-        let Some(pack) = packs.lookup_ref(&path.root) else { return };
-        let Some(config) = &pack.config else {
+    pub(super) async fn handle_toggle(loader: &PackLoader, path: CategoryPath<PackPath>, state: Option<bool>) {
+        // TODO: rethink whether controller wants to use loader like this or not?
+        let categories = SharedPacks::pack_at(&loader.shared.packs.info.borrow(), path.root)
+            .and_then(|pack_info| pack_info.info.as_ref().ok()
+                .map(|info| info.categories.clone())
+            );
+        let config = SharedPacks::pack_at(&loader.shared.packs.config.borrow(), path.root)
+            .and_then(|config| config.as_ref()
+                .map(|config| config.clone())
+            );
+        let (Some(categories), Some(config)) = (categories, config) else {
             log::error!("can't update {path}={state:?}, no config state?");
             return
         };
-        let Ok(info) = &pack.info.info else { return };
-        let cat_vis = !info.categories.disabled.contains(path);
+        let cat_vis = !categories.disabled.contains(path);
         let toggle_dev = state.map(|state| cat_vis ^ state);
 
         let mut state = state.unwrap_or(false);
@@ -97,18 +105,17 @@ impl PathingController {
 
         if changed {
             let changes = iter::once((path.unscope(), cat_vis ^ state));
-            self.category_commit_vis_set(path.root, changes).await;
+            Self::category_commit_vis_set(loader, path.root, changes).await;
         }
     }
-    pub(super) async fn category_commit_vis<C>(&self, pack_path: PackPath, dirty_cats: C) where
+    pub(super) async fn category_commit_vis<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C) where
         C: IntoIterator<Item = CategoryPath>,
     {
-        // TODO: much better ways to get this ugh... even via registry above is fine ugh... or make an accessor..?
-        let categories = SharedPacks::pack_at(&self.loader.shared.info.borrow(), pack_path)
+        let categories = SharedPacks::pack_at(&loader.shared.packs.info.borrow(), pack_path)
             .and_then(|pack_info| pack_info.info.as_ref().ok()
                 .map(|info| info.categories.clone())
             );
-        let config = SharedPacks::pack_at(&self.loader.shared.config.borrow(), pack_path)
+        let config = SharedPacks::pack_at(&loader.shared.packs.config.borrow(), pack_path)
             .and_then(|config| config.as_ref()
                 .map(|config| config.borrow().clone())
             );
@@ -123,9 +130,9 @@ impl PathingController {
                 let state = vis.is_visible() ^ default;
                 (path, state)
             });
-        self.category_commit_vis_set(pack_path, changes).await
+        Self::category_commit_vis_set(loader, pack_path, changes).await
     }
-    pub(super) async fn category_commit_vis_set<C>(&self, pack_path: PackPath, dirty_cats: C) where
+    pub(super) async fn category_commit_vis_set<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C) where
         C: IntoIterator<Item = (CategoryPath, bool)>,
     {
         #[cfg(todo)]
@@ -144,7 +151,7 @@ impl PathingController {
             if let Some(full_id) = full_id {
                 let settings = match &mut settings {
                     Some(s) => s,
-                    s @ None => s.insert(self.loader.settings.write().await),
+                    s @ None => s.insert(loader.settings.write().await),
                 };
                 PathingSettings::pathing_state_update(settings, full_id.to_string(), vis_state).await;
             } else {

@@ -25,8 +25,8 @@ impl PathingWindowState {
     ) {
         Self::draw_folder_button(ui);
         let (has_packs, has_packs_loaded) = if let Some(loader) = &self.pack_loader {
-            let has_packs = loader.shared.info.borrow().is_empty();
-            let has_loaded = loader.shared.data.borrow().iter().any(|p| !weak_is_null(p));
+            let has_packs = loader.packs.info.borrow().is_empty();
+            let has_loaded = loader.packs.data.borrow().iter().any(|p| !weak_is_null(p));
             (has_packs, has_loaded)
         } else { (false, false) };
         if has_packs_loaded {
@@ -42,7 +42,7 @@ impl PathingWindowState {
             if self.open_items.iter().any(|(_, open)| open.not_all()) {
                 ui.same_line();
                 if ui.button(&fl!("expand-all")) {
-                    if let Some(info) = self.pack_loader.as_ref().map(|l| l.shared.info.borrow()) {
+                    if let Some(info) = self.pack_loader.as_ref().map(|l| l.packs.info.borrow()) {
                         for (path, info) in SharedPacks::packs(info.iter()) {
                             let Ok(info) = &info.info else { continue };
                             let open = self.open_items.entry(path).or_default();
@@ -129,10 +129,10 @@ impl PathingWindowState {
                     let Some(pack_loader) = &self.pack_loader else {
                         return
                     };
-                    let pack_info = pack_loader.shared.info.borrow();
+                    let pack_info = pack_loader.packs.info.borrow();
                     SharedPacks::packs(pack_info.iter())
                         .map(|(path, info)| {
-                            let loaded = pack_loader.shared.data.borrow().get(path.path as usize)
+                            let loaded = pack_loader.packs.data.borrow().get(path.path as usize)
                                 .map(|data| !weak_is_null(data)).unwrap_or(false);
                             (path, info.info.clone(), loaded)
                         })
@@ -151,7 +151,9 @@ impl PathingWindowState {
                         },
                     }
                 }
-                self.refresh_current_state();
+                #[cfg(deleteme)] {
+                    self.refresh_current_state();
+                }
 
                 for (path, info, is_loaded) in packs {
                     let info = match (info, is_loaded) {
@@ -448,6 +450,7 @@ impl PathingWindowState {
             s.gameplay.as_ref().and_then(|g| g.borrow().gameplay_map())
         ).flatten().map(|map_id| path.rel(map_id));
         if self.filter_state.contains(PathingFilterState::CurrentMap) {
+            #[cfg(deleteme)]
             if let Some(map_path) = map_path {
                 self.refresh_current_map(map_path);
             }
@@ -585,6 +588,9 @@ impl PathingWindowState {
         }
     }
     pub fn commit_state(&mut self, path: CategoryPath<PackPath>, state: bool) {
+        if !self.pack_configs.contains_key(&path.root) {
+            log::info!("TODO: pack config not yet loaded?");
+        }
         //self.set_state(path, state);
         if path.path != CategoryIndex::MAX {
             PathingEvent::CategorySetToggle(

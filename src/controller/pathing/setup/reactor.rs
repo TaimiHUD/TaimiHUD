@@ -1,16 +1,17 @@
 use {
     crate::{
         controller::{
-            api::ApiAccountInfo, pathing::{
+            api::ApiAccountInfo,
+            pathing::{
                 filter,
-                registry::{CategorySet, CategoryPath, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, TrailPath},
+                registry::{CategoryPath, CategorySet, MapIndex, MarkerId, MarkerPath, PackConfig, PackLoader, PackMapPath, PackPath, PoiPath, TrailPath},
                 setup::{SetupPoi, SetupTrail},
                 state::{
                     hidden::{AutoReset, HideContext},
-                    shared::{SharedMapPackInfo, SharedLoaderPackInfo},
+                    shared::{PathingReceiver, PathingShared, SharedLoaderPackInfo},
                 }, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
             }, Controller
-        }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, space::pack::PackSpace, Interruption
+        }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, settings::SettingsLock, space::pack::PackSpace, Interruption
     },
     anyhow::Context, futures::{future, stream::{self, FusedStream}, FutureExt, StreamExt}, glamour::Point3, std::{collections::BTreeMap, future::Future, iter, pin::Pin, sync::Arc, time::SystemTime}, strum_macros::Display, taimi_meta::ui::{gameplay::GameplayTransition, GameplayState, MapContext, UiState}, taimi_pack::attributes::keys::Guid,
     tokio::{
@@ -165,11 +166,7 @@ impl PathingController {
             _ => (),
         }
 
-        ctx.pack_info.send_if_modified(|shared| {
-            shared.shared_loader = Some(self.loader.clone());
-            // TODO: true (once things consider this a shutdown state)
-            false
-        });
+        ctx.shared.clear_for_shutdown();
 
         ctx.tasks.detach_all();
 
@@ -219,12 +216,12 @@ impl PathingController {
                 self.handle_vis(ctx, path, state).await;
             },
             CategorySetToggle(path, state) => {
-                self.handle_toggle(path, state).await;
+                Self::handle_toggle(&self.loader, path, state).await;
             },
             CategoryCommitVisibility(pack_path, changed) => {
                 let changed = changed.into_iter()
                     .map(CategoryPath::with_path);
-                self.category_commit_vis(pack_path, changed).await;
+                Self::category_commit_vis(&self.loader, pack_path, changed).await;
             },
             GuidReset(guids) => {
                 self.handle_guid_reset(ctx, &guids);
@@ -357,15 +354,17 @@ impl PathingController {
     }
 }
 
+/// TODO: just make PathingReceiver a field
 pub struct PathingEventContext {
+    pub shared: Arc<PathingShared>,
     pub active: bool,
     pub rx: mpsc::Receiver<PathingEvent>,
     pub rx_interactions: broadcast::Receiver<InteractionEvent>,
+    pub interactions: broadcast::Sender<InteractionEvent>,
     pub gameplay: Watched<GameplayState>,
     pub controls: ControlsReceiver,
     pub keybinds: TaimiReceiver,
     pub festivals: Watcher<FestivalState>,
-    pub pack_info: watch::Sender<SharedMapPackInfo>,
     pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
     pub pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<Arc<PackConfig>>)> + Send + Unpin + 'static>,
     pub update_tick: Interval,
@@ -381,35 +380,33 @@ pub struct PathingEventContext {
 
 impl PathingEventContext {
     pub fn new(
-        loader: &Arc<PackLoader>,
-        rx: mpsc::Receiver<PathingEvent>,
-        gameplay: watch::Receiver<GameplayState>,
-        festivals_tx: watch::Sender<FestivalState>,
-        pack_info: watch::Sender<SharedMapPackInfo>,
-        mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
-    ) -> Self {
+        rx: PathingReceiver,
+        settings: SettingsLock,
+    ) -> (Self, Arc<PackLoader>) {
+        let loader = rx.make_loader(settings);
         let mut update_tick = interval(PathingController::UPDATE_INTERVAL_RESPONSIVE);
         update_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let rx_interactions = pack_info.borrow().interactions.subscribe();
-        Self {
-            rx,
-            gameplay: Watched::start_receiving(gameplay),
+        let ctx = Self {
+            loader_pack_info: rx.shared.packs.info.subscribe(),
+            shared: rx.shared,
+            rx: rx.command,
+            gameplay: Watched::start_receiving(rx.gameplay),
             controls: CONTROLS.subscribe_controls(),
             keybinds: CONTROLS.subscribe_taimi(),
             active: true,
-            festivals: Watcher::with_sender(festivals_tx),
-            pack_info,
-            mumble_identity,
+            festivals: Watcher::with_sender(rx.festivals),
+            mumble_identity: rx.mumble_identity,
             pack_configs: Box::new(stream::pending()),
             update_tick,
-            loader_pack_info: loader.shared.info.subscribe(),
             tasks: JoinSet::new(),
             filter_expiry: BTreeMap::new(),
             next_schedule: Box::pin(sleep(Self::SCHEDULE_TIMEOUT)),
             player_pos: Point3::INFINITY,
             filter_state_signal: true,
-            rx_interactions,
-        }
+            interactions: rx.interactions,
+            rx_interactions: rx.interactions_rx,
+        };
+        (ctx, loader)
     }
 
     pub fn spawn<F>(&mut self, f: F) -> AbortHandle where

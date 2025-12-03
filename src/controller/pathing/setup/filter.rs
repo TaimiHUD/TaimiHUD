@@ -162,22 +162,27 @@ impl PathingController {
     pub fn mark_hidden_dirty(&self, ctx: &mut PathingEventContext, path: Option<PackMapPath>) {
         let state = &self.filter_state.hidden;
         let map_packs = &self.map_packs;
-        ctx.pack_info.send_if_modified(|shared| {
+        let Some(map_id) = path.map(|p| p.path).or(ctx.gameplay_map()) else {
+            return
+        };
+        ctx.shared.gameplay.send_if_modified(|shared_map| {
             let mut updated = false;
-            let shared_map = path
-                .and_then(|path| shared.map_state.get_mut(&path)
-                    .map(|shared_map| (path, shared_map))
+            let Some(shared_map) = shared_map.get_mut(map_id) else { return updated };
+            let shared_state = path
+                .map(|path| shared_map.get_state_mut(path)
+                    .map(|state| (path, state))
                 );
-            if let Some((path, shared_map)) = shared_map {
-                if let Some(map_pack) = map_packs.get(&path) {
-                    updated = shared_map.update_with_hidden(path, state, map_pack);
-                }
-            } else {
-                for (&path, shared_map) in &mut shared.map_state {
+            match shared_state {
+                None => for (path, shared_map, _shared_info) in &mut shared_map.iter_state_mut() {
                     if let Some(map_pack) = map_packs.get(&path) {
                         updated |= shared_map.update_with_hidden(path, state, map_pack);
                     }
-                }
+                },
+                Some(Some((path, shared_map))) =>
+                    if let Some(map_pack) = map_packs.get(&path) {
+                        updated = shared_map.update_with_hidden(path, state, map_pack);
+                    },
+                Some(None) => (),
             }
             updated
         });

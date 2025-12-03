@@ -1,7 +1,7 @@
 #[cfg(feature = "space")]
 use {
     crate::{
-        controller::pathing::{registry::PackPath, shared::{SharedMapPackInfo, SharedMapPackState}},
+        controller::pathing::{registry::PackPath, shared::{SharedMapPackState}},
         space::engine::{Engine, SpaceEvent},
     },
     std::{ops::Range, mem, collections::BTreeMap},
@@ -80,10 +80,6 @@ pub struct RenderMachine {
     #[cfg(feature = "space")]
     pub depth_range: Option<Range<f32>>,
     #[cfg(feature = "space")]
-    pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
-    #[cfg(feature = "space")]
-    pub map_pack_state: BTreeMap<PackPath, SharedMapPackState>,
-    #[cfg(feature = "space")]
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
@@ -146,10 +142,6 @@ impl RenderMachine {
             fov2_tan: Self::DEFAULT_FOV2_TAN,
             #[cfg(feature = "space")]
             depth_range: None,
-            #[cfg(feature = "space")]
-            pack_info: Controller::with_sender(|s| s.pack_info.as_ref().map(|i| i.clone())).flatten(),
-            #[cfg(feature = "space")]
-            map_pack_state: Default::default(),
             #[cfg(feature = "extension-nexus")]
             rtapi: None,
             #[cfg(feature = "extension-nexus")]
@@ -375,6 +367,7 @@ impl RenderMachine {
             self.act_gameplay_transition(trans);
         }
 
+        #[cfg(todo)]
         #[cfg(feature = "space")]
         if let Some(pack_info) = &mut self.pack_info {
             let pack_map_changed = matches!(pack_info.has_changed(), Ok(true))

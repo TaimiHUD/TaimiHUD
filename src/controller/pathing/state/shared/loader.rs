@@ -1,13 +1,9 @@
 use {
-    crate::{
-        controller::pathing::registry::{
-            ActivePack,
-            PackPath, PackIndex,
-            PackInfo,
-            PackConfig,
-            LoadedPackInfo,
-        },
-        exports::runtime as rt,
+    crate::controller::pathing::registry::{
+        ActivePack,
+        PackPath, PackIndex,
+        PackConfig,
+        LoadedPackInfo,
     },
     std::{iter, mem, sync::{Arc, Weak}},
     taimi_sync::arcs::weak_is_null,
@@ -17,6 +13,8 @@ use {
 pub type SharedLoaderPackInfo = Box<[LoadedPackInfo]>;
 pub type SharedLoaderPackData = Box<[Weak<ActivePack>]>;
 pub type SharedLoaderPackConfig = Box<[Option<watch::Sender<Arc<PackConfig>>>]>;
+/// TODO: maybe split this up into sender and receiver halves...
+/// or just rework LoadedPack into something more sane to share
 #[derive(Debug)]
 pub struct SharedPacks {
     pub info: watch::Sender<SharedLoaderPackInfo>,

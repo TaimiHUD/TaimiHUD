@@ -1,10 +1,10 @@
-use core::fmt;
+use core::{cmp, fmt};
 
 pub mod packs;
 pub mod indexed;
 
 /// Generic resource reference
-#[derive(Debug, Copy, Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Hash)]
 pub struct Locator<N, L> {
     /// Root namespace
     pub root: N,
@@ -105,6 +105,63 @@ impl<N, L> fmt::Display for Locator<N, L> where
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self { root, path } = self;
         write!(f, "{root}/{path}")
+    }
+}
+impl<N: Eq, L: Eq> Eq for Locator<N, L> {}
+impl<N: Ord, L: Ord> Ord for Locator<N, L> {
+    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+        self.root.cmp(&rhs.root)
+            .then_with(|| self.path.cmp(&rhs.path))
+    }
+}
+impl<N, L, RN, RL> PartialEq<Locator<RN, RL>> for Locator<N, L> where
+    N: PartialEq<RN>,
+    L: PartialEq<RL>,
+{
+    fn eq(&self, rhs: &Locator<RN, RL>) -> bool {
+        self.root == rhs.root && self.path == rhs.path
+    }
+}
+impl<N, L, RN, RL> PartialOrd<Locator<RN, RL>> for Locator<N, L> where
+    N: PartialOrd<RN>,
+    L: PartialOrd<RL>,
+{
+    fn partial_cmp(&self, rhs: &Locator<RN, RL>) -> Option<cmp::Ordering> {
+        match self.root.partial_cmp(&rhs.root) {
+            Some(cmp::Ordering::Equal) =>
+                self.path.partial_cmp(&rhs.path),
+            ord => ord,
+        }
+    }
+}
+impl<N, L, RN, RL> PartialEq<Locator<RN, RL>> for &'_ Locator<N, L> where
+    Locator<N, L>: PartialEq<Locator<RN, RL>>,
+{
+    fn eq(&self, rhs: &Locator<RN, RL>) -> bool {
+        *self == rhs
+    }
+}
+impl<N, L, RN, RL> PartialOrd<Locator<RN, RL>> for &'_ Locator<N, L> where
+    N: PartialOrd<RN>,
+    L: PartialOrd<RL>,
+{
+    fn partial_cmp(&self, rhs: &Locator<RN, RL>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(*self, rhs)
+    }
+}
+impl<N, L, RN, RL> PartialEq<&'_ Locator<RN, RL>> for Locator<N, L> where
+    Locator<N, L>: PartialEq<Locator<RN, RL>>,
+{
+    fn eq(&self, rhs: &&Locator<RN, RL>) -> bool {
+        self == *rhs
+    }
+}
+impl<N, L, RN, RL> PartialOrd<&'_ Locator<RN, RL>> for Locator<N, L> where
+    N: PartialOrd<RN>,
+    L: PartialOrd<RL>,
+{
+    fn partial_cmp(&self, rhs: &&Locator<RN, RL>) -> Option<cmp::Ordering> {
+        PartialOrd::partial_cmp(self, *rhs)
     }
 }
 

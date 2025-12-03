@@ -260,17 +260,14 @@ impl PathingController {
             // (maybe on a different keybind though?)
             return
         }
-        ctx.pack_info.send_if_modified(|shared_info| {
-            for cmp::Reverse((_distdist, _, _, (path, loaded_path, interactive_path))) in nearby_pois {
-                let _ = shared_info.interactions.send(InteractionEvent::Interact {
-                    action,
-                    path,
-                    loaded_path,
-                    interactive_path,
-                });
-            }
-            false
-        });
+        for cmp::Reverse((_distdist, _, _, (path, loaded_path, interactive_path))) in nearby_pois {
+            let _ = ctx.interactions.send(InteractionEvent::Interact {
+                action,
+                path,
+                loaded_path,
+                interactive_path,
+            });
+        }
     }
 
     pub const UPDATE_INTERVAL_SLOW: Duration = Duration::from_secs(10);
@@ -332,17 +329,23 @@ impl PathingController {
             }
         }
         if !nearby_changes.is_empty() {
-            ctx.pack_info.send_if_modified(|shared_info| {
+            let mut all_events = Vec::new();
+            let mut dirty = false;
+            ctx.shared.gameplay.send_if_modified(|shared_map| {
                 for (path, nearby, events) in nearby_changes {
-                    let Some(shared_map) = shared_info.map_state.get_mut(&path) else { continue };
-                    shared_map.interactive_pois_nearby = nearby;
-                    for e in events {
-                        let _ = shared_info.interactions.send(e);
-                    }
+                    all_events.extend(events);
+                    let Some(shared_state) = shared_map.get_state_mut(*path) else { continue };
+                    shared_state.interactive_pois_nearby = nearby;
+                    dirty |= true;
                 }
-                true
+                false
             });
+            for e in all_events {
+                ctx.interactions.send(e);
+            }
+            if dirty {
+                ctx.shared.update_gameplay_notify(map_id);
+            }
         }
     }
-
 }

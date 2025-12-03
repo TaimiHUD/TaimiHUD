@@ -16,7 +16,7 @@ impl PathingController {
         setup_pois: Option<Vec<SetupPoi>>,
     ) -> anyhow::Result<()> {
         let active_weak = {
-            let pack_data = self.loader.shared.data.borrow();
+            let pack_data = self.loader.shared.packs.data.borrow();
             SharedPacks::pack_at(&pack_data, path.root).cloned()
         };
         let Some(active_weak) = active_weak else {

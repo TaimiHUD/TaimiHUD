@@ -14,9 +14,7 @@ use {
 };
 use crate::{
     controller::pathing::{
-        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex},
-        visible::{InteractionEvent, InteractionEventAction, InteractivePoi, VisibilityFlags},
-        shared::{SharedMapPackLoaded, SharedMapPackState},
+        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex}, shared::{SharedMapPackLoaded, SharedMapPackState}, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, VisibilityFlags}, SharedPacks
     },
     space::{render_list::RenderId, DrawSpace},
 };
@@ -46,13 +44,18 @@ impl PathingWindowState {
             _ => None,
         };
         let map_packs = {
-            let Some(pack_info) = self.pack_info.as_ref().map(|i| i.borrow()) else { return };
-            pack_info.pack_info()
+            let pack_info = self.pack_loader_info.as_ref().map(|i|
+                SharedPacks::packs(i.borrow().iter().map(|i| i.info.as_ref().ok().cloned()))
+                .collect::<Vec<_>>()
+            ).unwrap_or_default();
+            let Some(shared_map) = self.pack_gameplay.as_ref().map(|i| i.borrow()) else { return };
+            pack_info.into_iter()
                 .filter_map(|(path, info)| {
+                    let info = info?;
                     let map_path = path.rel(map_id);
-                    let map_info = pack_info.map_info.get(&map_path)?;
-                    let map = pack_info.map_state.get(&map_path)?;
-                    Some((map_path, info.clone(), map_info.clone(), map.clone()))
+                    let map = shared_map.get_state(map_path)?;
+                    let (_, map_info) = shared_map.get_info_for(map_path.root)?;
+                    Some((map_path, info, map_info.clone(), map.clone()))
                 }).collect::<Vec<_>>()
         };
         let ipois = map_packs.iter()
@@ -225,7 +228,7 @@ impl PathingWindowState {
             for (i, active) in active_packs {
                 let pack_path: PackPath = PackPath::with_path(i as u16);
                 let map_path = pack_path.rel(map_id);
-                let Some(map_info) = self.pack_info.as_ref().and_then(|i| i.borrow().map_info.get(&map_path).cloned()) else { continue };
+                let Some(map_info) = self.pack_maps.as_ref().and_then(|i| i.borrow().map_info.get(&map_path).cloned()) else { continue };
                 let textures = map_info.info.pois().enumerate()
                     .filter_map(|(i, path)| active.pack.pois.get(path.path as usize)
                         .and_then(|poi| poi.attributes.render.as_ref())
@@ -331,9 +334,9 @@ impl PathingWindowState {
 
         if let Some(action) = action_trigger {
             let action = rpoi.action_trigger(action);
-            if let Some(pi) = &self.pack_info {
-                let _ = pi.borrow().interactions.send(action);
-            }
+            Controller::with_sender(|s| if let Some(s) = &s.pathing {
+                s.interactions.send(action);
+            });
         } else if action_untrigger {
             rpoi.action_untrigger().try_send();
         }
@@ -616,10 +619,11 @@ impl PathingWindowState {
         match action {
             Some(Ok(action)) =>
                 action.try_send(),
-            Some(Err(action)) =>
-                if let Some(pi) = &self.pack_info {
-                    let _ = pi.borrow().interactions.send(action);
-                },
+            Some(Err(action)) => {
+                Controller::with_sender(|s| if let Some(s) = &s.pathing {
+                    s.interactions.send(action);
+                });
+            },
             None => (),
         }
 

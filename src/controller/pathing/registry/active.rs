@@ -11,7 +11,7 @@ use {
                     TrailIndex,
                     LoadedPack, UnloadedReason,
                 },
-                state::shared::SharedPacks,
+                state::shared::PathingShared,
             },
         },
         exports::runtime as rt,
@@ -100,7 +100,7 @@ impl LoadedPack {
                 let e = e.into_boxed_dyn_error().into();
                 let e: Arc<dyn StdError + Send + Sync> = Box::<dyn StdError + Send + Sync>::from(e).into();
                 self.info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
-                manager.shared.update_pack_info(self.info.index, &self.info);
+                manager.shared.packs.update_pack_info(self.info.index, &self.info);
                 Err(e.into())
             },
             Ok((pack, info, config)) => {
@@ -110,10 +110,10 @@ impl LoadedPack {
                     let update_config = self.config.is_none();
                     Self::try_update_config_inner(&mut self.config, config);
                     if update_config {
-                        manager.shared.update_pack_config(self.info.index, self.config.as_ref());
+                        manager.shared.packs.update_pack_config(self.info.index, self.config.as_ref());
                     }
                 }
-                manager.shared.update_pack_active(self.info.index, Some(active));
+                manager.shared.packs.update_pack_active(self.info.index, Some(active));
                 Ok(())
             },
         }
@@ -220,15 +220,15 @@ pub struct PackLoader {
     pub settings: SettingsLock,
     pub festival_categories: BTreeMap<&'static str, Festival>,
 
-    pub shared: SharedPacks,
+    pub shared: Arc<PathingShared>,
 }
 
 impl PackLoader {
-    pub fn new(settings: SettingsLock) -> Self {
+    pub fn new(shared: Arc<PathingShared>, settings: SettingsLock) -> Self {
         Self {
             settings,
+            shared,
             festival_categories: FestivalFixup::festival_categories(),
-            shared: SharedPacks::new(),
         }
     }
 

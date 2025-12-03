@@ -1,9 +1,11 @@
+use crate::controller::pathing::registry::UnloadedReason;
+
 use {
     crate::{
         controller::pathing::{
             registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, MarkerPath},
             visible::VisibilityFlags,
-            shared::{SharedPacks, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo, SharedMapPackInfo},
+            shared::{PathingShared, SharedGameplayMap, SharedMaps, SharedPacks, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo},
         }, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, Condition, StyleVar, Ui, Window,
         }}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
@@ -22,6 +24,7 @@ pub struct PathingWindowState {
     pub filter_state: PathingFilterState,
     pub open_items: BTreeMap<PackPath, BitVec>,
     pub current_state: BTreeMap<PackPath, BitVec>,
+    pub effective_state: BTreeMap<PackPath, BitVec>,
     pub current_map: BTreeMap<PackMapPath, BitVec>,
     pub category_names: BTreeMap<MarkerPath<PackPath>, Option<Arc<str>>>,
     pub category_tips: BTreeMap<MarkerPath<PackPath>, Option<(AttrString, AttrString)>>,
@@ -29,8 +32,9 @@ pub struct PathingWindowState {
     pub cache_info: BTreeMap<MarkerPath<PackPath>, Option<AttrString>>,
     pub pack_configs: BTreeMap<PackPath, Watched<Arc<PackConfig>>>,
     pub search_state: PathingSearchState,
-    pub pack_info: Option<watch::Receiver<SharedMapPackInfo>>,
-    pub pack_loader: Option<Arc<PackLoader>>,
+    pub pack_gameplay: Option<watch::Receiver<SharedGameplayMap>>,
+    pub pack_maps: Option<watch::Receiver<SharedMaps>>,
+    pub pack_loader: Option<Arc<PathingShared>>,
     pub pack_loader_info: Option<watch::Receiver<SharedLoaderPackInfo>>,
     pub pack_loader_data: Option<watch::Receiver<SharedLoaderPackData>>,
     pub pack_loader_config: Option<watch::Receiver<SharedLoaderPackConfig>>,
@@ -51,9 +55,11 @@ impl PathingWindowState {
             filter_state: Default::default(),
             open_items: Default::default(),
             search_state: Default::default(),
-            pack_info: Default::default(),
+            pack_maps: Default::default(),
+            pack_gameplay: Default::default(),
             pack_configs: Default::default(),
             current_state: Default::default(),
+            effective_state: Default::default(),
             current_map: Default::default(),
             category_names: Default::default(),
             category_tips: Default::default(),
@@ -85,34 +91,38 @@ impl PathingWindowState {
             return
         }
         self.init_watcher();
-        let mut packs_changed = false;
-        let mut maps_info_changed = false;
+        let mut packs_info_changed = false;
+        let mut packs_config_changed = false;
+        let mut packs_map_changed = false;
+        let mut packs_maps_changed = false;
+        let mut packs_data_changed = false;
         if let Some(pack_loader) = &self.pack_loader {
             let loader_info = self.pack_loader_info.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared.info.subscribe();
+                let mut rx = pack_loader.packs.info.subscribe();
                 rx.mark_changed();
                 rx
             });
             if let Some(loader_info) = loader_info.has_changed().unwrap_or(false).then(|| loader_info.borrow_and_update()) {
-                packs_changed = true;
+                packs_info_changed = true;
             };
 
             let loader_data = self.pack_loader_data.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared.data.subscribe();
+                let mut rx = pack_loader.packs.data.subscribe();
                 rx.mark_changed();
                 rx
             });
             if let Some(loader_data) = loader_data.has_changed().unwrap_or(false).then(|| loader_data.borrow_and_update()) {
                 // todo
-                maps_info_changed = true;
+                packs_data_changed = true;
             };
 
             let loader_config = self.pack_loader_config.get_or_insert_with(|| {
-                let mut rx = pack_loader.shared.config.subscribe();
+                let mut rx = pack_loader.packs.config.subscribe();
                 rx.mark_changed();
                 rx
             });
             if let Some(loader_config) = loader_config.has_changed().unwrap_or(false).then(|| loader_config.borrow_and_update()) {
+                packs_config_changed = true;
                 self.pack_configs.clear();
                 self.pack_configs.extend(loader_config.iter().enumerate()
                     .filter_map(|(i, c)| {
@@ -122,15 +132,72 @@ impl PathingWindowState {
                     })
                 );
             };
+
+            let pack_maps = self.pack_maps.get_or_insert_with(|| {
+                let mut rx = pack_loader.maps.subscribe();
+                rx.mark_changed();
+                rx
+            });
+            if let Some(pack_maps) = pack_maps.has_changed().unwrap_or(false).then(|| pack_maps.borrow_and_update()) {
+                packs_maps_changed = true;
+            };
+
+            let gameplay_map = self.pack_gameplay.get_or_insert_with(|| {
+                let mut rx = pack_loader.gameplay.subscribe();
+                rx.mark_changed();
+                rx
+            });
+            if let Some(gameplay_map) = gameplay_map.has_changed().unwrap_or(false).then(|| gameplay_map.borrow_and_update()) {
+                packs_map_changed = true;
+            };
         }
         for (_path, pack_config) in &mut self.pack_configs {
             let _ = pack_config.try_read_mut();
         }
-        if maps_info_changed {
-            self.refresh_maps_info();
+        if packs_data_changed {
+            self.refresh_packs_data();
         }
-        if packs_changed {
+        if packs_info_changed {
             self.refresh_packs();
+        }
+        let loaded_packs = if packs_info_changed || packs_config_changed || packs_maps_changed {
+            self.pack_loader_info.as_ref().map(|info|
+                SharedPacks::packs(info.borrow().iter().map(|pack| pack.info.clone()))
+                .collect::<Vec<_>>()
+            )
+        } else { None }.unwrap_or_default();
+        if packs_info_changed || packs_config_changed {
+            for &(path, ref pack) in &loaded_packs {
+                // 1. resets current_state to category defaults (fineish, but needs clobbering immediately if map is also active!)
+                // 2. ensures open_items exists for the path key but does not populate
+                match pack {
+                    Ok(pack) =>
+                        self.refresh_state_of(path, &pack),
+                    Err(reason) =>
+                        self.clear_state_of(path, reason)
+                }
+            }
+        }
+        if packs_maps_changed {
+            let map_id = self.pack_gameplay.as_ref()
+                .and_then(|state| state.borrow().map_id);
+            for &(path, ref pack) in &loaded_packs {
+                if let Ok(info) = pack {
+                    // populates bitvec of categories used by the current map for the filter
+                    self.refresh_current_map((path, map_id), info);
+                }
+            }
+            #[cfg(todo)]
+            if map_id.is_none() {
+                // idk probably unnecessary and annoying to clear this during loading screens...
+                self.clear_current_map();
+            }
+        }
+        if packs_map_changed {
+            // clobbers current_state with vis(default) from map state
+            // seems fine but also just read config directly tbh???
+            // a secondary bitvec tracking effective vis would be useful but is a different thing!
+            self.refresh_current_map_state();
         }
         let open_prev = self.open;
         let mut open = open_prev;
@@ -203,21 +270,17 @@ impl PathingWindowState {
     }
 
     fn init_watcher(&mut self) {
-        if self.pack_info.is_none() {
-            self.pack_info = Controller::with_sender(|s| s.pack_info.as_ref().map(|info| {
-                let mut info = info.clone();
-                info.mark_changed();
-                info
-            })).flatten();
+        if self.pack_loader.is_none() {
+            self.pack_loader = Controller::with_sender(|s| s.pathing.as_ref().map(|info| {
+                info.shared.clone()
+            })).map(|l| l.unwrap_or_else(|| {
+                log::info!("pathing controller didn't show up for work today");
+                Arc::new(PathingShared::new())
+            }));
         }
-        if let Some(pack_info) = &self.pack_info {
-            if self.pack_loader.is_none() || matches!(pack_info.has_changed(), Ok(true) | Err(..)) {
-                let pack_info = pack_info.borrow();
-                if self.pack_loader.is_some() != pack_info.shared_loader.is_some() {
-                    self.pack_loader = pack_info.shared_loader.clone();
-                }
-            }
-        }
+        #[cfg(todo)]
+        let was_shutdown = self.pack_loader.is_none();
+        let was_shutdown = false;
         if self.pack_loader.is_none() {
             self.reduce_memory();
             // TODO: free all other handles, controller shutdown probably
@@ -227,6 +290,7 @@ impl PathingWindowState {
     pub fn reduce_memory(&mut self) {
         self.current_map.clear();
         self.current_state.clear();
+        self.effective_state.clear();
         // TODO: retain any names with open parents that are presumably visible?
         self.category_names.clear();
         self.category_tips.clear();
@@ -245,9 +309,9 @@ impl PathingWindowState {
         for current_state in self.current_state.values_mut() {
             current_state.clear();
         }
-        let Some(pack_info) = &self.pack_info else { return };
+        let Some(pack_loader) = &self.pack_loader else { return };
     }
-    fn refresh_maps_info(&mut self) {
+    fn refresh_packs_data(&mut self) {
         self.category_names.retain(|_, v| v.is_some());
         self.category_tips.retain(|_, v| v.is_some());
         self.category_copy.retain(|_, v| v.is_some());
@@ -276,56 +340,77 @@ impl PathingWindowState {
         for cat_path in info.categories.disabled() {
             Self::try_set_bit(state, cat_path.path as usize, false);
         }
+        let config = self.pack_configs.get(&path)
+            .and_then(|config| config.cached.as_ref());
+        if let Some(config) = config {
+            for (cat_path, vis) in config.category_visibility.iter() {
+                let deviation = vis.contains(VisibilityFlags::TOGGLE);
+                if !deviation { continue }
+                if let Some(mut bit) = state.get_mut(cat_path.path as usize) {
+                    *bit ^= deviation;
+                }
+            }
+        }
         let _ = self.open_items.entry(path).or_default();
     }
-
-    pub fn refresh_current_state(&mut self) {
-        let map_id = Controller::with_sender(|s| s.gameplay.as_ref().and_then(|g|
-            g.borrow().gameplay_map()
-        ));
-        if let Some(Some(map_id)) = map_id {
-            self.refresh_current_map_state(map_id);
-        }
+    pub fn clear_state_of(&mut self, path: PackPath, _reason: &UnloadedReason) {
+        self.current_state.remove(&path);
+        self.effective_state.remove(&path);
+        self.current_map.retain(|p, _| p.root != path);
+        self.cache_info.retain(|p, _| p.root != path);
+        self.category_copy.retain(|p, _| p.root != path);
     }
 
-    pub fn refresh_current_map_state(&mut self, map_id: MapIndex) {
-        let Some(pack_info) = &self.pack_info else { return };
-        let pack_info = pack_info.borrow();
+    pub fn refresh_current_map_state(&mut self) {
+        let map = self.pack_gameplay.as_ref()
+            .map(|map| map.borrow());
+        let Some(map) = map else { return };
 
-        let maps = pack_info.map_info.iter()
-            .filter(|(path, _)| path.path == map_id);
-        for (path, info) in maps {
+        for (path, map, info) in map.iter_state() {
             let Some(state) = self.current_state.get_mut(&path.root) else { continue };
             if state.is_empty() { continue }
-            let Some(map) = pack_info.map_state.get(&path) else { continue };
+            let effective_state = self.effective_state.entry(path.root)
+                .or_insert_with(|| state.clone());
+            if effective_state.len() != state.len() {
+                effective_state.resize(state.len(), false);
+            }
+            effective_state[..].copy_from_bitslice(&state[..]);
             for (category_path, cat) in map.categories(info) {
                 let index = category_path.path as usize;
                 if index >= state.len() {
                     log::error!("category count ({}) mismatch! {category_path}", state.len());
                     continue
                 }
+                #[cfg(deleteme)]
                 let vis_configured = cat.visibility.contains(VisibilityFlags::DEFAULT_TOGGLE);
+                #[cfg(deleteme)]
                 state.set(index, vis_configured);
+                let vis_effective = cat.visibility.contains(VisibilityFlags::TOGGLE);
+                effective_state.set(index, vis_effective);
             }
         }
     }
 
-    pub fn refresh_current_map(&mut self, path: PackMapPath) {
+    pub fn refresh_current_map(&mut self, (path, map_id): (PackPath, Option<MapIndex>), info: &PackInfo) {
+        let path = match map_id {
+            Some(map_id) => path.rel(map_id),
+            None => return,
+        };
+
         let filter = self.current_map.entry(path).or_default();
+        #[cfg(deleteme)]
         if !filter.is_empty() {
             return
         }
 
-        let Some(pack_loader) = &self.pack_loader else { return };
-        let categories = SharedPacks::pack_at(&pack_loader.shared.info.borrow(), path.root)
-            .and_then(|i| i.info.as_ref().ok())
-            .map(|info| info.categories.clone());
-        let Some(pack_info) = &self.pack_info else { return };
-        let pack_info = pack_info.borrow();
-        let Some(map_info) = pack_info.map_info.get(&path) else { return };
-        if let Some(categories) = &categories {
-            filter.resize(categories.count(), false);
-        }
+        filter.resize(info.categories.count(), false);
+
+        let map_info = self.pack_maps.as_ref()
+            .map(|info| info.borrow());
+        let map_info = map_info.as_ref().and_then(|info|
+            info.map_info.get(&path)
+        );
+        let Some(map_info) = map_info else { return };
 
         #[cfg(todo = "unnecessary")]
         {
@@ -348,6 +433,7 @@ impl PathingWindowState {
                 parents.extend(pack_info.categories.children_of(parent));
             }
         }
+        filter.fill(false);
         for category in map_info.categories() {
             Self::try_set_bit(filter, category.path as usize, true);
         }

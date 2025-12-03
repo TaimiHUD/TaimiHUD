@@ -612,8 +612,8 @@ impl PathingConfig {
     }
 
     fn draw_festival_opts(&mut self, ui: &Ui) {
-        let Some(festivals) = Controller::with_sender(|s|
-            s.festivals.as_ref().map(|f| f.borrow().clone())
+        let Some(festivals) = Controller::with_sender(|s| s.pathing.as_ref()
+            .map(|p| p.festivals.borrow().clone())
         ).flatten() else { return };
         let mut change = None;
         for festival in Festival::all() {

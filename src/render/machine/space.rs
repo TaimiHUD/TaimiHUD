@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::pathing::{registry::{MapIndex, PackMapPath, PackPath}, visible::InteractivePoi, shared::SharedMapPackState}, render::{machine::{RenderMachine, RenderPosition, RenderPositioning}, RenderEvent, RenderState}, settings::pathing::CameraSource, space::DrawSpace
+        render::{machine::{RenderMachine, RenderPosition, RenderPositioning}, RenderEvent, RenderState}, settings::pathing::CameraSource, space::DrawSpace
     },
     glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
     std::{collections::BTreeMap, ops::Range, sync::Arc},
@@ -162,6 +162,7 @@ impl RenderMachine {
         }
     }
 
+    #[cfg(todo)]
     pub fn act_pack_map_changed(&mut self, map_id: MapIndex, mut prev: BTreeMap<PackPath, SharedMapPackState>) {
         let mut changes = Vec::new();
         for (path, map) in &self.map_pack_state {
@@ -200,6 +201,7 @@ impl RenderMachine {
             }
         }
     }
+    #[cfg(todo)]
     pub fn act_poi_nearby(&mut self, path: PackMapPath, (ipois, i): ((), usize)) {
         #[cfg(todo)]
         let Some(ipoi) = ipois.get(i) else { return };
