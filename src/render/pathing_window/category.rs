@@ -10,7 +10,9 @@ use {
         }, exports::runtime::{imgui::{
             ChildWindow, Condition, IdStackToken, MouseButton, Selectable, TableFlags, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, WindowFlags
         }, locator::LocationRef, Locator}, fl, render::{machine::RenderMachine, RenderState}, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, std::{collections::{btree_map, BTreeMap}, iter, sync::{Arc, Weak}}, taimi_pack::{attributes::AttrString, MarkerAttributes},
+    }, std::{collections::{btree_map, BTreeMap}, iter, sync::{Arc, Weak}},
+    taimi_sync::arcs::weak_is_null,
+    taimi_pack::{attributes::AttrString, MarkerAttributes},
     tokio::sync::watch,
 };
 
@@ -24,7 +26,7 @@ impl PathingWindowState {
         Self::draw_folder_button(ui);
         let (has_packs, has_packs_loaded) = if let Some(loader) = &self.pack_loader {
             let has_packs = loader.shared.info.borrow().is_empty();
-            let has_loaded = loader.shared.data.borrow().iter().any(|p| Weak::strong_count(p) > 0);
+            let has_loaded = loader.shared.data.borrow().iter().any(|p| !weak_is_null(p));
             (has_packs, has_loaded)
         } else { (false, false) };
         if has_packs_loaded {
@@ -131,7 +133,7 @@ impl PathingWindowState {
                     SharedPacks::packs(pack_info.iter())
                         .map(|(path, info)| {
                             let loaded = pack_loader.shared.data.borrow().get(path.path as usize)
-                                .map(|data| Weak::strong_count(data) > 0).unwrap_or(false);
+                                .map(|data| !weak_is_null(data)).unwrap_or(false);
                             (path, info.info.clone(), loaded)
                         })
                         .collect()

@@ -10,6 +10,7 @@ use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
 use bitvec::vec::BitVec;
 use taimi_meta::loc::packs::PackIndex;
+use taimi_sync::arcs::weak_is_null;
 use tokio::sync::broadcast;
 use taimi_pack::attributes::keys::Guid;
 pub use self::loader::{
@@ -84,12 +85,11 @@ impl SharedMapPackInfo {
     pub fn is_loaded(&self, path: &PackPath) -> bool {
         self.pack_loaded.contains(path)
     }
-    /// TODO: Weak::ptr_eq(&Weak::new())?
     #[deprecated]
     pub fn is_loaded(&self, path: &PackPath) -> bool {
         let Some(loader) = &self.shared_loader else { return false };
         SharedPacks::pack_at(&loader.shared.data.borrow(), *path)
-            .map(|data| Weak::strong_count(data) > 0)
+            .map(|data| !weak_is_null(data))
             .unwrap_or(false)
     }
 

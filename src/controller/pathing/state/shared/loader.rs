@@ -10,6 +10,7 @@ use {
         exports::runtime as rt,
     },
     std::{iter, mem, sync::{Arc, Weak}},
+    taimi_sync::arcs::weak_is_null,
     tokio::sync::watch,
 };
 
@@ -107,7 +108,7 @@ impl SharedPacks {
                     match pack.map(Arc::as_ptr) {
                         Some(p) if p == Weak::as_ptr(out) =>
                             false,
-                        None if Weak::ptr_eq(&*out, &Weak::new()) =>
+                        None if weak_is_null(&*out) =>
                             false,
                         _ => {
                             *out = pack_shared();
