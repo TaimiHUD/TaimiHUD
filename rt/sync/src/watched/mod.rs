@@ -1,5 +1,7 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use {
-    futures::future, serde::{Deserialize, Serialize}, std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock}, tokio::{sync::watch, time}
+    futures_util::future, std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock}, tokio::{sync::watch, time}
 };
 
 #[derive(Debug)]
@@ -269,12 +271,14 @@ impl<T> Clone for Watcher<T> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Watcher<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         <Option<T> as Deserialize<'de>>::deserialize(deserializer).map(Self::with_opt)
     }
 }
 
+#[cfg(feature = "serde")]
 impl<T: Serialize> Serialize for Watcher<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let watch = self.try_read();
@@ -454,12 +458,14 @@ impl<T: Clone> Default for Watched<T> {
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de, T: Clone + Deserialize<'de>> Deserialize<'de> for Watched<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Deserialize::<'de>::deserialize(deserializer).map(Self::with_watcher)
     }
 }
 
+#[cfg(feature = "serde")]
 impl<T: Clone + Serialize> Serialize for Watched<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.watch.serialize(serializer)
