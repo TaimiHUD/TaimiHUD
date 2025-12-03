@@ -46,7 +46,6 @@ pub mod mouse;
 pub mod statistics;
 pub mod textures;
 pub mod update;
-pub mod watched;
 #[cfg(feature = "extension-arcdps")]
 pub use arcloader_mumblelink::gw2_mumble::{LinkedMem as MumbleLink, MumblePtr, UiState};
 #[cfg(not(feature = "extension-arcdps"))]
@@ -54,16 +53,11 @@ pub use nexus::data_link::mumble::{MumbleLink, MumblePtr, UiState};
 #[cfg(feature = "extension-nexus")]
 pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
 pub use {
-    self::{
-        alert::send_alert,
-        mouse::MousePosition,
-        statistics::Counter,
-        textures::TextureLoader,
-        watched::Watched,
-    },
+    self::{alert::send_alert, mouse::MousePosition, statistics::Counter, textures::TextureLoader},
     arcdps::Language as GameLanguage,
     nexus::imgui,
     taimi_meta::coords::vec_eq,
+    taimi_sync::watched::{self, Watched},
     unic_langid_impl::subtags::Language,
 };
 #[cfg(not(feature = "extension-nexus"))]

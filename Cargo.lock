@@ -3708,6 +3708,7 @@ dependencies = [
  "taimi_input",
  "taimi_meta",
  "taimi_pack",
+ "taimi_sync",
  "tempfile",
  "tobj",
  "tokio",
@@ -3777,6 +3778,20 @@ dependencies = [
  "uuid",
  "xml-rs",
  "zip",
+]
+
+[[package]]
+name = "taimi_sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-core",
+ "futures-util",
+ "log",
+ "serde",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
 ]
 
 [[package]]
