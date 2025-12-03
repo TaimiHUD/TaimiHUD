@@ -191,7 +191,7 @@ pub struct ScheduleConfig {
 pub type ScheduleTimezone = chrono::Utc;
 #[cfg(feature = "paths-schedule")]
 impl ScheduleConfig {
-    pub fn from_attributes(attrs: &MarkerAttributes) -> Result<Option<Self>, CronError> {
+    pub fn from_attributes(attrs: &FilterAttributes) -> Result<Option<Self>, CronError> {
         let Some(schedule) = attrs.schedule.as_ref() else {
             return Ok(None)
         };
@@ -653,10 +653,11 @@ impl MapFilters {
         let mut schedules = Vec::new();
         let mut achievements = Vec::new();
         let mut inversions = MarkerSet::default();
+        // TODO: filter_map + filters.as_ref().map(FilterStateFilters::from_attributes) - repeat trails too
         let pois = info.pois()
             .filter_map(|path|
                 active.pack.pois.get(path.path as usize).map(|t| (path, t))
-            ).map(|(path, poi)| (path, FilterStateFilters::from_attributes(&poi.attributes)))
+            ).map(|(path, poi)| (path, FilterStateFilters::from_attributes(&poi.attributes.filters())))
             .filter(|(path, (f, extras))| {
                 if let Some(GroupConfig { inverted: true, .. }) = extras.group {
                     inversions.insert(*path);
@@ -678,7 +679,7 @@ impl MapFilters {
         let trails = info.trails()
             .filter_map(|path|
                 active.pack.trails.get(path.path as usize).map(|t| (path, t))
-            ).map(|(path, trail)| (path, FilterStateFilters::from_attributes(&trail.attributes)))
+            ).map(|(path, trail)| (path, FilterStateFilters::from_attributes(&trail.attributes.filters())))
             .filter(|(path, (f, extras))| {
                 if let Some(GroupConfig { inverted: true, .. }) = extras.group {
                     inversions.insert(*path);
@@ -753,34 +754,39 @@ pub struct FilterStateFilters {
 }
 
 impl FilterStateFilters {
-    pub fn from_attributes(attrs: &MarkerAttributes) -> (Self, FilterStateExtras) {
-        let filters = attrs.filters.as_ref()
-            .map(|f| &**f);
-        let achievements = filters.and_then(AchievementConfig::from_attributes)
+    pub fn from_attributes(filters: &FilterAttributes) -> (Self, FilterStateExtras) {
+        let achievements = AchievementConfig::from_attributes(filters)
             .map(Arc::new);
         #[cfg(feature = "paths-schedule")]
-        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten()
+        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(filters)).flatten()
             .map(Arc::new);
-        let festivals = filters.and_then(|f| f.festivals.clone())
+        let festivals = filters.festivals.clone()
             .and_then(|f| match f.is_empty() {
                 false => Some(f),
                 true => None,
             })
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let mounts = filters.and_then(|f| f.mounts.clone()).map(keys::Mounts)
+        let mounts = filters.mounts.clone().map(keys::Mounts)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let races = filters.and_then(|f| f.races.clone()).map(keys::Races)
+        let races = filters.races.clone().map(keys::Races)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let professions = filters.and_then(|f| f.professions.clone()).map(keys::Professions)
+        let professions = filters.professions.clone().map(keys::Professions)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let specializations = filters.and_then(|f| f.specializations.as_ref())
+        let specializations = filters.specializations.as_ref()
             .map(|s| s.iter().map(|&s| keys::Specialization(s as u32)).collect())
             .map(keys::Specializations)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let raids = filters.and_then(|f| f.raids.as_ref())
+        let raids = filters.raids.as_ref()
             .map(|s| s.iter().cloned().map(keys::Raid).collect())
             .map(keys::Raids)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
+        let group = match filters.invert_behavior {
+            Some(true) => Some(GroupConfig {
+                inverted: true,
+                .. GroupConfig::EMPTY
+            }),
+            _ => None,
+        };
         let filters = festivals.into_iter()
             .chain(mounts)
             .chain(races)
@@ -788,13 +794,6 @@ impl FilterStateFilters {
             .chain(specializations)
             .chain(raids)
             .collect();
-        let group = match attrs.invert_behavior {
-            Some(true) => Some(GroupConfig {
-                inverted: true,
-                .. GroupConfig::EMPTY
-            }),
-            _ => None,
-        };
 
         let extras = FilterStateExtras {
             achievements,

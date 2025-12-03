@@ -51,12 +51,6 @@ pub struct MarkerAttributes {
 
     pub filters: Option<Box<FilterAttributes>>,
 
-    /// Taco Behaviors.
-    pub taco_behavior: Option<TacoBehavior>,
-    pub invert_behavior: Option<bool>,
-    pub reset_length: Option<f32>,
-    pub auto_trigger: Option<bool>,
-
     pub interaction: Option<Box<InteractionAttributes>>,
 
     pub script: Option<Box<ScriptAttributes>>,
@@ -89,19 +83,6 @@ impl MarkerAttributes {
         // === Filters === //
         if let Some(filters) = &base.filters {
             self.filters_mut().merge(&filters);
-        }
-        // === Taco Behaviors === //
-        if self.taco_behavior.is_none() {
-            self.taco_behavior = base.taco_behavior;
-        }
-        if self.invert_behavior.is_none() {
-            self.invert_behavior = base.invert_behavior;
-        }
-        if self.reset_length.is_none() {
-            self.reset_length = base.reset_length;
-        }
-        if self.auto_trigger.is_none() {
-            self.auto_trigger = base.auto_trigger;
         }
         // === Modifiers === //
         if let Some(interaction) = &base.interaction {
@@ -145,8 +126,6 @@ impl MarkerAttributes {
             self.poi_mut().icon_file = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("iconsize") {
             self.poi_mut().icon_size = Some(value.parse()?);
-        } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
-            self.invert_behavior = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mapdisplaysize") {
             self.poi_mut().map_display_size = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("scaleonmapwithzoom") {
@@ -206,17 +185,19 @@ impl MarkerAttributes {
             self.filters_mut().schedule_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("raid") {
             self.filters_mut().raids = Some(list_into(parse_list(&value)?));
-        // === Taco Behaviors === //
-        } else if attr_name.eq_ignore_ascii_case("behavior") {
-            self.taco_behavior = Some(value.parse::<i32>()?.try_into()?);
         } else if attr_name.eq_ignore_ascii_case("achievementid") {
             self.filters_mut().achievement_id = parse_opt(&value)?;
         } else if attr_name.eq_ignore_ascii_case("achievementbit") {
             self.filters_mut().achievement_bit = Some(value.parse()?);
+        } else if attr_name.eq_ignore_ascii_case("invertbehavior") {
+            self.filters_mut().invert_behavior = Some(parse_bool(&value)?);
+        // === Taco Behaviors === //
+        } else if attr_name.eq_ignore_ascii_case("behavior") {
+            self.interaction_mut().taco_behavior = Some(value.parse::<i32>()?.try_into()?);
         } else if attr_name.eq_ignore_ascii_case("resetlength") {
-            self.reset_length = Some(value.parse()?);
+            self.interaction_mut().reset_length = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("autotrigger") {
-            self.auto_trigger = Some(parse_bool(&value)?);
+            self.interaction_mut().auto_trigger = Some(parse_bool(&value)?);
         // === Modifiers === //
         } else if attr_name.eq_ignore_ascii_case("info") {
             self.interaction_mut().info = Some(string_into(value));
@@ -387,6 +368,10 @@ pub struct InteractionAttributes {
     pub reset_guids: Option<AttrList<Uuid>>,
     pub show_category: Option<IdNameBox>,
     pub hide_category: Option<IdNameBox>,
+    /// Taco Behaviors.
+    pub taco_behavior: Option<TacoBehavior>,
+    pub reset_length: Option<f32>,
+    pub auto_trigger: Option<bool>,
 }
 
 impl InteractionAttributes {
@@ -427,6 +412,16 @@ impl InteractionAttributes {
         if self.hide_category.is_none() {
             self.hide_category = base.hide_category.clone();
         }
+        // === Taco Behaviors === //
+        if self.taco_behavior.is_none() {
+            self.taco_behavior = base.taco_behavior;
+        }
+        if self.reset_length.is_none() {
+            self.reset_length = base.reset_length;
+        }
+        if self.auto_trigger.is_none() {
+            self.auto_trigger = base.auto_trigger;
+        }
     }
 }
 
@@ -444,6 +439,7 @@ pub struct FilterAttributes {
     pub raids: Option<AttrList<String>>,
     pub achievement_id: Option<i32>,
     pub achievement_bit: Option<i32>,
+    pub invert_behavior: Option<bool>,
 }
 impl FilterAttributes {
     pub fn merge(&mut self, base: &Self) {
@@ -479,6 +475,9 @@ impl FilterAttributes {
         }
         if self.achievement_bit.is_none() {
             self.achievement_bit = base.achievement_bit;
+        }
+        if self.invert_behavior.is_none() {
+            self.invert_behavior = base.invert_behavior;
         }
     }
 }

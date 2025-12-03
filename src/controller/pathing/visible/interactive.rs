@@ -45,14 +45,15 @@ impl InteractivePoi {
         let interaction = attrs.interaction();
 
         let trigger = TriggerConfig {
-            auto: attrs.auto_trigger.unwrap_or_default(),
+            auto: interaction.auto_trigger.unwrap_or_default(),
             radius: interaction.info_range.map(keys::TriggerRange::from).unwrap_or_default().into(),
         };
-        let behaviour = attrs.taco_behavior.as_ref()
+        let behaviour = interaction.taco_behavior.as_ref()
             .map(|behaviour| BehaviourConfig {
                 mode: behaviour.clone().into(),
-                invert: attrs.invert_behavior.unwrap_or_default(),
-                reset_delay: attrs.reset_length.map(Into::into).unwrap_or_default(),
+                #[cfg(deleteme)]
+                invert: interaction.invert_behavior.unwrap_or_default(),
+                reset_delay: interaction.reset_length.map(Into::into).unwrap_or_default(),
             });
         let behaviour = match behaviour {
             Some(behaviour) if behaviour.is_empty() =>
@@ -207,6 +208,7 @@ pub struct BounceConfig {
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct BehaviourConfig {
     pub mode: keys::Behaviour,
+    #[cfg(deleteme)]
     pub invert: bool,
     pub reset_delay: keys::ResetLength,
 }
@@ -214,6 +216,7 @@ impl BehaviourConfig {
     pub fn new<M: Into<keys::Behaviour>>(mode: M) -> Self {
         Self {
             mode: mode.into(),
+            #[cfg(deleteme)]
             invert: false,
             reset_delay: Default::default(),
         }
@@ -222,11 +225,13 @@ impl BehaviourConfig {
         match self {
             Self { mode, .. } if !mode.is_empty() =>
                 false,
+            #[cfg(deleteme)]
             Self { invert: true, .. } =>
                 false,
             Self {
                 mode: _,
                 reset_delay: _,
+                #[cfg(deleteme)]
                 invert: _,
             } =>
                 true,
