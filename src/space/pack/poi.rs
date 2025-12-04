@@ -1,7 +1,7 @@
 use {
     super::ActivePack,
     crate::{
-        controller::pathing::{registry::{CategoryIndex, PoiIndex}, visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::{self as rt, Counter}, render::machine::RenderMachine, space::{
+        controller::pathing::{registry::{CategoryIndex, PoiIndex}, state::visible::{LoadedPoi, VisibilityFlags}}, exports::runtime::{self as rt, Counter}, render::machine::RenderMachine, space::{
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
             DrawSpace,

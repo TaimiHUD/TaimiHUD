@@ -4,7 +4,7 @@ use {
         controller::pathing::{
             registry::{CategoryIndex, CategoryPath, CategorySet, MarkerIndex, MarkerIndexVariant, MarkerPath, PackConfig, PackInfo, PackMapPath, PackPath, PackRoot, UnloadedReason},
             shared::SharedLoaderPackData,
-            visible::VisibilityFlags,
+            state::VisibilityFlags,
             PathingController, PathingEvent,
             SharedPacks,
         }, exports::runtime::{imgui::{

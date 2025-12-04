@@ -9,7 +9,9 @@ use {
                 state::{
                     hidden::{AutoReset, HideContext},
                     shared::{PathingReceiver, PathingShared, SharedLoaderPackInfo},
-                }, visible::{InteractionEvent, LoadedTrail}, FestivalState, PathingController
+                    interactive::InteractionEvent,
+                    visible::LoadedTrail,
+                }, FestivalState, PathingController
             }, Controller
         }, exports::runtime::{self as rt, bindings::{ControlsReceiver, GameControl, GameControls, TaimiControls, TaimiReceiver, CONTROLS}, watched::{Watched, Watcher}}, render::{machine::{MumbleIdentityUpdate, RenderTaskPriority}, RenderState}, settings::SettingsLock, space::pack::PackSpace, Interruption
     },

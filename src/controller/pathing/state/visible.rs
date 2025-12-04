@@ -5,9 +5,12 @@ use std::sync::Arc;
 use std::{iter, mem};
 use crate::space::pack::PackSpace;
 use crate::{resources::Vertex, space::{pack::trail::TrailParams, DrawSpace}};
-use super::filter::MapFilters;
-use super::registry::{CategoryIndex, CategoryPath, CategorySet, LoadedPack, MapIndex, PackCategoryInfo, PackConfig, PoiIndex, PoiPath, RecentlyUsed, TrailPath, BitFlagForSet, FlagSet};
-use super::MapPackInfo;
+use crate::controller::pathing::{
+    state::interactive::InteractivePoi,
+    filter::MapFilters,
+    registry::{CategoryIndex, CategoryPath, CategorySet, LoadedPack, MapIndex, PackCategoryInfo, PackConfig, PoiIndex, PoiPath, RecentlyUsed, TrailPath, BitFlagForSet, FlagSet},
+    MapPackInfo,
+};
 use bitflags::bitflags;
 use bitvec::order::Lsb0;
 use bitvec::slice::BitSlice;
@@ -18,10 +21,6 @@ use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
 use taimi_pack::attributes::keys::Guid;
 use taimi_pack::Category;
 use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
-pub use self::{interactive::{InteractivePoi, InteractionEvent, InteractionEventAction}, space::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader}};
-
-pub mod interactive;
-mod space;
 
 #[derive(Debug, Clone, Default)]
 pub struct LoadedCategory {

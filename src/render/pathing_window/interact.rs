@@ -6,7 +6,7 @@ use taimi_pack::attributes::keys::{self, Guid};
 use {
     super::PathingWindowState,
     crate::{
-        controller::pathing::{registry::PoiPath, visible::interactive::BehaviourConfig, PathingEvent}, exports::runtime::{imgui::{
+        exports::runtime::{imgui::{
             TableToken, TreeNode, Selectable, MouseButton, Condition,
             Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui,
         }, Locator}, with_i18n, render::machine::RenderMachine, space::engine::Engine, Controller,
@@ -14,9 +14,14 @@ use {
 };
 use crate::{
     controller::pathing::{
-        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex}, shared::{SharedMapPackLoaded, SharedMapPackState}, visible::{InteractionEvent, InteractionEventAction, InteractivePoi, VisibilityFlags}, SharedPacks
+        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex, PoiPath}, shared::{SharedMapPackLoaded, SharedMapPackState},
+        state::{
+            interactive::{BehaviourConfig, InteractionEvent, InteractionEventAction, InteractivePoi},
+            VisibilityFlags,
+        },
+        SharedPacks, PathingEvent,
     },
-    space::{render_list::RenderId, DrawSpace},
+    space::DrawSpace,
 };
 use crate::controller::pathing::registry::MarkerIndex;
 use crate::settings::pathing::TriggerKind;
@@ -207,7 +212,6 @@ impl PathingWindowState {
         engine: &mut Option<&mut Engine>,
     ) {
         use std::collections::BTreeMap;
-        use crate::controller::pathing::visible::VisibilityFlags;
         use glam::Vec4;
         use glamour::{Box3, Vector3};
         use crate::space::pack::poi::ActivePoi;

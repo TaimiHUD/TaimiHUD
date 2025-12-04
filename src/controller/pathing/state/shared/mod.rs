@@ -9,9 +9,18 @@ use crate::controller::pathing::{
     PathingEvent,
 };
 use crate::exports::runtime as rt;
-use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::render::machine::MumbleIdentityUpdate;
-use crate::controller::{pathing::{registry::{PackBoxOf, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
+use crate::controller::{
+    pathing::{
+        registry::{PackBoxOf, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason},
+        state::{
+            interactive::{InteractivePoi, InteractionEvent},
+            visible::{LoadedPoi, LoadedCategory, LoadedMapPack},
+        },
+        MapPackInfo
+    },
+    Controller,
+};
 use crate::settings::SettingsLock;
 use bitvec::vec::BitVec;
 use taimi_meta::loc::{

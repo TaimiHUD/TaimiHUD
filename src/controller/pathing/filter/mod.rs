@@ -1,10 +1,16 @@
 use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
-use crate::controller::pathing::state::hidden::MarkerState;
-use crate::settings::{pathing::PathingAchievementSave};
-use crate::render::machine::MumbleIdentityUpdate;
-use crate::exports::runtime::{self as rt, Locator};
+use crate::{
+    controller::pathing::{
+        registry::{ActivePack, MarkerSet},
+        state::hidden::MarkerState,
+        FestivalState, MapPackInfo,
+    },
+    settings::pathing::PathingAchievementSave,
+    render::machine::MumbleIdentityUpdate,
+    exports::runtime as rt,
+};
+use taimi_meta::loc::packs::{PoiPath, TrailPath, MapIndex, MarkerId, MarkerIndex, MarkerPath};
 use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes};
-use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
@@ -17,32 +23,6 @@ pub const FILTER_ALLOWED: Option<bool> = None;
 #[cfg(todo = "unused")]
 pub const FILTER_VISIBLE_OVERRIDE: Option<bool> = Some(true);
 pub type FilterAllow = Option<bool>;
-
-#[derive(Debug, Clone, Default)]
-pub struct MarkerSet {
-    pub pois: BTreeSet<PoiPath>,
-    pub trails: BTreeSet<TrailPath>,
-}
-impl MarkerSet {
-    pub fn contains<I>(&self, marker: I) -> bool where
-        I: Into<MarkerIndex>,
-    {
-        match marker.into().variant() {
-            MarkerIndexVariant::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.contains(&Locator::with_path(trail)),
-            _ => false,
-        }
-    }
-    pub fn insert<I>(&mut self, marker: I) -> bool where
-        I: Into<MarkerIndex>,
-    {
-        match marker.into().variant() {
-            MarkerIndexVariant::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.insert(Locator::with_path(trail)),
-            _ => false,
-        }
-    }
-}
 
 /// TODO: probably just replacing this with a collection of [keys]
 #[derive(Debug, Clone, Default)]

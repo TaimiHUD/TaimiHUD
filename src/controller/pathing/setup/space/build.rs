@@ -1,11 +1,18 @@
 use anyhow::Context;
 use std::sync::Arc;
-use crate::controller::pathing::registry::{PoiPath, TrailPath, ActivePack};
-use crate::space::pack::{self as spacepack, trail::TrailParams};
-use super::{LoadedPoi, LoadedTrail, LoadedTrailGeometry};
+use crate::{
+    controller::{
+        Controller,
+        pathing::{
+            registry::{PoiPath, TrailPath, ActivePack},
+            state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry},
+        },
+    },
+    space::pack::{self as spacepack, trail::TrailParams},
+};
 use taimi_pack::{attributes::keys, Poi as PackPoi};
 
-pub struct SpaceLoader<'a> {
+pub(super) struct SpaceLoader<'a> {
     pub active_pack: &'a mut spacepack::ActivePack,
     pub loader: &'a mut dyn taimi_pack::loader::PackLoaderContext,
     pub device: &'a taimi_d3d::dx11::Dx11Device,
@@ -80,7 +87,7 @@ impl SpaceTrailBuilder {
         };
         let trail_data = active.load_trail_data(path.path).await?;
         trail.populate_data(&trail_data);
-        let geometry = crate::controller::Controller::try_run_blocking("calculating vertices", {
+        let geometry = Controller::try_run_blocking("calculating vertices", {
             let trail = trail.clone();
             move || Ok(trail.vertices_for(&trail_data, &params))
         }).await?;

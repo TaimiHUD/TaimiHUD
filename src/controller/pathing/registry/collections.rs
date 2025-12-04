@@ -1,6 +1,13 @@
-use crate::controller::pathing::registry::{CategoryPath, CategoryIndex, MapIndex};
-use crate::exports::runtime::locator::{Locator, LocationGet};
-use taimi_meta::map::MapID;
+//! TODO: move to [taimi_meta::loc::packs] or something...
+
+use taimi_meta::{
+    loc::{Locator, LocationGet},
+    loc::packs::{
+        id::{MarkerIndex, MarkerIndexVariant},
+        CategoryPath, CategoryIndex, MapIndex, PoiPath, TrailPath,
+    },
+    map::MapID,
+};
 use bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView, store::BitStore};
 use std::collections::{btree_set, BTreeSet};
 use std::{iter, ops, hash, marker::PhantomData};
@@ -268,5 +275,31 @@ impl<F: BitFlagForSet> FromIterator<F> for FlagSet<F> {
         let mut set = Self::default();
         set.extend(iter);
         set
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MarkerSet {
+    pub pois: BTreeSet<PoiPath>,
+    pub trails: BTreeSet<TrailPath>,
+}
+impl MarkerSet {
+    pub fn contains<I>(&self, marker: I) -> bool where
+        I: Into<MarkerIndex>,
+    {
+        match marker.into().variant() {
+            MarkerIndexVariant::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.contains(&Locator::with_path(trail)),
+            _ => false,
+        }
+    }
+    pub fn insert<I>(&mut self, marker: I) -> bool where
+        I: Into<MarkerIndex>,
+    {
+        match marker.into().variant() {
+            MarkerIndexVariant::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.insert(Locator::with_path(trail)),
+            _ => false,
+        }
     }
 }

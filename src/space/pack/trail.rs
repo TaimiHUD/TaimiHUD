@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, visible::{LoadedTrailGeometry, LoadedTrailSection}}, exports::runtime::{self as rt, Counter}, space::{
+        controller::pathing::{registry::{CategoryIndex, TrailIndex, TrailSectionIndex}, state::visible::{LoadedTrailGeometry, LoadedTrailSection, VisibilityFlags}}, exports::runtime::{self as rt, Counter}, space::{
             pack::{poi::PoiCommonRenderData, ActivePack},
             resources::{Model, Texture},
             DrawSpace,
@@ -9,7 +9,6 @@ use {
         }
     }, anyhow::Context, core::f32, glamour::{Box3, Point2}, std::sync::Arc, taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*}, taimi_pack::PackLoaderContext
 };
-use crate::controller::pathing::visible::VisibilityFlags;
 
 pub struct ActiveTrail {
     #[cfg(todo = "unnecessary")]

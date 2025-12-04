@@ -4,7 +4,7 @@ use {
     crate::{
         controller::pathing::{
             registry::{PackConfig, PackInfo, MarkerPath},
-            visible::VisibilityFlags,
+            state::VisibilityFlags,
             shared::{PathingShared, SharedGameplayMap, SharedMaps, SharedPacks, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo},
         }, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, Condition, StyleVar, Ui, Window,

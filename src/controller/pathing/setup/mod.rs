@@ -5,10 +5,10 @@ use {
             state::{
                 MapPackInfoStorage,
                 info::MapPackInfo,
+                visible::LoadedMapPack,
             },
             registry::{PackRegistry, MapIndex, PackMapPath},
             registry::{LoadedPack, PackLoader, PackPath},
-            visible::LoadedMapPack,
         },
         controller::Controller,
         exports::runtime::{self as rt, locator::LocationMut, Locator},

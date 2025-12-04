@@ -4,8 +4,11 @@ use {
             pathing::{
                 filter::{self, MarkerFilter},
                 registry::{CategoryPath, MapIndex, MarkerIndex, MarkerPath, PackLoader, PackPath},
-                state::shared::SharedPacks,
-                visible::VisibilityFlags, PathingController, PathingEvent, PathingEventContext
+                state::{
+                    shared::SharedPacks,
+                    VisibilityFlags,
+                },
+                PathingController, PathingEvent, PathingEventContext
             }, Controller
         },
         exports::runtime::locator::LocationRef,

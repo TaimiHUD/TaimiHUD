@@ -1,7 +1,12 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{MapIndex, MarkerId, MarkerIndex, PoiIndex}, state::hidden::{AutoReset, HideContext}, visible::{InteractionEvent, InteractionEventAction, InteractivePoi}, PathingController, PathingEvent, PathingEventContext
+            registry::{MapIndex, MarkerId, MarkerIndex, PoiIndex},
+            state::{
+                hidden::{AutoReset, HideContext},
+                interactive::{InteractionEvent, InteractionEventAction, InteractivePoi},
+            },
+            PathingController, PathingEvent, PathingEventContext,
         },
         exports::runtime::{self as rt, Locator}, render::{RenderEvent, RenderState}, settings::pathing::TriggerKind,
     },

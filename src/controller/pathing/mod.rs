@@ -5,9 +5,9 @@ use {
         state::{
             MapPackInfoStorage,
             info::MapPackInfo,
+            visible::LoadedMapPack,
         },
         registry::{PackMapPath, PackLoader, PackRegistry},
-        visible::LoadedMapPack,
         filter::FilterState,
     },
     crate::{
@@ -27,7 +27,6 @@ pub use self::{
 
 pub mod registry;
 pub mod festivals;
-pub mod visible;
 pub mod filter;
 pub mod state;
 mod setup;

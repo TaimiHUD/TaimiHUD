@@ -7,7 +7,7 @@ use {
     crate::{
         exports::runtime as rt,
         settings::{DataSourcePath, PathingSettings},
-        controller::pathing::visible::{VisibilityFlagSet, VisibilityFlags},
+        controller::pathing::state::{VisibilityFlagSet, VisibilityFlags},
     },
     anyhow::anyhow,
     bitvec::vec::BitVec,
@@ -19,7 +19,7 @@ use {
 pub use taimi_meta::loc::packs::id::{self, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant};
 pub use self::{
     active::{ActivePack, PackFormat, PackLoader},
-    collections::{BitFlagForSet, CategorySet, FlagSet, MapSet, RecentlyUsed},
+    collections::{BitFlagForSet, CategorySet, FlagSet, MapSet, MarkerSet, RecentlyUsed},
     namespace::*,
 };
 

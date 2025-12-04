@@ -1,12 +1,16 @@
 use {
     crate::{controller::pathing::{
         registry::{PackMapPath, PoiPath, TrailPath},
-        visible::{LoadedPoi, LoadedTrail, SpaceLoader, SpacePoiBuilder, SpaceTrailBuilder},
+        state::visible::{LoadedPoi, LoadedTrail},
         shared::SharedPacks,
         PathingController, PathingEvent, PathingEventContext,
     }, exports::runtime::{self as rt, locator::LocationRef}, render::{machine::RenderTaskPriority, RenderState}},
     futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::Weak,
+    self::build::SpaceLoader,
 };
+pub use self::build::{SpacePoiBuilder, SpaceTrailBuilder};
+
+mod build;
 
 impl PathingController {
     pub async fn setup_pack(&mut self,
