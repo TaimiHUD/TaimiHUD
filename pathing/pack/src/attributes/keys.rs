@@ -1,5 +1,5 @@
 use {
-    super::TacoBehavior, crate::attributes::{AttrString, BounceBehavior, CullDirection}, base64::Engine as _, glam::{Vec3, Vec4}, std::{convert::Infallible, fmt, io, mem, ops, slice, str::FromStr, sync::Arc, time::Duration}, uuid::Uuid,
+    super::TacoBehavior, crate::attributes::{AttrString, BounceBehavior, CullDirection}, base64::Engine as _, glam::{Vec3, Vec4}, std::{borrow::Cow, convert::Infallible, fmt, io, mem, ops, slice, str::FromStr, sync::Arc, time::Duration}, uuid::Uuid,
 };
 
 // TODO: FromStr, Display
@@ -829,6 +829,44 @@ impl<'de> serde::Deserialize<'de> for Guid {
 impl serde::Serialize for Guid {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.to_string().serialize(s)
+    }
+}
+
+pub trait GetAttr<A: ?Sized + AttrKey> {
+    fn has_attr(&self) -> bool {
+        self.get_attr_ref().is_some()
+    }
+    fn get_attr_ref(&self) -> Option<&A>;
+    #[cfg(todo)]
+    fn get_attr_storage(&self) -> Option<&A::Storage>;
+    fn get_attr(&self) -> Option<Cow<'_, A>> {
+        self.get_attr_ref().map(Cow::Borrowed)
+    }
+}
+impl<A: ?Sized + AttrKey> GetAttr<A> for A {
+    fn has_attr(&self) -> bool { true }
+    fn get_attr_ref(&self) -> Option<&A> {
+        Some(self)
+    }
+}
+#[cfg(todo)]
+impl<A: AttrKey, T: ?Sized + GetAttr<A>> GetAttr<A> for &'_ T {
+    fn has_attr(&self) -> bool { GetAttr::has_attr(*self) }
+    fn get_attr_ref(&self) -> Option<&A> { GetAttr::get_attr_ref(*self) }
+    fn get_attr(&self) -> Option<Cow<'_, A>> { GetAttr::get_attr(*self) }
+}
+impl<T, A: ?Sized + AttrKey> GetAttr<A> for Option<T> where
+    T: GetAttr<A>,
+{
+    fn has_attr(&self) -> bool {
+        self.as_ref().map(GetAttr::<A>::has_attr)
+            .unwrap_or(false)
+    }
+    fn get_attr_ref(&self) -> Option<&A> {
+        self.as_ref().and_then(GetAttr::<A>::get_attr_ref)
+    }
+    fn get_attr(&self) -> Option<Cow<'_, A>> {
+        self.as_ref().and_then(GetAttr::<A>::get_attr)
     }
 }
 
