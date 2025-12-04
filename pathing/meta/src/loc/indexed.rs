@@ -986,7 +986,7 @@ impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
     T: Ord,
 {
     fn set_contains(&self, elem: &T) -> bool {
-        self.set_contains(elem)
+        self.contains(elem)
     }
 }
 impl<E, T: ?Sized> TaimiSet<T> for [E] where
@@ -1043,5 +1043,22 @@ impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,) where
 {
     fn set_contains(&self, elem: &T) -> bool {
         &self.0 == elem
+    }
+}
+
+impl<V, N, L, P> TaimiSet<Locator<N, L>> for BTreeMap<Locator<Locator<N, L>, P>, V> where
+    Locator<Locator<N, L>, P>: Ord,
+    Locator<N, L>: PartialEq,
+{
+    fn set_contains(&self, elem: &Locator<N, L>) -> bool {
+        self.keys().any(|path| elem == &path.root)
+    }
+}
+impl<N, L, P> TaimiSet<Locator<N, L>> for BTreeSet<Locator<Locator<N, L>, P>> where
+    Locator<Locator<N, L>, P>: Ord,
+    Locator<N, L>: PartialEq,
+{
+    fn set_contains(&self, elem: &Locator<N, L>) -> bool {
+        self.iter().any(|path| elem == &path.root)
     }
 }
