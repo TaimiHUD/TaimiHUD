@@ -255,6 +255,11 @@ impl Controller {
             CONTROLS.notify_handled(TaimiControls::WINDOW_PATHING);
             self.set_window_state(crate::WINDOW_PATHING, None).await;
         }
+        let menus = pressed & TaimiControls::MENUS;
+        if !menus.is_empty() {
+            CONTROLS.notify_handled(menus);
+            let _ = self.rt_sender.send(RenderEvent::ContextMenuOpen { menus }).await;
+        }
 
         #[cfg(feature = "timers")]
         self.timers.handle_keybinds(state, changed).await;

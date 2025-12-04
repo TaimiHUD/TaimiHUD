@@ -11,6 +11,7 @@ pub mod info_tab;
 pub mod machine;
 #[cfg(feature = "markers")]
 pub mod marker_tab;
+pub mod menu;
 #[cfg(feature = "space")]
 pub mod pathing_tab;
 #[cfg(feature = "space")]

@@ -58,7 +58,7 @@ bitflags! {
         const UNASSIGNED_4 = 0x0010;
         const UNASSIGNED_5 = 0x0020;
         const UNASSIGNED_6 = 0x0040;
-        const UNASSIGNED_7 = 0x0080;
+        const MENU_PRIMARY = 0x0080;
 
         #[cfg(feature = "timers")]
         const TIMER_TRIGGER_0 = 0x0100;
@@ -107,6 +107,7 @@ impl TaimiControls {
             };
         bits
     });
+    pub const MENUS: Self = Self::from_bits_retain(Self::MENU_PRIMARY.bits());
 
     #[cfg(feature = "timers")]
     pub const TIMER_TRIGGERS: Self = Self::from_bits_retain(

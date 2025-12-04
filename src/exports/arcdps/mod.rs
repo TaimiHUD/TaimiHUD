@@ -8,7 +8,7 @@ use {
         controller::timers::{TimersController, TimersEvent},
         exports::{
             self,
-            runtime::{self as rt, imgui, RuntimeResult},
+            runtime::{self as rt, bindings::TaimiControls, imgui, RuntimeResult},
         },
         marker::format::MarkerType,
         render::{machine::RenderMachine, RenderState},
@@ -336,6 +336,7 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         Some(s) => s,
         None => return hide_checkbox,
     };
+    let mut context_menu = None;
     for &binding in ArcSettings::VK_WINDOWS {
         let Some(window) = binding.window_name() else { continue };
         let window_id = format!("{window}-window");
@@ -343,6 +344,14 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
             // just mutating settings is enough?
         }
+        if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+            context_menu = Some(binding.control().unwrap_or(TaimiControls::WINDOW_PRIMARY));
+        }
+    }
+    drop(settings);
+
+    if let Some(menu) = context_menu {
+        RenderState::open_context_menu(ui, menu);
     }
 
     hide_checkbox
@@ -393,6 +402,13 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
                 w => KeyboardAndMouse::VIRTUAL_KEY(w as u16),
             };
             let mut bound = false;
+            let mut control = None;
+
+            for &binding in ArcSettings::VK_CONTEXT_MENUS {
+                if arc.binding_matches(binding, vk) {
+                    control = control.or(binding.control());
+                }
+            }
 
             for &binding in ArcSettings::VK_WINDOWS {
                 if arc.binding_matches(binding, vk) {
@@ -442,6 +458,17 @@ fn wnd_filter(_hwnd: *mut c_void, msg: u32, w: usize, l: isize) -> u32 {
             #[cfg(feature = "timers")]
             if arc.binding_matches(&ArcSettings::VK_TIMER_RESET, vk) {
                 TimersController::try_send(TimersEvent::TimerReset);
+            }
+
+            if let Some(control) = control {
+                use crate::exports::runtime::bindings::CONTROLS;
+
+                bound = true;
+                if is_trigger {
+                    CONTROLS.notify_press(control.to_vk_dummy(), control)
+                } else if is_release {
+                    CONTROLS.notify_release(control.to_vk_dummy())
+                }
             }
 
             match bound {

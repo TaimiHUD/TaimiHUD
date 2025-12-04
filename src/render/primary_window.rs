@@ -33,7 +33,7 @@ pub struct PrimaryWindowState {
     pub pathing_tab: PathingConfig,
     #[cfg(feature = "extension-arcdps")]
     pub arc_tab: super::ArcRenderState,
-    open: bool,
+    pub(super) open: bool,
 }
 
 impl PrimaryWindowState {

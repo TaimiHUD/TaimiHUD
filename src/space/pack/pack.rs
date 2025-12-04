@@ -432,7 +432,7 @@ impl ActivePack {
         push_token.pop();
     }
 
-    fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
+    pub(crate) fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
         let Some(copy_value) = &attributes.copy_value else { return };
         ui.set_clipboard_text(copy_value);
         if let Some(copy_message) = &attributes.copy_message {
@@ -440,7 +440,7 @@ impl ActivePack {
         }
     }
 
-    fn draw_tooltip_category(ui: &Ui, category: &Category) {
+    pub(crate) fn draw_tooltip_category(ui: &Ui, category: &Category) {
         let desc = match &category.marker_attributes.tip_description {
             Some(desc) if !desc.is_empty() => Some(&desc[..]),
             _ => None,
@@ -476,7 +476,7 @@ impl ActivePack {
         }
     }
 
-    fn category_has_tooltip(category: &Category) -> bool {
+    pub(crate) fn category_has_tooltip(category: &Category) -> bool {
         match &category.marker_attributes.tip_description {
             Some(desc) if !desc.is_empty() => return true,
             _ => (),
@@ -499,7 +499,7 @@ impl ActivePack {
         false
     }
 
-    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+    pub(crate) fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
         use imgui::StyleVar;
 
         let _id = ui.push_id("category_tooltip");

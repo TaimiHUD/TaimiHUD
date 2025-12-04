@@ -113,7 +113,9 @@ impl ConfigTabState {
             let prior_visible = self.quick_access_icons_visible;
             let mut changed = false;
             for (i, icon) in TaimiControls::QUICK_ACCESS_ICONS.into_iter().enumerate() {
-                let Some((_, _, _, keybind)) = quick_access_button_id(icon) else { continue };
+                let Some((_, _, _, _, keybind)) = quick_access_button_id(icon) else {
+                    continue
+                };
                 if i > 0 && i % 4 != 0 {
                     ui.same_line();
                 }

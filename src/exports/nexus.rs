@@ -379,9 +379,12 @@ pub fn unregister_keybinds() {
 }
 
 pub fn quick_access_add(icon: TaimiControls) {
-    use nexus::quick_access::{add_quick_access, add_quick_access_context_menu};
+    use {
+        crate::render::RenderState,
+        nexus::quick_access::{add_quick_access, add_quick_access_context_menu},
+    };
 
-    let Some((identifier, (neutral, neutral_png), (hover, hover_png), keybind)) =
+    let Some((identifier, menu, (neutral, neutral_png), (hover, hover_png), keybind)) =
         quick_access_button_id(icon)
     else {
         return
@@ -397,44 +400,38 @@ pub fn quick_access_add(icon: TaimiControls) {
         add_quick_access(identifier, neutral, hover, keybind, tooltip_text).leak();
     });
 
-    if let TaimiControls::WINDOW_PRIMARY = icon {
-        use crate::{control_window, fl};
-
-        add_quick_access_context_menu(
-            "TAIMI_MENU",
-            Some(identifier), // maybe some day
-            //None::<&str>,
-            nexus::render!(|ui| {
-                #[cfg(feature = "timers")]
-                if ui.button(fl!("timer-window")) {
-                    control_window(crate::WINDOW_TIMERS, None);
-                }
-                #[cfg(feature = "space")]
-                {
-                    use {crate::controller::pathing::PathingEvent, taimi_meta::ui::MapContext};
-                    if ui.button(fl!("pathing-render-toggle")) {
-                        PathingEvent::VISIBLE_TOGGLE_SPACE.try_send();
-                    }
-                    if ui.button(fl!("pathing-render-minimap-toggle")) {
-                        PathingEvent::visible_toggle(MapContext::Minimap).try_send();
-                    }
-                    if ui.button(fl!("pathing-render-map-toggle")) {
-                        PathingEvent::visible_toggle(MapContext::Global).try_send();
-                    }
-                    if ui.button(fl!("pathing-window")) {
-                        control_window(crate::WINDOW_PATHING, None);
-                    }
-                }
-                #[cfg(feature = "markers")]
-                if ui.button(fl!("marker-window")) {
-                    control_window(crate::WINDOW_MARKERS, None);
-                }
-                if ui.button(fl!("primary-window")) {
-                    control_window(crate::WINDOW_PRIMARY, None);
-                }
-            }),
+    match (icon, menu) {
+        (TaimiControls::WINDOW_TIMERS, Some(menu)) => add_quick_access_context_menu(
+            menu,
+            Some(identifier),
+            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_TIMERS)),
         )
-        .leak();
+        .leak(),
+        (TaimiControls::WINDOW_MARKERS, Some(menu)) => add_quick_access_context_menu(
+            menu,
+            Some(identifier),
+            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_MARKERS)),
+        )
+        .leak(),
+        (
+            TaimiControls::WINDOW_PATHING
+            | TaimiControls::PATHING_SPACE
+            | TaimiControls::PATHING_MINIMAP
+            | TaimiControls::PATHING_MAP,
+            Some(menu),
+        ) => add_quick_access_context_menu(
+            menu,
+            Some(identifier),
+            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PATHING)),
+        )
+        .leak(),
+        (_, Some(menu)) => add_quick_access_context_menu(
+            menu,
+            Some(identifier),
+            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PRIMARY)),
+        )
+        .leak(),
+        (_, None) => (),
     }
 }
 
@@ -449,9 +446,9 @@ pub fn quick_access_remove_all() {
 pub fn quick_access_remove(icon: TaimiControls) {
     use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
 
-    let Some((identifier, ..)) = quick_access_button_id(icon) else { return };
-    if let TaimiControls::WINDOW_PRIMARY = icon {
-        remove_quick_access_context_menu("TAIMI_MENU");
+    let Some((identifier, menu, ..)) = quick_access_button_id(icon) else { return };
+    if let Some(menu) = menu {
+        remove_quick_access_context_menu(menu);
     }
     remove_quick_access(identifier);
 }
@@ -461,6 +458,7 @@ pub(crate) fn quick_access_button_id(
     icon: TaimiControls,
 ) -> Option<(
     &'static str,
+    Option<&'static str>,
     (&'static str, &'static [u8]),
     (&'static str, &'static [u8]),
     &'static str,
@@ -468,6 +466,7 @@ pub(crate) fn quick_access_button_id(
     Some(match icon {
         TaimiControls::WINDOW_PRIMARY => (
             "TAIMI_BUTTON",
+            Some("TAIMI_MENU"),
             ("TAIMI_ICON", include_bytes!("../../icons/taimi.png")),
             ("TAIMI_ICON_HOVER", include_bytes!("../../icons/taimi-hover.png")),
             "primary-window-toggle",
@@ -475,6 +474,7 @@ pub(crate) fn quick_access_button_id(
         #[cfg(feature = "markers")]
         TaimiControls::WINDOW_MARKERS => (
             "TAIMI_MARKERS_BUTTON",
+            Some("TAIMI_MARKERS_MENU"),
             ("TAIMI_MARKERS_ICON", include_bytes!("../../icons/markers.png")),
             (
                 "TAIMI_MARKERS_ICON_HOVER",
@@ -485,6 +485,7 @@ pub(crate) fn quick_access_button_id(
         #[cfg(feature = "timers")]
         TaimiControls::WINDOW_TIMERS => (
             "TAIMI_TIMER_BUTTON",
+            Some("TAIMI_TIMERS_MENU"),
             ("TAIMI_TIMERS_ICON", include_bytes!("../../icons/timers.png")),
             (
                 "TAIMI_TIMERS_ICON_HOVER",
@@ -495,6 +496,7 @@ pub(crate) fn quick_access_button_id(
         #[cfg(feature = "space")]
         TaimiControls::WINDOW_PATHING => (
             "TAIMI_PATHING_BUTTON",
+            Some("TAIMI_PATHING_MENU"),
             ("TAIMI_PATHING_ICON", include_bytes!("../../icons/pathing.png")),
             (
                 "TAIMI_PATHING_ICON_HOVER",
@@ -509,6 +511,11 @@ pub(crate) fn quick_access_button_id(
                 TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_BUTTON",
                 _ => "TAIMI_PATHING_RENDER_BUTTON",
             },
+            Some(match icon {
+                TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_MENU",
+                TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_MENU",
+                _ => "TAIMI_PATHING_RENDER_MENU",
+            }),
             (
                 "TAIMI_PATHING_RENDER_ICON",
                 include_bytes!("../../icons/pathing-toggle.png"),

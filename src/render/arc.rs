@@ -3,7 +3,10 @@ use {crate::controller::pathing::PathingEvent, taimi_meta::ui::MapContext};
 use {
     crate::{
         controller::timers::{TimersController, TimersEvent},
-        exports::runtime::imgui::{self, Condition, TreeNode, TreeNodeFlags},
+        exports::runtime::{
+            bindings::CONTROLS,
+            imgui::{self, Condition, TreeNode, TreeNodeFlags},
+        },
         render::element::{addons::AddonHostSelection, keys::KeyBindSelection},
         settings::{state::BootstrapState, ArcSettings, ArcVk},
         with_i18n,
@@ -73,6 +76,17 @@ impl ArcRenderState {
                 Some(|vk: &ArcVk| {
                     if let Some(window) = vk.window_name() {
                         crate::control_window(window, None);
+                    }
+                }),
+            );
+        }
+        for &binding in ArcSettings::VK_CONTEXT_MENUS {
+            self.bindings.do_keybind(
+                ui,
+                binding,
+                Some(|vk: &ArcVk| {
+                    if let Some(control) = vk.control() {
+                        CONTROLS.notify_press(control.to_vk_dummy(), control);
                     }
                 }),
             );

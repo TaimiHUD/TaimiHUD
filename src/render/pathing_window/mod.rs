@@ -32,6 +32,7 @@ use {
 pub use self::filter::PathingSearchState;
 
 mod filter;
+mod menu;
 
 pub struct PathingWindowState {
     pub open: bool,

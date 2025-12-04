@@ -1,7 +1,7 @@
 use {
     crate::{
         controller::ControllerEvent,
-        exports::runtime as rt,
+        exports::runtime::{self as rt, bindings::TaimiControls},
         fl,
         marker::format::MarkerType,
         marker_icon_data,
@@ -60,6 +60,9 @@ pub enum RenderEvent {
     AlertReset(Arc<TimerFile>),
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
+    ContextMenuOpen {
+        menus: TaimiControls,
+    },
     CheckingForUpdates {
         checking: bool,
         downloading: bool,
@@ -102,7 +105,7 @@ pub struct RenderState {
     pub marker_window: MarkerWindowState,
     #[cfg(feature = "space")]
     pub pathing_window: PathingWindowState,
-    timer_window: TimerWindowState,
+    pub(super) timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
     pub state_errors: HashMap<String, anyhow::Error>,
@@ -189,6 +192,7 @@ impl RenderState {
                                 self.alert = None;
                             }
                         },
+                    ContextMenuOpen { menus } => self.open_context(ui, menus),
                     AlertFeed(phase_state) => {
                         self.timer_window.new_phase(phase_state);
                     },
@@ -232,6 +236,7 @@ impl RenderState {
         #[cfg(feature = "space")]
         self.pathing_window
             .draw(ui, &mut self.machine, self.engine.as_mut());
+        self.draw_context_menu(ui);
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);

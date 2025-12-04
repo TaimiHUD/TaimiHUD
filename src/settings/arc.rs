@@ -1,5 +1,5 @@
 use {
-    crate::settings::Settings,
+    crate::{exports::runtime::bindings::TaimiControls, settings::Settings},
     serde::{Deserialize, Serialize},
     std::{collections::HashMap, fmt},
     windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY},
@@ -30,15 +30,18 @@ impl ArcSettings {
         ArcVk::empty("timer-key-trigger-3"),
         ArcVk::empty("timer-key-trigger-4"),
     ];
+    pub const VK_CONTEXT_PRIMARY: ArcVk = ArcVk::new("context-menu-primary", vk::VK_F3);
 
     pub const VK_WINDOWS: &'static [&'static ArcVk] = &[
         &Self::VK_WINDOW_TOGGLE_PRIMARY,
+        #[cfg(feature = "timers")]
         &Self::VK_WINDOW_TOGGLE_TIMERS,
         #[cfg(feature = "markers")]
         &Self::VK_WINDOW_TOGGLE_MARKERS,
         #[cfg(feature = "space")]
         &Self::VK_WINDOW_TOGGLE_PATHING,
     ];
+    pub const VK_CONTEXT_MENUS: &'static [&'static ArcVk] = &[&Self::VK_CONTEXT_PRIMARY];
 
     pub fn get_vk(&self, binding: &ArcVk) -> Option<VIRTUAL_KEY> {
         self.bind_vks
@@ -118,6 +121,31 @@ impl ArcVk {
         }
 
         crate::LANGUAGE_LOADER.get(self.id)
+    }
+
+    pub fn control(&self) -> Option<TaimiControls> {
+        Some(match *self {
+            ArcSettings::VK_WINDOW_TOGGLE_PRIMARY => TaimiControls::WINDOW_PRIMARY,
+            #[cfg(feature = "timers")]
+            ArcSettings::VK_WINDOW_TOGGLE_TIMERS => TaimiControls::WINDOW_TIMERS,
+            #[cfg(feature = "markers")]
+            ArcSettings::VK_WINDOW_TOGGLE_MARKERS => TaimiControls::WINDOW_MARKERS,
+            #[cfg(feature = "space")]
+            ArcSettings::VK_WINDOW_TOGGLE_PATHING => TaimiControls::WINDOW_PATHING,
+            ArcSettings::VK_RENDER_TOGGLE_PATHING => TaimiControls::PATHING_SPACE,
+            ArcSettings::VK_RENDER_TOGGLE_PATHING_MINIMAP => TaimiControls::PATHING_MINIMAP,
+            ArcSettings::VK_RENDER_TOGGLE_PATHING_MAP => TaimiControls::PATHING_MAP,
+            ArcSettings::VK_TIMER_RESET => TaimiControls::TIMER_RESET,
+            ArcSettings::VK_CONTEXT_PRIMARY => TaimiControls::MENU_PRIMARY,
+            _ => {
+                if let Some(trigger_index) = ArcSettings::VK_TIMER_TRIGGERS.iter().position(|t| t == self) {
+                    return Some(TaimiControls::from_index(
+                        TaimiControls::TIMER_TRIGGER_0.index() + trigger_index as u8,
+                    ))
+                }
+                return None
+            },
+        })
     }
 
     pub fn window_name(&self) -> Option<&'static str> {
