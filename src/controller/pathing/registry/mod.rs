@@ -16,16 +16,15 @@ use {
     }, tokio::sync::watch,
     tokio_util::sync::ReusableBoxFuture,
 };
+pub use taimi_meta::loc::packs::id::{self, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant};
 pub use self::{
     active::{ActivePack, PackFormat, PackLoader},
     collections::{BitFlagForSet, CategorySet, FlagSet, MapSet, RecentlyUsed},
-    id::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant},
     namespace::*,
 };
 
 mod active;
 mod collections;
-pub mod id;
 mod namespace;
 
 #[derive(Debug, Default)]

@@ -11,14 +11,14 @@ use crate::controller::pathing::{
 use crate::exports::runtime as rt;
 use crate::controller::pathing::visible::{InteractivePoi, LoadedPoi};
 use crate::render::machine::MumbleIdentityUpdate;
-use crate::controller::{pathing::{registry::{CategoryPath, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
+use crate::controller::{pathing::{registry::{PackBoxOf, LoadedPack, PackInfo, PackLoader, PackMapPath, PackPath, UnloadedReason}, visible::{InteractionEvent, LoadedCategory, LoadedMapPack}, MapPackInfo}, Controller};
 use crate::settings::SettingsLock;
 use bitvec::vec::BitVec;
 use taimi_meta::loc::{
     Locator,
     LocationRef, LocationMut,
     indexed::TaimiSet,
-    packs::{PackIndex, MapIndex, PackBoxOf},
+    packs::{PackIndex, MapIndex, CategoryPath},
 };
 use taimi_meta::ui::GameplayState;
 use taimi_sync::arcs::weak_is_null;
@@ -231,6 +231,16 @@ impl SharedMaps {
     {
         let prev_len = maps.len();
         maps.retain(|path, _| self.map_info.contains_key(path.as_ref()));
+        maps.len() != prev_len
+    }
+    pub fn prune_map_of<P, T>(&self, maps: &mut BTreeMap<P, T>) -> bool where
+        P: AsRef<PackPath> + Ord,
+    {
+        let prev_len = maps.len();
+        maps.retain(|path, _| {
+            let path = path.as_ref();
+            self.map_info.keys().any(|p| p.root == path)
+        });
         maps.len() != prev_len
     }
     /// remove outdated info from a local cache
@@ -654,7 +664,7 @@ impl SharedMapPackState {
                     true,
                 id if id.marker_path::<PackMapPath>().map(|path| path.root == map_path).unwrap_or(false) =>
                     true,
-                _ => map_pack.poi_guids.contains(id.as_ref()),
+                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id.as_ref())),
             })
             .cloned()
             .collect()

@@ -22,11 +22,11 @@ impl PathingController {
             dirty
         });
         for guid in guids {
-            if self.filter_state.hidden.reset(&guid) {
+            if self.filter_state.hidden.reset(&guid.0) {
                 self.mark_hidden_dirty(ctx, None);
                 ctx.filter_state_signal = true;
             }
-            if ctx.unexpire(&guid) {
+            if ctx.unexpire(&guid.0) {
                 ctx.filter_state_signal = true;
             }
         }
@@ -49,7 +49,7 @@ impl PathingController {
                 })*/
         };
         let id = match guid {
-            Some(guid) => MarkerId::from(guid.clone()),
+            Some(guid) => MarkerId::from(guid.0.clone()),
             None => {
                 let path = path.map_path(MarkerIndex::with_poi);
                 match &hide_contexts {

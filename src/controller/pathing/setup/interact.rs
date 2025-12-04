@@ -38,7 +38,7 @@ impl PathingController {
                     .map(|(_, guid)| guid.clone());
                 let mut removed = self.handle_interaction_end(ctx, &MarkerId::for_marker(marker_path));
                 if let Some(guid) = guid {
-                    removed |= self.handle_interaction_end(ctx, guid.as_ref());
+                    removed |= self.handle_interaction_end(ctx, guid.0.as_ref());
                 }
                 if removed {
                     ctx.filter_state_signal = true;

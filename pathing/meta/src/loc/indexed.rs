@@ -989,11 +989,20 @@ impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
         self.contains(elem)
     }
 }
+#[cfg(todo)]
 impl<E, T: ?Sized> TaimiSet<T> for [E] where
     E: PartialEq<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {
         self.iter().any(|e| e == elem)
+    }
+}
+impl<E, T: ?Sized> TaimiSet<T> for [E] where
+    E: Borrow<T>,
+    T: PartialEq,
+{
+    fn set_contains(&self, elem: &T) -> bool {
+        self.iter().any(|e| e.borrow() == elem)
     }
 }
 impl<E, T: ?Sized> TaimiSet<T> for Vec<E> where
@@ -1043,22 +1052,5 @@ impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,) where
 {
     fn set_contains(&self, elem: &T) -> bool {
         &self.0 == elem
-    }
-}
-
-impl<V, N, L, P> TaimiSet<Locator<N, L>> for BTreeMap<Locator<Locator<N, L>, P>, V> where
-    Locator<Locator<N, L>, P>: Ord,
-    Locator<N, L>: PartialEq,
-{
-    fn set_contains(&self, elem: &Locator<N, L>) -> bool {
-        self.keys().any(|path| elem == &path.root)
-    }
-}
-impl<N, L, P> TaimiSet<Locator<N, L>> for BTreeSet<Locator<Locator<N, L>, P>> where
-    Locator<Locator<N, L>, P>: Ord,
-    Locator<N, L>: PartialEq,
-{
-    fn set_contains(&self, elem: &Locator<N, L>) -> bool {
-        self.iter().any(|path| elem == &path.root)
     }
 }

@@ -3,13 +3,17 @@ use crate::controller::pathing::registry::UnloadedReason;
 use {
     crate::{
         controller::pathing::{
-            registry::{CategoryIndex, CategoryPath, MapIndex, PackConfig, PackIndex, PackInfo, PackLoader, PackMapPath, PackPath, MarkerPath},
+            registry::{PackConfig, PackInfo, MarkerPath},
             visible::VisibilityFlags,
             shared::{PathingShared, SharedGameplayMap, SharedMaps, SharedPacks, SharedLoaderPackConfig, SharedLoaderPackData, SharedLoaderPackInfo},
         }, exports::runtime::{self as rt, Watched, imgui::{
             sys as imgui_sys, Condition, StyleVar, Ui, Window,
         }}, fl, render::{machine::RenderMachine, PathingConfig, RenderState}, settings::Settings, space::engine::Engine, with_i18n, Controller, ControllerEvent
-    }, bitvec::{slice::BitSlice, vec::BitVec}, std::{collections::BTreeMap, sync::{Arc, Weak}}, taimi_pack::attributes::AttrString,
+    },
+    bitvec::{slice::BitSlice, vec::BitVec},
+    std::{collections::BTreeMap, sync::{Arc, Weak}},
+    taimi_pack::attributes::AttrString,
+    taimi_meta::loc::packs::{CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath},
     tokio::sync::watch,
 };
 pub use self::filter::{PathingFilterState, PathingSearchState};

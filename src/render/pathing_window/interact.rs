@@ -642,7 +642,7 @@ impl PathingWindowState {
     }
     pub(super) fn lpoi_get_hidden(map: &SharedMapPackState, path: MarkerPath<PackPath>, guid: Option<&Guid>) -> bool {
         let hidden_guid = guid
-            .map(MarkerId::from_guid_ref)
+            .map(|guid| MarkerId::from_uuid_ref(&guid.0))
             .map(|id| map.hidden_markers.contains(id))
             .unwrap_or(false);
         hidden_guid || map.hidden_markers.contains(&MarkerId::from(path))

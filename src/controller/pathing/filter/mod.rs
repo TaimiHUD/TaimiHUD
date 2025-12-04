@@ -1,9 +1,9 @@
 use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
 use crate::controller::pathing::state::hidden::MarkerState;
-use crate::settings::{pathing::PathingAchievementSave, state::SaveState};
+use crate::settings::{pathing::PathingAchievementSave};
 use crate::render::machine::MumbleIdentityUpdate;
 use crate::exports::runtime::{self as rt, Locator};
-use taimi_pack::attributes::{self as attr, keys::{self, Guid}, MarkerAttributes, FilterAttributes};
+use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes};
 use super::{registry::{ActivePack, MapIndex, PoiPath, TrailPath, MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant}, FestivalState, MapPackInfo};
 #[cfg(feature = "paths-schedule")]
 use {
@@ -310,7 +310,7 @@ impl MarkerFilter for GroupConfig {
     type State = FilterState;
 
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        let guid = MarkerId::from_guid_ref(&self.guid);
+        let guid = MarkerId::from_uuid_ref(&self.guid.0);
         match state.hidden.is_hidden(guid, &state.map, &state.character) ^ self.inverted {
             true => FILTER_HIDDEN,
             false => FILTER_ALLOWED,

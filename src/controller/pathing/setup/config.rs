@@ -218,11 +218,11 @@ impl PathingController {
                 .flat_map(|map| map.poi_guids.iter().chain(map.trail_guids.iter()));
 
             for guid in all_guids {
-                if self.filter_state.hidden.hidden.contains_key(guid.as_ref()) {
+                if self.filter_state.hidden.hidden.contains_key(&guid.0) {
                     continue
                 }
                 let Some(&expiry_timestamp) = hidden_guids.get(guid) else { continue };
-                self.filter_state.hidden.expire_at_timestamp(guid.clone(), expiry_timestamp, &now, &now_mono);
+                self.filter_state.hidden.expire_at_timestamp(guid.0.clone(), expiry_timestamp, &now, &now_mono);
             }
             self.filter_state.hidden.reset_expired(&now_mono);
         }

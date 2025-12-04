@@ -517,7 +517,7 @@ impl PathingEventContext {
         self.spawn_expire_at(item.clone(), expiry, duration, async move {
             match item.marker_path() {
                 Some(marker) => Some(PathingEvent::ResetMarker(marker)),
-                _ => Some(PathingEvent::GuidReset(vec![item.into()])),
+                _ => Some(PathingEvent::GuidReset(vec![item.uuid.into()])),
             }
         })
     }

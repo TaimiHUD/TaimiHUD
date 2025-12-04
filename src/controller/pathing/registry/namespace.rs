@@ -1,9 +1,17 @@
-use crate::{
-    controller::pathing::registry::{PackRegistry, LoadedPack},
-    exports::runtime::locator::{Locator, LocationGet, LocationMut, LocationRef},
+use {
+    crate::{
+        controller::pathing::registry::{PackRegistry, LoadedPack},
+        exports::runtime::locator::{Locator, LocationMut, LocationRef},
+    },
+    taimi_meta::loc::indexed::IndexedList,
 };
 
 pub use taimi_meta::loc::packs::*;
+
+pub type PackListWith<T> = IndexedList<PackRegistryNs, PackIndex, T>;
+pub type PackVecOf<T> = PackListWith<Vec<T>>;
+pub type PackBoxOf<T> = PackListWith<Box<[T]>>;
+pub type PackArcOf<T> = PackListWith<std::sync::Arc<[T]>>;
 
 impl LocationRef<PackRegistryNs, PackIndex> for PackRegistry {
     type LookupRef = LoadedPack;

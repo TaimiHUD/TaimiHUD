@@ -1,8 +1,14 @@
 use std::{borrow::Borrow, fmt, iter, mem};
 use uuid::Uuid;
-use crate::exports::runtime::Locator;
+use crate::loc::{
+    Locator,
+    packs::{
+        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath,
+    },
+};
+use uuid::Uuid as Guid;
+#[cfg(todo)]
 use taimi_pack::attributes::keys::Guid;
-use crate::controller::pathing::registry::{CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackMarkerNs;
@@ -204,11 +210,11 @@ impl From<MarkerIndex> for MarkerIndexVariant {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct MarkerId {
-    pub guid: Guid,
+    pub uuid: Uuid,
 }
 
 impl MarkerId {
-    pub const EMPTY: Self = Self::with_guid(Guid::EMPTY);
+    pub const EMPTY: Self = Self::with_uuid(Uuid::nil());
 }
 
 impl MarkerId {
@@ -221,20 +227,18 @@ impl MarkerId {
     pub const NS1_PACK: u8 = 2;
     pub const NS1_PACK_MAP: u8 = 3;
 
-    pub const fn with_guid(guid: Guid) -> Self {
-        Self { guid }
-    }
     pub const fn with_uuid(uuid: Uuid) -> Self {
-        Self::with_guid(Guid(uuid))
+        Self { uuid }
     }
     pub const fn from_uuid_ref(uuid: &Uuid) -> &Self {
-        Self::from_guid_ref(Guid::from_uuid_ref(uuid))
-    }
-    pub const fn from_guid_ref(guid: &Guid) -> &Self {
         unsafe {
-            mem::transmute(guid)
+            mem::transmute(uuid)
         }
     }
+    #[cfg(todo)]
+    pub const fn with_guid(guid: Guid) -> Self {}
+    #[cfg(todo)]
+    pub const fn from_guid_ref(guid: &Guid) -> &Self {}
 
     /// any data present in `d3 & 0xf000` and `d4[0] & 0xc0` will be cleared
     ///
@@ -271,7 +275,7 @@ impl MarkerId {
     }
 
     pub fn ns01_8(&self) -> u8 {
-        self.guid.0.as_bytes()[8]
+        self.uuid.as_bytes()[8]
     }
     pub fn ns01(&self) -> (u8, u8) {
         let ns = self.ns01_8() & 0x3f;
@@ -280,7 +284,7 @@ impl MarkerId {
         (ns0, ns1)
     }
     pub fn index0(&self) -> u32 {
-        let bytes = self.guid.0.as_bytes();
+        let bytes = self.uuid.as_bytes();
         let index0 = unsafe {
             &*(bytes as *const [u8; 16] as *const [u8; 4])
         };
@@ -288,7 +292,7 @@ impl MarkerId {
             .swap_bytes()
     }
     pub fn index12(&self) -> (u16, u16) {
-        let bytes = self.guid.0.as_bytes();
+        let bytes = self.uuid.as_bytes();
         let (index1, index2) = unsafe {
             let bytes = bytes as *const [u8; 16] as *const [u8; 2];
             (
@@ -301,7 +305,7 @@ impl MarkerId {
         (index1, index2)
     }
     pub fn index3(&self) -> u64 {
-        let bytes = self.guid.0.as_bytes();
+        let bytes = self.uuid.as_bytes();
         let index3 = unsafe {
             &*(bytes as *const [u8; 16] as *const [u8; 8]).add(1)
         };
@@ -327,17 +331,17 @@ impl MarkerId {
         }
     }
 
-    fn new_uuidv5_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Guid where
+    fn new_uuidv5_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
         'n: 'b,
     {
         let bytes = iter::once(&ns.as_bytes()[..])
             .chain(bytes);
         let hash = hash_bytes(bytes);
         let uuid = uuid::Builder::from_sha1_bytes(hash).into_uuid();
-        Guid(uuid)
+        uuid
     }
 
-    pub fn new_for_parent(category: &MarkerId, group: Option<&MarkerId>, marker: MarkerIndex) -> Guid {
+    pub fn new_for_parent(category: &MarkerId, group: Option<&MarkerId>, marker: MarkerIndex) -> Uuid {
         Self::new_uuidv5_namespace(&NAMESPACE_PACK_PARENT, [
             &category.as_bytes()[..],
             group.unwrap_or(&MarkerId::EMPTY).as_bytes(),
@@ -346,7 +350,7 @@ impl MarkerId {
     }
 
     pub const fn as_bytes(&self) -> &[u8; 16] {
-        &self.guid.0.as_bytes()
+        &self.uuid.as_bytes()
     }
 
     pub fn variant(&self) -> IdVariant {
@@ -358,6 +362,7 @@ impl<N: MarkerId1> From<MarkerPath<N>> for MarkerId {
         Self::for_marker(marker)
     }
 }
+#[cfg(todo)]
 impl From<Guid> for MarkerId {
     fn from(id: Guid) -> Self {
         Self::with_guid(id)
@@ -368,6 +373,7 @@ impl From<Uuid> for MarkerId {
         Self::with_uuid(id)
     }
 }
+#[cfg(todo)]
 impl From<MarkerId> for Guid {
     fn from(id: MarkerId) -> Self {
         id.guid
@@ -375,19 +381,21 @@ impl From<MarkerId> for Guid {
 }
 impl From<MarkerId> for Uuid {
     fn from(id: MarkerId) -> Self {
-        id.guid.0
+        id.uuid
     }
 }
+#[cfg(todo)]
 impl AsRef<Guid> for MarkerId {
     fn as_ref(&self) -> &Guid {
-        &self.guid
+        &self.uuid
     }
 }
 impl AsRef<Uuid> for MarkerId {
     fn as_ref(&self) -> &Uuid {
-        &self.guid.0
+        &self.uuid
     }
 }
+#[cfg(todo)]
 impl Borrow<Guid> for MarkerId {
     fn borrow(&self) -> &Guid {
         self.as_ref()
@@ -405,7 +413,7 @@ impl AsRef<MarkerId> for MarkerId {
 }
 impl AsRef<MarkerId> for Guid {
     fn as_ref(&self) -> &MarkerId {
-        MarkerId::from_guid_ref(self)
+        MarkerId::from_uuid_ref(self)
     }
 }
 pub trait MarkerId1 {
