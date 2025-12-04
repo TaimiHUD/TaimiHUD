@@ -183,6 +183,7 @@ impl PathingWindowState {
             }
         }
         if packs_maps_changed {
+            self.prune_maps();
             let map_id = self.pack_gameplay.as_ref()
                 .and_then(|state| state.borrow().map_id);
             for &(path, ref pack) in &loaded_packs {
@@ -300,6 +301,19 @@ impl PathingWindowState {
         self.category_tips.clear();
         self.category_copy.clear();
         self.cache_info.clear();
+    }
+    /// TODO: lack of map info can just mean it's not loaded yet,
+    /// so don't clear anything meaningful here
+    pub fn prune_maps(&mut self) {
+        let map_info = self.pack_maps.as_ref()
+            .map(|info| info.borrow());
+        let Some(map_info) = map_info else { return };
+
+        map_info.prune_map(&mut self.current_map);
+        map_info.prune_map_of(&mut self.current_state);
+        map_info.prune_map_of(&mut self.category_tips);
+        map_info.prune_map_of(&mut self.category_copy);
+        map_info.prune_map_of(&mut self.cache_info);
     }
 
     fn refresh_packs(&mut self) {
