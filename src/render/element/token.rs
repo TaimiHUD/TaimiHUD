@@ -11,6 +11,11 @@ pub struct ApiTokenInput {
 impl ApiTokenInput {
     pub const DUMMY_CHAR: u8 = b'*';
     pub const DUMMY: &'static str = "***";
+    /// protect user from themselves (and imgui input focus issues)
+    ///
+    /// this should still be well below what we expect from api tokens
+    /// for github and arenanet, but beware if ever used for passwords?
+    pub const MIN_TOKEN_LEN: usize = 10;
 
     pub fn new() -> Self {
         Self { buffer: String::new() }
@@ -26,6 +31,7 @@ impl ApiTokenInput {
         self.update_preview(!token.is_empty())
     }
 
+    #[cfg(todo = "unused")]
     pub fn draw(&mut self, ui: &imgui::Ui, label_id: &str) -> Option<String> {
         let changed = self.draw_input(ui, label_id);
         self.draw_finish(ui, changed)
@@ -69,6 +75,11 @@ impl ApiTokenInput {
             return None
         }
         let token = match changed {
+            true if self.buffer.len() < Self::MIN_TOKEN_LEN => {
+                // protect user from themselves (and imgui input focus issues)
+                log::info!("token input too short, ignoring");
+                String::new()
+            },
             true => self.buffer.clone(),
             false if ui.is_item_clicked_with_button(MouseButton::Right) => String::new(),
             false => return None,
