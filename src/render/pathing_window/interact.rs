@@ -335,7 +335,7 @@ impl PathingWindowState {
         if let Some(action) = action_trigger {
             let action = rpoi.action_trigger(action);
             Controller::with_sender(|s| if let Some(s) = &s.pathing {
-                s.interactions.send(action);
+                let _ = s.interactions.send(action);
             });
         } else if action_untrigger {
             rpoi.action_untrigger().try_send();
@@ -621,7 +621,7 @@ impl PathingWindowState {
                 action.try_send(),
             Some(Err(action)) => {
                 Controller::with_sender(|s| if let Some(s) = &s.pathing {
-                    s.interactions.send(action);
+                    let _ = s.interactions.send(action);
                 });
             },
             None => (),
