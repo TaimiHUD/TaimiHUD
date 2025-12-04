@@ -3,7 +3,7 @@ use {
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
-        settings::state::save_state_backup,
+        settings::state::{save_state_backup, ui::UiState},
         SETTINGS,
     },
     anyhow::Context,
@@ -169,6 +169,8 @@ pub struct Settings {
     pub arc: Option<ArcSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pathing: Option<PathingSettings>,
+    #[serde(default, skip_serializing_if = "UiState::is_empty")]
+    pub ui_state: UiState,
 }
 
 impl Settings {
@@ -465,6 +467,7 @@ impl Settings {
             disabled_paths: Default::default(),
             pathing: Default::default(),
             arc: Default::default(),
+            ui_state: Default::default(),
         }
     }
     pub fn file_path(addon_dir: &Path) -> PathBuf {
@@ -520,6 +523,7 @@ impl Settings {
     }
 
     pub async fn start_save(&self) -> anyhow::Result<SettingsSave> {
+        self.ui_state.mark_clean();
         Ok((
             self.settings_path().await?,
             self.settings_str()?,
@@ -551,7 +555,10 @@ impl Settings {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.dirty.load(Ordering::Relaxed)
+        self.dirty.load(Ordering::Relaxed) || self.is_state_dirty()
+    }
+    fn is_state_dirty(&self) -> bool {
+        self.ui_state.is_dirty()
     }
 
     pub async fn try_commit() -> anyhow::Result<Option<SettingsSave>> {
@@ -560,7 +567,7 @@ impl Settings {
             Some(s) => s,
         };
         let dirty = settings.dirty.swap(false, Ordering::SeqCst);
-        if !dirty {
+        if !dirty && !settings.is_state_dirty() {
             return Ok(None)
         }
 

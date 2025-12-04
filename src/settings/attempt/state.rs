@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use relative_path::RelativePathBuf;
 
 use crate::settings::{GitHubSource, Source, NeedsUpdate, RemoteSource};
+use crate::settings::state::ui::Render2DState;
 
 use crate::timer::TimerFile;
 use crate::ADDON_DIR;
@@ -106,23 +107,6 @@ pub struct SourceInstallState {
     // for this.
     pub version: String,
     pub dir: PathBuf,
-}
-
-
-#[derive(Deserialize, Serialize, Default, Debug)]
-pub struct Render2DState {
-    primary_window: PrimaryWindowState,
-    timers_window: TimersWindowState,
-}
-
-#[derive(Deserialize, Serialize, Default, Debug)]
-pub struct PrimaryWindowState {
-    open: bool,
-}
-
-#[derive(Deserialize, Serialize, Default, Debug)]
-pub struct TimersWindowState {
-    open: bool,
 }
 
 #[derive(Debug)]

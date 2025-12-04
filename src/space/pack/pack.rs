@@ -12,9 +12,10 @@ use {
         fl,
         render::{
             machine::{RenderMachine, RenderPosition},
-            pathing_window::{PathingFilterState, PathingSearchState},
+            pathing_window::PathingSearchState,
             RenderState,
         },
+        settings::state::ui::pathing::PathingFilterFlags as PathingFilterState,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             pack::{FestivalFixup, MarkerAttributesExt, Pack},
@@ -825,6 +826,11 @@ impl ActivePack {
             self.loaded_textures.set(handle, false);
         }
         self.unused_textures.fill(false);
+    }
+}
+impl AsRef<Pack> for ActivePack {
+    fn as_ref(&self) -> &Pack {
+        &self.pack
     }
 }
 

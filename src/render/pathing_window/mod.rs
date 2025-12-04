@@ -3,16 +3,15 @@ use {
         controller::pathing::PathingEvent,
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
-        settings::Settings,
-        space::{
-            engine::Engine,
-            pack::{ActivePack, UnloadedReason},
+        settings::{
+            state::ui::{pathing::PathingFilterFlags, PathingWindowState as UiState},
+            Settings,
         },
+        space::{engine::Engine, pack::UnloadedReason},
         with_i18n,
         Controller,
         ControllerEvent,
     },
-    bitflags::bitflags,
     nexus::imgui::{
         ChildWindow,
         Condition,
@@ -26,141 +25,21 @@ use {
         Window,
         WindowFlags,
     },
-    regex::{Regex, RegexBuilder},
-    std::{collections::HashSet, str::FromStr},
+    std::collections::HashSet,
+    taimi_sync::watched::Watched,
 };
 
-bitflags! {
-    #[derive(PartialEq, Copy, Clone)]
-    pub struct PathingFilterState: u8 {
-        const Enabled = 1;
-        const Disabled = 1 << 1;
-        const CurrentMap = 1 << 2;
-        const IgnoreRoot = 1 << 3;
-        const IgnoreLeaves = 1 << 4;
-        const IgnoreBranches = 1 << 5;
-    }
-}
+pub use self::filter::PathingSearchState;
 
-impl Default for PathingFilterState {
-    fn default() -> Self {
-        Self::Enabled | Self::Disabled | Self::IgnoreRoot
-    }
-}
-
-impl FromStr for PathingFilterState {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "enabled" => Self::Enabled,
-            "disabled" => Self::Disabled,
-            "ignore-root" => Self::IgnoreRoot,
-            "ignore-leaf" => Self::IgnoreLeaves,
-            "ignore-branch" => Self::IgnoreBranches,
-            "current-map" => Self::CurrentMap,
-            _ => anyhow::bail!("unsupported filter option `{s}`"),
-        })
-    }
-}
-
-impl PathingFilterState {
-    pub fn bit_as_str(self) -> Option<&'static str> {
-        Some(match self.into_iter().next()? {
-            Self::Enabled => "enabled",
-            Self::Disabled => "disabled",
-            Self::CurrentMap => "current-map",
-            Self::IgnoreRoot => "ignore-root",
-            Self::IgnoreLeaves => "ignore-leaf",
-            Self::IgnoreBranches => "ignore-branch",
-            _ => return None,
-        })
-    }
-}
-
-#[derive(Clone)]
-pub struct PathingSearchState {
-    pub buffer: String,
-    matcher: Option<Regex>,
-    search_candidates: HashSet<String>,
-    pub ignore_space: bool,
-    pub ignore_case: bool,
-}
-
-impl PathingSearchState {
-    pub fn clear(&mut self) {
-        self.buffer.clear();
-        self.matcher = None;
-        self.search_candidates.clear();
-    }
-
-    pub fn commit<'p, P: Iterator<Item = &'p ActivePack>>(&mut self, packs: P) {
-        self.search_candidates.clear();
-        if self.buffer.is_empty() {
-            return
-        }
-        self.matcher = {
-            let pattern = regex::escape(&self.buffer);
-            let matcher = RegexBuilder::new(&pattern)
-                .case_insensitive(self.ignore_case)
-                .ignore_whitespace(self.ignore_space)
-                .build();
-            if let Err(e) = &matcher {
-                log::warn!("search filter failure: {e:#}");
-            }
-            matcher.ok()
-        };
-
-        for pack in packs {
-            for (full_id, category) in pack.pack.categories.all_categories.iter() {
-                if self.matches_name(&category.display_name) || self.matches_name(&category.id) {
-                    self.search_candidates.insert(full_id.into());
-                    let separators = full_id.rmatch_indices(".");
-                    for (idx, _eu) in separators {
-                        if let Some(sub_id) = full_id.get(..idx) {
-                            self.search_candidates.insert(sub_id.into());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn matches_name(&self, name: &str) -> bool {
-        match &self.matcher {
-            Some(regex) => regex.is_match(name),
-            #[cfg(todo = "unnecessary")]
-            None if self.buffer.is_empty() => false,
-            None => name.contains(&self.buffer),
-        }
-    }
-
-    pub fn matches_id(&self, full_id: &str) -> bool {
-        match self.buffer.is_empty() {
-            false => self.search_candidates.contains(full_id),
-            true => true,
-        }
-    }
-}
-
-impl Default for PathingSearchState {
-    fn default() -> Self {
-        Self {
-            buffer: Default::default(),
-            matcher: Default::default(),
-            search_candidates: Default::default(),
-            ignore_case: true,
-            ignore_space: true,
-        }
-    }
-}
+mod filter;
 
 pub struct PathingWindowState {
     pub open: bool,
     pub filter_open: bool,
-    pub filter_state: PathingFilterState,
+    pub filter_state: PathingFilterFlags,
     pub open_items: HashSet<String>,
     pub search_state: PathingSearchState,
+    pub ui_state: Watched<UiState>,
 }
 
 impl PathingWindowState {
@@ -171,6 +50,7 @@ impl PathingWindowState {
             filter_state: Default::default(),
             open_items: Default::default(),
             search_state: Default::default(),
+            ui_state: Watched::empty_with(Default::default()),
         }
     }
 
@@ -183,10 +63,24 @@ impl PathingWindowState {
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
             open = settings.pathing_window_open;
+            if self.ui_state.watch.get_receiver().is_none() {
+                self.ui_state.restart_watching(&settings.ui_state.pathing_window);
+            }
         };
+        if self.ui_state.watch.has_changed() {
+            let ui_state = self.ui_state.get_mut();
+            self.filter_open = ui_state.search.open;
+            self.filter_state = ui_state.filter.flags;
+            self.search_state.flags = ui_state.search.flags;
+            match ui_state.search.query() {
+                Some(query) if self.search_state.buffer.is_empty() =>
+                    self.search_state.buffer = query.into(),
+                _ => (),
+            }
+        }
         if open {
             Window::new(fl!("pathing-window"))
-                .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
+                .size([300.0, 200.0], Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {
                     let pathing_dir = crate::ADDON_DIR.join("pathing");
@@ -204,6 +98,9 @@ impl PathingWindowState {
                             };
                             if ui.button(button_text) {
                                 self.filter_open = !self.filter_open;
+                                self.ui_state.write_with(|state| {
+                                    state.search.open = self.filter_open;
+                                });
                             }
 
                             ui.same_line();
@@ -231,44 +128,22 @@ impl PathingWindowState {
                         }
                         if self.filter_open {
                             ui.separator();
-                            let pushy = ui.push_id("pathing-search");
-                            let mut search_dirty = ui
-                                .input_text("", &mut self.search_state.buffer)
-                                .hint("Search")
-                                .build();
-                            ui.same_line();
-                            if ui.button("X") {
-                                self.search_state.clear();
-                            }
-                            if ui.is_item_hovered() {
-                                ui.tooltip_text(fl!("searchbar-clear"));
-                            }
-                            ui.same_line();
-                            search_dirty |=
-                                ui.checkbox(&fl!("case-insensitive"), &mut self.search_state.ignore_case);
-                            ui.same_line();
-                            search_dirty |=
-                                ui.checkbox(&fl!("ignore-whitespace"), &mut self.search_state.ignore_space);
-                            pushy.pop();
-                            ui.dummy([4.0; 2]);
-                            ui.text(fl!("filter-options"));
-                            let filters = PathingFilterState::all()
-                                .iter()
-                                .filter_map(|filter| filter.bit_as_str().map(|name| (filter, name)));
-                            for (i, (flag, filter_name)) in filters.enumerate() {
-                                if i > 0 && i % 3 != 0 {
-                                    ui.same_line();
-                                }
-                                with_i18n!(filter_name, |name| ui.checkbox_flags(
-                                    name,
-                                    &mut self.filter_state,
-                                    flag
-                                ));
-                            }
+                            let filter_prev = self.filter_state;
+                            let search_dirty = self.draw_filters(ui);
                             ui.dummy([4.0; 2]);
                             ui.separator();
                             ui.dummy([4.0; 2]);
 
+                            if search_dirty || filter_prev != self.filter_state {
+                                self.ui_state.write_if(|s| {
+                                    let flags = (self.search_state.flags, self.filter_state);
+                                    let changed = (s.search.flags, s.filter.flags) != flags;
+                                    s.search.query = self.search_state.buffer.clone();
+                                    s.search.flags = flags.0;
+                                    s.filter.flags = flags.1;
+                                    changed.then_some(true)
+                                });
+                            }
                             if search_dirty {
                                 self.search_state.commit(engine.packs.loaded_packs.values());
                             }

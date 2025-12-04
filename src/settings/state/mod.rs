@@ -5,10 +5,12 @@ use {
 
 mod bootstrap;
 mod save;
+pub mod ui;
 
 pub use self::{
     bootstrap::{AddonHostName, BootstrapState, UpdatePreference},
     save::SaveState,
+    ui::UiState,
 };
 
 pub fn save_state_backup(path: &Path) {

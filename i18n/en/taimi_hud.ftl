@@ -274,6 +274,7 @@ current-map = Current map
 ignore-root = Ignore root state
 ignore-leaf = Ignore leaf state
 ignore-branch = Ignore branch state
+show-hidden = Show hidden
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
 toggle = Toggle
