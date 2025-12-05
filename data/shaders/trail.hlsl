@@ -16,7 +16,8 @@
 #define FEATHER_SIZE_Z 1.0
 #define FEATHER_SCALE_Z 5.0
 #endif
-#define dot3(l, r) (l.x * r.x + l.y * r.y + l.z * r.z)
+#define dot3(l, r) ((l).x * (r).x + (l).y * (r).y + (l).z * (r).z)
+#define saturate(x) clamp(x, 0.0, 1.0)
 
 struct VSInput
 {

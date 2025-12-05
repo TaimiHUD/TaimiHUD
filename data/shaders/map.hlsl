@@ -1,4 +1,4 @@
-#define dot3(l, r) (l.x * r.x + l.y * r.y + l.z * r.z)
+#define dot3(l, r) ((l).x * (r).x + (l).y * (r).y + (l).z * (r).z)
 
 struct VSInput
 {
