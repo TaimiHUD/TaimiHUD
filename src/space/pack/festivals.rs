@@ -127,6 +127,11 @@ impl FestivalFixup {
             Festival::Halloween,
             FestivalWindow::with_timestamp(1759852800, 1762282800),
         ),
+        // Wintersday 2025: 2025-12-09 — 2026-01-02
+        (
+            Festival::Wintersday,
+            FestivalWindow::with_timestamp(1765296000, 1767376800),
+        ),
     ];
 }
 
