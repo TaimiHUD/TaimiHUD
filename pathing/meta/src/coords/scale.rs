@@ -21,8 +21,10 @@ impl MapLocalScale {
     /// (local z+ is usually global y-, so for y scale negatively)
     pub const COMMON: Self = Self::with_game_scale(Vector2::new(24.0, -24.0));
 
-    /// 0.3048m / ft
-    pub const METRES_PER_FEET: f32 = 1.0 / 3.28084;
+    /// 3.28084ft / m or 0.3048m / ft
+    ///
+    /// precision chosen to match RTAPI
+    pub const METRES_PER_FEET: f32 = 12.0 / 39.369999;
     pub const METRES_PER_INCH: f32 = Self::METRES_PER_FEET / 12.0;
 
     pub fn with_scale(scale: Vector2<LocalSpace>) -> Self {
