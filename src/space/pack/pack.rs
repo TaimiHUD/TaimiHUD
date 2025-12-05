@@ -273,8 +273,35 @@ impl ActivePack {
                 }
                 ui.unindent();
                 ui.table_next_column();
-                ui.table_next_column();
             } else {
+                let mut state_checkbox = None;
+                if !category.is_separator {
+                    if let Some(idx) = all_categories.get_index_of(&category.full_id) {
+                        if state.get(idx).is_some() {
+                            let (state, recompute) = (&mut *state, &mut *recompute);
+                            state_checkbox = Some(move || {
+                                if let Some(mut substate) = state.get_mut(idx) {
+                                    if ui.checkbox("", &mut substate) {
+                                        *recompute = true;
+                                        PathingController::try_send(PathingEvent::PathingStateUpdate(
+                                            category.full_id.clone(),
+                                            *substate,
+                                        ));
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                let has_state_checkbox = !is_root && state_checkbox.is_some();
+                if !is_root {
+                    if let Some(mut checkbox) = state_checkbox.take() {
+                        ui.unindent();
+                        checkbox();
+                        ui.same_line();
+                    }
+                }
+
                 let (copyable_categories, copyable_pois, pois) = copyable;
                 let has_copyable_pois = category_idx
                     .map(|idx| copyable_categories.contains(&idx))
@@ -287,7 +314,10 @@ impl ActivePack {
                 {
                     unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
                 }
-                unbuilt = unbuilt.frame_padding(true).tree_push_on_open(false);
+                unbuilt = unbuilt
+                    .frame_padding(true)
+                    .tree_push_on_open(false)
+                    .allow_item_overlap(state_checkbox.is_some());
                 if category.is_separator {
                     unbuilt = unbuilt.leaf(true);
                 } else if category.sub_categories.is_empty() {
@@ -302,6 +332,14 @@ impl ActivePack {
                     Self::draw_tooltip(ui, &category.display_name, || {
                         Self::draw_tooltip_category(ui, category);
                     });
+                }
+                if let Some(mut checkbox) = state_checkbox.take() {
+                    ui.same_line();
+                    ui.dummy([4.0, 0.0]);
+                    ui.same_line();
+                    checkbox();
+                } else if has_state_checkbox {
+                    ui.indent();
                 }
                 if category.marker_attributes.copy_value.is_some() {
                     ui.same_line();
@@ -347,20 +385,6 @@ impl ActivePack {
                                 Self::draw_tooltip_poi(ui, &copyable.attributes);
                                 Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
                             });
-                        }
-                    }
-                }
-                ui.table_next_column();
-                if !category.is_separator {
-                    if let Some(idx) = all_categories.get_index_of(&category.full_id) {
-                        if let Some(mut substate) = state.get_mut(idx) {
-                            if ui.checkbox("", &mut substate) {
-                                *recompute = true;
-                                PathingController::try_send(PathingEvent::PathingStateUpdate(
-                                    category.full_id.clone(),
-                                    *substate,
-                                ));
-                            };
                         }
                     }
                 }

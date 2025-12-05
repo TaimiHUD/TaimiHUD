@@ -280,24 +280,7 @@ impl PathingWindowState {
                                 let table_flags =
                                     TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
                                 let table_name = format!("pathing");
-                                let table_token = ui.begin_table_header_with_flags(
-                                    &table_name,
-                                    [
-                                        TableColumnSetup {
-                                            name: &fl!("name"),
-                                            flags: TableColumnFlags::WIDTH_STRETCH,
-                                            init_width_or_weight: 0.0,
-                                            user_id: Id::Str("name"),
-                                        },
-                                        TableColumnSetup {
-                                            name: &fl!("toggle"),
-                                            flags: TableColumnFlags::WIDTH_FIXED,
-                                            init_width_or_weight: 0.0,
-                                            user_id: Id::Str("actions"),
-                                        },
-                                    ],
-                                    table_flags,
-                                );
+                                let table_token = ui.begin_table_with_flags(&table_name, 1, table_flags);
                                 ui.table_next_column();
                                 for (name, reason) in &engine.packs.unloaded_packs {
                                     let node = TreeNode::new(name)
@@ -325,7 +308,6 @@ impl PathingWindowState {
                                             }
                                         },
                                     }
-                                    ui.table_next_column();
                                     ui.table_next_column();
                                     if let Some(node) = node {
                                         node.pop()
