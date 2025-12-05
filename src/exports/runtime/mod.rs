@@ -486,11 +486,7 @@ where
     let res = if TEXTURES.is_available() {
         match TEXTURES.request_load_file(key.as_ref(), path.as_ref()).await {
             Ok(()) => return Ok(()),
-            Err(e) => {
-                let msg = "Texture load failure";
-                ::log::error!("{msg}: {e}");
-                msg
-            },
+            Err(..) => "Texture load failure",
         }
     } else {
         res
@@ -534,11 +530,7 @@ where
         };
         match TEXTURES.request_load_bytes(key.as_ref(), bytes).await {
             Ok(()) => return Ok(()),
-            Err(e) => {
-                let msg = "Texture load failure";
-                ::log::error!("{msg}: {e}");
-                msg
-            },
+            Err(..) => "Texture load failure",
         }
     } else {
         res

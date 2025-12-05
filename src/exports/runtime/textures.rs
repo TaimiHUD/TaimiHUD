@@ -171,6 +171,7 @@ impl TextureLoader {
         textures.get(key).map(|texture| texture.imgui_texture())
     }
 
+    #[cfg(todo = "unused")]
     pub async fn request_load_file_relative<R, P>(&self, rel: R, path: P) -> anyhow::Result<()>
     where
         R: AsRef<RelativePath> + Into<String>,
