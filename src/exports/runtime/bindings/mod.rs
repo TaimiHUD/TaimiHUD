@@ -163,7 +163,12 @@ impl serde::Serialize for TaimiControls {
 }
 impl<'de> serde::Deserialize<'de> for TaimiControls {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        u32::deserialize(deserializer).map(Self::from_bits_retain)
+        u64::deserialize(deserializer).map(|v| {
+            if v > u32::MAX as u64 {
+                log::info!("unexpected taimi controls {v:#018x}, maybe version reverted?");
+            }
+            Self::from_bits_truncate(v as u32)
+        })
     }
 }
 
