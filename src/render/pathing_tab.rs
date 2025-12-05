@@ -90,8 +90,11 @@ impl PathingConfig {
                 let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
                     .flags(TreeNodeFlags::FRAMED)
                     .opened(false, Condition::Once)
-                    .tree_push_on_open(true)
-                    .build(ui, || Self::draw_goggles_opts(ui, machine));
+                    .tree_push_on_open(false)
+                    .build(ui, || {
+                        let _id = ui.push_id("goggles");
+                        Self::draw_goggles_opts(ui, machine)
+                    });
             }
         };
 
@@ -241,21 +244,24 @@ impl PathingConfig {
     ) -> Option<Option<f32>> {
         let mut enabled = value.is_some();
         let _token = ui.push_id(label);
-        let res = if let Some(value) = value {
-            let res = Self::slider_setting(ui, label, value, range);
-            res
-        } else {
-            ui.label_text(label, &fl!("disabled"));
-            None
-        };
-        ui.same_line();
-        if ui.checkbox("", &mut enabled) {
-            return Some(match enabled {
+        ui.unindent();
+        let mut res = if ui.checkbox("", &mut enabled) {
+            Some(match enabled {
                 false if initial.is_some() => None,
                 false => Some(SpaceSettings::NONE_F32),
                 true => initial,
             })
+        } else {
+            None
+        };
+
+        ui.same_line();
+        if let Some(value) = value {
+            res = res.or(Self::slider_setting(ui, label, value, range));
+        } else {
+            ui.label_text(label, &fl!("disabled"));
         }
+        ui.indent();
         res
     }
 
@@ -332,6 +338,7 @@ impl PathingConfig {
 
         with_i18n!("pathing-config-reset-notice", |msg| ui.text_wrapped(&msg));
 
+        ui.indent();
         if let Some(value) = Self::slider_setting(
             ui,
             &fl!("pathing-config-trail-alpha"),
@@ -402,6 +409,7 @@ impl PathingConfig {
         ) {
             Self::set_pathing(|s| s.space.distance_max = value);
         }
+        ui.unindent();
         #[cfg(feature = "extension-nexus")]
         if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
@@ -500,7 +508,7 @@ impl PathingConfig {
             )
         })?;
 
-        let minimap_opts = || {
+        let mut minimap_opts = || {
             //RenderState::font_text("ui", ui, &fl!("pathing-config-minimap"));
             if ui.checkbox(&fl!("pathing-render-minimap-toggle"), &mut visible_minimap) {
                 Self::set_pathing(|s| s.space.visible_map_mini = Some(visible_minimap));
@@ -546,10 +554,13 @@ impl PathingConfig {
         let _minimap = TreeNode::new(&fl!("pathing-config-minimap"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(true, Condition::Once)
-            .tree_push_on_open(true)
-            .build(ui, minimap_opts);
+            .tree_push_on_open(false)
+            .build(ui, || {
+                let _id = ui.push_id("minimap");
+                minimap_opts()
+            });
 
-        let worldmap_opts = || {
+        let mut worldmap_opts = || {
             if ui.checkbox(&fl!("pathing-render-map-toggle"), &mut visible_worldmap) {
                 Self::set_pathing(|s| s.space.visible_map_world = Some(visible_worldmap));
             }
@@ -602,8 +613,11 @@ impl PathingConfig {
         let _worldmap = TreeNode::new(&fl!("pathing-config-worldmap"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(true, Condition::Once)
-            .tree_push_on_open(true)
-            .build(ui, worldmap_opts);
+            .tree_push_on_open(false)
+            .build(ui, || {
+                let _id = ui.push_id("worldmap");
+                worldmap_opts()
+            });
 
         Some(())
     }
@@ -728,7 +742,7 @@ impl PathingConfig {
         let _lenses = TreeNode::new("advanced lens config")
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
-            .tree_push_on_open(true)
+            .tree_push_on_open(false)
             .build(ui, || render_goggles::options_ui_lenses(ui));
 
         Some(())
