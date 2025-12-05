@@ -17,7 +17,8 @@
 #define FEATHER_SCALE_Z 5.0
 #endif
 #define dot3(l, r) ((l).x * (r).x + (l).y * (r).y + (l).z * (r).z)
-#define saturate(x) clamp(x, 0.0, 1.0)
+#define saturate1(v1) (((v1) < 0.0) ? 0.0 : (((v1) > 1.0) ? 1.0 : (v1)))
+#define saturate3(v3) (float3(saturate1((v3).x), saturate1((v3).y), saturate1((v3).z)))
 
 struct VSInput
 {
@@ -93,7 +94,7 @@ PSOutput PSMain(VSOutput input)
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot3(displacement, displacement);
-    float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
+    float distance_intensity = saturate1(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
     float intensity = INTENSITY_PARAM_2 * distance_intensity * distance_intensity + INTENSITY_PARAM_1 * distance_intensity + INTENSITY_PARAM_0;
 
     float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
@@ -102,10 +103,10 @@ PSOutput PSMain(VSOutput input)
         abs(FeatherOffset.xy - input.position.xy * viewport_size_1),
         FeatherOffset.z - input.position.z * FEATHER_SIZE_Z /* / input.position.w */
     );
-    float3 feather3 = saturate((float1(1.0).xxx - feather_offset) * feather_scale);
+    float3 feather3 = saturate3((float1(1.0).xxx - feather_offset) * feather_scale);
     float feather = feather3.x * feather3.y;
 
-    float alpha = textureColour.w * saturate(intensity) * feather*feather * feather3.z;
+    float alpha = textureColour.w * saturate1(intensity) * feather*feather * feather3.z;
     output.color = float4(textureColour.xyz, alpha);
 
     return output;
