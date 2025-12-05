@@ -1,3 +1,5 @@
+#define dot3(l, r) (l.x * r.x + l.y * r.y + l.z * r.z)
+
 struct VSInput
 {
     float3 position: POSITION;
@@ -31,7 +33,7 @@ VSOutput VSMain(VSInput input)
 
     //float expand_dir = normalize(input.normal);
     float3 expand_dir = input.normal;
-    float isTrail = dot(expand_dir, expand_dir); // 1.0 for trails, 0.0 for POIs
+    float isTrail = dot3(expand_dir, expand_dir); // 1.0 for trails, 0.0 for POIs
     //float isPoi = step(isTrail, 0.5);
     float isPoi = 1.0 - isTrail;
 

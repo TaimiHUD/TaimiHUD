@@ -16,6 +16,7 @@
 #define FEATHER_SIZE_Z 1.0
 #define FEATHER_SCALE_Z 5.0
 #endif
+#define dot3(l, r) (l.x * r.x + l.y * r.y + l.z * r.z)
 
 struct VSInput
 {
@@ -88,7 +89,7 @@ PSOutput PSMain(VSOutput input)
     //if (textureColour.w < DISCARD_ALPHA || input.position.z < DiscardZ) { discard; }
 
     float3 displacement = input.distance.xyz;
-    float distance_squared = dot(displacement, displacement);
+    float distance_squared = dot3(displacement, displacement);
 
     float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
 
