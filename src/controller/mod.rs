@@ -685,6 +685,12 @@ impl Controller {
             ControllerEvent::CombatEvent { .. }
             | ControllerEvent::WindowState(..)
             | ControllerEvent::UiTick(..) => log::trace!("Controller received event: {}", event),
+            #[cfg(feature = "timers")]
+            Timers(..) => (),
+            #[cfg(feature = "markers")]
+            Markers(..) => (),
+            #[cfg(feature = "space")]
+            Pathing(..) => (),
             event => log::debug!("Controller received event: {}", event),
         }
 
@@ -696,7 +702,7 @@ impl Controller {
                     .await,
             #[cfg(feature = "markers")]
             Markers(evt) => self.markers.handle_event(evt, &self.rt_sender).await?,
-            #[cfg(feature = "markers")]
+            #[cfg(feature = "space")]
             Pathing(evt) => self.pathing.handle_event(evt, &self.settings).await,
 
             ReloadData => self.reload_data().await,
