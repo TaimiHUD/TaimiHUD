@@ -475,12 +475,16 @@ pub fn d3d11_device() -> anyhow::Result<(Device, SwapChain)> {
     })
 }
 
-pub async fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> {
+pub async fn texture_schedule_path<K, P>(key: K, path: P) -> RuntimeResult<()>
+where
+    K: AsRef<str> + Into<String>,
+    P: AsRef<Path> + Into<PathBuf>,
+{
     let res = RT_UNAVAILABLE;
 
     #[cfg(feature = "texture-loader")]
     let res = if TEXTURES.is_available() {
-        match TEXTURES.request_load_file(key, path).await {
+        match TEXTURES.request_load_file(key.as_ref(), path.as_ref()).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let msg = "Texture load failure";
@@ -493,14 +497,31 @@ pub async fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<()> 
     };
 
     #[cfg(feature = "extension-nexus")]
-    if let Some(res) = exports::nexus::texture_schedule_path(key, path)? {
-        return Ok(res)
+    {
+        let key = key.into();
+        let path = path.into();
+        let nexus_res =
+            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_path(&key, &path))
+                .await
+                .with_context(|| format!("scheduling nexus texture load"));
+        match nexus_res {
+            Err(e) => {
+                ::log::error!("{e:#}");
+                return Err(res)
+            },
+            Ok(Err(e)) => return Err(e),
+            Ok(Ok(Some(res))) => return Ok(res),
+            Ok(Ok(None)) => (),
+        }
     }
 
     Err(res)
 }
 
-pub async fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<()> {
+pub async fn texture_schedule_bytes<K>(key: K, bytes: Vec<u8>) -> RuntimeResult<()>
+where
+    K: AsRef<str> + Into<String>,
+{
     let res = RT_UNAVAILABLE;
 
     #[cfg(feature = "texture-loader")]
@@ -511,7 +532,7 @@ pub async fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<
             #[cfg(not(feature = "extension-nexus"))]
             b => b,
         };
-        match TEXTURES.request_load_bytes(key, bytes).await {
+        match TEXTURES.request_load_bytes(key.as_ref(), bytes).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let msg = "Texture load failure";
@@ -524,8 +545,21 @@ pub async fn texture_schedule_bytes(key: &str, bytes: Vec<u8>) -> RuntimeResult<
     };
 
     #[cfg(feature = "extension-nexus")]
-    if let Some(res) = exports::nexus::texture_schedule_bytes(key, &bytes)? {
-        return Ok(res)
+    {
+        let key = key.into();
+        let nexus_res =
+            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_bytes(&key, &bytes))
+                .await
+                .with_context(|| format!("scheduling nexus texture load"));
+        match nexus_res {
+            Err(e) => {
+                ::log::error!("{e:#}");
+                return Err(res)
+            },
+            Ok(Err(e)) => return Err(e),
+            Ok(Ok(Some(res))) => return Ok(res),
+            Ok(Ok(None)) => (),
+        }
     }
 
     Err(res)
