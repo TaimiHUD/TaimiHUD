@@ -21,8 +21,6 @@ use {
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
-            LocalContext,
-            MapContext,
         },
         with_i18n,
     },
@@ -41,6 +39,7 @@ use {
         },
     },
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
+    taimi_meta::ui::{LocalContext, MapContext},
     taimi_pack::{
         attributes::{Festival, MarkerAttributes},
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},

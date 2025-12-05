@@ -5,7 +5,6 @@ use {
             pack::{ActivePack, TrailSectionExt},
             resources::{Model, Texture, Vertex},
             DrawSpace,
-            LocalContext,
             TextureSpace,
         },
     },
@@ -14,6 +13,7 @@ use {
     glamour::{Box3, Point2, Vec3Swizzles, Vector3},
     std::sync::Arc,
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
+    taimi_meta::ui::LocalContext,
     taimi_pack::Trail,
 };
 

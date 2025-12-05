@@ -7,7 +7,6 @@ use {
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
             DrawSpace,
-            LocalContext,
         },
     },
     anyhow::Context,
@@ -21,6 +20,7 @@ use {
         },
         state::PrimitiveTopology,
     },
+    taimi_meta::ui::LocalContext,
     taimi_pack::Poi,
 };
 
