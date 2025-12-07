@@ -279,19 +279,36 @@ impl PathingController {
         let Ok(mut settings) = Settings::async_write().await else { return };
 
         let pathing = settings.pathing_mut();
-        let (is_visible, out) = match context {
+        let (_control, is_visible, out) = match context {
             Some(MapContext::Global) => (
+                TaimiControls::PATHING_MAP,
                 pathing.space.visible_worldmap(),
                 &mut pathing.space.visible_map_world,
             ),
             Some(MapContext::Minimap) => (
+                TaimiControls::PATHING_MINIMAP,
                 pathing.space.visible_minimap(),
                 &mut pathing.space.visible_map_mini,
             ),
-            None => (pathing.space.visible_space(), &mut pathing.space.visible_space),
+            None => (
+                TaimiControls::PATHING_SPACE,
+                pathing.space.visible_space(),
+                &mut pathing.space.visible_space,
+            ),
         };
         let set = set.unwrap_or(!is_visible);
         *out = Some(set);
+        drop(settings);
+
+        #[cfg(feature = "extension-nexus")]
+        crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
+            if state.contains(_control) != set {
+                state.toggle(_control);
+                true
+            } else {
+                false
+            }
+        });
 
         #[cfg(feature = "goggles")]
         match (context, set) {

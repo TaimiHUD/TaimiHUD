@@ -10,6 +10,7 @@ use {
         },
         game_language_id as lang_id,
         marker::format::MarkerType,
+        settings::IconStyle,
         unload,
         with_i18n,
         TEXTURES,
@@ -378,60 +379,72 @@ pub fn unregister_keybinds() {
     keybinds.clear();
 }
 
-pub fn quick_access_add(icon: TaimiControls) {
+pub fn quick_access_add(icon: TaimiControls, state_on: TaimiControls, style: IconStyle) {
     use {
         crate::render::RenderState,
         nexus::quick_access::{add_quick_access, add_quick_access_context_menu},
     };
 
-    let Some((identifier, menu, (neutral, neutral_png), (hover, hover_png), keybind)) =
-        quick_access_button_id(icon)
-    else {
+    let Some(identifier) = IconStyle::control_id(icon) else {
+        log::warn!("no button for icon {:#010x}", icon.bits());
         return
     };
-
-    load_texture_from_memory(neutral, neutral_png, None);
-    load_texture_from_memory(hover, hover_png, None);
-    let tooltip_id = match icon {
-        TaimiControls::WINDOW_PRIMARY => "primary-window-toggle-text",
-        _ => keybind,
+    let Some(keybind) = IconStyle::keybind_id(icon) else {
+        log::error!("no keybind for icon {:#010x}", icon.bits());
+        return
     };
+    let tooltip_id = IconStyle::tooltip_id(icon).unwrap_or(keybind);
+    let button_id = IconStyle::control_button_id(identifier);
+
+    let on_off = match state_on.intersects(icon) {
+        state if style.icon_has_state(icon) => state,
+        _ => IconStyle::NEUTRAL_ON_OFF,
+    };
+
+    let texture_neutral = style
+        .texture_id(icon, on_off, false)
+        .or_else(|| IconStyle::default().texture_id(icon, on_off, false));
+    let Some(texture_neutral) = texture_neutral else {
+        log::error!("no texture for icon {:#010x}", icon.bits());
+        return
+    };
+    if let Some(data) = style.data_for(icon, on_off, false) {
+        load_texture_from_memory(&texture_neutral, data, None);
+    }
+    let texture_hover = style.texture_id(icon, on_off, true);
+    let texture_hover = match &texture_hover {
+        Some(id) if style.icon_has_hover(icon) => match style.data_for(icon, on_off, true) {
+            Some(data) => {
+                load_texture_from_memory(id, data, None);
+                Some(&id[..])
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+    .unwrap_or(&texture_neutral[..]);
     with_i18n(tooltip_id, |tooltip_text| {
-        add_quick_access(identifier, neutral, hover, keybind, tooltip_text).leak();
+        add_quick_access(&button_id, &texture_neutral, texture_hover, keybind, tooltip_text).leak();
     });
 
-    match (icon, menu) {
-        (TaimiControls::WINDOW_TIMERS, Some(menu)) => add_quick_access_context_menu(
-            menu,
-            Some(identifier),
-            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_TIMERS)),
-        )
-        .leak(),
-        (TaimiControls::WINDOW_MARKERS, Some(menu)) => add_quick_access_context_menu(
-            menu,
-            Some(identifier),
-            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_MARKERS)),
-        )
-        .leak(),
-        (
+    if IconStyle::control_has_menu(icon) {
+        let menu_id = IconStyle::control_menu_id(identifier);
+        let callback = match icon {
+            #[cfg(feature = "timers")]
+            TaimiControls::WINDOW_TIMERS =>
+                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_TIMERS)),
+            #[cfg(feature = "markers")]
+            TaimiControls::WINDOW_MARKERS =>
+                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_MARKERS)),
+            #[cfg(feature = "space")]
             TaimiControls::WINDOW_PATHING
             | TaimiControls::PATHING_SPACE
             | TaimiControls::PATHING_MINIMAP
-            | TaimiControls::PATHING_MAP,
-            Some(menu),
-        ) => add_quick_access_context_menu(
-            menu,
-            Some(identifier),
-            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PATHING)),
-        )
-        .leak(),
-        (_, Some(menu)) => add_quick_access_context_menu(
-            menu,
-            Some(identifier),
-            nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PRIMARY)),
-        )
-        .leak(),
-        (_, None) => (),
+            | TaimiControls::PATHING_MAP =>
+                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PATHING)),
+            _ => nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PRIMARY)),
+        };
+        add_quick_access_context_menu(menu_id, Some(button_id), callback).leak()
     }
 }
 
@@ -446,102 +459,194 @@ pub fn quick_access_remove_all() {
 pub fn quick_access_remove(icon: TaimiControls) {
     use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
 
-    let Some((identifier, menu, ..)) = quick_access_button_id(icon) else { return };
-    if let Some(menu) = menu {
-        remove_quick_access_context_menu(menu);
+    let Some(identifier) = IconStyle::control_id(icon) else { return };
+    if IconStyle::control_has_menu(icon) {
+        let menu_id = IconStyle::control_menu_id(identifier);
+        remove_quick_access_context_menu(menu_id);
     }
-    remove_quick_access(identifier);
+    let button_id = IconStyle::control_button_id(identifier);
+    remove_quick_access(button_id);
 }
 
-/// ("BUTTON", "ICON", "HOVER", "keybind")
-pub(crate) fn quick_access_button_id(
-    icon: TaimiControls,
-) -> Option<(
-    &'static str,
-    Option<&'static str>,
-    (&'static str, &'static [u8]),
-    (&'static str, &'static [u8]),
-    &'static str,
-)> {
-    Some(match icon {
-        TaimiControls::WINDOW_PRIMARY => (
-            "TAIMI_BUTTON",
-            Some("TAIMI_MENU"),
-            ("TAIMI_ICON", include_bytes!("../../icons/taimi.png")),
-            ("TAIMI_ICON_HOVER", include_bytes!("../../icons/taimi-hover.png")),
-            "primary-window-toggle",
-        ),
-        #[cfg(feature = "markers")]
-        TaimiControls::WINDOW_MARKERS => (
-            "TAIMI_MARKERS_BUTTON",
-            Some("TAIMI_MARKERS_MENU"),
-            ("TAIMI_MARKERS_ICON", include_bytes!("../../icons/markers.png")),
-            (
-                "TAIMI_MARKERS_ICON_HOVER",
-                include_bytes!("../../icons/markers-hover.png"),
-            ),
-            "marker-window-toggle",
-        ),
-        #[cfg(feature = "timers")]
-        TaimiControls::WINDOW_TIMERS => (
-            "TAIMI_TIMER_BUTTON",
-            Some("TAIMI_TIMERS_MENU"),
-            ("TAIMI_TIMERS_ICON", include_bytes!("../../icons/timers.png")),
-            (
-                "TAIMI_TIMERS_ICON_HOVER",
-                include_bytes!("../../icons/timers-hover.png"),
-            ),
-            "timer-window-toggle",
-        ),
-        #[cfg(feature = "space")]
-        TaimiControls::WINDOW_PATHING => (
-            "TAIMI_PATHING_BUTTON",
-            Some("TAIMI_PATHING_MENU"),
-            ("TAIMI_PATHING_ICON", include_bytes!("../../icons/pathing.png")),
-            (
-                "TAIMI_PATHING_ICON_HOVER",
-                include_bytes!("../../icons/pathing-hover.png"),
-            ),
-            "pathing-window-toggle",
-        ),
-        #[cfg(feature = "space")]
-        TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MINIMAP | TaimiControls::PATHING_MAP => (
-            match icon {
-                TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_BUTTON",
-                TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_BUTTON",
-                _ => "TAIMI_PATHING_RENDER_BUTTON",
-            },
-            Some(match icon {
-                TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP_MENU",
-                TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP_MENU",
-                _ => "TAIMI_PATHING_RENDER_MENU",
-            }),
-            (
-                "TAIMI_PATHING_RENDER_ICON",
-                include_bytes!("../../icons/pathing-toggle.png"),
-            ),
-            (
-                "TAIMI_PATHING_RENDER_ICON_HOVER",
-                include_bytes!("../../icons/pathing-toggle-hover.png"),
-            ),
-            match icon {
-                TaimiControls::PATHING_MINIMAP => "pathing-render-minimap-toggle",
-                TaimiControls::PATHING_MAP => "pathing-render-map-toggle",
-                _ => "pathing-render-toggle",
-            },
-        ),
-        icon => {
-            log::warn!("unrecognized quick access icon {icon:?}");
-            return None
-        },
-    })
-}
-
-pub fn quick_access_init(icons: TaimiControls) {
+pub fn quick_access_init(icons: TaimiControls, style: IconStyle, state_on: TaimiControls) {
     let quick_access_icons_visible = TaimiControls::QUICK_ACCESS_ICONS
         .into_iter()
         .filter(|&icon| icons.intersects(icon));
     for icon in quick_access_icons_visible {
-        quick_access_add(icon);
+        quick_access_add(icon, state_on, style);
+    }
+}
+
+impl IconStyle {
+    pub fn data_for(self, icon: TaimiControls, on_off: bool, hover: bool) -> Option<&'static [u8]> {
+        Some(match (self, Self::canon_icon(icon), hover, on_off) {
+            (Self::Plain, TaimiControls::WINDOW_PRIMARY, false, _) =>
+                include_bytes!("../../data/icons/plain/taimi.png"),
+            (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, false, _) =>
+                include_bytes!("../../data/icons/scanlines-1/taimi.png"),
+            (Self::Plain, TaimiControls::WINDOW_PRIMARY, true, _) =>
+                include_bytes!("../../data/icons/plain/taimi-hover.png"),
+            (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, true, _) =>
+                include_bytes!("../../data/icons/scanlines-1/taimi-hover.png"),
+
+            #[cfg(feature = "markers")]
+            (Self::Plain, TaimiControls::WINDOW_MARKERS, false, _) =>
+                include_bytes!("../../data/icons/plain/markers.png"),
+            #[cfg(feature = "markers")]
+            (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, false, _) =>
+                include_bytes!("../../data/icons/scanlines-1/markers.png"),
+            #[cfg(feature = "markers")]
+            (Self::Plain, TaimiControls::WINDOW_MARKERS, true, _) =>
+                include_bytes!("../../data/icons/plain/markers-hover.png"),
+            #[cfg(feature = "markers")]
+            (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, true, _) =>
+                include_bytes!("../../data/icons/scanlines-1/markers-hover.png"),
+
+            #[cfg(feature = "timers")]
+            (Self::Plain, TaimiControls::WINDOW_TIMERS, false, _) =>
+                include_bytes!("../../data/icons/plain/timers.png"),
+            #[cfg(feature = "timers")]
+            (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, false, _) =>
+                include_bytes!("../../data/icons/scanlines-1/timers.png"),
+            #[cfg(feature = "timers")]
+            (Self::Plain, TaimiControls::WINDOW_TIMERS, true, _) =>
+                include_bytes!("../../data/icons/plain/timers-hover.png"),
+            #[cfg(feature = "timers")]
+            (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, true, _) =>
+                include_bytes!("../../data/icons/scanlines-1/timers-hover.png"),
+
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::WINDOW_PATHING, false, _) =>
+                include_bytes!("../../data/icons/plain/pathing.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::WINDOW_PATHING, false, _) =>
+                include_bytes!("../../data/icons/scanlines-1/pathing.png"),
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::WINDOW_PATHING, true, _) =>
+                include_bytes!("../../data/icons/plain/pathing-hover.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::WINDOW_PATHING, true, _) =>
+                include_bytes!("../../data/icons/scanlines-1/pathing-hover.png"),
+
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::PATHING_SPACE, false, true) =>
+                include_bytes!("../../data/icons/plain/pathingtoggle-on.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, true) =>
+                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on.png"),
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::PATHING_SPACE, true, true) =>
+                include_bytes!("../../data/icons/plain/pathingtoggle-on-hover.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, true) =>
+                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on-hover.png"),
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::PATHING_SPACE, false, false) =>
+                include_bytes!("../../data/icons/plain/pathingtoggle-off.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, false) =>
+                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off.png"),
+            #[cfg(feature = "space")]
+            (Self::Plain, TaimiControls::PATHING_SPACE, true, false) =>
+                include_bytes!("../../data/icons/plain/pathingtoggle-off-hover.png"),
+            #[cfg(feature = "space")]
+            (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, false) =>
+                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off-hover.png"),
+            _ => {
+                log::warn!("unrecognized quick access icon {:#010x}", icon.bits());
+                return None
+            },
+        })
+    }
+    pub fn control_button_id(control_id: &str) -> String {
+        format!("{control_id}_BUTTON")
+    }
+    pub fn control_menu_id(control_id: &str) -> String {
+        format!("{control_id}_MENU")
+    }
+    pub fn texture_id(self, icon: TaimiControls, on_off: bool, hover: bool) -> Option<String> {
+        let icon_id = Self::icon_id(icon)?;
+        let state = match self.icon_has_state(icon) {
+            true if !on_off => "_OFF",
+            _ => "",
+        };
+        let hover = match self.icon_has_hover(icon) {
+            true if hover => "_HOVER",
+            _ => "",
+        };
+        let suffix = self.suffix_upper();
+        Some(format!("{icon_id}{state}{hover}{suffix}"))
+    }
+    pub fn control_id(icon: TaimiControls) -> Option<&'static str> {
+        Some(match icon {
+            TaimiControls::WINDOW_PRIMARY => "TAIMI",
+            #[cfg(feature = "markers")]
+            TaimiControls::WINDOW_MARKERS => "TAIMI_MARKERS",
+            #[cfg(feature = "timers")]
+            TaimiControls::WINDOW_TIMERS => "TAIMI_TIMERS",
+            #[cfg(feature = "space")]
+            TaimiControls::WINDOW_PATHING => "TAIMI_PATHING",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_SPACE => "TAIMI_PATHING_RENDER",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_MINIMAP => "TAIMI_PATHING_RENDER_MINIMAP",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_MAP => "TAIMI_PATHING_RENDER_MAP",
+            _ => return None,
+        })
+    }
+    pub fn icon_id(icon: TaimiControls) -> Option<&'static str> {
+        Self::control_id(Self::canon_icon(icon))
+    }
+    pub fn icon_has_state(self, icon: TaimiControls) -> bool {
+        match icon {
+            TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MAP | TaimiControls::PATHING_MINIMAP =>
+                true,
+            _ => false,
+        }
+    }
+    #[inline(always)]
+    pub fn icon_has_hover(self, _icon: TaimiControls) -> bool {
+        true
+    }
+    #[inline(always)]
+    pub fn control_has_menu(icon: TaimiControls) -> bool {
+        true
+    }
+    pub fn suffix_upper(self) -> &'static str {
+        match self {
+            Self::Plain => "",
+            Self::Scanlines1 => "_SCAN1",
+        }
+    }
+    pub fn canon_icon(icon: TaimiControls) -> TaimiControls {
+        match icon {
+            icon if icon.intersects(TaimiControls::PATHING_TOGGLES) => TaimiControls::PATHING_SPACE,
+            icon => icon,
+        }
+    }
+    pub fn keybind_id(icon: TaimiControls) -> Option<&'static str> {
+        Some(match icon {
+            TaimiControls::WINDOW_PRIMARY => "primary-window-toggle",
+            #[cfg(feature = "markers")]
+            TaimiControls::WINDOW_MARKERS => "marker-window-toggle",
+            #[cfg(feature = "timers")]
+            TaimiControls::WINDOW_TIMERS => "timer-window-toggle",
+            #[cfg(feature = "space")]
+            TaimiControls::WINDOW_PATHING => "pathing-window-toggle",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_MINIMAP => "pathing-render-minimap-toggle",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_MAP => "pathing-render-map-toggle",
+            #[cfg(feature = "space")]
+            TaimiControls::PATHING_SPACE => "pathing-render-toggle",
+            _ => return None,
+        })
+    }
+    pub fn tooltip_id(icon: TaimiControls) -> Option<&'static str> {
+        match icon {
+            TaimiControls::WINDOW_PRIMARY => Some("primary-window-toggle-text"),
+            _ => None,
+        }
     }
 }
