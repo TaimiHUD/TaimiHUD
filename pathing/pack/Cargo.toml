@@ -49,6 +49,7 @@ md5 = "0.7"
 base64 = "0.22"
 zip = { version = "4", optional = true }
 bitvec = { workspace = true }
+bitflags = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]

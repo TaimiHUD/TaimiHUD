@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::MarkerAttributes,
+        category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid},
     },
@@ -18,7 +19,7 @@ use {
 
 #[derive(Debug, Clone)]
 pub struct Trail {
-    pub category: String,
+    pub category: IdNameBox,
     pub guid: Uuid,
     pub attributes: MarkerAttributes,
     pub parent_path: Option<String>,
@@ -43,7 +44,9 @@ impl Trail {
                 trail_path = Some(attr.value);
                 Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
-                guid = Some(taco_xml_to_guid(&attr.value));
+                if !attr.value.is_empty() {
+                    guid = Some(taco_xml_to_guid(&attr.value));
+                }
                 Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
                 attr.value
@@ -79,10 +82,10 @@ impl Trail {
         });
 
         // TODO: support bh features properly...
-        attributes.merge(&attributes_bh);
+        attributes.merge(&attributes_bh, false);
 
         Ok(Self {
-            category,
+            category: category.into(),
             guid,
             attributes,
             parent_path,
@@ -133,17 +136,21 @@ impl Trail {
 
     #[inline]
     pub fn texture_name(&self) -> Option<&str> {
-        self.attributes.texture.as_ref().map(|s| &s[..])
+        self.attributes
+            .render
+            .as_ref()
+            .and_then(|render| render.trail.texture.as_ref())
+            .map(|s| &s[..])
     }
 
     #[inline]
     pub fn scale(&self) -> f32 {
-        self.attributes.trail_scale.unwrap_or(1.0)
+        self.attributes.trail().trail_scale.unwrap_or(1.0)
     }
 
     #[inline]
     pub fn is_wall(&self) -> bool {
-        self.attributes.is_wall.unwrap_or(false)
+        self.attributes.trail().is_wall.unwrap_or(false)
     }
 }
 
