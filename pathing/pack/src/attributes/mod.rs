@@ -15,6 +15,7 @@ pub use self::{
 };
 
 pub mod festival;
+pub mod keys;
 pub mod mount;
 pub mod profession;
 pub mod race;
