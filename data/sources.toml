@@ -9,7 +9,25 @@ repository = "CommandersMarkersInternalMarkers"
 type = "GitHub"
 
 [[Pathing]]
-description = "A collection of xTeh.7146's marker packs."
+author = "Lady Elyssa"
+description = "A comprehensive collection of TacO Markers and Trails"
+homepage_url = "https://github.com/LadyElyssa/LadyElyssaTacoTrails?tab=readme-ov-file#lady-elyssas-taco-trail-guides"
+name = "Lady Elyssa's Guides"
+owner = "LadyElyssa"
+repository = "LadyElyssaTacoTrails"
+type = "GitHub"
+
+[[Pathing]]
+description = "Mega pack of 921 achievements with 18011 markers and 982 trails"
+display_name = "ReActif (EN)"
+homepage_url = "https://web.archive.org/web/20241204004932/https://www.heinze.fr/taco/?lang=en"
+name = "ReActif EN"
+type = "Direct"
+url = "https://github.com/TaimiHUD/DataSources-mirrored/releases/download/mirrored/reactif-en.taco"
+
+[[Pathing]]
+author = "xTeh.7146"
+description = "Tailored for speedrunning map completion, utilizing all mounts and waypoints."
 homepage_url = "https://github.com/xrandox/TehsTrails"
 name = "Teh's Trails - Map Completion"
 owner = "xrandox"
