@@ -1,13 +1,12 @@
 use {
     crate::{
-        attributes::MarkerAttributes,
+        attributes::{AttrString, MarkerAttributes},
         category::id::IdNameBox,
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
-    glam::Vec4,
     glamour::Point3,
-    std::{fmt, path::Path},
+    std::fmt,
     uuid::Uuid,
 };
 
@@ -18,11 +17,14 @@ pub struct Poi {
     pub map_id: i32,
     pub position: Point3,
     pub attributes: MarkerAttributes,
-    pub parent_path: Option<String>,
+    pub parent_path: Option<AttrString>,
 }
 
 impl Poi {
-    pub fn from_xml(asset: &str, attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Poi> {
+    pub fn from_xml(
+        asset_parent: Option<&AttrString>,
+        attrs: Vec<xml::attribute::OwnedAttribute>,
+    ) -> anyhow::Result<Poi> {
         let mut category = String::new();
         let mut map_id = None;
         let mut pos_x = None;
@@ -80,45 +82,38 @@ impl Poi {
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh, false);
 
-        let parent_path = Path::new(asset).parent().map(|p| p.to_string_lossy().into());
         Ok(Poi {
             category: category.into(),
             guid,
             map_id,
             position,
             attributes,
-            parent_path,
+            parent_path: asset_parent.cloned(),
         })
     }
 
     #[inline]
     pub fn icon_name(&self) -> Option<&str> {
         self.attributes
-            .render
-            .as_ref()
-            .and_then(|render| render.poi.as_ref())
+            .get_poi()
             .and_then(|poi| poi.icon_file.as_ref())
             .map(|s| &s[..])
     }
 
     #[inline]
     pub fn height_offset(&self) -> f32 {
-        self.attributes.poi().height_offset.unwrap_or(1.5)
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.height_offset)
+            .unwrap_or(1.5)
     }
 
     #[inline]
     pub fn icon_scale(&self) -> f32 {
-        self.attributes.poi().icon_size.unwrap_or(1.0)
-    }
-
-    #[inline]
-    pub fn tint(&self) -> Vec4 {
-        self.attributes.render().tint.unwrap_or(Vec4::ONE)
-    }
-
-    #[inline]
-    pub fn alpha(&self) -> f32 {
-        self.attributes.render().alpha.unwrap_or(1.0)
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.icon_size)
+            .unwrap_or(1.0)
     }
 }
 

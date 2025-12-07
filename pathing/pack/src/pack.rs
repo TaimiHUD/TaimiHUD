@@ -1,5 +1,6 @@
 use {
     crate::{
+        attributes,
         category::{
             id::{CategoryId, FullIdRef},
             Category,
@@ -15,6 +16,7 @@ use {
         io::{Cursor, Read as _},
         iter,
         mem,
+        path::Path,
     },
     uuid::Uuid,
     xml::{common::Position, name::OwnedName, reader::XmlEvent},
@@ -59,7 +61,6 @@ impl Pack {
 
         merge_category_attributes(&mut pack);
         apply_marker_attributes(&mut pack);
-        pack.categories.trim_attributes();
 
         Ok(pack)
     }
@@ -241,6 +242,7 @@ fn apply_marker_attributes(pack: &mut Pack) {
             trail.category = id.clone();
         }
         trail.attributes.merge(&category.marker_attributes, true);
+        let _ = trail.attributes.interaction.take();
     }
 }
 
@@ -251,6 +253,11 @@ fn inner_parse_pack_def(
     asset: &str,
 ) -> anyhow::Result<()> {
     let mut parse_stack: Vec<PartialItem> = Vec::with_capacity(16);
+    let asset_parent = Path::new(asset).parent().map(|p| {
+        let mut parent = p.to_string_lossy().into_owned();
+        parent.push_str("/");
+        attributes::string_into(parent)
+    });
 
     loop {
         let elem = parser.next()?;
@@ -318,7 +325,7 @@ fn inner_parse_pack_def(
                     "pois" => {
                         parse_stack.push(PartialItem::PoiGroup);
                     },
-                    "poi" => match Poi::from_xml(asset, attributes) {
+                    "poi" => match Poi::from_xml(asset_parent.as_ref(), attributes) {
                         Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
                         Err(e) => {
                             log::warn!("POI parse failed in {asset}: {e:#}");
@@ -326,12 +333,13 @@ fn inner_parse_pack_def(
                         },
                     },
                     "trail" => {
-                        let trail = Trail::from_xml(asset, attributes).and_then(|mut trail| {
-                            if trail.map_id.is_none() {
-                                trail.update_map_id(ctx)?
-                            }
-                            Ok(trail)
-                        });
+                        let trail =
+                            Trail::from_xml(asset_parent.as_ref(), attributes).and_then(|mut trail| {
+                                if trail.map_id.is_none() {
+                                    trail.update_map_id(ctx)?
+                                }
+                                Ok(trail)
+                            });
                         match trail {
                             Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                             Err(e) => {

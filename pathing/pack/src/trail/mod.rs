@@ -1,6 +1,6 @@
 use {
     crate::{
-        attributes::MarkerAttributes,
+        attributes::{AttrString, MarkerAttributes},
         category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid},
@@ -12,7 +12,6 @@ use {
         fmt,
         io::{self, BufRead, Read},
         mem,
-        path::Path,
     },
     uuid::Uuid,
 };
@@ -22,13 +21,16 @@ pub struct Trail {
     pub category: IdNameBox,
     pub guid: Uuid,
     pub attributes: MarkerAttributes,
-    pub parent_path: Option<String>,
+    pub parent_path: Option<AttrString>,
     pub trail_path: Option<String>,
     pub map_id: Option<i32>,
 }
 
 impl Trail {
-    pub fn from_xml(asset: &str, attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Trail> {
+    pub fn from_xml(
+        asset_parent: Option<&AttrString>,
+        attrs: Vec<xml::attribute::OwnedAttribute>,
+    ) -> anyhow::Result<Trail> {
         let mut category = String::new();
         let mut trail_path = None;
         let mut guid = None;
@@ -75,12 +77,6 @@ impl Trail {
 
         let guid = guid.unwrap_or_default();
 
-        let parent_path = Path::new(asset).parent().map(|p| {
-            let mut parent = p.to_string_lossy().into_owned();
-            parent.push_str("/");
-            parent
-        });
-
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh, false);
 
@@ -88,7 +84,7 @@ impl Trail {
             category: category.into(),
             guid,
             attributes,
-            parent_path,
+            parent_path: asset_parent.cloned(),
             trail_path,
             map_id,
         })
@@ -137,20 +133,25 @@ impl Trail {
     #[inline]
     pub fn texture_name(&self) -> Option<&str> {
         self.attributes
-            .render
-            .as_ref()
-            .and_then(|render| render.trail.texture.as_ref())
+            .get_trail()
+            .and_then(|trail| trail.texture.as_ref())
             .map(|s| &s[..])
     }
 
     #[inline]
     pub fn scale(&self) -> f32 {
-        self.attributes.trail().trail_scale.unwrap_or(1.0)
+        self.attributes
+            .get_trail()
+            .and_then(|trail| trail.trail_scale)
+            .unwrap_or(1.0)
     }
 
     #[inline]
     pub fn is_wall(&self) -> bool {
-        self.attributes.trail().is_wall.unwrap_or(false)
+        self.attributes
+            .get_trail()
+            .and_then(|trail| trail.is_wall)
+            .unwrap_or(false)
     }
 }
 

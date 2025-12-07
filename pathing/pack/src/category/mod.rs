@@ -21,7 +21,7 @@ pub struct Category {
     // Map of local to global name.
     pub sub_categories: Box<[CategoryId]>,
     /// Attributes for markers attached to this category.
-    pub marker_attributes: Arc<MarkerAttributes>,
+    pub marker_attributes: MarkerAttributes,
 }
 
 impl Category {
@@ -118,7 +118,6 @@ impl Category {
         // TODO: support bh features properly...
         marker_attributes.merge(&attributes_bh, false);
 
-        let marker_attributes = Arc::new(marker_attributes);
         let display_name = display_name.or(bh_display_name).or(name).unwrap_or(id.clone());
 
         let is_separator = is_separator.or(bh_is_separator).unwrap_or(false);
@@ -151,12 +150,7 @@ impl Category {
             );
             return;
         }
-        // This should not result in a clone because nobody else should own the Arc.
-        if Arc::strong_count(&new.marker_attributes) > 1 {
-            log::warn!("Multiple owners for category attributes.");
-        }
         new.attributes_mut().merge(&self.marker_attributes, false);
-        self.marker_attributes = new.marker_attributes;
         self.append_children(new.sub_categories);
     }
     /// TODO: way too thrashy :<
@@ -171,8 +165,9 @@ impl Category {
         self.sub_categories = sub_categories.into()
     }
 
+    #[inline]
     pub fn attributes_mut(&mut self) -> &mut MarkerAttributes {
-        Arc::make_mut(&mut self.marker_attributes)
+        &mut self.marker_attributes
     }
 
     pub fn id(&self) -> &IdNameSeg {
@@ -200,10 +195,6 @@ impl Category {
     /// Once all child markers have inherited attributes from a category,
     /// it doesn't really have any further need for related attribute data
     pub fn trim_attributes(&mut self) {
-        if Arc::strong_count(&self.marker_attributes) > 1 {
-            // it's not that important...
-            return
-        }
         let is_sep = self.is_separator();
         let attrs = self.attributes_mut();
         let _ = attrs.render.take();

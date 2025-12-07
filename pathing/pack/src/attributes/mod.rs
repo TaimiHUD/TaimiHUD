@@ -1,6 +1,7 @@
 use {
     crate::{category::id::IdNameBox, pack::taco_xml_to_guid},
     anyhow::{anyhow, Context},
+    glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
     uuid::Uuid,
     xml::name::Name,
@@ -19,13 +20,13 @@ pub mod profession;
 pub mod race;
 
 pub type AttrString = Arc<Box<str>>;
-fn string_into(s: impl Into<Box<str>>) -> AttrString {
+pub fn string_into(s: impl Into<Box<str>>) -> AttrString {
     Arc::new(s.into())
 }
 #[cfg(todo)]
 pub type AttrString = Arc<str>;
 #[cfg(todo)]
-fn string_into(s: impl Into<Arc<str>>) -> AttrString {
+pub fn string_into(s: impl Into<Arc<str>>) -> AttrString {
     s.into()
 }
 pub type AttrList<T> = Arc<Box<[T]>>;
@@ -43,11 +44,11 @@ pub struct MarkerAttributes {
     pub in_game_visibility: Option<bool>,
     pub tip_name: Option<AttrString>,
     pub tip_description: Option<AttrString>,
-    pub render: Option<Box<RenderAttributes>>,
+    pub render: Option<Arc<RenderAttributes>>,
 
     pub filters: Option<Box<FilterAttributes>>,
 
-    pub interaction: Option<Box<InteractionAttributes>>,
+    pub interaction: Option<Arc<InteractionAttributes>>,
 
     pub script: Option<Box<ScriptAttributes>>,
 }
@@ -55,8 +56,10 @@ pub struct MarkerAttributes {
 impl MarkerAttributes {
     pub fn merge(&mut self, base: &MarkerAttributes, child: bool) {
         // === Common === //
-        if let Some(render) = &base.render {
-            self.render_mut().merge(&render);
+        match (&base.render, &mut self.render) {
+            (Some(base), render @ None) => *render = Some(base.clone()),
+            (Some(base), Some(..)) => self.render_mut().merge(base),
+            (None, _) => (),
         }
         if self.edit_tag.is_none() {
             self.edit_tag = base.edit_tag;
@@ -77,16 +80,22 @@ impl MarkerAttributes {
             self.tip_description = base.tip_description.clone();
         }
         // === Filters === //
-        if let Some(filters) = &base.filters {
-            self.filters_mut().merge(&filters);
+        match (&base.filters, &mut self.filters) {
+            (Some(base), filters @ None) => *filters = Some(base.clone()),
+            (Some(base), Some(filters)) => filters.merge(base),
+            (None, _) => (),
         }
         // === Modifiers === //
-        if let Some(interaction) = &base.interaction {
-            self.interaction_mut().merge(&interaction, child);
+        match (&base.interaction, &mut self.interaction) {
+            (Some(base), interaction @ None) if !child => *interaction = Some(base.clone()),
+            (Some(base), _) => self.interaction_mut().merge(base, child),
+            (None, _) => (),
         }
         // === Scripting === //
-        if let Some(script) = &base.script {
-            self.script_mut().merge(script);
+        match (&base.script, &mut self.script) {
+            (Some(base), script @ None) => *script = Some(base.clone()),
+            (Some(base), Some(script)) => script.merge(base),
+            (None, _) => (),
         }
     }
 
@@ -133,7 +142,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("occlude") {
             self.poi_mut().occlude = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("rotate") {
-            self.poi_mut().rotate = Some(glam::Vec3::from_array(parse_array(&value)?));
+            self.poi_mut().rotate = Some(Vec3::from_array(parse_array(&value)?));
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
             let x = value.parse()?;
             self.poi_mut().rotate.get_or_insert_default().x = x;
@@ -245,6 +254,9 @@ impl MarkerAttributes {
     pub fn script_mut(&mut self) -> &mut ScriptAttributes {
         self.script.get_or_insert_default()
     }
+    pub fn get_interaction_mut(&mut self) -> Option<&mut InteractionAttributes> {
+        self.interaction.as_mut().map(Arc::make_mut)
+    }
     pub fn interaction(&self) -> Cow<'_, InteractionAttributes> {
         match &self.interaction {
             Some(i) => Cow::Borrowed(i),
@@ -252,7 +264,7 @@ impl MarkerAttributes {
         }
     }
     pub fn interaction_mut(&mut self) -> &mut InteractionAttributes {
-        self.interaction.get_or_insert_default()
+        Arc::make_mut(self.interaction.get_or_insert_default())
     }
     pub fn filters(&self) -> Cow<'_, FilterAttributes> {
         match &self.filters {
@@ -269,22 +281,45 @@ impl MarkerAttributes {
             None => Cow::Owned(Default::default()),
         }
     }
+    pub fn get_render_mut(&mut self) -> Option<&mut RenderAttributes> {
+        self.render.as_mut().map(Arc::make_mut)
+    }
     pub fn render_mut(&mut self) -> &mut RenderAttributes {
-        self.render.get_or_insert_default()
+        Arc::make_mut(self.render.get_or_insert_default())
+    }
+    pub fn get_trail(&self) -> Option<&TrailAttributes> {
+        self.render
+            .as_ref()
+            .and_then(|render| render.trail.as_ref())
+            .map(|a| &**a)
+    }
+    pub fn get_trail_mut(&mut self) -> Option<&mut TrailAttributes> {
+        self.get_render_mut()
+            .and_then(|render| render.trail.as_mut())
+            .map(|a| &mut **a)
     }
     pub fn trail(&self) -> Cow<'_, TrailAttributes> {
-        let trail = self.render.as_ref().map(|render| &render.trail);
-        match trail {
+        match self.get_trail() {
             Some(i) => Cow::Borrowed(i),
             None => Cow::Owned(Default::default()),
         }
     }
     pub fn trail_mut(&mut self) -> &mut TrailAttributes {
-        &mut self.render_mut().trail
+        self.render_mut().trail.get_or_insert_default()
+    }
+    pub fn get_poi(&self) -> Option<&PoiAttributes> {
+        self.render
+            .as_ref()
+            .and_then(|render| render.poi.as_ref())
+            .map(|a| &**a)
+    }
+    pub fn get_poi_mut(&mut self) -> Option<&mut PoiAttributes> {
+        self.get_render_mut()
+            .and_then(|render| render.poi.as_mut())
+            .map(|a| &mut **a)
     }
     pub fn poi(&self) -> Cow<'_, PoiAttributes> {
-        let poi = self.render.as_ref().and_then(|render| render.poi.as_ref());
-        match poi {
+        match self.get_poi() {
             Some(i) => Cow::Borrowed(i),
             None => Cow::Owned(Default::default()),
         }
@@ -418,6 +453,13 @@ impl InteractionAttributes {
             self.auto_trigger = base.auto_trigger;
         }
     }
+
+    pub fn marker_can_inherit(&self, child: bool) -> bool {
+        match (&self.copy_value, &self.copy_message) {
+            (Some(..), _) | (_, Some(..)) if child => false,
+            _ => true,
+        }
+    }
 }
 
 /// Filters.
@@ -477,15 +519,15 @@ impl FilterAttributes {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RenderAttributes {
     pub alpha: Option<f32>,
     pub can_fade: Option<bool>,
-    pub tint: Option<glam::Vec4>,
+    pub tint: Option<Vec4>,
     pub cull: Option<CullDirection>,
     pub fade_near: Option<f32>,
     pub fade_far: Option<f32>,
-    pub trail: TrailAttributes,
+    pub trail: Option<Box<TrailAttributes>>,
     pub poi: Option<Box<PoiAttributes>>,
 }
 impl RenderAttributes {
@@ -509,16 +551,32 @@ impl RenderAttributes {
             self.fade_far = base.fade_far;
         }
         // === POI-specific === //
-        if let Some(poi) = &base.poi {
-            self.poi.get_or_insert_default().merge(&poi);
+        match (&base.poi, &mut self.poi) {
+            (Some(base), poi @ None) => *poi = Some(base.clone()),
+            (Some(base), Some(poi)) => poi.merge(base),
+            (None, _) => (),
         }
         // === Trail-specific === //
-        self.trail.merge(&base.trail);
+        match (&base.trail, &mut self.trail) {
+            (Some(base), trail @ None) => *trail = Some(base.clone()),
+            (Some(base), Some(trail)) => trail.merge(base),
+            (None, _) => (),
+        }
+    }
+
+    #[inline]
+    pub fn tint(&self) -> Vec4 {
+        self.tint.unwrap_or(Vec4::ONE)
+    }
+
+    #[inline]
+    pub fn alpha(&self) -> f32 {
+        self.alpha.unwrap_or(1.0)
     }
 }
 
 /// Trail-specific.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrailAttributes {
     pub anim_speed: Option<f32>,
     pub texture: Option<AttrString>,
@@ -542,7 +600,7 @@ impl TrailAttributes {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PoiAttributes {
     pub height_offset: Option<f32>,
     pub icon_file: Option<AttrString>,
@@ -552,9 +610,9 @@ pub struct PoiAttributes {
     pub min_size: Option<f32>,
     pub max_size: Option<f32>,
     pub occlude: Option<bool>,
-    pub rotate: Option<glam::Vec3>,
+    pub rotate: Option<Vec3>,
     pub billboard_text: Option<AttrString>,
-    pub billboard_text_color: Option<glam::Vec4>,
+    pub billboard_text_color: Option<Vec4>,
 }
 impl PoiAttributes {
     pub fn merge(&mut self, base: &Self) {
@@ -618,13 +676,13 @@ fn opt_str(value: &str) -> Option<&str> {
     }
 }
 
-fn parse_color(value: &str) -> anyhow::Result<glam::Vec4> {
+fn parse_color(value: &str) -> anyhow::Result<Vec4> {
     let val = value.trim_start_matches('#');
     let mut itint = u32::from_str_radix(val, 16)?;
     if val.len() == 6 {
         itint |= 0xFF000000;
     }
-    Ok(glam::Vec4::new(
+    Ok(Vec4::new(
         ((itint >> 16) & 0xFF) as f32 / 255.0,
         ((itint >> 8) & 0xFF) as f32 / 255.0,
         ((itint >> 0) & 0xFF) as f32 / 255.0,

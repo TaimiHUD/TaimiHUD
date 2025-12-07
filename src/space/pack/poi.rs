@@ -193,8 +193,10 @@ impl ActivePoi {
         let position = poi.position();
         let scale = poi.icon_scale();
         let scale_map = poi.attributes.poi().map_display_size.unwrap_or(20.0);
-        let tint = poi.tint();
-        let opacity = poi.alpha();
+        let (tint, opacity) = {
+            let render = poi.attributes.render();
+            (render.tint(), render.alpha())
+        };
 
         let edge_len = scale * 2.0;
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
