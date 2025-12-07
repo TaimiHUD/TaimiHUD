@@ -192,7 +192,7 @@ impl ActivePoi {
 
         let position = poi.position();
         let scale = poi.icon_scale();
-        let scale_map = poi.attributes.map_display_size.unwrap_or(20.0);
+        let scale_map = poi.attributes.poi().map_display_size.unwrap_or(20.0);
         let tint = poi.tint();
         let opacity = poi.alpha();
 

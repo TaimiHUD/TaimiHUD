@@ -24,6 +24,7 @@ pub use {
 pub type PackSpace = taimi_meta::coords::LocalSpace;
 
 pub trait MarkerAttributesExt {
+    #[cfg(todo)]
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>>;
     fn visibility_for_map(&self, map: MapContext) -> Option<bool>;
     #[cfg(todo = "unused")]
@@ -38,6 +39,7 @@ pub trait MarkerAttributesExt {
 }
 
 impl MarkerAttributesExt for MarkerAttributes {
+    #[cfg(todo)]
     fn parse_schedule(&self) -> anyhow::Result<Option<Cron>> {
         match &self.schedule {
             Some(schedule) => schedule.parse().context("parsing marker schedule").map(Some),

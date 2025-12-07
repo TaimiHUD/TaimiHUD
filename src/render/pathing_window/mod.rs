@@ -26,6 +26,7 @@ use {
         WindowFlags,
     },
     std::collections::HashSet,
+    taimi_pack::category::CategoryId,
     taimi_sync::watched::Watched,
 };
 
@@ -38,7 +39,7 @@ pub struct PathingWindowState {
     pub open: bool,
     pub filter_open: bool,
     pub filter_state: PathingFilterFlags,
-    pub open_items: HashSet<String>,
+    pub open_items: HashSet<CategoryId>,
     pub search_state: PathingSearchState,
     pub ui_state: Watched<UiState>,
 }

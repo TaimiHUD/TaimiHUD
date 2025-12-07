@@ -15,7 +15,7 @@ use {
     std::{path::PathBuf, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::MapContext,
-    taimi_pack::Pack,
+    taimi_pack::{category::CategoryId, Pack},
     tokio::{
         fs::create_dir_all,
         select,
@@ -31,7 +31,7 @@ pub(crate) enum PathingEvent {
     LoadAll,
     UnloadAll,
     RequestDisabledPaths,
-    PathingStateUpdate(String, bool),
+    PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
 }
 
@@ -39,11 +39,12 @@ pub(crate) enum PathingEvent {
 pub(crate) struct PathingController {}
 
 impl PathingController {
-    async fn pathing_state_update(&mut self, path: String, state: bool) {
+    async fn pathing_state_update(&mut self, path: CategoryId, state: bool) {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
-        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path, state).await;
+        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path.into(), state)
+            .await;
         drop(settings_lock);
     }
 

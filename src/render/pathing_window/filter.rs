@@ -53,8 +53,11 @@ impl PathingSearchState {
             let pack = pack.as_ref();
 
             for (full_id, category) in pack.categories.all_categories.iter() {
-                if self.matches_name(&category.display_name) || self.matches_name(&category.id) {
+                if self.matches_name(&category.display_name[..])
+                    || self.matches_name(category.id().as_str())
+                {
                     self.search_candidates.insert(full_id.into());
+                    let full_id = full_id.as_str();
                     let separators = full_id.rmatch_indices(".");
                     for (idx, _eu) in separators {
                         if let Some(sub_id) = full_id.get(..idx) {

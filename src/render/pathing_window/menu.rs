@@ -39,7 +39,7 @@ impl PathingWindowState {
                 .root_categories
                 .iter()
                 .filter_map(|id| pack.pack.categories.all_categories.get_full(id))
-                .filter(|(_, _, cat)| !cat.is_hidden)
+                .filter(|(_, _, cat)| !cat.is_hidden())
                 .filter_map(|(idx, id, cat)| {
                     let filtered = match pack.available_categories.get(idx).map(|b| !*b) {
                         Some(true) | None if !filtered => return None,
@@ -112,18 +112,23 @@ impl PathingWindowState {
     ) -> (bool, bool) {
         let _id = ui.push_id(Id::Int(cat_index as _));
         Self::dead_zone_spacing(ui, false);
-        let decorative = cat.is_separator;
+        let decorative = cat.is_separator();
+        let is_copyable = cat
+            .marker_attributes
+            .interaction
+            .as_ref()
+            .and_then(|i| i.copy_value.as_ref())
+            .is_some();
         let item = MenuItem::new(&cat.display_name)
             .selected(state.unwrap_or(false))
-            .enabled(!decorative || cat.marker_attributes.copy_value.is_some());
+            .enabled(!decorative || is_copyable);
         let mut toggled = match () {
-            _ if cat.is_separator && cat.display_name.is_empty() => {
+            _ if cat.is_separator() && cat.display_name.is_empty() => {
                 ui.separator();
                 Self::dead_zone_spacing(ui, false);
                 return (false, false)
             },
-            _ if cat.marker_attributes.copy_value.is_some() =>
-                with_i18n!("copy", |label| item.shortcut(&label).build(ui)),
+            _ if is_copyable => with_i18n!("copy", |label| item.shortcut(&label).build(ui)),
             _ if ActivePack::category_has_tooltip(cat) => item.shortcut("?").build(ui),
             _ if filtered == Some(true) && !decorative =>
                 with_i18n!("inactive", |label| item.shortcut(&label).build(ui)),
@@ -199,15 +204,15 @@ impl PathingWindowState {
 
         let children = cat
             .sub_categories
-            .values()
+            .iter()
             .filter_map(|id| pack.pack.categories.all_categories.get_full(id))
-            .filter(|(_, _, cat)| !cat.is_hidden)
+            .filter(|(_, _, cat)| !cat.is_hidden())
             .map(|(idx, id, cat)| {
                 let filtered = match filtered {
                     Some(false) => pack.available_categories.get(idx).map(|b| !*b),
                     _ => None,
                 };
-                let state = match cat.is_separator {
+                let state = match cat.is_separator() {
                     true => None,
                     false => pack.user_category_state.get(idx).map(|b| *b),
                 };
@@ -358,10 +363,16 @@ impl PathingWindowState {
     ) -> bool {
         let (recompute, ..) = ctx;
         if toggled {
+            let is_copyable = cat
+                .marker_attributes
+                .interaction
+                .as_ref()
+                .and_then(|i| i.copy_value.as_ref())
+                .is_some();
             if let Some(state) = state {
                 PathingEvent::PathingStateUpdate(cat.full_id.clone(), !state).try_send();
                 recompute.push(cat_index as u32);
-            } else if cat.marker_attributes.copy_value.is_some() {
+            } else if is_copyable {
                 ActivePack::copy_copyable(ui, &cat.marker_attributes);
             }
         }

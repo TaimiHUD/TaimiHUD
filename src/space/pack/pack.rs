@@ -43,6 +43,7 @@ use {
     taimi_meta::ui::{LocalContext, MapContext},
     taimi_pack::{
         attributes::{Festival, MarkerAttributes},
+        category::CategoryId,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category,
         Poi,
@@ -93,7 +94,7 @@ impl ActivePack {
             .categories
             .all_categories
             .values()
-            .map(|category| category.default_toggle)
+            .map(|category| category.default_toggle())
             .collect();
 
         ActivePack {
@@ -128,7 +129,12 @@ impl ActivePack {
         for (_, poi) in &self.active_pois {
             if !poi.filtered {
                 let actual_poi = &self.pack.pois[poi.poi_idx];
-                if actual_poi.attributes.copy_value.is_some() {
+                let copyable = actual_poi
+                    .attributes
+                    .interaction
+                    .as_ref()
+                    .and_then(|i| i.copy_value.as_ref());
+                if copyable.is_some() {
                     let actual_poi = actual_poi.clone();
                     current_pois.push(actual_poi);
                 }
@@ -141,7 +147,7 @@ impl ActivePack {
         &mut self,
         ui: &Ui,
         filter_state: PathingFilterState,
-        open_items: &mut HashSet<String>,
+        open_items: &mut HashSet<CategoryId>,
         recompute: &mut bool,
         search_state: &PathingSearchState,
     ) {
@@ -198,16 +204,42 @@ impl ActivePack {
             let Some((_, category)) = self.pack.categories.all_categories.get_index(leaf) else {
                 continue 'leafies
             };
-            let seps = category.full_id.rmatch_indices(".");
-            'parents: for (idx, _) in seps {
-                if let Some(parent) = category.full_id.get(..idx) {
-                    if let Some(parent_idx) = self.pack.categories.all_categories.get_index_of(parent) {
-                        if available[parent_idx] {
-                            // we've already been here before
-                            break 'parents
-                        }
-                        available.set(parent_idx, true)
+            let mut id = category.full_id.as_id();
+            'parents: while let Some(parent) = id.parent() {
+                id = parent;
+                if let Some(parent_idx) = self.pack.categories.all_categories.get_index_of(parent) {
+                    if available[parent_idx] {
+                        // we've already been here before
+                        break 'parents
                     }
+                    available.set(parent_idx, true)
+                }
+            }
+        }
+    }
+
+    pub fn recompute_enabled_category(
+        category: &Category,
+        all_categories: &IndexMap<CategoryId, Category>,
+        enabled_categories: &mut BitVec,
+        user_category_state: &BitVec,
+        parent: bool,
+    ) {
+        if let Some(idx) = all_categories.get_index_of(&category.full_id) {
+            if let Some(cur) = user_category_state.get(idx) {
+                let res = parent && *cur;
+                if let Some(mut cat) = enabled_categories.get_mut(idx) {
+                    *cat = res;
+                }
+                for global in category.sub_categories.iter() {
+                    let Some(child) = all_categories.get(global) else { continue };
+                    Self::recompute_enabled_category(
+                        child,
+                        all_categories,
+                        enabled_categories,
+                        user_category_state,
+                        res,
+                    );
                 }
             }
         }
@@ -216,10 +248,10 @@ impl ActivePack {
     pub fn draw_category(
         ui: &Ui,
         category: &Category,
-        all_categories: &IndexMap<String, Category>,
+        all_categories: &IndexMap<CategoryId, Category>,
         state: &mut BitVec,
         filter_state: PathingFilterState,
-        open_items: &mut HashSet<String>,
+        open_items: &mut HashSet<CategoryId>,
         is_root: bool,
         recompute: &mut bool,
         search_state: &PathingSearchState,
@@ -227,7 +259,7 @@ impl ActivePack {
         copyable: (&BTreeSet<usize>, &BTreeSet<usize>, &[Poi]),
     ) {
         let push_token = ui.push_id(&category.full_id);
-        if category.is_hidden {
+        if category.is_hidden() {
             push_token.pop();
             return;
         }
@@ -243,7 +275,7 @@ impl ActivePack {
                 let is_leaf_filter = is_leaf && filter_state.contains(PathingFilterState::IgnoreLeaves);
                 let is_branch_filter =
                     is_branch && filter_state.contains(PathingFilterState::IgnoreBranches);
-                let search_filter = search_state.matches_id(&category.full_id);
+                let search_filter = search_state.matches_id(category.full_id.as_str());
                 let category_filter = category_filter
                     .and_then(|f| f.get(idx).map(|b| *b))
                     .unwrap_or(true);
@@ -253,8 +285,14 @@ impl ActivePack {
             }
         }
         if display {
-            let is_copyable = match &category.marker_attributes.copy_value {
-                Some(value) if category.sub_categories.is_empty() && !category.is_separator => Some(value),
+            let copy_value = category
+                .marker_attributes
+                .interaction
+                .as_ref()
+                .and_then(|i| i.copy_value.as_ref());
+            let is_copyable = match &copy_value {
+                Some(value) if category.sub_categories.is_empty() && !category.is_separator() =>
+                    Some(value),
                 _ => None,
             };
             if let Some(..) = is_copyable {
@@ -276,7 +314,7 @@ impl ActivePack {
                 ui.table_next_column();
             } else {
                 let mut state_checkbox = None;
-                if !category.is_separator {
+                if !category.is_separator() {
                     if let Some(idx) = all_categories.get_index_of(&category.full_id) {
                         if state.get(idx).is_some() {
                             let (state, recompute) = (&mut *state, &mut *recompute);
@@ -313,8 +351,8 @@ impl ActivePack {
                     .unwrap_or(false);
 
                 let mut unbuilt = TreeNode::new(&category.display_name);
-                if (category.is_separator || category.sub_categories.is_empty())
-                    && category.marker_attributes.copy_value.is_none()
+                if (category.is_separator() || category.sub_categories.is_empty())
+                    && copy_value.is_none()
                     && !has_copyable_pois
                 {
                     unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
@@ -323,7 +361,7 @@ impl ActivePack {
                     .frame_padding(true)
                     .tree_push_on_open(false)
                     .allow_item_overlap(state_checkbox.is_some());
-                if category.is_separator {
+                if category.is_separator() {
                     unbuilt = unbuilt.leaf(true);
                 } else if category.sub_categories.is_empty() {
                     unbuilt = unbuilt.bullet(true);
@@ -347,7 +385,7 @@ impl ActivePack {
                 } else if has_state_checkbox {
                     ui.indent();
                 }
-                if category.marker_attributes.copy_value.is_some() {
+                if copy_value.is_some() {
                     ui.same_line();
                     if with_i18n!("copy", |copy| ui.small_button(copy)) {
                         Self::copy_copyable(ui, &category.marker_attributes);
@@ -368,13 +406,13 @@ impl ActivePack {
                         .iter()
                         .filter_map(|&poi_idx| pois.get(poi_idx))
                         //.filter(|poi| poi.category_idx == idx);
-                        .filter(|poi| poi.category == category.full_id);
+                        .filter(|poi| category.full_id == poi.category);
                     for (i, copyable) in pois.enumerate() {
                         if i % 4 != 3 {
                             ui.same_line();
                         }
                         let copied = match &copyable.attributes.tip_name {
-                            Some(name) => ui.small_button(&fl!("copy-arg", arg = name)),
+                            Some(name) => ui.small_button(&fl!("copy-arg", arg = (&name[..]))),
                             None => with_i18n!("copy", |copy| ui.small_button(copy)),
                         };
                         if copied {
@@ -396,7 +434,7 @@ impl ActivePack {
                 }
                 let mut internal_closure = || {
                     if !open_items.contains(&category.full_id)
-                        && !category.is_separator
+                        && !category.is_separator()
                         && !category.sub_categories.is_empty()
                     {
                         open_items.insert(category.full_id.clone());
@@ -404,7 +442,7 @@ impl ActivePack {
                     if !category.sub_categories.is_empty() {
                         ui.indent(); //_by(1.0);
                     }
-                    for (_local, global) in category.sub_categories.iter() {
+                    for global in category.sub_categories.iter() {
                         Self::draw_category(
                             ui,
                             &all_categories[global],
@@ -438,10 +476,11 @@ impl ActivePack {
     }
 
     pub(crate) fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
-        let Some(copy_value) = &attributes.copy_value else { return };
-        ui.set_clipboard_text(copy_value);
-        if let Some(copy_message) = &attributes.copy_message {
-            let _ = rt::send_alert(ui, copy_message);
+        let interaction = attributes.interaction();
+        let Some(copy_value) = &interaction.copy_value else { return };
+        ui.set_clipboard_text(&copy_value[..]);
+        if let Some(copy_message) = &interaction.copy_message {
+            let _ = rt::send_alert(ui, &copy_message[..]);
         }
     }
 
@@ -451,7 +490,7 @@ impl ActivePack {
             _ => None,
         };
         let title = match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) =>
+            Some(title) if !title.is_empty() && !category.display_name.starts_with(&title[..]) =>
                 Some(&title[..]),
             _ => None,
         };
@@ -474,10 +513,10 @@ impl ActivePack {
 
         if let Some(title) = &attributes.tip_name {
             let _title_font = desc.map(|_| RenderState::push_font("big", ui));
-            ui.text(title);
+            ui.text(&title[..]);
         }
         if let Some(desc) = &attributes.tip_description {
-            ui.text_wrapped(desc);
+            ui.text_wrapped(&desc[..]);
         }
     }
 
@@ -487,7 +526,8 @@ impl ActivePack {
             _ => (),
         }
         match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(title) => return true,
+            Some(title) if !title.is_empty() && !category.display_name[..].starts_with(&title[..]) =>
+                return true,
             _ => (),
         }
 
@@ -497,8 +537,12 @@ impl ActivePack {
     /// since these aren't intended to be displayed, there's no canon name to use...
     /// if it looks like more than just a location link, we'll try to preview it
     fn copyable_value_has_message(attributes: &MarkerAttributes) -> bool {
-        let Some(copy_value) = attributes.copy_value.as_ref() else { return false };
-        if !copy_value.starts_with('[') || !copy_value.ends_with(']') {
+        let copy_value = attributes
+            .interaction
+            .as_ref()
+            .and_then(|i| i.copy_value.as_ref());
+        let Some(copy_value) = copy_value else { return false };
+        if !copy_value[..].starts_with('[') || !copy_value.ends_with(']') {
             return true
         }
         false
@@ -521,8 +565,9 @@ impl ActivePack {
     }
 
     fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
-        let copy_message = attributes.copy_message.as_ref().map(|m| &m[..]);
-        match &attributes.copy_value {
+        let interaction = attributes.interaction();
+        let copy_message = interaction.copy_message.as_ref().map(|m| &m[..]);
+        match &interaction.copy_value {
             Some(copy_value)
                 if (display_name.is_none() || copy_message.is_none())
                     && Self::copyable_value_has_message(attributes) =>
@@ -536,7 +581,7 @@ impl ActivePack {
 
     pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
         for path in paths {
-            if let Some(idx) = self.pack.categories.all_categories.get_index_of(path) {
+            if let Some(idx) = self.pack.categories.all_categories.get_index_of(&path[..]) {
                 if let Some(mut state) = self.user_category_state.get_mut(idx) {
                     *state = false;
                 }
@@ -549,15 +594,22 @@ impl ActivePack {
         let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
-                root.recompute_enabled(all, &mut self.enabled_categories, &self.user_category_state, true);
+                Self::recompute_enabled_category(
+                    root,
+                    all,
+                    &mut self.enabled_categories,
+                    &self.user_category_state,
+                    true,
+                );
             }
         }
         for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
-            if category
+            let f = category
                 .marker_attributes
-                .festivals
+                .filters
                 .as_ref()
-                .map(|f| !f.iter().any(|f| festivals.contains(f)))
+                .and_then(|f| f.festivals);
+            if f.map(|f| !f.iter_festivals().any(|f| festivals.contains(&f)))
                 .unwrap_or(false)
             {
                 self.enabled_categories.set(i, false)
@@ -679,7 +731,7 @@ impl ActivePack {
             let category_idx = pack
                 .categories
                 .all_categories
-                .get_index_of(&pack_trail.category)
+                .get_index_of(pack_trail.category.as_id())
                 .unwrap_or(0);
             let trail = ActiveTrail::build(
                 self,
@@ -746,7 +798,7 @@ impl ActivePack {
             let category_idx = pack
                 .categories
                 .all_categories
-                .get_index_of(&pack_poi.category)
+                .get_index_of(pack_poi.category.as_id())
                 .unwrap_or(0);
             let poi = ActivePoi::build(self, pack_poi, i_poi, category_idx, device)
                 .with_context(|| format!("Error loading POI {pack_poi}"));
@@ -758,7 +810,13 @@ impl ActivePack {
                 },
             };
 
-            if pack_poi.attributes.copy_value.is_some() {
+            if pack_poi
+                .attributes
+                .interaction
+                .as_ref()
+                .and_then(|i| i.copy_value.as_ref())
+                .is_some()
+            {
                 self.copyable_pois.insert(i_poi);
                 self.copyable_categories.insert(category_idx);
             }
@@ -953,7 +1011,7 @@ impl PackCollection {
             let is_festival = FestivalFixup::FESTIVAL_PREFIXES
                 .iter()
                 .copied()
-                .find(|prefix| category.full_id.starts_with(prefix));
+                .find(|prefix| category.full_id.as_str().starts_with(prefix));
             match is_festival {
                 Some(prefix) if category.full_id != prefix => (),
                 _ => continue,
@@ -961,9 +1019,9 @@ impl PackCollection {
             let festival = self
                 .festival_categories
                 .iter()
-                .find_map(|(&prefix, &fest)| category.full_id.starts_with(prefix).then_some(fest));
+                .find_map(|(&prefix, &fest)| category.full_id.as_str().starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                Arc::make_mut(&mut category.marker_attributes).festivals = Some(vec![festival]);
+                category.attributes_mut().filters_mut().festivals = Some(festival.into());
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
             }
@@ -1309,10 +1367,6 @@ impl PackCollection {
                     if trail.filtered || !info.attributes.is_visible_for_map(map) {
                         continue
                     }
-                    let scale = info.attributes.scale_on_map_with_zoom;
-                    if scale == Some(false) {
-                        // idk invert .-.
-                    }
                     if shader_state == ShaderState::None {
                         backend.shaders.set_named(device_context, "map");
                         poi_common.set_primitive(device_context);
@@ -1339,7 +1393,7 @@ impl PackCollection {
                     if poi.filtered || !info.attributes.is_visible_for_map(map) {
                         continue
                     }
-                    let scale = info.attributes.scale_on_map_with_zoom;
+                    let scale = info.attributes.poi().scale_on_map_with_zoom;
                     if scale == Some(false) {
                         // idk invert .-.
                     }

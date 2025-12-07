@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::MarkerAttributes,
+        category::id::IdNameBox,
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
@@ -10,9 +11,9 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Poi {
-    pub category: String,
+    pub category: IdNameBox,
     pub guid: Uuid,
     pub map_id: i32,
     pub position: Point3,
@@ -35,7 +36,7 @@ impl Poi {
             let res = if attr.name.local_name.eq_ignore_ascii_case("type") {
                 category = taco_safe_name(&attr.value, true);
                 Ok(())
-            } else if attr.name.local_name.eq_ignore_ascii_case("MapID") {
+            } else if attr.name.local_name.eq_ignore_ascii_case("mapid") {
                 attr.value.parse().map(|v| map_id = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("xpos") {
                 attr.value.parse().map(|v| pos_x = Some(v)).map_err(From::from)
@@ -44,7 +45,9 @@ impl Poi {
             } else if attr.name.local_name.eq_ignore_ascii_case("zpos") {
                 attr.value.parse().map(|v| pos_z = Some(v)).map_err(From::from)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
-                guid = Some(taco_xml_to_guid(&attr.value));
+                if !attr.value.is_empty() {
+                    guid = Some(taco_xml_to_guid(&attr.value));
+                }
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
                 match attributes_bh.try_add(attr.name.borrow(), attr.value) {
@@ -75,11 +78,11 @@ impl Poi {
         let guid = guid.unwrap_or_default();
 
         // TODO: support bh features properly...
-        attributes.merge(&attributes_bh);
+        attributes.merge(&attributes_bh, false);
 
         let parent_path = Path::new(asset).parent().map(|p| p.to_string_lossy().into());
         Ok(Poi {
-            category,
+            category: category.into(),
             guid,
             map_id,
             position,
@@ -90,27 +93,32 @@ impl Poi {
 
     #[inline]
     pub fn icon_name(&self) -> Option<&str> {
-        self.attributes.icon_file.as_ref().map(|s| &s[..])
+        self.attributes
+            .render
+            .as_ref()
+            .and_then(|render| render.poi.as_ref())
+            .and_then(|poi| poi.icon_file.as_ref())
+            .map(|s| &s[..])
     }
 
     #[inline]
     pub fn height_offset(&self) -> f32 {
-        self.attributes.height_offset.unwrap_or(1.5)
+        self.attributes.poi().height_offset.unwrap_or(1.5)
     }
 
     #[inline]
     pub fn icon_scale(&self) -> f32 {
-        self.attributes.icon_size.unwrap_or(1.0)
+        self.attributes.poi().icon_size.unwrap_or(1.0)
     }
 
     #[inline]
     pub fn tint(&self) -> Vec4 {
-        self.attributes.tint.unwrap_or(Vec4::ONE)
+        self.attributes.render().tint.unwrap_or(Vec4::ONE)
     }
 
     #[inline]
     pub fn alpha(&self) -> f32 {
-        self.attributes.alpha.unwrap_or(1.0)
+        self.attributes.render().alpha.unwrap_or(1.0)
     }
 }
 
