@@ -79,6 +79,10 @@ pub struct Controller {
     // TODO: remove!
     alert_sem: Arc<Mutex<()>>,
     settings: SettingsLock,
+    #[cfg(feature = "extension-nexus")]
+    state_quick_access_current: TaimiControls,
+    #[cfg(feature = "extension-nexus")]
+    state_quick_access: watch::Receiver<TaimiControls>,
     state_bootstrap: watch::Receiver<BootstrapState>,
     state_bootstrap_throttle: rt::watched::WatchThrottleDelay,
     state_save: watch::Receiver<SaveState>,
@@ -107,6 +111,10 @@ impl Controller {
             previous_combat_state: Default::default(),
             rt_sender,
             settings,
+            #[cfg(feature = "extension-nexus")]
+            state_quick_access_current: TaimiControls::empty(),
+            #[cfg(feature = "extension-nexus")]
+            state_quick_access: crate::QUICK_ACCESS_STATE.subscribe(),
             state_bootstrap: BootstrapState::get().subscribe(),
             state_bootstrap_throttle: BootstrapState::watch_initial_delay(),
             state_save: SaveState::get().subscribe(),
@@ -149,11 +157,40 @@ impl Controller {
     pub async fn late_init(&mut self) {
         #[cfg(feature = "extension-nexus")]
         if rt::nexus_available() {
-            let qa_icons = {
+            let mut qa_state = TaimiControls::empty();
+            let (qa_icons, qa_style) = {
                 let settings = self.settings.read().await;
-                settings.quick_access_visible
+                crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
+                    let pathing = settings.pathing();
+                    state.set(TaimiControls::PATHING_SPACE, pathing.space.visible_space());
+                    state.set(TaimiControls::PATHING_MAP, pathing.space.visible_worldmap());
+                    state.set(TaimiControls::PATHING_MINIMAP, pathing.space.visible_minimap());
+                    qa_state = *state;
+                    // no need to notify, this is used for initial state after all!
+                    false
+                });
+                (settings.quick_access_visible, settings.quick_access_style)
             };
-            crate::exports::nexus::quick_access_init(qa_icons);
+            crate::exports::nexus::quick_access_init(qa_icons, qa_style, qa_state);
+        }
+    }
+    #[cfg(feature = "extension-nexus")]
+    async fn quick_access_changed(&mut self) {
+        use crate::exports::nexus::{quick_access_add, quick_access_remove};
+
+        let prev = self.state_quick_access_current;
+        self.state_quick_access_current = self.state_quick_access.borrow_and_update().clone();
+        let state = self.state_quick_access_current;
+        let (style, visible) = {
+            let settings = self.settings.read().await;
+            (settings.quick_access_style, settings.quick_access_visible)
+        };
+        for changed_icon in state ^ prev {
+            if !visible.intersects(changed_icon) {
+                continue
+            }
+            quick_access_remove(changed_icon);
+            quick_access_add(changed_icon, state, style);
         }
     }
 
@@ -186,6 +223,12 @@ impl Controller {
         state.late_init().await;
 
         loop {
+            let state_quick_access = match () {
+                #[cfg(feature = "extension-nexus")]
+                _ => state.state_quick_access.changed(),
+                #[cfg(not(feature = "extension-nexus"))]
+                _ => futures::future::pending::<Result<(), ()>>(),
+            };
             select! {
                 evt = state.receiver.recv() => match evt {
                     Some(evt) => {
@@ -208,6 +251,12 @@ impl Controller {
                     let state = state.state_bootstrap.borrow_and_update();
                     if let Err(e) = Self::commit_state_bootstrap(state).await {
                         log::error!("{e:#}");
+                    }
+                },
+                Ok(()) = state_quick_access => {
+                    #[cfg(feature = "extension-nexus")]
+                    if rt::nexus_available() {
+                        state.quick_access_changed().await;
                     }
                 },
                 Ok(()) = SaveState::watch_dirty(&mut state.state_save, &mut state.state_save_throttle) => {

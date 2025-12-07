@@ -27,9 +27,12 @@ use {
     strum::IntoEnumIterator,
     tokio::sync::watch,
 };
-
 #[cfg(feature = "extension-nexus")]
-use crate::exports::runtime::bindings::TaimiControls;
+use {
+    crate::{exports::runtime::bindings::TaimiControls, settings::IconStyle},
+    strum::VariantArray,
+};
+
 #[cfg(feature = "updates")]
 use crate::{
     exports::runtime::update::ResolvedVersion,
@@ -44,6 +47,8 @@ pub struct ConfigTabState {
     pub marker_autoplace_inner: Option<SquadCondition>,
     pub dpi_scaling: Option<f32>,
     pub gamebind_invoke: Option<bool>,
+    #[cfg(feature = "extension-nexus")]
+    pub quick_access_style: IconStyle,
     #[cfg(feature = "extension-nexus")]
     pub quick_access_icons_visible: TaimiControls,
     #[cfg(feature = "updates")]
@@ -60,6 +65,8 @@ impl ConfigTabState {
             marker_autoplace: Default::default(),
             marker_autoplace_inner: Default::default(),
             gamebind_invoke: Default::default(),
+            #[cfg(feature = "extension-nexus")]
+            quick_access_style: Default::default(),
             #[cfg(feature = "extension-nexus")]
             quick_access_icons_visible: TaimiControls::default_quick_access(),
             #[cfg(feature = "updates")]
@@ -103,19 +110,21 @@ impl ConfigTabState {
 
         #[cfg(feature = "extension-nexus")]
         let nexus_ui = || {
-            use crate::exports::nexus::{quick_access_add, quick_access_button_id, quick_access_remove};
+            use crate::{
+                exports::nexus::{quick_access_add, quick_access_remove},
+                QUICK_ACCESS_STATE,
+            };
 
             if let Some(settings) = Settings::try_read() {
                 self.quick_access_icons_visible = settings.quick_access_visible.clone();
+                self.quick_access_style = settings.quick_access_style;
             }
 
             with_i18n("nexus-quick-access", |msg| ui.text(msg));
             let prior_visible = self.quick_access_icons_visible;
             let mut changed = false;
             for (i, icon) in TaimiControls::QUICK_ACCESS_ICONS.into_iter().enumerate() {
-                let Some((_, _, _, _, keybind)) = quick_access_button_id(icon) else {
-                    continue
-                };
+                let Some(keybind) = IconStyle::keybind_id(icon) else { continue };
                 if i > 0 && i % 4 != 0 {
                     ui.same_line();
                 }
@@ -125,15 +134,46 @@ impl ConfigTabState {
                     icon
                 ));
             }
+            let mut changed_icons = prior_visible ^ self.quick_access_icons_visible;
+            let select_style = || {
+                let mut selected = None;
+                for &style in IconStyle::VARIANTS {
+                    let is_current = style == self.quick_access_style;
+                    if with_i18n!(style.name_id(), |label| Selectable::new(&label)
+                        .selected(is_current)
+                        .build(ui))
+                    {
+                        selected = Some(style);
+                    }
+                }
+                selected
+            };
+            let current_style = self.quick_access_style.name_id();
+            let style_selection = with_i18n!(current_style, |current| with_i18n!("icon-style", |label| {
+                ComboBox::new(&label)
+                    .preview_value(&current)
+                    .build(ui, select_style)
+            }))
+            .flatten();
+            if let Some(selection) = style_selection {
+                self.quick_access_style = selection;
+                changed_icons = self.quick_access_icons_visible;
+                changed = true;
+            }
 
             if changed {
+                let state = QUICK_ACCESS_STATE.borrow().clone();
                 let _ = Settings::write_with_blocking(|settings| {
                     settings.quick_access_visible = self.quick_access_icons_visible;
+                    settings.quick_access_style = self.quick_access_style;
                 });
-                for icon in prior_visible ^ self.quick_access_icons_visible {
-                    match self.quick_access_icons_visible.intersects(icon) {
-                        true => quick_access_add(icon),
-                        false => quick_access_remove(icon),
+                for icon in changed_icons {
+                    let is_visible = self.quick_access_icons_visible.intersects(icon);
+                    if !is_visible || style_selection.is_some() {
+                        quick_access_remove(icon);
+                    }
+                    if is_visible {
+                        quick_access_add(icon, state, self.quick_access_style);
                     }
                 }
             }

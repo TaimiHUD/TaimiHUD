@@ -14,25 +14,29 @@ mod space;
 
 //use i18n_embed_fl::fl;
 #[cfg(feature = "extension-nexus")]
-use nexus::{
-    event::{
-        arc::{ACCOUNT_NAME, COMBAT_LOCAL},
-        event_consume,
-        extras::EXTRAS_SQUAD_UPDATE,
-        Event,
-        MUMBLE_IDENTITY_UPDATED,
-        WINDOW_RESIZED,
+use {
+    crate::exports::runtime::bindings::TaimiControls,
+    nexus::{
+        event::{
+            arc::{ACCOUNT_NAME, COMBAT_LOCAL},
+            event_consume,
+            extras::EXTRAS_SQUAD_UPDATE,
+            Event,
+            MUMBLE_IDENTITY_UPDATED,
+            WINDOW_RESIZED,
+        },
+        gui::{register_render, RenderType},
+        on_unload,
+        rtapi::{
+            event::{RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE},
+            GroupMember,
+            GroupMemberOwned,
+        },
+        wnd_proc::register_wnd_proc,
+        AddonFlags,
+        UpdateProvider,
     },
-    gui::{register_render, RenderType},
-    on_unload,
-    rtapi::{
-        event::{RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE},
-        GroupMember,
-        GroupMemberOwned,
-    },
-    wnd_proc::register_wnd_proc,
-    AddonFlags,
-    UpdateProvider,
+    tokio::sync::watch,
 };
 use {
     crate::{
@@ -259,6 +263,9 @@ pub mod built_info {
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
 static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
+#[cfg(feature = "extension-nexus")]
+static QUICK_ACCESS_STATE: LazyLock<watch::Sender<TaimiControls>> =
+    LazyLock::new(|| watch::Sender::new(TaimiControls::empty()));
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
 #[cfg(feature = "extension-nexus")]
 static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
@@ -311,14 +318,14 @@ pub const WINDOW_MARKERS: &'static str = "markers";
 pub const WINDOW_PATHING: &'static str = "pathing";
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
-    let arrow = include_bytes!("../icons/markers/cmdrArrow.png");
-    let circle = include_bytes!("../icons/markers/cmdrCircle.png");
-    let cross = include_bytes!("../icons/markers/cmdrCross.png");
-    let heart = include_bytes!("../icons/markers/cmdrHeart.png");
-    let spiral = include_bytes!("../icons/markers/cmdrSpiral.png");
-    let square = include_bytes!("../icons/markers/cmdrSquare.png");
-    let star = include_bytes!("../icons/markers/cmdrStar.png");
-    let triangle = include_bytes!("../icons/markers/cmdrTriangle.png");
+    let arrow = include_bytes!("../data/icons/markers/cmdrArrow.png");
+    let circle = include_bytes!("../data/icons/markers/cmdrCircle.png");
+    let cross = include_bytes!("../data/icons/markers/cmdrCross.png");
+    let heart = include_bytes!("../data/icons/markers/cmdrHeart.png");
+    let spiral = include_bytes!("../data/icons/markers/cmdrSpiral.png");
+    let square = include_bytes!("../data/icons/markers/cmdrSquare.png");
+    let star = include_bytes!("../data/icons/markers/cmdrStar.png");
+    let triangle = include_bytes!("../data/icons/markers/cmdrTriangle.png");
     use MarkerType::*;
     match marker_type {
         Arrow => Some(Vec::from(arrow)),
@@ -430,10 +437,7 @@ fn init() -> Result<(), &'static str> {
 
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
-    use crate::exports::{
-        nexus::{quick_access_remove_all, register_keybind, unregister_keybinds},
-        runtime::bindings::TaimiControls,
-    };
+    use crate::exports::nexus::{quick_access_remove_all, register_keybind, unregister_keybinds};
 
     // Rendering setup
 

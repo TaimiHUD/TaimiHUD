@@ -3,7 +3,10 @@ use {
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
-        settings::state::{save_state_backup, ui::UiState},
+        settings::{
+            state::{save_state_backup, ui::UiState},
+            IconStyle,
+        },
         SETTINGS,
     },
     anyhow::Context,
@@ -161,6 +164,8 @@ pub struct Settings {
         skip_serializing_if = "TaimiControls::is_default_quick_access"
     )]
     pub quick_access_visible: TaimiControls,
+    #[serde(default, skip_serializing_if = "IconStyle::is_default")]
+    pub quick_access_style: IconStyle,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
@@ -463,6 +468,7 @@ impl Settings {
             enable_katrender: false,
             dpi_scaling: None,
             quick_access_visible: TaimiControls::default_quick_access(),
+            quick_access_style: Default::default(),
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
             pathing: Default::default(),
