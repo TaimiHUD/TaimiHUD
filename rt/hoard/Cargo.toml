@@ -1,0 +1,24 @@
+[package]
+name = "taimi_hoard"
+authors = [ "kittywitch" ]
+description = "TaimiHUD collection utilities"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = [
+]
+serde = [
+  "dep:serde",
+]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+serde = { version = "1", features = ["derive"], optional = true }

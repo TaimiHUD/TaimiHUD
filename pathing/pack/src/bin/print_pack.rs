@@ -1,7 +1,10 @@
 use {
-    std::{env, fs, path::Path},
+    std::{env, fs, path::Path, time::Instant},
+    taimi_hoard::statistics::allocator::CounterAllocator,
     taimi_pack::{loader, Pack},
 };
+#[global_allocator]
+static ALLOC: CounterAllocator = CounterAllocator::new();
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -10,6 +13,8 @@ fn main() -> anyhow::Result<()> {
     let fname = Path::new(&fname);
 
     let meta = fs::metadata(fname);
+    let mem_pre = CounterAllocator::total_allocated();
+    let time_pre = Instant::now();
     let mut loader_zip;
     let mut loader_dir;
     let mut loader =
@@ -22,12 +27,16 @@ fn main() -> anyhow::Result<()> {
         };
 
     let pack = Pack::load_strict(&mut loader, true)?;
+    let mem_consumed = CounterAllocator::total_allocated() - mem_pre;
+    let time_consumed = time_pre.elapsed();
 
     eprintln!(
-        "loaded pack {} with {} trails and {} pois",
+        "loaded pack {} with {} trails and {} pois in {:.3}s with {:.3} MB",
         pack.name,
         pack.trails.len(),
-        pack.pois.len()
+        pack.pois.len(),
+        time_consumed.as_secs_f64(),
+        (mem_consumed as f64) / (1024.0 * 1024.0),
     );
 
     Ok(())

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "pathing/pack",
   "pathing/meta",
+  "rt/hoard",
   "rt/input",
   "rt/sync",
   "space/d3d",
@@ -274,6 +275,7 @@ taimi_meta = { path = "./pathing/meta", optional = true, default-features = fals
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
+taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }

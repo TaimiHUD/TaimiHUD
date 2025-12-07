@@ -3645,6 +3645,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "taimi_hoard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "log",
+ "serde",
+]
+
+[[package]]
 name = "taimi_hud"
 version = "0.3.0"
 dependencies = [
@@ -3705,6 +3714,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sync-unsafe-cell",
  "taimi_d3d",
+ "taimi_hoard",
  "taimi_input",
  "taimi_meta",
  "taimi_pack",
@@ -3775,6 +3785,7 @@ dependencies = [
  "regex",
  "relative-path",
  "serde",
+ "taimi_hoard",
  "uuid",
  "xml-rs",
  "zip",
