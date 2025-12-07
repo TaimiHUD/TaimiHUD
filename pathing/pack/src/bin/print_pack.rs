@@ -26,7 +26,8 @@ fn main() -> anyhow::Result<()> {
             &mut loader_dir as &mut dyn loader::PackLoaderContext
         };
 
-    let pack = Pack::load_strict(&mut loader, true)?;
+    let mut pack = Pack::load_strict(&mut loader, true)?;
+    pack.categories.trim_attributes();
     let mem_consumed = CounterAllocator::total_allocated() - mem_pre;
     let time_consumed = time_pre.elapsed();
 
