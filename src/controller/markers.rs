@@ -4,7 +4,7 @@ pub use SquadUpdateType as SquadState;
 use {
     crate::{
         account_name_canon,
-        controller::{ControllerEvent, MapId, RtSender},
+        controller::{Controller, MapId, RtSender},
         exports::runtime::{
             self as rt,
             keyboard::KeyState,
@@ -34,6 +34,7 @@ use {
     },
     tokio::{
         fs::create_dir_all,
+        sync::watch,
         task::JoinHandle,
         time::{sleep, Duration},
     },
@@ -72,9 +73,6 @@ pub(crate) enum MarkersEvent {
     MarkerDisable(String),
     UiResize(MapCalibration),
     UiMapOpened(MapOpen),
-    MumbleIdentityUpdated {
-        role: SquadRank,
-    },
 }
 
 #[derive(Default, Debug)]
@@ -87,6 +85,7 @@ pub(crate) struct MarkersController {
     pub map_id_to_markers: HashMap<u32, HashSet<Arc<MarkerSet>>>,
     pub marker_autoplace: Option<MarkerAutoPlaceSettings>,
     pub mumble_role: Option<SquadRank>,
+    pub(crate) mumble_identity_rx: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
 }
 
 impl MarkersController {
@@ -209,8 +208,15 @@ impl MarkersController {
         Ok(())
     }
 
-    pub(crate) async fn handle_mumble_identity(&mut self, role: SquadRank) {
-        self.mumble_role = Some(role);
+    pub(crate) fn handle_mumble_identity(&mut self) {
+        let is_commander = self
+            .mumble_identity_rx
+            .as_mut()
+            .and_then(|id| id.borrow_and_update().as_ref().map(|id| id.is_commander));
+        self.mumble_role = is_commander.map(|comm| match comm {
+            true => SquadRank::Commander,
+            false => SquadRank::Member,
+        });
     }
 
     async fn extras_squad_update(&mut self, data: Vec<UserInfoOwned>) {
@@ -535,14 +541,6 @@ impl MarkersController {
             | UiState::Focused.bits(),
     );
 
-    pub fn receive_mumble_identity(id: &MumbleIdentityUpdate) {
-        let role = match id.is_commander {
-            true => SquadRank::Commander,
-            false => SquadRank::Member,
-        };
-        MarkersController::try_send(MarkersEvent::MumbleIdentityUpdated { role })
-    }
-
     pub(crate) async fn place_marker_from_map(
         place_duration: Duration,
         point: Point3<LocalSpace>,
@@ -604,12 +602,7 @@ impl MarkersController {
     }
 
     pub fn try_send(e: MarkersEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        let full_e = ControllerEvent::Markers(e);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(full_e);
-        }
+        Controller::with_sender(|sender| sender.markers_try_send(e));
     }
 
     pub(crate) async fn handle_event(
@@ -619,7 +612,6 @@ impl MarkersController {
     ) -> anyhow::Result<()> {
         use MarkersEvent::*;
         match event {
-            MumbleIdentityUpdated { role } => self.handle_mumble_identity(role).await,
             #[cfg(feature = "extension-nexus")]
             RTAPISquadUpdate(change, member) => self.rtapi_squad_update(change, member).await,
             ClearMarkers => self.clear().await,

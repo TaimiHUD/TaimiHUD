@@ -5,6 +5,7 @@ use {
         marker::format::MarkerType,
         notify_quit,
         settings::state::BootstrapState,
+        Interruption,
     },
     ::log::info,
     anyhow::Context,
@@ -19,7 +20,7 @@ use {
         path::{Path, PathBuf},
         ptr::{self, NonNull},
         sync::{
-            atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
+            atomic::{AtomicI32, AtomicPtr, AtomicU8, Ordering},
             LazyLock,
             Mutex,
             Once,
@@ -356,12 +357,13 @@ pub fn is_ingame() -> RuntimeResult<bool> {
     Err(RT_UNAVAILABLE)
 }
 
-static EXIT: AtomicBool = AtomicBool::new(false);
-pub fn is_shutdown() -> bool {
-    EXIT.load(Ordering::Relaxed)
+static EXIT: AtomicU8 = AtomicU8::new(Interruption::NONE);
+pub fn is_shutdown() -> Option<Interruption> {
+    let reason = EXIT.load(Ordering::Relaxed);
+    unsafe { Interruption::from_repr_unchecked(reason) }
 }
-pub fn notify_shutdown() {
-    EXIT.store(true, Ordering::Relaxed);
+pub fn notify_shutdown(reason: Interruption) {
+    EXIT.store(reason.into(), Ordering::Relaxed);
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
