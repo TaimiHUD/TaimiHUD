@@ -6,7 +6,7 @@ use {
         with_i18n,
     },
     glam::Vec2,
-    nexus::imgui::{Id, MenuItem, MouseButton, Ui},
+    nexus::imgui::{Id, MenuItem, MouseButton, StyleVar, Ui},
     taimi_pack::Category,
 };
 
@@ -15,6 +15,7 @@ impl PathingWindowState {
     pub fn draw_context_menu(&mut self, ui: &Ui, engine: &mut Engine) {
         self.draw_context_menu_packs(ui, engine, false);
         if !engine.packs.loaded_packs.is_empty() {
+            Self::dead_zone_spacing(ui, false);
             ui.separator();
             if let Some(_menu) = with_i18n!("show-all", |label| ui.begin_menu(&label)) {
                 self.draw_context_menu_packs(ui, engine, true);
@@ -56,7 +57,11 @@ impl PathingWindowState {
             }
             let multi_root = roots.clone().count() > 1;
             match was_multi_root {
-                Some(was) if multi_root || was => ui.separator(),
+                Some(was) if multi_root || was => {
+                    Self::dead_zone_spacing(ui, false);
+                    ui.separator();
+                    Self::dead_zone_spacing(ui, false);
+                },
                 _ => (),
             }
             was_multi_root = Some(multi_root);
@@ -106,6 +111,7 @@ impl PathingWindowState {
         _ctx: &mut CategoryMenuContext,
     ) -> (bool, bool) {
         let _id = ui.push_id(Id::Int(cat_index as _));
+        Self::dead_zone_spacing(ui, false);
         let decorative = cat.is_separator;
         let item = MenuItem::new(&cat.display_name)
             .selected(state.unwrap_or(false))
@@ -113,6 +119,7 @@ impl PathingWindowState {
         let mut toggled = match () {
             _ if cat.is_separator && cat.display_name.is_empty() => {
                 ui.separator();
+                Self::dead_zone_spacing(ui, false);
                 return (false, false)
             },
             _ if cat.marker_attributes.copy_value.is_some() =>
@@ -126,6 +133,9 @@ impl PathingWindowState {
             toggled |= true;
         }
         let hovered = ui.is_item_hovered();
+        if !decorative {
+            Self::dead_zone_spacing(ui, false);
+        }
         (toggled, hovered)
     }
     pub fn draw_context_menu_cat_branch(
@@ -138,6 +148,8 @@ impl PathingWindowState {
         ctx: &mut CategoryMenuContext,
     ) -> (bool, bool) {
         let _id = ui.push_id(Id::Int(cat_index as _));
+        Self::dead_zone_spacing(ui, true);
+
         let tooltip_hint = match ActivePack::category_has_tooltip(cat) {
             true => "❓",
             #[cfg(todo)]
@@ -170,6 +182,7 @@ impl PathingWindowState {
             ui.set_cursor_pos(checkpoint);
         }
 
+        Self::dead_zone_spacing(ui, true);
         (toggled, hovered)
     }
     pub fn draw_context_menu_cat_children(
@@ -236,7 +249,9 @@ impl PathingWindowState {
         for (i, (child_idx, _child_id, child, child_filtered, child_state)) in children_filtered.enumerate()
         {
             if any_visible && i == 0 {
+                Self::dead_zone_spacing(ui, false);
                 ui.separator();
+                Self::dead_zone_spacing(ui, false);
             }
             any_visible = true;
             let act = Self::draw_context_menu_cat(
@@ -268,6 +283,7 @@ impl PathingWindowState {
         match state {
             Some(state) if !inline => {
                 if any_visible {
+                    Self::dead_zone_spacing(ui, false);
                     ui.separator();
                 }
                 let label = match state {
@@ -368,5 +384,18 @@ impl PathingWindowState {
             });
         }
         toggled && ui.io().key_shift
+    }
+    /// create a dead zone for the mouse to rest without triggering a menu change
+    const MENU_DEAD_ZONE: Vec2 = Vec2::new(2.0, 2.0);
+    fn dead_zone_spacing(ui: &Ui, branch: bool) {
+        let _vspace = ui.push_style_var(StyleVar::ItemSpacing([0.2, 0.2]));
+        let sz = match branch {
+            true => Self::MENU_DEAD_ZONE,
+            false => Self::MENU_DEAD_ZONE / 2.0,
+        };
+        if Vec2::from(ui.cursor_pos()).y > Vec2::from(ui.cursor_start_pos()).y + Self::MENU_DEAD_ZONE.y {
+            // create a dead zone for the mouse to rest without triggering a menu change
+            ui.dummy(sz.to_array());
+        }
     }
 }
