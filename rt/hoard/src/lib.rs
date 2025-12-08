@@ -1,6 +1,7 @@
 use std::{borrow::Cow, hash};
 
 pub mod flags;
+pub mod paths;
 pub mod statistics;
 
 pub fn str_opt_ref<S: ?Sized + AsRef<str>>(s: &S) -> Option<&str> {

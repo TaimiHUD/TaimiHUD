@@ -27,6 +27,7 @@ use {
         },
         time::Duration,
     },
+    taimi_hoard::paths::new_path_const,
     windows::Win32::{
         Foundation::HWND,
         UI::{Input::KeyboardAndMouse, WindowsAndMessaging},
@@ -140,8 +141,9 @@ pub fn try_addon_dir() -> RuntimeResult<PathBuf> {
     Err(RT_UNAVAILABLE)
 }
 
-pub fn addon_dir_fallback() -> &'static Path {
-    Path::new("addons/Taimi")
+#[inline]
+pub const fn addon_dir_fallback() -> &'static Path {
+    new_path_const("addons/Taimi")
 }
 
 pub(crate) static ADDON_DIR: RwLock<Option<&'static Path>> = RwLock::new(None);
