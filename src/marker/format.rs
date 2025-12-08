@@ -3,7 +3,6 @@ use {
         render::RenderState,
         settings::SourceKind,
         timer::{BlishVec3, Polytope, Position},
-        ADDON_DIR,
         SETTINGS,
     },
     anyhow::anyhow,

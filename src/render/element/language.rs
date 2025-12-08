@@ -2,11 +2,9 @@ use {
     crate::{
         exports::runtime::{self as rt, imgui},
         game_language_id,
-        load_language,
         with_i18n,
         LANGUAGE_LOADER,
     },
-    anyhow::Context,
     i18n_embed::LanguageLoader,
 };
 

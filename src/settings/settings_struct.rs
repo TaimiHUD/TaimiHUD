@@ -4,7 +4,7 @@ use {
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
         settings::{
-            state::{save_state_backup, ui::UiState},
+            state::{save_state_backup, UiState},
             IconStyle,
         },
         SETTINGS,

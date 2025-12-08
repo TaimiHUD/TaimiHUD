@@ -65,7 +65,7 @@ impl MarkerTabState {
         self.draw_sidebar_header(ui, state_errors);
         self.draw_sidebar_child(ui);
     }
-    fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    fn draw_sidebar_header(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
         let markers_dir = crate::ADDON_DIR.join("markers");
         RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &markers_dir);
         ui.same_line();

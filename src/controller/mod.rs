@@ -24,13 +24,10 @@ use {
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::f32::Vec3,
     relative_path::RelativePathBuf,
-    std::{
-        ffi::OsStr,
-        path::PathBuf,
-        sync::{Arc, RwLock},
-        time::SystemTime,
-    },
+    std::{ffi::OsStr, path::PathBuf, sync::Arc, time::SystemTime},
     strum_macros::Display,
+    taimi_meta::ui::gameplay::{GameplayState, GameplayTransition},
+    taimi_sync::watched,
     tokio::{
         select,
         sync::{
@@ -47,7 +44,6 @@ mod generic;
 #[cfg(feature = "timers")]
 pub(crate) mod timers;
 
-use taimi_meta::ui::{gameplay::GameplayTransition, GameplayState};
 #[cfg(feature = "timers")]
 use timers::{TimersController, TimersEvent};
 
@@ -84,9 +80,9 @@ pub struct Controller {
     #[cfg(feature = "extension-nexus")]
     state_quick_access: watch::Receiver<TaimiControls>,
     state_bootstrap: watch::Receiver<BootstrapState>,
-    state_bootstrap_throttle: rt::watched::WatchThrottleDelay,
+    state_bootstrap_throttle: watched::WatchThrottleDelay,
     state_save: watch::Receiver<SaveState>,
-    state_save_throttle: rt::watched::WatchThrottleDelay,
+    state_save_throttle: watched::WatchThrottleDelay,
     save_interval: tokio::time::Interval,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,

@@ -8,12 +8,11 @@ use {
 };
 use {
     nexus::imgui::TextureId,
-    relative_path::RelativePath,
     std::{
         collections::{hash_map, HashMap},
         future::Future,
         mem,
-        path::{Path, PathBuf},
+        path::PathBuf,
         sync::{Arc, RwLock as StdRwLock},
     },
     taimi_d3d::dx11::{buffer::TextureView2, prelude::*},

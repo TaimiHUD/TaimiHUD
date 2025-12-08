@@ -610,7 +610,7 @@ impl IconStyle {
         true
     }
     #[inline(always)]
-    pub fn control_has_menu(icon: TaimiControls) -> bool {
+    pub fn control_has_menu(_icon: TaimiControls) -> bool {
         true
     }
     pub fn suffix_upper(self) -> &'static str {

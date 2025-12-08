@@ -58,7 +58,6 @@ pub use {
     arcdps::Language as GameLanguage,
     nexus::imgui,
     taimi_meta::coords::vec_eq,
-    taimi_sync::watched::{self, Watched},
     unic_langid_impl::subtags::Language,
 };
 #[cfg(not(feature = "extension-nexus"))]
