@@ -147,6 +147,15 @@ impl GameplayState {
                 GameplayTransition::Map { prev_map_id: None, next_map_id: map_id },
         }
     }
+
+    pub fn latest_transition_from(&self, mut prev: GameplayState) -> GameplayTransition {
+        match self {
+            GameplayState::Gameplay { map_id, .. } =>
+                prev.commit_ingame(map_id.map(|id| id.get()).unwrap_or_default()),
+            GameplayState::Intermission { .. } => prev.commit_intermission(),
+        }
+        .unwrap_or_else(|| self.latest_transition())
+    }
 }
 
 impl Default for GameplayState {

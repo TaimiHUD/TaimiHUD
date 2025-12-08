@@ -1,6 +1,3 @@
-#[cfg(feature = "space")]
-use core::ops::Range;
-
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
@@ -12,9 +9,11 @@ use {
         ui::{MapOpen, UiMap},
     },
 };
+#[cfg(feature = "space")]
+use {crate::space::engine::Engine, std::ops::Range};
 use {
     crate::{
-        controller::{Controller, ControllerEvent},
+        controller::Controller,
         exports::runtime::{self as rt, imgui},
         render::RenderState,
         settings::Settings,
@@ -34,14 +33,14 @@ use {
     },
 };
 
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use self::mumblelink::MumbleIdentityUpdate;
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
-#[cfg(feature = "space")]
-use crate::space::engine::{Engine, SpaceEvent};
 
 mod map;
 #[cfg(feature = "markers")]
@@ -78,8 +77,6 @@ pub struct RenderMachine {
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
-    #[cfg(feature = "space")]
-    pub active_festivals: std::collections::BTreeSet<taimi_pack::attributes::Festival>,
     #[cfg(feature = "extension-nexus")]
     pub rtapi: Option<rt::RealTimeApi>,
     #[cfg(feature = "extension-nexus")]
@@ -137,8 +134,6 @@ impl RenderMachine {
             fov: Vector2::ZERO,
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
-            #[cfg(feature = "space")]
-            active_festivals: Self::initial_festivals().collect(),
             #[cfg(feature = "space")]
             depth_range: None,
             #[cfg(feature = "extension-nexus")]
@@ -244,12 +239,11 @@ impl RenderMachine {
                 },
             };
         }
-        #[cfg(feature = "space")]
-        Engine::try_send(SpaceEvent::GameplayStatus {
-            gameplay: gameplay.clone(),
-            trans: trans.clone(),
+        Controller::with_sender(|sender| {
+            if let Some(tx) = &sender.gameplay {
+                tx.send_replace(gameplay);
+            }
         });
-        Controller::try_send(ControllerEvent::GameplayStatus { gameplay, trans });
     }
 
     /// First map load we've seen!

@@ -4,7 +4,7 @@ use {
         trail::{ActiveTrail, TrailParams},
     },
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::pathing::{FestivalFixup, PathingController, PathingEvent},
         exports::runtime::{
             self as rt,
             imgui::{self, Condition, StyleVar, TreeNode, Ui},
@@ -18,7 +18,7 @@ use {
         settings::state::ui::pathing::PathingFilterFlags as PathingFilterState,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{FestivalFixup, MarkerAttributesExt, Pack},
+            pack::{MarkerAttributesExt, Pack},
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
@@ -42,7 +42,7 @@ use {
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
     taimi_meta::ui::{LocalContext, MapContext},
     taimi_pack::{
-        attributes::{Festival, MarkerAttributes},
+        attributes::{Festival, Festivals, MarkerAttributes},
         category::CategoryId,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category,
@@ -579,7 +579,7 @@ impl ActivePack {
         }
     }
 
-    pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
+    pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: Festivals) {
         for path in paths {
             if let Some(idx) = self.pack.categories.all_categories.get_index_of(&path[..]) {
                 if let Some(mut state) = self.user_category_state.get_mut(idx) {
@@ -590,7 +590,7 @@ impl ActivePack {
         self.recompute_enabled(festivals);
     }
 
-    pub fn recompute_enabled(&mut self, festivals: &BTreeSet<Festival>) {
+    pub fn recompute_enabled(&mut self, festivals: Festivals) {
         let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
@@ -609,7 +609,7 @@ impl ActivePack {
                 .filters
                 .as_ref()
                 .and_then(|f| f.festivals);
-            if f.map(|f| !f.iter_festivals().any(|f| festivals.contains(&f)))
+            if f.map(|f| !f.is_empty() && !f.intersects(festivals))
                 .unwrap_or(false)
             {
                 self.enabled_categories.set(i, false)
@@ -909,7 +909,6 @@ pub struct PackCollection {
     pub trail_params: TrailParams,
 
     festival_categories: BTreeMap<&'static str, Festival>,
-    pub active_festivals: BTreeSet<Festival>,
 }
 
 impl PackCollection {
@@ -923,13 +922,13 @@ impl PackCollection {
             trail_params: TrailParams::default(),
             poi_common,
             festival_categories: FestivalFixup::festival_categories(),
-            active_festivals: Default::default(),
         })
     }
 
-    pub fn disable_paths(&mut self, disabled_paths: HashSet<String>) {
+    pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
+        let active_festivals = PathingController::active_festivals().unwrap_or_default().get();
         for (_pn, pack) in &mut self.loaded_packs {
-            pack.disable_paths(&disabled_paths, &self.active_festivals);
+            pack.disable_paths(&disabled_paths, active_festivals);
         }
     }
 
@@ -1103,7 +1102,8 @@ impl PackCollection {
             pack.clear();
             pack.cleanup_textures();
         } else {
-            pack.recompute_enabled(&self.active_festivals);
+            let active_festivals = PathingController::active_festivals().unwrap_or_default().get();
+            pack.recompute_enabled(active_festivals);
         }
         if inplace {
             self.render_list.entities_mut_end();
