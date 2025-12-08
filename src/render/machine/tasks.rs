@@ -120,7 +120,7 @@ impl RenderMachine {
     }
     pub(crate) fn poll_runtime(state: &mut RenderState) {
         if let Some(runtime) = &mut state.runtime {
-            use crate::controller::runtime::PollOnce;
+            use taimi_sync::poll_once::PollOnce;
 
             // TODO: return both set and lifetime or split struct up
             let handle = runtime.handle.clone();
