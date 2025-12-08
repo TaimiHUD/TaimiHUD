@@ -203,7 +203,7 @@ impl RenderState {
         let submenu_id = "context-popup-pathing";
         let mut submenu = Some(|| {
             if with_i18n!("reload-packs", |msg| Selectable::new(&msg).build(ui)) {
-                PathingEvent::ReloadAll.try_send();
+                PathingEvent::ReloadAll(true).try_send();
             }
             if with_i18n!("unload-packs", |msg| Selectable::new(&msg).build(ui)) {
                 PathingEvent::UnloadAll.try_send();

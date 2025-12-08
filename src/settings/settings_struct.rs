@@ -169,7 +169,7 @@ pub struct Settings {
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
-    pub disabled_paths: HashSet<String>,
+    pub disabled_paths: Arc<HashSet<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -640,6 +640,11 @@ impl Settings {
         settings.mark_dirty();
 
         Ok(f(&mut *settings))
+    }
+
+    pub fn disabled_paths_mut(&mut self) -> &mut HashSet<String> {
+        self.mark_dirty();
+        Arc::make_mut(&mut self.disabled_paths)
     }
 
     pub fn arc(&self) -> Cow<ArcSettings> {
