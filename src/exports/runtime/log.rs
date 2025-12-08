@@ -1,10 +1,11 @@
-#[cfg(not(feature = "log-filter"))]
-use anyhow::Context;
+#![allow(dead_code)]
+
 use {
     crate::{
         exports::{self, runtime as rt},
         settings::state::BootstrapState,
     },
+    anyhow::Context,
     log::{Level, LevelFilter, Log, Metadata, Record},
     std::{
         ffi::CStr,
@@ -629,4 +630,63 @@ impl Log for DeferredLogger {
     fn flush(&self) {
         // TODO: could flush to log file if it happens to be open, but why bother?
     }
+}
+
+pub fn log_ok<R, E>(level: Level, res: Result<R, E>) -> Option<R>
+where
+    E: fmt::Display,
+{
+    match res {
+        Ok(res) => Some(res),
+        Err(e) => {
+            log::log!(level, "{e:#}");
+            None
+        },
+    }
+}
+#[inline(always)]
+pub fn debug_ok_with<C, R, E>(context: C, res: Result<R, E>) -> Option<R>
+where
+    Result<R, E>: anyhow::Context<R, E>,
+    E: Into<anyhow::Error>,
+    C: fmt::Display,
+{
+    if log::log_enabled!(Level::Debug) {
+        let res = Context::with_context(res, move || context.to_string());
+        log_ok(Level::Debug, res)
+    } else {
+        res.ok()
+    }
+}
+#[inline(always)]
+pub fn debug_ok<R, E>(res: Result<R, E>) -> Option<R>
+where
+    E: fmt::Display,
+{
+    if log::log_enabled!(Level::Debug) {
+        log_ok(Level::Debug, res)
+    } else {
+        res.ok()
+    }
+}
+#[inline]
+pub fn info_ok<R, E>(res: Result<R, E>) -> Option<R>
+where
+    E: fmt::Display,
+{
+    log_ok(Level::Info, res)
+}
+#[inline]
+pub fn warn_ok<R, E>(res: Result<R, E>) -> Option<R>
+where
+    E: fmt::Display,
+{
+    log_ok(Level::Warn, res)
+}
+#[inline]
+pub fn error_ok<R, E>(res: Result<R, E>) -> Option<R>
+where
+    E: fmt::Display,
+{
+    log_ok(Level::Error, res)
 }
