@@ -7,7 +7,7 @@ use {
         controller::pathing::{PathingController, PathingEvent},
         exports::runtime::{
             self as rt,
-            imgui::{self, Condition, TreeNode, Ui},
+            imgui::{self, Condition, StyleVar, TreeNode, Ui},
         },
         fl,
         render::{
@@ -295,9 +295,13 @@ impl ActivePack {
                     }
                 }
                 let has_state_checkbox = !is_root && state_checkbox.is_some();
+                let mut checkbox_gap = None;
                 if !is_root {
                     if let Some(mut checkbox) = state_checkbox.take() {
                         ui.unindent();
+                        checkbox_gap = Some(ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0])));
+                        #[cfg(todo = "unnecessary")]
+                        let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
                         checkbox();
                         ui.same_line();
                     }
@@ -329,6 +333,7 @@ impl ActivePack {
                         .opened(open_items.contains(&category.full_id), Condition::Always);
                 }
                 let tree_token = unbuilt.push(ui);
+                drop(checkbox_gap);
                 if ui.is_item_hovered() && Self::category_has_tooltip(category) {
                     Self::draw_tooltip(ui, &category.display_name, || {
                         Self::draw_tooltip_category(ui, category);
@@ -500,8 +505,6 @@ impl ActivePack {
     }
 
     pub(crate) fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
-        use imgui::StyleVar;
-
         let _id = ui.push_id("category_tooltip");
         let [minwidth, lineheight] = ui.calc_text_size(title_template);
         unsafe {
