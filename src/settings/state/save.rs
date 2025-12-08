@@ -6,6 +6,7 @@ use {
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{fs, io, path::Path, sync::LazyLock},
+    taimi_sync::watched,
     tokio::{sync::watch, time},
 };
 
@@ -82,12 +83,12 @@ impl SaveState {
     }
 
     pub const SAVE_THROTTLE_TIMEOUT: time::Duration = time::Duration::from_secs(30);
-    pub fn watch_initial_delay() -> rt::watched::WatchThrottleDelay {
+    pub fn watch_initial_delay() -> watched::WatchThrottleDelay {
         Some(Box::pin(time::sleep(Self::SAVE_THROTTLE_TIMEOUT)))
     }
     pub async fn watch_dirty(
         receiver: &mut watch::Receiver<Self>,
-        throttle: &mut rt::watched::WatchThrottleDelay,
+        throttle: &mut watched::WatchThrottleDelay,
     ) -> Result<(), watch::error::RecvError> {
         if let Some(throttle) = throttle {
             throttle.await;

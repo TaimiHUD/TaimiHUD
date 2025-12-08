@@ -72,7 +72,7 @@ use {
         path::PathBuf,
         ptr,
         slice,
-        sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
+        sync::{Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
         time::Duration,
     },

@@ -49,7 +49,7 @@ impl TimerTabState {
         self.draw_sidebar_child(ui);
     }
 
-    fn draw_sidebar_header(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    fn draw_sidebar_header(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
         let timers_dir = SourceKind::Timers.get_user_dir();
         RenderState::draw_open_path_button(ui, fl!("open-button", kind = "ad-hoc folder"), &timers_dir);
         ui.same_line();

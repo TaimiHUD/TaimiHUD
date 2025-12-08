@@ -78,7 +78,7 @@ impl DataSourceTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
         let table_token = if self.downloading_update {
             ui.text(fl!("downloading-update"));
             None

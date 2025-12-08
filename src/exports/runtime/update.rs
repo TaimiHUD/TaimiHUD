@@ -363,6 +363,7 @@ impl Updater {
         pref
     }
 
+    #[cfg(todo = "unused")]
     pub(crate) fn version_pref_matches_crate(pref: &str) -> bool {
         if pref == rt::CRATE_VERSION {
             return true

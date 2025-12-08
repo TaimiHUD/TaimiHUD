@@ -1,7 +1,7 @@
 use {
     self::pathing::{PathingFilterFlags, PathingSearchFlags},
-    crate::exports::runtime::watched,
     serde::{Deserialize, Serialize},
+    taimi_sync::watched,
 };
 
 pub mod pathing;

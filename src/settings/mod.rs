@@ -9,7 +9,7 @@ pub mod state;
 mod v1;
 
 pub use {
-    arc::{ArcSettings, ArcUpdatePreference, ArcVk, InvokeMethod},
+    arc::{ArcSettings, ArcVk, InvokeMethod},
     pathing::PathingSettings,
     progress_bar_config::ProgressBarSettings,
     settings_struct::{
