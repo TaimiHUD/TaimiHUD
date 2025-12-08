@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::pathing::PathingEvent,
+        controller::pathing::{PathingController, PathingEvent},
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
         settings::{
@@ -110,7 +110,7 @@ impl PathingWindowState {
                         }
                         ui.same_line();
                         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
-                            PathingEvent::ReloadAll.try_send();
+                            PathingEvent::ReloadAll(true).try_send();
                         }
                         ui.same_line();
                         if with_i18n!("unload-packs", |msg| ui.button(msg)) {
@@ -188,7 +188,9 @@ impl PathingWindowState {
                                         &self.search_state,
                                     );
                                     if recompute {
-                                        pack.recompute_enabled(&engine.packs.active_festivals);
+                                        let active_festivals =
+                                            PathingController::active_festivals().unwrap_or_default().get();
+                                        pack.recompute_enabled(active_festivals);
                                     }
                                 }
                                 if let Some(token) = table_token {

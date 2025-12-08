@@ -1,6 +1,9 @@
 use {
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::{
+            pathing::{PathingController, PathingEvent},
+            Controller,
+        },
         fl,
         render::{machine::RenderMachine, RenderEvent, RenderState},
         settings::{
@@ -444,7 +447,7 @@ impl PathingConfig {
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || self.draw_festival_opts(ui, machine));
+            .build(ui, || self.draw_festival_opts(ui));
 
         let advanced = || {
             ui.text_wrapped(&fl!("pathing-config-trail-notice"));
@@ -623,31 +626,32 @@ impl PathingConfig {
         Some(())
     }
 
-    fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let change = Self::get_pathing(|s| {
-            let mut change = None;
-            for festival in Festival::all() {
-                let active = machine.festival_active(festival);
-                let selected = s.get_festival_preference(festival);
-                let name = crate::LANGUAGE_LOADER.get(festival.as_str());
-                let title = match active {
-                    true => fl!("pathing-config-festival-active", festival = name),
-                    false => name,
-                };
-                let selection = Selectable::new(title).selected(selected.unwrap_or(active));
-                if selection.build(ui) {
-                    change = Some((festival, match (selected, active) {
-                        (Some(selected), active) if active == !selected => None,
-                        (Some(selected), ..) => Some(!selected),
-                        (None, active) => Some(!active),
-                    }));
-                }
+    fn draw_festival_opts(&mut self, ui: &Ui) {
+        let Some(festivals) =
+            Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.festivals.borrow().clone())).flatten()
+        else {
+            return
+        };
+        let mut change = None;
+        for festival in Festival::all() {
+            let selected = festivals.get_preference(festival);
+            let active = festivals.active.get(festival);
+            let name = crate::LANGUAGE_LOADER.get(festival.as_str());
+            let title = match active {
+                true => fl!("pathing-config-festival-active", festival = name),
+                false => name,
+            };
+            let selection = Selectable::new(title).selected(selected.unwrap_or(active));
+            if selection.build(ui) {
+                change = Some((festival, match (selected, active) {
+                    (Some(selected), active) if active == !selected => None,
+                    (Some(selected), ..) => Some(!selected),
+                    (None, active) => Some(!active),
+                }));
             }
-            change
-        });
-        if let Some(Some((festival, change))) = change {
+        }
+        if let Some((festival, change)) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
-            PathingController::try_send(PathingEvent::RequestDisabledPaths);
         }
     }
 

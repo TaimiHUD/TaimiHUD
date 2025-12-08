@@ -3,7 +3,7 @@ use {
         collections::BTreeMap,
         time::{Duration, SystemTime},
     },
-    taimi_pack::attributes::Festival,
+    taimi_pack::attributes::{Festival, Festivals},
 };
 
 pub struct FestivalFixup;
@@ -118,6 +118,19 @@ impl FestivalFixup {
         "reactif.festivals",
         "legs.festivals",
     ];
+
+    /// [self.active_festivals](SystemTime::now)
+    pub fn current_festivals() -> Festivals {
+        Self::active_festivals(SystemTime::now())
+    }
+    /// For use as an initial setting, not to be considered reliable
+    pub fn active_festivals(now: SystemTime) -> Festivals {
+        Self::FESTIVAL_WINDOWS
+            .iter()
+            .filter(move |(_f, window)| window.is_active(now))
+            .map(|&(festival, ..)| Festivals::from(festival))
+            .collect()
+    }
 
     /// Generally Tuesdays from $(date +%s -d '20??-??-??T09:00:00-07:00')
     /// to $(date +%s -d '20??-??-??T12:00:00-07:00')

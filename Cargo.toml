@@ -72,6 +72,7 @@ space = [
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
   "texture-loader",
+  "paths",
   "goggles",
   "space-list",
   #"space-ecs",
@@ -106,7 +107,10 @@ markers = [
   "windows/Win32_Graphics_Gdi",
 ]
 markers-edit = [
-  "markers"
+  "markers",
+]
+
+paths = [
 ]
 
 meta-cache = [
