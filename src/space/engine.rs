@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::{pathing::PathingEvent, Controller},
         render::machine::RenderMachine,
         settings::{PathingSettings, Settings},
         space::{
@@ -28,7 +28,7 @@ use {
             MapContext,
         },
     },
-    taimi_pack::attributes::Festival,
+    taimi_sync::watched::{watch, Watched},
     tokio::{
         sync::mpsc::{Receiver, Sender},
         time::Instant,
@@ -79,10 +79,6 @@ pub enum SpaceEvent {
     MarkerFeed(PhaseState),
     MarkerReset(Arc<TimerFile>),
     SettingsDirty,
-    GameplayStatus {
-        gameplay: GameplayState,
-        trans: GameplayTransition,
-    },
     UiResize(Option<Size2<ScreenSpace>>),
     #[cfg(feature = "goggles")]
     GogglesRefreshLens {
@@ -114,6 +110,7 @@ fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Mark
 
 pub struct Engine {
     receiver: Receiver<SpaceEvent>,
+    gameplay: Watched<GameplayState>,
     pub render_backend: RenderBackend,
     #[cfg(feature = "space-ecs")]
     pub model_files: HashMap<PathBuf, ObjFile>,
@@ -136,7 +133,11 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn initialise(machine: &RenderMachine, receiver: Receiver<SpaceEvent>) -> anyhow::Result<Engine> {
+    pub fn initialise(
+        machine: &RenderMachine,
+        receiver: Receiver<SpaceEvent>,
+        gameplay: &watch::Sender<GameplayState>,
+    ) -> anyhow::Result<Engine> {
         let display_size = machine
             .display_size()
             .ok_or_else(|| anyhow!("display size unknown"))?;
@@ -174,12 +175,16 @@ impl Engine {
         schedule.add_systems(handle_marker_timings);
 
         let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
-        PathingController::try_send(PathingEvent::LoadAll);
+        PathingEvent::LoadAll.try_send();
+
+        let mut gameplay = Watched::start_watching(gameplay);
+        let _ = gameplay.try_get_mut();
 
         let engine = Engine {
             #[cfg(feature = "space-ecs")]
             model_files,
             receiver,
+            gameplay,
             render_backend,
             #[cfg(feature = "space-ecs")]
             object_kinds,
@@ -227,17 +232,11 @@ impl Engine {
                 return Ok(())
             },
             e => e,
-            _ => return Ok(()),
         };
         let mut res = None;
         let engine = engine.get_or_insert_with(|| {
             log::debug!("setting up space engine...");
             let (tx, rx) = tokio::sync::mpsc::channel::<SpaceEvent>(64);
-            // TODO: remove this...
-            let _ = tx.try_send(SpaceEvent::GameplayStatus {
-                gameplay: machine.gameplay,
-                trans: machine.gameplay.latest_transition(),
-            });
             #[cfg(feature = "goggles")]
             let _ = tx.try_send(SpaceEvent::RefreshEdgeScale);
             match crate::SPACE_SENDER
@@ -250,7 +249,11 @@ impl Engine {
                     return Err(e)
                 },
             }
-            match Self::initialise(machine, rx) {
+            let gameplay = Controller::with_sender(|s| s.gameplay.clone());
+            let Some(gameplay) = gameplay.flatten() else {
+                anyhow::bail!("controller unavailable");
+            };
+            match Self::initialise(machine, rx, &gameplay) {
                 Err(e) => {
                     res = Some(anyhow!("{e:#}"));
                     Err(e)
@@ -386,51 +389,6 @@ impl Engine {
                     SettingsDirty => {
                         self.settings = None;
                     },
-                    GameplayStatus { gameplay, trans } => {
-                        let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
-                            .context("I lost my context!");
-                        match gameplay {
-                            GameplayState::Gameplay { map_id: Some(new_map_id) } => {
-                                let prev = match trans {
-                                    GameplayTransition::Map { prev_map_id, .. } => prev_map_id,
-                                    GameplayTransition::Loaded { prev_map_id, .. } => prev_map_id,
-                                    GameplayTransition::Intermission { prev_map_id } => prev_map_id,
-                                };
-                                log::debug!(
-                                    "{}entering map {new_map_id}",
-                                    if prev == Some(new_map_id) { "re-" } else { "" }
-                                );
-                                self.gameplay_map_enter(&device_context?, new_map_id)
-                            },
-                            GameplayState::Gameplay { map_id: None } => {
-                                log::info!("how do we know we loaded into a null map from {trans:?} to {gameplay:?}?");
-                                Ok(())
-                            },
-                            GameplayState::Intermission {
-                                prev_map_id: Some(prev),
-                                next_map_id: None,
-                                initial: false,
-                            } => {
-                                log::debug!("leaving map {prev}");
-                                self.goggles_exit();
-                                //self.gameplay_map_exit(&device_context?, prev)
-                                Ok(())
-                            },
-                            GameplayState::Intermission {
-                                prev_map_id: Some(prev),
-                                next_map_id: Some(next),
-                                initial: false,
-                            } =>
-                                if prev != next {
-                                    log::info!("forget about previous map {prev}, prepare for {next}!");
-                                    self.gameplay_map_exit(&device_context?, prev)
-                                } else {
-                                    Ok(())
-                                },
-                            _ => Ok(()),
-                        }
-                        .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))?;
-                    },
                     UiResize(display_size) => match display_size {
                         None => {},
                         Some(sz) => {
@@ -475,13 +433,56 @@ impl Engine {
             Err(_error) => Ok(false),
         }
     }
+    fn process_gameplay_event(
+        &mut self,
+        gameplay: GameplayState,
+        trans: GameplayTransition,
+    ) -> anyhow::Result<()> {
+        let device_context =
+            unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!");
+        match gameplay {
+            GameplayState::Gameplay { map_id: Some(new_map_id) } => {
+                let prev = match trans {
+                    GameplayTransition::Map { prev_map_id, .. } => prev_map_id,
+                    GameplayTransition::Loaded { prev_map_id, .. } => prev_map_id,
+                    GameplayTransition::Intermission { prev_map_id } => prev_map_id,
+                };
+                log::debug!(
+                    "{}entering map {new_map_id}",
+                    if prev == Some(new_map_id) { "re-" } else { "" }
+                );
+                self.gameplay_map_enter(&device_context?, new_map_id)
+            },
+            GameplayState::Gameplay { map_id: None } => {
+                log::info!("how do we know we loaded into a null map from {trans:?} to {gameplay:?}?");
+                Ok(())
+            },
+            GameplayState::Intermission {
+                prev_map_id: Some(prev),
+                next_map_id: None,
+                initial: false,
+            } => {
+                log::debug!("leaving map {prev}");
+                self.goggles_exit();
+                //self.gameplay_map_exit(&device_context?, prev)
+                Ok(())
+            },
+            GameplayState::Intermission {
+                prev_map_id: Some(prev),
+                next_map_id: Some(next),
+                initial: false,
+            } =>
+                if prev != next {
+                    log::info!("forget about previous map {prev}, prepare for {next}!");
+                    self.gameplay_map_exit(&device_context?, prev)
+                } else {
+                    Ok(())
+                },
+            _ => Ok(()),
+        }
+    }
 
-    pub fn disable_paths(&mut self, machine: &RenderMachine, disabled_paths: HashSet<String>) {
-        self.packs.active_festivals = self.map_settings(|s| {
-            Festival::all()
-                .filter(|&f| s.get_festival_preference(f).unwrap_or(machine.festival_active(f)))
-                .collect()
-        });
+    pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
         self.packs.disable_paths(disabled_paths);
     }
 
@@ -519,6 +520,17 @@ impl Engine {
                 },
             )
         });
+        let gameplay_prev = self.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
+        if self.gameplay.watch.has_changed() {
+            let gameplay = *self.gameplay.get_mut();
+            let trans = gameplay.latest_transition_from(gameplay_prev);
+            let res = self
+                .process_gameplay_event(gameplay, trans)
+                .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"));
+            if let Err(e) = res {
+                log::error!("{e:#}");
+            }
+        }
         for _ in 0..5 {
             // try to get a couple events out of the way at a time
             // (would be nice to batch pack loads)
