@@ -141,14 +141,17 @@ pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
 
 /// I hate this. See: <https://github.com/blish-hud/Pathing/blob/25b65248c7861e585b2e80a52ffb7fd4ddb371d5/Utility/AttributeParsingUtil.cs#L39>
 pub fn taco_xml_to_guid(value: &str) -> Uuid {
-    use base64::{engine::general_purpose, Engine as _};
+    use {
+        base64::{engine::general_purpose, Engine as _},
+        md5::{Digest, Md5},
+    };
     let mut raw_guid = [0u8; 16];
     if let Ok(len) = general_purpose::STANDARD.decode_slice(value, &mut raw_guid) {
         if len == 16 {
             return Uuid::from_bytes_le(raw_guid);
         }
     }
-    Uuid::from_bytes_le(md5::compute(value).0)
+    Uuid::from_bytes_le(Md5::digest(value).into())
 }
 
 pub fn parse_pack_def(
