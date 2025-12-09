@@ -8,7 +8,7 @@ use {
             bindings::{TaimiControls, TaimiReceiver, CONTROLS},
         },
         log_join_error,
-        render::machine::MumblelinkTick,
+        render::{machine::MumblelinkTick, RenderEvent, RenderState},
         settings::{
             state::{BootstrapState, SaveState},
             DeserializedSource,
@@ -22,7 +22,6 @@ use {
         timer::{CombatState, Position},
         Interruption,
         InterruptionSignal,
-        RenderEvent,
         SETTINGS,
         SOURCES,
     },
@@ -281,7 +280,7 @@ impl Controller {
         state.render_inherit();
         state.late_init().await;
 
-        loop {
+        let interruption = loop {
             let state_quick_access = match () {
                 #[cfg(feature = "extension-nexus")]
                 _ => state.state_quick_access.changed(),
@@ -296,17 +295,15 @@ impl Controller {
             };
             select! {
                 evt = state.receiver.recv() => match evt {
-                    Some(evt) => {
-                        match state.handle_event(evt).await {
-                            Ok(true) => (),
-                            Ok(false) => break,
-                            Err(error) => {
-                                log::error!("Error! {}", error)
-                            }
+                    Some(evt) => match state.handle_event(evt).await {
+                        Ok(None) => (),
+                        Ok(Some(int)) => break int,
+                        Err(error) => {
+                            log::error!("Error! {}", error)
                         }
                     },
                     None => {
-                        break
+                        break Interruption::Unspecified
                     },
                 },
                 Ok(()) = state.gameplay_rx.changed() => {
@@ -351,7 +348,9 @@ impl Controller {
                     }
                 },
             }
-        }
+        };
+
+        state.handle_exit(interruption).await;
     }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
@@ -803,7 +802,7 @@ impl Controller {
         }
     }
 
-    async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
+    async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<Option<Interruption>> {
         use ControllerEvent::*;
         match &event {
             // omit the worst spam offenders
@@ -849,54 +848,84 @@ impl Controller {
                 false => (),
                 _ => self.mumblelink_tick().await?,
             },
-            Quit(Interruption::Abort) => {
-                log::debug!("controller skipping shutdown due to abort");
-                return Ok(false)
-            },
-            Quit(_reason) => {
-                if let Err(e) = self.save_on_quit().await {
-                    log::error!("{e:#}");
-                }
-                return Ok(false)
-            },
-            UnloadAll => {
-                if let Err(e) = self.save_on_quit().await {
-                    log::error!("{e:#}");
-                }
-                #[cfg(feature = "extension-arcdps")]
-                {
-                    use {crate::exports::arcdps as exports, std::thread};
-                    let avail = exports::available();
-                    let arc_cleanup = match avail {
-                        #[cfg(feature = "extension-nexus")]
-                        false if exports::loaded() && !rt::nexus_available() => true,
-                        avail => avail,
-                    };
-                    if arc_cleanup {
-                        thread::spawn(move || {
-                            if avail {
-                                // wait a tiny bit to give render thread cleanup a chance
-                                thread::sleep(Duration::from_millis(84));
-                            }
-                            // TODO: synchronize with controller shutdown in case it takes a while...
-                            let res = unsafe { exports::ExitHandle::try_exit() }
-                                .and_then(|exit| exit.ok_or("unloaded/unaware?"));
-                            match res {
-                                Err(e) => log::error!("Failed to leave arcdps: {e}"),
-                                Ok(exit) => {
-                                    log::info!("goodbye arc");
-                                    exit.free_blocking();
-                                },
-                            }
-                        });
-                    }
-                }
-                return Ok(false)
-            },
+            Quit(reason) => return Ok(Some(reason)),
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:
             //_ => (),
         }
-        Ok(true)
+        Ok(None)
+    }
+
+    pub async fn handle_exit(&mut self, reason: Interruption) {
+        if let Interruption::Abort = reason {
+            log::debug!("controller skipping shutdown due to abort");
+            return
+        }
+        match reason {
+            // no need if we're exiting for good or will be right back...
+            Interruption::GameQuit | Interruption::Temporary => (),
+            // otherwise unloading for typical reasons and should perform clean-up
+            _ => {},
+        }
+        let _ = rt::log::error_ok(self.save_on_quit().await);
+    }
+
+    #[cfg(feature = "extension-arcdps")]
+    pub fn arc_spawn_early_exit() {
+        use {crate::exports::arcdps as exports, std::thread};
+
+        let avail = exports::available();
+        let arc_cleanup = match avail {
+            #[cfg(feature = "extension-nexus")]
+            false if exports::loaded() && !rt::nexus_available() => true,
+            avail => avail,
+        };
+        if arc_cleanup {
+            thread::spawn(move || {
+                if avail {
+                    // wait a tiny bit to give render thread cleanup a chance
+                    thread::sleep(Duration::from_millis(84));
+                }
+                // TODO: synchronize with controller shutdown in case it takes a while...
+                let res = unsafe { exports::ExitHandle::try_exit() }
+                    .and_then(|exit| exit.ok_or("unloaded/unaware?"));
+                match res {
+                    Err(e) => log::error!("Failed to leave arcdps: {e}"),
+                    Ok(exit) => {
+                        log::info!("goodbye arc");
+                        exit.free_blocking();
+                    },
+                }
+            });
+        }
+    }
+
+    #[cfg(todo = "unused")]
+    pub fn try_exit(reason: Interruption) -> Option<Interruption> {
+        let mut sender = crate::CONTROLLER_SENDER.try_write().ok()?;
+        if let Some(reason) = sender.shutdown {
+            return Some(reason)
+        }
+        match sender.exit(reason) {
+            Some(true) => {
+                RenderState::try_send(RenderEvent::Quit(reason));
+                Some(reason)
+            },
+            _ => sender.shutdown,
+        }
+    }
+    pub fn send_exit(reason: Interruption) -> Interruption {
+        let mut sender = match crate::CONTROLLER_SENDER.write() {
+            Ok(s) => s,
+            // if this is poisoned that's very bad news
+            Err(..) => return Interruption::Abort,
+        };
+        match sender.exit(reason) {
+            Some(true) => {
+                RenderState::try_send(RenderEvent::Quit(reason));
+                reason
+            },
+            _ => sender.shutdown.unwrap_or(Interruption::Unspecified),
+        }
     }
 
     pub fn with_sender<R, F: FnOnce(&ControllerSender) -> R>(f: F) -> Option<R> {
@@ -981,9 +1010,6 @@ pub enum ControllerEvent {
     CheckUpdateSources,
     CheckAddonUpdate(bool),
     Quit(Interruption),
-    /// Like quit but will also request addon release
-    /// (if possible)
-    UnloadAll,
 }
 
 impl ControllerEvent {
@@ -1003,6 +1029,7 @@ impl InterruptionSignal for ControllerEvent {
 
 #[derive(Debug, Clone, Default)]
 pub struct ControllerSender {
+    pub shutdown: Option<Interruption>,
     pub gameplay: Option<watch::Sender<GameplayState>>,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
@@ -1014,6 +1041,7 @@ pub struct ControllerSender {
 
 impl ControllerSender {
     pub const EMPTY: Self = Self {
+        shutdown: None,
         gameplay: None,
         #[cfg(any(feature = "markers", feature = "space"))]
         mumble_identity: None,
@@ -1043,6 +1071,7 @@ impl ControllerSender {
             pathing: Some(pathing_rx),
         };
         let sender = Self {
+            shutdown: None,
             gameplay: Some(gameplay),
             #[cfg(any(feature = "markers", feature = "space"))]
             mumble_identity: Some(mumble_identity_tx),
@@ -1063,16 +1092,28 @@ impl ControllerSender {
         if let Some(sender) = self.api.take() {
             let _ = sender.command.try_send(ApiMessage::Exit(reason));
         }
+        let reason = rt::notify_shutdown(reason);
         let sent = self
             .generic
             .as_ref()?
             .try_send(ControllerEvent::Quit(reason))
             .is_ok();
+        if self.shutdown.is_none() {
+            self.shutdown = Some(
+                sent.then_some(reason)
+                    .unwrap_or_else(|| rt::is_shutdown().unwrap_or(Interruption::Unspecified)),
+            );
+        }
         match (reason, sent) {
             (Interruption::GameQuit, false) => return Some(false),
             _ => (),
         }
-        let _ = self.generic.take();
+        let generic = self.generic.take();
+        let sent = match generic {
+            Some(generic) if !sent && !reason.is_urgent() =>
+                generic.blocking_send(ControllerEvent::Quit(reason)).is_ok(),
+            _ => sent,
+        };
         Some(sent)
     }
 
