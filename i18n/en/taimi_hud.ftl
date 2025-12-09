@@ -33,6 +33,7 @@ data = Data
 object = Object
 files = Files
 clear = Clear
+refresh = Refresh
 refresh-files = Refresh files
 # as in 3D
 model = Model
@@ -131,6 +132,21 @@ gamebinds = Game Bindings
 keybind = Keybind
 gamebind-notice = Set these to match your Controls settings in-game. These may be automatically detected when arcdps-unofficial-extras is installed.
 
+## API Config
+
+api-tab = API
+api-notice = An API key token allows you to opt in to personalized features such as hiding completed achievement markers. The `progression` and `characters` permissions are recommended.
+api-token-label = Token
+api-setup-open = Link Account
+api-link = "https://account.arena.net/applications"
+api-status-setup = Adding API key...
+api-refresh = Refresh...
+api-refresh-achievements = Achievements
+api-refresh-raids = Raid Clears
+api-refresh-account = Account
+api-auto-update = Automatic Updates
+api-permissions = Permissions
+
 ## Windows
 
 primary-window = TaimiHUD
@@ -164,7 +180,7 @@ downloading-update = Downloading update...
 check-for-updates = Check for updates
 check-for-updates-tooltip = Check for updates to any data sources. We don't do this automatically to respect your choice on whether or not to make network requests.
 checked-for-updates-last = Last checked for updates at: { $time }
-reload-data-sources = Reload data sources
+reload-data-sources = Reload data
 reload-data-sources-tooltip = Reload items from currently installed data sources. Useful if you have changed the files within them!
 
 remote = Remote
@@ -326,6 +342,9 @@ pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
 pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
+pathing-config-filters = Filters
+pathing-config-api-bypass = API bypass
+pathing-config-api-bypass-notice = Temporarily show completed achievements when replaying content with your friends
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
 pathing-config-reset-notice = Right-click any slider below to restore its default setting.

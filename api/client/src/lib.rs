@@ -1,7 +1,7 @@
 pub use gw2lib_model::{self as model, BulkEndpoint, Endpoint, EndpointWithId, FixedEndpoint, Language};
 use {
-    core::{fmt, mem, ops},
-    serde::{de::DeserializeOwned, Serialize},
+    core::{fmt, marker::PhantomData, mem, ops},
+    serde::de::DeserializeOwned,
 };
 
 #[cfg(feature = "reqwest")]
@@ -10,14 +10,15 @@ pub mod festivals;
 
 pub type IdValue = u32;
 pub type Gw2ApiKey = String;
-pub trait Gw2Endpoint: FixedEndpoint + DeserializeOwned + Serialize {}
-impl<T: FixedEndpoint + DeserializeOwned + Serialize> Gw2Endpoint for T {}
+pub trait Gw2Endpoint: FixedEndpoint + DeserializeOwned {}
+impl<T: FixedEndpoint + DeserializeOwned> Gw2Endpoint for T {}
 
-pub trait Gw2BulkEndpoint: BulkEndpoint + FixedEndpoint + DeserializeOwned + Serialize {}
-impl<T: BulkEndpoint + FixedEndpoint + DeserializeOwned + Serialize> Gw2BulkEndpoint for T {}
+pub trait Gw2BulkEndpoint: BulkEndpoint + FixedEndpoint + DeserializeOwned {}
+impl<T: BulkEndpoint + FixedEndpoint + DeserializeOwned> Gw2BulkEndpoint for T {}
 
 pub trait IdRange {
     fn id_is_multiple(&self) -> bool;
+    fn id_is_all(&self) -> bool;
 
     fn id_key(&self) -> Option<&'static str> {
         Some(match self.id_is_multiple() {
@@ -45,6 +46,9 @@ impl<I: IdRange> IdRange for &'_ I {
     fn id_is_multiple(&self) -> bool {
         IdRange::id_is_multiple(*self)
     }
+    fn id_is_all(&self) -> bool {
+        IdRange::id_is_all(*self)
+    }
     fn id_key(&self) -> Option<&'static str> {
         IdRange::id_key(*self)
     }
@@ -54,13 +58,20 @@ impl<I: IdRange> IdRange for &'_ I {
 }
 
 impl dyn IdRange {
-    pub fn fmt_value<I: Into<IdValue>>(id: I, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&id.into(), f)
+    pub fn fmt_value<E: EndpointWithId>(id: &E::IdType, f: &mut fmt::Formatter) -> fmt::Result {
+        match id {
+            #[cfg(todo = "unnecessary")]
+            id => f.write_str(&E::format_id(id)),
+            id => fmt::Display::fmt(id, f),
+        }
     }
 
-    pub fn fmt_values<I: IntoIterator>(ids: I, f: &mut fmt::Formatter) -> fmt::Result
+    pub fn fmt_values<E: EndpointWithId, I>(
+        ids: impl IntoIterator<Item = I>,
+        f: &mut fmt::Formatter,
+    ) -> fmt::Result
     where
-        I::Item: Into<IdValue>,
+        I: ops::Deref<Target = E::IdType>,
     {
         let mut is_empty = true;
         for (i, id) in ids.into_iter().enumerate() {
@@ -68,7 +79,7 @@ impl dyn IdRange {
             if i > 0 {
                 f.write_str(",")?;
             }
-            Self::fmt_value(id, f)?;
+            Self::fmt_value::<E>(&id, f)?;
         }
         if is_empty {
             log::warn!("API request expected IDs");
@@ -84,7 +95,7 @@ impl dyn IdRange {
 #[repr(transparent)]
 pub struct IdRangeDisplay<I: ?Sized>(pub I);
 impl<I: ?Sized> IdRangeDisplay<I> {
-    pub fn from_ref(id: &I) -> &Self {
+    pub const fn from_ref(id: &I) -> &Self {
         unsafe { mem::transmute(id) }
     }
 
@@ -105,95 +116,158 @@ impl IdRange for ops::RangeFull {
     fn id_is_multiple(&self) -> bool {
         true
     }
+    fn id_is_all(&self) -> bool {
+        true
+    }
 
     fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("all")
     }
 }
-impl IdRange for IdValue {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[repr(transparent)]
+pub struct RequestOne<E: EndpointWithId>(pub E::IdType);
+impl<E: EndpointWithId> RequestOne<E> {
+    pub const fn from_ref(id: &E::IdType) -> &Self {
+        unsafe { mem::transmute(id) }
+    }
+    pub fn from_mut(id: &mut E::IdType) -> &mut Self {
+        unsafe { mem::transmute(id) }
+    }
+}
+impl<E: EndpointWithId> IdRange for RequestOne<E> {
     fn id_is_multiple(&self) -> bool {
+        false
+    }
+    fn id_is_all(&self) -> bool {
         false
     }
 
     fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <dyn IdRange>::fmt_value(*self, f)
-    }
-}
-impl<I: Into<IdValue> + PartialOrd> IdRange for ops::Range<I>
-where
-    Self: Iterator<Item = I> + ExactSizeIterator + Clone,
-{
-    fn id_is_multiple(&self) -> bool {
-        self.len() != 1
-    }
-
-    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <dyn IdRange>::fmt_values(self.clone(), f)
-    }
-}
-impl<I: Into<IdValue> + PartialOrd> IdRange for ops::RangeTo<I>
-where
-    Self: Iterator<Item = I> + ExactSizeIterator + Clone,
-{
-    fn id_is_multiple(&self) -> bool {
-        self.len() != 1
-    }
-
-    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <dyn IdRange>::fmt_values(self.clone(), f)
-    }
-}
-impl<I: Into<IdValue> + PartialOrd> IdRange for ops::RangeFrom<I>
-where
-    Self: Iterator<Item = I> + ExactSizeIterator + Clone,
-{
-    fn id_is_multiple(&self) -> bool {
-        self.len() != 1
-    }
-
-    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <dyn IdRange>::fmt_values(self.clone(), f)
-    }
-}
-impl<I: Into<IdValue> + PartialOrd> IdRange for ops::RangeInclusive<I>
-where
-    Self: Iterator<Item = I> + ExactSizeIterator + Clone,
-{
-    fn id_is_multiple(&self) -> bool {
-        self.len() != 1
-    }
-
-    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        <dyn IdRange>::fmt_values(self.clone(), f)
+        <dyn IdRange>::fmt_value::<E>(&self.0, f)
     }
 }
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(transparent)]
-pub struct IdRangeIter<I: ?Sized>(pub I);
-impl<I, ID> IdRange for IdRangeIter<I>
+pub struct IdsIn<E: EndpointWithId, R> {
+    pub _endpoint: PhantomData<E>,
+    pub range: R,
+}
+impl<E: EndpointWithId, R> IdsIn<E, R> {
+    pub const fn new(range: R) -> Self {
+        Self { range, _endpoint: PhantomData }
+    }
+}
+impl<E: EndpointWithId, I: ops::Deref<Target = E::IdType> + PartialOrd> IdRange for IdsIn<E, ops::Range<I>>
 where
-    for<'a> &'a I: IntoIterator<Item = &'a ID>,
-    for<'a> ID: Clone + Into<IdValue>,
-    for<'a> <&'a I as IntoIterator>::IntoIter: ExactSizeIterator,
+    ops::Range<I>: Iterator<Item = I> + ExactSizeIterator + Clone,
 {
     fn id_is_multiple(&self) -> bool {
-        IntoIterator::into_iter(&self.0).len() != 1
+        //self.range.len() != 1
+        self.range.clone().count() != 1
+    }
+    fn id_is_all(&self) -> bool {
+        false
     }
 
     fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let iter = IntoIterator::into_iter(&self.0).cloned();
-        <dyn IdRange>::fmt_values(iter, f)
+        <dyn IdRange>::fmt_values::<E, _>(self.range.clone(), f)
+    }
+}
+impl<E: EndpointWithId, I: ops::Deref<Target = E::IdType> + PartialOrd> IdRange
+    for IdsIn<E, ops::RangeTo<I>>
+where
+    ops::RangeTo<I>: Iterator<Item = I> + ExactSizeIterator + Clone,
+{
+    fn id_is_multiple(&self) -> bool {
+        self.range.clone().count() != 1
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+
+    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <dyn IdRange>::fmt_values::<E, _>(self.range.clone(), f)
+    }
+}
+impl<E: EndpointWithId, I: ops::Deref<Target = E::IdType> + PartialOrd> IdRange
+    for IdsIn<E, ops::RangeFrom<I>>
+where
+    ops::RangeFrom<I>: Iterator<Item = I> + ExactSizeIterator + Clone,
+{
+    fn id_is_multiple(&self) -> bool {
+        self.range.clone().count() != 1
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+
+    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <dyn IdRange>::fmt_values::<E, _>(self.range.clone(), f)
+    }
+}
+impl<E: EndpointWithId, I: ops::Deref<Target = E::IdType> + PartialOrd> IdRange
+    for IdsIn<E, ops::RangeInclusive<I>>
+where
+    ops::RangeInclusive<I>: Iterator<Item = I> + ExactSizeIterator + Clone,
+{
+    fn id_is_multiple(&self) -> bool {
+        self.range.clone().count() != 1
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+
+    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <dyn IdRange>::fmt_values::<E, _>(self.range.clone(), f)
+    }
+}
+#[derive(Debug, Copy, Clone, Default)]
+#[repr(transparent)]
+pub struct IterIds<E: EndpointWithId, I: ?Sized> {
+    pub _endpoint: PhantomData<E>,
+    pub iter: I,
+}
+impl<E: EndpointWithId, I> IterIds<E, I> {
+    pub const fn new(iter: I) -> Self {
+        Self { iter, _endpoint: PhantomData }
+    }
+}
+impl<E: EndpointWithId, I: ?Sized> IterIds<E, I> {
+    pub fn from_ref(iter: &I) -> &Self {
+        unsafe { mem::transmute(iter) }
+    }
+    pub fn from_mut(iter: &mut I) -> &mut Self {
+        unsafe { mem::transmute(iter) }
+    }
+}
+impl<E: EndpointWithId, I: ?Sized, ID> IdRange for IterIds<E, I>
+where
+    for<'a> &'a I: IntoIterator<Item = &'a ID>,
+    for<'a> ID: Clone + ops::Deref<Target = E::IdType>,
+    for<'a> <&'a I as IntoIterator>::IntoIter: ExactSizeIterator,
+{
+    fn id_is_multiple(&self) -> bool {
+        IntoIterator::into_iter(&self.iter).len() != 1
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+
+    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let iter = IntoIterator::into_iter(&self.iter).cloned();
+        <dyn IdRange>::fmt_values::<E, ID>(iter, f)
     }
 }
 
-pub enum IdQueryContainer {
+pub enum IdQueryContainer<E: EndpointWithId> {
     Ids,
-    Single(IdValue),
-    Multi(Vec<IdValue>),
+    Single(E::IdType),
+    Multi(Vec<E::IdType>),
     All,
 }
 
-impl IdQueryContainer {
+impl<E: EndpointWithId> IdQueryContainer<E> {
     pub fn key(&self) -> Option<&'static str> {
         Some(match self {
             Self::Ids => return None,
@@ -207,28 +281,21 @@ impl IdQueryContainer {
     }
 }
 
-impl fmt::Display for IdQueryContainer {
+impl<E: EndpointWithId> fmt::Display for IdQueryContainer<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.id_fmt_value(f)
     }
 }
 
-impl From<IdValue> for IdQueryContainer {
-    fn from(id: IdValue) -> Self {
-        Self::Single(id)
-    }
-}
-impl From<ops::RangeFull> for IdQueryContainer {
-    fn from(_: ops::RangeFull) -> Self {
-        Self::All
-    }
-}
-impl IdRange for IdQueryContainer {
+impl<E: EndpointWithId> IdRange for IdQueryContainer<E> {
     fn id_is_multiple(&self) -> bool {
         match self {
             Self::Single(..) => false,
             _ => true,
         }
+    }
+    fn id_is_all(&self) -> bool {
+        matches!(self, Self::All)
     }
 
     fn id_key(&self) -> Option<&'static str> {
@@ -255,5 +322,66 @@ impl IdRange for IdQueryContainer {
             },
             Self::All => f.write_str("all"),
         }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[repr(transparent)]
+pub struct RequestAll<E>(pub PhantomData<E>);
+impl<E> RequestAll<E> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+impl<E: BulkEndpoint> IdRange for RequestAll<E> {
+    fn id_is_multiple(&self) -> bool {
+        true
+    }
+    fn id_is_all(&self) -> bool {
+        E::ALL
+    }
+    fn id_key(&self) -> Option<&'static str> {
+        E::ALL.then_some("ids")
+    }
+    fn id_fmt_value(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("all")
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[repr(transparent)]
+pub struct RequestIds<E>(pub PhantomData<E>);
+impl<E> RequestIds<E> {
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+impl<E: EndpointWithId> IdRange for RequestIds<E> {
+    fn id_is_multiple(&self) -> bool {
+        true
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+    fn id_key(&self) -> Option<&'static str> {
+        None
+    }
+    fn id_fmt_value(&self, _: &mut fmt::Formatter) -> fmt::Result {
+        Ok(())
+    }
+}
+
+impl IdRange for () {
+    /// if it could be, use [RequestAll] instead
+    fn id_is_multiple(&self) -> bool {
+        false
+    }
+    fn id_is_all(&self) -> bool {
+        false
+    }
+    fn id_key(&self) -> Option<&'static str> {
+        None
+    }
+    fn id_fmt_value(&self, _: &mut fmt::Formatter) -> fmt::Result {
+        Ok(())
     }
 }

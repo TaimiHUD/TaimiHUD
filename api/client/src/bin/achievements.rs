@@ -1,14 +1,17 @@
-use taimi_api_client::{
-    client::ApiClient,
-    model::{
-        achievements::Achievement,
-        authenticated::account::{
-            achievements::AccountAchievements,
-            wizards_vault::{
-                daily::WizardsVaultDailies,
-                listings::WizardsVaultListing,
-                special::WizardsVaultSpecials,
-                weekly::WizardsVaultWeeklies,
+use {
+    std::env,
+    taimi_api_client::{
+        client::ApiClient,
+        model::{
+            achievements::Achievement,
+            authenticated::account::{
+                achievements::AccountAchievements,
+                wizards_vault::{
+                    daily::WizardsVaultDailies,
+                    listings::WizardsVaultListing,
+                    special::WizardsVaultSpecials,
+                    weekly::WizardsVaultWeeklies,
+                },
             },
         },
     },
@@ -21,6 +24,9 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::new().default_filter_or("debug,reqwest=info")).init();
     log::info!("Rock and roll!");
     let mut client = ApiClient::new()?;
+    if let Ok(key) = env::var("ANET_API_KEY") {
+        client.set_api_key(Some(key))?;
+    }
     /*let request = client.request_ids::<Achievement>()
         .await?;
     let mut id_len = request.len();
