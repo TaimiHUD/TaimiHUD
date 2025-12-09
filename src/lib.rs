@@ -429,6 +429,14 @@ pub(crate) fn pre_uninit_for(host: AddonHostName) -> bool {
     other_hosts.all(|other| !other.is_active())
 }
 pub(crate) fn post_uninit_for(host: AddonHostName) {
+    match rt::is_shutdown() {
+        Some(Interruption::GameQuit | Interruption::Abort) => {
+            // too much cleanup on exit is a bad idea unfortunately
+            // (partly because nexus unload is unsynchronized+racy, therefore urgent)
+            return
+        },
+        _ => (),
+    }
     let mut pending_cleanup = false;
     let other_hosts = AddonHostName::HOST_PRIORITY
         .iter()
@@ -501,6 +509,7 @@ fn init() -> Result<(), &'static str> {
     }
 
     // Set up the thread
+    rt::reset_shutdown();
     let addon_dir = &*ADDON_DIR;
 
     if let Err(e) = rt::reload_language() {
@@ -976,11 +985,9 @@ fn notify_quit() {
     // if !RenderState::is_running() { return }
 
     log::info!("Preparing for game exit");
-    let int = Interruption::GameQuit;
-    rt::notify_shutdown(int);
+    let int = rt::notify_shutdown(Interruption::GameQuit);
 
-    let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
-    controller_sender.exit(int);
+    Controller::send_exit(int);
 
     TEXTURES.quit();
 
@@ -1034,8 +1041,8 @@ pub enum Interruption {
 
 impl Interruption {
     pub const NONE: u8 = 0;
-    pub const UNSPECIFIED: u8 = Self::Unspecified as u8;
-    pub const REPR_MIN: u8 = Self::GameQuit as u8;
+    pub const UNSPECIFIED: u8 = Self::Unspecified.repr();
+    pub const REPR_MIN: u8 = Self::GameQuit.repr();
     pub const REPR_MAX: u8 = Self::UNSPECIFIED;
 
     pub const fn from_bool(value: bool) -> Option<Self> {
@@ -1056,6 +1063,13 @@ impl Interruption {
     }
     pub const unsafe fn from_repr_unchecked(value: u8) -> Option<Self> {
         mem::transmute(value)
+    }
+    pub const fn repr(self) -> u8 {
+        self as _
+    }
+
+    pub fn is_urgent(&self) -> bool {
+        matches!(self, Interruption::Abort | Interruption::GameQuit)
     }
 
     /// Drain remaining queue for termination signal, then close the channel -
@@ -1091,7 +1105,7 @@ impl Interruption {
 
 impl From<Interruption> for u8 {
     fn from(value: Interruption) -> Self {
-        value as u8
+        value.repr()
     }
 }
 pub trait InterruptionSignal {
@@ -1135,6 +1149,7 @@ fn unload() {
     BootstrapState::try_write_with(|s| s.try_update_latest_host(None));
 
     log::info!("Unloading addon");
+    let reason = rt::notify_shutdown(Interruption::Shutdown);
 
     TEXTURES.quit();
 
@@ -1144,7 +1159,7 @@ fn unload() {
     }
 
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
-    let controller_quit = CONTROLLER_SENDER.write().unwrap().exit(Interruption::Shutdown);
+    let controller_quit = Controller::send_exit(reason);
 
     let confirm_render_unload = {
         #[cfg(feature = "space")]
@@ -1152,7 +1167,6 @@ fn unload() {
         let mut render_sender = RENDER_SENDER.write().unwrap();
         let mut render_state = RenderState::lock();
 
-        let interruption = rt::is_shutdown();
         let render_quit = match RenderState::is_render_thread() {
             true => {
                 if let Some(state) = render_state.take() {
@@ -1162,13 +1176,13 @@ fn unload() {
             },
             _ => render_sender
                 .as_ref()
-                .map(|sender| sender.try_send(RenderEvent::Quit(interruption.unwrap_or_default()))),
+                .map(|sender| sender.try_send(RenderEvent::Quit(reason))),
         };
         let _ = render_sender.take();
 
         log::logger().flush();
         match render_quit {
-            _ if matches!(rt::is_shutdown(), Some(Interruption::GameQuit)) || render_state.is_none() => {
+            _ if matches!(reason, Interruption::GameQuit) || render_state.is_none() => {
                 // it's already gone, nothing more to do here
                 false
             },
@@ -1207,7 +1221,13 @@ fn unload() {
     }
 
     match controller_quit {
-        Some(true) | None => match controller_handle {
+        Interruption::Unspecified => log::warn!("Failed to signal controller quit"),
+        Interruption::Abort => (),
+        #[cfg(feature = "extension-nexus")]
+        Interruption::GameQuit if rt::nexus_available() => {
+            log::info!("not bothering to wait for controller");
+        },
+        _ => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 log::logger().flush();
@@ -1218,9 +1238,6 @@ fn unload() {
             None => {
                 log::warn!("Controller unavailable?");
             },
-        },
-        Some(false) => {
-            log::warn!("Failed to signal controller quit");
         },
     }
 

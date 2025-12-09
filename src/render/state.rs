@@ -102,6 +102,13 @@ pub enum RenderEvent {
     #[cfg(feature = "goggles")]
     UiDepthAcquired(),
 }
+impl RenderEvent {
+    pub const INITIATE_QUIT_REASON: Interruption = match () {
+        #[cfg(todo)]
+        () => Interruption::Shutdown,
+        () => Interruption::Unspecified,
+    };
+}
 
 #[derive(Display, Default, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -253,8 +260,11 @@ impl RenderState {
                         Self::select_host();
                     },
                     InitiateQuit => {
+                        #[cfg(feature = "extension-arcdps")]
+                        Controller::arc_spawn_early_exit();
+
                         crate::TEXTURES.quit();
-                        Controller::try_send(ControllerEvent::UnloadAll);
+                        Controller::send_exit(RenderEvent::INITIATE_QUIT_REASON);
                         let _ = crate::SPACE_SENDER.write().map(|mut s| s.take());
                         if let Ok(mut sender) = crate::RENDER_SENDER.try_write() {
                             sender.take();
@@ -723,7 +733,7 @@ impl InterruptionSignal for RenderEvent {
     fn interrupted(&self) -> Option<Interruption> {
         match self {
             &Self::Quit(reason) => Some(reason),
-            Self::InitiateQuit => Some(Interruption::Unspecified),
+            Self::InitiateQuit => Some(RenderEvent::INITIATE_QUIT_REASON),
             _ => None,
         }
     }
