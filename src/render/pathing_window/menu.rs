@@ -98,8 +98,8 @@ impl PathingWindowState {
                         *b ^= true;
                     }
                 }
-                let active_festivals = PathingController::active_festivals().unwrap_or_default().get();
-                pack.recompute_enabled(active_festivals);
+                let external = PathingController::external_filter_state();
+                pack.recompute_enabled(external.as_ref());
             }
         }
     }

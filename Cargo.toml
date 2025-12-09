@@ -290,7 +290,7 @@ ordered-float = { version = "5.0.0", features = [ "serde" ] }
 bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
 semver = { version = "1", optional = true }
-uuid = "1"
+uuid = { version = "1", features = ["v3", "v4", "serde"] }
 regex = "1"
 croner = "3"
 bitvec = { workspace = true }

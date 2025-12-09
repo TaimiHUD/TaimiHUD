@@ -1,7 +1,8 @@
 use {
     crate::{
         controller::{
-            pathing::{PathingController, PathingEvent},
+            api::ApiController,
+            pathing::{PathingController, PathingEnables, PathingEvent},
             Controller,
         },
         fl,
@@ -29,18 +30,29 @@ use {
     std::collections::HashMap,
     strum::VariantArray,
     taimi_pack::attributes::Festival,
+    taimi_sync::watched::Watched,
 };
 
 #[cfg(feature = "goggles")]
 use crate::space::engine::{Engine, SpaceEvent};
 
 pub struct PathingConfig {
-    katrender: bool,
+    enables: Watched<PathingEnables>,
 }
 
 impl PathingConfig {
     pub fn new() -> Self {
-        Self { katrender: false }
+        let mut state = Self { enables: Watched::EMPTY };
+        Controller::with_sender(|s| {
+            if let Some(p) = &s.pathing {
+                state.enables.restart_watching(&p.enables);
+            }
+        });
+        state
+    }
+
+    fn katrender(&self) -> bool {
+        self.enables.get().contains(PathingEnables::KATRENDER)
     }
 
     pub fn draw(
@@ -49,22 +61,19 @@ impl PathingConfig {
         machine: &mut RenderMachine,
         _state_errors: &mut HashMap<String, anyhow::Error>,
     ) {
-        if let Some(settings) = Settings::try_read() {
-            self.katrender = settings.enable_katrender;
-        };
-
+        let _ = self.enables.get_mut();
         ui.columns(2, "pathing_tab_start", true);
 
         self.draw_header(ui);
 
         let opts_primary = || {
             let available = Engine::is_available();
-            if !available && self.katrender {
+            if !available && self.katrender() {
                 Self::draw_space_error(ui, machine, None);
             }
 
             self.draw_pathing_opts(ui, machine);
-            if available && self.katrender {
+            if available && self.katrender() {
                 ui.separator();
                 let label = fl!("pathing-window");
                 if ui.button(&label) {
@@ -151,13 +160,14 @@ impl PathingConfig {
 
     fn draw_header(&mut self, ui: &Ui) {
         {
-            let _font = (!self.katrender).then(|| RenderState::push_font("big", ui));
-            if ui.checkbox(&fl!("pathing-config-enable"), &mut self.katrender) {
+            let _font = (!self.katrender()).then(|| RenderState::push_font("big", ui));
+            let enables = self.enables.borrow_mut();
+            if ui.checkbox_flags(&fl!("pathing-config-enable"), enables, PathingEnables::KATRENDER) {
                 PathingController::try_send(PathingEvent::ToggleKatRender);
             }
         }
 
-        if self.katrender {
+        if self.katrender() {
             ui.same_line();
             if ui.button(&fl!("render-unload")) {
                 let _disabled = Settings::write_with_blocking(|settings| {
@@ -442,6 +452,24 @@ impl PathingConfig {
             },
         }
 
+        let filters_tree = with_i18n!("pathing-config-filters", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .push(ui));
+        if let Some(_tree) = filters_tree {
+            let enables = self.enables.borrow_mut();
+            if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
+                &label,
+                enables,
+                PathingEnables::API_BYPASS
+            )) {
+                PathingEvent::ApiBypass(Some(enables.contains(PathingEnables::API_BYPASS))).try_send();
+            }
+            if ui.is_item_hovered() {
+                with_i18n!("pathing-config-api-bypass-notice", |msg| ui.tooltip_text(&msg));
+            }
+        }
         let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
@@ -626,11 +654,7 @@ impl PathingConfig {
     }
 
     fn draw_festival_opts(&mut self, ui: &Ui) {
-        let Some(festivals) =
-            Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.festivals.borrow().clone())).flatten()
-        else {
-            return
-        };
+        let Some(festivals) = ApiController::active_festivals() else { return };
         let mut change = None;
         for festival in Festival::all() {
             let selected = festivals.get_preference(festival);

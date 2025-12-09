@@ -1,13 +1,14 @@
+#[cfg(feature = "space")]
+use {
+    crate::controller::Controller,
+    taimi_meta::ui::MapContext,
+    taimi_pack::attributes::{Festival, Festivals},
+};
 use {
     crate::settings::Settings,
     serde::{Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, sync::Arc},
     strum::{IntoStaticStr, VariantArray},
-};
-#[cfg(feature = "space")]
-use {
-    taimi_meta::ui::MapContext,
-    taimi_pack::attributes::{Festival, Festivals},
 };
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
@@ -54,9 +55,9 @@ impl PathingSettings {
                 festival_filter.insert(festival.into(), pref);
             },
         }
-        crate::Controller::with_sender(|s| {
-            if let Some(p) = &s.pathing {
-                p.festivals.send_if_modified(|festivals| {
+        Controller::with_sender(|s| {
+            if let Some(a) = &s.api {
+                a.festivals.send_if_modified(|festivals| {
                     let prev = festivals.get();
                     festivals.set_preference(festival, pref);
                     prev != festivals.get()
