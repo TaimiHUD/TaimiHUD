@@ -14,11 +14,17 @@ use {
 pub struct SaveState {
     #[serde(default, skip_serializing_if = "GameBinds::is_empty")]
     pub game_binds: GameBinds,
+    /// TODO: put this in an api struct...
+    #[serde(default, skip_serializing_if = "taimi_hoard::is_false_ref")]
+    pub api_auto_update: bool,
     // TODO: move dpi scaling toggle here maybe?
 }
 
 impl SaveState {
-    pub const EMPTY: Self = Self { game_binds: GameBinds::new() };
+    pub const EMPTY: Self = Self {
+        game_binds: GameBinds::new(),
+        api_auto_update: false,
+    };
 
     pub fn new() -> Self {
         Self::EMPTY
@@ -47,7 +53,8 @@ impl SaveState {
 
     pub fn is_empty(&self) -> bool {
         match self {
-            Self { game_binds } if game_binds.is_empty() => true,
+            Self { game_binds, .. } if !game_binds.is_empty() => false,
+            Self { game_binds: _, api_auto_update: false } => true,
             _ => false,
         }
     }

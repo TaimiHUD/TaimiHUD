@@ -3,12 +3,16 @@ use {
     std::{fs, path::Path, time::UNIX_EPOCH},
 };
 
+mod api;
 mod bootstrap;
+pub mod install;
 mod save;
 pub mod ui;
 
 pub use self::{
+    api::SavedApiToken,
     bootstrap::{AddonHostName, BootstrapState, UpdatePreference},
+    install::Installation,
     save::SaveState,
     ui::UiState,
 };

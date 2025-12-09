@@ -188,9 +188,8 @@ impl PathingWindowState {
                                         &self.search_state,
                                     );
                                     if recompute {
-                                        let active_festivals =
-                                            PathingController::active_festivals().unwrap_or_default().get();
-                                        pack.recompute_enabled(active_festivals);
+                                        let external = PathingController::external_filter_state();
+                                        pack.recompute_enabled(external.as_ref());
                                     }
                                 }
                                 if let Some(token) = table_token {
