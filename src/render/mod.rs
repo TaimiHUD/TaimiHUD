@@ -1,3 +1,6 @@
+#![allow(irrefutable_let_patterns)]
+
+pub mod api_tab;
 #[cfg(feature = "extension-arcdps")]
 pub mod arc;
 pub mod config_tab;
@@ -28,6 +31,7 @@ pub mod marker_window;
 pub use arc::ArcRenderState;
 #[allow(unused_imports)]
 pub use {
+    api_tab::ApiTabState,
     config_tab::ConfigTabState,
     data_source_tab::DataSourceTabState,
     info_tab::InfoTabState,

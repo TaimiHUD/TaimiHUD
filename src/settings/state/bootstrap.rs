@@ -1,7 +1,7 @@
 use {
     crate::{
         exports::runtime::{self as rt, log::DeferredLogger},
-        settings::state::save_state_backup,
+        settings::state::{install::InstallId, save_state_backup, Installation, SavedApiToken},
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
@@ -23,6 +23,8 @@ pub use crate::settings::arc::ArcUpdatePreference as UpdatePreference;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct BootstrapState {
+    #[serde(default, skip_serializing_if = "Installation::id_is_empty")]
+    pub install_id: InstallId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_host_preference: Option<AddonHostName>,
     #[serde(default, skip_serializing_if = "taimi_hoard::is_false_ref")]
@@ -45,6 +47,8 @@ pub struct BootstrapState {
     pub update_override_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gh_api_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anet_api_token: Vec<SavedApiToken>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_dir: Option<OsString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -55,6 +59,7 @@ pub struct BootstrapState {
 
 impl BootstrapState {
     pub const EMPTY: Self = Self {
+        install_id: Installation::ID_EMPTY,
         addon_host_preference: None,
         addon_host_exclusive: false,
         latest_addon_host: None,
@@ -66,6 +71,7 @@ impl BootstrapState {
         update_override_channel: String::new(),
         update_override_version: String::new(),
         gh_api_token: None,
+        anet_api_token: Vec::new(),
         addon_dir: None,
         language: None,
         log_filter: None,
@@ -120,6 +126,30 @@ impl BootstrapState {
 
     pub fn file_path() -> &'static Path {
         Path::new("addons/Taimi/boot.json")
+    }
+
+    pub fn installation() -> &'static Installation {
+        use sync_unsafe_cell::SyncUnsafeCell;
+        static INSTALL: SyncUnsafeCell<Installation> = SyncUnsafeCell::new(Installation::EMPTY);
+        unsafe {
+            Self::try_write_with(move |s| {
+                let install = &mut *INSTALL.get();
+                if install.id.is_nil() {
+                    install.id = s.install_id.clone();
+                }
+                if install.try_setup() {
+                    let new_id = install.id.clone();
+                    if s.install_id == new_id {
+                        return false
+                    }
+                    s.install_id = new_id;
+                    true
+                } else {
+                    false
+                }
+            });
+            &*INSTALL.get()
+        }
     }
 
     pub fn read_file(path: &Path) -> io::Result<Self> {
@@ -328,6 +358,15 @@ impl BootstrapState {
             Some(token) if token.is_empty() => None,
             Some(token) => Some(token),
         }
+    }
+    pub fn anet_api_token<'a>(&'a self, acc: &str) -> Option<&'a SavedApiToken> {
+        SavedApiToken::token_by_account_name(&self.anet_api_token, acc)
+    }
+    pub fn anet_api_token_mut<'a, F: FnMut(&SavedApiToken) -> bool>(
+        &'a mut self,
+        criteria: F,
+    ) -> &'a mut SavedApiToken {
+        SavedApiToken::get_token_mut(&mut self.anet_api_token, criteria)
     }
 
     pub fn init_addon_dir<D: AsRef<OsStr> + Into<OsString>>(addon_dir: D) -> bool {
