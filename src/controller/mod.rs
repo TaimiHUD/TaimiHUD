@@ -1,8 +1,8 @@
 #![allow(irrefutable_let_patterns)]
 
 use {
+    self::api::{ApiController, ApiMessage, ApiReceiver, ApiSender},
     crate::{
-        controller::api::{ApiController, ApiMessage},
         exports::runtime::{
             self as rt,
             bindings::{TaimiControls, TaimiReceiver, CONTROLS},
@@ -67,7 +67,7 @@ use markers::{MarkersController, MarkersEvent};
 pub(crate) mod pathing;
 
 #[cfg(feature = "space")]
-use pathing::{FestivalState, PathingController, PathingEvent, PathingReceiver, PathingSender};
+use pathing::{PathingController, PathingEvent, PathingReceiver, PathingSender};
 
 pub(crate) mod api;
 pub(crate) mod runtime;
@@ -226,24 +226,11 @@ impl Controller {
         } else {
             None
         };
-        #[cfg(feature = "paths")]
-        let festivals = settings.pathing().festival_preferences();
         drop(settings);
 
         #[cfg(feature = "extension-nexus")]
         if let Some((qa_icons, qa_style, qa_state)) = qa {
             crate::exports::nexus::quick_access_init(qa_icons, qa_style, qa_state);
-        }
-        #[cfg(feature = "paths")]
-        if let prefs = festivals {
-            Controller::with_sender(|s| {
-                if let Some(pathing) = s.pathing.as_ref() {
-                    pathing.festivals.send_if_modified(|festivals| {
-                        festivals.update_preferences(prefs);
-                        !festivals.on.is_empty() || !festivals.off.is_empty()
-                    });
-                }
-            });
         }
     }
     #[cfg(feature = "extension-nexus")]
@@ -1028,7 +1015,7 @@ pub struct ControllerSender {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
     pub generic: Option<Sender<ControllerEvent>>,
-    pub api: Option<Sender<ApiMessage>>,
+    pub api: Option<ApiSender>,
     #[cfg(feature = "space")]
     pub pathing: Option<PathingSender>,
 }
@@ -1046,15 +1033,13 @@ impl ControllerSender {
 
     pub fn new() -> (Self, ControllerReceiver) {
         let (generic, generic_rx) = mpsc::channel(64);
-        let (api, api_rx) = mpsc::channel(32);
         let gameplay = watch::Sender::new(GameplayState::INITIAL);
+        let (api, api_rx) = ApiSender::new(&gameplay);
         #[cfg(any(feature = "markers", feature = "space"))]
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
         #[cfg(feature = "paths")]
-        let festivals = watch::Sender::new(FestivalState::new(pathing::FestivalFixup::current_festivals()));
-        #[cfg(feature = "paths")]
         let (pathing, pathing_rx) =
-            PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone(), festivals);
+            PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone(), &api.festivals);
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),
@@ -1084,7 +1069,7 @@ impl ControllerSender {
             let _ = sender.command.try_send(PathingEvent::Exit(reason));
         }
         if let Some(sender) = self.api.take() {
-            let _ = sender.try_send(ApiMessage::Exit(reason));
+            let _ = sender.command.try_send(ApiMessage::Exit(reason));
         }
         let sent = self
             .generic
@@ -1112,7 +1097,7 @@ impl ControllerSender {
     pub fn api_try_send(&self, message: ApiMessage) -> bool {
         self.api
             .as_ref()
-            .and_then(move |sender| sender.try_send(message).ok())
+            .and_then(move |api| api.command.try_send(message).ok())
             .is_some()
     }
 
@@ -1153,7 +1138,7 @@ pub struct ControllerReceiver {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
     pub generic: Option<Receiver<ControllerEvent>>,
-    pub api: Option<Receiver<ApiMessage>>,
+    pub api: Option<ApiReceiver>,
     #[cfg(feature = "space")]
     pub pathing: Option<PathingReceiver>,
 }

@@ -3,6 +3,7 @@ use {
         fl,
         render::{
             machine::RenderMachine,
+            ApiTabState,
             ConfigTabState,
             DataSourceTabState,
             InfoTabState,
@@ -24,6 +25,7 @@ use super::PathingConfig;
 
 pub struct PrimaryWindowState {
     pub config_tab: ConfigTabState,
+    pub api_tab: ApiTabState,
     pub timer_tab: TimerTabState,
     pub data_sources_tab: DataSourceTabState,
     pub info_tab: InfoTabState,
@@ -40,6 +42,7 @@ impl PrimaryWindowState {
     pub fn new() -> Self {
         Self {
             config_tab: ConfigTabState::new(),
+            api_tab: ApiTabState::new(),
             timer_tab: TimerTabState::new(),
             data_sources_tab: DataSourceTabState::new(),
             info_tab: InfoTabState::new(),
@@ -115,6 +118,9 @@ impl PrimaryWindowState {
             if let Some(_token) = ui.tab_item(&fl!("data-sources-tab")) {
                 self.data_sources_tab.draw(ui, state_errors);
             }
+            if let Some(_token) = ui.tab_item(&fl!("api-tab")) {
+                self.api_tab.draw(ui, state_errors);
+            }
             if let Some(_token) = ui.tab_item(&fl!("config-tab")) {
                 self.config_tab.draw(ui, machine, timer_window_state);
             }
@@ -129,6 +135,9 @@ impl PrimaryWindowState {
             }
             if let Some(_token) = ui.tab_item(&fl!("data-sources-tab")) {
                 self.data_sources_tab.draw(ui, state_errors);
+            }
+            if let Some(_token) = ui.tab_item(&fl!("api-tab")) {
+                self.api_tab.draw(ui, state_errors);
             }
             #[cfg(feature = "space")]
             if let Some(_token) = ui.tab_item(&fl!("pathing-tab")) {

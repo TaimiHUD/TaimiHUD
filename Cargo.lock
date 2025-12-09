@@ -3658,6 +3658,7 @@ dependencies = [
  "serde",
  "tokio",
  "tokio-macros",
+ "url",
 ]
 
 [[package]]
@@ -4307,6 +4308,7 @@ checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
  "getrandom 0.3.2",
  "js-sys",
+ "md-5",
  "serde",
  "wasm-bindgen",
 ]

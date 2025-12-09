@@ -1,11 +1,15 @@
 use {
     crate::{
-        controller::Controller,
+        controller::{
+            api::{AchievementState, RaidState},
+            Controller,
+        },
         exports::runtime::bindings::{
             ControlsReceiver,
             GameControl,
             GameControls,
             TaimiControls,
+            TaimiReceiver,
             CONTROLS,
         },
         render::machine::RenderTaskPriority,
@@ -23,7 +27,7 @@ use {
     std::{path::PathBuf, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::MapContext,
-    taimi_pack::{category::CategoryId, Pack},
+    taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
     tokio::{
         fs::create_dir_all,
         select,
@@ -33,11 +37,13 @@ use {
 
 pub use self::{
     festivals::FestivalFixup,
-    shared::{FestivalState, PathingReceiver, PathingSender},
+    shared::{PathingEnables, PathingReceiver, PathingSender},
 };
 
 mod festivals;
 mod shared;
+
+pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
@@ -49,12 +55,14 @@ pub(crate) enum PathingEvent {
     RequestDisabledPaths,
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
+    ApiBypass(Option<bool>),
     Exit(Interruption),
 }
 
 pub(crate) struct PathingController {
     rx: PathingReceiver,
     controls: ControlsReceiver,
+    keybinds: TaimiReceiver,
     settings: SettingsLock,
 }
 
@@ -63,11 +71,18 @@ impl PathingController {
         Self {
             rx,
             controls: CONTROLS.subscribe_controls(),
+            keybinds: CONTROLS.subscribe_taimi(),
             settings,
         }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
+        let mut enables = self.rx.enables.borrow().clone();
+        {
+            let settings = self.settings.read().await;
+            enables.set(PathingEnables::KATRENDER, settings.enable_katrender);
+        }
+        self.rx.enables.send_replace(enables);
         let _interruption = loop {
             select! {
                 e = self.rx.command.recv() => {
@@ -87,8 +102,13 @@ impl PathingController {
                 controls = self.controls.wait() => match controls {
                     Err(e) => log::error!("Control bindings error! {e:#}"),
                     Ok((&controls_state, controls_changed)) => {
-                        #[cfg(feature = "space")]
                         self.handle_presses(controls_state, controls_changed).await;
+                    },
+                },
+                keybinds = self.keybinds.wait() => match keybinds {
+                    Err(e) => log::error!("Keybind receive error! {e:#}"),
+                    Ok((binds_state, binds_changed)) => {
+                        self.handle_keybinds(binds_state, binds_changed).await;
                     },
                 },
             }
@@ -224,12 +244,23 @@ impl PathingController {
         Ok(())
     }
 
-    async fn toggle_katrender(&mut self) {
+    async fn toggle_katrender(&self) {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
         settings_lock.toggle_katrender();
+        let katrender = settings_lock.enable_katrender;
         drop(settings_lock);
+        self.rx
+            .enables
+            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
+    }
+
+    fn toggle_api_bypass(&self, set: Option<bool>) {
+        self.rx.enables.send_modify(|en| match set {
+            Some(set) => en.set(PathingEnables::API_BYPASS, set),
+            None => en.toggle(PathingEnables::API_BYPASS),
+        });
     }
 
     fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
@@ -336,6 +367,7 @@ impl PathingController {
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
+            ApiBypass(set) => self.toggle_api_bypass(set),
             VisibleToggle { context, set } => self.set_visible(context, set).await,
         }
         None
@@ -386,7 +418,7 @@ impl PathingController {
         Engine::try_send(SpaceEvent::SettingsDirty);
     }
 
-    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+    async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::PATHING_SPACE) {
             CONTROLS.notify_handled(TaimiControls::PATHING_SPACE);
@@ -413,13 +445,29 @@ impl PathingController {
         log::trace!("TODO: player interaction");
     }
 
+    pub fn external_filter_state() -> Option<ExternalFilterState> {
+        Controller::with_sender(|s| {
+            let bypass = s
+                .pathing
+                .as_ref()
+                .map(|p| p.enables.borrow().clone())
+                .unwrap_or_default()
+                .contains(PathingEnables::API_BYPASS);
+            s.api.as_ref().map(|a| {
+                let festivals = a.festivals.borrow().get();
+                let (clears, achievements) = match bypass {
+                    true => Default::default(),
+                    false => (a.raids.borrow().clone(), a.achievements.borrow().clone()),
+                };
+                (festivals, clears, achievements)
+            })
+        })
+        .flatten()
+    }
+
     #[inline]
     pub fn try_send(e: PathingEvent) -> bool {
         Controller::with_sender(|s| s.pathing_try_send(e)).unwrap_or(false)
-    }
-
-    pub fn active_festivals() -> Option<FestivalState> {
-        Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.festivals.borrow().clone())).flatten()
     }
 }
 
