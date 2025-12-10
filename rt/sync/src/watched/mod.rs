@@ -1,7 +1,7 @@
 pub use tokio::sync::watch::{self, Receiver as Rx, Ref, Sender as Tx};
 use {
     futures_util::future,
-    std::{borrow::Cow, hint::unreachable_unchecked, mem, ops, pin::Pin, ptr, sync::OnceLock},
+    std::{borrow::Cow, mem, ops, pin::Pin, ptr, sync::OnceLock},
     tokio::time,
 };
 
@@ -104,10 +104,7 @@ impl<T> Watcher<T> {
     pub fn set(&self, value: T) {
         let mut value = Some(value);
         let receiver = self.watch.get_or_init(|| {
-            let value = match value.take() {
-                Some(v) => v,
-                None => unsafe { unreachable_unchecked() },
-            };
+            let value = unsafe { value.take().unwrap_unchecked() };
             Self::sender_to_receiver(watch::Sender::new(value))
         });
         if let Some(value) = value {
@@ -174,6 +171,12 @@ impl<T> Watcher<T> {
     pub fn try_read_update(&mut self) -> Option<watch::Ref<'_, T>> {
         self.get_receiver_mut().map(|r| r.borrow_and_update())
     }
+    pub fn try_read_if_changed(&mut self) -> Option<watch::Ref<'_, T>> {
+        self.get_receiver_mut().and_then(|r| {
+            let r = r.borrow_and_update();
+            r.has_changed().then_some(r)
+        })
+    }
 
     pub async fn when_changed(&mut self) {
         if let Some(receiver) = self.get_receiver_mut() {
@@ -231,10 +234,7 @@ impl<T: Default> Watcher<T> {
         if self.watch.get().is_none() {
             self.watch.get_or_init(Self::initial);
         }
-        match self.watch.get_mut() {
-            Some(watch) => watch,
-            None => unsafe { unreachable_unchecked() },
-        }
+        unsafe { self.watch.get_mut().unwrap_unchecked() }
     }
     pub fn sender_mut(&mut self) -> &mut watch::Sender<T> {
         Self::receiver_as_sender_mut(self.receiver_mut())
@@ -327,6 +327,12 @@ impl<T: Clone> Watched<T> {
             None => None,
         }
     }
+    pub fn try_read_if_changed(&mut self) -> Option<&mut T> {
+        match self.watch.try_read_if_changed().map(|w| w.clone()) {
+            Some(v) => Some(self.cached.insert(v)),
+            None => None,
+        }
+    }
 
     pub fn try_get_mut(&mut self) -> Option<&mut T> {
         if self.cached.is_none() {
@@ -412,10 +418,7 @@ impl<T: Clone + Default> Watched<T> {
     }
     pub fn borrow_mut(&mut self) -> &mut T {
         match self.watch.has_changed() {
-            false if self.cached.is_some() => match &mut self.cached {
-                Some(c) => c,
-                None => unsafe { unreachable_unchecked() },
-            },
+            false if self.cached.is_some() => unsafe { self.cached.as_mut().unwrap_unchecked() },
             _ => {
                 let latest = self.watch.read().clone();
                 self.cached.insert(latest)
@@ -424,10 +427,7 @@ impl<T: Clone + Default> Watched<T> {
     }
     pub fn get_mut(&mut self) -> &mut T {
         match self.watch.has_changed() {
-            false if self.cached.is_some() => match &mut self.cached {
-                Some(c) => c,
-                None => unsafe { unreachable_unchecked() },
-            },
+            false if self.cached.is_some() => unsafe { self.cached.as_mut().unwrap_unchecked() },
             _ => {
                 let latest = self.watch.read_update().clone();
                 self.cached.insert(latest)
