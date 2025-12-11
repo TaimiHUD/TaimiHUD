@@ -13,6 +13,7 @@ use {
         path::Path,
         sync::LazyLock,
     },
+    taimi_hoard::write_owned,
     taimi_sync::watched,
     tokio::{sync::watch, time},
 };
@@ -26,12 +27,18 @@ pub struct BootstrapState {
     pub addon_host_preference: Option<AddonHostName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_addon_host: Option<AddonHostName>,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub latest_addon_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_preference: Option<UpdatePreference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_host_preference: Option<Option<AddonHostName>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_remote_version: Option<String>,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub update_override_channel: String,
+    #[serde(default, skip_serializing_if = "str::is_empty")]
+    pub update_override_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gh_api_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,9 +53,12 @@ impl BootstrapState {
     pub const EMPTY: Self = Self {
         addon_host_preference: None,
         latest_addon_host: None,
+        latest_addon_version: String::new(),
         update_host_preference: None,
         update_preference: None,
         update_remote_version: None,
+        update_override_channel: String::new(),
+        update_override_version: String::new(),
         gh_api_token: None,
         addon_dir: None,
         language: None,
@@ -71,7 +81,13 @@ impl BootstrapState {
             res => res.context("boot state file failed to load"),
         };
         match res {
-            Ok(state) => state,
+            Ok(mut state) => {
+                // clear update info the moment an update has occurred
+                state.update_version();
+                #[cfg(feature = "updates")]
+                state.report_version();
+                state
+            },
             Err(e) => {
                 log::error!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
                 save_state_backup(Self::file_path());
@@ -165,6 +181,7 @@ impl BootstrapState {
 
     fn default_update_preference() -> &'static UpdatePreference {
         let never = &UpdatePreference::Never;
+        let ask = &UpdatePreference::ASK;
         #[allow(unreachable_patterns)]
         match () {
             #[cfg(debug_assertions)]
@@ -172,7 +189,7 @@ impl BootstrapState {
             #[cfg(feature = "extension-nexus")]
             _ if crate::built_info::IS_TAGGED_RELEASE_OR_RC && rt::nexus_available() => never,
             #[cfg(feature = "updates")]
-            _ if rt::update::crate_channel() != Some(rt::update::CHANNEL_DEBUG) => &UpdatePreference::ASK,
+            _ if rt::update::crate_channel_build() != Some(rt::update::CHANNEL_DEBUG) => ask,
             _ => never,
         }
     }
@@ -237,6 +254,46 @@ impl BootstrapState {
 
             changed
         })
+    }
+
+    pub(crate) fn update_version(&mut self) -> Option<()> {
+        let addon_version = rt::update::addon_version_build();
+        if self.latest_addon_version == addon_version {
+            return None
+        }
+
+        let mut has_override = false;
+        if !self.latest_addon_version.is_empty() {
+            has_override =
+                !self.update_override_version.is_empty() || !self.update_override_channel.is_empty();
+            let info = match has_override {
+                true => "overide",
+                false => "info",
+            };
+            log::info!(logger: DeferredLogger::BEST_EFFORT, "clearing update {info} from {}", self.latest_addon_version);
+        }
+
+        self.update_remote_version.take();
+        if has_override && self.update_preference == Some(UpdatePreference::Always) {
+            self.update_preference.take();
+        }
+        if let Some(pref) = &mut self.update_preference {
+            pref.take_authorization();
+        }
+        self.update_override_version.clear();
+        self.update_override_channel.clear();
+        write_owned(&mut self.latest_addon_version, addon_version);
+
+        Some(())
+    }
+
+    #[cfg(feature = "updates")]
+    fn report_version(&self) {
+        let res =
+            rt::update::report_overrides(&self.update_override_channel, &self.update_override_version);
+        if let Err(e) = res {
+            log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
+        }
     }
 }
 

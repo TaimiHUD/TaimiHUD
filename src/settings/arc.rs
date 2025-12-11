@@ -1,7 +1,7 @@
 use {
     crate::{exports::runtime::bindings::TaimiControls, settings::Settings},
     serde::{Deserialize, Serialize},
-    std::{collections::HashMap, fmt},
+    std::{collections::HashMap, fmt, mem},
     windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY},
 };
 
@@ -279,6 +279,25 @@ impl ArcUpdatePreference {
             (Self::Once { .. }, false) => {
                 *self = Self::Never;
             },
+        }
+    }
+
+    pub fn take_authorization(&mut self) -> Option<Result<String, String>> {
+        let mut undo_once;
+        let auth = match self {
+            auth @ Self::Once { .. } => {
+                undo_once = match mem::replace(auth, Self::Never) {
+                    Self::Once { authorized } => Self::Ask { authorized: Some(Ok(authorized)) },
+                    m => m,
+                };
+                &mut undo_once
+            },
+            auth => auth,
+        };
+        match auth {
+            Self::Once { .. } => None,
+            Self::Ask { authorized } => authorized.take(),
+            Self::Always | Self::Never => None,
         }
     }
 }
