@@ -73,14 +73,12 @@ pub static GH_REPO_SRC: LazyLock<GitHubSource> =
 impl ResolvedVersion {
     pub fn with_gh_release(release: GitHubLatestRelease) -> anyhow::Result<Self> {
         #[cfg(feature = "updates")]
-        let version = release
-            .tag_name
-            .strip_prefix("v")
-            .map(|v| {
-                v.parse()
-                    .with_context(|| format!("Latest version {} unrecognized", release.tag_name))
-            })
-            .transpose()?;
+        let version = match &release.tag_name {
+            tag if !tag.starts_with("v") => Ok(None),
+            tag => Self::parse_version_id(tag)
+                .with_context(|| format!("Latest version {} unrecognized", release.tag_name))
+                .map(Some),
+        }?;
         Ok(Self {
             release,
             #[cfg(feature = "updates")]
@@ -90,16 +88,10 @@ impl ResolvedVersion {
 
     pub fn with_version_id(id: String) -> anyhow::Result<Self> {
         #[cfg(feature = "updates")]
-        let version = match id.strip_prefix("v") {
-            Some(release) => release
-                .parse::<Version>()
-                .map(Some)
-                .with_context(|| format!("version {id} unrecognized"))?,
-            _ => None,
-        };
+        let version = Self::parse_version_id(&id).with_context(|| format!("version {id} unrecognized"))?;
         Ok(Self {
             #[cfg(feature = "updates")]
-            version,
+            version: Some(version),
             release: GitHubLatestRelease {
                 tag_name: id,
                 ..GitHubLatestRelease::empty_with_url("https://taimihud.com".try_into()?)
@@ -304,6 +296,36 @@ impl ResolvedVersion {
                 Some(CHANNEL_PRERELEASE),
             _ => None,
         }
+    }
+
+    pub fn parse_version_id(v: &str) -> Result<Version, semver::Error> {
+        let version = v.strip_prefix("v").unwrap_or(v);
+        Self::parse_version(version)
+    }
+
+    /// nexus tags require the 0.0.0.0 version scheme
+    fn gloss_over_nexus_version(v: &str) -> &str {
+        if v.as_bytes().iter().filter(|&&c| c == b'.').count() == 3 {
+            v.strip_suffix(".0")
+        } else {
+            None
+        }
+        .unwrap_or(v)
+    }
+
+    fn parse_version(v: &str) -> Result<Version, semver::Error> {
+        let v = Self::gloss_over_nexus_version(v);
+        let mut v: Version = v.parse()?;
+        if let Some(rc) = v.patch.checked_sub(900) {
+            v.minor += 1;
+            if v.pre.is_empty() {
+                v.patch = 0;
+                v.pre = semver::Prerelease::new(&format!("{CHANNEL_PRERELEASE}.{rc}")).unwrap_or_default()
+            } else {
+                v.patch = rc;
+            }
+        }
+        Ok(v)
     }
 }
 
