@@ -33,7 +33,7 @@ pub type RemoteSource = Arc<dyn Source + Send + Sync>;
 
 pub fn new_client() -> ClientBuilder {
     let name = rt::CRATE_NAME;
-    let version = rt::CRATE_VERSION;
+    let version = rt::update::addon_version_build();
     let user_agent = format!("{name}/{version}");
     Client::builder().user_agent(user_agent)
 }

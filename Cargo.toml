@@ -200,7 +200,8 @@ level = "warn"
 check-cfg = [
   'cfg(todo, values("unused", "unnecessary"))',
   'cfg(todo)',
-  'cfg(taimi_has, values("author", "title", "version"))',
+  'cfg(taimi_has, values("author", "title", "version", "url-github", "url-update-base", "url-update-direct"))',
+  'cfg(taimi_update, values("direct", "github", "manual", "none"))',
 ]
 
 [profile.release]
