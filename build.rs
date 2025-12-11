@@ -8,6 +8,7 @@ use {
 
 const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
 const FEATURE_NEXUS_CODEGEN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_CODEGEN";
+const FEATURE_UPDATES: &'static str = "CARGO_FEATURE_UPDATES";
 fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_BUILT}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_CODEGEN}");
@@ -32,6 +33,7 @@ const BUILT_ATTRS: &'static [&'static str] = &[
 const ADDON_TITLE: &'static str = "ADDON_TITLE";
 const ADDON_AUTHOR: &'static str = "ADDON_AUTHOR";
 const ADDON_VERSION: &'static str = "ADDON_VERSION";
+const ADDON_URL: &'static str = "ADDON_URL";
 
 fn apply_built_info() {
     println!("cargo::rustc-cfg=taimi_has={:?}", "title");
@@ -159,6 +161,7 @@ fn apply_built_info() {
         }
     };
     let imperative_build = pkg_build == "local";
+    let mut version = None;
     let release_channel = if let Some(pkg_version) =
         pkg_version.as_ref().and_then(|v| v.parse::<Version>().ok())
     {
@@ -189,7 +192,7 @@ fn apply_built_info() {
             },
             None => (),
         }
-        let version = match release_version {
+        let version = version.insert(match release_version {
             Some(version) => {
                 if version.pre.is_empty() {
                     release_channel = None;
@@ -234,7 +237,7 @@ fn apply_built_info() {
                 }
                 version
             },
-        };
+        });
 
         println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}", version.build);
         println!("cargo::rustc-env={ADDON_VERSION}_PRE={}", version.pre);
@@ -296,6 +299,43 @@ fn apply_built_info() {
         "cargo::rustc-env={ADDON_VERSION}_CHANNEL={}",
         release_channel.unwrap_or("")
     );
+    {
+        println!("cargo::rerun-if-env-changed=CARGO_PKG_HOMEPAGE");
+        if let Ok(webroot) = env::var("CARGO_PKG_HOMEPAGE") {
+            println!("cargo::rustc-cfg=taimi_has={:?}", "url-update-base");
+            let ext = ".dll";
+            let update_base = format!("{webroot}/taimi_data/update/{package}");
+            println!("cargo::rustc-env={ADDON_URL}_UPDATE_BASE={update_base}");
+
+            println!("cargo::rustc-cfg=taimi_has={:?}", "url-update-direct");
+            let version = version
+                .as_ref()
+                .map(ToString::to_string)
+                .or(pkg_version.clone())
+                .unwrap_or_default();
+            let channel = release_channel.unwrap_or("release");
+            println!("cargo::rustc-env={ADDON_URL}_UPDATE_DIRECT={update_base}/{channel}/{package}{ext}?v={version}");
+        }
+        let github_org = "TaimiHUD";
+        let github_repo = "TaimiHUD";
+        let github_url = format!("https://github.com/{github_org}/{github_repo}");
+        println!("cargo::rustc-cfg=taimi_has={:?}", "url-github");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB_OWNER={github_org}");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB_REPO={github_repo}");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB={github_url}");
+        let has_updates = env::var_os(FEATURE_UPDATES).is_some();
+        let update_method = match release_channel {
+            None | Some("rc") => "github",
+            #[cfg(todo)]
+            Some("debug") => "none",
+            Some(..) if has_updates => "manual",
+            Some(..) if release.as_ref().map(|r| r.is_ok()).unwrap_or(false) => "direct",
+            #[cfg(todo)]
+            Some(..) => "direct",
+            Some(..) => "none",
+        };
+        println!("cargo::rustc-cfg=taimi_update=\"{update_method}\"");
+    }
 
     tags.push(release_channel.map(|c| match c {
         "rc" => "Prerelease Test",
