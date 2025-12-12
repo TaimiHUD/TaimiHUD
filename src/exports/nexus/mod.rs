@@ -18,6 +18,7 @@ use {
     anyhow::anyhow,
     arcdps::Language,
     nexus::{
+        addon::{AddonFlags, UpdateProvider},
         alert,
         data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
         gamebind,
@@ -41,19 +42,35 @@ use {
     windows::Win32::Foundation::{HWND, LPARAM, WPARAM},
 };
 
+#[cfg(feature = "extension-nexus-codegen")]
+pub(crate) mod cb;
+#[cfg(feature = "extension-nexus-extern")]
+pub(crate) mod r#extern;
+
 /// raidcore addon id or NEGATIVE random unique signature
 pub const SIG: i32 = -exports::SIG;
+#[allow(unreachable_patterns)]
+pub const UPDATE_PROVIDER: UpdateProvider = match () {
+    #[cfg(taimi_update = "github")]
+    () => UpdateProvider::GitHub,
+    #[cfg(taimi_update = "direct")]
+    () => UpdateProvider::Direct,
+    #[cfg(taimi_update = "manual")]
+    () => UpdateProvider::Manual,
+    _ => UpdateProvider::None,
+};
+pub const FLAGS: AddonFlags = AddonFlags::None;
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn pre_init() {
-    RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
+    RUNTIME_LOADED.store(true, Ordering::Relaxed);
     crate::crate_init();
 }
 
-pub(crate) fn cb_load() {
-    pre_init();
-
+pub(self) fn init() {
+    RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
     #[cfg(feature = "extension-arcdps")]
     if exports::arcdps::available() {
         log::info!("switching over from arcdps to nexus...");
@@ -64,7 +81,7 @@ pub(crate) fn cb_load() {
     crate::load_nexus()
 }
 
-pub(crate) fn cb_unload() {
+pub(self) fn uninit() {
     #[cfg(feature = "extension-arcdps")]
     let own_handle = match exports::arcdps::ExitHandle::try_exit() {
         Err(e) => {
@@ -91,11 +108,15 @@ pub(crate) fn cb_unload() {
     }
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
+    RUNTIME_LOADED.store(false, Ordering::SeqCst);
 
     #[cfg(not(feature = "extension-arcdps"))]
     rt::log::TaimiLog::logger().close();
 }
 
+pub fn loaded() -> bool {
+    RUNTIME_LOADED.load(Ordering::SeqCst)
+}
 pub fn available() -> bool {
     RUNTIME_AVAILABLE.load(Ordering::SeqCst)
 }
@@ -481,77 +502,77 @@ impl IconStyle {
     pub fn data_for(self, icon: TaimiControls, on_off: bool, hover: bool) -> Option<&'static [u8]> {
         Some(match (self, Self::canon_icon(icon), hover, on_off) {
             (Self::Plain, TaimiControls::WINDOW_PRIMARY, false, _) =>
-                include_bytes!("../../data/icons/plain/taimi.png"),
+                include_bytes!("../../../data/icons/plain/taimi.png"),
             (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/taimi.png"),
+                include_bytes!("../../../data/icons/scanlines-1/taimi.png"),
             (Self::Plain, TaimiControls::WINDOW_PRIMARY, true, _) =>
-                include_bytes!("../../data/icons/plain/taimi-hover.png"),
+                include_bytes!("../../../data/icons/plain/taimi-hover.png"),
             (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/taimi-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/taimi-hover.png"),
 
             #[cfg(feature = "markers")]
             (Self::Plain, TaimiControls::WINDOW_MARKERS, false, _) =>
-                include_bytes!("../../data/icons/plain/markers.png"),
+                include_bytes!("../../../data/icons/plain/markers.png"),
             #[cfg(feature = "markers")]
             (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/markers.png"),
+                include_bytes!("../../../data/icons/scanlines-1/markers.png"),
             #[cfg(feature = "markers")]
             (Self::Plain, TaimiControls::WINDOW_MARKERS, true, _) =>
-                include_bytes!("../../data/icons/plain/markers-hover.png"),
+                include_bytes!("../../../data/icons/plain/markers-hover.png"),
             #[cfg(feature = "markers")]
             (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/markers-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/markers-hover.png"),
 
             #[cfg(feature = "timers")]
             (Self::Plain, TaimiControls::WINDOW_TIMERS, false, _) =>
-                include_bytes!("../../data/icons/plain/timers.png"),
+                include_bytes!("../../../data/icons/plain/timers.png"),
             #[cfg(feature = "timers")]
             (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/timers.png"),
+                include_bytes!("../../../data/icons/scanlines-1/timers.png"),
             #[cfg(feature = "timers")]
             (Self::Plain, TaimiControls::WINDOW_TIMERS, true, _) =>
-                include_bytes!("../../data/icons/plain/timers-hover.png"),
+                include_bytes!("../../../data/icons/plain/timers-hover.png"),
             #[cfg(feature = "timers")]
             (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/timers-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/timers-hover.png"),
 
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::WINDOW_PATHING, false, _) =>
-                include_bytes!("../../data/icons/plain/pathing.png"),
+                include_bytes!("../../../data/icons/plain/pathing.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::WINDOW_PATHING, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/pathing.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathing.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::WINDOW_PATHING, true, _) =>
-                include_bytes!("../../data/icons/plain/pathing-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathing-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::WINDOW_PATHING, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/pathing-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathing-hover.png"),
 
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, false, true) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-on.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-on.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, true) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-on.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, true, true) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-on-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-on-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, true) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-on-hover.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, false, false) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-off.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-off.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, false) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-off.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, true, false) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-off-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-off-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, false) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-off-hover.png"),
             _ => {
                 log::warn!("unrecognized quick access icon {:#010x}", icon.bits());
                 return None
