@@ -124,6 +124,7 @@ extension-arcdps = [
   "nexus/arc",
   "windows/Win32_System_LibraryLoader",
   "windows/Win32_System_Memory",
+  "windows/Win32_System_Threading",
   "texture-loader",
 ]
 extension-arcdps-extras = [
