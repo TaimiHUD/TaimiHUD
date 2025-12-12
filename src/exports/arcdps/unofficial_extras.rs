@@ -1,5 +1,8 @@
 use {
-    crate::exports::{arcdps as exports, runtime as rt},
+    crate::{
+        exports::{arcdps as exports, runtime as rt},
+        settings::state::AddonHostName,
+    },
     arcdps::extras::{self, ExtrasSubscriberInfo},
     std::{ffi::CStr, panic, str},
     taimi_input::win::keyboard::keybind_change_from_raw,
@@ -18,10 +21,12 @@ pub(crate) unsafe fn extras_init_raw(
             log::warn!("arcdps_unofficial_extras init missing required argument");
             return
         }
-        #[cfg(feature = "extension-nexus")]
-        if rt::nexus_available() || exports::check_for_nexus() {
-            log::info!("ignoring arcdps_unofficial_extras, nexus is available");
-            return
+        match AddonHostName::ArcDPS.is_preferred_host() {
+            Ok(()) => (),
+            Err(host) => {
+                log::info!("ignoring arcdps_unofficial_extras, {host} is preferred");
+                return
+            },
         }
 
         let info = &*info;
