@@ -1,5 +1,8 @@
 use {
-    crate::{exports::runtime as rt, settings::state::save_state_backup},
+    crate::{
+        exports::runtime::{self as rt, log::DeferredLogger},
+        settings::state::save_state_backup,
+    },
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
@@ -70,7 +73,7 @@ impl BootstrapState {
         match res {
             Ok(state) => state,
             Err(e) => {
-                log::error!("{e:#}");
+                log::error!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
                 save_state_backup(Self::file_path());
                 Self::new()
             },

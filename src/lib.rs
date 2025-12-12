@@ -15,7 +15,7 @@ mod space;
 //use i18n_embed_fl::fl;
 #[cfg(feature = "extension-nexus")]
 use {
-    crate::exports::runtime::bindings::TaimiControls,
+    crate::exports::runtime::{bindings::TaimiControls, log::DeferredLogger},
     nexus::{
         event::{
             arc::{ACCOUNT_NAME, COMBAT_LOCAL},
@@ -112,7 +112,7 @@ static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
             },
         );
     if let Err(e) = res {
-        log::warn!(logger: rt::log::DeferredLogger::BEST_EFFORT, "{e:#}");
+        log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
     }
     language_loader_setup(&loader);
     loader
@@ -170,7 +170,7 @@ where
                 Err(..) => false,
             };
             if warn_once {
-                log::debug!("missing i18n message {message_id}");
+                log::debug!(logger: DeferredLogger::BEST_EFFORT, "missing i18n message {message_id}");
             }
             f(Cow::Borrowed(message_id))
         },
