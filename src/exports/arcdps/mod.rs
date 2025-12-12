@@ -610,11 +610,11 @@ fn extras_squad_update(members: UserInfoIter) {
 }
 
 pub fn loaded() -> bool {
-    RUNTIME_LOADED.load(Ordering::Relaxed)
+    RUNTIME_LOADED.load(Ordering::SeqCst)
 }
 
 pub fn available() -> bool {
-    RUNTIME_AVAILABLE.load(Ordering::Relaxed)
+    RUNTIME_AVAILABLE.load(Ordering::SeqCst)
 }
 
 pub fn exports_present() -> bool {
