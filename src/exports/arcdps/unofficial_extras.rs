@@ -53,6 +53,13 @@ pub(crate) unsafe fn extras_init_raw(
             chat_message,
         );
 
+        if (*subscriber).header.info_version == 0 {
+            log::warn!(
+                "arcdps-rs refused to subscribe to extras (api {})",
+                version.api_version
+            );
+            return
+        }
         let account_name = match info.self_account_name {
             name if name.is_null() => None,
             name => Some(CStr::from_ptr(name as *const _)),
