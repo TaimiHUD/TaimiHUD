@@ -33,8 +33,6 @@ use {
             GroupMemberOwned,
         },
         wnd_proc::register_wnd_proc,
-        AddonFlags,
-        UpdateProvider,
     },
     tokio::sync::watch,
 };
@@ -281,12 +279,12 @@ static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 #[cfg(feature = "extension-nexus-codegen")]
 nexus::export! {
     name: exports::addon_title!(),
-    signature: exports::nexus::SIG,
-    load: exports::nexus::cb_load,
-    unload: exports::nexus::cb_unload,
-    flags: AddonFlags::None,
-    provider: if built_info::IS_TAGGED_RELEASE_OR_RC { UpdateProvider::GitHub } else { UpdateProvider::Manual },
-    update_link: exports::gh_repo_url!(),
+    signature: exports::nexus::cb::SIG,
+    load: exports::nexus::cb::load,
+    unload: exports::nexus::cb::unload,
+    flags: exports::nexus::cb::FLAGS,
+    provider: exports::nexus::cb::UPDATE_PROVIDER,
+    update_link: exports::nexus::cb::update_url!(),
     // TODO: author: env!("ADDON_AUTHOR")
 }
 
@@ -459,6 +457,8 @@ fn load_nexus() {
             RenderMachine::turn_render_entry();
             if !render_ready {
                 #[cfg(feature = "extension-nexus-codegen")]
+                let ui = unsafe { nexus::ui() };
+                #[cfg(feature = "extension-nexus-extern-todo")]
                 let ui = unsafe { nexus::ui() };
                 RenderState::render_setup(ui);
             }
