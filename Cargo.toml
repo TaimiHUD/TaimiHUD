@@ -151,8 +151,8 @@ extension-arcdps-extern = [
 extension-arcdps-extern-cleanup = [
 ]
 extension-nexus = [
-  "extension-nexus-codegen",
-  #"extension-nexus-extern",
+  #"extension-nexus-codegen",
+  "extension-nexus-extern-todo",
   "nexus/arc",
   "nexus/extras",
   "nexus/rtapi",
@@ -162,6 +162,15 @@ extension-nexus = [
   "taimi_meta?/mumblelink-nexus",
 ]
 extension-nexus-codegen = []
+extension-nexus-extern = [
+  "dep:sync-unsafe-cell",
+  "arcffi",
+]
+extension-nexus-extern-todo = [
+  # TODO: remove all use of the dep (and __macro)!
+  #"nexus",
+  "extension-nexus-extern",
+]
 dpsapi = [
   "dep:dpsapi",
   "dpsapi/nexus",
