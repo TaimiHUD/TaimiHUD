@@ -31,7 +31,7 @@ use {
         path::PathBuf,
         ptr::{self, NonNull},
         sync::{
-            atomic::{AtomicBool, AtomicPtr, Ordering},
+            atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
             Mutex,
         },
         thread,
@@ -219,19 +219,52 @@ fn release() {
 
 pub struct ExitHandle {
     own_handle: HMODULE,
+    arc_loaded: bool,
+    ref_count: u8,
 }
 
 impl ExitHandle {
     pub fn try_exit() -> RuntimeResult<Option<Self>> {
         let handle = match loaded() {
-            true => match unload_self()? {
-                Some(handle) if !handle.is_invalid() => Some(handle),
+            true => match unload_self() {
+                Ok(Some(handle)) if !handle.is_invalid() => Some(handle),
+                Err(..) => None,
                 _ => None,
             },
             false => None,
         };
+        let arc_loaded = handle.is_some();
+        let own_handle = match handle {
+            #[cfg(windows)]
+            None if EXTRA_HANDLES.load(Ordering::Relaxed) > 0 => unsafe {
+                use windows::{
+                    core::PCSTR,
+                    Win32::System::LibraryLoader::{self as ll, GetModuleHandleExA},
+                };
+                log::info!("need to get a little creative to unload extra handles (why?)");
+                let mut handle = HMODULE::default();
+                let context_msg = "GetModuleHandleExA on exit";
+                // a static str like this should be in our module's .text/rodata probably sure
+                let sentinel = context_msg.as_ptr();
+                let flags = ll::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
+                    | ll::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
+                let res = GetModuleHandleExA(flags, PCSTR(sentinel as *const _), &mut handle)
+                    .context(context_msg);
+                rt::log::error_ok(res).and_then(|()| match handle.is_invalid() {
+                    true => None,
+                    false => Some(handle),
+                })
+            },
+            // just had to check first...
+            None if loaded() => return Err(NO_EXPORT),
+            handle => handle,
+        };
 
-        Ok(handle.map(|own_handle| Self { own_handle }))
+        Ok(own_handle.map(|own_handle| Self {
+            ref_count: arc_loaded.then_some(1).unwrap_or(0),
+            arc_loaded,
+            own_handle,
+        }))
     }
 
     #[cfg(todo)]
@@ -241,19 +274,60 @@ impl ExitHandle {
         unsafe { FreeLibraryAndExitThread(self.own_handle, 0) };
     }
 
-    pub fn free_and_exit(self) -> ! {
-        use windows::Win32::System::LibraryLoader::FreeLibraryAndExitThread;
+    pub unsafe fn free_and_exit(self) -> ! {
+        use windows::Win32::{
+            Foundation::FreeLibrary,
+            System::{LibraryLoader::FreeLibraryAndExitThread, Threading::ExitThread},
+        };
 
-        log::info!("goodbye");
-        unsafe { FreeLibraryAndExitThread(self.own_handle, 0) };
+        log::info!("goodbye x{}", self.ref_count);
+        let code = 0;
+
+        let extra_refs = self.ref_count.checked_sub(1);
+        let mut rem = extra_refs.is_some();
+        if let Some(amt) = extra_refs {
+            for _ in 0..amt {
+                if FreeLibrary(self.own_handle).is_err() {
+                    // oh no...
+                    rem = false;
+                    break
+                }
+            }
+        }
+        if rem {
+            FreeLibraryAndExitThread(self.own_handle, code)
+        } else {
+            ExitThread(code)
+        }
     }
 
-    pub fn spawn_free(self) {
+    pub fn spawn_free(mut self) {
         let _ = thread::spawn(move || -> ! {
-            thread::sleep(Duration::from_millis(400));
+            self.commit_ref_count();
+            let wait = self.wait();
+            if wait.as_millis() > 0 {
+                thread::sleep(wait);
+            }
+            self.commit_ref_count();
+            // TODO: synchronize with main thread and controller too...
             rt::log::TaimiLog::logger().close();
-            self.free_and_exit();
+            unsafe {
+                self.free_and_exit();
+            }
         });
+    }
+
+    fn commit_ref_count(&mut self) {
+        let count_extra = EXTRA_HANDLES.swap(0, Ordering::SeqCst);
+        self.ref_count = self.ref_count.saturating_add(count_extra as _);
+    }
+
+    fn wait(&self) -> Duration {
+        match self {
+            Self { ref_count: 0, .. } => Duration::from_millis(0),
+            Self { arc_loaded: false, .. } => Duration::from_millis(80),
+            Self { arc_loaded: true, .. } => Duration::from_millis(400),
+        }
     }
 }
 
@@ -592,10 +666,12 @@ fn combat_local(event: CombatArgs) {
 }
 
 static EXTRAS_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static EXTRA_HANDLES: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(feature = "extension-arcdps-extras")]
 fn extras_init(info: ExtrasVersion) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
+    EXTRA_HANDLES.fetch_add(1, Ordering::Relaxed);
 
     log::debug!("arcdps_extras initialized: {info:?}");
 }

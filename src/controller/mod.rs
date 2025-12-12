@@ -790,7 +790,12 @@ impl Controller {
                 {
                     use {crate::exports::arcdps as exports, std::thread};
                     let avail = exports::available();
-                    if avail || exports::loaded() {
+                    let arc_cleanup = match avail {
+                        #[cfg(feature = "extension-nexus")]
+                        false if exports::loaded() && !rt::nexus_available() => true,
+                        avail => avail,
+                    };
+                    if arc_cleanup {
                         thread::spawn(move || {
                             if avail {
                                 // wait a tiny bit to give render thread cleanup a chance

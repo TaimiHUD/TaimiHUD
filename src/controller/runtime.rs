@@ -16,8 +16,9 @@ use {
 };
 
 impl Controller {
-    pub const RUNTIME_BLOCKING_TIMEOUT: Duration = Duration::from_secs(12);
-    pub const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
+    pub const RUNTIME_BLOCKING_TIMEOUT: Duration = Duration::from_secs(9);
+    pub const RUNTIME_SHUTDOWN_TIMEOUT: Duration =
+        Duration::from_secs(Self::RUNTIME_BLOCKING_TIMEOUT.as_secs() + 2);
 
     pub fn new_runtime() -> anyhow::Result<Runtime> {
         let runtime = Builder::new_current_thread()
