@@ -1,7 +1,10 @@
 use {
-    crate::exports::{
-        arcdps as exports,
-        runtime::imgui::{self, sys as imgui_sys, Ui},
+    crate::{
+        exports::{
+            arcdps as exports,
+            runtime::imgui::{self, sys as imgui_sys, Ui},
+        },
+        settings::state::AddonHostName,
     },
     arcffi::cstr::{cstr, CStrPtr, CStrPtr16},
     core::{
@@ -50,28 +53,24 @@ pub fn arc_args() -> Option<&'static InitArgs> {
     }
 }
 
-pub unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
-    let context_global = unsafe { *ARC_IMGUI_CONTEXT.get() };
+unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
+    let context_global = *ARC_IMGUI_CONTEXT.get();
     let context = match context_global {
         Some(context_global) => {
             let ptr = context_global.get() as *mut imgui::Context;
             return Some(&*ptr)
         },
         None => {
-            let arc = arc_args()?;
-            let context_sys = arc.imgui_ctx.map(NonNull::cast::<imgui_sys::ImGuiContext>)?;
-            unsafe {
-                imgui_sys::igSetCurrentContext(context_sys.as_ptr());
-                imgui_sys::igSetAllocatorFunctions(arc.malloc, arc.free, InitArgs::ALLOC_USER_DATA);
-                Box::new(imgui::Context::current())
-            }
+            let _context_sys = imgui_bind_context()?;
+            Box::new(imgui::Context::current())
         },
     };
     let context = Box::into_raw(context);
-    Some(unsafe {
-        ptr::write(ARC_IMGUI_CONTEXT.get() as *mut usize, context as usize);
-        &*context
-    })
+    ptr::write(ARC_IMGUI_CONTEXT.get() as *mut usize, context as usize);
+    Some(&*context)
+}
+pub(super) fn arc_imgui_context_ptr() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+    arc_args().and_then(|arc| arc.imgui_ctx.map(NonNull::cast))
 }
 
 #[cfg(feature = "extension-arcdps-extern-cleanup")]
@@ -132,15 +131,24 @@ pub unsafe fn arc_imgui_ui<'u>() -> Option<&'u Ui<'static>> {
     }
 }
 
-#[cfg(todo = "unnecessary")]
-pub unsafe fn new_imgui_frame() {
+pub unsafe fn imgui_context_cleanup() {
+    let context = unsafe { mem::replace(&mut *ARC_IMGUI_CONTEXT.get(), None) };
+    let Some(context) = context else { return };
+
+    imgui_frame_cleanup();
+
+    let context = context.get() as *mut imgui::Context;
+    let context = Box::from_raw(context);
+    drop(context)
+}
+pub unsafe fn imgui_frame_cleanup() {
     let ui_global = unsafe { mem::replace(&mut *ARC_IMGUI_UI.get(), None) };
     let ui = match ui_global {
         Some(ui) => ui,
         None => return,
     };
     ptr::write(ARC_IMGUI_UI.get(), None);
-    let ptr = ui.get() as *mut ManuallyDrop<Ui<'static>>;
+    let ptr = ui.get() as *mut mem::ManuallyDrop<Ui<'static>>;
     #[cfg(feature = "extension-arcdps-extern-cleanup")]
     if let Some(offset) = unsafe { *ARC_IMGUI_BUFFER_OFFSET.get() } {
         let buffer = (ptr as *mut usize).add(offset) as *mut Vec<u8>;
@@ -148,7 +156,31 @@ pub unsafe fn new_imgui_frame() {
     }
     drop(Box::from_raw(ptr));
 }
-pub unsafe fn new_imgui_frame() {}
+pub unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+    let arc = arc_args()?;
+    let context_sys = arc.imgui_ctx.map(NonNull::cast::<imgui_sys::ImGuiContext>)?;
+    imgui_sys::igSetCurrentContext(context_sys.as_ptr());
+    imgui_sys::igSetAllocatorFunctions(arc.malloc, arc.free, InitArgs::ALLOC_USER_DATA);
+    Some(context_sys)
+}
+pub unsafe fn new_imgui_frame() {
+    #[cfg(feature = "extension-nexus")]
+    match (arc_args(), crate::exports::nexus::imgui_context_ptr()) {
+        (Some(arc), Some(ctx)) if arc.imgui_ctx == Some(ctx.cast()) => {
+            // they're linked, no need to switch
+        },
+        (_, None) => {
+            // TODO: unloading may make this an outdated comparison?
+        },
+        _ if !crate::exports::runtime::nexus_available() => return,
+        (None, _) => (),
+        (Some(..), ..) => {
+            imgui_bind_context();
+        },
+    }
+    #[cfg(todo = "unnecessary")]
+    imgui_frame_cleanup();
+}
 
 pub unsafe fn with_imgui<R, F: FnOnce(&'_ Ui<'_>) -> R>(f: F) -> Option<R> {
     match arc_imgui_ui() {
@@ -163,11 +195,13 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
     }
     exports::pre_init();
 
-    #[cfg(feature = "extension-nexus")]
-    if crate::exports::runtime::nexus_available() || exports::check_for_nexus() {
-        log::info!("ignoring arcdps, nexus is available");
-        exports::disable_load();
-        return None
+    match AddonHostName::ArcDPS.is_preferred_host() {
+        Ok(()) => (),
+        Err(host) => {
+            log::info!("ignoring arcdps, {host} is preferred");
+            exports::disable_load();
+            return None
+        },
     }
 
     Some(arc_init)

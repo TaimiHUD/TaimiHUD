@@ -234,6 +234,29 @@ pub fn send_alert(_ui: &rt::imgui::Ui, message: &str) -> RuntimeResult<Option<()
     Ok(Some(()))
 }
 
+#[allow(unreachable_patterns)]
+pub fn imgui_context_ptr() -> Option<NonNull<rt::imgui::sys::ImGuiContext>> {
+    match () {
+        #[cfg(feature = "extension-nexus-extern")]
+        _ => r#extern::imgui_context_ptr(),
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ => NonNull::new(cb::addon_api().imgui_ctx),
+    }
+}
+pub unsafe fn with_ui<R, F: FnOnce(&rt::imgui::Ui) -> R>(f: F) -> R {
+    #[cfg(feature = "extension-nexus-extern")]
+    let ui = {
+        r#extern::new_imgui_frame();
+        r#extern::imgui_ui()
+    };
+    #[cfg(feature = "extension-nexus-codegen")]
+    let ui = {
+        cb::new_imgui_frame();
+        nexus::ui()
+    };
+    f(ui)
+}
+
 pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)

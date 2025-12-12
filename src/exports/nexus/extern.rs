@@ -67,15 +67,9 @@ pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinitio
         def.author = into_cstring_leak(rt::crate_authors());
     }
 
-    let preferred_host = BootstrapState::read_with(|s| s.addon_host_preference);
-    let preferred_host = match preferred_host {
-        #[cfg(feature = "extension-arcdps")]
-        Some(h @ AddonHostName::ArcDPS) => Err(h),
-        None | Some(AddonHostName::Nexus) => Ok(()),
-    };
-    def.api_version = match preferred_host {
+    def.api_version = match AddonHostName::Nexus.is_preferred_host() {
         Err(preferred) => {
-            let disabled = format!("disabled, configured for {preferred}");
+            let disabled = format!("disabled, configured for {preferred} via boot.json");
             log::info!(logger: DeferredLogger::BEST_EFFORT, "GetAddonDef {disabled}");
             def.description = into_cstring_leak(disabled);
             0
@@ -242,7 +236,7 @@ pub enum NexusLoadStatus {
     Unloaded,
 }
 
-#[cfg(todo = "unused")]
+#[inline]
 pub fn addon_api() -> Option<&'static AddonApi> {
     unsafe { *NEXUS_API.get() }
 }
@@ -273,4 +267,31 @@ unsafe fn report_error_ptr(e: *const c_char) {
 }
 fn curious(op: &str) {
     log::debug!(logger: DeferredLogger::BEST_EFFORT, "redundant {op}, curious");
+}
+
+pub(super) fn imgui_context_ptr() -> Option<ptr::NonNull<rt::imgui::sys::ImGuiContext>> {
+    addon_api().and_then(|aapi| ptr::NonNull::new(aapi.imgui_context))
+}
+
+pub(super) unsafe fn new_imgui_frame() {
+    #[cfg(feature = "extension-arcdps")]
+    match (addon_api(), crate::exports::arcdps::imgui_context_ptr()) {
+        (Some(aapi), Some(ctx)) if aapi.imgui_context == ctx.as_ptr() => {
+            // they're linked, no need to switch
+        },
+        (_, None) => {
+            // TODO: unloading may make this an outdated comparison?
+        },
+        _ if !rt::arcdps_available() => (),
+        (None, _) => (),
+        (Some(aapi), ..) if aapi.imgui_context.is_null() => (),
+        (Some(aapi), ..) => {
+            rt::imgui::sys::igSetCurrentContext(aapi.imgui_context);
+            rt::imgui::sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
+        },
+    }
+}
+#[cfg(feature = "extension-nexus-extern-todo")]
+pub unsafe fn imgui_ui<'a, 'u>() -> &'a rt::imgui::Ui<'u> {
+    nexus::ui()
 }
