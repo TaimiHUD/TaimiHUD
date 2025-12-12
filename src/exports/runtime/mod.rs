@@ -434,6 +434,12 @@ pub async fn invoke_marker_bind(
     press_marker_bind(marker, target, false, position).await
 }
 
+/// TODO: this needs to be very careful if called from any render thread...
+pub unsafe fn notify_render_reinit() {
+    #[cfg(feature = "extension-arcdps-extern")]
+    exports::arcdps::r#extern::imgui_context_cleanup();
+}
+
 #[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<SwapChain>> {
     #[cfg(feature = "extension-nexus")]

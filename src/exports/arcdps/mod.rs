@@ -358,6 +358,19 @@ pub fn is_ingame() -> Option<bool> {
 
 static MUMBLE_LINK: Mutex<Option<MumbleLink>> = Mutex::new(None);
 
+#[allow(unreachable_patterns)]
+pub fn imgui_context_ptr() -> Option<NonNull<imgui::sys::ImGuiContext>> {
+    match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        _ if loaded() => {
+            // TODO
+            None
+        },
+        #[cfg(feature = "extension-arcdps-extern")]
+        _ => r#extern::arc_imgui_context_ptr(),
+        _ => None,
+    }
+}
 #[cfg(todo)]
 pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
     match () {
