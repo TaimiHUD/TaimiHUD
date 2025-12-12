@@ -231,7 +231,10 @@ impl RenderState {
                     UiDepthAcquired() => {
                         self.machine.turn_depth_event(true);
                     },
-                    event @ (Reload | ReloadAll) => self.reload(matches!(event, Reload)),
+                    event @ (Reload | ReloadAll) => {
+                        self.reload(matches!(event, Reload));
+                        return true
+                    },
                     Quit => {
                         self.quit();
                         return false;
@@ -493,6 +496,10 @@ impl RenderState {
         if !superficial {
             // probably no need to reload textures/etc unless we've lost the entire d3d device or something?
             TEXTURES.cleanup(RenderState::is_render_thread());
+        }
+
+        unsafe {
+            rt::notify_render_reinit();
         }
     }
 

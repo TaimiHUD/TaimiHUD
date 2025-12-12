@@ -447,15 +447,21 @@ fn load_nexus() {
 
     // Rendering setup
 
-    let taimi_window = nexus::gui::render!(|ui| {
-        #[cfg(not(feature = "space"))]
-        if !RenderState::pre_render() {
-            RenderState::render_setup(ui);
+    extern "C-unwind" fn unsafe_taimi_window() {
+        unsafe {
+            #[cfg(not(feature = "space"))]
+            let needs_setup = !RenderState::pre_render();
+            #[cfg(not(feature = "space"))]
+            if needs_setup {
+                exports::nexus::with_ui(RenderState::render_setup);
+            }
+            exports::nexus::with_ui(|ui| {
+                RenderMachine::turn_ui_entry(ui);
+                RenderState::render_ui(ui);
+            });
         }
-        RenderMachine::turn_ui_entry(ui);
-        RenderState::render_ui(ui);
-    });
-    let render_callback = register_render(RenderType::Render, taimi_window);
+    }
+    let render_callback = register_render(RenderType::Render, unsafe_taimi_window);
     *RENDER_CALLBACK.lock().unwrap() = Some(Box::new(render_callback.into_inner()));
 
     #[cfg(feature = "space")]
@@ -467,7 +473,7 @@ fn load_nexus() {
                 #[cfg(feature = "extension-nexus-codegen")]
                 let ui = unsafe { nexus::ui() };
                 #[cfg(feature = "extension-nexus-extern-todo")]
-                let ui = unsafe { nexus::ui() };
+                let ui = unsafe { exports::nexus::r#extern::imgui_ui() };
                 RenderState::render_setup(ui);
             }
         }
@@ -475,10 +481,10 @@ fn load_nexus() {
         *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
     }
 
-    let taimi_settings = nexus::gui::render!(|ui| {
-        RenderState::render_options(ui);
-    });
-    register_render(RenderType::OptionsRender, taimi_settings).revert_on_unload();
+    extern "C-unwind" fn unsafe_taimi_settings() {
+        unsafe { exports::nexus::with_ui(RenderState::render_options) }
+    }
+    register_render(RenderType::OptionsRender, unsafe_taimi_settings).revert_on_unload();
 
     register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
