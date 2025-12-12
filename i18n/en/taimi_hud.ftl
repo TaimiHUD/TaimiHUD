@@ -204,6 +204,7 @@ size-frag-kb = { $size } KB
 arcdps = ArcDPS
 arcdps-tab = { arcdps }
 nexus = Nexus
+multi-addon-host = All
 
 ## Markers tab
 
