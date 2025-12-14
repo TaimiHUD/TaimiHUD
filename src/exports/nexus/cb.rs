@@ -57,3 +57,10 @@ pub(super) unsafe fn new_imgui_frame() {
         },
     }
 }
+
+pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a rt::imgui::Ui<'u>> {
+    match exports::loaded() {
+        true => Some(nexus::ui()),
+        false => None,
+    }
+}
