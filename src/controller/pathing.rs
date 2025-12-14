@@ -344,7 +344,7 @@ impl PathingController {
     }
 
     pub(crate) async fn handle_press_interact(&mut self) {
-        log::debug!("TODO: player interaction");
+        log::trace!("TODO: player interaction");
     }
 
     #[inline]
