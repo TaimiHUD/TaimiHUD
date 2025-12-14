@@ -79,6 +79,20 @@ impl TaimiLog {
         rt::addon_dir().join("taimi.log")
     }
 
+    pub fn ensure_available(&self, requester: &str) {
+        if rt::nexus_available() || rt::arcdps_available() {
+            return
+        }
+        if self.log_file.get().is_some() {
+            return
+        }
+        if let Ok(_) = self.open_file() {
+            if !requester.is_empty() {
+                ::log::info!("taimi.log opened for {requester}");
+            }
+        }
+    }
+
     pub fn open_file(&self) -> io::Result<&fs::File> {
         let log_path = Self::log_path();
         let append = match crate::built_info::IS_TAGGED_VERSION || crate::built_info::CI_PLATFORM.is_some()
@@ -169,6 +183,13 @@ impl TaimiLog {
         };
         drop(f);
     }
+
+    pub fn flush_all(&self) {
+        if let Some(mut f) = self.log_file.get() {
+            let _ = io::Write::flush(&mut f);
+            let _ = f.sync_data();
+        }
+    }
 }
 
 impl Log for TaimiLog {
@@ -192,10 +213,7 @@ impl Log for TaimiLog {
     }
 
     fn flush(&self) {
-        if let Some(mut f) = self.log_file.get() {
-            let _ = io::Write::flush(&mut f);
-            let _ = f.sync_data();
-        }
+        self.flush_all()
     }
 }
 
