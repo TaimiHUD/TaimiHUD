@@ -807,13 +807,13 @@ impl Controller {
                                 thread::sleep(Duration::from_millis(84));
                             }
                             // TODO: synchronize with controller shutdown in case it takes a while...
-                            let res = exports::ExitHandle::try_exit()
+                            let res = unsafe { exports::ExitHandle::try_exit() }
                                 .and_then(|exit| exit.ok_or("unloaded/unaware?"));
                             match res {
                                 Err(e) => log::error!("Failed to leave arcdps: {e}"),
                                 Ok(exit) => {
                                     log::info!("goodbye arc");
-                                    exit.spawn_free();
+                                    exit.free_blocking();
                                 },
                             }
                         });

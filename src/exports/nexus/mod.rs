@@ -10,7 +10,8 @@ use {
         },
         game_language_id as lang_id,
         marker::format::MarkerType,
-        settings::IconStyle,
+        render::RenderState,
+        settings::{state::AddonHostName, IconStyle},
         unload,
         with_i18n,
         TEXTURES,
@@ -44,6 +45,7 @@ use {
 
 #[cfg(feature = "extension-nexus-codegen")]
 pub(crate) mod cb;
+pub mod datalink;
 #[cfg(feature = "extension-nexus-extern")]
 pub(crate) mod r#extern;
 
@@ -71,54 +73,109 @@ pub(crate) fn pre_init() {
 
 pub(self) fn init() {
     RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
-    #[cfg(feature = "extension-arcdps")]
-    if exports::arcdps::available() {
-        log::info!("switching over from arcdps to nexus...");
-        exports::arcdps::disable();
-    }
+    let res = match crate::pre_init_for(AddonHostName::Nexus) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            unsafe {
+                load_fallback();
+            }
+            #[cfg(todo)]
+            disable();
+            Ok(())
+        },
+        Err(e) => Err(e),
+    };
 
-    crate::init().expect("load failed");
-    crate::load_nexus()
+    let res = res.and_then(|()| crate::init());
+    match res {
+        #[cfg(feature = "extension-nexus-extern")]
+        Ok(()) if r#extern::is_disabled() => {
+            log::info!("skipping disabled nexus init");
+            unsafe {
+                load_fallback();
+            }
+        },
+        Ok(()) => crate::load_nexus(),
+        Err(e) => {
+            #[cfg(not(panic = "unwind"))]
+            log::error!("nexus load failed: {e}");
+            disable();
+        },
+    }
+    crate::post_init_for(AddonHostName::Nexus, res.is_ok());
+    #[cfg(panic = "unwind")]
+    if let Err(e) = res {
+        panic!("{e}")
+    }
+}
+
+unsafe fn load_fallback() {
+    use nexus::gui::RenderType;
+    let Some(aapi) = addon_api() else { return };
+
+    if !aapi.imgui_context.is_null() {
+        (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options_fallback);
+    }
+}
+extern "C-unwind" fn unsafe_options_fallback() {
+    unsafe {
+        with_ui(|ui| RenderState::render_options_fallback(ui, AddonHostName::Nexus));
+    }
 }
 
 pub(self) fn uninit() {
-    #[cfg(feature = "extension-arcdps")]
-    let own_handle = match exports::arcdps::ExitHandle::try_exit() {
-        Err(e) => {
-            log::warn!("failed to request unload from arcdps: {e}");
-            None
-        },
-        Ok(exit) => {
-            if exit.is_some() {
-                log::info!("scheduling DLL exit after unload...");
-            }
-            exit
-        },
-    };
-
-    if available() {
+    let unloading = crate::pre_uninit_for(AddonHostName::Nexus);
+    if unloading {
         unload();
     }
-
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(handle) = own_handle {
-        handle.spawn_free();
-    } else {
-        rt::log::TaimiLog::logger().close();
-    }
+    uninit_cleanup();
 
     RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
     RUNTIME_LOADED.store(false, Ordering::SeqCst);
 
-    #[cfg(not(feature = "extension-arcdps"))]
-    rt::log::TaimiLog::logger().close();
+    if unloading {
+        crate::post_uninit_for(AddonHostName::Nexus);
+    }
+}
+
+/// revert nexus handles if any were registered
+///
+/// must remain idempotent if used multiple times during shutdown
+pub fn uninit_cleanup() {
+    if !loaded() {
+        return
+    }
+
+    if let Some(revert_render) = crate::RENDER_CALLBACK.lock().ok().and_then(|mut r| r.take()) {
+        revert_render();
+    }
+    #[cfg(feature = "space")]
+    if let Some(revert_render) = crate::RENDER_CALLBACK_PRE.lock().ok().and_then(|mut r| r.take()) {
+        revert_render();
+    }
+
+    quick_access_remove_all();
+    unregister_keybinds();
+
+    if let Some(aapi) = addon_api() {
+        unsafe {
+            (aapi.renderer.deregister)(unsafe_options_fallback);
+        }
+    }
 }
 
 pub fn loaded() -> bool {
-    RUNTIME_LOADED.load(Ordering::SeqCst)
+    match RUNTIME_LOADED.load(Ordering::SeqCst) {
+        #[cfg(feature = "extension-nexus-extern")]
+        true if r#extern::addon_api().is_none() || r#extern::requested_api() == 0 => false,
+        loaded => loaded,
+    }
 }
 pub fn available() -> bool {
     RUNTIME_AVAILABLE.load(Ordering::SeqCst)
+}
+pub fn disable() {
+    RUNTIME_AVAILABLE.store(false, Ordering::SeqCst)
 }
 
 pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
@@ -166,7 +223,7 @@ pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
-    if !available() {
+    if !loaded() {
         return Ok(None)
     }
 
@@ -243,45 +300,70 @@ pub fn imgui_context_ptr() -> Option<NonNull<rt::imgui::sys::ImGuiContext>> {
         _ => NonNull::new(cb::addon_api().imgui_ctx),
     }
 }
-pub unsafe fn with_ui<R, F: FnOnce(&rt::imgui::Ui) -> R>(f: F) -> R {
+pub unsafe fn with_ui<R, F: FnOnce(&rt::imgui::Ui) -> R>(f: F) -> Option<R> {
     #[cfg(feature = "extension-nexus-extern")]
     let ui = {
         r#extern::new_imgui_frame();
-        r#extern::imgui_ui()
+        r#extern::imgui_ui()?
     };
     #[cfg(feature = "extension-nexus-codegen")]
     let ui = {
         cb::new_imgui_frame();
-        nexus::ui()
+        cb::imgui_ui()?
     };
-    f(ui)
+    Some(f(ui))
+}
+
+pub fn addon_api() -> Option<&'static AddonApi> {
+    match () {
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ if !available() => return None,
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ => Some(AddonApi::get()),
+        #[cfg(feature = "extension-nexus-extern")]
+        _ => r#extern::addon_api(),
+    }
 }
 
 pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
-    if !available() {
+    #[cfg(todo = "unnecessary")]
+    if !loaded() {
         return Ok(None)
     }
+    let Some(aapi) = addon_api() else { return Ok(None) };
 
     let level = rt::log::nexus_log_level(metadata.level());
     let channel = rt::NAME_C.as_ptr();
 
     unsafe {
-        (AddonApi::get().log)(level, channel, message.as_ptr());
+        (aapi.log)(level, channel, message.as_ptr());
     }
 
     Ok(Some(()))
 }
 
 pub async fn perform_update(release: &rt::update::ResolvedVersion) -> RuntimeResult<Option<()>> {
-    if !available() {
+    #[cfg(todo = "unnecessary")]
+    if !loaded() {
         return Ok(None)
     }
+    let Some(aapi) = addon_api() else { return Ok(None) };
 
     let dll_url = release.dll_url(false).await.map_err(|e| {
         log::error!("{e:#}");
         "DLL URL missing"
     })?;
-    nexus::updater::request_update(SIG, dll_url.as_str());
+    match () {
+        #[cfg(todo = "unnecessary")]
+        () => nexus::updater::request_update(SIG, dll_url.as_str()),
+        () => {
+            let url = String::from(dll_url);
+            unsafe {
+                let url_c = CString::from_vec_unchecked(url.into());
+                (aapi.request_update)(SIG, url_c.as_ptr())
+            }
+        },
+    }
 
     Ok(Some(()))
 }
@@ -417,17 +499,16 @@ pub fn unregister_keybinds() {
         log::error!("keybind map poisoned?");
         return
     };
-    for kb in keybinds.keys() {
-        unsafe { (AddonApi::get().input_binds.deregister)(kb.as_ptr()) }
+    if let Some(aapi) = addon_api() {
+        for kb in keybinds.keys() {
+            unsafe { (aapi.input_binds.deregister)(kb.as_ptr()) }
+        }
     }
     keybinds.clear();
 }
 
 pub fn quick_access_add(icon: TaimiControls, state_on: TaimiControls, style: IconStyle) {
-    use {
-        crate::render::RenderState,
-        nexus::quick_access::{add_quick_access, add_quick_access_context_menu},
-    };
+    use nexus::quick_access::{add_quick_access, add_quick_access_context_menu};
 
     let Some(identifier) = IconStyle::control_id(icon) else {
         log::warn!("no button for icon {:#010x}", icon.bits());
@@ -501,15 +582,20 @@ pub fn quick_access_remove_all() {
 }
 
 pub fn quick_access_remove(icon: TaimiControls) {
-    use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
-
+    let Some(aapi) = addon_api() else { return };
     let Some(identifier) = IconStyle::control_id(icon) else { return };
     if IconStyle::control_has_menu(icon) {
         let menu_id = IconStyle::control_menu_id(identifier);
-        remove_quick_access_context_menu(menu_id);
+        unsafe {
+            let menu_id = CString::from_vec_unchecked(menu_id.into());
+            (aapi.quick_access.remove_context_menu)(menu_id.as_ptr())
+        }
     }
     let button_id = IconStyle::control_button_id(identifier);
-    remove_quick_access(button_id);
+    unsafe {
+        let button_id = CString::from_vec_unchecked(button_id.into());
+        (aapi.quick_access.remove)(button_id.as_ptr())
+    }
 }
 
 pub fn quick_access_init(icons: TaimiControls, style: IconStyle, state_on: TaimiControls) {

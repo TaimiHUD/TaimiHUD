@@ -10,7 +10,7 @@ use {
     },
     core::{ffi::c_char, mem, ptr},
     nexus::{
-        addon::{AddonDefinition, AddonVersion, UpdateProvider},
+        addon::{AddonDefinition, AddonFlags, AddonVersion, UpdateProvider},
         AddonApi,
     },
     std::{
@@ -29,66 +29,90 @@ use {
 /// .-.
 #[export_name = "GetAddonDef"]
 pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinition> {
-    match update_status(NexusLoadStatus::Enumerated, None) {
+    let prev_status = update_status(NexusLoadStatus::Enumerated, None);
+    match prev_status {
         Ok(()) | Err(None) => (),
+        Err(Some(NexusLoadStatus::Unloaded)) => {
+            // be careful...
+        },
         Err(Some(prev_status)) => {
             match prev_status {
                 NexusLoadStatus::Enumerated => (),
                 NexusLoadStatus::Loaded | NexusLoadStatus::Loading => curious("GetAddonDef"),
-                NexusLoadStatus::Failed | NexusLoadStatus::Unloaded | NexusLoadStatus::Unloading =>
-                    if (*ADDON_DEF.get()).api_version != 0 {
-                        report_error_ptr(c"unload incomplete, game restart may be required".as_ptr());
-                    },
+                NexusLoadStatus::Failed | NexusLoadStatus::Unloading | NexusLoadStatus::Unloaded => {
+                    // Unloaded *might* be fine as long as nexus isn't responsible for updates
+                    if !is_disabled() {
+                        report_error_ptr(ERROR_INCOMPLETE_UNLOAD.as_ptr());
+                    }
+                },
             }
             return Some(&*ADDON_DEF.get())
         },
     }
 
-    let def = &mut *ADDON_DEF.get();
-    def.description = ADDON_DESC_C.as_ptr();
-    def.provider = UpdateProvider::None;
-    def.update_link = ptr::null();
-    def.version = {
-        let (major, minor, build, ..) = *rt::update::CRATE_SEMVER_PARTS;
-        let revision = 0;
-        AddonVersion {
-            major: major as i16,
-            minor: minor as i16,
-            build: build as i16,
-            revision,
-        }
-    };
+    let mut provider = UPDATE_NONE;
+    let mut update_link = ptr::null();
+    let author;
+    {
+        let def = &mut *ADDON_DEF.get();
+        author = def.author;
+        def.provider = provider.clone();
+        def.update_link = update_link;
+        def.flags = exports::FLAGS;
+        def.api_version = nexus::AddonApi::VERSION;
+        def.description = ADDON_DESC_C.as_ptr();
+        def.version = {
+            let (major, minor, build, ..) = *rt::update::CRATE_SEMVER_PARTS;
+            let revision = 0;
+            AddonVersion {
+                major: major as i16,
+                minor: minor as i16,
+                build: build as i16,
+                revision,
+            }
+        };
+    }
 
     // TODO: panic::catch_unwind for any of this?
 
+    let def = ADDON_DEF.get();
     exports::pre_init();
 
-    if def.author.is_null() || def.author == EMPTY_C.as_ptr() {
-        def.author = into_cstring_leak(rt::crate_authors());
+    if author.is_null() || author == EMPTY_C.as_ptr() {
+        ptr::write_volatile(&raw mut (*def).author, into_cstring_leak(rt::crate_authors()));
     }
 
-    def.api_version = match AddonHostName::Nexus.is_preferred_host() {
+    match AddonHostName::Nexus.is_preferred_host() {
         Err(preferred) => {
-            let disabled = format!("disabled, configured for {preferred} via boot.json");
-            log::info!(logger: DeferredLogger::BEST_EFFORT, "GetAddonDef {disabled}");
-            def.description = into_cstring_leak(disabled);
-            0
+            let disabled_msg = format!("disabled, configured for {preferred} via boot.json");
+            log::info!(logger: DeferredLogger::BEST_EFFORT, "GetAddonDef {disabled_msg}");
+            ptr::write_volatile(&raw mut (*def).description, into_cstring_leak(disabled_msg));
+            #[cfg(todo = "unnecessary")]
+            {
+                def.flags |= AddonFlags::OnlyLoadDuringGameLaunchSequence;
+                def.api_version = 0;
+            }
         },
-        Ok(()) => nexus::AddonApi::VERSION,
-    };
+        Ok(()) => (),
+    }
 
+    let update_allowed = match AddonHostName::Nexus.is_preferred_update_host() {
+        Ok(()) => true,
+        Err(_host) => false,
+    };
     #[allow(unreachable_patterns)]
     BootstrapState::read_with(|s| {
         let channel = match str_opt_ref(&s.update_override_channel) {
             Some(rt::update::CHANNEL_RELEASE_NAME) => Some(None),
             c => c.map(Some),
         };
-        def.provider = match channel {
+        provider = match channel {
+            _ if !update_allowed => UpdateProvider::Manual,
             None => exports::UPDATE_PROVIDER,
             Some(None) | Some(Some(rt::update::CHANNEL_PRERELEASE)) => UpdateProvider::GitHub,
             Some(Some(url)) if url.starts_with("https") => {
                 // x.x
-                def.update_link = into_cstring_leak(url);
+                update_link = into_cstring_leak(url);
                 let is_gh = url
                     .starts_with("https://github.com/")
                     .then(|| url.as_bytes().iter().filter(|&&c| c == b'/').count() == 4)
@@ -109,10 +133,10 @@ pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinitio
             taimi_has = "url-update-base",
             any(not(feature = "updates"), taimi_update = "direct")
         ))]
-        if def.update_link.is_null() {
+        if update_link.is_null() {
             let version = str_opt_ref(&s.update_override_version);
             let channel = channel.map(|c| c.strip_prefix(rt::update::CHANNEL_DL_PREFIX).unwrap_or(c));
-            let direct_url = match def.provider {
+            let direct_url = match provider {
                 UpdateProvider::Direct => match channel {
                     #[cfg(taimi_has = "url-update-direct")]
                     None if version.is_none() => None,
@@ -121,18 +145,29 @@ pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinitio
                 _ => None,
             };
             if let Some(direct_url) = direct_url {
-                def.update_link = into_cstring_leak(direct_url.into());
+                update_link = into_cstring_leak(direct_url.into());
             }
         }
     });
-    if def.update_link.is_null() {
-        match def.provider {
+    if update_link.is_null() {
+        match provider {
             #[cfg(taimi_has = "url-update-direct")]
-            UpdateProvider::Direct => def.update_link = update_url_of!(Direct:&CStr).as_ptr(),
-            UpdateProvider::GitHub => def.update_link = update_url_of!(GitHub:&CStr).as_ptr(),
+            UpdateProvider::Direct => update_link = update_url_of!(Direct:&CStr).as_ptr(),
+            UpdateProvider::GitHub => update_link = update_url_of!(GitHub:&CStr).as_ptr(),
             _ => (),
         }
     }
+    if matches!(prev_status, Err(Some(NexusLoadStatus::Unloaded))) {
+        if is_nexus_updater(&provider) {
+            provider = UPDATE_NONE;
+            update_link = ptr::null();
+            if !is_disabled() {
+                report_error_ptr(ERROR_INCOMPLETE_UNLOAD.as_ptr());
+            }
+        }
+    }
+    ptr::write_volatile(&raw mut (*def).provider, provider);
+    ptr::write_volatile(&raw mut (*def).update_link, update_link);
 
     Some(&*def)
 }
@@ -151,29 +186,79 @@ static ADDON_DEF: SyncUnsafeCell<AddonDefinition> = SyncUnsafeCell::new(AddonDef
 });
 const EMPTY_C: &'static CStr = c"";
 const ADDON_DESC_C: &'static CStr = arcffi::cstr!(env!("CARGO_PKG_DESCRIPTION"));
+const ERROR_INCOMPLETE_UNLOAD: &'static CStr = c"unload incomplete, game restart may be required";
 const NEXUS_VERSION_ZERO: AddonVersion = AddonVersion {
     major: 0,
     minor: 0,
     build: 0,
     revision: 0,
 };
+/// [UpdateProvider::None] actually means "auto-detect", which is usually not
+/// what we want
+const UPDATE_NONE: UpdateProvider = UpdateProvider::Manual;
+
+pub fn is_enumerated() -> bool {
+    let version = unsafe { &(&*ADDON_DEF.get()).version };
+    !matches!(version, AddonVersion { major: 0, minor: 0, .. })
+}
+pub fn is_disabled() -> bool {
+    // requested_api() == 0
+    let (desc, api) = unsafe {
+        let def = &*ADDON_DEF.get();
+        (def.description, def.api_version)
+    };
+    desc != ADDON_DESC_C.as_ptr() || api == 0
+}
+pub fn requested_api() -> i32 {
+    unsafe { (&*ADDON_DEF.get()).api_version }
+}
+
+fn is_nexus_updater(provider: &UpdateProvider) -> bool {
+    matches!(
+        provider,
+        UpdateProvider::Direct | UpdateProvider::GitHub | UpdateProvider::Raidcore
+    )
+}
 
 unsafe extern "C-unwind" fn nexus_load(api: *const AddonApi) {
     let api: Option<&'static AddonApi> = mem::transmute(api);
-    let Some(api) = api else {
-        log::error!(logger: DeferredLogger::BLOCKING, "load requested without AddonApi");
+    let disabled = is_disabled();
+    if api.is_none() && !disabled {
+        log::error!(logger: DeferredLogger::BEST_EFFORT, "load requested without AddonApi");
+        report_error_ptr(c"unexpected APIv0".as_ptr());
+        set_status(NexusLoadStatus::Failed);
         return
-    };
+    }
     let status = match update_status(NexusLoadStatus::Loading, Some(NexusLoadStatus::Enumerated)) {
-        Ok(()) => {
-            ptr::write_volatile(NEXUS_API.get(), Some(api));
+        Ok(()) | Err(Some(NexusLoadStatus::Unloaded)) => {
+            let nexus_api = NEXUS_API.get();
+            let prev_api = ptr::read_volatile(nexus_api);
+            #[cfg(feature = "extension-nexus-extern-todo")]
+            let prev_init = *NEXUS_API_INIT.get();
+            let api = match (api, prev_api) {
+                (Some(api), _) => {
+                    ptr::write_volatile(nexus_api, Some(api));
+                    Some(api)
+                },
+                (None, Some(prev)) => Some(prev),
+                (api, _) => api,
+            };
             let log_filter: Option<&'static str> = None;
             let res = panic::catch_unwind(|| {
-                #[cfg(feature = "extension-nexus-extern-todo")]
-                {
-                    nexus::__macro::init(api as *const AddonApi, "TaimiHUD", log_filter);
-                    // expect this to have clobbered our hook, meanies :<
-                    crate::setup_panic_hook();
+                match api {
+                    #[cfg(feature = "extension-nexus-extern-todo")]
+                    Some(api) if /* !disabled &&*/ !prev_init => {
+                        ptr::write_volatile(NEXUS_API_INIT.get(), true);
+                        nexus::__macro::init(api as *const AddonApi, "TaimiHUD", log_filter);
+                        // expect this to have clobbered our hook, meanies :<
+                        crate::setup_panic_hook();
+                    },
+                    _ => (),
+                }
+                if !disabled && prev_init {
+                    // TODO: if we implement auto-updates, disable them since something is subtly wrong with dll refcount
+                    let incomplete = str::from_utf8_unchecked(ERROR_INCOMPLETE_UNLOAD.to_bytes());
+                    log::warn!("nexus {incomplete}");
                 }
                 exports::init()
             });
@@ -223,6 +308,8 @@ unsafe extern "C-unwind" fn nexus_unload() {
     ptr::write_volatile(NEXUS_API.get(), None);
 }
 static NEXUS_API: SyncUnsafeCell<Option<&'static AddonApi>> = SyncUnsafeCell::new(None);
+#[cfg(feature = "extension-nexus-extern-todo")]
+static NEXUS_API_INIT: SyncUnsafeCell<bool> = SyncUnsafeCell::new(false);
 static NEXUS_LOAD_STATUS: SyncUnsafeCell<Option<NexusLoadStatus>> = SyncUnsafeCell::new(None);
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -264,6 +351,10 @@ unsafe fn report_error_ptr(e: *const c_char) {
     let def = ADDON_DEF.get();
     ptr::write_volatile(&raw mut (*def).description, e);
     ptr::write_volatile(&raw mut (*def).api_version, 0);
+    ptr::write_volatile(
+        &raw mut (*def).flags,
+        exports::FLAGS | AddonFlags::OnlyLoadDuringGameLaunchSequence,
+    );
 }
 fn curious(op: &str) {
     log::debug!(logger: DeferredLogger::BEST_EFFORT, "redundant {op}, curious");
@@ -292,6 +383,10 @@ pub(super) unsafe fn new_imgui_frame() {
     }
 }
 #[cfg(feature = "extension-nexus-extern-todo")]
-pub unsafe fn imgui_ui<'a, 'u>() -> &'a rt::imgui::Ui<'u> {
-    nexus::ui()
+pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a rt::imgui::Ui<'u>> {
+    match addon_api() {
+        None => None,
+        Some(aapi) if aapi.imgui_context.is_null() => None,
+        Some(..) => Some(nexus::ui()),
+    }
 }

@@ -120,11 +120,11 @@ impl BootstrapState {
         let f = fs::File::open(path)?;
         serde_json::from_reader(io::BufReader::with_capacity(2048, f)).map_err(Into::into)
     }
-    #[cfg(todo = "unnecessary")]
-    pub fn write_file(&self, path: &Path) -> anyhow::Result<()> {
+    pub fn write_file((path, data): &(&Path, String)) -> anyhow::Result<()> {
+        use std::io::Write;
         let _ = fs::create_dir_all(rt::addon_dir_fallback());
-        let f = fs::File::create(path)?;
-        serde_json::to_writer(f, self).context("writing boot state")
+        let mut f = fs::File::create(path)?;
+        f.write_all(data.as_bytes()).context("writing boot state")
     }
     pub fn start_save(&self) -> anyhow::Result<(&'static Path, String)> {
         let s = serde_json::to_string(self).context("boot state serialization error")?;
@@ -171,12 +171,13 @@ impl BootstrapState {
 
     /// only use this for UI, check [self.addon_host_is_preferred()] if verifying
     pub fn addon_host_preference(&self) -> AddonHostName {
-        self.addon_host_preference.unwrap_or_else(|| match () {
-            _ if rt::nexus_available() => AddonHostName::Nexus,
-            #[cfg(all(feature = "extension-nexus", feature = "extension-arcdps"))]
-            _ if crate::exports::arcdps::check_for_nexus() => AddonHostName::Nexus,
-            _ if rt::arcdps_available() => AddonHostName::ArcDPS,
-            _ => AddonHostName::DEFAULT,
+        self.addon_host_preference.unwrap_or_else(|| {
+            for prio in AddonHostName::HOST_PRIORITY {
+                if prio.is_active() || prio.is_detected() == Some(true) {
+                    return *prio
+                }
+            }
+            AddonHostName::DEFAULT
         })
     }
     #[allow(unreachable_patterns)]
@@ -207,6 +208,16 @@ impl BootstrapState {
             (None, _) => Err(AddonHostName::DEFAULT),
         }
     }
+    pub fn update_host_is_preferred(&self, requester: AddonHostName) -> Result<(), Option<AddonHostName>> {
+        match self.update_host_preference {
+            Some(Some(pref)) if pref.contains(requester) => Ok(()),
+            Some(pref) => Err(pref),
+            None if Some(requester) == self.reliable_addon_host()
+                && self.addon_host_is_preferred(requester).is_ok() =>
+                Ok(()),
+            None => Err(None),
+        }
+    }
 
     fn default_update_preference() -> &'static UpdatePreference {
         let never = &UpdatePreference::Never;
@@ -232,7 +243,7 @@ impl BootstrapState {
     pub fn update_host_preference(&self) -> Option<AddonHostName> {
         self.update_host_preference
             .unwrap_or_else(|| match self.reliable_addon_host() {
-                Some(host) if self.addon_host_preference() == host => Some(host),
+                Some(host) if host.is_preferred_host().is_ok() => Some(host),
                 _ => None,
             })
     }
@@ -243,15 +254,26 @@ impl BootstrapState {
             Some(..) => None,
         }
     }
+    pub fn try_update_latest_host(&mut self, host: Option<Option<AddonHostName>>) -> bool {
+        let host = match host {
+            _ if self.addon_host_preference == Some(AddonHostName::All) => None,
+            Some(host) => host,
+            None => Self::current_addon_host(),
+        };
+        if self.latest_addon_host == host {
+            return false
+        }
+        self.latest_addon_host = host;
+        true
+    }
 
     pub fn current_addon_host() -> Option<AddonHostName> {
-        match () {
-            #[cfg(feature = "extension-nexus")]
-            _ if rt::nexus_available() => Some(AddonHostName::Nexus),
-            #[cfg(feature = "extension-arcdps")]
-            _ if rt::arcdps_available() => Some(AddonHostName::ArcDPS),
-            _ => None,
+        for prio in AddonHostName::HOST_PRIORITY {
+            if prio.is_active() {
+                return Some(*prio)
+            }
         }
+        None
     }
 
     pub fn gh_api_token(&self) -> Option<&str> {
@@ -335,7 +357,7 @@ pub enum AddonHostName {
 
 #[allow(unreachable_patterns)]
 impl AddonHostName {
-    pub const ALL: [Self; 2] = [Self::ArcDPS, Self::Nexus];
+    pub const ALL: [Self; 3] = [Self::ArcDPS, Self::Nexus, Self::All];
     pub const HOST_PRIORITY: &'static [Self] = &[
         #[cfg(feature = "extension-nexus")]
         Self::Nexus,
@@ -376,6 +398,27 @@ impl AddonHostName {
             Self::All => None,
         }
     }
+    pub fn is_active(&self) -> bool {
+        match self {
+            Self::ArcDPS => rt::arcdps_available(),
+            Self::Nexus => rt::nexus_available(),
+            Self::All => false,
+            // if we're running, maybe it counts?
+            #[cfg(todo)]
+            Self::All => true,
+        }
+    }
+    pub fn is_loaded(&self) -> bool {
+        match self {
+            #[cfg(feature = "extension-arcdps")]
+            Self::ArcDPS => crate::exports::arcdps::loaded(),
+            #[cfg(feature = "extension-nexus")]
+            Self::Nexus => crate::exports::nexus::loaded(),
+            #[cfg(todo)]
+            Self::All => true,
+            _ => false,
+        }
+    }
     /// we *could* enumerate process dlls for symbols that are unique to each loader,
     /// but that might be excessive...
     #[cfg(todo)]
@@ -391,6 +434,8 @@ impl AddonHostName {
             return Some(true)
         }
         match () {
+            #[cfg(feature = "extension-nexus-extern")]
+            () if crate::exports::nexus::r#extern::is_enumerated() => Some(true),
             #[cfg(all(feature = "extension-nexus", feature = "extension-arcdps"))]
             () => Some(crate::exports::arcdps::check_for_nexus()),
             _ => None,
@@ -404,6 +449,10 @@ impl AddonHostName {
         if crate::exports::arcdps::loaded() {
             return Some(true)
         }
+        #[cfg(feature = "extension-arcdps-extern")]
+        if crate::exports::arcdps::r#extern::arc_args().is_some() {
+            return Some(true)
+        }
         #[cfg(todo)]
         #[cfg(all(feature = "extension-nexus", feature = "extension-arcdps"))]
         if crate::exports::nexus::check_for_arcdps() {
@@ -415,6 +464,15 @@ impl AddonHostName {
 
     pub fn is_preferred_host(&self) -> Result<(), Self> {
         BootstrapState::read_with(|s| s.addon_host_is_preferred(*self))
+    }
+    pub fn is_explicit_preferred_host(&self) -> Result<(), Self> {
+        BootstrapState::read_with(|s| match s.addon_host_preference {
+            Some(pref @ Self::All) => Err(pref),
+            _ => s.addon_host_is_preferred(*self),
+        })
+    }
+    pub fn is_preferred_update_host(&self) -> Result<(), Option<Self>> {
+        BootstrapState::read_with(|s| s.update_host_is_preferred(*self))
     }
 }
 

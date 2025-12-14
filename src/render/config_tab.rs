@@ -12,6 +12,7 @@ use {
             element::{keys::KeyBindSelection, language::LanguageSelection, token::ApiTokenInput},
             machine::RenderMachine,
             RenderEvent,
+            RenderState,
             TextFont,
         },
         settings::{
@@ -93,17 +94,7 @@ impl ConfigTabState {
         ui.dummy([4.0, 4.0]);
 
         if ui.button(&fl!("quit")) {
-            // XXX: this will wipe all of render state, rather than just katrender
-            let mut render_sender = crate::RENDER_SENDER.write().unwrap();
-            let render_quit = render_sender
-                .as_ref()
-                .map(|sender| sender.try_send(RenderEvent::Quit));
-            if let Some(Ok(())) = render_quit {
-                let _ = render_sender.take();
-                let _ = crate::SPACE_SENDER.write().unwrap().take();
-                crate::TEXTURES.quit();
-            }
-            Controller::try_send(ControllerEvent::UnloadAll);
+            RenderState::try_send(RenderEvent::InitiateQuit);
         }
         ui.same_line();
         if ui.button(&fl!("save")) {
@@ -467,7 +458,7 @@ impl ConfigUpdateState {
             false
         };
         #[cfg(feature = "extension-nexus")]
-        if !up_to_date && rt::nexus_available() {
+        if !up_to_date && crate::exports::nexus::loaded() {
             ui.same_line();
             if with_i18n!("update", |msg| ui.button(msg)) {
                 Controller::try_send(ControllerEvent::CheckAddonUpdate(true));

@@ -167,6 +167,13 @@ impl TaimiLog {
         };
         drop(f);
     }
+
+    pub fn flush_all(&self) {
+        if let Some(mut f) = self.log_file.get() {
+            let _ = io::Write::flush(&mut f);
+            let _ = f.sync_data();
+        }
+    }
 }
 
 impl Log for TaimiLog {
@@ -190,10 +197,7 @@ impl Log for TaimiLog {
     }
 
     fn flush(&self) {
-        if let Some(mut f) = self.log_file.get() {
-            let _ = io::Write::flush(&mut f);
-            let _ = f.sync_data();
-        }
+        self.flush_all()
     }
 }
 
