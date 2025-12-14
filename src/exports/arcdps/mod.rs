@@ -1,3 +1,5 @@
+#[cfg(feature = "extension-arcdps-extern")]
+use dpsapi::api::ApiExports as _;
 #[cfg(feature = "space")]
 use {
     crate::{controller::pathing::PathingEvent, space::Engine},
@@ -8,7 +10,7 @@ use {
         controller::timers::{TimersController, TimersEvent},
         exports::{
             self,
-            runtime::{self as rt, bindings::TaimiControls, imgui, RuntimeResult},
+            runtime::{self as rt, bindings::TaimiControls, imgui, log::DeferredLogger, RuntimeResult},
         },
         marker::format::MarkerType,
         render::{machine::RenderMachine, RenderState},
@@ -26,6 +28,7 @@ use {
     std::{
         ffi::{c_void, CStr, CString, OsStr},
         fmt::{self, Write},
+        mem,
         ops,
         panic,
         path::PathBuf,
@@ -42,8 +45,6 @@ use {
         UI::{Input::KeyboardAndMouse, WindowsAndMessaging},
     },
 };
-#[cfg(feature = "extension-arcdps-extern")]
-use {dpsapi::api::ApiExports as _, std::mem::transmute};
 
 #[cfg(feature = "extension-arcdps-codegen")]
 pub(crate) mod cb;
@@ -88,43 +89,8 @@ fn check_for_nexus_bridge() -> bool {
 }
 
 #[cfg(feature = "extension-nexus")]
-fn check_for_nexus_link() -> bool {
-    use windows::{
-        core::PCSTR,
-        Win32::{
-            Foundation::CloseHandle,
-            System::Memory::{OpenFileMappingA, FILE_MAP_READ},
-        },
-    };
-
-    let object_name = {
-        //let process_id = windows::Win32::System::Threading::GetCurrentProcessId();
-        let process_id = std::process::id();
-        format!("DL_NEXUS_LINK_{process_id}\0")
-    };
-    let res = unsafe { OpenFileMappingA(FILE_MAP_READ.0, false, PCSTR(object_name.as_ptr() as *const _)) };
-    match res {
-        Ok(handle) => {
-            let cleanup = unsafe { CloseHandle(handle) };
-            if let Err(e) = cleanup {
-                log::warn!("Failed to clean up mapped handle after checking for NexusLink: {e}");
-            }
-            true
-        },
-        Err(_e) => {
-            // TODO: does it matter what error code we expect, ERROR_OBJECT_NOT_FOUND?
-            #[cfg(debug_assertions)]
-            {
-                log::debug!("NexusLink({object_name}) unavailable: {_e}");
-            }
-            false
-        },
-    }
-}
-
-#[cfg(feature = "extension-nexus")]
 pub(crate) fn check_for_nexus() -> bool {
-    check_for_nexus_bridge() || check_for_nexus_link()
+    check_for_nexus_bridge() || crate::exports::nexus::datalink::check_for_nexus_link()
 }
 
 #[allow(unreachable_patterns)]
@@ -157,44 +123,41 @@ fn pre_init() {
 fn init() -> Result<(), &'static str> {
     early_init();
 
-    #[cfg(feature = "extension-nexus")]
-    if rt::nexus_available() {
-        log::info!("already loaded by nexus");
-        disable();
-        init_continue_with_nexus()?;
-    } else if check_for_nexus() {
-        log::info!("nexus detected");
-        init_continue_with_nexus()?;
-    }
+    let res = match crate::pre_init_for(AddonHostName::ArcDPS) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            disable();
+            Ok(())
+        },
+        Err(e) => {
+            disable();
+            Err(e)
+        },
+    };
 
-    let res = crate::init().and_then(|()| crate::load_arcdps());
+    let res = res
+        .and_then(|()| crate::init())
+        .and_then(|()| crate::load_arcdps());
 
     if res.is_err() {
-        RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
+        disable();
     }
 
     #[cfg(feature = "extension-arcdps-extras")]
-    if !extras_available() && unofficial_extras::extras_resubscribe() {
-        // TODO: extras_reinit() and stash info?
+    if res.is_ok() && !extras_available() && unofficial_extras::extras_resubscribe() {
         EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
     }
 
-    res.map_err(Into::into)
-}
+    crate::post_init_for(AddonHostName::ArcDPS, res.is_ok());
 
-/// Returns an empty error to abort init if we'd prefer nexus instead
-#[cfg(feature = "extension-nexus")]
-fn init_continue_with_nexus() -> Result<(), &'static str> {
-    //log::trace!("TODO: option to select between arcdps and nexus");
-    //Err("")
-    Ok(())
+    res.map_err(Into::into)
 }
 
 fn release() {
     log::trace!("arcdps release");
     let _ = MUMBLE_LINK.lock().unwrap_or_else(|e| e.into_inner()).take();
 
-    let unloading = available() && !rt::nexus_available();
+    let unloading = crate::pre_uninit_for(AddonHostName::ArcDPS);
     if unloading {
         crate::unload();
     }
@@ -212,8 +175,7 @@ fn release() {
     EXTRAS_AVAILABLE.store(false, Ordering::SeqCst);
 
     if unloading {
-        // TODO: avoid if exit is in-flight?
-        rt::log::TaimiLog::logger().close();
+        crate::post_uninit_for(AddonHostName::ArcDPS);
     }
 }
 
@@ -224,47 +186,44 @@ pub struct ExitHandle {
 }
 
 impl ExitHandle {
-    pub fn try_exit() -> RuntimeResult<Option<Self>> {
-        let handle = match loaded() {
-            true => match unload_self() {
-                Ok(Some(handle)) if !handle.is_invalid() => Some(handle),
-                Err(..) => None,
-                _ => None,
+    const HMODULE_ERR: &'static str = "my HMODULE";
+    pub unsafe fn try_exit() -> RuntimeResult<Option<Self>> {
+        let is_loaded = loaded();
+        let needs_own_handle = is_loaded || EXTRA_HANDLES.load(Ordering::SeqCst) > 0;
+        let mut own_handle = needs_own_handle
+            .then(||
+            // pre-incrementing ref is important, because arcdps will FreeLibrary upon
+            // removal, but we're kinda still alive here!
+            Self::own_handle(true).ok_or(Self::HMODULE_ERR))
+            .transpose()?;
+        if let Some(own_handle) = &mut own_handle {
+            if is_loaded {
+                match unsafe { unload_self() } {
+                    Ok(Some(handle)) if handle.is_invalid() => (),
+                    Ok(Some(handle)) if handle.0 != own_handle.own_handle.0 => {
+                        log::error!(
+                            "removed HMODULE({:p}) mismatches, {:p} expected",
+                            handle.0,
+                            own_handle.own_handle.0
+                        );
+                        return Err(Self::HMODULE_ERR)
+                    },
+                    Ok(Some(_)) => {
+                        own_handle.arc_loaded = true;
+                    },
+                    Err(..) | Ok(None) => (),
+                }
+            }
+            own_handle.commit_ref_count();
+        }
+        Ok(match own_handle {
+            Some(handle) if handle.arc_loaded || handle.ref_count > 1 => Some(handle),
+            _ => {
+                // just had to check first...
+                // NOTE this will drop and free library ref created above
+                None
             },
-            false => None,
-        };
-        let arc_loaded = handle.is_some();
-        let own_handle = match handle {
-            #[cfg(windows)]
-            None if EXTRA_HANDLES.load(Ordering::Relaxed) > 0 => unsafe {
-                use windows::{
-                    core::PCSTR,
-                    Win32::System::LibraryLoader::{self as ll, GetModuleHandleExA},
-                };
-                log::info!("need to get a little creative to unload extra handles (why?)");
-                let mut handle = HMODULE::default();
-                let context_msg = "GetModuleHandleExA on exit";
-                // a static str like this should be in our module's .text/rodata probably sure
-                let sentinel = context_msg.as_ptr();
-                let flags = ll::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT
-                    | ll::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
-                let res = GetModuleHandleExA(flags, PCSTR(sentinel as *const _), &mut handle)
-                    .context(context_msg);
-                rt::log::error_ok(res).and_then(|()| match handle.is_invalid() {
-                    true => None,
-                    false => Some(handle),
-                })
-            },
-            // just had to check first...
-            None if loaded() => return Err(NO_EXPORT),
-            handle => handle,
-        };
-
-        Ok(own_handle.map(|own_handle| Self {
-            ref_count: arc_loaded.then_some(1).unwrap_or(0),
-            arc_loaded,
-            own_handle,
-        }))
+        })
     }
 
     #[cfg(todo)]
@@ -274,47 +233,62 @@ impl ExitHandle {
         unsafe { FreeLibraryAndExitThread(self.own_handle, 0) };
     }
 
-    pub unsafe fn free_and_exit(self) -> ! {
-        use windows::Win32::{
-            Foundation::FreeLibrary,
-            System::{LibraryLoader::FreeLibraryAndExitThread, Threading::ExitThread},
-        };
+    pub fn free_and_exit(mut self) -> ! {
+        use windows::Win32::System::{LibraryLoader::FreeLibraryAndExitThread, Threading::ExitThread};
 
-        log::info!("goodbye x{}", self.ref_count);
         let code = 0;
 
-        let extra_refs = self.ref_count.checked_sub(1);
-        let mut rem = extra_refs.is_some();
-        if let Some(amt) = extra_refs {
-            for _ in 0..amt {
-                if FreeLibrary(self.own_handle).is_err() {
-                    // oh no...
-                    rem = false;
-                    break
-                }
-            }
+        let mut last_ref = self.take_one_ref();
+        if self.free_refs().is_err() {
+            // oh no...
+            last_ref = None;
         }
-        if rem {
-            FreeLibraryAndExitThread(self.own_handle, code)
-        } else {
-            ExitThread(code)
+        unsafe {
+            match last_ref {
+                Some(()) => FreeLibraryAndExitThread(self.own_handle, code),
+                None => ExitThread(code),
+            }
         }
     }
 
-    pub fn spawn_free(mut self) {
-        let _ = thread::spawn(move || -> ! {
-            self.commit_ref_count();
-            let wait = self.wait();
-            if wait.as_millis() > 0 {
-                thread::sleep(wait);
+    fn take_one_ref(&mut self) -> Option<()> {
+        self.ref_count.checked_sub(1).map(|rem| {
+            self.ref_count = rem;
+            ()
+        })
+    }
+    pub fn free_refs(&mut self) -> Result<(), ()> {
+        use windows::Win32::Foundation::FreeLibrary;
+
+        let amt = mem::replace(&mut self.ref_count, 0);
+        for _ in 0..amt {
+            let res = unsafe { FreeLibrary(self.own_handle) };
+            if res.is_err() {
+                // oh no...
+                return Err(())
             }
-            self.commit_ref_count();
-            // TODO: synchronize with main thread and controller too...
-            rt::log::TaimiLog::logger().close();
-            unsafe {
-                self.free_and_exit();
-            }
-        });
+        }
+        Ok(())
+    }
+
+    pub fn spawn_free(self) {
+        let _ = thread::spawn(move || -> ! { self.free_blocking() });
+    }
+    pub fn prepare_for_free(&mut self) {
+        rt::log::TaimiLog::logger().flush_all();
+        self.commit_ref_count();
+        let wait = self.wait();
+        if wait.as_millis() > 0 {
+            thread::sleep(wait);
+        }
+        self.commit_ref_count();
+        log::info!("goodbye x{}", self.ref_count);
+        rt::log::TaimiLog::logger().close();
+        // TODO: synchronize with main thread and controller too...
+    }
+    pub fn free_blocking(mut self) -> ! {
+        self.prepare_for_free();
+        self.free_and_exit();
     }
 
     fn commit_ref_count(&mut self) {
@@ -325,17 +299,52 @@ impl ExitHandle {
     fn wait(&self) -> Duration {
         match self {
             Self { ref_count: 0, .. } => Duration::from_millis(0),
-            Self { arc_loaded: false, .. } => Duration::from_millis(80),
-            Self { arc_loaded: true, .. } => Duration::from_millis(400),
+            Self { arc_loaded: false, .. } => Duration::from_millis(54),
+            Self { arc_loaded: true, .. } => Duration::from_millis(80),
         }
+    }
+
+    pub fn own_handle(inc_ref: bool) -> Option<Self> {
+        use windows::{
+            core::PCSTR,
+            Win32::System::LibraryLoader::{self as ll, GetModuleHandleExA},
+        };
+        let mut own_handle = HMODULE::default();
+        let res = unsafe {
+            let context_msg = "GetModuleHandleExA on exit";
+            // a static str like this should be in our module's .text/rodata probably sure
+            let sentinel = context_msg.as_ptr();
+            let flag_ref = (!inc_ref)
+                .then_some(ll::GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT)
+                .unwrap_or_default();
+            let flags = flag_ref | ll::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS;
+            GetModuleHandleExA(flags, PCSTR(sentinel as *const _), &mut own_handle).context(context_msg)
+        };
+        rt::log::error_ok(res).and_then(|()| match own_handle.is_invalid() {
+            true => None,
+            false => Some(Self {
+                own_handle,
+                ref_count: inc_ref.then_some(1).unwrap_or(0),
+                arc_loaded: false,
+            }),
+        })
     }
 }
 
 unsafe impl Send for ExitHandle {}
+impl Drop for ExitHandle {
+    fn drop(&mut self) {
+        if let Err(()) = self.free_refs() {
+            log::error!("own FreeLibrary failed???");
+        }
+    }
+}
 
 /// This may block!
+#[cfg(todo = "unused")]
 pub fn exit() -> RuntimeResult<()> {
-    let exit = match ExitHandle::try_exit()? {
+    let exit = unsafe { pExitHandle::try_exit() };
+    let exit = match exit? {
         None => return Err("arcdps is unaware of us, maybe not loaded?"),
         Some(h) => h,
     };
@@ -343,6 +352,72 @@ pub fn exit() -> RuntimeResult<()> {
     // TODO: stash this away in a static to be spawned *after* release has been called?
     exit.spawn_free();
 
+    Ok(())
+}
+
+fn add_self() -> RuntimeResult<bool> {
+    let Some(own_handle) = ExitHandle::own_handle(true) else {
+        return Err(ExitHandle::HMODULE_ERR)
+    };
+    let mut prev_host = None;
+    BootstrapState::try_write_with(|s| {
+        // temporary override :3
+        prev_host = Some((s.addon_host_preference, s.get_update_host_preference()));
+        s.addon_host_preference = Some(AddonHostName::All);
+        s.set_update_host_preference(Some(None));
+        false
+    });
+    let res = match () {
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () if !arcdps::exports::has_add_extension() => None,
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => Some(unsafe { arcdps::exports::raw::add_extension(own_handle.own_handle) as usize }),
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::arc_args()
+            .and_then(|arc| unsafe { arc.module.arc_extension_add2(own_handle.own_handle.into()) }.ok()),
+    }
+    .ok_or(NO_EXPORT);
+    if let Some((prev_host, prev_updater)) = prev_host {
+        BootstrapState::try_write_with(|s| {
+            // restore override
+            s.addon_host_preference = prev_host;
+            s.set_update_host_preference(prev_updater);
+            false
+        });
+    }
+
+    match res? {
+        0 => {
+            // arc leaks a handle here iirc x.x
+            // own_handle.ref_count += 1;
+            // in case we're wrong+crash, delay reclaiming this handle until later
+            EXTRA_HANDLES.fetch_add(1, Ordering::Relaxed);
+            Ok(true)
+        },
+        // duplicate sig means we're probably already loaded
+        4 => Ok(false),
+        e => {
+            log::warn!("addextension2 failed with code {e}");
+            Err("addextension2")
+        },
+    }
+}
+pub fn enter() -> RuntimeResult<()> {
+    #[cfg(todo = "unnecessary")]
+    if available() {
+        return Ok(())
+    }
+    log::info!("arc (re?)entry");
+    let res = add_self()?;
+    if res {
+        log::debug!("guess we're in");
+    } else {
+        log::info!("unhiding from arc");
+    };
+    if !res || !available() {
+        RUNTIME_LOADED.store(true, Ordering::SeqCst);
+        RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
+    }
     Ok(())
 }
 
@@ -390,9 +465,10 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
         return
     }
 
-    let render_ready = RenderState::pre_render();
+    let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) else {
+        return
+    };
 
-    #[cfg(feature = "space")]
     RenderMachine::turn_render_entry();
 
     if !render_ready {
@@ -405,17 +481,23 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
 }
 
 fn imgui_options_tab(ui: &imgui::Ui) {
-    if RenderState::is_running() {
+    let mut running = available() && RenderState::is_running();
+    if available() && RenderState::is_running() {
         let mut state = RenderState::lock();
         if let Some(ref mut state) = *state {
             state.primary_window.arc_tab.ui_options(ui);
+        } else {
+            running = false;
         }
+    }
+    if !running {
+        RenderState::render_options_fallback(ui, AddonHostName::ArcDPS)
     }
 }
 
 fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
     let hide_checkbox = false;
-    if window_name.is_some() || !RenderState::is_running() {
+    if window_name.is_some() || !RenderState::is_running() || !available() {
         return hide_checkbox
     }
 
@@ -609,14 +691,23 @@ fn get_update_url() -> Option<String> {
         crate::crate_init();
     }
 
-    match BootstrapState::read_with(|state| state.update_host_preference()) {
-        Some(AddonHostName::ArcDPS) => (),
-        Some(pref) => {
-            log::info!("skipping get_update_url, {pref} is preferred");
+    match AddonHostName::ArcDPS.is_preferred_update_host() {
+        Ok(())
+            if AddonHostName::HOST_PRIORITY
+                .iter()
+                .any(|&h| h != AddonHostName::ArcDPS && h.is_loaded()) =>
+        {
+            log::warn!("skipping get_update_url, we're not alone");
             return None
         },
-        None => {
-            log::info!("skipping get_update_url, updates disabled");
+        Ok(()) => (),
+        Err(pref) => {
+            match pref {
+                Some(pref) =>
+                    log::info!(logger: DeferredLogger::BEST_EFFORT, "skipping get_update_url, {pref} is preferred"),
+                None =>
+                    log::info!(logger: DeferredLogger::BEST_EFFORT, "skipping get_update_url, updates disabled"),
+            }
             return None
         },
     }
@@ -642,9 +733,11 @@ async fn release_update_url(release: rt::update::ResolvedVersion) -> anyhow::Res
 pub(crate) fn update_url() -> Option<String> {
     let authorized = rt::update::Updater::get_preference();
     if authorized.will_authorize() == Some(false) {
-        log::info!("Auto-update disabled");
+        log::info!(logger: DeferredLogger::BEST_EFFORT, "Auto-update disabled");
         return None
     }
+
+    rt::log::TaimiLog::logger().ensure_available("arcdps get_update_url");
 
     let res =
         rt::update::ResolvedVersion::latest_release_standalone(UPDATE_CHECK_TIMEOUT, release_update_url)
@@ -684,9 +777,10 @@ static EXTRA_HANDLES: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "extension-arcdps-extras")]
 fn extras_init(info: ExtrasVersion) {
     EXTRAS_AVAILABLE.store(true, Ordering::Relaxed);
+    // UE leaks a handle (but not if we've recovered our callbacks after a reload!)
     EXTRA_HANDLES.fetch_add(1, Ordering::Relaxed);
 
-    log::debug!("arcdps_extras initialized: {info:?}");
+    log::trace!("arcdps_extras initialized: {info:?}");
 }
 
 #[cfg(feature = "extension-arcdps-extras")]
@@ -727,11 +821,7 @@ pub fn disable_load() {
     disable();
 }
 
-pub fn unload_self() -> RuntimeResult<Option<HMODULE>> {
-    if !loaded() {
-        return Ok(None)
-    }
-
+unsafe fn unload_self() -> RuntimeResult<Option<HMODULE>> {
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_free_extension() => None,
@@ -863,7 +953,7 @@ fn log_window_message(message: &CStr) -> RuntimeResult<()> {
                     }
                     export
                 },
-                p => unsafe { transmute(p) },
+                p => unsafe { mem::transmute(p) },
             }
             .map(|e| unsafe { e(Some(message.into())) })
         }),
@@ -897,7 +987,7 @@ pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()
                     }
                     export
                 },
-                p => unsafe { transmute(p) },
+                p => unsafe { mem::transmute(p) },
             }
             .map(|e| unsafe { e(Some(message.into())) })
         }),
