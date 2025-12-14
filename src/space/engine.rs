@@ -883,10 +883,19 @@ impl Engine {
         }
     }
 
-    pub fn cleanup(&mut self) {
+    pub fn cleanup(&mut self, unload: bool) {
         #[cfg(debug_assertions)]
         {
             log::warn!("TODO: Please clean up the engine when the program quits");
+        }
+        if unload {
+            if let Ok(mut sender) = crate::SPACE_SENDER.write() {
+                let _ = sender.take();
+            }
+            // pack cleanup kinda unnecessary since it's done on drop anyway?
+            // self.packs.clear();
+        } else {
+            self.packs.destroy_buffers();
         }
     }
 
