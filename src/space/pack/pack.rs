@@ -1216,6 +1216,10 @@ impl PackCollection {
         }
     }
 
+    pub fn destroy_buffers(&mut self) {
+        self.mark_buffers_dirty();
+    }
+
     pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         if
         /* !self.loaded_packs.is_empty() &&*/
