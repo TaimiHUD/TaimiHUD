@@ -1,9 +1,17 @@
 use {
     crate::{
         built_info,
-        exports::{nexus as exports, runtime as rt, update_url_of},
+        exports::{
+            nexus as exports,
+            runtime::{
+                self as rt,
+                imgui::{self, sys as imgui_sys},
+            },
+            update_url_of,
+        },
     },
     nexus::{AddonFlags, UpdateProvider},
+    std::ptr::NonNull,
 };
 
 pub use crate::exports::nexus::{FLAGS, SIG, UPDATE_PROVIDER};
@@ -38,29 +46,22 @@ pub fn addon_api() -> Option<&'static AddonApi> {
     nexus::addon_api()
 }
 
-/// TODO: same logic as extern...
-pub(super) unsafe fn new_imgui_frame() {
-    #[cfg(feature = "extension-arcdps")]
-    match (addon_api(), crate::exports::arcdps::imgui_context_ptr()) {
-        (Some(aapi), Some(ctx)) if aapi.imgui_context == ctx.as_ptr() => {
-            // they're linked, no need to switch
-        },
-        (_, None) => {
-            // TODO: unloading may make this an outdated comparison?
-        },
-        _ if !rt::arcdps_available() => (),
-        (None, _) => (),
-        (Some(aapi), ..) if aapi.imgui_context.is_null() => (),
-        (Some(aapi), ..) => {
-            rt::imgui::sys::igSetCurrentContext(aapi.imgui_context);
-            rt::imgui::sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
-        },
+unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+    let aapi = addon_api()?;
+    let ctx = ptr::NonNull::new(aapi.imgui_context)?;
+    if imgui_sys::igGetCurrentContext() != ctx.as_ptr() as *mut _ {
+        imgui_sys::igSetCurrentContext(ctx.as_ptr());
+        imgui_sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
     }
+
+    Some(ctx)
 }
 
-pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a rt::imgui::Ui<'u>> {
-    match exports::loaded() {
-        true => Some(nexus::ui()),
-        false => None,
-    }
+pub(super) unsafe fn new_imgui_frame() {}
+unsafe fn imgui_ui<'a, 'u>() -> Option<&'a imgui::Ui<'u>> {
+    imgui_bind_context()?;
+    Some(nexus::ui())
+}
+pub unsafe fn with_ui<'u, R, F: FnOnce(&imgui::Ui<'u>) -> R>(f: F) -> Option<R> {
+    imgui_ui().map(f)
 }
