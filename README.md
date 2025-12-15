@@ -1,8 +1,15 @@
 # TaimiHUD
 
+https://taimihud.com
+
 A cross-platform Timers, Commander's Markers and Pathing addon, leveraging [Raidcore Nexus](https://raidcore.gg/Nexus) or [ArcDPS](https://www.deltaconnected.com/arcdps/).
 
 [Join our Discord!](https://discord.gg/dKpaphTMGS)
+
+## Manual
+
+Hopefully someday?
+In the meantime please consult the [Installation Guide](https://taimihud.com/install-guide/) to get started.
 
 ## References
 
