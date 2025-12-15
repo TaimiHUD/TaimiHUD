@@ -315,7 +315,15 @@ impl TextureLoader {
 
     #[cfg(feature = "texture-loader")]
     pub fn wait_for_shutdown(&self) -> anyhow::Result<()> {
-        let handle = self.shutdown()?;
+        let handle = match self.shutdown() {
+            Ok(h) => h,
+            Err(e) => {
+                // failure just means it was already shut down earlier, which is expected
+                // in a number of situations
+                log::debug!("{e:#}");
+                return Ok(())
+            },
+        };
         match handle.join() {
             Ok(res) => res,
             Err(e) => Err(crate::with_any_error(&e, |e| {

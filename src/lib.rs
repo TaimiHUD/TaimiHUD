@@ -903,6 +903,8 @@ where
     Controller::try_send(event);
 }
 
+/// it's a bad idea to take too long to unload on quit due to issues on nexus,
+/// so instead we perform slow/blocking shutdown in wndproc :<
 fn notify_quit() {
     // if !RenderState::is_running() { return }
 
@@ -939,6 +941,14 @@ fn notify_quit() {
             // this seems futile and unlikely to reach the other side but we can try anyway
             let _ = sender.try_send(RenderEvent::Quit);
         }
+    }
+
+    if rt::nexus_available() {
+        // this can take some time :<
+        let textures_shutdown = TEXTURES
+            .wait_for_shutdown()
+            .context("failed to shut down texture loader");
+        rt::log::error_ok(textures_shutdown);
     }
 }
 
