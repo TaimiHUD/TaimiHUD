@@ -298,7 +298,7 @@ fn apply_built_info() {
     );
 
     tags.push(release_channel.map(|c| match c {
-        "rc" => "Release Candidate",
+        "rc" => "Prerelease Test",
         "debug" => "Debug",
         "dev" => "Main",
         "develop" => "Develop",
