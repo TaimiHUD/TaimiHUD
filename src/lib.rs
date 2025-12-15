@@ -371,7 +371,9 @@ pub(crate) fn pre_init_for(host: AddonHostName) -> Result<bool, &'static str> {
                 };
                 log::info!("ghosting {host}, {desc} {pref} more");
                 match loud {
+                    #[cfg(todo)]
                     true => Err(pref.name()),
+                    true => Err("disabled via boot.json"),
                     false => Ok(false),
                 }
             },
@@ -392,8 +394,7 @@ pub(crate) fn pre_init_for(host: AddonHostName) -> Result<bool, &'static str> {
             AddonHostName::ArcDPS => {
                 log::info!("switching over from arcdps to {host}");
                 exports::arcdps::disable();
-                // XXX: we could have arcdps quit here, but if it's loaded then it must've
-                // been allowed to load by config anyway right...
+                // XXX: we should have arcdps quit here...
             },
             #[cfg(feature = "extension-nexus")]
             AddonHostName::Nexus => {
