@@ -39,12 +39,16 @@ impl InfoTabState {
         };
 
         let cursor_top = ui.cursor_screen_pos();
-        let project_heading = format!(
-            "{}, {} by {}",
-            crate::exports::addon_title!(),
-            version,
-            self.authors
-        );
+        let heading = crate::exports::addon_title!();
+        let mut project_heading = format!("{heading}, {version}");
+        let subheading = match format_args!("by {}", self.authors) {
+            subh if heading.contains("(") || !version.pre.is_empty() => Some(subh.to_string()),
+            subh => {
+                use core::fmt::Write;
+                let _ = write!(&mut project_heading, " {subh}");
+                None
+            },
+        };
         RenderState::font_text("big", ui, &project_heading);
 
         let wrap_limit = if let Some(Some(logo)) = TEXTURES.lookup_imgui(RenderMachine::TEXTURE_LOGO_KEY) {
@@ -85,6 +89,9 @@ impl InfoTabState {
         } else {
             None
         };
+        if let Some(subheading) = subheading {
+            RenderState::font_text("big", ui, &subheading);
+        }
 
         let in_ci = match built_info::CI_PLATFORM {
             Some(platform) => format!(" via {platform}"),
