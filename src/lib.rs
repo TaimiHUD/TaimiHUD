@@ -218,7 +218,7 @@ pub mod built_info {
     #[cfg(todo)]
     pub const IS_TAGGED_RELEASE_OR_RC: bool = IS_TAGGED_RELEASE;
     pub const IS_TAGGED_RELEASE: bool = match option_env!("ADDON_VERSION_RELEASE") {
-        Some(r) if r.len() == 1 && r.as_bytes()[0] == b'1' => true,
+        Some(r) if r.len() == 1 && r.as_bytes()[0] == b'z' => true,
         _ => false,
     };
 
