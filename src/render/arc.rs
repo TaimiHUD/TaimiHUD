@@ -54,7 +54,7 @@ impl ArcRenderState {
         self.update_host.host = state.update_host_preference();
     }
 
-    pub fn ui_options(&mut self, ui: &imgui::Ui) {
+    pub fn ui_options(&mut self, ui: &imgui::Ui, host: AddonHostName) {
         if self.boot_changes.has_changed().ok() == Some(true) {
             self.sync_boot();
         }
@@ -75,20 +75,35 @@ impl ArcRenderState {
             BootstrapState::write_with(|s| s.set_update_host_preference(host));
         }
 
+        let mut drawn = false;
+        if RenderState::is_host(host) != Some(true) && host.is_active() {
+            drawn = true;
+            if ui.button("take over") {
+                // RenderState::select_host();
+                RenderState::set_host(host);
+            }
+        }
         #[cfg(feature = "extension-arcdps")]
-        if !rt::arcdps_available() && !exports::loaded() && self.detected {
-            if with_i18n!("arcdps", |label| ui.button(&label)) {
-                if let Err(e) = exports::enter() {
-                    log::error!("arc unavailable? {e}");
+        if host != AddonHostName::ArcDPS {
+            if exports::loaded() {
+                if drawn {
+                    ui.same_line();
+                }
+                if ui.button("un-arcdps") {
+                    Self::un_arcdps();
+                }
+            } else if self.detected && !rt::arcdps_available() {
+                if drawn {
+                    ui.same_line();
+                }
+                if with_i18n!("arcdps", |label| ui.button(&label)) {
+                    if let Err(e) = exports::enter() {
+                        log::error!("arc unavailable? {e}");
+                    }
                 }
             }
         }
-        #[cfg(feature = "extension-arcdps")]
-        if rt::arcdps_available() {
-            if ui.button("un-arcdps") {
-                Self::un_arcdps();
-            }
-        }
+        let _ = drawn;
 
         let _keybinds = with_i18n!("addonbinds", |msg| TreeNode::new(&msg)
             .flags(TreeNodeFlags::FRAMED)
