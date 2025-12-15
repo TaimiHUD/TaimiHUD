@@ -10,7 +10,7 @@ use {
         },
         game_language_id as lang_id,
         marker::format::MarkerType,
-        render::RenderState,
+        render::{machine::RenderMachine, RenderState},
         settings::{state::AddonHostName, IconStyle},
         unload,
         with_i18n,
@@ -23,6 +23,7 @@ use {
         alert,
         data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
         gamebind,
+        gui::RenderType,
         localization::translate,
         paths,
         rtapi::RealTimeApi,
@@ -42,6 +43,11 @@ use {
     },
     windows::Win32::Foundation::{HWND, LPARAM, WPARAM},
 };
+
+#[cfg(feature = "extension-nexus-codegen")]
+pub use self::cb::with_ui;
+#[cfg(feature = "extension-nexus-extern")]
+pub use self::r#extern::with_ui;
 
 #[cfg(feature = "extension-nexus-codegen")]
 pub(crate) mod cb;
@@ -96,7 +102,7 @@ pub(self) fn init() {
                 load_fallback();
             }
         },
-        Ok(()) => crate::load_nexus(),
+        Ok(()) => unsafe { load_nexus() },
         Err(e) => {
             #[cfg(not(panic = "unwind"))]
             log::error!("nexus load failed: {e}");
@@ -119,12 +125,59 @@ pub(self) fn init() {
     }
 }
 
+unsafe fn load_nexus() {
+    let Some(aapi) = addon_api() else { return };
+    #[cfg(feature = "space")]
+    (aapi.renderer.register)(RenderType::PreRender, unsafe_render_pre);
+    (aapi.renderer.register)(RenderType::Render, unsafe_render);
+    (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options);
+    (aapi.wnd_proc.register)(wnd);
+
+    // TODO: migrate the rest here too...
+    crate::load_nexus();
+}
 unsafe fn load_fallback() {
-    use nexus::gui::RenderType;
     let Some(aapi) = addon_api() else { return };
 
     if !aapi.imgui_context.is_null() {
         (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options_fallback);
+    }
+}
+extern "C-unwind" fn unsafe_render_pre() {
+    unsafe {
+        let Some(render_ready) = RenderState::pre_render(AddonHostName::Nexus) else {
+            return
+        };
+        RenderMachine::turn_render_entry();
+        if !render_ready {
+            exports::nexus::with_ui(RenderState::render_setup);
+        }
+    }
+}
+extern "C-unwind" fn unsafe_render() {
+    unsafe {
+        #[cfg(not(feature = "space"))]
+        unsafe_render_pre();
+        if RenderState::is_host(AddonHostName::Nexus) != Some(true) {
+            return
+        }
+        exports::nexus::with_ui(|ui| {
+            RenderMachine::turn_ui_entry(ui);
+            RenderState::render_ui(ui);
+        });
+    }
+}
+extern "C-unwind" fn unsafe_options() {
+    unsafe {
+        let mut running = loaded() && RenderState::is_running();
+        if running {
+            with_ui(|ui| {
+                running &= RenderState::render_options(ui, AddonHostName::Nexus);
+            });
+        }
+        if !running {
+            unsafe_options_fallback();
+        }
     }
 }
 extern "C-unwind" fn unsafe_options_fallback() {
@@ -145,33 +198,36 @@ pub(self) fn uninit() {
 
     if unloading {
         crate::post_uninit_for(AddonHostName::Nexus);
+    } else {
+        RenderState::try_send(crate::render::RenderEvent::RefreshHost);
     }
+}
+pub fn enter() -> RuntimeResult<()> {
+    if available() {
+        return Ok(())
+    }
+
+    log::debug!("TODO: enter");
+
+    Ok(())
 }
 
 /// revert nexus handles if any were registered
 ///
 /// must remain idempotent if used multiple times during shutdown
 pub fn uninit_cleanup() {
-    if !loaded() {
-        return
-    }
-
-    if let Some(revert_render) = crate::RENDER_CALLBACK.lock().ok().and_then(|mut r| r.take()) {
-        revert_render();
-    }
-    #[cfg(feature = "space")]
-    if let Some(revert_render) = crate::RENDER_CALLBACK_PRE.lock().ok().and_then(|mut r| r.take()) {
-        revert_render();
+    if let Some(aapi) = addon_api() {
+        unsafe {
+            (aapi.renderer.deregister)(unsafe_options);
+            (aapi.renderer.deregister)(unsafe_options_fallback);
+            (aapi.renderer.deregister)(unsafe_render);
+            (aapi.renderer.deregister)(unsafe_render_pre);
+            (aapi.wnd_proc.deregister)(wnd);
+        }
     }
 
     quick_access_remove_all();
     unregister_keybinds();
-
-    if let Some(aapi) = addon_api() {
-        unsafe {
-            (aapi.renderer.deregister)(unsafe_options_fallback);
-        }
-    }
 }
 
 pub fn loaded() -> bool {
@@ -301,29 +357,6 @@ pub fn send_alert(_ui: &rt::imgui::Ui, message: &str) -> RuntimeResult<Option<()
     Ok(Some(()))
 }
 
-#[allow(unreachable_patterns)]
-pub fn imgui_context_ptr() -> Option<NonNull<rt::imgui::sys::ImGuiContext>> {
-    match () {
-        #[cfg(feature = "extension-nexus-extern")]
-        _ => r#extern::imgui_context_ptr(),
-        #[cfg(feature = "extension-nexus-codegen")]
-        _ => NonNull::new(cb::addon_api().imgui_ctx),
-    }
-}
-pub unsafe fn with_ui<R, F: FnOnce(&rt::imgui::Ui) -> R>(f: F) -> Option<R> {
-    #[cfg(feature = "extension-nexus-extern")]
-    let ui = {
-        r#extern::new_imgui_frame();
-        r#extern::imgui_ui()?
-    };
-    #[cfg(feature = "extension-nexus-codegen")]
-    let ui = {
-        cb::new_imgui_frame();
-        cb::imgui_ui()?
-    };
-    Some(f(ui))
-}
-
 pub fn is_nexus_updater() -> bool {
     match () {
         #[cfg(feature = "extension-nexus-extern")]
@@ -418,6 +451,10 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
 }
 
 pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
+    if !available() {
+        return msg
+    }
+
     match rt::handle_wnd_event(hwnd, msg, w.0, l.0) {
         m if m == msg => msg,
         _ => 0,

@@ -403,12 +403,16 @@ fn add_self() -> RuntimeResult<bool> {
     }
 }
 pub fn enter() -> RuntimeResult<()> {
-    #[cfg(todo = "unnecessary")]
-    if available() {
-        return Ok(())
-    }
+    let res = match loaded() {
+        true if available() => return Ok(()),
+        true => Some(false),
+        false => None,
+    };
     log::info!("arc (re?)entry");
-    let res = add_self()?;
+    let res = match res {
+        None => add_self()?,
+        Some(r) => r,
+    };
     if res {
         log::debug!("guess we're in");
     } else {
@@ -446,15 +450,6 @@ pub fn imgui_context_ptr() -> Option<NonNull<imgui::sys::ImGuiContext>> {
         _ => None,
     }
 }
-#[cfg(todo)]
-pub unsafe fn imgui_ui<'u>() -> Option<ManuallyDrop<imgui::Ui<'u>>> {
-    match () {
-        #[cfg(feature = "extension-arcdps-extern")]
-        () => r#extern::arc_imgui_ui(),
-        #[cfg(feature = "extension-arcdps-codegen")]
-        () => arcdps::__macro::ui(),
-    }
-}
 
 fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     let available = available();
@@ -483,9 +478,15 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
 fn imgui_options_tab(ui: &imgui::Ui) {
     let mut running = available() && RenderState::is_running();
     if available() && RenderState::is_running() {
+        if RenderState::is_host(AddonHostName::ArcDPS) != Some(true) {
+            if ui.button("take over") {
+                //RenderState::select_host();
+                RenderState::set_host(AddonHostName::ArcDPS);
+            }
+        }
         let mut state = RenderState::lock();
         if let Some(ref mut state) = *state {
-            state.primary_window.arc_tab.ui_options(ui);
+            state.primary_window.arc_tab.ui_options(ui, AddonHostName::ArcDPS);
         } else {
             running = false;
         }
