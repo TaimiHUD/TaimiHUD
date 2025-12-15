@@ -31,7 +31,6 @@ use {
             GroupMember,
             GroupMemberOwned,
         },
-        wnd_proc::register_wnd_proc,
     },
     tokio::sync::watch,
 };
@@ -267,10 +266,6 @@ static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(
 static QUICK_ACCESS_STATE: LazyLock<watch::Sender<TaimiControls>> =
     LazyLock::new(|| watch::Sender::new(TaimiControls::empty()));
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
-#[cfg(feature = "extension-nexus")]
-static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
-#[cfg(all(feature = "extension-nexus", feature = "space"))]
-static RENDER_CALLBACK_PRE: Mutex<Option<Revertible>> = Mutex::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "space")]
@@ -545,58 +540,6 @@ fn init() -> Result<(), &'static str> {
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
     use crate::exports::nexus::register_keybind;
-
-    // Rendering setup
-
-    extern "C-unwind" fn nexus_pre_render() {
-        unsafe {
-            let Some(render_ready) = RenderState::pre_render(AddonHostName::Nexus) else {
-                return
-            };
-            RenderMachine::turn_render_entry();
-            if !render_ready {
-                exports::nexus::with_ui(RenderState::render_setup);
-            }
-        }
-    }
-    extern "C-unwind" fn unsafe_taimi_window() {
-        unsafe {
-            #[cfg(not(feature = "space"))]
-            nexus_pre_render();
-            if RenderState::is_host(AddonHostName::Nexus) != Some(true) {
-                return
-            }
-            exports::nexus::with_ui(|ui| {
-                RenderMachine::turn_ui_entry(ui);
-                RenderState::render_ui(ui);
-            });
-        }
-    }
-    let render_callback = register_render(RenderType::Render, unsafe_taimi_window);
-    *RENDER_CALLBACK.lock().unwrap() = Some(Box::new(render_callback.into_inner()));
-
-    #[cfg(feature = "space")]
-    {
-        let render_callback_pre = register_render(RenderType::PreRender, nexus_pre_render);
-        *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
-    }
-
-    extern "C-unwind" fn unsafe_taimi_settings() {
-        unsafe {
-            exports::nexus::with_ui(|ui| {
-                let mut running = rt::nexus_available() && RenderState::is_running();
-                if running {
-                    running &= RenderState::render_options(ui)
-                }
-                if !running {
-                    RenderState::render_options_fallback(ui, AddonHostName::Nexus)
-                }
-            });
-        }
-    }
-    register_render(RenderType::OptionsRender, unsafe_taimi_settings).revert_on_unload();
-
-    register_wnd_proc(exports::nexus::wnd).revert_on_unload();
 
     // Handle window toggling with keybind and button
     register_keybind(

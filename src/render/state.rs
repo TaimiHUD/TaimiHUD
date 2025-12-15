@@ -539,18 +539,38 @@ impl RenderState {
     }
     pub fn select_host() {
         for host in AddonHostName::HOST_PRIORITY {
-            if host.is_active() {
-                let id = host.id().as_ptr() as *mut _;
-                let prev = Self::host().swap(id, Ordering::Relaxed);
-                if prev != id {
-                    log::debug!("selected primary renderer {host}");
-                }
-                return
+            if !host.is_loaded() {
+                continue
             }
+            if !host.is_active() {
+                log::info!("reactivating {host}");
+                let res = match host {
+                    #[cfg(feature = "extension-arcdps")]
+                    AddonHostName::ArcDPS => crate::exports::arcdps::enter(),
+                    #[cfg(feature = "extension-nexus")]
+                    AddonHostName::Nexus => crate::exports::nexus::enter(),
+                    _ => continue,
+                };
+                if let Err(e) = res {
+                    log::warn!("failed to reenter {host}: {e}");
+                    continue
+                }
+            }
+
+            Self::set_host(*host);
+            return
         }
         let prev = Self::host().swap(ptr::null_mut(), Ordering::Relaxed);
         if !prev.is_null() {
             log::debug!("primary renderer cleared");
+        }
+    }
+    pub fn set_host(host: AddonHostName) {
+        let id = host.id().as_ptr() as *mut _;
+        let prev = Self::host().swap(id, Ordering::Relaxed);
+        if prev != id {
+            log::debug!("selected primary renderer {host}");
+            // TODO: clear imgui context because uhhh yeah
         }
     }
     pub fn is_host(host: AddonHostName) -> Option<bool> {
@@ -626,7 +646,7 @@ impl RenderState {
         }
     }
 
-    pub fn render_options(ui: &Ui) -> bool {
+    pub fn render_options(ui: &Ui, host: AddonHostName) -> bool {
         let mut lock = Self::lock();
         let state = match &mut *lock {
             None => return false,
@@ -635,6 +655,7 @@ impl RenderState {
         let mut state_errors = Default::default();
         state.primary_window.draw_tabs(
             ui,
+            Some(host),
             &mut state.machine,
             &mut state.timer_window,
             &mut state_errors,
