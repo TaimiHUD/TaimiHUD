@@ -4,13 +4,21 @@ use {
         built_info,
         exports::{
             nexus as exports,
-            runtime::{self as rt, log::DeferredLogger},
+            runtime::{
+                self as rt,
+                imgui::{self, sys as imgui_sys},
+                log::DeferredLogger,
+            },
             update_url_of,
             ADDON_TITLE_C,
         },
         settings::state::{AddonHostName, BootstrapState},
     },
-    core::{ffi::c_char, mem, ptr},
+    core::{
+        ffi::c_char,
+        mem,
+        ptr::{self, NonNull},
+    },
     nexus::{
         addon::{AddonDefinition, AddonFlags, AddonVersion, UpdateProvider},
         AddonApi,
@@ -364,33 +372,23 @@ fn curious(op: &str) {
     log::debug!(logger: DeferredLogger::BEST_EFFORT, "redundant {op}, curious");
 }
 
-pub(super) fn imgui_context_ptr() -> Option<ptr::NonNull<rt::imgui::sys::ImGuiContext>> {
-    addon_api().and_then(|aapi| ptr::NonNull::new(aapi.imgui_context))
+unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+    let aapi = addon_api()?;
+    let ctx = ptr::NonNull::new(aapi.imgui_context)?;
+    if imgui_sys::igGetCurrentContext() != ctx.as_ptr() as *mut _ {
+        imgui_sys::igSetCurrentContext(ctx.as_ptr());
+        imgui_sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
+    }
+
+    Some(ctx)
 }
 
-pub(super) unsafe fn new_imgui_frame() {
-    #[cfg(feature = "extension-arcdps")]
-    match (addon_api(), crate::exports::arcdps::imgui_context_ptr()) {
-        (Some(aapi), Some(ctx)) if aapi.imgui_context == ctx.as_ptr() => {
-            // they're linked, no need to switch
-        },
-        (_, None) => {
-            // TODO: unloading may make this an outdated comparison?
-        },
-        _ if !rt::arcdps_available() => (),
-        (None, _) => (),
-        (Some(aapi), ..) if aapi.imgui_context.is_null() => (),
-        (Some(aapi), ..) => {
-            rt::imgui::sys::igSetCurrentContext(aapi.imgui_context);
-            rt::imgui::sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
-        },
-    }
-}
+pub(super) unsafe fn new_imgui_frame() {}
 #[cfg(feature = "extension-nexus-extern-todo")]
-pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a rt::imgui::Ui<'u>> {
-    match addon_api() {
-        None => None,
-        Some(aapi) if aapi.imgui_context.is_null() => None,
-        Some(..) => Some(nexus::ui()),
-    }
+pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a imgui::Ui<'u>> {
+    imgui_bind_context()?;
+    Some(nexus::ui())
+}
+pub unsafe fn with_ui<'u, R, F: FnOnce(&imgui::Ui<'u>) -> R>(f: F) -> Option<R> {
+    imgui_ui().map(f)
 }

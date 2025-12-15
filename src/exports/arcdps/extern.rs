@@ -105,8 +105,12 @@ fn find_buffer_offset<T>(ui: *const T, ignore_context: usize) -> Result<usize, &
 #[cfg(feature = "extension-arcdps-extern-cleanup")]
 static ARC_IMGUI_BUFFER_OFFSET: SyncUnsafeCell<Option<usize>> = SyncUnsafeCell::new(None);
 pub unsafe fn arc_imgui_ui<'u>() -> Option<&'u Ui<'static>> {
+    if !super::loaded() {
+        return None
+    }
     let ui_global = unsafe { *ARC_IMGUI_UI.get() };
     if let Some(ui_global) = ui_global {
+        imgui_check_context()?;
         return Some(&*(ui_global.get() as *const Ui<'static>))
     }
     match arc_imgui_context() {
@@ -137,9 +141,10 @@ pub unsafe fn imgui_context_cleanup() {
 
     imgui_frame_cleanup();
 
-    let context = context.get() as *mut imgui::Context;
+    let context = context.get() as *mut mem::ManuallyDrop<imgui::Context>;
+    // we do not want this to clean up the context shared by other addons!
     let context = Box::from_raw(context);
-    drop(context)
+    drop(context);
 }
 pub unsafe fn imgui_frame_cleanup() {
     let ui_global = unsafe { mem::replace(&mut *ARC_IMGUI_UI.get(), None) };
@@ -164,22 +169,16 @@ pub unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
     Some(context_sys)
 }
 pub unsafe fn new_imgui_frame() {
-    #[cfg(feature = "extension-nexus")]
-    match (arc_args(), crate::exports::nexus::imgui_context_ptr()) {
-        (Some(arc), Some(ctx)) if arc.imgui_ctx == Some(ctx.cast()) => {
-            // they're linked, no need to switch
-        },
-        (_, None) => {
-            // TODO: unloading may make this an outdated comparison?
-        },
-        _ if !crate::exports::runtime::nexus_available() => return,
-        (None, _) => (),
-        (Some(..), ..) => {
-            imgui_bind_context();
-        },
-    }
     #[cfg(todo = "unnecessary")]
     imgui_frame_cleanup();
+}
+pub unsafe fn imgui_check_context() -> Option<()> {
+    let Some(target) = arc_imgui_context_ptr() else { return None };
+    let current = imgui_sys::igGetCurrentContext();
+    if target.as_ptr() != current {
+        imgui_bind_context();
+    }
+    Some(())
 }
 
 pub unsafe fn with_imgui<R, F: FnOnce(&'_ Ui<'_>) -> R>(f: F) -> Option<R> {
