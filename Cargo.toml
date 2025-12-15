@@ -18,8 +18,7 @@ authors = [
   "arcnmx"
 ]
 homepage = "https://taimihud.com"
-#description = "Pathing, encounter timers and markers"
-description = "Give us your feedback via GitHub or Discord! Disable pre-releases if you need to opt out of beta-testing the newest features - basic pathing is now widely available (if that's all you're here for)"
+description = "Pathing, encounter timers and markers"
 version = "0.4.0"
 edition = "2021"
 build = "build.rs"
