@@ -197,10 +197,14 @@ fn arc_get_init(args: InitArgs) -> Option<InitFn> {
 
     match AddonHostName::ArcDPS.is_preferred_host() {
         Ok(()) => (),
-        Err(host) => {
-            log::info!("ignoring arcdps, {host} is preferred");
-            exports::disable_load();
-            return None
+        Err(pref) => {
+            log::info!("ignoring arcdps, {pref} is preferred");
+            if pref == AddonHostName::Nexus && pref.is_detected() != Some(false) {
+                // arcdps doesn't report this as an error when it's a potential addonapi module?
+                exports::disable_load();
+                return None
+            }
+            // ... otherwise continue on so we can produce a less confusing error message
         },
     }
 
