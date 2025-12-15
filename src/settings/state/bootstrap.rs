@@ -25,6 +25,8 @@ pub use crate::settings::arc::ArcUpdatePreference as UpdatePreference;
 pub struct BootstrapState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addon_host_preference: Option<AddonHostName>,
+    #[serde(default, skip_serializing_if = "taimi_hoard::is_false_ref")]
+    pub addon_host_exclusive: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_addon_host: Option<AddonHostName>,
     #[serde(default, skip_serializing_if = "str::is_empty")]
@@ -54,6 +56,7 @@ pub struct BootstrapState {
 impl BootstrapState {
     pub const EMPTY: Self = Self {
         addon_host_preference: None,
+        addon_host_exclusive: false,
         latest_addon_host: None,
         latest_addon_version: String::new(),
         update_host_preference: None,
@@ -184,10 +187,15 @@ impl BootstrapState {
         })
     }
     #[allow(unreachable_patterns)]
-    pub fn addon_host_is_preferred(&self, requester: AddonHostName) -> Result<(), AddonHostName> {
+    pub fn addon_host_is_preferred(
+        &self,
+        requester: AddonHostName,
+        exclusive: Option<bool>,
+    ) -> Result<(), AddonHostName> {
+        let exclusive = exclusive.unwrap_or(self.addon_host_exclusive);
         match (self.addon_host_preference, requester) {
             (Some(pref), req) if pref.contains(req) => Ok(()),
-            (Some(pref), _) if pref.is_detected() == Some(false) => Ok(()),
+            (Some(pref), _) if !exclusive && pref.is_detected() == Some(false) => Ok(()),
             (Some(pref), _) => Err(pref),
             (None, ref req) => {
                 for prio in AddonHostName::HOST_PRIORITY {
@@ -216,7 +224,7 @@ impl BootstrapState {
             Some(Some(pref)) if pref.contains(requester) => Ok(()),
             Some(pref) => Err(pref),
             None if Some(requester) == self.reliable_addon_host_or(Some(requester))
-                && self.addon_host_is_preferred(requester).is_ok() =>
+                && self.addon_host_is_preferred(requester, Some(true)).is_ok() =>
                 Ok(()),
             None => Err(None),
         }
@@ -491,12 +499,12 @@ impl AddonHostName {
     }
 
     pub fn is_preferred_host(&self) -> Result<(), Self> {
-        BootstrapState::read_with(|s| s.addon_host_is_preferred(*self))
+        BootstrapState::read_with(|s| s.addon_host_is_preferred(*self, None))
     }
     pub fn is_explicit_preferred_host(&self) -> Result<(), Self> {
         BootstrapState::read_with(|s| match s.addon_host_preference {
             Some(pref @ Self::All) => Err(pref),
-            _ => s.addon_host_is_preferred(*self),
+            _ => s.addon_host_is_preferred(*self, Some(true)),
         })
     }
     pub fn is_preferred_update_host(&self) -> Result<(), Option<Self>> {
