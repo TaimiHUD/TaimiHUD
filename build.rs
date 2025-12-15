@@ -50,21 +50,98 @@ fn apply_built_info() {
     }
     println!("cargo::rerun-if-env-changed=PROFILE");
     println!("cargo::rerun-if-env-changed=CARGO_CRATE_NAME");
+    #[cfg(feature = "built-info")]
     println!("cargo::rerun-if-env-changed=CARGO_MANIFEST_DIR");
 
     let ci = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_CI}"));
     let commit = env::var(&format!("{built_env_prefix}{BUILT_ATTR_REF}"));
+    #[cfg(feature = "built-info")]
+    let (built_git_head, built_git_tagdesc) = {
+        let git_root = manifest_dir();
+        let head = git_root
+            .as_ref()
+            .and_then(|dir| built::util::get_repo_head(dir).ok())
+            .flatten();
+        let desc = git_root
+            .as_ref()
+            .and_then(|dir| built::util::get_repo_description(dir).ok())
+            .flatten();
+        let desc = match (desc, &head) {
+            (Some((name, dirty)), Some((_ref, _long, short))) if name.ends_with(short) => {
+                // filter out "tag" with `-${distance}-g${short}` generated via `git describe`
+                Some((None, dirty))
+            },
+            (desc, _) => desc.map(|(name, dirty)| (Some(name), dirty)),
+        };
+        (head, desc)
+    };
+    #[allow(unreachable_patterns)]
+    let commit = match commit {
+        Ok(commit) => Some(commit),
+        #[cfg(feature = "built-info")]
+        Err(..) => match (&built_git_head, &built_git_tagdesc) {
+            (_, Some((Some(tag), _dirty))) => Some(match tag.starts_with("refs/") {
+                false => format!("refs/tags/{tag}"),
+                // unlikely but just in case...
+                true => tag.clone(),
+            }),
+            (Some((Some(head), ..)), _) => Some(match head.starts_with("refs/") {
+                false => format!("refs/heads/{head}"),
+                true => head.clone(),
+            }),
+            (Some((None, long, ..)), _) => Some(long.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    #[allow(unreachable_patterns)]
     let release = match &commit {
-        Ok(head) => head
+        Some(head) => head
             .strip_prefix("refs/tags/v")
             .map(Ok)
             .or(head.strip_prefix("refs/heads/").map(Err)),
-        _ => None,
+        None => None,
     };
     let dirty = match env::var(&format!("{built_env_prefix}{BUILT_ATTR_REV}")) {
         Ok(rev) => rev.ends_with("-dirty"),
-        _ => true,
+        #[allow(unreachable_patterns)]
+        _ => match ci.is_none() {
+            #[cfg(feature = "built-info")]
+            dirty_default => built_git_tagdesc
+                .as_ref()
+                .map(|(_tag, dirty)| *dirty)
+                .unwrap_or(dirty_default),
+            dirty => dirty,
+        },
     };
+    let mut rev = match env::var(&format!("{built_env_prefix}{BUILT_ATTR_REV}")) {
+        Ok(r) if r.is_empty() => None,
+        Ok(rev) => Some(rev.strip_suffix("-dirty").map(String::from).unwrap_or(rev)),
+        _ => None,
+    };
+    let mut rev_short = match env::var(&format!("{built_env_prefix}{BUILT_ATTR_REV_SHORT}")) {
+        Ok(r) if r.is_empty() => None,
+        Ok(rev) if rev.len() >= 7 => Some(rev.strip_suffix("-dirty").map(String::from).unwrap_or(rev)),
+        _ => None,
+    };
+    if rev.is_none() {
+        match &commit {
+            Some(commit) if release.is_none() && commit.len() == 40 => rev = Some(commit.clone()),
+            _ => (),
+        }
+    }
+    #[cfg(feature = "built-info")]
+    if rev.is_none() {
+        if let Some((_head, long, short)) = built_git_head {
+            rev = Some(long);
+            let _ = rev_short.get_or_insert(short);
+        }
+    }
+    if rev_short.is_none() {
+        if let Some(short) = rev.as_ref().and_then(|rev| rev.get(..10)) {
+            rev_short = Some(short.into());
+        }
+    }
     let debug = env::var_os("PROFILE") != Some("release".into());
 
     let mut tags = Vec::new();
@@ -73,10 +150,10 @@ fn apply_built_info() {
     let pkg_version = env::var("CARGO_PKG_VERSION").ok();
     let pkg_build = {
         let ci = ci.is_none().then_some("local");
-        if let Some(rev) = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_REV_SHORT}")) {
+        if let Some(rev) = &rev_short {
             let ci_sep = ci.is_some().then_some("-").unwrap_or("");
             let ci = ci.unwrap_or("");
-            format!("{}{ci_sep}{ci}", rev.display())
+            format!("{rev}{ci_sep}{ci}")
         } else {
             ci.unwrap_or("").into()
         }
@@ -186,13 +263,10 @@ fn apply_built_info() {
         release_channel
     } else {
         let ci = ci.is_none().then_some("local");
-        if let Some(rev) = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_REV_SHORT}")) {
+        if let Some(rev) = &rev_short {
             let ci_sep = ci.is_some().then_some("-").unwrap_or("");
             let ci = ci.unwrap_or("");
-            println!(
-                "cargo::rustc-env={ADDON_VERSION}_BUILD={}{ci_sep}{ci}",
-                rev.display()
-            );
+            println!("cargo::rustc-env={ADDON_VERSION}_BUILD={rev}{ci_sep}{ci}");
         } else {
             println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}", ci.unwrap_or(""));
         }
@@ -267,7 +341,7 @@ fn write_built_info() {
         let built_out = env::var_os("OUT_DIR")
             .map(PathBuf::from)
             .map(|p| p.join("built.rs"));
-        let manifest_dir = env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from);
+        let manifest_dir = manifest_dir();
         let manifest_dir = manifest_dir.as_ref().map(PathBuf::as_path);
 
         let res = if let Some(out) = built_out {
@@ -293,4 +367,9 @@ fn write_built_info() {
             println!("cargo::warning=failed to stub out built metadata: {e:?}");
         }
     }
+}
+
+#[cfg(feature = "built-info")]
+fn manifest_dir() -> Option<PathBuf> {
+    env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from)
 }
