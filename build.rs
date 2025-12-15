@@ -247,7 +247,7 @@ fn apply_built_info() {
         println!("cargo::rustc-env={ADDON_VERSION}={version}");
 
         if version.pre.is_empty() {
-            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=1");
+            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=z");
         } else if let Some(rc) = version.pre.strip_prefix("rc.") {
             println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
             if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() {
