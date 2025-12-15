@@ -9,7 +9,7 @@ use {
             TimerTabState,
             TimerWindowState,
         },
-        settings::Settings,
+        settings::{state::AddonHostName, Settings},
         Controller,
         ControllerEvent,
     },
@@ -69,7 +69,7 @@ impl PrimaryWindowState {
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
                 .build(ui, || {
-                    self.draw_tabs(ui, machine, timer_window_state, state_errors, true)
+                    self.draw_tabs(ui, None, machine, timer_window_state, state_errors, true)
                 });
         }
         if open != self.open {
@@ -91,6 +91,7 @@ impl PrimaryWindowState {
     pub fn draw_tabs(
         &mut self,
         ui: &Ui,
+        host: Option<AddonHostName>,
         machine: &mut RenderMachine,
         timer_window_state: &mut TimerWindowState,
         state_errors: &mut HashMap<String, anyhow::Error>,
@@ -135,7 +136,9 @@ impl PrimaryWindowState {
             }
             #[cfg(feature = "extension-arcdps")]
             if let Some(_token) = ui.tab_item(&fl!("arcdps-tab")) {
-                self.arc_tab.ui_options(ui);
+                // only relevant when drawing embedded...
+                let host = host.unwrap_or(AddonHostName::All);
+                self.arc_tab.ui_options(ui, host);
             }
             if let Some(_token) = ui.tab_item(&fl!("info-tab")) {
                 self.info_tab.draw(ui, timer_window_state);
