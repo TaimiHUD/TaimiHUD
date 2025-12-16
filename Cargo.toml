@@ -4,6 +4,7 @@ members = [
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
+  "rt/ffi",
   "rt/input",
   "rt/sync",
   "space/d3d",
@@ -127,6 +128,7 @@ extension-arcdps = [
   "texture-loader",
 ]
 extension-arcdps-extras = [
+  "taimi_ffi/fnalloc",
   "closure-ffi",
   "jit-allocator2",
   "nexus/extras",
@@ -184,6 +186,7 @@ windows = [
   "arcffi?/windows-061",
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
+  "taimi_ffi/windows",
   "taimi_input?/windows",
 ]
 
@@ -275,6 +278,7 @@ bitvec = { workspace = true }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
+taimi_ffi = { path = "./rt/ffi", default-features = false, features = ["serde"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
