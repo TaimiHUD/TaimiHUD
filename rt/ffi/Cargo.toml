@@ -1,0 +1,47 @@
+[package]
+name = "taimi_ffi"
+authors = [ "kittywitch" ]
+description = "TaimiHUD ffi utilities"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = [
+  "windows",
+  "fnalloc",
+]
+fnalloc = [
+  "closure-ffi",
+  "jit-allocator2",
+  "windows?/Win32_System_Memory",
+]
+serde = [
+  "dep:serde",
+]
+windows = [
+  "dep:windows",
+  "arcffi/windows-061",
+]
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"], optional = true }
+closure-ffi = { version = "3", default-features = false, features = ["std"], optional = true }
+jit-allocator2 = { version = "0.2", optional = true }
+arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false }
+
+[target.'cfg(windows)'.dependencies.windows]
+optional = true
+version = "0.61"
+features = [
+  "System",
+  "Foundation",
+]
