@@ -230,7 +230,7 @@ dependencies = [
 [[package]]
 name = "arcffi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
+source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "windows 0.60.0",
  "windows 0.61.1",
@@ -244,7 +244,7 @@ dependencies = [
 [[package]]
 name = "arcloader-mumblelink"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
+source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcffi",
  "gw2_mumble 0.2.5",
@@ -961,7 +961,7 @@ checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 [[package]]
 name = "dpsapi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
+source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcdps 0.16.0",
  "arcffi",
@@ -974,7 +974,7 @@ dependencies = [
 [[package]]
 name = "dyload"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
+source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcffi",
  "windows 0.60.0",
@@ -3651,6 +3651,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "taimi_ffi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcffi",
+ "closure-ffi",
+ "jit-allocator2",
+ "log",
+ "serde",
+ "windows 0.61.1",
+]
+
+[[package]]
 name = "taimi_hoard"
 version = "0.1.0"
 dependencies = [
@@ -3720,6 +3733,7 @@ dependencies = [
  "strum_macros 0.27.1",
  "sync-unsafe-cell",
  "taimi_d3d",
+ "taimi_ffi",
  "taimi_hoard",
  "taimi_input",
  "taimi_meta",
