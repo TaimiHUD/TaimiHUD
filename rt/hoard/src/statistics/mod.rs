@@ -73,6 +73,11 @@ impl Dummy {
     pub fn get(&self) -> isize {
         0
     }
+
+    #[inline(always)]
+    pub fn count(&self) -> usize {
+        0
+    }
 }
 
 impl From<Dummy> for isize {

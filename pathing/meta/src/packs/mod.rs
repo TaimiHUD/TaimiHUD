@@ -1,15 +1,11 @@
 use {
-    crate::{
-        loc::{
-            locator_ns,
-            Locator,
-        },
-        map::MapID,
-    },
-    core::{fmt, num::NonZero},
+    taimi_hoard::loc::locator_ns,
+    crate::map::MapID,
+    core::num::NonZero,
 };
 pub use self::id::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant, MarkerIndexNamespace, IdVariant};
 
+pub mod collections;
 pub mod id;
 
 locator_ns! {

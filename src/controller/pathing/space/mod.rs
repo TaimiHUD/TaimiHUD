@@ -3,15 +3,14 @@ use {
         PathingController, PathingEvent,
     }, exports::runtime as rt},
     futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::{Arc, LazyLock},
-    self::build::SpaceLoader,
     taimi_meta::packs::{PackMapPath, PoiPath, TrailPath},
     taimi_hoard::loc::LocationRef,
 };
 pub use self::{
-    build::{SpacePoiBuilder, SpaceTrailBuilder},
+    build::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader},
     poi::{SpacePoi, PoiScale},
     trail::{SpaceTrail, TrailParams, TrailScale, TrailTextureMap},
-    pack::SpacePack,
+    pack::{SpacePack, SpacePackCollection},
 };
 pub use super::PackSpace as DrawSpace;
 

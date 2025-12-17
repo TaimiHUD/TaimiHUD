@@ -1,22 +1,44 @@
 use {
-    crate::controller::{
-        Controller,
-        pathing::{
-            registry::ActivePack,
-            space::{SpacePack, SpacePoi, SpaceTrail, TrailParams},
-            state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry},
+    crate::{
+        controller::{
+            Controller,
+            pathing::{
+                registry::ActivePack,
+                space::{SpacePack, SpacePoi, SpaceTrail, TrailParams},
+                state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry},
+            },
         },
+        resources::Texture,
     },
     anyhow::Context,
     std::sync::Arc,
     taimi_meta::packs::{PoiPath, TrailPath, CategoryPath},
-    taimi_pack::{attributes::RenderAttributes, Poi as PackPoi},
+    taimi_pack::{attributes::{AttrString, RenderAttributes}, Poi as PackPoi},
 };
 
-pub(super) struct SpaceLoader<'a> {
+pub struct SpaceLoader<'a> {
     pub active_pack: &'a mut SpacePack,
     pub loader: &'a mut dyn taimi_pack::loader::PackLoaderContext,
     pub device: &'a taimi_d3d::dx11::Dx11Device,
+}
+
+type SpaceTextureHandle = String;
+impl<'a> SpaceLoader<'a> {
+    pub fn register_texture(&mut self, texture: &AttrString) -> SpaceTextureHandle {
+        let texture = &texture[..];
+        let name = match &self.active_pack.pack {
+            Some(pack) => &pack.pack.name,
+            None => {
+                log::error!("texture for EMPTY PACK?");
+                "pack_unspecified_TODO"
+            },
+        };
+        format!("{name}{texture}")
+    }
+
+    pub fn get_or_load_texture(&mut self, handle: SpaceTextureHandle) -> anyhow::Result<Arc<Texture>> {
+        Err(anyhow::anyhow!("TODO: get_or_load_texture {handle}"))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -28,7 +50,7 @@ impl SpacePoiBuilder {
     pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<SpacePoi> {
         let visibility = poi.visibility;
         let mut poi = SpacePoi::new(visibility, path.unscope(), CategoryPath::with_path(poi.category), self.attrs);
-        poi.setup(loader.loader, loader.device)
+        poi.setup(loader)
             .map(move |()| poi)
     }
 
@@ -38,7 +60,7 @@ impl SpacePoiBuilder {
 
     pub fn from_pack(poi: &PackPoi) -> Option<Self> {
         Some(SpacePoiBuilder {
-            attrs: poi.attributes.render().clone().unwrap_or_default(),
+            attrs: poi.attributes.render.clone().unwrap_or_default(),
         })
     }
 }
@@ -53,9 +75,9 @@ impl SpaceTrailBuilder {
     pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<SpaceTrail> {
         let visibility = trail.visibility;
         let sections = trail.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
-        let mut trail = SpaceTrail::new(self.attrs, self.geometry, sections, visibility, path.path, CategoryPath::with_path(trail.category), 0, loader.device)
-        trail.setup(loader.loader, loader.device)
-            .map(move |()| poi)
+        let mut trail = SpaceTrail::new(self.attrs, self.geometry, sections, visibility, path.unscope(), CategoryPath::with_path(trail.category));
+        trail.setup(loader, 0)
+            .map(move |()| trail)
     }
 
     pub fn build_empty() -> SpaceTrail {
@@ -67,18 +89,14 @@ impl SpaceTrailBuilder {
         let geometry = trail.vertices_for(&data, params);
         Some(SpaceTrailBuilder {
             geometry,
-            texture_file: texture_name.into(),
+            attrs: pack_trail.attributes.render.clone().unwrap_or_default(),
         })
     }
     pub async fn read_from_pack(path: TrailPath, active: &ActivePack, trail: &mut LoadedTrail, params: TrailParams) -> anyhow::Result<Self> {
         let Some(pack_trail) = active.pack.trails.get(path.path as usize) else {
             anyhow::bail!("expected trail to exist")
         };
-        let render = pack_trail.attributes.render.as_ref();
-        let Some(texture_name) = render.as_ref().and_then(|render| render.trail.texture.clone()) else {
-            // TODO: allow empty?
-            anyhow::bail!("no texture specified")
-        };
+        let attrs = pack_trail.attributes.render.clone();
         let trail_data = active.load_trail_data(path.path).await?;
         trail.populate_data(&trail_data);
         let geometry = Controller::try_run_blocking("calculating vertices", {
@@ -87,7 +105,7 @@ impl SpaceTrailBuilder {
         }).await?;
         let setup = SpaceTrailBuilder {
             geometry,
-            texture_file: keys::TextureFile(keys::File(texture_name)),
+            attrs: attrs.unwrap_or_default(),
         };
         Ok(setup)
     }

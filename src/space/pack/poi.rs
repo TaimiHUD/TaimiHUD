@@ -1,6 +1,6 @@
 use {
-    super::ActivePack, crate::{
-        controller::pathing::space::{SpacePoi, SpacePack},
+    crate::{
+        controller::pathing::space::{SpacePoi, SpacePack, SpaceLoader},
         exports::runtime::Counter,
         render::machine::RenderMachine,
         space::{
@@ -165,7 +165,7 @@ impl PoiCommonRenderData {
         let mut gaps: BitVec = BitVec::with_capacity(ib_len);
         gaps.resize(ib_len, false);
         for (_packi, pack) in packs.iter().enumerate() {
-            for i in pack.poi_instanceidk_range() {
+            for i in pack.render_poi_bookmarks() {
                 let index = i as usize;
                 let Some(poi) = pack.active_pois.get(index) else { continue };
                 if let Some(b) = gaps.get_mut(index) {
@@ -196,7 +196,7 @@ impl PoiCommonRenderData {
         Ok(())
     }
     fn ib_len_for_packs(&self, packs: &[SpacePack]) -> usize {
-        packs.iter().map(|p| p.poi_instanceidk_bookmark_range().end).max()
+        packs.iter().map(|p| p.render_poi_bookmarks().end).max()
     }
     fn ib_len(&self) -> usize {
         let ib = self.world_ib.as_ref()
@@ -244,21 +244,20 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 impl SpacePoi {
     pub fn setup(
         &mut self,
-        loader: &mut ActivePack,
-        device: &Dx11Device,
+        loader: &mut SpaceLoader<'_>,
     ) -> anyhow::Result<()> {
         if self.icon.is_some() { return Ok(()) }
 
         let icon_handle = self.poi_attrs().icon_file
             .as_ref()
             .context("POI is missing icon");
-        let icon_handle = icon_handle.map(|h| loader.register_texture(&h[..]));
+        let icon_handle = icon_handle.map(|h| loader.register_texture(h));
         let icon = icon_handle.and_then(|icon_handle| loader
-            .get_or_load_texture(icon_handle, device)
+            .get_or_load_texture(icon_handle)
             .context("Loading poi texture"));
 
         self.icon = match &icon {
-            &Ok(texture) => Some(texture.clone()),
+            &Ok(texture) => Some(texture),
             Err(..) => None,
         };
 

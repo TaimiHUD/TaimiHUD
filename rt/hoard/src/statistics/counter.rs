@@ -62,6 +62,9 @@ impl Counter {
     pub fn get(&self) -> isize {
         self.count.load(Self::ORDERING)
     }
+    pub fn count(&self) -> usize {
+        self.get() as usize
+    }
 }
 
 impl Default for Counter {

@@ -1,8 +1,8 @@
 use std::{borrow::Borrow, fmt, iter, mem};
 use uuid::Uuid;
-use crate::loc::{
-    Locator,
-    packs::{
+use {
+    taimi_hoard::loc::Locator,
+    crate::packs::{
         CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath,
     },
 };
@@ -331,18 +331,38 @@ impl MarkerId {
         }
     }
 
+    fn new_uuidv3_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
+        'n: 'b,
+    {
+        let bytes = iter::once(&ns.as_bytes()[..])
+            .chain(bytes);
+        let hash = hash_bytes_md5(bytes);
+        let uuid = uuid::Builder::from_md5_bytes(hash).into_uuid();
+        uuid
+    }
+    #[cfg(feature = "sha1_smol")]
     fn new_uuidv5_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
         'n: 'b,
     {
         let bytes = iter::once(&ns.as_bytes()[..])
             .chain(bytes);
-        let hash = hash_bytes(bytes);
+        let hash = hash_bytes_sha1(bytes);
         let uuid = uuid::Builder::from_sha1_bytes(hash).into_uuid();
         uuid
     }
+    fn new_uuid_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
+        'n: 'b,
+    {
+        match ns {
+            #[cfg(feature = "sha1_smol")]
+            ns => Self::new_uuidv5_namespace(ns, bytes),
+            #[cfg(not(feature = "sha1_smol"))]
+            ns => Self::new_uuidv3_namespace(ns, bytes),
+        }
+    }
 
     pub fn new_for_parent(category: &MarkerId, group: Option<&MarkerId>, marker: MarkerIndex) -> Uuid {
-        Self::new_uuidv5_namespace(&NAMESPACE_PACK_PARENT, [
+        Self::new_uuid_namespace(&NAMESPACE_PACK_PARENT, [
             &category.as_bytes()[..],
             group.unwrap_or(&MarkerId::EMPTY).as_bytes(),
             &marker.repr().to_be_bytes(),
@@ -535,7 +555,8 @@ pub const NAMESPACE_PACK_PARENT: Uuid = match Uuid::try_parse_ascii(b"5a4d8880-7
 };
 
 /// TODO: wincrypt/ncrypt implementation?
-pub fn hash_bytes<'a, B: IntoIterator<Item = &'a [u8]>>(bytes: B) -> [u8; 16] {
+#[cfg(feature = "sha1_smol")]
+pub fn hash_bytes_sha1<'a, B: IntoIterator<Item = &'a [u8]>>(bytes: B) -> [u8; 16] {
     let mut hasher = sha1_smol::Sha1::new();
     for b in bytes {
         hasher.update(b);
@@ -545,4 +566,14 @@ pub fn hash_bytes<'a, B: IntoIterator<Item = &'a [u8]>>(bytes: B) -> [u8; 16] {
         // truncate...
         *(&hash as *const [u8; 20] as *const [u8; 16])
     }
+}
+/// TODO: wincrypt/ncrypt implementation?
+pub fn hash_bytes_md5<'a, B: IntoIterator<Item = &'a [u8]>>(bytes: B) -> [u8; 16] {
+    use md5::{Digest, Md5};
+
+    let mut hasher = Md5::new();
+    for b in bytes {
+        hasher.update(b);
+    }
+    hasher.finalize().into()
 }

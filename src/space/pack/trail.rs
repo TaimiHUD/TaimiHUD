@@ -1,9 +1,9 @@
 use {
     crate::{
-        controller::pathing::space::SpaceTrail,
+        controller::pathing::space::{SpaceTrail, SpaceLoader},
         exports::runtime::Counter,
         space::{
-            pack::{ActivePack, PoiCommonRenderData},
+            pack::PoiCommonRenderData,
             resources::Model,
         },
     },
@@ -19,8 +19,7 @@ use {
 impl SpaceTrail {
     pub fn setup(
         &mut self,
-        loader: &mut ActivePack,
-        device: &Dx11Device,
+        loader: &mut SpaceLoader<'_>,
         render_bookmark: u32,
     ) -> anyhow::Result<()> {
         self.render_bookmark = render_bookmark;
@@ -28,13 +27,13 @@ impl SpaceTrail {
             let texture_handle = self.trail_attrs().texture
                 .as_ref()
                 .context("Trail is missing texture");
-            let texture_handle = texture_handle.map(|h| loader.register_texture(&h[..]));
+            let texture_handle = texture_handle.map(|h| loader.register_texture(h));
             let texture = texture_handle.and_then(|texture_handle| loader
-                .get_or_load_texture(texture_handle, device)
+                .get_or_load_texture(texture_handle)
                 .context("Loading trail texture"));
 
             self.texture = match &texture {
-                &Ok(texture) => Some(texture.clone()),
+                &Ok(texture) => Some(texture),
                 Err(..) => None,
             };
             texture.map(drop)
@@ -42,7 +41,7 @@ impl SpaceTrail {
 
         let res = if self.section_vbuffer.is_none() {
             let model = Model::from_vertices(mem::take(&mut self.vertices));
-            let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
+            let section_vbuffer = model.to_buffer(loader.device).context("Creating trail vbuffer");
             match section_vbuffer {
                 Ok(vbuffer) => {
                     STATS_TRAIL_VERTEX_SIZE.increment_by(|| vbuffer.size());

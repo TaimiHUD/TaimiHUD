@@ -1,10 +1,11 @@
 use {
-    super::{
-        poi::{ActivePoi, PoiCommonRenderData},
-        trail::{ActiveTrail, TrailParams},
-    },
+    taimi_hoard::statistics::Counter,
+    super::PoiCommonRenderData,
     crate::{
-        controller::pathing::{ExternalFilterState, FestivalFixup, PathingController, PathingEvent},
+        controller::pathing::{
+            space::{SpacePack, SpacePackCollection, TrailParams},
+            ExternalFilterState, FestivalFixup, PathingController, PathingEvent,
+        },
         exports::runtime::{
             self as rt,
             imgui::{self, Condition, StyleVar, TreeNode, Ui},
@@ -18,7 +19,6 @@ use {
         settings::state::ui::pathing::PathingFilterFlags as PathingFilterState,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{MarkerAttributesExt, Pack},
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
@@ -51,16 +51,7 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Debug)]
-pub enum UnloadedReason {
-    #[cfg(todo = "unused")]
-    Disabled,
-    UnknownFormat,
-    LoadingFailed(String),
-}
-
-pub type LoaderBox = Box<dyn PackLoaderContext + Send + 'static>;
-
+#[cfg(deleteme)]
 pub struct ActivePack {
     pub pack: Arc<Pack>,
     loader: LoaderBox,
@@ -88,6 +79,7 @@ pub struct ActivePack {
     //_script_engine: (),
 }
 
+#[cfg(todo)]
 impl ActivePack {
     pub fn new(pack: Arc<Pack>, loader: LoaderBox) -> Self {
         let enabled_categories: BitVec = pack
@@ -944,16 +936,19 @@ impl ActivePack {
         self.unused_textures.fill(false);
     }
 }
+#[cfg(deleteme)]
 impl AsRef<Pack> for ActivePack {
     fn as_ref(&self) -> &Pack {
         &self.pack
     }
 }
 
+#[cfg(deleteme)]
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PackTextureHandle(usize);
 
+#[cfg(deleteme)]
 pub struct PackCollection {
     pub loaded_packs: IndexMap<String, ActivePack>,
     pub unloaded_packs: IndexMap<String, UnloadedReason>,
@@ -966,6 +961,7 @@ pub struct PackCollection {
     festival_categories: BTreeMap<&'static str, Festival>,
 }
 
+#[cfg(todo)]
 impl PackCollection {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<PackCollection> {
         let poi_common = PoiCommonRenderData::new(backend)?;
@@ -1306,7 +1302,7 @@ impl PackCollection {
             backend,
             entities,
         );
-        STATS_ENTITY_COUNT.store(self.render_list.entities_count(), Ordering::Relaxed);
+        STATS_ENTITY_COUNT.reset_with(|| self.render_list.entities_count());
     }
 
     pub fn draw_entities<'e, E>(
@@ -1380,7 +1376,7 @@ impl PackCollection {
             }
             num_drawn += 1;
         }
-        STATS_ENTITY_DRAW.store(num_drawn, Ordering::Relaxed);
+        STATS_ENTITY_DRAW.reset(num_drawn);
     }
 
     #[cfg(feature = "goggles")]
@@ -1470,7 +1466,7 @@ impl PackCollection {
             }
             num_drawn += 1;
         }
-        STATS_ENTITY_DRAW_MAP.store(num_drawn, Ordering::Relaxed);
+        STATS_ENTITY_DRAW_MAP.reset(num_drawn);
     }
 
     pub fn entities_map<'a>(
@@ -1535,6 +1531,6 @@ enum ShaderState {
     Poi,
 }
 
-pub static STATS_ENTITY_DRAW: AtomicUsize = AtomicUsize::new(0);
-pub static STATS_ENTITY_COUNT: AtomicUsize = AtomicUsize::new(0);
-pub static STATS_ENTITY_DRAW_MAP: AtomicUsize = AtomicUsize::new(0);
+pub static STATS_ENTITY_DRAW: Counter = Counter::DEFAULT;
+pub static STATS_ENTITY_COUNT: Counter = Counter::DEFAULT;
+pub static STATS_ENTITY_DRAW_MAP: Counter = Counter::DEFAULT;

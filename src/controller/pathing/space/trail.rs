@@ -17,10 +17,7 @@ use {
     std::sync::Arc,
     taimi_d3d::dx11::buffer::VertexBuffer,
     taimi_meta::packs::{CategoryIndex, CategoryPath, TrailPath},
-    taimi_pack::{
-        attributes::{RenderAttributes, TrailAttributes},
-        PackLoaderContext
-    },
+    taimi_pack::attributes::{RenderAttributes, TrailAttributes},
 };
 
 pub struct SpaceTrail {
@@ -46,13 +43,17 @@ pub struct SpaceTrail {
 
 impl SpaceTrail {
     pub fn new(
-        attrs: Arc<RenderAttributes>,
+        mut attrs: Arc<RenderAttributes>,
         geometry: LoadedTrailGeometry,
         sections: &[LoadedTrailSection],
         visibility: VisibilityFlags,
-        path: TrailPath,
+        _path: TrailPath,
         category: CategoryPath,
     ) -> anyhow::Result<Self> {
+        if !attrs.trail.is_some() {
+            log::warn!("{_path} has incomplete render attrs?");
+            let _ = Arc::make_mut(&mut attrs).trail.get_or_insert_default();
+        }
         #[cfg(todo)]
         let mut y_offset = {
             // mitigate z-fighting by fudging y values for (hopefully) unique trails
@@ -82,7 +83,7 @@ impl SpaceTrail {
         section_bookmarks.push(section_bookmark);
 
         if geometry.vertices.is_empty() {
-            log::info!("Empty trail {category}/{path}");
+            log::info!("Empty trail {category}/{_path}");
         }
 
         Ok(Self {

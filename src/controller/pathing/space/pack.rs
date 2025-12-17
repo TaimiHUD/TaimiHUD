@@ -4,18 +4,19 @@ use {
         trail::SpaceTrail,
     },
     crate::{
-        controller::pathing::registry::{PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
-        space::{
-            render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
-            DrawSpace,
+        controller::pathing::{
+            registry::ActivePack,
+            space::DrawSpace,
         },
+        space::render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
     },
-    anyhow::{anyhow, Context},
+    taimi_meta::packs::{PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
     glamour::Box3,
-    std::mem,
+    std::{mem, sync::Arc, ops},
 };
 
 pub struct SpacePack {
+    pub pack: Option<Arc<ActivePack>>,
     pub active_trails: Vec<SpaceTrail>,
     pub active_pois: Vec<SpacePoi>,
 
@@ -28,6 +29,7 @@ pub struct SpacePack {
 impl SpacePack {
     pub fn new() -> Self {
         SpacePack {
+            pack: None,
             active_pois: Default::default(),
             active_trails: Default::default(),
             render_list_bookmark: Default::default(),
@@ -101,21 +103,32 @@ impl SpacePack {
         self.render_poi_bookmark = 0;
         self.poi_bookmark = 0;
     }
+
+    pub fn render_poi_bookmarks(&self) -> ops::Range<PoiIndex> {
+        match self.render_poi_bookmark {
+            0 => 0..0,
+            start => {
+                let end = (start + self.active_pois.len()) as PoiIndex;
+                let start = start as PoiIndex;
+                start..end
+            },
+        }
+    }
 }
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PackTextureHandle(usize);
 
-pub struct PackCollection {
+pub struct SpacePackCollection {
     pub loaded_packs: Vec<SpacePack>,
 
     pub render_list: RenderList,
 }
 
-impl PackCollection {
-    pub fn new() -> anyhow::Result<PackCollection> {
-        Ok(PackCollection {
+impl SpacePackCollection {
+    pub fn new() -> anyhow::Result<SpacePackCollection> {
+        Ok(SpacePackCollection {
             loaded_packs: Default::default(),
             render_list: RenderListBuilder::default().build(),
         })
@@ -248,12 +261,6 @@ impl PackCollection {
     /// use that
     pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
         for pack in &mut self.loaded_packs {
-            data_world.extend(pack.active_pois.iter().map(|poi| poi.instance_data()));
-            data_map.extend(
-                pack.active_pois
-                    .iter()
-                    .map(|poi| poi.instance_data_map(machine)),
-            );
             pack.render_poi_bookmark = offset;
             offset += pack.active_pois.len();
         }
