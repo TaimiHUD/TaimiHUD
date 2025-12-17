@@ -7,6 +7,11 @@ use {
     },
 };
 
+pub use self::{lazymut::ArcLazyMut, ptrcmp::ArcPtrCmp};
+
+pub mod lazymut;
+mod ptrcmp;
+
 /// unallocated refs are [equivalent](Weak::ptr_eq) to [Weak::new()]
 pub fn weak_is_null<T>(weak: &Weak<T>) -> bool {
     Weak::ptr_eq(weak, &Weak::new())
