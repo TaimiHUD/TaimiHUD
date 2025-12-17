@@ -1,20 +1,28 @@
 use {
     crate::{controller::pathing::{
-        registry::{PackMapPath, PoiPath, TrailPath},
-        state::visible::{LoadedPoi, LoadedTrail},
-        shared::SharedPacks,
-        PathingController, PathingEvent, PathingEventContext,
-    }, exports::runtime::{self as rt, locator::LocationRef}, render::{machine::RenderTaskPriority, RenderState}},
-    futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::Weak,
+        PathingController, PathingEvent,
+    }, exports::runtime as rt},
+    futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::{Arc, LazyLock},
     self::build::SpaceLoader,
+    taimi_meta::packs::{PackMapPath, PoiPath, TrailPath},
+    taimi_hoard::loc::LocationRef,
 };
-pub use self::build::{SpacePoiBuilder, SpaceTrailBuilder};
+pub use self::{
+    build::{SpacePoiBuilder, SpaceTrailBuilder},
+    poi::{SpacePoi, PoiScale},
+    trail::{SpaceTrail, TrailParams, TrailScale, TrailTextureMap},
+    pack::SpacePack,
+};
+pub use super::PackSpace as DrawSpace;
 
 mod build;
+mod pack;
+mod poi;
+mod trail;
 
 impl PathingController {
+    #[cfg(todo)]
     pub async fn setup_pack(&mut self,
-        ctx: &mut PathingEventContext,
         path: PackMapPath,
         setup_trails: Vec<SetupTrail>,
         setup_pois: Option<Vec<SetupPoi>>,
@@ -100,6 +108,7 @@ impl PathingController {
         Ok(())
     }
 
+    #[cfg(todo)]
     pub async fn prepare_pack(&mut self, ctx: &mut PathingEventContext, path: PackMapPath) {
         let Some(info) = self.map_pack_info.get(&path) else { return };
         let Some(map) = self.map_packs.get(&path) else { return };
@@ -115,6 +124,7 @@ impl PathingController {
         self.prepare_trails(ctx, path, Some(pois)).await
     }
 
+    #[cfg(todo)]
     pub async fn prepare_trails(&mut self, ctx: &mut PathingEventContext, path: PackMapPath, pois: Option<Vec<SetupPoi>>) {
         let Some(info) = self.map_pack_info.get(&path) else { return };
         let Some(map) = self.map_packs.get(&path) else { return };
@@ -132,8 +142,9 @@ impl PathingController {
     }
 
     const LOAD_TRAIL_PARALLEL: usize = 12;
+    #[cfg(todo)]
     pub fn prepare_trails_spawn<F, T>(ctx: &mut PathingEventContext, path: PackMapPath, trails: T, pois: Option<Vec<SetupPoi>>) where
-        F: Future<Output = (TrailPath, anyhow::Result<SpaceTrailBuilder>, LoadedTrail, bool)> + Send + 'static,
+        F: Future<Output = (TrailPath, anyhow::Result<SpaceTrailBuilder>, SpaceTrail, bool)> + Send + 'static,
         T: IntoIterator<Item = F>,
     {
         let trails: Vec<_> = trails.into_iter().collect();
@@ -167,5 +178,8 @@ impl PathingController {
     }
 }
 
-pub type SetupPoi = (PoiPath, Option<SpacePoiBuilder>, LoadedPoi);
-pub type SetupTrail = (TrailPath, Option<SpaceTrailBuilder>, LoadedTrail);
+pub type SetupPoi = (PoiPath, Option<SpacePoiBuilder>, SpacePoi);
+pub type SetupTrail = (TrailPath, Option<SpaceTrailBuilder>, SpaceTrail);
+static EMPTY_RENDER_ATTRS: LazyLock<Arc<taimi_pack::attributes::RenderAttributes>> = LazyLock::new(||
+    Arc::new(Default::default())
+);

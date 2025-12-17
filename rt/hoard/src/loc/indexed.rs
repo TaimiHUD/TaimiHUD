@@ -368,7 +368,7 @@ impl<P, T, PN, PI, TI> LocationGet<PN, PI> for AdjacentList<P, T> where
 {
     type LookupGet = TI;
     fn lookup_get(&self, loc: &Locator<PN, PI>) -> Option<Self::LookupGet> {
-        self.iter().find(|(p, i)| p == loc)
+        self.iter().find(|(p, _i)| p == loc)
             .map(|(_p, i)| i)
     }
 }
@@ -379,7 +379,7 @@ impl<P, T, PN, PI, TI> LocationRef<PN, PI> for AdjacentList<P, T> where
 {
     type LookupRef = TI;
     fn lookup_ref(&self, loc: &'_ Locator<PN, PI>) -> Option<&Self::LookupRef> {
-        self.iter().find(|(p, i)| p == loc)
+        self.iter().find(|(p, _i)| p == loc)
             .map(|(_p, i)| i)
     }
 }
@@ -390,7 +390,7 @@ impl<P, T, PN, PI> LocationMut<PN, PI> for AdjacentList<P, T> where
     Locator<PN, PI>: PartialEq,
 {
     fn lookup_mut(&mut self, loc: &'_ Locator<PN, PI>) -> Option<&mut Self::LookupRef> {
-        self.iter_mut().find(|(p, i)| p == loc)
+        self.iter_mut().find(|(p, _i)| p == loc)
             .map(|(_p, i)| i)
     }
 }
@@ -477,7 +477,7 @@ impl_iter_wrap! {
         let iter = |this| this.iter.iter;
         let iter = |&this| &this.iter.iter;
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| Self::map_item(item);
+        let item = |&mut _this, item| Self::map_item(item);
     }
     impl{N: Clone, I, P, II} DoubleEndedIterator for LocatorRelIter0<N, I>, I
         where{
@@ -530,7 +530,7 @@ impl_iter_wrap! {
         let iter = |this| this.iter;
         let iter = |&this| &this.iter;
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| LocatorPathAs::<P, _>::new(item).path_as();
+        let item = |&mut _this, item| LocatorPathAs::<P, _>::new(item).path_as();
     }
     impl{IN, IP, P, I} DoubleEndedIterator for LocatorPathAs<P, I>, I
         where{
@@ -593,7 +593,7 @@ impl_iter_wrap! {
         let iter = |this| this.iter;
         let iter = |&this| &this.iter;
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| Self::map_item(item);
+        let item = |&mut _this, item| Self::map_item(item);
     }
     impl{P, I, E} DoubleEndedIterator for EnumerateAs<P, I>, iter::Enumerate<I>
         where{

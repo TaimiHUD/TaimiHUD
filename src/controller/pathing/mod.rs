@@ -38,14 +38,18 @@ use {
 pub use self::{
     festivals::FestivalFixup,
     shared::{PathingEnables, PathingReceiver, PathingSender},
+    state::visible,
 };
+pub use taimi_meta::coords::LocalSpace as PackSpace;
 
 mod festivals;
+pub mod registry;
 mod shared;
+mod state;
+pub mod space;
 
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
-#[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },

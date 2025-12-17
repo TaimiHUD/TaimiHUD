@@ -1,71 +1,65 @@
-use anyhow::Context;
-use std::sync::Arc;
-use crate::{
-    controller::{
+use {
+    crate::controller::{
         Controller,
         pathing::{
-            registry::{PoiPath, TrailPath, ActivePack},
+            registry::ActivePack,
+            space::{SpacePack, SpacePoi, SpaceTrail, TrailParams},
             state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry},
         },
     },
-    space::pack::{self as spacepack, trail::TrailParams},
+    anyhow::Context,
+    std::sync::Arc,
+    taimi_meta::packs::{PoiPath, TrailPath, CategoryPath},
+    taimi_pack::{attributes::RenderAttributes, Poi as PackPoi},
 };
-use taimi_pack::{attributes::keys, Poi as PackPoi};
 
 pub(super) struct SpaceLoader<'a> {
-    pub active_pack: &'a mut spacepack::ActivePack,
+    pub active_pack: &'a mut SpacePack,
     pub loader: &'a mut dyn taimi_pack::loader::PackLoaderContext,
     pub device: &'a taimi_d3d::dx11::Dx11Device,
 }
 
 #[derive(Debug, Clone)]
 pub struct SpacePoiBuilder {
-    pub icon_file: keys::IconFile,
-    pub scale: keys::IconSize,
-    pub scale_map: keys::MapDisplaySize,
-    pub tint: keys::Tint,
-    pub opacity: keys::Alpha,
+    pub attrs: Arc<RenderAttributes>,
 }
 
 impl SpacePoiBuilder {
-    pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<spacepack::poi::ActivePoi> {
+    pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<SpacePoi> {
         let visibility = poi.visibility;
-        spacepack::poi::ActivePoi::new(loader.active_pack, loader.loader, visibility, path.path, poi, self.icon_file.as_str(), self.scale.into(), self.scale_map.into(), self.tint.into(), self.opacity.into(), loader.device)
+        let mut poi = SpacePoi::new(visibility, path.unscope(), CategoryPath::with_path(poi.category), self.attrs);
+        poi.setup(loader.loader, loader.device)
+            .map(move |()| poi)
     }
 
-    pub fn build_empty() -> spacepack::poi::ActivePoi {
-        spacepack::poi::ActivePoi::empty()
+    pub fn build_empty() -> SpacePoi {
+        SpacePoi::empty()
     }
 
     pub fn from_pack(poi: &PackPoi) -> Option<Self> {
-        let render = poi.attributes.render.as_ref()?;
-        let attrs = render.poi.as_ref()?;
         Some(SpacePoiBuilder {
-            // TODO: allow empty?
-            icon_file: keys::IconFile(keys::File(attrs.icon_file.as_ref()?.clone())),
-            scale: attrs.icon_size.map(Into::into).unwrap_or_default(),
-            scale_map: attrs.map_display_size.map(Into::into).unwrap_or_default(),
-            tint: render.tint.map(Into::into).unwrap_or_default(),
-            opacity: render.alpha.map(Into::into).unwrap_or_default(),
+            attrs: poi.attributes.render().clone().unwrap_or_default(),
         })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SpaceTrailBuilder {
-    pub texture_file: keys::TextureFile,
+    pub attrs: Arc<RenderAttributes>,
     pub geometry: LoadedTrailGeometry,
 }
 
 impl SpaceTrailBuilder {
-    pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<spacepack::trail::ActiveTrail> {
+    pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<SpaceTrail> {
         let visibility = trail.visibility;
         let sections = trail.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
-        spacepack::trail::ActiveTrail::new(loader.active_pack, loader.loader, self.texture_file.as_str(), self.geometry, sections, visibility, path.path, trail.category, 0, loader.device)
+        let mut trail = SpaceTrail::new(self.attrs, self.geometry, sections, visibility, path.path, CategoryPath::with_path(trail.category), 0, loader.device)
+        trail.setup(loader.loader, loader.device)
+            .map(move |()| poi)
     }
 
-    pub fn build_empty() -> spacepack::trail::ActiveTrail {
-        spacepack::trail::ActiveTrail::empty()
+    pub fn build_empty() -> SpaceTrail {
+        SpaceTrail::empty()
     }
 
     #[cfg(todo = "unused")]

@@ -21,4 +21,7 @@ serde = [
 [dependencies]
 anyhow = "1"
 log = "0.4"
+bitvec = { workspace = true }
+num-traits = { workspace = true }
+
 serde = { version = "1", features = ["derive"], optional = true }

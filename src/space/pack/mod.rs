@@ -11,7 +11,7 @@ pub(crate) mod pack;
 pub use {
     self::{
         pack::{ActivePack, LoaderBox, PackCollection, UnloadedReason},
-        poi::PoiScale,
+        poi::{PoiScale, PoiCommonRenderData},
         trail::{TrailScale, TrailTextureMap},
     },
     taimi_pack::{attributes::MarkerAttributes, pack::Pack, poi::Poi, trail::TrailSection},

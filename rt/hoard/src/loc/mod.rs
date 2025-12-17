@@ -1,6 +1,5 @@
-use core::{borrow::Borrow, cmp, fmt, mem};
+use core::{cmp, fmt, mem};
 
-pub mod packs;
 pub mod indexed;
 
 /// Generic resource reference

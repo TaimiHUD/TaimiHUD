@@ -1,27 +1,20 @@
 use {
-    super::{ActivePack, PoiExt},
-    crate::{
+    super::ActivePack, crate::{
+        controller::pathing::space::{SpacePoi, SpacePack},
         exports::runtime::Counter,
         render::machine::RenderMachine,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
-            DrawSpace,
         },
-    },
-    anyhow::Context,
-    glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
-    glamour::{Box3, Point3, Vector2},
-    std::sync::Arc,
-    taimi_d3d::{
+        TEXTURES,
+    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::sync::Arc, taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
         },
         state::PrimitiveTopology,
-    },
-    taimi_meta::ui::LocalContext,
-    taimi_pack::Poi,
+    }, taimi_meta::ui::LocalContext,
 };
 
 pub struct PoiCommonRenderData {
@@ -37,6 +30,8 @@ pub struct PoiCommonRenderData {
 
     pub world_ib: Option<BufferOf<InstanceBufferData>>,
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
+
+    pub fallback_texture: Option<Arc<Texture>>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -62,6 +57,7 @@ impl PoiCommonRenderData {
             quad_vb,
             map_ib: None,
             world_ib: None,
+            fallback_texture: None,
         })
     }
 
@@ -129,6 +125,90 @@ impl PoiCommonRenderData {
         let _ = self.map_ib.take();
     }
 
+    pub fn update(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[SpacePack]) -> anyhow::Result<()> {
+        if self.fallback_texture.is_none() {
+            self.fallback_texture = TEXTURES.lookup_resource(RenderMachine::TEXTURE_LOGO_KEY).flatten();
+        }
+
+        let ib_len = self.ib_len_for_packs(packs);
+        let ib_dirty = !self.is_empty() && self.ib_len() == ib_len;
+        if !ib_dirty {
+            return Ok(())
+        }
+
+        self.rebuild_ib(device, machine, packs)?;
+
+        Ok(())
+    }
+    pub fn rebuild_ib(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[SpacePack]) -> anyhow::Result<()> {
+        let ib_len = self.ib_len_for_packs(packs);
+        let mut data_world = vec![InstanceBufferData::IDENTITY; ib_len];
+        let mut data_map = vec![InstanceBufferData::IDENTITY; ib_len];
+        self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
+
+        let (data_world, data_map) = (&data_world[..], &data_map[..]);
+        STATS_POI_INSTANCE_SIZE
+            .reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
+        let (poi_ib_world, poi_ib_map) = (
+            BufferOf::new_with_data(device, Ok(data_world), ())?,
+            BufferOf::new_with_data(device, Ok(data_map), ())?,
+        );
+        self.world_ib = Some(poi_ib_world);
+        self.map_ib = Some(poi_ib_map);
+        Ok(())
+    }
+    pub fn write_ib(&self, machine: &RenderMachine, packs: &[SpacePack], ib_world: &mut [InstanceBufferData], ib_map: &mut [InstanceBufferData]) -> anyhow::Result<()> {
+        let ib_len = self.ib_len_for_packs(packs);
+        if (ib_world.len() > 1 && ib_world.len() != ib_len) || (ib_map.len() > 1 && ib_map.len() != ib_len) {
+            anyhow::bail!("expected {ib_len} POI instances, got {}(world) and {}(map) instead", ib_world.len(), ib_map.len());
+        }
+        let mut gaps: BitVec = BitVec::with_capacity(ib_len);
+        gaps.resize(ib_len, false);
+        for (_packi, pack) in packs.iter().enumerate() {
+            for i in pack.poi_instanceidk_range() {
+                let index = i as usize;
+                let Some(poi) = pack.active_pois.get(index) else { continue };
+                if let Some(b) = gaps.get_mut(index) {
+                    if *b {
+                        log::error!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
+                        continue
+                    }
+                    *b = true;
+                }
+                if let Some(world) = ib_world.get_mut(index) {
+                    *world = poi.instance_data();
+                }
+                if let Some(map) = ib_map.get_mut(index) {
+                    *map = poi.instance_data_map(machine);
+                }
+            }
+        }
+        for gap in gaps.iter_zeros() {
+            // fill identity at start for trail drawing
+            if let Some(world) = ib_world.get_mut(gap) {
+                *world = InstanceBufferData::IDENTITY;
+            }
+            if let Some(map) = ib_map.get_mut(gap) {
+                *map = InstanceBufferData::IDENTITY;
+            }
+        }
+
+        Ok(())
+    }
+    fn ib_len_for_packs(&self, packs: &[SpacePack]) -> usize {
+        packs.iter().map(|p| p.poi_instanceidk_bookmark_range().end).max()
+    }
+    fn ib_len(&self) -> usize {
+        let ib = self.world_ib.as_ref()
+            .or(self.map_ib.as_ref());
+        let Some(ib) = ib else { return 0 };
+        let count = ib.count();
+        if count == 0 {
+            log::debug!("TODO: is buffer.count() (ByteSize) reliable? shouldn't be 0 right...");
+        }
+        ib.count()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.world_ib.is_none() && self.map_ib.is_none()
     }
@@ -161,65 +241,28 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
     },
 ];
 
-pub struct ActivePoi {
-    pub poi_idx: usize,
-    pub category_idx: usize,
-    pub filtered: bool,
-    pub bounds: Box3<DrawSpace>,
-    pub position: Point3<DrawSpace>,
-    pub tint: Vec4,
-    pub opacity: f32,
-    pub scale: f32,
-    pub scale_map: f32,
-    pub icon: Arc<Texture>,
-}
-
-impl ActivePoi {
-    pub fn build(
+impl SpacePoi {
+    pub fn setup(
+        &mut self,
         loader: &mut ActivePack,
-        poi: &Poi,
-        poi_idx: usize,
-        category_idx: usize,
         device: &Dx11Device,
-    ) -> anyhow::Result<ActivePoi> {
-        let icon_handle = poi
-            .icon_name()
-            .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
-        let icon_handle = loader.register_texture(icon_handle);
-        let icon = loader
-            .get_or_load_texture(icon_handle, device)
-            .context("Loading poi texture")?;
+    ) -> anyhow::Result<()> {
+        if self.icon.is_some() { return Ok(()) }
 
-        let position = poi.position();
-        let scale = poi.icon_scale();
-        let scale_map = poi.attributes.poi().map_display_size.unwrap_or(20.0);
-        let (tint, opacity) = {
-            let render = poi.attributes.render();
-            (render.tint(), render.alpha())
+        let icon_handle = self.poi_attrs().icon_file
+            .as_ref()
+            .context("POI is missing icon");
+        let icon_handle = icon_handle.map(|h| loader.register_texture(&h[..]));
+        let icon = icon_handle.and_then(|icon_handle| loader
+            .get_or_load_texture(icon_handle, device)
+            .context("Loading poi texture"));
+
+        self.icon = match &icon {
+            &Ok(texture) => Some(texture.clone()),
+            Err(..) => None,
         };
 
-        let edge_len = scale * 2.0;
-        let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
-        let bounds = Box3::from_origin_and_size(position, glamour::size3!(max_diagonal));
-
-        Ok(ActivePoi {
-            poi_idx,
-            category_idx,
-            filtered: false,
-            bounds,
-            position,
-            tint,
-            opacity,
-            scale,
-            scale_map,
-            icon: icon.clone(),
-        })
-    }
-
-    pub fn tint(&self) -> Vec4 {
-        let mut tint = self.tint;
-        tint.w *= self.opacity;
-        tint
+        icon.map(drop)
     }
 
     pub fn instance_data(&self) -> InstanceBufferData {
@@ -242,13 +285,16 @@ impl ActivePoi {
         }
     }
 
-    pub fn update(pack: &mut ActivePack, poi_idx: usize) {
-        let _ = pack;
-        let _ = poi_idx;
+    pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
+        let texture = self.icon.as_ref()
+            .or_else(|| common.fallback_texture.as_ref());
+        if let Some(texture) = texture {
+            texture.set(device_context, 0);
+        }
     }
 
+    /// PREREQUISITES: Poi shaders and texture must already be set.
     pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
-        self.icon.set(device_context, 0);
         let voffset = match ctx {
             LocalContext::World => 0,
             LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,
