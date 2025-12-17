@@ -3850,10 +3850,12 @@ dependencies = [
  "futures-core",
  "futures-util",
  "log",
+ "rustc-hash 2.1.1",
  "serde",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "type-map",
 ]
 
 [[package]]
