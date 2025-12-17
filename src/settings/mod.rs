@@ -4,7 +4,7 @@ pub mod pathing;
 mod progress_bar_config;
 mod settings_struct;
 pub(crate) mod source;
-mod sources;
+pub mod sources;
 pub mod state;
 mod v1;
 

@@ -20,14 +20,18 @@ impl Counter {
         self.increment(amt);
         amt
     }
-
     #[inline(always)]
     pub fn decrement_by<F: FnOnce() -> usize>(&self, f: F) -> usize {
         let amt = f();
         self.decrement(amt);
         amt
     }
-
+    #[inline(always)]
+    pub fn adjust_by<F: FnOnce() -> isize>(&self, f: F) -> isize {
+        let amt = f();
+        self.adjust(amt);
+        amt
+    }
     #[inline(always)]
     pub fn reset_with<F: FnOnce() -> isize>(&self, f: F) -> isize {
         let amt = f();
@@ -50,9 +54,11 @@ impl Counter {
     pub fn increment(&self, amt: usize) {
         self.count.fetch_add(amt as isize, Self::ORDERING);
     }
-
     pub fn decrement(&self, amt: usize) {
         self.count.fetch_sub(amt as isize, Self::ORDERING);
+    }
+    pub fn adjust(&self, amt: isize) {
+        self.count.fetch_add(amt, Self::ORDERING);
     }
 
     pub fn reset(&self, amt: isize) {
@@ -61,6 +67,9 @@ impl Counter {
 
     pub fn get(&self) -> isize {
         self.count.load(Self::ORDERING)
+    }
+    pub fn count(&self) -> usize {
+        self.get() as usize
     }
 }
 

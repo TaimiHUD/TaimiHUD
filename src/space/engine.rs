@@ -1,12 +1,17 @@
 use {
     crate::{
-        controller::{pathing::PathingEvent, Controller},
+        controller::{
+            pathing::{
+                space::{PoiScale, TrailScale, TrailTextureMap},
+                PathingEvent,
+            },
+            Controller,
+        },
         render::machine::RenderMachine,
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::{PackCollection, PoiScale, TrailScale, TrailTextureMap},
-            render_list::MapFrustum,
+            pack::{PackRender, PackRenderList},
         },
         timer::{PhaseState, TimerFile, TimerMarker},
     },
@@ -14,15 +19,11 @@ use {
     bevy_ecs::prelude::*,
     glam::Vec3,
     glamour::{Box2, Size2, TransformMap},
-    std::{
-        collections::{HashMap, HashSet},
-        mem,
-        num::NonZeroU32,
-        sync::Arc,
-    },
+    std::{collections::HashMap, mem, num::NonZeroU32, sync::Arc},
     taimi_d3d::dx11::prelude::*,
     taimi_meta::{
         coords::ScreenSpace,
+        spatial::cull::MapFrustum,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
             MapContext,
@@ -127,7 +128,7 @@ pub struct Engine {
     // ECS stuff
     pub world: World,
 
-    pub packs: PackCollection,
+    pub packs: PackRender,
 
     settings: Option<PathingSettings>,
 }
@@ -174,7 +175,7 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
+        let packs = PackRender::new(&render_backend).context("Initializing packs")?;
         PathingEvent::LoadAll.try_send();
 
         let mut gameplay = Watched::start_watching(gameplay);
@@ -373,8 +374,7 @@ impl Engine {
     }
 
     pub fn stop(&mut self) {
-        self.packs.clear_active();
-        self.packs.clear();
+        self.packs.stop();
     }
 
     pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<bool> {
@@ -480,10 +480,7 @@ impl Engine {
                 },
             _ => Ok(()),
         }
-    }
-
-    pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
-        self.packs.disable_paths(disabled_paths);
+        .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))
     }
 
     #[allow(dead_code)]
@@ -493,7 +490,6 @@ impl Engine {
 
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         let map_ctx = machine.is_map_visible();
-        let map_id = machine.is_ingame();
         let (
             visible_space,
             visible_map,
@@ -505,7 +501,7 @@ impl Engine {
             (_obscured_alpha,),
         ) = self.map_settings(|s| {
             (
-                map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
+                s.space.visible_space().then_some(s.space.distance_max()),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
                 s.space.edge_feather_scale(),
@@ -521,8 +517,7 @@ impl Engine {
             )
         });
         let gameplay_prev = self.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
-        if self.gameplay.watch.has_changed() {
-            let gameplay = *self.gameplay.get_mut();
+        if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);
             let res = self
                 .process_gameplay_event(gameplay, trans)
@@ -546,16 +541,11 @@ impl Engine {
         let device_context =
             unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
 
-        if map_id.is_none() {
+        if !self.packs.prepare(&self.render_backend.device, machine)? {
             return Ok(())
         }
 
-        self.packs.trail_params.y_offset = trail_y_offset.unwrap_or(0.0);
-        self.packs.trail_params.resolution = Some(trail_resolution);
-        self.packs.trail_params.width = trail_width;
-
-        self.packs.prepare(&self.render_backend.device, machine)?;
-        self.packs.update();
+        //self.packs.update();
 
         let render_map = match visible_map {
             Some(true) =>
@@ -656,9 +646,14 @@ impl Engine {
                     .perspective_handler
                     .set_map_cb(&device_context, perspective_slot);
 
-                let entities = self.packs.entities_map(local_bounds);
-                PackCollection::draw_map_entities(
-                    &self.packs.loaded_packs,
+                let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
+                let entities = self.packs.render_list.iter_markers_map(
+                    self.packs.pack_data.map_ref_as_slice(),
+                    map_ctx,
+                    &map_query,
+                );
+                PackRender::draw_map_entities(
+                    &mut self.packs.draw_state,
                     &self.packs.poi_common,
                     &device_context,
                     &backend,
@@ -826,14 +821,8 @@ impl Engine {
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
-                let entities = self.packs.entities_obscured(cull);
-                PackCollection::draw_entities(
-                    &self.packs.loaded_packs,
-                    &self.packs.poi_common,
-                    &device_context,
-                    &backend,
-                    entities,
-                );
+                self.packs
+                    .draw_obscured(camera.clone(), cull, &*backend, &device_context);
 
                 backend.depth_handler.set_state_obscured(&device_context, false);
             }
@@ -852,7 +841,7 @@ impl Engine {
         }
 
         #[cfg(feature = "goggles")]
-        if let Some(map_id) = map_id {
+        if let Some(map_id) = machine.is_ingame() {
             let goggles_tick = self
                 .goggles_select_lens_delay
                 .as_mut()
@@ -908,7 +897,6 @@ impl Engine {
                 let _ = sender.take();
             }
             // pack cleanup kinda unnecessary since it's done on drop anyway?
-            // self.packs.clear();
         } else {
             self.packs.destroy_buffers();
         }
@@ -916,22 +904,20 @@ impl Engine {
 
     pub fn gameplay_map_exit(
         &mut self,
-        device_context: &Dx11Context,
-        prev_map_id: NonZeroU32,
+        _device_context: &Dx11Context,
+        _prev_map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
-        let res = self.packs.unload_map(device_context, prev_map_id.get());
+        let res = Ok(());
 
         res
     }
 
     pub fn gameplay_map_enter(
         &mut self,
-        device_context: &Dx11Context,
-        map_id: NonZeroU32,
+        _device_context: &Dx11Context,
+        _map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
-        let res = self
-            .packs
-            .load_map(&self.render_backend.device, device_context, map_id.get());
+        let res = Ok(());
 
         self.goggles_enter(true);
 

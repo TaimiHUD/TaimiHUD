@@ -70,19 +70,13 @@ space = [
   "dep:bevy_ecs",
   "dep:bevy_utils",
   "dep:arc-atomic",
-  "windows/Win32_UI_WindowsAndMessaging",
-  "windows/Win32_UI_Input_KeyboardAndMouse",
-  "windows/Win32_Graphics_Direct3D11",
-  "windows/Win32_Graphics_Dxgi",
-  "windows/Win32_Graphics_Dxgi_Common",
-  "windows/Win32_Graphics_Direct3D_Fxc",
-  "windows/Win32_Graphics_Hlsl",
   "texture-loader",
   "paths",
   "goggles",
   "space-list",
   #"space-ecs",
   "dep:taimi_meta",
+  "taimi_meta/spatial",
   "dep:taimi_pack",
   "dep:taimi_d3d",
 ]
@@ -291,12 +285,13 @@ bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
 semver = { version = "1", optional = true }
 uuid = { version = "1", features = ["v3", "v4", "serde"] }
+rustc-hash = "2"
 regex = "1"
 croner = "3"
 bitvec = { workspace = true }
 
 taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
-taimi_pack = { path = "./pathing/pack", optional = true }
+taimi_pack = { path = "./pathing/pack", optional = true, features = ["serde"] }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
 taimi_ffi = { path = "./rt/ffi", default-features = false, features = ["serde"] }

@@ -1,373 +1,213 @@
 use {
+    super::PackRenderState,
     crate::{
-        exports::runtime::Counter,
-        space::{
-            pack::{ActivePack, TrailSectionExt},
-            resources::{Model, Texture, Vertex},
-            DrawSpace,
-            TextureSpace,
+        controller::pathing::{
+            registry::LoadedTrailPath,
+            shared::{LoadedTrailRef, SharedPackInfo},
+            state::LoadedTrailGeometry,
         },
+        exports::runtime::{
+            textures::{TextureKey, TextureSlot},
+            Counter,
+        },
+        space::{pack::PoiCommonRenderData, resources::Model},
     },
     anyhow::Context,
-    core::f32,
-    glamour::{Box3, Point2, Vec3Swizzles, Vector3},
-    std::sync::Arc,
+    std::{mem, ops},
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
-    taimi_meta::ui::LocalContext,
-    taimi_pack::Trail,
+    taimi_hoard::loc::Locator,
+    taimi_meta::{
+        packs::{
+            id::{MarkerId, MarkerIndex},
+            TrailSectionIndex,
+            TrailSectionPath,
+        },
+        ui::LocalContext,
+    },
 };
 
-pub struct ActiveTrail {
-    pub trail_idx: usize,
-    pub category_idx: usize,
-    pub filtered: bool,
-    pub render_bookmark: usize,
-
-    // Segment data.
-    pub section_bounds: Vec<Box3<DrawSpace>>,
-
-    // World render data.
-    pub texture: Arc<Texture>,
-    pub section_vbuffer: VertexBuffer,
-    pub section_bookmarks: Vec<u32>,
-
-    pub y_offset: f32,
+/// World render data
+pub struct TrailRender {
+    pub texture_handle: Option<TextureKey>,
+    pub texture: Option<TextureSlot>,
+    pub section_vbuffer: Option<VertexBuffer>,
+    pub vbuffer_section_end: Vec<u32>,
 }
 
-impl ActiveTrail {
-    pub fn build(
-        loader: &mut ActivePack,
-        trail: &Trail,
-        trail_idx: usize,
-        category_idx: usize,
-        params: &TrailParams,
-        render_bookmark: usize,
+impl TrailRender {
+    pub fn empty() -> Self {
+        Self {
+            texture_handle: None,
+            texture: None,
+            section_vbuffer: None,
+            vbuffer_section_end: Vec::new(),
+        }
+    }
+
+    pub fn setup_geometry(
+        &mut self,
         device: &Dx11Device,
-    ) -> anyhow::Result<ActiveTrail> {
-        let trail_width = params.width();
-        let resolution = params.resolution();
-        let smoothing = params.smoothing();
-        let mut y_offset = {
-            // mitigate z-fighting by fudging y values for (hopefully) unique trails
-            let pack_signature = loader.pack.trails.len()
-                + loader.pack.pois.len()
-                + loader.pack.categories.all_categories.len();
-            params.y_offset_for(pack_signature ^ (trail_idx.wrapping_mul(73)))
-        };
-
-        let texture_handle = trail
-            .texture_name()
-            .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
-        let texture_handle = loader.register_texture(texture_handle);
-        let trail_data = trail
-            .read_trl_data(loader.loader())
-            .context("Loading trail vertices")?;
-        let texture = loader
-            .get_or_load_texture(texture_handle, device)
-            .context("Loading trail texture")?;
-
-        let mut vertices: Vec<Vertex> = Vec::new();
-        let mut section_bookmarks: Vec<u32> = vec![0];
-        let mut section_bounds = Vec::new();
-
-        for (isec, section) in trail_data.sections.iter().enumerate() {
-            y_offset = (y_offset - f32::EPSILON * 40.0).max(0.0);
-
-            if section.points.is_empty() {
-                log::debug!("Section {isec} is empty.");
-                continue;
-            }
-
-            // Interpolate points to be no more than 1/resolution metres apart.
-            let mut points = Vec::with_capacity(section.points.len());
-            let mut prev_point = None;
-            for mut point in section.points.iter().copied() {
-                point.y += y_offset;
-
-                if let Some(prev_point) = prev_point.replace(point) {
-                    let dist = prev_point.distance(point);
-                    let segments = (dist * resolution) as i32;
-                    for i in 0..segments {
-                        let s = (i + 1) as f32 / (segments + 1) as f32;
-                        let position = match smoothing {
-                            None => s,
-                            // bias resolution near corners
-                            Some(smoothing) => s.powi(if smoothing > 6.0 { 3 } else { 2 }),
-                        };
-                        let int_point = prev_point.lerp(point, position);
-                        points.push(int_point);
-                    }
+        geometry: LoadedTrailGeometry,
+    ) -> anyhow::Result<()> {
+        let model = Model::from_vertices(geometry.vertices);
+        let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
+        #[cfg(feature = "statistics")]
+        let prev_size = self
+            .section_vbuffer
+            .as_ref()
+            .map(|v| v.size() as isize)
+            .unwrap_or(0);
+        match section_vbuffer {
+            Ok(vbuffer) => {
+                #[cfg(feature = "statistics")]
+                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size);
+                self.section_vbuffer = Some(vbuffer);
+                self.vbuffer_section_end = geometry.section_lengths;
+                let mut start = 0u32;
+                for out in &mut self.vbuffer_section_end {
+                    *out += start;
+                    start = *out;
                 }
-                points.push(point);
-            }
-
-            if let Some(smoothing) = smoothing {
-                let mut points = &mut points[..];
-                while let &mut [prev, mid, ..] = points {
-                    let next = points.get(2).copied().unwrap_or(mid);
-                    let target = prev.slerp(next, 0.5);
-                    let smooth = mid.xz().lerp(target.xz(), smoothing / 10.0);
-                    points[1] = smooth.extend(mid.y * 0.925 + target.y * 0.075).xzy();
-                    points = &mut points[1..];
-                }
-            }
-
-            log::trace!(
-                "Section {isec} added {} interpolation points ({} -> {}).",
-                points.len() - section.points.len(),
-                section.points.len(),
-                points.len(),
-            );
-
-            let mut cur_point = points[0];
-            let mut last_offset = Vector3::ZERO;
-            let mut flip_over = 1.0f32;
-            let normal_offset = trail_width * trail.scale() / 2.0;
-            let mut mod_distance = Vector3::ZERO;
-
-            let mut distance = 0.0f32;
-            for &next_point in points.iter().skip(1) {
-                let path_direction = next_point - cur_point;
-                let offset = path_direction.cross(Vector3::Y);
-                let offset = if trail.is_wall() { path_direction.cross(offset) } else { offset };
-                let offset = offset.normalize();
-
-                if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
-                    flip_over *= -1.0;
-                }
-
-                mod_distance = offset * normal_offset * flip_over;
-                let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                    glam::vec3(1.0, 0.0, 1.0)
-                        .normalize()
-                        .copysign(mod_distance.to_raw()),
-                );
-
-                vertices.push(Vertex {
-                    position: (cur_point - mod_distance).into(),
-                    colour: glam::Vec3::ONE,
-                    normal: -normal_scale_dir,
-                    texture: glam::vec2(1.0, distance / trail_width - 1.0),
-                });
-                vertices.push(Vertex {
-                    position: (cur_point + mod_distance).into(),
-                    colour: glam::Vec3::ONE,
-                    normal: normal_scale_dir,
-                    texture: glam::vec2(0.0, distance / trail_width - 1.0),
-                });
-
-                distance += path_direction.length();
-                last_offset = offset;
-                cur_point = next_point;
-            }
-
-            let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                glam::vec3(1.0, 0.0, 1.0)
-                    .normalize()
-                    .copysign(mod_distance.to_raw()),
-            );
-            vertices.push(Vertex {
-                position: (cur_point - mod_distance).into(),
-                colour: glam::Vec3::ONE,
-                normal: -normal_scale_dir,
-                texture: glam::vec2(1.0, distance / trail_width - 1.0),
-            });
-            vertices.push(Vertex {
-                position: (cur_point + mod_distance).into(),
-                colour: glam::Vec3::ONE,
-                normal: normal_scale_dir,
-                texture: glam::vec2(0.0, distance / trail_width - 1.0),
-            });
-
-            section_bookmarks.push(vertices.len() as u32);
-            section_bounds.push(section.bounds());
+                Ok(())
+            },
+            Err(e) => Err(e),
         }
-
-        if vertices.is_empty() {
-            log::info!("Empty trail {}:{}", trail.category, trail.guid,);
-        }
-
-        let model = Model::from_vertices(vertices);
-        let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer")?;
-        STATS_TRAIL_VERTEX_SIZE.increment_by(|| section_vbuffer.size());
-
-        Ok(ActiveTrail {
-            trail_idx,
-            category_idx,
-            filtered: false,
-            section_bounds,
-            texture: texture.clone(),
-            section_vbuffer,
-            section_bookmarks,
-            render_bookmark,
-            y_offset,
-        })
     }
 
-    pub fn update(pack: &mut ActivePack, trail_idx: usize) {
-        let _ = pack;
-        let _ = trail_idx;
+    pub fn update(
+        &mut self,
+        _device: &Dx11Device,
+        pack_info: &SharedPackInfo,
+        ltrail: Option<LoadedTrailRef<'_>>,
+    ) {
+        let texture = ltrail
+            .as_ref()
+            .and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
+        pack_info.setup_texture(&mut self.texture_handle, &mut self.texture, texture);
+    }
+    pub fn report_incomplete(
+        &self,
+        id: &MarkerId,
+        draw_state: &mut PackRenderState,
+        path: Locator<LoadedTrailPath, TrailSectionPath>,
+    ) -> bool {
+        let mut incomplete = false;
+        if self.section_vbuffer.is_none() {
+            if !self.is_empty() {
+                // marked broken, ignore this section...
+                return true
+            }
+            let id = match id {
+                id if path.path.path != 0 => {
+                    // replace section index with 0 since we can't partially load trl data (yet?)
+                    let id = id
+                        .get_marker_pack_map_path()
+                        .rel(MarkerIndex::with_trail_section(path.root.path, 0));
+                    MarkerId::for_marker(id)
+                },
+                id => id.clone(),
+            };
+            draw_state.drawn_incomplete.insert(id);
+            incomplete = true;
+        }
+        if matches!(
+            self.texture,
+            None | Some(TextureSlot::Reserved | TextureSlot::Loading)
+        ) {
+            let id = id
+                .get_marker_pack_map_path()
+                .rel(MarkerIndex::with_trail(path.root.path));
+            draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
+        }
+        incomplete
+    }
+    pub fn needs_texture_info(&self) -> bool {
+        self.texture.is_none() && self.texture_handle.is_none()
     }
 
+    pub fn bind_texture(
+        &self,
+        device_context: &Dx11Context,
+        common: &PoiCommonRenderData,
+        _ctx: LocalContext,
+    ) {
+        let texture = self
+            .texture
+            .as_ref()
+            .and_then(TextureSlot::get)
+            .or_else(|| common.fallback_texture.as_ref());
+        if let Some(texture) = texture {
+            texture.set(device_context, 0);
+        }
+    }
     /// Draw a trail segment.
-    /// PREREQUISITES: Trail shaders must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, section: usize, ctx: LocalContext) {
-        self.texture.set(device_context, 0);
-
+    /// PREREQUISITES: Trail shaders and texture must already be set.
+    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionPath, ctx: LocalContext) {
+        let Some(ops::Range { start, end }) = self.section_geometry_vertices(section.path) else {
+            log::error!("attempted to draw invalid {section}");
+            return
+        };
+        if start >= end {
+            // ignore empty sections
+            log::debug!("BUG? filter empty sections prior to scene or binding");
+            return
+        }
+        if let Some(section_vbuffer) = &self.section_vbuffer {
+            section_vbuffer.set(device_context, 0);
+        } else {
+            log::debug!("BUG? trail vbuffer missing while expecting {start}..{end}");
+        }
         unsafe {
-            self.section_vbuffer.set(device_context, 0);
             //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {
-                LocalContext::World => device_context.Draw(
-                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
-                    self.section_bookmarks[section],
-                ),
-                LocalContext::Map(..) => device_context.DrawInstanced(
-                    self.section_bookmarks[section + 1] - self.section_bookmarks[section],
-                    1,
-                    self.section_bookmarks[section],
-                    0,
-                ),
+                LocalContext::World => device_context.Draw(end - start, start),
+                LocalContext::Map(..) => device_context.DrawInstanced(end - start, 1, start, 0),
             }
         }
+    }
+
+    pub fn section_geometry_vertices(&self, section: TrailSectionIndex) -> Option<ops::Range<u32>> {
+        let section = section as usize;
+        let end = *self.vbuffer_section_end.get(section)?;
+        let start = match section {
+            #[cfg(todo = "unnecessary")]
+            section => section
+                .checked_sub(1)
+                .map(|prev| unsafe { *self.vbuffer_section_end.get_unchecked(prev) })
+                .unwrap_or(0),
+            section => *self
+                .vbuffer_section_end
+                .get(section.wrapping_sub(1))
+                .unwrap_or(&0),
+        };
+        Some(start..end)
+    }
+
+    /// mark broken
+    pub fn disable(&mut self) {
+        self.section_vbuffer = None;
+        self.vbuffer_section_end.clear();
+        self.vbuffer_section_end.push(0);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.section_vbuffer.is_none() && self.vbuffer_section_end.is_empty()
+    }
+
+    #[inline]
+    pub fn cleanup_background(mut self) {
+        mem::forget(self.texture.take());
+        mem::forget(self.section_vbuffer.take());
     }
 }
 
 #[cfg(feature = "statistics")]
-impl Drop for ActiveTrail {
+impl Drop for TrailRender {
     fn drop(&mut self) {
-        STATS_TRAIL_VERTEX_SIZE.decrement_by(|| self.section_vbuffer.size());
+        if let Some(vbuffer) = &self.section_vbuffer {
+            STATS_TRAIL_VERTEX_SIZE.decrement_by(|| vbuffer.size());
+        }
     }
 }
 
 pub static STATS_TRAIL_VERTEX_SIZE: Counter = Counter::DEFAULT;
-
-pub struct TrailParams {
-    pub resolution: Option<f32>,
-    pub width: f32,
-    pub y_offset: f32,
-    pub smoothing: Option<f32>,
-}
-
-impl TrailParams {
-    /// Current hardcoded value in BlishHUD Pathing
-    pub const DEFAULT: Self = Self {
-        resolution: None,
-        width: Self::DEFAULT_WIDTH,
-        y_offset: 0.0,
-        smoothing: None,
-    };
-
-    pub const DEFAULT_SMOOTHING: f32 = 5.5;
-    pub const DEFAULT_RESOLUTION: f32 = 1.0 / 20.0;
-    pub const DEFAULT_WIDTH: f32 = Self::WIDTH_FACTOR / Self::DEFAULT_RESOLUTION;
-    pub const WIDTH_FACTOR: f32 = 0.0254 * 2.0;
-
-    pub fn width(&self) -> f32 {
-        self.width
-    }
-
-    pub fn smoothing(&self) -> Option<f32> {
-        (self.resolution() > Self::DEFAULT_RESOLUTION).then_some(Self::DEFAULT_SMOOTHING)
-    }
-
-    pub fn resolution(&self) -> f32 {
-        self.resolution.unwrap_or(Self::WIDTH_FACTOR / self.width())
-    }
-
-    pub fn y_offset_for(&self, idx: usize) -> f32 {
-        //self.y_offset * (0.2 + (idx as f32 * f32::EPSILON * 100.0) % 0.8f32)
-        let scale = 0x4000;
-        let idx = idx % scale;
-        self.y_offset * (0.5 + (idx as f32 * 0.5 / scale as f32))
-    }
-}
-
-impl Default for TrailParams {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
-/// Expansion outward from trail edges
-///
-/// Pair with [TrailTextureMap::set_scale_from_expansion] for it to look
-/// remotely natural.
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-#[repr(transparent)]
-pub struct TrailScale {
-    pub normal_expansion: f32,
-}
-
-impl TrailScale {
-    /// No expansion, standard sizing
-    pub const DEFAULT: Self = Self::new(0.0);
-    /// Invalid setting that will always require refreshing parameters
-    pub const DIRTY: Self = Self::new(f32::NAN);
-
-    pub const fn new(normal_expansion: f32) -> Self {
-        Self { normal_expansion }
-    }
-
-    /// Convert from settings
-    pub const fn with_scale(trail_scale: f32) -> Self {
-        Self::new((trail_scale - 1.0) / 2.0)
-    }
-
-    pub const fn scale(&self) -> f32 {
-        self.normal_expansion * 2.0 + 1.0
-    }
-}
-
-impl Default for TrailScale {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-#[repr(C)]
-pub struct TrailTextureMap {
-    /// V coordinate offset
-    pub v_offset: f32,
-    /// V coordinate scaling
-    pub v_scale: f32,
-}
-
-impl TrailTextureMap {
-    pub const DEFAULT: Self = Self::new(1.0, 0.0);
-    pub const UNTEXTURED: Self = Self::new(0.0, Self::UNTEXTURED_ANCHOR.y);
-    pub const UNTEXTURED_ANCHOR: Point2<TextureSpace> = Point2::new(0.0, 0.39);
-
-    pub const fn new(v_scale: f32, v_offset: f32) -> Self {
-        Self { v_scale, v_offset }
-    }
-
-    pub const fn with_tex_scale(v_scale: f32) -> Self {
-        Self { v_scale, ..Self::DEFAULT }
-    }
-
-    pub fn set_scale_from_expansion(&mut self, scale: TrailScale) {
-        let TrailScale { normal_expansion } = scale;
-        let scale_trail_norm = match () {
-            #[cfg(todo)]
-            _ => (normal_expansion + 10.0 / 5.2) * -0.52 + 2.0,
-            () => {
-                let (e0, e1) = match () {
-                    #[cfg(todo)]
-                    _ => (2.38206f32, -0.45979f32),
-                    _ => (2.22149f32, -0.388849f32),
-                };
-                let scalex = normal_expansion * 1.5;
-                (e1 * (scalex + 2.0)).exp() * e0
-            },
-        };
-        self.v_scale = scale_trail_norm.clamp(0.04, 0.99);
-    }
-}
-
-impl Default for TrailTextureMap {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}

@@ -36,6 +36,16 @@ pub trait AsFullId {
     fn id_starts_with(&self, prefix: impl AsRef<FullIdRef>) -> bool {
         full_id_starts_with(self, prefix.as_ref())
     }
+    fn id_is_root(&self) -> bool {
+        let mut segs = self.segments().into_iter();
+        if segs.next().is_some() {
+            segs.next().is_none()
+        } else {
+            // XXX: unclear if empty is or isn't..?
+            // but we expect at least one segment atm so
+            false
+        }
+    }
 }
 fn full_id_starts_with<I: ?Sized + AsFullId>(id: &I, prefix: &FullIdRef) -> bool {
     let mut segs = id.segments().into_iter();

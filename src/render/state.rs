@@ -126,6 +126,8 @@ pub struct RenderState {
     pub marker_window: MarkerWindowState,
     #[cfg(feature = "space")]
     pub pathing_window: PathingWindowState,
+    #[cfg(feature = "paths")]
+    pub pathing_menu_open: bool,
     pub(super) timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
@@ -155,6 +157,8 @@ impl RenderState {
             marker_window: MarkerWindowState::new(),
             #[cfg(feature = "space")]
             pathing_window: PathingWindowState::new(),
+            #[cfg(feature = "paths")]
+            pathing_menu_open: false,
             state_errors: Default::default(),
         }
     }
@@ -617,6 +621,24 @@ impl RenderState {
             .read()
             .map(|sender| sender.is_some())
             .unwrap_or(false)
+    }
+
+    /// per-frame state setup
+    pub fn pre_render_ui(&mut self) {
+        #[cfg(feature = "paths")]
+        {
+            use crate::render::element::pack::PackVisibility;
+            self.pathing_window.pre_render();
+            self.machine
+                .pack_ui_state
+                .pre_draw(match self.pathing_window.open {
+                    _ if self.pathing_menu_open => PackVisibility::Visible,
+                    true => PackVisibility::Visible,
+                    false => PackVisibility::Closed,
+                });
+            self.pathing_window.pre_draw(&mut self.machine);
+            self.pathing_menu_open = false;
+        }
     }
 
     pub fn pre_render(host: AddonHostName) -> Option<bool> {

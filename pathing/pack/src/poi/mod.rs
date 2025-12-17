@@ -1,10 +1,11 @@
 use {
     crate::{
-        attributes::{AttrString, MarkerAttributes},
+        attributes::{keys, AttrString, MarkerAttributes},
         category::id::IdNameBox,
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
+    glam::{EulerRot, Quat, Vec3},
     glamour::Point3,
     std::fmt,
     uuid::Uuid,
@@ -92,28 +93,60 @@ impl Poi {
         })
     }
 
-    #[inline]
-    pub fn icon_name(&self) -> Option<&str> {
+    pub fn icon_file(&self) -> Option<&str> {
         self.attributes
             .get_poi()
-            .and_then(|poi| poi.icon_file.as_ref())
+            .and_then(|poi| poi.icon_file())
             .map(|s| &s[..])
     }
-
-    #[inline]
     pub fn height_offset(&self) -> f32 {
         self.attributes
             .get_poi()
             .and_then(|poi| poi.height_offset)
-            .unwrap_or(1.5)
+            .unwrap_or(keys::HeightOffset::DEFAULT.into())
     }
-
-    #[inline]
-    pub fn icon_scale(&self) -> f32 {
+    pub fn icon_size(&self) -> f32 {
         self.attributes
             .get_poi()
             .and_then(|poi| poi.icon_size)
-            .unwrap_or(1.0)
+            .unwrap_or(keys::IconSize::DEFAULT.into())
+    }
+    pub fn map_display_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.map_display_size)
+            .unwrap_or(keys::MapDisplaySize::DEFAULT.into())
+    }
+    pub fn scale_on_map_with_zoom(&self) -> bool {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.scale_on_map_with_zoom)
+            .unwrap_or(keys::ScaleOnMapWithZoom::DEFAULT.into())
+    }
+    pub fn min_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.min_size)
+            .unwrap_or(keys::MinSize::DEFAULT.into())
+    }
+    pub fn max_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.max_size)
+            .unwrap_or(keys::MaxSize::DEFAULT.into())
+    }
+    pub fn occlude(&self) -> bool {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.occlude)
+            .unwrap_or(keys::Occlude::DEFAULT.into())
+    }
+    pub fn rotate(&self) -> Option<Vec3> {
+        self.attributes.get_poi().and_then(|poi| poi.rotate)
+    }
+    pub fn rotation(&self) -> Option<Quat> {
+        self.rotate()
+            .map(|r| Quat::from_euler(EulerRot::XYZ, r.x, r.y, r.z))
     }
 }
 

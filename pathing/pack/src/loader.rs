@@ -25,6 +25,16 @@ pub trait PackLoaderContext {
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>>;
 
+    /// check if an asset directly corresponds to a real file
+    /// (only realistic when backed by [DirectoryLoader])
+    ///
+    /// TODO: could include byte offset range if in an uncompressed archive or something insane?
+    #[inline]
+    fn asset_absolute_path(&mut self, name: &str) -> Option<PathBuf> {
+        let _ = name;
+        None
+    }
+
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a>;
 
     fn all_files_with_ext_owned(&self, ext: &'static str) -> Vec<anyhow::Result<PathBuf>>
@@ -155,6 +165,10 @@ impl PackLoaderContext for DirectoryLoader {
         let iter = visit_dir_ext(&self.root, Cow::Borrowed(&self.root), ext);
 
         Box::new(iter)
+    }
+
+    fn asset_absolute_path(&mut self, name: &str) -> Option<PathBuf> {
+        Some(self.root.join(name))
     }
 }
 
