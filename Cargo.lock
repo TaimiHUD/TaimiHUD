@@ -3642,8 +3642,11 @@ name = "taimi_hoard"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitvec",
  "log",
+ "num-traits",
  "serde",
+ "wyz",
 ]
 
 [[package]]
