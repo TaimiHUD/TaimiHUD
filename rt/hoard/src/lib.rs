@@ -1,5 +1,6 @@
 use std::{borrow::Cow, hash};
 
+pub mod cmp;
 pub mod flags;
 pub mod iters;
 pub mod lazyfmt;
