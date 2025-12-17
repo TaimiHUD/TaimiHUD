@@ -1,13 +1,16 @@
 use {
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::pathing::{
+            PathingController, PathingEvent,
+            UnloadedReason,
+        },
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
         settings::{
             state::ui::{pathing::PathingFilterFlags, PathingWindowState as UiState},
             Settings,
         },
-        space::{engine::Engine, pack::UnloadedReason},
+        space::engine::Engine,
         with_i18n,
         Controller,
         ControllerEvent,

@@ -49,7 +49,7 @@ impl SpaceTrail {
         visibility: VisibilityFlags,
         _path: TrailPath,
         category: CategoryPath,
-    ) -> anyhow::Result<Self> {
+    ) -> Self {
         if !attrs.trail.is_some() {
             log::warn!("{_path} has incomplete render attrs?");
             let _ = Arc::make_mut(&mut attrs).trail.get_or_insert_default();
@@ -86,7 +86,7 @@ impl SpaceTrail {
             log::info!("Empty trail {category}/{_path}");
         }
 
-        Ok(Self {
+        Self {
             #[cfg(todo = "unnecessary")]
             path,
             category,
@@ -99,7 +99,7 @@ impl SpaceTrail {
             section_bookmarks,
             vertices: geometry.vertices,
             render_bookmark: 0,
-        })
+        }
     }
 
     pub fn empty() -> Self {

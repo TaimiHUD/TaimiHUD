@@ -1,36 +1,32 @@
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::{num::NonZero, ops};
-use std::sync::Arc;
-use std::{iter, mem};
-use crate::space::pack::PackSpace;
-use crate::{
-    controller::pathing::space::{DrawSpace, TrailParams},
-    resources::Vertex,
-};
-#[cfg(deleteme)]
 use {
-    crate::controller::pathing::{
-        state::interactive::InteractivePoi,
-        registry::{LoadedPack, PackCategoryInfo, PackConfig},
-        filter::MapFilters,
-        MapPackInfo,
+    crate::{
+        controller::pathing::{
+            registry::{LoadedPack, PackCategoryInfo, PackConfig},
+            space::{DrawSpace, TrailParams},
+            shared::MapPackInfo,
+            PackSpace,
+        },
+        resources::Vertex,
     },
+    std::{iter, mem, sync::Arc, num::NonZero, ops, hash::Hash, collections::VecDeque},
     taimi_hoard::collections::lru::RecentlyUsed,
+    taimi_hoard::flags::set::{BitFlagForSet, FlagSet},
+    taimi_meta::packs::{
+        collections::CategorySet,
+        CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath,
+    },
+    bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
 };
-use taimi_meta::packs::{
-    collections::CategorySet,
-    CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath, TrailPath,
+#[cfg(todo)]
+use crate::controller::pathing::{
+    state::interactive::InteractivePoi,
+    filter::MapFilters,
+    taimi_pack::attributes::keys::Guid,
 };
-use taimi_hoard::flags::set::{BitFlagForSet, FlagSet};
 use bitflags::bitflags;
-use bitvec::order::Lsb0;
-use bitvec::slice::BitSlice;
-use bitvec::{vec::BitVec, view::BitView};
 use glam::Vec3Swizzles;
 use glamour::{Box3, Point3, Size3, Vector3};
 use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
-use taimi_pack::attributes::keys::Guid;
 use taimi_pack::Category;
 use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
 
@@ -380,34 +376,42 @@ pub struct LoadedTrailGeometry {
     pub y_offsets: Vec<f32>,
 }
 
-#[cfg(deleteme)]
 #[derive(Debug, Clone)]
 pub struct LoadedMapPack {
     pub map_id: NonZero<MapID>,
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
+    #[cfg(todo)]
     pub poi_guids: Arc<[Guid]>,
+    #[cfg(todo)]
     pub interactive_pois: Arc<[InteractivePoi]>,
+    #[cfg(todo)]
     pub interactive_pois_nearby: BitVec,
     pub trails: Box<[LoadedTrail]>,
+    #[cfg(todo)]
     pub trail_guids: Box<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
+    #[cfg(todo)]
     pub filters: MapFilters,
 }
 
-#[cfg(deleteme)]
 impl LoadedMapPack {
     pub fn empty(map_id: MapIndex) -> Self {
         Self {
             map_id,
             used: RecentlyUsed::DEFAULT,
+            #[cfg(todo)]
             interactive_pois: Default::default(),
+            #[cfg(todo)]
             interactive_pois_nearby: Default::default(),
             pois: Default::default(),
+            #[cfg(todo)]
             poi_guids: Default::default(),
             trails: Default::default(),
+            #[cfg(todo)]
             trail_guids: Default::default(),
             categories: Default::default(),
+            #[cfg(todo)]
             filters: Default::default(),
         }
     }
@@ -421,10 +425,12 @@ impl LoadedMapPack {
         let pois = info.pois()
             .map(|path| LoadedPoi::from_pack(path, pack))
             .collect();
+        #[cfg(todo)]
         let poi_guids = info.poi_guid_filter(info.pois())
             .map(|path|
                 pack.pois.get(path.path as usize).map(|poi| Guid::from(poi.guid)).unwrap_or_default()
             ).collect();
+        #[cfg(todo)]
         let interactive_pois = info.pois().enumerate()
             .map(|(i, path)| InteractivePoi::from_pack(i as PoiIndex, path, pack))
             .filter(|ipoi| !ipoi.is_empty())
@@ -432,25 +438,35 @@ impl LoadedMapPack {
         let trails = info.trails()
             .map(|path| LoadedTrail::from_pack(path, pack))
             .collect();
+        #[cfg(todo)]
         let trail_guids = info.trail_guid_filter(info.trails())
             .map(|path|
                 pack.trails.get(path.path as usize).map(|trail| Guid::from(trail.guid)).unwrap_or_default()
             ).collect();
+        #[cfg(todo)]
         let filters = MapFilters::from_pack(info, active);
 
         let mut loaded = Self {
             map_id,
+            #[cfg(todo)]
             interactive_pois_nearby: BitVec::new(),
+            #[cfg(todo)]
             interactive_pois,
             pois,
+            #[cfg(todo)]
             poi_guids,
             trails,
+            #[cfg(todo)]
             trail_guids,
+            #[cfg(todo)]
             filters,
             categories: Default::default(),
             used: RecentlyUsed::DEFAULT,
         };
-        loaded.interactive_pois_nearby.reserve_exact(loaded.interactive_pois.len());
+        #[cfg(todo)]
+        {
+            loaded.interactive_pois_nearby.reserve_exact(loaded.interactive_pois.len());
+        }
 
         loaded
     }
@@ -465,6 +481,7 @@ impl LoadedMapPack {
     {
         info.pois().zip(self.pois.iter_mut())
     }
+    #[cfg(todo)]
     pub fn poi_guids<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (PoiPath, &'a Guid)> + 'i where
         'a: 'i,
     {
@@ -491,6 +508,7 @@ impl LoadedMapPack {
     {
         info.trails().zip(self.trails.iter_mut())
     }
+    #[cfg(todo)]
     pub fn trail_guids<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (TrailPath, &'a Guid)> + 'i where
         'a: 'i,
     {

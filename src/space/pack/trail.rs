@@ -32,11 +32,16 @@ impl SpaceTrail {
                 .get_or_load_texture(texture_handle)
                 .context("Loading trail texture"));
 
-            self.texture = match &texture {
-                &Ok(texture) => Some(texture),
-                Err(..) => None,
-            };
-            texture.map(drop)
+            match texture {
+                Ok(texture) => {
+                    self.texture = Some(texture);
+                    Ok(())
+                },
+                Err(e) => {
+                    self.texture = None;
+                    Err(e)
+                },
+            }
         } else { Ok(()) };
 
         let res = if self.section_vbuffer.is_none() {

@@ -1,11 +1,16 @@
 use {
     crate::{
-        controller::{pathing::PathingEvent, Controller},
+        controller::{
+            pathing::{
+                space::{SpacePackCollection, PoiScale, TrailScale, TrailTextureMap},
+                PathingEvent,
+            },
+            Controller,
+        },
         render::machine::RenderMachine,
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::{PackCollection, PoiScale, TrailScale, TrailTextureMap},
             render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
@@ -127,7 +132,7 @@ pub struct Engine {
     // ECS stuff
     pub world: World,
 
-    pub packs: PackCollection,
+    pub packs: Arc<SpacePackCollection>,
 
     settings: Option<PathingSettings>,
 }

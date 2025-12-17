@@ -290,7 +290,7 @@ croner = "3"
 bitvec = { workspace = true }
 
 taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
-taimi_pack = { path = "./pathing/pack", optional = true }
+taimi_pack = { path = "./pathing/pack", optional = true, features = ["serde"] }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
 taimi_ffi = { path = "./rt/ffi", default-features = false, features = ["serde"] }

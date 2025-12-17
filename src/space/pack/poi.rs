@@ -168,7 +168,7 @@ impl PoiCommonRenderData {
             for i in pack.render_poi_bookmarks() {
                 let index = i as usize;
                 let Some(poi) = pack.active_pois.get(index) else { continue };
-                if let Some(b) = gaps.get_mut(index) {
+                if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
                         log::error!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
                         continue
@@ -196,7 +196,8 @@ impl PoiCommonRenderData {
         Ok(())
     }
     fn ib_len_for_packs(&self, packs: &[SpacePack]) -> usize {
-        packs.iter().map(|p| p.render_poi_bookmarks().end).max()
+        packs.iter().map(|p| p.render_poi_bookmarks().end as usize).max()
+            .unwrap_or(0)
     }
     fn ib_len(&self) -> usize {
         let ib = self.world_ib.as_ref()
@@ -256,12 +257,16 @@ impl SpacePoi {
             .get_or_load_texture(icon_handle)
             .context("Loading poi texture"));
 
-        self.icon = match &icon {
-            &Ok(texture) => Some(texture),
-            Err(..) => None,
-        };
-
-        icon.map(drop)
+        match icon {
+            Ok(icon) => {
+                self.icon = Some(icon);
+                Ok(())
+            },
+            Err(e) => {
+                self.icon = None;
+                Err(e)
+            },
+        }
     }
 
     pub fn instance_data(&self) -> InstanceBufferData {

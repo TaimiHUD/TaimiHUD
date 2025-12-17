@@ -16,7 +16,6 @@ use {
         settings::{Settings, SettingsLock, SourceKind},
         space::{
             engine::SpaceEvent,
-            pack::{LoaderBox, UnloadedReason},
             Engine,
         },
         Interruption,
@@ -36,8 +35,9 @@ use {
 };
 
 pub use self::{
+    registry::{LoaderBox, UnloadedReason},
     festivals::FestivalFixup,
-    shared::{PathingEnables, PathingReceiver, PathingSender},
+    shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
     state::visible,
 };
 pub use taimi_meta::coords::LocalSpace as PackSpace;

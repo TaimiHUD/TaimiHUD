@@ -1,16 +1,36 @@
 use {
     crate::{
-        controller::{api::FestivalState, pathing::PathingEvent},
+        controller::{
+            api::FestivalState,
+            pathing::{registry::PackLoader, PathingEvent},
+        },
         render::machine::MumbleIdentityUpdate,
+        settings::SettingsLock,
     },
+    std::{collections::btree_map, sync::Arc},
     taimi_meta::ui::GameplayState,
-    tokio::sync::{mpsc, watch},
+    taimi_sync::watched::watch,
+    tokio::sync::mpsc,
 };
+pub use self::{
+    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPackInfo, SharedLoaderPackConfig},
+    maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState},
+    info::MapPackInfo,
+};
+#[cfg(todo)]
+pub use self::maps::SharedMaps;
+
+mod info;
+mod loader;
+mod maps;
 
 #[derive(Debug, Clone)]
 pub struct PathingSender {
+    pub shared: Arc<PathingShared>,
     pub command: mpsc::Sender<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
+    #[cfg(todo)]
+    pub interactions: broadcast::Sender<InteractionEvent>,
 }
 impl PathingSender {
     pub fn new(
@@ -19,28 +39,104 @@ impl PathingSender {
         festivals: &watch::Sender<FestivalState>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(48);
+        #[cfg(todo)]
+        let interactions = broadcast::Sender::new(Self::INTERACTIONS_BUFFER_LEN);
         let sender = Self {
+            shared: Arc::new(PathingShared::new()),
             command,
             enables: watch::Sender::new(PathingEnables::empty()),
+            #[cfg(todo)]
+            interactions: interactions.clone(),
         };
         let rx = PathingReceiver {
+            shared: sender.shared.clone(),
             command: command_rx,
             festivals: festivals.subscribe(),
             gameplay,
             mumble_identity,
             enables: sender.enables.clone(),
+            #[cfg(todo)]
+            interactions_rx: interactions.subscribe(),
+            #[cfg(todo)]
+            interactions,
         };
 
         (sender, rx)
     }
+    #[cfg(todo)]
+    const INTERACTIONS_BUFFER_LEN: usize = 48;
 }
 
 pub struct PathingReceiver {
+    pub shared: Arc<PathingShared>,
     pub command: mpsc::Receiver<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
     pub festivals: watch::Receiver<FestivalState>,
     pub gameplay: watch::Receiver<GameplayState>,
     pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
+    #[cfg(todo)]
+    pub interactions: broadcast::Sender<InteractionEvent>,
+    #[cfg(todo)]
+    pub interactions_rx: broadcast::Receiver<InteractionEvent>,
+}
+impl PathingReceiver {
+    pub(crate) fn make_loader(&self, settings: SettingsLock) -> Arc<PackLoader> {
+        let loader = PackLoader::new(self.shared.clone(), settings);
+        Arc::new(loader)
+    }
+}
+
+/// TODO: make a recv side to this?
+#[derive(Debug)]
+pub struct PathingShared {
+    pub packs: SharedPacks,
+    #[cfg(todo)]
+    pub maps: watch::Sender<SharedMaps>,
+    /// current map
+    pub gameplay: watch::Sender<SharedGameplayMap>,
+}
+impl PathingShared {
+    pub fn new() -> Self {
+        Self {
+            packs: SharedPacks::new(),
+            #[cfg(todo)]
+            maps: watch::Sender::new(Default::default()),
+            gameplay: watch::Sender::new(SharedGameplayMap::default()),
+        }
+    }
+
+    /// TODO: cache as atomic
+    pub fn pack_count(&self) -> usize {
+        self.packs.info.borrow().len()
+    }
+
+    pub fn clear_for_shutdown(&self) {
+        // TODO: consider true once downstream interprets some changes as shutdown
+        let notify = false;
+        self.gameplay.send_if_modified(|shared_map| {
+            *shared_map = SharedGameplayMap::default();
+            notify
+        });
+        #[cfg(todo)]
+        {
+            self.maps.send_if_modified(|shared_maps| {
+                *shared_maps = SharedMaps::empty();
+                notify
+            });
+        }
+        self.packs.info.send_if_modified(|info| {
+            *info = Default::default();
+            notify
+        });
+        self.packs.config.send_if_modified(|config| {
+            *config = Default::default();
+            notify
+        });
+        self.packs.data.send_if_modified(|data| {
+            *data = Default::default();
+            notify
+        });
+    }
 }
 
 bitflags::bitflags! {
