@@ -8,13 +8,14 @@ use {
         },
         resources::Vertex,
     },
-    std::{iter, mem, sync::Arc, num::NonZero, ops, hash::Hash, collections::VecDeque},
+    std::{iter, mem, sync::{Arc, LazyLock}, num::NonZero, ops, hash::Hash, collections::VecDeque},
     taimi_hoard::collections::lru::RecentlyUsed,
     taimi_hoard::flags::set::{BitFlagForSet, FlagSet},
     taimi_meta::packs::{
         collections::CategorySet,
         CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath,
     },
+    taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
     bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
 };
 #[cfg(todo)]
@@ -47,19 +48,25 @@ pub struct LoadedPoi {
     pub visibility: VisibilityFlags,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
+    attrs: Arc<RenderAttributes>,
+    overrides: Option<Box<RenderAttributes>>,
 }
 
 impl LoadedPoi {
-    pub const INVALID: Self = Self {
-        category: CategoryIndex::MAX,
-        visibility: VisibilityFlags::empty(),
-        position: Point3::INFINITY,
-        bounds: Box3::ZERO,
-    };
+    pub fn invalid() -> Self {
+        Self {
+            category: CategoryIndex::MAX,
+            visibility: VisibilityFlags::empty(),
+            position: Point3::INFINITY,
+            bounds: Box3::ZERO,
+            attrs: EMPTY_RENDER_ATTRS.clone(),
+            overrides: None,
+        }
+    }
 
     pub fn from_pack(path: PoiPath, pack: &Pack) -> Self {
         let Some(poi) = pack.pois.get(path.path as usize) else {
-            return Self::INVALID
+            return Self::invalid()
         };
         let mut visibility = VisibilityFlags::DEFAULTS;
         let category = match () {
@@ -75,11 +82,61 @@ impl LoadedPoi {
         visibility.set_defaults_from_attributes(&poi.attributes);
         let (position, bounds) = Self::coords_for(poi);
 
+        let mut attrs = poi.attributes.render.clone()
+            .unwrap_or_else(|| EMPTY_RENDER_ATTRS.clone());
+        if !attrs.poi.is_some() {
+            log::warn!("{path} has incomplete render attrs?");
+            let _ = Arc::make_mut(&mut attrs).poi.get_or_insert_default();
+        }
+
         Self {
             category,
             visibility: visibility.restore_default_toggles(),
             bounds,
             position,
+            attrs,
+            overrides: None,
+        }
+    }
+
+    pub fn render_attrs(&self) -> &RenderAttributes {
+        self.overrides.as_ref().map(|a| &**a)
+            .unwrap_or(&self.attrs)
+    }
+    pub fn poi_attrs(&self) -> &PoiAttributes {
+        let poi = self.render_attrs().poi.as_ref()
+            .map(|p| &**p);
+        unsafe {
+            poi.unwrap_unchecked()
+        }
+    }
+
+    pub fn clear_overrides(&mut self) {
+        self.overrides = None;
+    }
+    pub fn set_overrides(&mut self, overrides: RenderAttributes) {
+        let overrides = self.overrides.insert(Box::new(overrides));
+        let _ = overrides.poi.get_or_insert_default();
+        overrides.merge(&self.attrs);
+    }
+    #[inline]
+    pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
+        match overrides {
+            Some(o) => self.set_overrides(o),
+            None => self.clear_overrides(),
+        }
+    }
+    pub fn with_overrides_mut<R, F: FnOnce(&mut RenderAttributes) -> R>(&mut self, f: F) -> R {
+        let overrides = get_overrides_mut(&mut self.overrides);
+        let res = f(overrides);
+        // please don't clear the attributes, that would be very rude...
+        let _ = overrides.poi.get_or_insert_default();
+        res
+    }
+    pub fn poi_overrides_mut(&mut self) -> &mut PoiAttributes {
+        let overrides = get_overrides_mut(&mut self.overrides);
+        unsafe {
+            overrides.poi.as_mut().unwrap_unchecked()
         }
     }
 
@@ -124,23 +181,25 @@ pub struct LoadedTrail {
     pub category: CategoryIndex,
     pub visibility: VisibilityFlags,
     pub sections: Option<Arc<[LoadedTrailSection]>>,
-    pub scale: f32,
-    pub is_wall: bool,
+    attrs: Arc<RenderAttributes>,
+    overrides: Option<Box<RenderAttributes>>,
     // TODO: y_offset?
 }
 
 impl LoadedTrail {
-    pub const INVALID: Self = Self {
-        category: CategoryIndex::MAX,
-        visibility: VisibilityFlags::empty(),
-        sections: None,
-        scale: 1.0,
-        is_wall: false,
-    };
+    pub fn invalid() -> Self {
+        Self {
+            category: CategoryIndex::MAX,
+            visibility: VisibilityFlags::empty(),
+            sections: None,
+            attrs: EMPTY_RENDER_ATTRS.clone(),
+            overrides: None,
+        }
+    }
 
     pub fn from_pack(path: TrailPath, pack: &Pack) -> Self {
         let Some(trail) = pack.trails.get(path.path as usize) else {
-            return Self::INVALID
+            return Self::invalid()
         };
         let mut visibility = VisibilityFlags::DEFAULTS;
         let category = match () {
@@ -155,12 +214,60 @@ impl LoadedTrail {
         }.unwrap_or(CategoryIndex::MAX);
         visibility.set_defaults_from_attributes(&trail.attributes);
 
+        let mut attrs = trail.attributes.render.clone()
+            .unwrap_or_else(|| EMPTY_RENDER_ATTRS.clone());
+        if !attrs.trail.is_some() {
+            log::warn!("{path} has incomplete render attrs?");
+            let _ = Arc::make_mut(&mut attrs).trail.get_or_insert_default();
+        }
+
         Self {
             category,
             visibility: visibility.restore_default_toggles(),
-            is_wall: trail.is_wall(),
-            scale: trail.scale(),
+            attrs,
+            overrides: None,
             sections: None,
+        }
+    }
+
+    pub fn render_attrs(&self) -> &RenderAttributes {
+        self.overrides.as_ref().map(|a| &**a)
+            .unwrap_or(&self.attrs)
+    }
+    pub fn trail_attrs(&self) -> &TrailAttributes {
+        let trail = self.render_attrs().trail.as_ref()
+            .map(|p| &**p);
+        unsafe {
+            trail.unwrap_unchecked()
+        }
+    }
+
+    pub fn clear_overrides(&mut self) {
+        self.overrides = None;
+    }
+    pub fn set_overrides(&mut self, overrides: RenderAttributes) {
+        let overrides = self.overrides.insert(Box::new(overrides));
+        let _ = overrides.trail.get_or_insert_default();
+        overrides.merge(&self.attrs);
+    }
+    #[inline]
+    pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
+        match overrides {
+            Some(o) => self.set_overrides(o),
+            None => self.clear_overrides(),
+        }
+    }
+    pub fn with_overrides_mut<R, F: FnOnce(&mut RenderAttributes) -> R>(&mut self, f: F) -> R {
+        let overrides = get_overrides_mut(&mut self.overrides);
+        let res = f(overrides);
+        // please don't clear the attributes, that would be very rude...
+        let _ = overrides.trail.get_or_insert_default();
+        res
+    }
+    pub fn trail_overrides_mut(&mut self) -> &mut TrailAttributes {
+        let overrides = get_overrides_mut(&mut self.overrides);
+        unsafe {
+            overrides.trail.as_mut().unwrap_unchecked()
         }
     }
 
@@ -180,7 +287,10 @@ impl LoadedTrail {
         let section_count = self.sections.as_ref().map(|s| s.len()).unwrap_or(0);
         // TODO
         let y_offset_sig = (self.category as usize) << 24 | section_count;
-        Self::vertices_with_data(trail_data, params, self.scale, self.is_wall, params.y_offset_for(y_offset_sig))
+        let trail = self.trail_attrs();
+        let scale = trail.trail_scale();
+        let is_wall = trail.is_wall();
+        Self::vertices_with_data(trail_data, params, scale, is_wall, params.y_offset_for(y_offset_sig))
     }
 
     pub fn vertices_with_pack_trail(trail_data: &TrailData, trail: &Trail, params: &TrailParams, y_offset: f32) -> LoadedTrailGeometry {
@@ -375,6 +485,17 @@ pub struct LoadedTrailGeometry {
     pub section_lengths: Vec<u32>,
     pub y_offsets: Vec<f32>,
 }
+
+fn get_overrides_mut<'a>(overrides: &'a mut Option<Box<RenderAttributes>>) -> &'a mut Box<RenderAttributes> {
+    overrides.get_or_insert_with(|| Box::new((**EMPTY_RENDER_ATTRS).clone()))
+}
+static EMPTY_RENDER_ATTRS: LazyLock<Arc<RenderAttributes>> = LazyLock::new(|| {
+    Arc::new(RenderAttributes {
+        poi: Some(Default::default()),
+        trail: Some(Default::default()),
+        .. Default::default()
+    })
+});
 
 #[derive(Debug, Clone)]
 pub struct LoadedMapPack {

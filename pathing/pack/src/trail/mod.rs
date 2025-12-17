@@ -1,6 +1,6 @@
 use {
     crate::{
-        attributes::{AttrString, MarkerAttributes},
+        attributes::{keys, AttrString, MarkerAttributes},
         category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
         pack::{taco_safe_name, taco_xml_to_guid},
@@ -130,28 +130,29 @@ impl Trail {
         data
     }
 
-    #[inline]
     pub fn texture_name(&self) -> Option<&str> {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.texture.as_ref())
             .map(|s| &s[..])
     }
-
-    #[inline]
     pub fn scale(&self) -> f32 {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.trail_scale)
-            .unwrap_or(1.0)
+            .unwrap_or(keys::TrailScale::DEFAULT.into())
     }
-
-    #[inline]
     pub fn is_wall(&self) -> bool {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.is_wall)
-            .unwrap_or(false)
+            .unwrap_or(keys::IsWall::DEFAULT.into())
+    }
+    pub fn anim_speed(&self) -> f32 {
+        self.attributes
+            .get_trail()
+            .and_then(|trail| trail.anim_speed)
+            .unwrap_or(keys::AnimSpeed::DEFAULT.into())
     }
 }
 

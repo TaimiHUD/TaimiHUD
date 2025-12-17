@@ -948,17 +948,12 @@ impl AsRef<Pack> for ActivePack {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PackTextureHandle(usize);
 
-#[cfg(deleteme)]
-pub struct PackCollection {
-    pub loaded_packs: IndexMap<String, ActivePack>,
-    pub unloaded_packs: IndexMap<String, UnloadedReason>,
+pub struct PackRender {
+    pub packs: SpacePackCollection,
 
     pub current_map: Option<i32>,
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
-    pub trail_params: TrailParams,
-
-    festival_categories: BTreeMap<&'static str, Festival>,
 }
 
 #[cfg(todo)]

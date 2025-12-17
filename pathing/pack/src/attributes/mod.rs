@@ -2,7 +2,7 @@ use {
     crate::{category::id::IdNameBox, pack::taco_xml_to_guid},
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
-    std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
+    std::{borrow::Cow, fmt, str::FromStr, sync::Arc, num::NonZero},
     uuid::Uuid,
     xml::name::Name,
 };
@@ -518,6 +518,50 @@ impl FilterAttributes {
             self.invert_behavior = base.invert_behavior;
         }
     }
+
+    pub fn festivals(&self) -> Festivals {
+        self.festivals.unwrap_or(Festivals::empty())
+    }
+    pub fn mounts(&self) -> Mounts {
+        self.mounts.unwrap_or(Mounts::empty())
+    }
+    pub fn professions(&self) -> Professions {
+        self.professions.unwrap_or(Professions::empty())
+    }
+    pub fn races(&self) -> Races {
+        self.races.unwrap_or(Races::empty())
+    }
+    pub fn specializations(&self) -> &[keys::Specialization] {
+        let v = self.specializations.as_ref()
+            .map(|s| &s[..])
+            .unwrap_or(&[]);
+        keys::Specialization::slice_from_i32(v)
+    }
+    pub fn map_types(&self) -> &[MapType] {
+        self.map_types.as_ref()
+            .map(|s| &s[..])
+            .unwrap_or(&[])
+    }
+    pub fn schedule(&self) -> Option<&str> {
+        self.schedule.as_ref().map(|s| &s[..])
+    }
+    pub fn schedule_duration(&self) -> f32 {
+        self.schedule_duration.unwrap_or(keys::ScheduleDuration::DEFAULT.into())
+    }
+    pub fn raids(&self) -> &[String] {
+        self.raids.as_ref()
+            .map(|v| &v[..])
+            .unwrap_or(&[])
+    }
+    pub fn achievement_id(&self) -> Option<NonZero<u32>> {
+        self.achievement_id.and_then(|v| NonZero::new(v as u32))
+    }
+    pub fn achievement_bit(&self) -> Option<u16> {
+        self.achievement_bit.map(|v| v as u16)
+    }
+    pub fn invert_behavior(&self) -> bool {
+        self.invert_behavior.unwrap_or(keys::InvertBehaviour::DEFAULT.into())
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -567,12 +611,23 @@ impl RenderAttributes {
 
     #[inline]
     pub fn tint(&self) -> Vec4 {
-        self.tint.unwrap_or(Vec4::ONE)
+        self.tint.unwrap_or(keys::Tint::DEFAULT.into())
     }
-
     #[inline]
     pub fn alpha(&self) -> f32 {
-        self.alpha.unwrap_or(1.0)
+        self.alpha.unwrap_or(keys::Alpha::DEFAULT.into())
+    }
+    pub fn can_fade(&self) -> bool {
+        self.can_fade.unwrap_or(keys::CanFade::DEFAULT.into())
+    }
+    pub fn cull(&self) -> CullDirection {
+        self.cull.unwrap_or(keys::Cull::DEFAULT.into())
+    }
+    pub fn fade_near(&self) -> f32 {
+        self.fade_near.unwrap_or(keys::FadeNear::DEFAULT.into())
+    }
+    pub fn fade_far(&self) -> f32 {
+        self.fade_far.unwrap_or(keys::FadeFar::DEFAULT.into())
     }
 }
 
@@ -598,6 +653,19 @@ impl TrailAttributes {
         if self.is_wall.is_none() {
             self.is_wall = base.is_wall;
         }
+    }
+
+    pub fn texture(&self) -> Option<&str> {
+        self.texture.as_ref().map(|s| &s[..])
+    }
+    pub fn anim_speed(&self) -> f32 {
+        self.anim_speed.unwrap_or(keys::AnimSpeed::DEFAULT.into())
+    }
+    pub fn scale(&self) -> f32 {
+        self.trail_scale.unwrap_or(keys::TrailScale::DEFAULT.into())
+    }
+    pub fn is_wall(&self) -> bool {
+        self.is_wall.unwrap_or(keys::IsWall::DEFAULT.into())
     }
 }
 
@@ -650,6 +718,34 @@ impl PoiAttributes {
         if self.billboard_text_color.is_none() {
             self.billboard_text_color = base.billboard_text_color;
         }
+    }
+
+    pub fn icon_file(&self) -> Option<&str> {
+        self.icon_file.as_ref().map(|s| &s[..])
+    }
+    pub fn height_offset(&self) -> f32 {
+        self.height_offset.unwrap_or(keys::HeightOffset::DEFAULT.into())
+    }
+    pub fn icon_size(&self) -> f32 {
+        self.icon_size.unwrap_or(keys::IconSize::DEFAULT.into())
+    }
+    pub fn map_display_size(&self) -> f32 {
+        self.map_display_size.unwrap_or(keys::MapDisplaySize::DEFAULT.into())
+    }
+    pub fn scale_on_map_with_zoom(&self) -> bool {
+        self.scale_on_map_with_zoom.unwrap_or(keys::ScaleOnMapWithZoom::DEFAULT.into())
+    }
+    pub fn min_size(&self) -> f32 {
+        self.min_size.unwrap_or(keys::MinSize::DEFAULT.into())
+    }
+    pub fn max_size(&self) -> f32 {
+        self.max_size.unwrap_or(keys::MaxSize::DEFAULT.into())
+    }
+    pub fn occlude(&self) -> bool {
+        self.occlude.unwrap_or(keys::Occlude::DEFAULT.into())
+    }
+    pub fn rotate(&self) -> Vec3 {
+        self.rotate.unwrap_or(keys::Rotate::DEFAULT.into())
     }
 }
 
