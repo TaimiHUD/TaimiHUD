@@ -13,6 +13,7 @@ pub use self::{lazymut::ArcLazyMut, ptrcmp::ArcPtrCmp};
 
 pub mod iters;
 pub mod lazymut;
+pub mod moveshare;
 mod ptrcmp;
 
 /// unallocated refs are [equivalent](Weak::ptr_eq) to [Weak::new()]
