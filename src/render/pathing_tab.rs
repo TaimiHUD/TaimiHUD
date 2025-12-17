@@ -49,7 +49,7 @@ impl PathingConfig {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        let _ = self.enables.get_mut();
+        let _ = self.enables.read_mut();
         ui.columns(2, "pathing_tab_start", true);
 
         self.draw_header(ui);
@@ -153,7 +153,7 @@ impl PathingConfig {
     {
         {
             let _font = (!self.katrender()).then(|| NexusLinkFont::Big.push_font(ui));
-            let enables = self.enables.borrow_mut();
+            let enables = self.enables.get_mut();
             if ui.checkbox_flags(fl!("pathing-config-enable"), enables, PathingEnables::KATRENDER) {
                 PathingController::try_send(PathingEvent::ToggleKatRender);
             }
@@ -477,7 +477,7 @@ impl PathingConfig {
             false,
         ));
         if let Some(_tree) = filters_tree {
-            let enables = self.enables.borrow_mut();
+            let enables = self.enables.get_mut();
             if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
                 &label,
                 enables,
