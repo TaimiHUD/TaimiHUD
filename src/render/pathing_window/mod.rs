@@ -58,7 +58,7 @@ impl PathingWindowState {
             }
         };
         if self.ui_state.watch.has_changed() {
-            let ui_state = self.ui_state.get_mut();
+            let ui_state = self.ui_state.read_mut();
             self.filter_open = ui_state.search.open;
             self.filter_state = ui_state.filter.flags;
             self.search_state.flags = ui_state.search.flags;
