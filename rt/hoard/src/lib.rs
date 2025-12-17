@@ -1,7 +1,12 @@
 use std::{borrow::Cow, hash};
 
+pub mod cmp;
+pub mod collections;
 pub mod flags;
+pub mod fns;
+pub mod iters;
 pub mod lazyfmt;
+pub mod loc;
 pub mod paths;
 pub mod statistics;
 

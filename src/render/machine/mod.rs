@@ -10,7 +10,15 @@ use {
     },
 };
 #[cfg(feature = "space")]
-use {crate::space::engine::Engine, std::ops::Range};
+use {
+    crate::{
+        controller::pathing::shared::{PathingShared, SharedGameplayMap},
+        render::element::pack::PackElements,
+        space::engine::Engine,
+    },
+    std::{ops::Range, sync::Arc},
+    taimi_sync::watched::Watched,
+};
 use {
     crate::{
         controller::Controller,
@@ -95,6 +103,10 @@ pub struct RenderMachine {
     pub gameplay: GameplayState,
     #[cfg(not(any(feature = "markers", feature = "space")))]
     pub display_size: Size2<ScreenSpace>,
+    #[cfg(feature = "paths")]
+    pub pathing: Option<Arc<PathingShared>>,
+    #[cfg(feature = "paths")]
+    pub pack_ui_state: PackElements,
 }
 
 pub type RenderPositioning<S = LocalSpace> = (Point3<S>, Vector3<S>);
@@ -154,6 +166,10 @@ impl RenderMachine {
             gameplay: GameplayState::INITIAL,
             #[cfg(not(any(feature = "markers", feature = "space")))]
             display_size: Size2::ZERO,
+            #[cfg(feature = "paths")]
+            pathing: None,
+            #[cfg(feature = "paths")]
+            pack_ui_state: PackElements::default(),
         }
     }
 
@@ -288,6 +304,9 @@ impl RenderMachine {
 
         let mut state = RenderState::lock();
         if let Some(state) = state.as_mut() {
+            state.machine.turn_render_pre();
+            state.pre_render_ui();
+
             Self::run_tasks(state);
 
             Self::poll_runtime(state);
@@ -305,6 +324,25 @@ impl RenderMachine {
     pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_lines256";
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
         include_bytes!("../../../data/textures/logotype-lines-256.png");
+
+    pub fn turn_render_pre(&mut self) {
+        #[cfg(feature = "paths")]
+        if self.pathing.is_none() {
+            Controller::with_sender(|s| {
+                if let Some(pathing) = &s.pathing {
+                    self.pathing = Some(pathing.shared.clone());
+                }
+            });
+        }
+        #[cfg(feature = "paths")]
+        #[cfg(todo)]
+        if let Some(pathing) = &self.pathing {
+            if !self.pack_map.is_watching() {
+                self.pack_map.restart_watching(&pathing.gameplay);
+            }
+            let _ = self.pack_map.try_read_mut();
+        }
+    }
 
     pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]

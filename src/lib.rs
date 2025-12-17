@@ -60,7 +60,7 @@ use {
     },
     marker::format::MarkerType,
     nexus::event::{arc::CombatData, extras::SquadUpdate, MumbleIdentityUpdate},
-    relative_path::RelativePathBuf,
+    relative_path::RelativePath,
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
@@ -955,20 +955,27 @@ fn process_textures() {
 
 fn texture_schedule_bytes<K, B>(key: K, bytes: B)
 where
-    K: Into<String>,
+    K: Into<rt::textures::TextureKey>,
     B: Into<Vec<u8>>,
 {
     let event = ControllerEvent::LoadTextureIntegrated(key.into(), bytes.into());
     Controller::try_send(event);
 }
+fn texture_schedule_file<K, P>(key: K, path: P)
+where
+    K: Into<rt::textures::TextureKey>,
+    P: Into<PathBuf>,
+{
+    let event = ControllerEvent::LoadTexture(key.into(), path.into());
+    Controller::try_send(event);
+}
 
 fn texture_schedule_path<R, P>(rel: R, path: P)
 where
-    R: Into<RelativePathBuf>,
+    R: AsRef<RelativePath>,
     P: Into<PathBuf>,
 {
-    let event = ControllerEvent::LoadTexture(rel.into(), path.into());
-    Controller::try_send(event);
+    texture_schedule_file(rel.as_ref().as_str(), path)
 }
 
 /// it's a bad idea to take too long to unload on quit due to issues on nexus,

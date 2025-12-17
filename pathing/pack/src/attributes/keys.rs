@@ -113,6 +113,11 @@ impl From<i32> for Bool {
         Self(value != 0)
     }
 }
+impl From<Bool> for bool {
+    fn from(value: Bool) -> Self {
+        value.0
+    }
+}
 
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Colour(pub Vec4);
@@ -263,6 +268,7 @@ pack_key! {
     pub struct Alpha(pub f32);
     #[pack(attr = "canfade")]
     #[derive(Copy)]
+    /// unrelated to [FadeNear] and [FadeFar] btw
     pub struct CanFade(pub Bool);
     #[pack(attr = "cull")]
     #[derive(Copy)]
@@ -286,9 +292,116 @@ pack_key! {
     #[derive(Copy)]
     pub struct InGameVisibility(pub Bool);
 }
+impl CanFade {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
+}
+impl Default for CanFade {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl From<bool> for CanFade {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<CanFade> for bool {
+    #[inline]
+    fn from(v: CanFade) -> Self {
+        v.0.into()
+    }
+}
+impl InGameVisibility {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
+}
+impl Default for InGameVisibility {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl From<bool> for InGameVisibility {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<InGameVisibility> for bool {
+    #[inline]
+    fn from(v: InGameVisibility) -> Self {
+        v.0.into()
+    }
+}
+impl MinimapVisibility {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
+}
+impl Default for MinimapVisibility {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl From<bool> for MinimapVisibility {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<MinimapVisibility> for bool {
+    #[inline]
+    fn from(v: MinimapVisibility) -> Self {
+        v.0.into()
+    }
+}
+impl MapVisibility {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
+}
+impl Default for MapVisibility {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl From<bool> for MapVisibility {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<MapVisibility> for bool {
+    #[inline]
+    fn from(v: MapVisibility) -> Self {
+        v.0.into()
+    }
+}
+impl FadeNear {
+    pub const DEFAULT: Self = Self(-1.0);
+}
+impl Default for FadeNear {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl FadeFar {
+    pub const DEFAULT: Self = Self(-1.0);
+}
+impl Default for FadeFar {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl Cull {
+    pub const DEFAULT: Self = Self(CullDirection::None);
+}
+impl Default for Cull {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Tint(pub Colour);
+impl Tint {
+    pub const DEFAULT: Self = Self(Colour::WHITE);
+}
 
 impl From<Tint> for Vec4 {
     fn from(tint: Tint) -> Self {
@@ -307,6 +420,12 @@ impl AttrKey for Tint {
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR, "color"];
 }
 
+impl Default for Tint {
+    fn default() -> Self {
+        Self(Colour::WHITE)
+    }
+}
+
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Point3(pub Vec3);
 
@@ -320,6 +439,14 @@ pack_key! {
 }
 #[derive(Debug, Copy, Clone)]
 pub struct Specialization(pub u32);
+impl Specialization {
+    pub const fn slice_from(spec: &[u32]) -> &[Self] {
+        unsafe { mem::transmute(spec) }
+    }
+    pub const fn slice_from_i32(spec: &[i32]) -> &[Self] {
+        unsafe { mem::transmute(spec) }
+    }
+}
 impl FromStr for Specialization {
     type Err = <u32 as FromStr>::Err;
 
@@ -409,12 +536,14 @@ pack_key! {
     pub struct ScaleOnMapWithZoom(pub Bool);
     #[pack(attr = "minsize")]
     #[derive(Copy)]
+    /// in pixels
     pub struct MinSize(pub f32);
     #[pack(attr = "maxsize")]
     #[derive(Copy)]
+    /// in pixels
     pub struct MaxSize(pub f32);
     #[pack(attr = "occlude")]
-    #[derive(Copy)]
+    #[derive(Copy, Default)]
     pub struct Occlude(pub Bool);
     #[pack(attr = "rotate-x")]
     #[derive(Copy)]
@@ -466,13 +595,55 @@ impl Default for MapDisplaySize {
         Self::DEFAULT
     }
 }
-
-impl Tint {
-    pub const DEFAULT: Self = Self(Colour::WHITE);
+impl ScaleOnMapWithZoom {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
 }
-impl Default for Tint {
+impl Default for ScaleOnMapWithZoom {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+impl From<bool> for ScaleOnMapWithZoom {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<ScaleOnMapWithZoom> for bool {
+    #[inline]
+    fn from(v: ScaleOnMapWithZoom) -> Self {
+        v.0.into()
+    }
+}
+impl MinSize {
+    pub const DEFAULT: Self = Self(5.0);
+}
+impl Default for MinSize {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl MaxSize {
+    pub const DEFAULT: Self = Self(2048.0);
+}
+impl Default for MaxSize {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl Occlude {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for Occlude {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<Occlude> for bool {
+    #[inline]
+    fn from(v: Occlude) -> Self {
+        v.0.into()
     }
 }
 
@@ -496,6 +667,9 @@ impl Default for Alpha {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Rotate(pub Vec3);
+impl Rotate {
+    pub const DEFAULT: Self = Self(Vec3::ZERO);
+}
 impl AttrKey for Rotate {
     type Storage = Vec3;
     const ATTR: &'static str = "rotate";
@@ -508,6 +682,23 @@ impl FromStr for Rotate {
         Array::<3, f32>::from_str(value)
             .map(|Array(v)| Vec3::from_array(v))
             .map(Self)
+    }
+}
+impl Default for Rotate {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl From<Vec3> for Rotate {
+    #[inline]
+    fn from(v: Vec3) -> Self {
+        Self(v)
+    }
+}
+impl From<Rotate> for Vec3 {
+    #[inline]
+    fn from(v: Rotate) -> Self {
+        v.0
     }
 }
 
@@ -609,11 +800,13 @@ impl AttrKey for Behaviour {
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
 }
 impl From<TacoBehaviour> for u8 {
+    #[inline]
     fn from(behaviour: TacoBehaviour) -> Self {
         behaviour as _
     }
 }
 impl From<BlishBehaviour> for u8 {
+    #[inline]
     fn from(behaviour: BlishBehaviour) -> Self {
         behaviour as _
     }
@@ -641,6 +834,21 @@ impl ResetLength {
         Duration::from_secs_f32(self.0)
     }
 }
+impl InvertBehaviour {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for InvertBehaviour {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<InvertBehaviour> for bool {
+    #[inline]
+    fn from(v: InvertBehaviour) -> Self {
+        v.0.into()
+    }
+}
 
 // Trails
 pack_key! {
@@ -655,8 +863,40 @@ pack_key! {
     #[derive(Copy)]
     pub struct TrailScale(pub f32);
     #[pack(attr = "iswall")]
-    #[derive(Copy)]
+    #[derive(Copy, Default)]
     pub struct IsWall(pub Bool);
+}
+
+impl AnimSpeed {
+    pub const DEFAULT: Self = Self(1.0);
+}
+impl Default for AnimSpeed {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl TrailScale {
+    pub const DEFAULT: Self = Self(1.0);
+}
+impl Default for TrailScale {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+impl IsWall {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for IsWall {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<IsWall> for bool {
+    #[inline]
+    fn from(v: IsWall) -> Self {
+        v.0.into()
+    }
 }
 
 // Categories
@@ -673,9 +913,54 @@ pack_key! {
     #[pack(attr = "displayname")]
     pub struct DisplayName(pub AttrString);
 }
+impl DefaultToggle {
+    pub const DEFAULT: Self = Self(Bool::TRUE);
+}
 impl Default for DefaultToggle {
     fn default() -> Self {
-        Self(Bool::TRUE)
+        Self::DEFAULT
+    }
+}
+impl From<bool> for DefaultToggle {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<DefaultToggle> for bool {
+    #[inline]
+    fn from(v: DefaultToggle) -> Self {
+        v.0.into()
+    }
+}
+impl IsHidden {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for IsHidden {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<IsHidden> for bool {
+    #[inline]
+    fn from(v: IsHidden) -> Self {
+        v.0.into()
+    }
+}
+impl IsSeparator {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for IsSeparator {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<IsSeparator> for bool {
+    #[inline]
+    fn from(v: IsSeparator) -> Self {
+        v.0.into()
     }
 }
 
@@ -698,22 +983,22 @@ pack_key! {
     #[derive(Copy)]
     pub struct TriggerRange(pub f32);
     #[pack(attr = "autotrigger")]
-    #[derive(Copy)]
-    pub struct AutoTrigger(pub f32);
+    #[derive(Copy, Default)]
+    pub struct AutoTrigger(pub Bool);
     #[pack(attr = "copy")]
     pub struct CopyValue(pub AttrString);
     #[pack(attr = "copy-message")]
     pub struct CopyMessage(pub AttrString);
-    #[pack(attr = "category", aliases("togglecategory"))]
-    #[derive(Copy)]
-    pub struct ToggleCategory(pub Bool);
     #[pack(attr = "resetguid")]
     pub struct ResetGuid(pub List<Guid>);
+    #[pack(attr = "category", aliases("togglecategory"))]
+    #[derive(Copy, Default)]
+    pub struct ToggleCategory(pub Bool);
     #[pack(attr = "show")]
-    #[derive(Copy)]
+    #[derive(Copy, Default)]
     pub struct ShowCategory(pub Bool);
     #[pack(attr = "hide")]
-    #[derive(Copy)]
+    #[derive(Copy, Default)]
     pub struct HideCategory(pub Bool);
     #[pack(attr = "achievementid")]
     #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -737,7 +1022,7 @@ pack_key! {
     #[derive(Copy)]
     pub struct BounceDuration(pub f32);
     #[pack(attr = "bounce-delay")]
-    #[derive(Copy)]
+    #[derive(Copy, Default)]
     pub struct BounceDelay(pub f32);
     #[pack(attr = "script-tick")]
     pub struct ScriptTick(pub Script);
@@ -751,34 +1036,115 @@ pack_key! {
     pub struct ScriptOnce(pub Script);
 }
 
+impl AutoTrigger {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for AutoTrigger {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<AutoTrigger> for bool {
+    #[inline]
+    fn from(v: AutoTrigger) -> Self {
+        v.0.into()
+    }
+}
+impl TriggerRange {
+    pub const DEFAULT: Self = Self(2.0);
+}
 impl Default for TriggerRange {
     fn default() -> Self {
-        Self(2.0)
+        Self::DEFAULT
+    }
+}
+impl InfoRange {
+    pub const DEFAULT: Self = Self(TriggerRange::DEFAULT.0);
+}
+impl Default for InfoRange {
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
-impl Default for BounceDelay {
-    fn default() -> Self {
-        Self(0.0)
+impl ToggleCategory {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for ToggleCategory {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
     }
+}
+impl From<ToggleCategory> for bool {
+    #[inline]
+    fn from(v: ToggleCategory) -> Self {
+        v.0.into()
+    }
+}
+impl ShowCategory {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for ShowCategory {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<ShowCategory> for bool {
+    #[inline]
+    fn from(v: ShowCategory) -> Self {
+        v.0.into()
+    }
+}
+impl HideCategory {
+    pub const DEFAULT: Self = Self(Bool::FALSE);
+}
+impl From<bool> for HideCategory {
+    #[inline]
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
+}
+impl From<HideCategory> for bool {
+    #[inline]
+    fn from(v: HideCategory) -> Self {
+        v.0.into()
+    }
+}
+
+impl BounceDelay {
+    pub const DEFAULT: Self = Self(0.0);
+}
+impl BounceDuration {
+    pub const DEFAULT: Self = Self(1.0);
 }
 impl Default for BounceDuration {
     fn default() -> Self {
-        Self(1.0)
+        Self::DEFAULT
     }
+}
+impl BounceHeight {
+    pub const DEFAULT: Self = Self(2.0);
 }
 impl Default for BounceHeight {
     fn default() -> Self {
-        Self(2.0)
+        Self::DEFAULT
     }
+}
+impl ScheduleDuration {
+    pub const DEFAULT: Self = Self(0.0);
 }
 
 impl From<i32> for AchievementId {
+    #[inline]
     fn from(id: i32) -> Self {
         Self(id as _)
     }
 }
 impl From<i32> for AchievementBit {
+    #[inline]
     fn from(id: i32) -> Self {
         Self(id as _)
     }
@@ -843,8 +1209,15 @@ impl Default for Guid {
     }
 }
 impl From<Uuid> for Guid {
+    #[inline]
     fn from(v: Uuid) -> Self {
         Self(v)
+    }
+}
+impl From<Guid> for Uuid {
+    #[inline]
+    fn from(v: Guid) -> Self {
+        v.0
     }
 }
 #[cfg(feature = "serde")]
@@ -978,11 +1351,13 @@ macro_rules! pack_key {
         );
 
         impl $ident {
+            #[inline]
             pub fn from_ref<'a>(v: &'a $ty) -> &'a Self {
                 unsafe {
                     mem::transmute(v)
                 }
             }
+            #[inline]
             pub fn from_mut<'a>(v: &'a mut $ty) -> &'a mut Self {
                 unsafe {
                     mem::transmute(v)
@@ -991,52 +1366,62 @@ macro_rules! pack_key {
         }
 
         impl<'a> From<&'a $ident> for &'a $ty {
+            #[inline]
             fn from(v: &'a $ident) -> Self {
                 &v.0
             }
         }
         impl<'a> From<&'a $ty> for &'a $ident {
+            #[inline]
             fn from(v: &'a $ty) -> Self {
                 $ident::from_ref(v)
             }
         }
         impl<'a> From<&'a mut $ident> for &'a mut $ty {
+            #[inline]
             fn from(v: &'a mut $ident) -> Self {
                 &mut v.0
             }
         }
         impl<'a> From<&'a mut $ty> for &'a mut $ident {
+            #[inline]
             fn from(v: &'a mut $ty) -> Self {
                 $ident::from_mut(v)
             }
         }
         impl From<$ident> for $ty {
+            #[inline]
             fn from(v: $ident) -> Self {
                 v.0
             }
         }
         impl From<$ty> for $ident {
+            #[inline]
             fn from(v: $ty) -> Self {
                 Self(v)
             }
         }
         impl AsRef<$ty> for $ident {
+            #[inline]
             fn as_ref(&self) -> &$ty {
                 &self.0
             }
         }
         impl AsMut<$ty> for $ident {
+            #[inline]
             fn as_mut(&mut self) -> &mut $ty {
                 &mut self.0
             }
         }
         impl ops::Deref for $ident {
             type Target = $ty;
+            #[inline]
             fn deref(&self) -> &Self::Target {
                 &self.0
             }
         }
         impl ops::DerefMut for $ident {
+            #[inline]
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }

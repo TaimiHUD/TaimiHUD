@@ -18,7 +18,15 @@ default = [
 ]
 map-cache = [
   "serde",
-  #"gzip", # TODO
+  #"gzip",
+]
+spatial = [
+  "dep:bvh",
+  "dep:nalgebra",
+  "dep:mint",
+  "glamour/mint",
+  "nalgebra/convert-mint",
+  #"glam/mint",
 ]
 nexus = [
   "dep:nexus",
@@ -41,6 +49,8 @@ serde = [
   "dep:serde_json",
   "glam/serde",
   "glamour/serde",
+  "taimi_hoard/serde",
+  #"bvh?/serde",
 ]
 gzip = [
   "dep:async-compression",
@@ -51,16 +61,23 @@ gzip = [
 taimi_mumblelink = []
 
 [dependencies]
+taimi_hoard = { path = "../../rt/hoard", default-features = true }
 anyhow = "1"
 async-compression = { version = "0.4.29", optional = true }
 bitflags = { workspace = true }
+bitvec = { workspace = true }
 log = "0.4"
-tokio = { version = "1", default-features = false }
+uuid = "1"
+md-5 = "0.10"
+sha1_smol = { version = "1", features = ["std"], optional = true }
 glam = { workspace = true }
 glamour = { workspace = true }
 num-traits = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+bvh = { version = "0.11", default-features = false, optional = true }
+nalgebra = { version = "0.33", default-features = false, features = ["convert-mint", "mint"], optional = true }
+mint = { version = "0.5", optional = true }
 
 arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
 # keep version in sync with nexus dependency

@@ -1,4 +1,5 @@
 use {
+    self::textures::TextureKey,
     crate::{
         exports,
         load_language,
@@ -504,15 +505,18 @@ pub fn d3d11_device() -> anyhow::Result<(Device, SwapChain)> {
 
 pub async fn texture_schedule_path<K, P>(key: K, path: P) -> RuntimeResult<()>
 where
-    K: AsRef<str> + Into<String>,
+    K: Into<TextureKey>,
     P: AsRef<Path> + Into<PathBuf>,
 {
     let res = RT_UNAVAILABLE;
+    let key = key.into();
 
     #[cfg(feature = "texture-loader")]
     let res = if TEXTURES.is_available() {
-        match TEXTURES.request_load_file(key.as_ref(), path.as_ref()).await {
-            Ok(()) => return Ok(()),
+        #[cfg(feature = "extension-nexus")]
+        let key = key.clone();
+        match TEXTURES.request_load_file(key, path.as_ref()).await {
+            Ok(_key) => return Ok(()),
             Err(..) => "Texture load failure",
         }
     } else {
@@ -521,10 +525,9 @@ where
 
     #[cfg(feature = "extension-nexus")]
     {
-        let key = key.into();
         let path = path.into();
         let nexus_res =
-            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_path(&key, &path))
+            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_path(&key[..], &path))
                 .await
                 .with_context(|| format!("scheduling nexus texture load"));
         match nexus_res {
@@ -543,20 +546,23 @@ where
 
 pub async fn texture_schedule_bytes<K>(key: K, bytes: Vec<u8>) -> RuntimeResult<()>
 where
-    K: AsRef<str> + Into<String>,
+    K: Into<TextureKey>,
 {
     let res = RT_UNAVAILABLE;
+    let key = key.into();
 
     #[cfg(feature = "texture-loader")]
     let res = if TEXTURES.is_available() {
+        #[cfg(feature = "extension-nexus")]
+        let key = key.clone();
         let bytes = match bytes {
             #[cfg(feature = "extension-nexus")]
             ref b => &b[..],
             #[cfg(not(feature = "extension-nexus"))]
             b => b,
         };
-        match TEXTURES.request_load_bytes(key.as_ref(), bytes).await {
-            Ok(()) => return Ok(()),
+        match TEXTURES.request_load_bytes(key, bytes).await {
+            Ok(_key) => return Ok(()),
             Err(..) => "Texture load failure",
         }
     } else {
@@ -565,9 +571,8 @@ where
 
     #[cfg(feature = "extension-nexus")]
     {
-        let key = key.into();
         let nexus_res =
-            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_bytes(&key, &bytes))
+            tokio::task::spawn_blocking(move || exports::nexus::texture_schedule_bytes(&key[..], &bytes))
                 .await
                 .with_context(|| format!("scheduling nexus texture load"));
         match nexus_res {

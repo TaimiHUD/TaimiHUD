@@ -216,10 +216,7 @@ impl InfoTabState {
 
     #[cfg(feature = "space")]
     pub fn space_info(&self, ui: &Ui) {
-        use {
-            crate::space::pack::{pack, poi, trail},
-            std::sync::atomic::Ordering,
-        };
+        use {crate::space::pack, std::sync::atomic::Ordering};
 
         #[cfg(todo)]
         engine_ref(|engine| {
@@ -264,20 +261,20 @@ impl InfoTabState {
         });
 
         RenderState::font_text("ui", ui, "Pathing Stats");
-        let pack_entity_total = pack::STATS_ENTITY_COUNT.load(Ordering::Relaxed);
-        let pack_entity_draw = pack::STATS_ENTITY_DRAW.load(Ordering::Relaxed);
-        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.load(Ordering::Relaxed);
+        let pack_entity_total = pack::STATS_ENTITY_COUNT.count();
+        let pack_entity_draw = pack::STATS_ENTITY_DRAW.count();
+        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.count();
         ui.text(format!("Drawn: {}", pack_entity_draw));
         ui.text(format!("Mapped: {}", pack_entity_draw_map));
         ui.text(format!("Total: {}", pack_entity_total));
-        if let Some(size) = trail::STATS_TRAIL_VERTEX_SIZE.get_any() {
+        if let Some(size) = pack::STATS_TRAIL_VERTEX_SIZE.get_any() {
             let trail = fl!("trail");
             let vertices = fl!("vertices");
             let size = Self::size_frag(size);
             let size = fl!("alloc-size", size = size);
             ui.text(&format!("{trail} {vertices} {size}"));
         }
-        if let Some(size) = poi::STATS_POI_INSTANCE_SIZE.get_any() {
+        if let Some(size) = pack::STATS_POI_INSTANCE_SIZE.get_any() {
             let size = Self::size_frag(size);
             let size = fl!("alloc-size", size = size);
             ui.text(&format!("POI Instance Buffer {size}"));
