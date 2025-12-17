@@ -49,7 +49,7 @@ impl PathingConfig {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        let _ = self.enables.read_mut();
+        let _ = self.enables.try_read_mut();
         ui.columns(2, "pathing_tab_start", true);
 
         self.draw_header(ui);
@@ -119,21 +119,15 @@ impl PathingConfig {
                 }
                 None
             },
-            None if machine.gameplay.is_initial() => {
-                ui.text_wrapped(fl!("render-notice-gameplay"));
-                None
-            },
             None => {
-                match Engine::is_available() {
-                    false => {
-                        ui.text_wrapped("Load in to the game to get started");
-                        None
-                    },
-                    true => {
-                        // shouldn't happen?
-                        None
-                    },
+                if machine.gameplay.is_initial() {
+                    with_i18n!("render-notice-gameplay-initial", |msg| ui.text_wrapped(msg));
+                } else if !Engine::is_available() {
+                    with_i18n!("render-notice-gameplay", |msg| ui.text_wrapped(msg));
+                } else {
+                    // shouldn't happen?
                 }
+                None
             },
             Some(e) => {
                 if !Engine::is_available() {
@@ -213,13 +207,41 @@ impl PathingConfig {
     fn slider_setting<'ui, U>(
         ui: &mut U,
         label: impl ImStrExt,
-        mut value: f32,
-        (min, max): (f32, f32),
+        value: f32,
+        range: (f32, f32),
     ) -> Option<Option<f32>>
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        let changed = ui.slider(label, &mut value, min..=max, IM_STR_NONE);
+        Self::slider_setting_inner(ui, label, value, range, None)
+    }
+    fn slider_setting_int<'ui, U>(
+        ui: &mut U,
+        label: impl ImStrExt,
+        value: i32,
+        (min, max): (i32, i32),
+    ) -> Option<Option<i32>>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let range = (min as f32, max as f32);
+        match Self::slider_setting_inner(ui, label, value as f32, range, Some(c"%.0f")) {
+            Some(Some(new)) => Some(Some(new as i32)),
+            Some(None) => Some(None),
+            None => None,
+        }
+    }
+    fn slider_setting_inner<'ui, U>(
+        ui: &mut U,
+        label: impl ImStrExt,
+        mut value: f32,
+        (min, max): (f32, f32),
+        format: Option<&'static CStr>,
+    ) -> Option<Option<f32>>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let changed = ui.slider(label, &mut value, min..=max, format);
         // TODO: right-click to reset or something?
         match changed {
             true => Some(Some(value)),
@@ -316,6 +338,7 @@ impl PathingConfig {
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let (
+            load_simultaneous,
             camera_source,
             mut visible_space,
             player_overlap_threshold,
@@ -332,6 +355,7 @@ impl PathingConfig {
             (edge_scale,),
         ) = Self::get_pathing(|s| {
             (
+                s.load_simultaneous(),
                 s.space.camera_source(),
                 s.space.visible_space(),
                 s.space.player_overlap_threshold(),
@@ -499,13 +523,22 @@ impl PathingConfig {
             self.draw_festival_opts(ui)
         }
 
-        let trail_advanced = with_i18n!("pathing-config-advanced", |label| ui.begin_tree_node_framed(
+        let advanced = with_i18n!("pathing-config-advanced", |label| ui.begin_tree_node_framed(
             ImCondition::startup(false),
             c"pathing-config-advanced",
             label,
             false,
         ));
-        if let Some(_tree) = trail_advanced {
+        if let Some(_tree) = advanced {
+            if let Some(value) = Self::slider_setting_int(
+                ui,
+                fl!("pathing-config-load-simultaneous"),
+                load_simultaneous as i32,
+                (1, 99),
+            ) {
+                let value = value.map(|v| v.max(1) as usize);
+                Self::set_pathing(|s| s.load_simultaneous = value);
+            }
             ui.text_wrapped(fl!("pathing-config-trail-notice"));
             if let Some(value) = Self::slider_opt_setting(
                 ui,

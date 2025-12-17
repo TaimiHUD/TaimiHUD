@@ -1,22 +1,35 @@
-#[cfg(feature = "space")]
 use {
-    crate::controller::Controller,
-    taimi_meta::ui::MapContext,
-    taimi_pack::attributes::{Festival, Festivals},
-};
-use {
-    crate::settings::Settings,
+    crate::{controller::Controller, settings::Settings},
+    bitflags::bitflags,
     serde::{Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt, sync::Arc},
+    std::{collections::BTreeMap, fmt, sync::Arc, time},
     strum::{IntoStaticStr, VariantArray},
 };
+#[cfg(feature = "space")]
+use {
+    taimi_meta::ui::MapContext,
+    taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+};
 
-#[derive(Deserialize, Serialize, Default, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PathingSettings {
     #[serde(default, skip_serializing_if = "SpaceSettings::is_empty")]
     pub space: SpaceSettings,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub festival_filter: Arc<BTreeMap<String, FestivalPreference>>,
+    #[serde(
+        default = "TriggerKind::settings_default_auto",
+        skip_serializing_if = "TriggerKind::settings_default_is_auto"
+    )]
+    pub trigger_allow_auto: TriggerKind,
+    #[serde(
+        default = "TriggerKind::settings_default_interact",
+        skip_serializing_if = "TriggerKind::settings_default_is_interact"
+    )]
+    pub trigger_allow_interact: TriggerKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_simultaneous: Option<usize>,
+
     #[cfg(feature = "paths-lua")]
     #[serde(default, rename = "deleteme_script_enable")]
     pub scripting_enable: bool,
@@ -35,6 +48,9 @@ pub struct PathingSettings {
 }
 
 impl PathingSettings {
+    #[cfg(feature = "paths")]
+    pub const DEFAULT_LOAD_SIMULTANEOUS: usize = 4;
+
     #[cfg(feature = "space")]
     pub async fn pathing_state_update(settings: &mut Settings, path: String, state: bool) {
         if settings.disabled_paths.contains(&path) && state {
@@ -83,6 +99,26 @@ impl PathingSettings {
     #[cfg(feature = "space")]
     pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {
         Arc::make_mut(&mut self.festival_filter)
+    }
+
+    #[cfg(feature = "paths")]
+    pub fn load_simultaneous(&self) -> usize {
+        self.load_simultaneous.unwrap_or(Self::DEFAULT_LOAD_SIMULTANEOUS)
+    }
+    #[cfg(feature = "paths")]
+    pub fn set_load_simultaneous(&mut self, v: usize) {
+        self.load_simultaneous = Some(v);
+    }
+}
+impl Default for PathingSettings {
+    fn default() -> Self {
+        Self {
+            space: Default::default(),
+            festival_filter: Default::default(),
+            trigger_allow_auto: TriggerKind::SETTINGS_DEFAULT_AUTO,
+            trigger_allow_interact: TriggerKind::SETTINGS_DEFAULT_INTERACT,
+            load_simultaneous: None,
+        }
     }
 }
 
@@ -570,5 +606,162 @@ impl GogglesSettings {
 
     pub fn map_depth_calibration_mut(&mut self) -> &mut BTreeMap<u32, (f32, f32)> {
         Arc::make_mut(&mut self.map_depth_calibration)
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct TriggerKind: u16 {
+        const BEHAVIOUR = 0x0001;
+        const COPY = 0x0002;
+        const INFO = 0x0004;
+        const RESET = 0x0008;
+        const TOGGLE = 0x0010;
+        const SHOW = 0x0020;
+        const HIDE = 0x0040;
+        const SCRIPT = 0x0080;
+        const BOUNCE = 0x0100;
+    }
+}
+impl TriggerKind {
+    pub const fn flag_str(self) -> Option<&'static str> {
+        Some(match self {
+            Self::BEHAVIOUR => "trigger-behaviour",
+            Self::COPY => "trigger-copy",
+            Self::INFO => "trigger-info",
+            Self::RESET => "trigger-reset",
+            Self::TOGGLE => "trigger-toggle",
+            Self::SHOW => "trigger-show",
+            Self::HIDE => "trigger-hide",
+            Self::SCRIPT => "trigger-script",
+            Self::BOUNCE => "trigger-bounce",
+            _ => return None,
+        })
+    }
+}
+impl fmt::Display for TriggerKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.flag_str() {
+            Some(name) => f.write_str(name),
+            None => write!(f, "{}", self.bits()),
+        }
+    }
+}
+impl serde::Serialize for TriggerKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.bits().serialize(serializer)
+    }
+}
+impl<'de> serde::Deserialize<'de> for TriggerKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        u16::deserialize(deserializer).map(Self::from_bits_retain)
+    }
+}
+impl TriggerKind {
+    pub const SETTINGS_GUI: Self =
+        Self::from_bits_retain(Self::all().bits() & !(Self::SHOW.bits() | Self::HIDE.bits()));
+    pub const SETTINGS_TOGGLE_SHOWHIDE: Self =
+        Self::from_bits_retain(Self::SHOW.bits() | Self::HIDE.bits());
+    pub const SETTINGS_DEFAULT_AUTO: Self = Self::from_bits_retain(
+        Self::BEHAVIOUR.bits()
+            | Self::INFO.bits()
+            | Self::RESET.bits()
+            | Self::TOGGLE.bits()
+            | Self::SHOW.bits()
+            | Self::HIDE.bits()
+            | Self::BOUNCE.bits(),
+    );
+    pub const DISMISS: Self = Self::from_bits_retain(Self::BEHAVIOUR.bits() | Self::BOUNCE.bits());
+    pub const fn settings_default_auto() -> Self {
+        Self::SETTINGS_DEFAULT_AUTO
+    }
+    pub const SETTINGS_DEFAULT_INTERACT: Self = Self::from_bits_retain(
+        Self::BEHAVIOUR.bits()
+            | Self::COPY.bits()
+            | Self::INFO.bits()
+            | Self::RESET.bits()
+            | Self::TOGGLE.bits()
+            | Self::SHOW.bits()
+            | Self::HIDE.bits()
+            | Self::BOUNCE.bits(),
+    );
+    pub const fn settings_default_interact() -> Self {
+        Self::SETTINGS_DEFAULT_INTERACT
+    }
+    pub const fn settings_default_is_auto(&self) -> bool {
+        self.bits() == Self::settings_default_auto().bits()
+    }
+    pub const fn settings_default_is_interact(&self) -> bool {
+        self.bits() == Self::settings_default_interact().bits()
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingSave {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hidden_guid_expiry: Arc<BTreeMap<Guid, u64>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub per_account: BTreeMap<String, PathingAccountSave>,
+}
+impl PathingSave {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() => false,
+            Self { per_account, .. } if !Self::is_per_account_empty(per_account) => false,
+            Self { hidden_guid_expiry: _, per_account: _ } => true,
+        }
+    }
+    pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, u64> {
+        Arc::make_mut(&mut self.hidden_guid_expiry)
+    }
+    pub fn hidden_guid_expire_at(&mut self, guid: Guid, expiry: time::SystemTime) {
+        if let Ok(timestamp) = expiry.duration_since(time::UNIX_EPOCH) {
+            self.hidden_guid_expiry_mut().insert(guid, timestamp.as_secs());
+        }
+    }
+    pub fn hidden_guid_expire(&mut self, guid: &Guid) -> Option<u64> {
+        if self.hidden_guid_expiry.contains_key(guid) {
+            self.hidden_guid_expiry_mut().remove(guid)
+        } else {
+            None
+        }
+    }
+    pub fn hidden_guid_expiry_get(&self, guid: &Guid) -> Option<&u64> {
+        self.hidden_guid_expiry.get(guid)
+    }
+    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
+        self.hidden_guid_expiry
+            .get(guid)
+            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
+    }
+
+    pub(crate) fn is_empty_opt(save: &Option<Self>) -> bool {
+        match save {
+            None => true,
+            Some(pathing) => pathing.is_empty(),
+        }
+    }
+    pub(crate) fn is_per_account_empty(per_account: &BTreeMap<String, PathingAccountSave>) -> bool {
+        per_account.values().all(|a| a.is_empty())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingAccountSave {
+    /// if api controller just keeps a cached response around, why bother?
+    #[cfg(todo)]
+    #[serde(default, skip_serializing_if = "PathingAchievementSave::is_empty")]
+    pub achievements: Arc<PathingAchievementSave>,
+}
+impl PathingAccountSave {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            #[cfg(todo)]
+            Self { achievements, .. } if !achievements.is_empty() => false,
+            Self {
+                #[cfg(todo)]
+                    achievements: _,
+            } => true,
+        }
     }
 }
