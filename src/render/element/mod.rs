@@ -5,6 +5,8 @@ pub mod frame;
 pub mod im;
 pub mod keys;
 pub mod language;
+#[cfg(feature = "paths")]
+pub mod pack;
 pub mod token;
 pub mod window;
 

@@ -67,7 +67,11 @@ fn main() -> anyhow::Result<()> {
     }
     seen.clear();
     for trail in pack.trails.iter() {
-        let trl_name = trail.trail_path.as_ref().map(|p| &p[..]).unwrap_or("<unavail>");
+        let trl_name = trail
+            .trail_path
+            .as_ref()
+            .map(|p| &p.path[..])
+            .unwrap_or("<unavail>");
         let context = lazyfmt::StrFmt::fmt_fn(|f| write!(f, "{trl_name} ({trail})"));
         let res = context.annotate_result(trail.read_trl_data(&mut loader));
         let trl = match res {

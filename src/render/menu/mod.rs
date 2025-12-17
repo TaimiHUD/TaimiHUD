@@ -139,6 +139,8 @@ impl RenderState {
             Some(Ok(engine)) => Some(engine),
             _ => None,
         };
+        // TODO: just use katrender toggle state instead
+        let pathing_enabled = engine.is_some();
 
         let mut toggled = None;
         let mut toggle_with = |label: &str, mut value: Option<&mut bool>, inline: Option<bool>| -> bool {
@@ -217,19 +219,23 @@ impl RenderState {
         }
 
         let window_open = self.pathing_window.open;
-        let has_engine = engine.is_some();
         let submenu_id = "context-popup-pathing";
         let mut submenu = Some(|ui: &mut U| {
-            if let Some(engine) = engine {
+            if pathing_enabled {
                 if let Some(_menu) = ui.begin_menu(fl!("paths-menu-packs")) {
-                    self.pathing_window.draw_context_menu(ui, engine);
+                    self.pathing_menu_open = true;
+                    self.pathing_window.draw_context_menu(ui, &mut self.machine);
                 }
-            }
-            if with_i18n!("reload-packs", |msg| ui.pressable(msg)) {
-                PathingEvent::ReloadAll(true).try_send();
-            }
-            if with_i18n!("unload-packs", |msg| ui.pressable(msg)) {
-                PathingEvent::UnloadAll.try_send();
+                if with_i18n!("reload-packs", |msg| ui.pressable(msg)) {
+                    PathingEvent::ReloadAll(true).try_send();
+                }
+                if with_i18n!("deactivate-packs", |msg| ui.pressable(msg)) {
+                    PathingEvent::UnloadAll(false).try_send();
+                }
+                #[cfg(todo = "unnecessary")]
+                if with_i18n!("unload-packs", |msg| ui.pressable(msg)) {
+                    PathingEvent::UnloadAll(true).try_send();
+                }
             }
             if with_i18n!("toggle", |msg| ui.pressable(msg)) {
                 PathingEvent::ToggleKatRender.try_send();
@@ -237,7 +243,7 @@ impl RenderState {
         });
         if !inline {
             if let Some(_popup) = ui.begin_popup(submenu_id, Default::default()) {
-                if let Some(f) = submenu.take() {
+                if let Some(mut f) = submenu.take() {
                     f(ui)
                 }
             }
@@ -249,9 +255,9 @@ impl RenderState {
         if with_i18n!(window_label, |label| ui.selectable(label, window_open)) {
             control_window(crate::WINDOW_PATHING, None);
         }
-        if has_engine {
+        if pathing_enabled {
             if inline {
-                if let Some(f) = submenu.take() {
+                if let Some(mut f) = submenu.take() {
                     f(ui);
                 }
             } else if ui.is_item_right_clicked() {

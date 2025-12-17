@@ -1,16 +1,18 @@
-#[cfg(feature = "paths-lua")]
-use core::mem;
-
 use {
-    super::ActivePack,
+    super::PackRenderState,
     crate::{
-        exports::runtime::Counter,
+        controller::pathing::shared::{LoadedPoiRef, SharedPackInfo},
+        exports::runtime::{
+            textures::{TextureKey, TextureSlot},
+            Counter,
+        },
         render::machine::RenderMachine,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            resources::{Model, ShaderPair, Texture, Vertex},
-            DrawSpace,
+            pack::PackRenderData,
+            resources::{Model, ShaderPair, Vertex},
         },
+        TEXTURES,
     },
     anyhow::Context,
     glam::{vec2, vec3, EulerRot, Mat4, Quat, Vec3, Vec3Swizzles, Vec4},
@@ -18,6 +20,7 @@ use {
     std::{
         borrow::{Borrow, Cow},
         f32::consts::FRAC_PI_2,
+        mem,
         sync::Arc,
     },
     taimi_d3d::{
@@ -27,7 +30,10 @@ use {
         },
         state::PrimitiveTopology,
     },
-    taimi_meta::ui::{LocalContext, MapContext},
+    taimi_meta::{
+        packs::id::MarkerId,
+        ui::{LocalContext, MapContext},
+    },
     taimi_pack::attributes::{
         cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
         keys::{self, GetAttr, SetAttr},
@@ -47,6 +53,8 @@ pub struct PoiCommonRenderData {
 
     pub world_ib: Option<BufferOf<InstanceBufferData>>,
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
+
+    pub fallback_texture: Option<TextureSlot>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -72,6 +80,7 @@ impl PoiCommonRenderData {
             quad_vb,
             map_ib: None,
             world_ib: None,
+            fallback_texture: None,
         })
     }
 
@@ -139,8 +148,151 @@ impl PoiCommonRenderData {
         let _ = self.map_ib.take();
     }
 
+    pub fn update_fallback(&mut self, device: &Dx11Device, _machine: &RenderMachine) {
+        if self.fallback_texture.is_none() {
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
+                self.fallback_texture = texture;
+            }
+        }
+    }
+    #[cfg(todo)]
+    pub fn update(
+        &mut self,
+        device: &Dx11Device,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+    ) -> anyhow::Result<()> {
+        if self.fallback_texture.is_none() {
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
+                self.fallback_texture = texture;
+            }
+        }
+
+        #[cfg(todo)]
+        {
+            // scratch this because len depends on both poi info being uptodate
+            // *and* knowing if any packs have non-empty trails if pois=0
+            let ib_len = self.ib_len_for_packs(packs);
+            let ib_dirty = !self.is_empty() && self.ib_len() != ib_len;
+            if !ib_dirty {
+                return Ok(())
+            }
+        }
+
+        self.rebuild_ib(device, machine, packs)?;
+
+        Ok(())
+    }
+    pub fn rebuild_ib(
+        &mut self,
+        device: &Dx11Device,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+    ) -> anyhow::Result<()> {
+        let ib_len = self.ib_len_for_packs(packs);
+        if ib_len == 0 {
+            // usually we'd reserve one for trails but this probably means 0 packs loaded?
+            return Ok(())
+        }
+        let mut data_world = vec![InstanceBufferData::IDENTITY; ib_len];
+        let mut data_map = vec![InstanceBufferData::IDENTITY; ib_len];
+        self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
+
+        let (data_world, data_map) = (&data_world[..], &data_map[..]);
+        STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
+        let (poi_ib_world, poi_ib_map) = (
+            BufferOf::new_with_data(device, Ok(data_world), ())?,
+            BufferOf::new_with_data(device, Ok(data_map), ())?,
+        );
+        self.world_ib = Some(poi_ib_world);
+        self.map_ib = Some(poi_ib_map);
+        Ok(())
+    }
+    pub fn write_ib(
+        &self,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+        ib_world: &mut [InstanceBufferData],
+        ib_map: &mut [InstanceBufferData],
+    ) -> anyhow::Result<()> {
+        let ib_len = self.ib_len_for_packs(packs);
+        if (ib_world.len() > 1 && ib_world.len() != ib_len) || (ib_map.len() > 1 && ib_map.len() != ib_len)
+        {
+            anyhow::bail!(
+                "expected {ib_len} POI instances, got {}(world) and {}(map) instead",
+                ib_world.len(),
+                ib_map.len()
+            );
+        }
+        #[cfg(todo = "unnecessary")]
+        let mut gaps: BitVec = {
+            // currently we always start with a fresh pre-filled vec...
+            let mut gaps = BitVec::with_capacity(ib_len);
+            gaps.resize(ib_len, false);
+            gaps
+        };
+        for (_packi, pack) in packs.iter().enumerate() {
+            let Some(map_info) = &pack.map_info else { continue };
+            for (i, (poi, lpoi)) in pack
+                .render_poi_bookmarks()
+                .zip(pack.pois.values().zip(pack.map_state.loaded_pois(map_info)))
+            {
+                let index = i as usize;
+                #[cfg(todo = "unnecessary")]
+                if let Some(mut b) = gaps.get_mut(index) {
+                    if *b {
+                        log::debug!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
+                        continue
+                    }
+                    *b = true;
+                }
+                if let Some(world) = ib_world.get_mut(index) {
+                    *world = poi.instance_data(&lpoi);
+                }
+                if let Some(map) = ib_map.get_mut(index) {
+                    *map = poi.instance_data_map(&lpoi, machine);
+                }
+            }
+        }
+        #[cfg(todo = "unnecessary")]
+        for gap in gaps.iter_zeros() {
+            // fill identity at start for trail drawing
+            if let Some(world) = ib_world.get_mut(gap) {
+                *world = InstanceBufferData::IDENTITY;
+            }
+            if let Some(map) = ib_map.get_mut(gap) {
+                *map = InstanceBufferData::IDENTITY;
+            }
+        }
+
+        Ok(())
+    }
+    pub(super) fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
+        packs
+            .iter()
+            .map(|p| p.render_poi_bookmarks().end as usize)
+            .max()
+            .map(|l| l.max(1))
+            .unwrap_or(0)
+    }
+    pub(super) fn ib_len(&self) -> usize {
+        let ib = self.world_ib.as_ref().or(self.map_ib.as_ref());
+        let Some(ib) = ib else { return 0 };
+        let count = ib.count();
+        if count == 0 {
+            log::debug!("TODO: is buffer.count() (ByteSize) reliable? shouldn't be 0 right...");
+        }
+        ib.count()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.world_ib.is_none() && self.map_ib.is_none()
+    }
+
+    /// whole thing lol
+    #[inline]
+    pub fn cleanup_background(self) {
+        mem::forget(self);
     }
 }
 
@@ -171,13 +323,155 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
     },
 ];
 
+pub struct PoiRender {
+    pub icon_handle: Option<TextureKey>,
+    pub icon: Option<TextureSlot>,
+    pub static_rotation: bool,
+}
+impl PoiRender {
+    pub fn empty() -> Self {
+        Self {
+            icon_handle: None,
+            icon: None,
+            static_rotation: false,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        _device: &Dx11Device,
+        pack_info: &SharedPackInfo,
+        lpoi: Option<LoadedPoiRef<'_>>,
+    ) {
+        let icon_name = lpoi.as_ref().and_then(|lpoi| lpoi.poi_attrs().icon_file.as_ref());
+        pack_info.setup_texture(&mut self.icon_handle, &mut self.icon, icon_name);
+    }
+    pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState) -> bool {
+        if matches!(
+            self.icon,
+            None | Some(TextureSlot::Reserved | TextureSlot::Loading)
+        ) {
+            draw_state.drawn_incomplete.insert(id.clone());
+        }
+        false
+    }
+    pub fn needs_texture_info(&self) -> bool {
+        self.icon.is_none() && self.icon_handle.is_none()
+    }
+    #[inline]
+    pub fn is_billboard(&self) -> bool {
+        !self.static_rotation
+    }
+    pub(crate) fn rotation_from_xyz(rot: Vec3) -> Quat {
+        Quat::from_euler(
+            EulerRot::XZY,
+            rot.x.to_radians() - FRAC_PI_2,
+            rot.y.to_radians(),
+            -rot.z.to_radians(),
+        )
+    }
+    pub(crate) fn rotation_to_xyz(rot: Quat) -> Vec3 {
+        let (x, y, z) = rot.to_euler(EulerRot::XZY);
+        Vec3::new(x + FRAC_PI_2, y, -z).map(f32::to_degrees)
+    }
+    pub fn populate_rotation(&mut self, poi: &LoadedPoiRef) {
+        self.static_rotation = GetAttr::<keys::Rotate>::has_attr(&**poi.poi_attrs());
+    }
+
+    pub fn instance_data(&self, poi: &LoadedPoiRef) -> InstanceBufferData {
+        let render = poi.render_attrs();
+        let attrs = poi.poi_attrs();
+        InstanceBufferData {
+            world: Mat4::from_scale_rotation_translation(
+                Vec3::splat(
+                    GetAttr::<keys::IconSize>::get_attr_or_default(&**attrs)
+                        .into_owned()
+                        .into(),
+                ),
+                attrs.rotate.map(Self::rotation_from_xyz).unwrap_or_default(),
+                poi.lpoi().position.into(),
+            ),
+            colour: render.tint(),
+        }
+    }
+
+    pub fn instance_data_map(&self, lpoi: &LoadedPoiRef, machine: &RenderMachine) -> InstanceBufferData {
+        // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
+        let scale_map = f32::from(
+            GetAttr::<keys::MapDisplaySize>::get_attr_or_default(&**lpoi.poi_attrs()).into_owned(),
+        );
+        let size = Vector2::splat(scale_map / 2.0);
+
+        // TODO: DPI/UI scaling is irrelevant here right?
+        let scale = size * machine.map.calibration.local_space().scale.abs();
+        InstanceBufferData {
+            world: Mat4::from_translation(lpoi.lpoi().position.into())
+                * Mat4::from_scale(scale.extend(scale.y).into()),
+            colour: lpoi.render_attrs().tint(),
+        }
+    }
+
+    pub fn bind_texture(
+        &self,
+        device_context: &Dx11Context,
+        common: &PoiCommonRenderData,
+        _ctx: LocalContext,
+    ) {
+        let texture = self
+            .icon
+            .as_ref()
+            .and_then(TextureSlot::get)
+            .or_else(|| common.fallback_texture.as_ref());
+        if let Some(texture) = texture {
+            texture.set(device_context, 0);
+        }
+    }
+
+    /// PREREQUISITES: Poi shaders and texture must already be set.
+    pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
+        let voffset = match ctx {
+            LocalContext::World => 0,
+            LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,
+        };
+        unsafe {
+            device_context.DrawInstanced(
+                PoiCommonRenderData::VERTEX_COUNT as u32,
+                1,
+                voffset,
+                render_idx as u32,
+            );
+        }
+        /*self.buffer.set(device_context, 1);
+        unsafe {
+            device_context.Draw(4, 0);
+        }*/
+    }
+
+    #[cfg(feature = "paths-lua")]
+    pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            keys::InGameVisibility,
+            keys::MapVisibility,
+            keys::MinimapVisibility,
+            keys::GameMap,
+        ]) }
+    }
+
+    #[inline]
+    pub fn cleanup_background(mut self) {
+        mem::forget(self.icon.take());
+    }
+}
+
+pub static STATS_POI_INSTANCE_SIZE: Counter = Counter::DEFAULT;
+
+#[cfg(deleteme)]
 pub struct ActivePoi {
     pub poi_idx: usize,
     pub category_idx: usize,
     pub filtered: bool,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
-    pub height_offset: f32,
     pub rotation: Option<Quat>,
     pub tint: Vec4,
     pub opacity: f32,
@@ -196,7 +490,7 @@ pub struct ActivePoi {
     #[cfg(todo)]
     pub attr_map_id: keys::GameMap,
 }
-
+#[cfg(deleteme)]
 impl ActivePoi {
     pub fn build<A>(
         loader: &mut ActivePack,
@@ -214,7 +508,6 @@ impl ActivePoi {
             + GetAttr<keys::IconFile>
             + GetAttr<keys::IconSize>
             + GetAttr<keys::MapDisplaySize>
-            + GetAttr<keys::HeightOffset>
             + GetAttr<keys::PositionX>
             + GetAttr<keys::PositionY>
             + GetAttr<keys::PositionZ>
@@ -232,8 +525,6 @@ impl ActivePoi {
             .get_or_load_texture(icon_handle, device)
             .context("Loading poi texture")?;
 
-        let height_offset =
-            f32::from(GetAttr::<keys::HeightOffset>::get_attr_or_default(attrs).into_owned());
         let position = Point3::new(
             f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
             f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
@@ -256,7 +547,7 @@ impl ActivePoi {
         let tint = Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned());
         let opacity = f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned());
 
-        let bounds = Self::bounds_for(position, height_offset, scale);
+        let bounds = Self::bounds_for(position, scale);
 
         Ok(ActivePoi {
             poi_idx,
@@ -264,7 +555,6 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
-            height_offset,
             rotation,
             tint,
             opacity,
@@ -296,7 +586,6 @@ impl ActivePoi {
             + GetAttr<keys::IconFile>
             + GetAttr<keys::IconSize>
             + GetAttr<keys::MapDisplaySize>
-            + GetAttr<keys::HeightOffset>
             + GetAttr<keys::PositionX>
             + GetAttr<keys::PositionY>
             + GetAttr<keys::PositionZ>
@@ -330,8 +619,6 @@ impl ActivePoi {
                 .context("Preparing empty texture")
             })?;
 
-        let height_offset =
-            f32::from(GetAttr::<keys::HeightOffset>::get_attr_or_default(attrs).into_owned());
         let position = Point3::new(
             f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
             f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
@@ -352,7 +639,7 @@ impl ActivePoi {
         let scale = f32::from(GetAttr::<keys::IconSize>::get_attr_or_default(attrs).into_owned());
 
         let bounds = match GetAttr::<keys::PositionX>::has_attr(attrs) {
-            true => Self::bounds_for(position, height_offset, scale),
+            true => Self::bounds_for(position, scale),
             false => Self::DIRTY_BOUNDS,
         };
 
@@ -362,7 +649,6 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
-            height_offset,
             tint: Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned()),
             opacity: f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned()),
             scale,
@@ -379,59 +665,6 @@ impl ActivePoi {
             ibd_dirty_map: true,
         })
     }
-
-    pub fn tint(&self) -> Vec4 {
-        let mut tint = self.tint;
-        tint.w *= self.opacity;
-        tint
-    }
-    #[inline]
-    pub fn is_billboard(&self) -> bool {
-        self.rotation.is_none()
-    }
-    #[inline]
-    pub fn rotation_xyz(&self) -> Vec3 {
-        self.rotation.map(Self::rotation_to_xyz).unwrap_or(Vec3::ZERO)
-    }
-    pub(crate) fn rotation_from_xyz(rot: Vec3) -> Quat {
-        Quat::from_euler(
-            EulerRot::XZY,
-            rot.x.to_radians() - FRAC_PI_2,
-            rot.y.to_radians(),
-            -rot.z.to_radians(),
-        )
-    }
-    pub(crate) fn rotation_to_xyz(rot: Quat) -> Vec3 {
-        let (x, y, z) = rot.to_euler(EulerRot::XZY);
-        Vec3::new(x + FRAC_PI_2, y, -z).map(f32::to_degrees)
-    }
-
-    pub fn instance_data(&self) -> InstanceBufferData {
-        let mut position = self.position;
-        position.y += self.height_offset;
-        InstanceBufferData {
-            world: Mat4::from_scale_rotation_translation(
-                Vec3::splat(self.scale),
-                self.rotation.unwrap_or_default(),
-                position.into(),
-            ),
-            colour: self.tint(),
-        }
-    }
-
-    pub fn instance_data_map(&self, machine: &RenderMachine) -> InstanceBufferData {
-        // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-        let size = Vector2::splat(self.scale_map / 2.0);
-
-        // TODO: DPI/UI scaling is irrelevant here right?
-        let scale = size * machine.map.calibration.local_space().scale.abs();
-        InstanceBufferData {
-            world: Mat4::from_translation(self.position.into())
-                * Mat4::from_scale(scale.extend(scale.y).into()),
-            colour: self.tint(),
-        }
-    }
-
     #[cfg(feature = "paths-lua")]
     pub fn update(pack: &mut ActivePack, active_poi_idx: usize) -> (bool, bool, bool) {
         let poi = match pack.active_pois.get_index_mut(active_poi_idx) {
@@ -451,37 +684,20 @@ impl ActivePoi {
         )
     }
 
-    pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
-        self.icon.set(device_context, 0);
-        let voffset = match ctx {
-            LocalContext::World => 0,
-            LocalContext::Map(..) => PoiCommonRenderData::VERTEX_OFFSET_MAP as u32,
-        };
-        unsafe {
-            device_context.DrawInstanced(
-                PoiCommonRenderData::VERTEX_COUNT as u32,
-                1,
-                voffset,
-                render_idx as u32,
-            );
-        }
-        /*self.buffer.set(device_context, 1);
-        unsafe {
-            device_context.Draw(4, 0);
-        }*/
-    }
-
     pub(crate) fn is_visible_for_map(&self, ctx: MapContext) -> bool {
         match ctx {
             MapContext::Global => self.attr_vis_map.into(),
             MapContext::Minimap => self.attr_vis_minimap.into(),
         }
     }
+    #[inline]
+    pub fn rotation_xyz(&self) -> Vec3 {
+        self.rotation.map(Self::rotation_to_xyz).unwrap_or(Vec3::ZERO)
+    }
 
-    fn bounds_for(mut position: Point3<DrawSpace>, height_offset: f32, icon_scale: f32) -> Box3<DrawSpace> {
+    fn bounds_for(position: Point3<DrawSpace>, icon_scale: f32) -> Box3<DrawSpace> {
         let edge_len = icon_scale * 2.0;
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
-        position.y += height_offset;
         Box3::from_origin_and_size(position, glamour::size3!(max_diagonal))
     }
     pub(crate) fn is_dirty(&self) -> bool {
@@ -498,58 +714,16 @@ impl ActivePoi {
         self.bounds = Self::DIRTY_BOUNDS;
     }
     fn regen_bounds(&mut self) {
-        self.bounds = Self::bounds_for(self.position, self.height_offset, self.scale);
-    }
-
-    #[cfg(feature = "paths-lua")]
-    pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
-        pack_attr! { =id_is_in(key, [
-            keys::InGameVisibility,
-            keys::MapVisibility,
-            keys::MinimapVisibility,
-            keys::GameMap,
-        ]) }
+        self.bounds = Self::bounds_for(self.position, self.scale);
     }
 }
-
-pub static STATS_POI_INSTANCE_SIZE: Counter = Counter::DEFAULT;
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-#[repr(transparent)]
-pub struct PoiScale {
-    pub expansion: f32,
-}
-
-impl PoiScale {
-    /// No expansion, standard sizing
-    pub const DEFAULT: Self = Self::new(0.0);
-
-    pub const fn new(expansion: f32) -> Self {
-        Self { expansion }
-    }
-
-    /// Convert from settings
-    pub const fn with_scale(poi_scale: f32) -> Self {
-        Self::new(poi_scale - 1.0)
-    }
-
-    pub const fn scale(&self) -> f32 {
-        self.expansion + 1.0
-    }
-}
-
-impl Default for PoiScale {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
+#[cfg(deleteme)]
 pack_attr! {
     impl Attr{keys::InGameVisibility} for &struct{ActivePoi}.attr_vis_space {}
     impl Attr{keys::MapVisibility} for &struct{ActivePoi}.attr_vis_map {}
     impl Attr{keys::MinimapVisibility} for &struct{ActivePoi}.attr_vis_minimap {}
-    impl Attr{keys::HeightOffset} for &struct{ActivePoi}.height_offset {}
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::PositionX> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -560,6 +734,7 @@ impl GetAttr<keys::PositionX> for ActivePoi {
         Some(keys::PositionX::from_ref(&self.position.x))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::PositionX> for ActivePoi {
     fn set_attr(&mut self, value: keys::PositionX) {
         let x = f32::from(value);
@@ -574,6 +749,7 @@ impl SetAttr<keys::PositionX> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::PositionY> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -584,6 +760,7 @@ impl GetAttr<keys::PositionY> for ActivePoi {
         Some(keys::PositionY::from_ref(&self.position.y))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::PositionY> for ActivePoi {
     fn set_attr(&mut self, value: keys::PositionY) {
         let y = f32::from(value);
@@ -598,6 +775,7 @@ impl SetAttr<keys::PositionY> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::PositionZ> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -608,6 +786,7 @@ impl GetAttr<keys::PositionZ> for ActivePoi {
         Some(keys::PositionZ::from_ref(&self.position.z))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::PositionZ> for ActivePoi {
     fn set_attr(&mut self, value: keys::PositionZ) {
         let z = f32::from(value);
@@ -622,6 +801,7 @@ impl SetAttr<keys::PositionZ> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::Rotate> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -632,6 +812,7 @@ impl GetAttr<keys::Rotate> for ActivePoi {
         Some(Cow::Owned(keys::Rotate::from(self.rotation_xyz())))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::Rotate> for ActivePoi {
     fn set_attr(&mut self, value: keys::Rotate) {
         self.rotation = Some(Self::rotation_from_xyz(value.into()));
@@ -648,6 +829,7 @@ impl SetAttr<keys::Rotate> for ActivePoi {
         self.rotation = None;
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::RotateX> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -658,6 +840,7 @@ impl GetAttr<keys::RotateX> for ActivePoi {
         Some(Cow::Owned(keys::RotateX::from(self.rotation_xyz().x)))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::RotateX> for ActivePoi {
     fn set_attr(&mut self, value: keys::RotateX) {
         let rot = self.rotation_xyz();
@@ -678,6 +861,7 @@ impl SetAttr<keys::RotateX> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::RotateY> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -688,6 +872,7 @@ impl GetAttr<keys::RotateY> for ActivePoi {
         Some(Cow::Owned(keys::RotateY::from(self.rotation_xyz().y)))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::RotateY> for ActivePoi {
     fn set_attr(&mut self, value: keys::RotateY) {
         let rot = self.rotation_xyz();
@@ -708,6 +893,7 @@ impl SetAttr<keys::RotateY> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::RotateZ> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -718,6 +904,7 @@ impl GetAttr<keys::RotateZ> for ActivePoi {
         Some(Cow::Owned(keys::RotateZ::from(self.rotation_xyz().z)))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::RotateZ> for ActivePoi {
     fn set_attr(&mut self, value: keys::RotateZ) {
         let rot = self.rotation_xyz();
@@ -738,6 +925,7 @@ impl SetAttr<keys::RotateZ> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::IconSize> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -749,6 +937,7 @@ impl GetAttr<keys::IconSize> for ActivePoi {
         Some(keys::IconSize::from_ref(&self.scale))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::IconSize> for ActivePoi {
     fn set_attr(&mut self, value: keys::IconSize) {
         let scale = f32::from(value);
@@ -759,6 +948,7 @@ impl SetAttr<keys::IconSize> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::MapDisplaySize> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -770,6 +960,7 @@ impl GetAttr<keys::MapDisplaySize> for ActivePoi {
         Some(keys::MapDisplaySize::from_ref(&self.scale_map))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::MapDisplaySize> for ActivePoi {
     fn set_attr(&mut self, value: keys::MapDisplaySize) {
         let scale_map = f32::from(value);
@@ -781,6 +972,7 @@ impl SetAttr<keys::MapDisplaySize> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::Tint> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -792,6 +984,7 @@ impl GetAttr<keys::Tint> for ActivePoi {
         Some(self.tint.borrow())
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::Tint> for ActivePoi {
     fn set_attr(&mut self, value: keys::Tint) {
         let tint = Vec4::from(value);
@@ -807,6 +1000,7 @@ impl SetAttr<keys::Tint> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttr<keys::Alpha> for ActivePoi {
     #[inline]
     fn has_attr(&self) -> bool {
@@ -818,6 +1012,7 @@ impl GetAttr<keys::Alpha> for ActivePoi {
         Some(keys::Alpha::from_ref(&self.opacity))
     }
 }
+#[cfg(deleteme)]
 impl SetAttr<keys::Alpha> for ActivePoi {
     fn set_attr(&mut self, value: keys::Alpha) {
         let opacity = f32::from(value);
@@ -831,6 +1026,7 @@ impl SetAttr<keys::Alpha> for ActivePoi {
         }
     }
 }
+#[cfg(deleteme)]
 impl GetAttrDyn for ActivePoi {
     fn holds_attr_dyn(key: PackKeyId) -> bool {
         pack_attr! { =id_is_in(key, [
@@ -838,7 +1034,6 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
-            keys::HeightOffset,
             // keys::Position,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
@@ -851,7 +1046,6 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
-            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::Rotate,
@@ -865,7 +1059,6 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
-            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
         ] }
@@ -883,13 +1076,13 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
-            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
         ] }
     }
 }
+#[cfg(deleteme)]
 impl SetAttrDyn for ActivePoi {
     fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
         pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
@@ -897,7 +1090,6 @@ impl SetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
-            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::Rotate,

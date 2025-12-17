@@ -4,7 +4,11 @@ use {
     mint::IntoMint,
 };
 
+pub use self::bounded::*;
+
+mod bounded;
 pub mod cull;
+pub mod record;
 
 pub trait ConstNan {
     const NAN: Self;
@@ -39,6 +43,7 @@ where
 }
 pub const IRRELEVANT_MIN: f32 = -9999.0;
 pub const IRRELEVANT_MAX: f32 = -9990.0;
+pub const IRRELEVANT_MID: f32 = (IRRELEVANT_MAX - IRRELEVANT_MIN) / 2.0;
 pub const fn irrelevant_box2<U: Unit<Scalar = f32>>() -> Box2<U> {
     let min = Point2::new(IRRELEVANT_MIN, IRRELEVANT_MIN);
     let max = Point2::new(IRRELEVANT_MAX, IRRELEVANT_MAX);
@@ -64,6 +69,20 @@ where
 {
     let Box3 { min, max } = bounds;
     aabb::Aabb::with_bounds(min.into_nalg(), max.into_nalg())
+}
+pub fn aabb2box<U: Unit>(bounds: aabb::Aabb<U::Scalar, 2>) -> Box2<U>
+where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point2<U>: MintConv<MintNalg = nalgebra::Point2<U::Scalar>>,
+{
+    Box2::new(MintConv::from_nalg(bounds.min), MintConv::from_nalg(bounds.max))
+}
+pub fn aabb3box<U: Unit>(bounds: aabb::Aabb<U::Scalar, 3>) -> Box3<U>
+where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
+{
+    Box3::new(MintConv::from_nalg(bounds.min), MintConv::from_nalg(bounds.max))
 }
 
 pub trait MintConv: Sized {

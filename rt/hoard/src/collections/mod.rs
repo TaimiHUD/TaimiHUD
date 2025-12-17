@@ -4,6 +4,7 @@ pub use self::{
 };
 
 pub mod flatset;
+pub mod lru;
 pub mod traits;
 
 /// TODO: check if points to same slice .-.

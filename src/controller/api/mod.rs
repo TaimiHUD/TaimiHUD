@@ -170,18 +170,13 @@ impl ApiController {
                 Ok(())
             },
             ApiMessage::AccountInfoAchievements(state) => {
-                let _changed = self.rx.achievements.send_if_modified(|shared| {
+                self.rx.achievements.send_if_modified(|shared| {
                     if **shared == state {
                         return false
                     }
                     *Arc::make_mut(shared) = state;
                     true
                 });
-                #[cfg(feature = "paths")]
-                if _changed {
-                    log::debug!("TODO: add watcher to pathing controller");
-                    super::PathingEvent::RequestDisabledPaths.try_send();
-                }
                 Ok(())
             },
             ApiMessage::AccountStateUpdate(account) => {
