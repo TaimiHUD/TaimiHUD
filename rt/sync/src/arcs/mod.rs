@@ -7,8 +7,11 @@ use {
     },
 };
 
+#[cfg(todo)]
+pub use self::iters::{ArcSliceAt, ArcSliceIter};
 pub use self::{lazymut::ArcLazyMut, ptrcmp::ArcPtrCmp};
 
+pub mod iters;
 pub mod lazymut;
 mod ptrcmp;
 
