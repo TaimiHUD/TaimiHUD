@@ -3355,6 +3355,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3713,19 +3719,23 @@ dependencies = [
  "arcloader-mumblelink",
  "async-compression",
  "bitflags 2.9.0",
+ "bitvec",
  "bvh",
  "compression-codecs",
  "compression-core",
  "glam 0.30.1",
  "glamour",
  "log",
+ "md-5",
  "mint",
  "nalgebra",
  "nexus",
  "num-traits",
  "serde",
  "serde_json",
- "tokio",
+ "sha1_smol",
+ "taimi_hoard",
+ "uuid",
 ]
 
 [[package]]

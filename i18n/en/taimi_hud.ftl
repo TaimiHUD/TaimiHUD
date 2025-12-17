@@ -39,6 +39,7 @@ files = Files
 clear = Clear
 refresh = Refresh
 refresh-files = Refresh files
+loading = Loading
 # as in 3D
 model = Model
 revert = Revert
@@ -74,6 +75,7 @@ default = Default
 disable = Disable
 enabled = { enable }d
 disabled = { disable }d
+unloaded = Unloaded
 author-arg = { author }: { $author }
 reset = Reset
 timer = Timer
@@ -241,7 +243,6 @@ multi-addon-host = All
 
 reload-markers = Reload { markers }
 marker-tab = { marker-window }
-pathing-tab = { pathing-config }
 marker = Marker
 markers = { marker }s
 markers-place = Place { markers }
@@ -311,12 +312,29 @@ reset-timers = { reset } { timers }
 
 ## Pathing
 
+pathing-tab = { pathing-config }
 pathing = Pathing
 trail = Trail
 poi = POI
 space = KatRender
-reload-packs = Reload
-unload-packs = Unload All
+#pack = Pack
+reload-pack = Reload
+refresh-pack = {refresh}
+reload-packs = {reload-pack}
+deactivate-packs = Deactivate All
+remove-pack = {remove}
+remove-packs = {remove} All
+#unload-pack = Remove? Close?
+unload-pack = Unload
+offload-pack = Offload
+#offload-pack = Later
+activate-pack = Activate
+deactivate-pack = Deactivate
+#deactivate-pack = Unload
+pack-error = Failed
+unknown-pack-format = { unknown }
+pack-format-notice = Supported .taco zip file or extracted folder
+
 filter-options = Filter Options
 search = Search
 pathing-search = { search }
@@ -332,7 +350,21 @@ show-all = Show all
 #off-map = Elsewhere
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
+
 toggle = Toggle
+enable-all = Enable all
+disable-all = Disable all
+enable-to = Enable above
+disable-to = Disable to
+reset-all = Reset all
+isolate = Isolate
+unisolate = Reset adjacent
+hide = Hide
+unhide = Unhide
+pack-category = Category
+pack-root = Main { pack-category }
+pack-root-submenu = Pack Control
+
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing (Experimental)
 pathing-config-minimap = Minimap Options
@@ -358,6 +390,7 @@ pathing-config-textured-worldmap = Textured trails
 pathing-config-map-open = Fwoom
 pathing-config-camera-source = Camera Data Source
 pathing-config-advanced = { config-advanced }
+pathing-config-load-simultaneous = Simultaneous Load Limit
 pathing-config-trail-notice = Trail generation settings may require a map change or reload to take effect, and may not work as you might expect.
 pathing-config-trail-y-offset = Vertical Offset
 pathing-config-trail-resolution = Trail Resolution
@@ -387,7 +420,7 @@ render-notice-gameplay = Load in to the game to get started
 render-notice-gameplay-initial = Select a character to get started
 render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 packs-empty = No files loaded
-packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "Reload" button should pick them up!
+packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "{ reload-packs }" button should pick them up!
 
 ## Festivals
 

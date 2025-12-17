@@ -6,6 +6,7 @@ use {
         exports::runtime::{
             self as rt,
             bindings::{TaimiControls, TaimiReceiver, CONTROLS},
+            textures::TextureKey,
         },
         log_join_error,
         render::{machine::MumblelinkTick, RenderEvent, RenderState},
@@ -810,14 +811,17 @@ impl Controller {
         res
     }
 
-    async fn load_texture(&self, rel: RelativePathBuf, base: PathBuf) {
-        if let Err(e) = rt::texture_schedule_path(rel.as_str(), &base).await {
-            log::warn!("Cannot load texture {rel:?}: {e}");
+    async fn load_texture(&self, identifier: TextureKey, path: PathBuf) {
+        if let Err(e) = rt::texture_schedule_path(identifier.clone(), &path).await {
+            log::warn!(
+                "Cannot load texture {identifier:?} at {}: {e}",
+                rt::relative_path(&path).display()
+            );
         }
     }
 
-    async fn load_texture_integrated(&mut self, identifier: String, data: Vec<u8>) {
-        if let Err(e) = rt::texture_schedule_bytes(&identifier[..], data).await {
+    async fn load_texture_integrated(&mut self, identifier: TextureKey, data: Vec<u8>) {
+        if let Err(e) = rt::texture_schedule_bytes(identifier.clone(), data).await {
             log::warn!("Cannot load texture {identifier:?}: {e}");
         }
     }
@@ -861,7 +865,7 @@ impl Controller {
             CheckAddonUpdate(proceed) => self.addon_check_for_updates(proceed).await,
             DoDataSourceUpdate { kind, id } => self.spawn_source_update(kind, id),
             WindowState(window, state) => self.set_window_state(&window, state).await,
-            LoadTexture(rel, base) => self.load_texture(rel, base).await,
+            LoadTexture(identifier, path) => self.load_texture(identifier, path).await,
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
             UiTick(tick) => {
                 #[cfg(feature = "scripts")]
@@ -1028,9 +1032,9 @@ pub enum ControllerEvent {
         kind: SourceKind,
         id: String,
     },
-    LoadTextureIntegrated(String, Vec<u8>),
+    LoadTextureIntegrated(TextureKey, Vec<u8>),
     #[strum(to_string = "Load texture {0} from {1:?}")]
-    LoadTexture(RelativePathBuf, PathBuf),
+    LoadTexture(TextureKey, PathBuf),
     ReloadData,
     SaveSettings,
     UiTick(MumblelinkTick),
@@ -1089,8 +1093,13 @@ impl ControllerSender {
         #[cfg(any(feature = "markers", feature = "space"))]
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
         #[cfg(feature = "paths")]
-        let (pathing, pathing_rx) =
-            PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone(), &api.festivals);
+        let (pathing, pathing_rx) = PathingSender::new(
+            &gameplay,
+            &mumble_identity_tx,
+            &api.festivals,
+            &api.achievements,
+            &api.raids,
+        );
         #[cfg(feature = "scripts")]
         let (scripting, scripting_rx) = ScriptSender::new();
 

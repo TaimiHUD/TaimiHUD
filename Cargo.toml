@@ -72,8 +72,6 @@ space = [
   "dep:tobj",
   "dep:bevy_ecs",
   "dep:bevy_utils",
-  "windows/Win32_Graphics_Direct3D_Fxc",
-  "windows/Win32_Graphics_Hlsl",
   "texture-loader",
   "goggles",
   "space-list",
@@ -259,8 +257,8 @@ env_logger = { version = "0.11", default-features = false, optional = true }
 log = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.43.0", features = [ "fs", "macros" ], default-features = false }
 arcdps = { workspace = true, features = ["extras", "strum"] }
-glam = { workspace = true, features = [ "serde", "mint" ] }
-glamour = { workspace = true, features = ["mint"] }
+glam = { workspace = true, features = [ "serde" ] }
+glamour = { workspace = true }
 palette = { version = "0.7.6", features = [ "serde" ] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 glob = "0.3.2"
@@ -320,7 +318,7 @@ bitvec = { workspace = true }
 
 arcffi = { path = "rt/ffi", package = "taimi_ffi", default-features = false, features = ["serde"] }
 taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
-taimi_pack = { path = "./pathing/pack", optional = true }
+taimi_pack = { path = "./pathing/pack", optional = true, features = ["serde"] }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde", "arcffi"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
@@ -372,9 +370,9 @@ arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", defaul
 arcdps = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi", default-features = false }
 nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi", default-features = false }
 #gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }
-glam = "0.30"
-glamour = "0.18"
-nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ] }
+glam = { version = "0.30", features = ["mint"] }
+glamour = { version = "0.18", features = ["mint"] }
+nalgebra = { version = "0.33", default-features = false, features = ["convert-mint", "mint"] }
 mint = "0.5"
 bvh = { version = "0.11", default-features = false }
 num-traits = { version = "0.2", default-features = false }

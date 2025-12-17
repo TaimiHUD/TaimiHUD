@@ -305,7 +305,7 @@ impl DepthHandler {
         edge_scale: Option<(f32, &MapCalibration)>,
     ) -> anyhow::Result<VertexBuffer> {
         let mut verts: Vec<_> =
-            crate::space::pack::poi::PoiCommonRenderData::quad(taimi_meta::ui::LocalContext::GLOBAL).into();
+            crate::space::pack::PoiCommonRenderData::quad(taimi_meta::ui::LocalContext::GLOBAL).into();
 
         if let Some((edge_scale, calibration)) = edge_scale {
             use {

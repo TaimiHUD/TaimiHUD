@@ -1,5 +1,6 @@
 use {
     crate::{
+        exports::runtime as rt,
         settings::{source, DirectSource, GitHubSource, Source},
         with_i18n,
         ADDON_DIR,
@@ -7,6 +8,7 @@ use {
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
+        borrow::Cow,
         collections::BTreeMap,
         fmt,
         fs::read_to_string as sync_read_to_string,
@@ -14,6 +16,7 @@ use {
         sync::LazyLock,
     },
     strum_macros::Display,
+    taimi_hoard::{loc::Locator, paths::new_path_const},
     tokio::{
         fs::{create_dir_all, read_to_string, File},
         io::AsyncWriteExt,
@@ -112,6 +115,10 @@ impl SourcesFile {
     pub const EMPTY: Self = Self(BTreeMap::new());
     pub const STOCK_SOURCES_TOML: &'static str = include_str!("../../../data/sources.toml");
     pub const FILENAME: &'static str = "sources.toml";
+
+    pub fn file_path() -> PathBuf {
+        rt::addon_dir().join(Path::new(Self::FILENAME))
+    }
 
     pub async fn download_sources() -> anyhow::Result<Self> {
         let req = SOURCES_SRC.request_release_asset_browser(None, Self::FILENAME)?;
@@ -272,3 +279,46 @@ impl RemoteAssetForm {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct SourcesNs<'a> {
+    pub name: Cow<'a, Path>,
+}
+
+impl SourcesNs<'static> {
+    pub const SOURCES_TOML: Self =
+        Self::with_name(Cow::Borrowed(new_path_const("addons/Taimi/sources.toml")));
+}
+
+impl<'a> SourcesNs<'a> {
+    #[inline]
+    pub const fn with_name(name: Cow<'a, Path>) -> Self {
+        Self { name }
+    }
+
+    pub fn new<N: Into<Cow<'a, Path>>>(name: N) -> Self {
+        Self::with_name(name.into())
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct SourcesToml;
+
+impl SourcesToml {
+    pub const DEFAULT: Self = Self;
+
+    #[inline]
+    pub const fn locator_for(path: String) -> DataSourcePath<Self> {
+        Locator::with_parts(Self::DEFAULT, path)
+    }
+}
+
+impl AsRef<SourcesNs<'static>> for SourcesToml {
+    fn as_ref(&self) -> &SourcesNs<'static> {
+        static SOURCES_TOML: LazyLock<SourcesNs<'static>> =
+            LazyLock::new(|| SourcesNs::with_name(Cow::Owned(SourcesFile::file_path())));
+        &SOURCES_TOML
+    }
+}
+
+pub type DataSourcePath<S = SourcesToml> = Locator<S, String>;

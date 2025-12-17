@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::{
+            self,
             cell::{
                 pack_attr,
                 AttrKeyValue,
@@ -36,7 +37,7 @@ pub struct Trail {
     pub guid: Uuid,
     pub attributes: MarkerAttributes,
     pub parent_path: Option<AttrString>,
-    pub trail_path: Option<String>,
+    pub trail_path: Option<TrlPath>,
     pub map_id: Option<i32>,
 }
 
@@ -58,7 +59,7 @@ impl Trail {
                 category = taco_safe_name(&attr.value, true);
                 Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("traildata") {
-                trail_path = Some(attr.value);
+                trail_path = Some(TrlPath::new(attributes::string_into(attr.value)));
                 Ok(true)
             } else if attr.name.local_name.eq_ignore_ascii_case("guid") {
                 if !attr.value.is_empty() {
@@ -110,6 +111,10 @@ impl Trail {
         // TODO: support bh features properly...
         attributes.merge(&attributes_bh, false);
 
+        if let Some(trail_path) = &mut trail_path {
+            trail_path.parent_path = asset_parent.cloned();
+        }
+
         Ok(Self {
             category: category.into(),
             guid,
@@ -129,23 +134,15 @@ impl Trail {
         Ok(())
     }
 
-    pub fn open_trl_data<'l>(
+    pub fn open_trl_data(
         &self,
         ctx: &mut dyn PackLoaderContext,
     ) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
-        let Some(trail_path) = &self.trail_path else {
-            anyhow::bail!("No 'trailData' specified for Trail '{self}'");
-        };
-        match &self.parent_path {
-            Some(parent) => ctx.find_asset_near(parent, trail_path),
-            None => ctx.load_asset_dyn(trail_path),
-        }
+        self.trail_path()?.open_trl_data(ctx)
     }
 
     pub fn read_trl_data(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<TrailData> {
-        let mut asset = self.open_trl_data(ctx)?;
-        let data =
-            TrailData::read_from_trl(&mut asset).with_context(|| format!("Reading trail data from {self}"));
+        let data = self.trail_path()?.read_trl_data(ctx);
 
         match (self.map_id, &data) {
             (Some(map_id), Ok(data)) if data.header.map_id != map_id => {
@@ -160,28 +157,40 @@ impl Trail {
         data
     }
 
-    #[inline]
+    pub fn trail_path(&self) -> anyhow::Result<&TrlPath> {
+        self.trail_path
+            .as_ref()
+            .with_context(|| format!("No 'trailData' specified for Trail '{self}'"))
+    }
+    pub fn parent_path(&self) -> Option<&AttrString> {
+        self.trail_path
+            .as_ref()
+            .and_then(|path| path.parent_path.as_ref())
+    }
+
     pub fn texture_name(&self) -> Option<&str> {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.texture.as_ref())
             .map(|s| &s[..])
     }
-
-    #[inline]
     pub fn scale(&self) -> f32 {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.trail_scale)
-            .unwrap_or(1.0)
+            .unwrap_or(keys::TrailScale::DEFAULT.into())
     }
-
-    #[inline]
     pub fn is_wall(&self) -> bool {
         self.attributes
             .get_trail()
             .and_then(|trail| trail.is_wall)
-            .unwrap_or(false)
+            .unwrap_or(keys::IsWall::DEFAULT.into())
+    }
+    pub fn anim_speed(&self) -> f32 {
+        self.attributes
+            .get_trail()
+            .and_then(|trail| trail.anim_speed)
+            .unwrap_or(keys::AnimSpeed::DEFAULT.into())
     }
 }
 
@@ -192,6 +201,40 @@ impl fmt::Display for Trail {
         match &self.parent_path {
             Some(parent) => write!(f, "{parent}{category}/{guid}"),
             None => write!(f, "{category}/{guid}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TrlPath {
+    pub path: AttrString,
+    pub parent_path: Option<AttrString>,
+}
+impl TrlPath {
+    pub const fn new(path: AttrString) -> Self {
+        Self { path, parent_path: None }
+    }
+    pub fn open_trl_data(
+        &self,
+        ctx: &mut dyn PackLoaderContext,
+    ) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
+        match &self.parent_path {
+            Some(parent) => ctx.find_asset_near(parent, &self.path),
+            None => ctx.load_asset_dyn(&self.path),
+        }
+    }
+
+    pub fn read_trl_data(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<TrailData> {
+        let mut asset = self.open_trl_data(ctx)?;
+        TrailData::read_from_trl(&mut asset).with_context(|| format!("Reading trail data from {self}"))
+    }
+}
+impl fmt::Display for TrlPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let path = &self.path[..];
+        match &self.parent_path {
+            Some(parent) => write!(f, "{}/{path}", &parent[..]),
+            None => fmt::Display::fmt(path, f),
         }
     }
 }
@@ -377,6 +420,12 @@ impl TrailSection {
         self.points.is_empty()
     }
 }
+impl AsRef<TrailSection> for TrailSection {
+    #[inline(always)]
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
 
 impl Trail {
     fn holds_attr_dyn_inherent(key: PackKeyId) -> bool {
@@ -466,13 +515,17 @@ impl GetAttr<keys::TrailDataFile> for Trail {
     fn has_attr(&self) -> bool {
         self.trail_path.is_some()
     }
-    fn get_attr(&self) -> Option<Cow<'_, keys::TrailDataFile>> {
-        self.trail_path.as_ref().map(|p| Cow::Owned(p.into()))
+    fn get_attr_ref(&self) -> Option<&keys::TrailDataFile> {
+        self.trail_path.as_ref().map(|trl| keys::TrailDataFile::from_ref(&trl.path))
     }
 }
 impl SetAttr<keys::TrailDataFile> for Trail {
     fn set_attr(&mut self, value: keys::TrailDataFile) {
-        self.trail_path = Some(value[..].into());
+        if let Some(trl) = &mut self.trail_path {
+            trl.path = value.into();
+        } else {
+            self.trail_path = Some(TrlPath::new(value.into()));
+        }
     }
     fn unset_attr(&mut self) {
         self.trail_path = None;
