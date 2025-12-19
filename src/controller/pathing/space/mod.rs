@@ -2,14 +2,14 @@ use {
     crate::{controller::pathing::{
         PathingController, PathingEvent,
     }, exports::runtime as rt},
-    futures::{future::Future, stream, FutureExt, StreamExt}, std::sync::{Arc, LazyLock},
+    futures::{future::Future, stream, FutureExt, StreamExt},
     taimi_meta::packs::{PackMapPath, PoiPath, TrailPath},
     taimi_hoard::loc::LocationRef,
 };
 pub use self::{
     build::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader},
-    poi::{SpacePoi, PoiScale},
-    trail::{SpaceTrail, TrailParams, TrailScale, TrailTextureMap},
+    poi::PoiScale,
+    trail::{TrailParams, TrailScale, TrailTextureMap},
     pack::{SpacePack, SpacePackCollection},
 };
 pub use super::PackSpace as DrawSpace;
@@ -177,8 +177,5 @@ impl PathingController {
     }
 }
 
-pub type SetupPoi = (PoiPath, Option<SpacePoiBuilder>, SpacePoi);
-pub type SetupTrail = (TrailPath, Option<SpaceTrailBuilder>, SpaceTrail);
-static EMPTY_RENDER_ATTRS: LazyLock<Arc<taimi_pack::attributes::RenderAttributes>> = LazyLock::new(||
-    Arc::new(Default::default())
-);
+pub type SetupPoi = (PoiPath, Option<SpacePoiBuilder>);
+pub type SetupTrail = (TrailPath, Option<SpaceTrailBuilder>);

@@ -1,7 +1,9 @@
 use {
-    crate::loc::{LocationGet, LocationMut, LocationRef, Locator},
-    core::{borrow::Borrow, cmp, hash::Hash, iter, marker::PhantomData, mem, ops},
-    std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc},
+    crate::{
+        collections::TaimiExtend,
+        loc::{LocationGet, LocationMut, LocationRef, Locator},
+    },
+    core::{hash::Hash, iter, marker::PhantomData, ops},
     num_traits::AsPrimitive,
 };
 
@@ -275,6 +277,19 @@ impl<N, P, T> LocationMut<N, P> for IndexedList<N, P, T> where
         self.at_mut(*path)
     }
 }
+impl<N, P, T> ops::Deref for IndexedList<N, P, T> {
+    type Target = T;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+impl<N, P, T> ops::DerefMut for IndexedList<N, P, T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AdjacentList<P, T> {
@@ -426,6 +441,17 @@ impl_iter_wrap! {
         let iter = |&this| &this.iter;
         let iter = |&mut this| &mut this.iter;
         let item = |&mut this, item| this.map_item(item);
+
+        fn last(self) -> Option<Self::Item> {
+            let Self { root, iter } = self;
+            iter.last().map(|i| Locator::with_parts(root, i))
+        }
+        #[cfg(todo)]
+        fn is_sorted(self) -> bool where
+            Self::Item: PartialOrd,
+        {
+            self.iter.is_sorted()
+        }
     }
     impl{N: Clone, I} DoubleEndedIterator for LocatorRelIter<N, I>, I
         where{}
@@ -478,6 +504,16 @@ impl_iter_wrap! {
         let iter = |&this| &this.iter.iter;
         let iter = |&mut this| &mut this.iter;
         let item = |&mut _this, item| Self::map_item(item);
+
+        fn last(self) -> Option<Self::Item> {
+            self.iter.last().map(Self::map_item)
+        }
+        #[cfg(todo)]
+        fn is_sorted(self) -> bool where
+            Self::Item: PartialOrd,
+        {
+            self.iter.is_sorted()
+        }
     }
     impl{N: Clone, I, P, II} DoubleEndedIterator for LocatorRelIter0<N, I>, I
         where{
@@ -531,6 +567,16 @@ impl_iter_wrap! {
         let iter = |&this| &this.iter;
         let iter = |&mut this| &mut this.iter;
         let item = |&mut _this, item| LocatorPathAs::<P, _>::new(item).path_as();
+
+        fn last(self) -> Option<Self::Item> {
+            self.iter.last().map(|i| LocatorPathAs::<P, _>::new(i).path_as())
+        }
+        #[cfg(todo)]
+        fn is_sorted(self) -> bool where
+            Self::Item: PartialOrd,
+        {
+            self.iter.is_sorted()
+        }
     }
     impl{IN, IP, P, I} DoubleEndedIterator for LocatorPathAs<P, I>, I
         where{
@@ -594,6 +640,16 @@ impl_iter_wrap! {
         let iter = |&this| &this.iter;
         let iter = |&mut this| &mut this.iter;
         let item = |&mut _this, item| Self::map_item(item);
+
+        fn last(self) -> Option<Self::Item> {
+            self.iter.last().map(Self::map_item)
+        }
+        #[cfg(todo)]
+        fn is_sorted(self) -> bool where
+            Self::Item: PartialOrd,
+        {
+            self.iter.is_sorted()
+        }
     }
     impl{P, I, E} DoubleEndedIterator for EnumerateAs<P, I>, iter::Enumerate<I>
         where{
@@ -660,6 +716,25 @@ impl_iter_wrap! {
         fn nth(&mut self, i: usize) -> Option<Self::Item> {
             let item = self.iter.nth(i)?;
             Self::map_item(item, self.prefix.nth(i))
+        }
+        fn last(self) -> Option<Self::Item> {
+            let Self { iter, mut prefix } = self;
+            let (last, n) = match iter.size_hint() {
+                (_, Some(left)) => (iter.last(), left),
+                (min, None) => {
+                    let mut n = min.saturating_sub(1);
+                    let last = iter.skip(min).inspect(|_| n += 1).last();
+                    (last, n)
+                },
+            };
+            last.and_then(move |i| Self::map_item(i, prefix.nth(n - 1)))
+        }
+        /// just ignore the prefix
+        #[cfg(todo = "unnecessary")]
+        fn is_sorted(self) -> bool where
+            Self::Item: PartialOrd,
+        {
+            self.iter.is_sorted()
         }
     }
     impl{P, I} DoubleEndedIterator for ZipPrefix<P, I>, I
@@ -738,129 +813,8 @@ impl_iter_wrap! {
     }
 }
 
-macro_rules! impl_iter_wrap {
-    () => {};
-    (
-        impl{$($imp:tt)*} ExactSizeIterator for $ty:ty, $iter_size:ty
-            $(where{$($where:tt)*})?
-        {
-            $(
-                let iter = |&$this_iter_ref:ident| $iter_ref:expr;
-            )?
-            $(fn $($inner_size:tt)+)?
-        }
-        $($($rest:tt)+)?
-    ) => {
-        impl<$($imp)*> ::core::iter::ExactSizeIterator for $ty where
-            $iter_size: ::core::iter::ExactSizeIterator,
-            $($($where)*)?
-        {
-            $(
-                fn len(&self) -> usize {
-                    let $this_iter_ref = self;
-                    ::core::iter::ExactSizeIterator::len($iter_ref)
-                }
-            )?
-            $(fn $($inner_size)+)?
-        }
-        impl<$($imp)*> ::core::iter::FusedIterator for $ty where
-            $iter_size: ::core::iter::FusedIterator,
-            $($($where)*)?
-        {}
-        $(impl_iter_wrap!{$($rest)*})?
-    };
-    (
-        impl{$($imp:tt)*} Iterator for $ty:ty, $iter_map:ty
-            $(where{$($where:tt)*})?
-        {
-            type Item = $item:ty;
-            $(
-                let iter = |$this_iter_into:ident| $iter_into:expr;
-                let iter = |&$this_iter_ref:ident| $iter_ref:expr;
-            )?
-            $(
-                let iter = |&mut $this_iter_mut:ident| $iter_mut:expr;
-                let item = |&mut $this_map:ident, $id_map:ident| $map_item:expr;
-            )?
-            $(fn $($inner_iter:tt)+)?
-        }
-        $($($rest:tt)+)?
-    ) => {
-        impl<$($imp)*> Iterator for $ty where
-            $iter_map: Iterator,
-            $($($where)*)?
-        {
-            type Item = $item;
-            $(
-                fn next(&mut self) -> Option<Self::Item> {
-                    let item = {
-                        let $this_iter_mut = &mut *self;
-                        $iter_mut.next()
-                    };
-                    let $this_map = &mut *self;
-                    item.map(|$id_map| $map_item)
-                }
-                fn nth(&mut self, i: usize) -> Option<Self::Item> {
-                    let item = {
-                        let $this_iter_mut = &mut *self;
-                        $iter_mut.nth(i)
-                    };
-                    let $this_map = &mut *self;
-                    item.map(|$id_map| $map_item)
-                }
-            )?
-
-            $(
-                fn size_hint(&self) -> (usize, Option<usize>) {
-                    let $this_iter_ref = self;
-                    $iter_ref.size_hint()
-                }
-                fn count(self) -> usize {
-                    let $this_iter_into = self;
-                    $iter_into.count()
-                }
-            )?
-            $(fn $($inner_iter)+)?
-        }
-    };
-    (
-        impl{$($imp:tt)*} DoubleEndedIterator for $ty:ty, $iter_map:ty
-            $(where{$($where:tt)*})?
-        {
-            $(
-                let iter = |&mut $this_iter_mut:ident| $iter_mut:expr;
-                let item = |&mut $this_map:ident, $id_map:ident| $map_item:expr;
-            )?
-            $(fn $($inner_double:tt)+)?
-        }
-        $($($rest:tt)+)?
-    ) => {
-        impl<$($imp)*> ::core::iter::DoubleEndedIterator for $ty where
-            $iter_map: ::core::iter::DoubleEndedIterator,
-            $($($where)*)?
-        {
-            $(
-                fn next_back(&mut self) -> Option<<Self as Iterator>::Item> {
-                    let item = {
-                        let $this_iter_mut = &mut *self;
-                        ::core::iter::DoubleEndedIterator::next_back($iter_mut)
-                    };
-                    let $this_map = &mut *self;
-                    item.map(|$id_map| $map_item)
-                }
-                fn nth_back(&mut self, n: usize) -> Option<<Self as Iterator>::Item> {
-                    let item = {
-                        let $this_iter_mut = &mut *self;
-                        ::core::iter::DoubleEndedIterator::nth_back($iter_mut, n)
-                    };
-                    let $this_map = &mut *self;
-                    item.map(|$id_map| $map_item)
-                }
-            )?
-            $(fn $($inner_double)+)?
-        }
-        $(impl_iter_wrap!{$($rest)*})?
-    };
+#[macro_export]
+macro_rules! impl_iter_wrap_loc {
     (
         impl{$($imp:tt)*} LocationGet<$n:ident, $l:ident> for $ty:ty, $inner:ty
             $(where{$($where:tt)*})?
@@ -885,7 +839,7 @@ macro_rules! impl_iter_wrap {
             )?
             $(fn $($inner_get)+)?
         }
-        $(impl_iter_wrap!{$($rest)*})?
+        $(impl_iter_wrap_loc!{$($rest)*})?
     };
     (
         impl{$($imp:tt)*} LocationRef<$n:ident, $l:ident> for $ty:ty, $inner:ty
@@ -915,142 +869,11 @@ macro_rules! impl_iter_wrap {
                 $crate::loc::LocationMut::lookup_mut($inner_mut, loc)
             }
         }
-        $(impl_iter_wrap!{$($rest)*})?
+        $(impl_iter_wrap_loc!{$($rest)*})?
+    };
+    ($($rest:tt)*) => {
+        $crate::iters::impl_iter_wrap!{$($rest)*}
     };
 }
-use impl_iter_wrap;
-
-pub trait TaimiExtend<T> {
-    fn current_len(&self) -> usize;
-    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I);
-}
-/// specialization :<
-#[cfg(todo)]
-impl<C, T> TaimiExtend<T> for C where
-    C: Extend<T>,
-{
-    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
-        Extend::extend(self, items)
-    }
-}
-impl<T, E> TaimiExtend<T> for Vec<E> where
-    T: Into<E>,
-{
-    fn current_len(&self) -> usize { self.len() }
-    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
-        Extend::extend(self, items.into_iter().map(Into::into))
-    }
-}
-impl<T, E> TaimiExtend<T> for Box<[E]> where
-    T: Into<E>,
-{
-    fn current_len(&self) -> usize { self.len() }
-    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
-        let mut collection = Vec::from(mem::take(self));
-        collection.extend_from(items);
-        *self = collection.into_boxed_slice();
-    }
-}
-impl<T, E> TaimiExtend<T> for Arc<[E]> where
-    T: Into<E>,
-    E: Clone,
-{
-    fn current_len(&self) -> usize { self.len() }
-    fn extend_from<I: IntoIterator<Item = T>>(&mut self, items: I) {
-        let mut collection = Vec::from(&self[..]);
-        collection.extend_from(items);
-        *self = collection.into();
-    }
-}
-pub trait TaimiSet<T: ?Sized> {
-    fn set_contains(&self, elem: &T) -> bool;
-}
-impl<K, V, T: ?Sized> TaimiSet<T> for HashMap<K, V> where
-    K: Borrow<T> + Hash + Eq,
-    T: Hash + Eq,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        self.contains_key(elem)
-    }
-}
-impl<K, V, T: ?Sized> TaimiSet<T> for BTreeMap<K, V> where
-    K: Borrow<T> + Ord,
-    T: Ord,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        self.contains_key(elem)
-    }
-}
-impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
-    K: Borrow<T> + Ord,
-    T: Ord,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        self.contains(elem)
-    }
-}
-#[cfg(todo)]
-impl<E, T: ?Sized> TaimiSet<T> for [E] where
-    E: PartialEq<T>,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        self.iter().any(|e| e == elem)
-    }
-}
-impl<E, T: ?Sized> TaimiSet<T> for [E] where
-    E: Borrow<T>,
-    T: PartialEq,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        self.iter().any(|e| e.borrow() == elem)
-    }
-}
-impl<E, T: ?Sized> TaimiSet<T> for Vec<E> where
-    [E]: TaimiSet<T>,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        TaimiSet::set_contains(&self[..], elem)
-    }
-}
-impl<E, T: ?Sized> TaimiSet<T> for Box<[E]> where
-    [E]: TaimiSet<T>,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        TaimiSet::set_contains(&self[..], elem)
-    }
-}
-impl<E, T: ?Sized> TaimiSet<T> for Arc<[E]> where
-    [E]: TaimiSet<T>,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        TaimiSet::set_contains(&self[..], elem)
-    }
-}
-impl<C: ?Sized + TaimiSet<T>, T: ?Sized> TaimiSet<T> for &'_ C {
-    fn set_contains(&self, elem: &T) -> bool {
-        TaimiSet::set_contains(*self, elem)
-    }
-}
-impl<C: ?Sized + TaimiSet<T>, T: ?Sized> TaimiSet<T> for &'_ mut C {
-    fn set_contains(&self, elem: &T) -> bool {
-        TaimiSet::set_contains(*self, elem)
-    }
-}
-/// `true` contains everything, `false` has nothing
-impl<T: ?Sized> TaimiSet<T> for bool {
-    fn set_contains(&self, _elem: &T) -> bool {
-        *self
-    }
-}
-impl<C: /*?Sized +*/ TaimiSet<T>, T: ?Sized> TaimiSet<T> for cmp::Reverse<C> {
-    fn set_contains(&self, elem: &T) -> bool {
-        !self.0.set_contains(elem)
-    }
-}
-impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,) where
-    C: PartialEq<T>,
-{
-    fn set_contains(&self, elem: &T) -> bool {
-        &self.0 == elem
-    }
-}
+pub use impl_iter_wrap_loc;
+use self::impl_iter_wrap_loc as impl_iter_wrap;

@@ -1,15 +1,18 @@
 use {
     crate::controller::pathing::registry::{
-        PackLoader, LoadedPack,
+        PackLoader, LoadedPack, PackMapPath, PackPath,
+        LoadedPoiPath, LoadedTrailPath,
     },
     bitvec::vec::BitVec,
     taimi_meta::packs::{
+        id::{MarkerIndexVariant, MarkerIndex, MarkerPath},
         MapIndex,
         PoiIndex, PoiPath,
         TrailIndex, TrailPath,
         CategoryIndex, CategoryPath,
     },
     taimi_pack::category::id::FullIdRef,
+    taimi_hoard::iters::IterExt as _,
 };
 
 #[derive(Debug, Clone)]
@@ -132,7 +135,11 @@ impl MapPackInfo {
     }
     pub fn pois(&self) -> impl Iterator<Item = PoiPath> + '_ {
         self.pois.iter_ones()
-            .map(|i| PoiPath::with_path(i as PoiIndex))
+            .lazy_map(|i| PoiPath::with_path(i as PoiIndex))
+    }
+    pub fn loaded_pois(&self) -> impl Iterator<Item = (LoadedPoiPath, PoiPath)> + '_ {
+        self.pois().enumerate()
+            .map(|(i, path)| (LoadedPoiPath::with_path(i as PoiIndex), path))
     }
     #[cfg(todo)]
     pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
@@ -149,17 +156,38 @@ impl MapPackInfo {
         self.poi_guid_mask().zip(iter)
             .filter_map(|(mask, v)| mask.then_some(v))
     }
-    pub fn poi_index(&self, path: PoiPath) -> Option<PoiIndex> {
-        let path = path.path as usize;
-        self.pois.iter_ones().position(|p| p == path)
-            .map(|p| p as PoiIndex)
+    pub fn poi_index(&self, path: PoiPath) -> Option<LoadedPoiPath> {
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => self.pois().position(|t| t.path == path.path)
+                .map(|i| LoadedTrailPath::with_path(i as TrailIndex)),
+            _ => match self.pois.get(path.path as usize) {
+                None => None,
+                Some(b) if !*b =>
+                    None,
+                Some(_) => Some(unsafe {
+                    let index = path.path as usize;
+                    let preceding = self.pois.get_unchecked(..path.path as usize);
+                    LoadedPoiPath::with_path(preceding.count_ones() as PoiIndex)
+                }),
+            },
+        }
+    }
+    /// TODO: `nth` isn't implemented on [bitvec::slice::IterOnes], it should
+    /// probably popcnt instead?
+    pub fn poi_path(&self, path: LoadedPoiPath) -> Option<PoiPath> {
+        self.pois().nth(path.path as usize)
     }
     pub fn trail_count(&self) -> usize {
         self.trails.count_ones()
     }
     pub fn trails(&self) -> impl Iterator<Item = TrailPath> + '_ {
         self.trails.iter_ones()
-            .map(|i| TrailPath::with_path(i as TrailIndex))
+            .lazy_map(|i| TrailPath::with_path(i as TrailIndex))
+    }
+    pub fn loaded_trails(&self) -> impl Iterator<Item = (LoadedTrailPath, TrailPath)> + '_ {
+        self.trails().enumerate()
+            .map(|(i, path)| (LoadedTrailPath::with_path(i as TrailIndex), path))
     }
     #[cfg(todo)]
     pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
@@ -176,10 +204,27 @@ impl MapPackInfo {
         self.trail_guid_mask().zip(iter)
             .filter_map(|(mask, v)| mask.then_some(v))
     }
-    pub fn trail_index(&self, path: TrailPath) -> Option<TrailIndex> {
-        let path = path.path as usize;
-        self.trails.iter_ones().position(|t| t == path)
-            .map(|i| i as TrailIndex)
+    pub fn trail_index(&self, path: TrailPath) -> Option<LoadedTrailPath> {
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => self.trails().position(|t| t.path == path.path)
+                .map(|i| LoadedTrailPath::with_path(i as TrailIndex)),
+            _ => match self.trails.get(path.path as usize) {
+                None => None,
+                Some(b) if !*b =>
+                    None,
+                Some(_) => Some(unsafe {
+                    let index = path.path as usize;
+                    let preceding = self.trails.get_unchecked(..path.path as usize);
+                    LoadedTrailPath::with_path(preceding.count_ones() as TrailIndex)
+                }),
+            },
+        }
+    }
+    /// TODO: `nth` isn't implemented on [bitvec::slice::IterOnes], it should
+    /// probably popcnt instead?
+    pub fn trail_path(&self, path: LoadedTrailPath) -> Option<TrailPath> {
+        self.trails().nth(path.path as usize)
     }
     pub fn category_count(&self) -> usize {
         self.categories.len()
@@ -198,5 +243,33 @@ impl MapPackInfo {
     pub fn category_index(&self, path: CategoryPath) -> Option<CategoryIndex> {
         self.categories[..].iter().position(|&c| c == path.path)
             .map(|i| i as CategoryIndex)
+    }
+
+    pub fn path_from_loaded(&self, loaded: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
+        let pack_path = loaded.root.root;
+        Some(match loaded.path.variant() {
+            MarkerIndexVariant::Poi(index) => {
+                let p = self.poi_path(LoadedPoiPath::with_path(index))?;
+                #[cfg(todo = "unnecessary")]
+                let index = MarkerIndex::with_poi(p.path);
+                let index = p.into();
+                MarkerPath::with_parts(pack_path, index)
+            },
+            MarkerIndexVariant::Trail(index) => {
+                let p = self.trail_path(LoadedTrailPath::with_path(index))?;
+                #[cfg(todo = "unnecessary")]
+                let index = MarkerIndex::with_trail(p.path);
+                let index = p.into();
+                MarkerPath::with_parts(pack_path, index)
+            },
+            MarkerIndexVariant::TrailSection(index, section) => {
+                let p = self.trail_path(LoadedTrailPath::with_path(index))?;
+                let index = MarkerIndex::with_trail_section(p.path, section);
+                #[cfg(todo)]
+                let index = p.into();
+                MarkerPath::with_parts(pack_path, index)
+            },
+            _ => return None,
+        })
     }
 }

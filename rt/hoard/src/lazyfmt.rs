@@ -34,6 +34,24 @@ impl<F> MaybeFmt<F> {
         MaybeFmt::new(Self::wrap_lazy_fn::<R, F>(f))
     }
 }
+impl MaybeFmt<FormatterFn> {
+    /// format `Some(T)` or fallback
+    pub const fn fmt_or<T: fmt::Display, F: fmt::Display>(v: Option<T>, fallback: F) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+        MaybeFmt::new(move |f| match &v {
+            Some(v) => fmt::Display::fmt(v, f),
+            None => fmt::Display::fmt(&fallback, f),
+        })
+    }
+}
+pub const fn fmt_or<T: fmt::Display, F: fmt::Display>(v: Option<T>, fallback: F) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+    MaybeFmt::fmt_or(v, fallback)
+}
+pub const fn or_empty<T: fmt::Display>(v: Option<T>) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+    fmt_or(v, "")
+}
+pub const fn or_unavail<T: fmt::Display>(v: Option<T>) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+    fmt_or(v, UNAVAILABLE)
+}
 impl<F> fmt::Display for MaybeFmt<F>
 where
     F: Fn(&mut fmt::Formatter) -> fmt::Result,

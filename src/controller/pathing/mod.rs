@@ -4,13 +4,16 @@ use {
             api::{AchievementState, RaidState},
             Controller,
         },
-        exports::runtime::bindings::{
-            ControlsReceiver,
-            GameControl,
-            GameControls,
-            TaimiControls,
-            TaimiReceiver,
-            CONTROLS,
+        exports::runtime::{
+            self as rt,
+            bindings::{
+                ControlsReceiver,
+                GameControl,
+                GameControls,
+                TaimiControls,
+                TaimiReceiver,
+                CONTROLS,
+            },
         },
         render::machine::RenderTaskPriority,
         settings::{Settings, SettingsLock, SourceKind},
@@ -196,12 +199,13 @@ impl PathingController {
                         Ok(())
                     },
                     Err(e) | Ok(Err(e)) => {
+                        let e = rt::log::error_into_arc(e);
                         Self::pathing_notify_pack_error(
                             name,
-                            UnloadedReason::LoadingFailed(format!("{e:#}")),
+                            UnloadedReason::LoadingFailed(e.clone()),
                         )
                         .await;
-                        Err(e)
+                        Err(e.into())
                     },
                 }
             };

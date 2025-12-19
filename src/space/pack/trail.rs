@@ -1,69 +1,85 @@
 use {
     crate::{
-        controller::pathing::space::{SpaceTrail, SpaceLoader},
+        controller::pathing::{
+            visible::{LoadedTrail, LoadedTrailGeometry},
+            space::SpaceLoader,
+        },
         exports::runtime::Counter,
         space::{
             pack::PoiCommonRenderData,
             resources::Model,
         },
+        resources::Texture,
     },
+    std::ops,
     anyhow::Context,
-    core::mem,
-    taimi_d3d::dx11::prelude::*,
+    std::sync::Arc,
+    taimi_d3d::dx11::{
+        buffer::VertexBuffer,
+        prelude::*,
+    },
+    taimi_hoard::lazyfmt,
     taimi_meta::{
-        packs::TrailSectionIndex,
+        packs::TrailSectionPath,
         ui::LocalContext,
     },
+    taimi_pack::attributes::AttrString,
 };
 
-impl SpaceTrail {
-    pub fn setup(
+/// World render data
+pub struct TrailRender {
+    pub texture: Option<Arc<Texture>>,
+    pub section_vbuffer: Option<VertexBuffer>,
+}
+
+impl TrailRender {
+    pub fn empty() -> Self {
+        Self {
+            texture: None,
+            section_vbuffer: None,
+        }
+    }
+
+    pub fn setup_texture(
         &mut self,
         loader: &mut SpaceLoader<'_>,
-        render_bookmark: u32,
+        texture_name: &AttrString,
     ) -> anyhow::Result<()> {
-        self.render_bookmark = render_bookmark;
-        let res = if self.texture.is_none() {
-            let texture_handle = self.trail_attrs().texture
-                .as_ref()
-                .context("Trail is missing texture");
-            let texture_handle = texture_handle.map(|h| loader.register_texture(h));
-            let texture = texture_handle.and_then(|texture_handle| loader
-                .get_or_load_texture(texture_handle)
-                .context("Loading trail texture"));
+        if self.texture.is_some() { return Ok(()) }
+        let handle = loader.register_texture(texture_name);
+        let texture = loader
+            .get_or_load_texture(handle)
+            .context("Loading trail texture");
 
-            match texture {
-                Ok(texture) => {
-                    self.texture = Some(texture);
-                    Ok(())
-                },
-                Err(e) => {
-                    self.texture = None;
-                    Err(e)
-                },
-            }
-        } else { Ok(()) };
-
-        let res = if self.section_vbuffer.is_none() {
-            let model = Model::from_vertices(mem::take(&mut self.vertices));
-            let section_vbuffer = model.to_buffer(loader.device).context("Creating trail vbuffer");
-            match section_vbuffer {
-                Ok(vbuffer) => {
-                    STATS_TRAIL_VERTEX_SIZE.increment_by(|| vbuffer.size());
-                    self.section_vbuffer = Some(vbuffer);
-                    res
-                },
-                Err(e) => match res {
-                    Ok(()) => Err(e),
-                    res @ Err(..) => {
-                        log::error!("{e:#}");
-                        res
-                    }
-                },
-            }
-        } else { Ok(()) };
-
-        res
+        match texture {
+            Ok(texture) => {
+                self.texture = Some(texture);
+                Ok(())
+            },
+            Err(e) => {
+                self.texture = None;
+                Err(e)
+            },
+        }
+    }
+    pub fn setup_geometry(
+        &mut self,
+        loader: &mut SpaceLoader<'_>,
+        mut geometry: LoadedTrailGeometry,
+    ) -> anyhow::Result<()> {
+        if self.section_vbuffer.is_some() {
+            return Ok(())
+        }
+        let model = Model::from_vertices(geometry.take_vertices());
+        let section_vbuffer = model.to_buffer(loader.device).context("Creating trail vbuffer");
+        match section_vbuffer {
+            Ok(vbuffer) => {
+                STATS_TRAIL_VERTEX_SIZE.increment_by(|| vbuffer.size());
+                self.section_vbuffer = Some(vbuffer);
+                Ok(())
+            },
+            Err(e) => Err(e),
+        }
     }
 
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
@@ -75,18 +91,13 @@ impl SpaceTrail {
     }
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders and texture must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionIndex, ctx: LocalContext) {
-        let section = section as usize;
-
+    pub fn draw_section(&self, device_context: &Dx11Context, trail: &LoadedTrail, section: TrailSectionPath, ctx: LocalContext) {
         if let Some(section_vbuffer) = &self.section_vbuffer {
             section_vbuffer.set(device_context, 0);
         }
-        let (start, end) = match self.section_bookmarks.get(section..) {
-            Some(&[start, end, ..]) => (start, end),
-            _ => {
-                log::error!("attempted to draw invalid section#{section} of trail in {}", self.category);
-                return
-            },
+        let Some(ops::Range { start, end }) = trail.section_geometry_vertices(section) else {
+            log::error!("attempted to draw invalid {section} in {}", lazyfmt::or_unavail(trail.category()));
+            return
         };
         unsafe {
             //PrimitiveTopology::TriangleStrip.set(device_context);
@@ -104,10 +115,14 @@ impl SpaceTrail {
             }
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.section_vbuffer.is_none()
+    }
 }
 
 #[cfg(feature = "statistics")]
-impl Drop for SpaceTrail {
+impl Drop for TrailRender {
     fn drop(&mut self) {
         if let Some(vbuffer) = &self.section_vbuffer {
             STATS_TRAIL_VERTEX_SIZE.decrement_by(|| vbuffer.size());

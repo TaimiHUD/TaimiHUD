@@ -1,9 +1,9 @@
 use std::{cmp, mem, ops};
 use crate::coords::{LocalPoint2, LocalSpace};
-use glamour::{FloatScalar, Point3, Unit, Vector2, Vector3};
+use glamour::{FloatScalar, Point3, Unit, Vector2, Vector3, Box2, Box3};
 use bvh::{aabb, ball, bounding_hierarchy::{BHShape, BHValue}, bvh::Bvh};
 use num_traits::Signed;
-use crate::spatial::{MintConv, ConstNan};
+use crate::spatial::{box2aabb, box3aabb, MintConv, ConstNan};
 
 pub struct BvhEntities<T, P = usize, const D: usize = 3> {
     entities: Vec<T>,
@@ -400,14 +400,16 @@ impl TriggerBoundsInfo<LocalSpace> {
         )
     }
 }
+
 impl aabb::Bounded<<LocalSpace as Unit>::Scalar, 2> for TriggerBoundsInfo<LocalSpace> {
     fn aabb(&self) -> aabb::Aabb<<LocalSpace as Unit>::Scalar, 2> {
-        let corner = Vector2::splat(self.radius());
+        let corner = Vector2::<LocalSpace>::splat(self.radius());
         let position = self.position2();
-        aabb::Aabb::with_bounds(
-            (position - corner).into_nalg(),
-            (position + corner).into_nalg(),
-        )
+        let bounds = Box2::new(
+            position - corner,
+            position + corner,
+        );
+        box2aabb(bounds)
     }
 }
 impl<U: Unit> aabb::Bounded<U::Scalar, 3> for TriggerBoundsInfo<U> where
@@ -415,10 +417,11 @@ impl<U: Unit> aabb::Bounded<U::Scalar, 3> for TriggerBoundsInfo<U> where
     Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
 {
     fn aabb(&self) -> aabb::Aabb<U::Scalar, 3> {
-        let corner = Vector3::splat(self.radius());
-        aabb::Aabb::with_bounds(
-            (self.position - corner).into_nalg(),
-            (self.position + corner).into_nalg(),
-        )
+        let corner = Vector3::<U>::splat(self.radius());
+        let bounds = Box3::new(
+            self.position - corner,
+            self.position + corner,
+        );
+        box3aabb(bounds)
     }
 }

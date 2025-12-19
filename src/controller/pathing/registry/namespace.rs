@@ -1,9 +1,11 @@
 use {
     crate::controller::pathing::registry::{PackRegistry, LoadedPack},
     taimi_hoard::loc::{
+        locator_ns,
         indexed::IndexedList,
         Locator, LocationMut, LocationRef,
     },
+    taimi_meta::packs,
 };
 pub use taimi_meta::packs::{PackRegistryNs, PackPath, PackIndex, PackMapPath};
 
@@ -24,3 +26,25 @@ impl LocationMut<PackRegistryNs, PackIndex> for PackRegistry {
         self.packs.get_mut(loc.path as usize)
     }
 }
+
+locator_ns! {
+    pub struct LoadedPoiNs;
+    impl LocatorNamespace {
+        pub index LoadedPoiIndex = packs::PoiIndex;
+        pub path LoadedPoiPath;
+        fn fmt(&self, f) {
+            f.write_str("controller/pois")
+        }
+    }
+
+    pub struct LoadedTrailNs;
+    impl LocatorNamespace {
+        pub index LoadedTrailIndex = packs::TrailIndex;
+        pub path LoadedTrailPath;
+        fn fmt(&self, f) {
+            f.write_str("controller/trails")
+        }
+    }
+}
+pub type PoiMapPath<N = PackMapPath> = LoadedPoiPath<N>;
+pub type TrailMapPath<N = PackMapPath> = LoadedTrailPath<N>;

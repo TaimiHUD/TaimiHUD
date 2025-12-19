@@ -1,23 +1,30 @@
-use super::PathingShared;
-use std::{cmp, ops, sync::Arc};
-use taimi_meta::packs::{
-    MapIndex, CategoryPath,
-};
-use crate::controller::pathing::{
-    registry::{PackBoxOf, PackMapPath, PackPath},
-    visible::{LoadedCategory, LoadedMapPack},
-    shared::MapPackInfo,
-};
-use taimi_hoard::loc::{
-    Locator,
-    LocationRef, LocationMut,
-    indexed::TaimiSet,
+use {
+    super::PathingShared,
+    crate::controller::pathing::{
+        registry::{PackBoxOf, PackMapPath, PackPath, LoadedPoiPath, LoadedPoiIndex, LoadedTrailPath, LoadedTrailIndex},
+        visible::{LoadedCategory, LoadedMapPack},
+        shared::MapPackInfo,
+    },
+    std::{cmp, ops, sync::Arc},
+    taimi_hoard::{
+        collections::TaimiSet,
+        loc::{
+            Locator,
+            LocationRef, LocationMut,
+        },
+    },
+    taimi_meta::packs::{
+        id::{IdVariant, MarkerIndexVariant, MarkerId, MarkerIndex, MarkerPath, FromMarkerId1},
+        MapIndex, CategoryPath,
+    },
 };
 #[cfg(todo)]
 use {
     taimi_pack::attributes::keys::Guid,
     taimi_meta::packs::{
-        MarkerId, PoiPath,
+        PoiPath,
+        PackIndex,
+        PoiPath,
     },
     crate::controller::pathing::{
         state::hidden::MarkerState,
@@ -238,6 +245,22 @@ impl SharedGameplayMap {
         self.info.lookup_ref(&path.root)
             .and_then(|info| info.as_ref())
             .map(|info| (path, info))
+    }
+    pub fn iter_markers(&self) -> impl Iterator<Item = SharedMarkerRef<'_>> {
+        self.iter_state()
+            .flat_map(move |(map_path, map, map_info)|
+                map_info.loaded_pois().map(move |(loaded, poi)| SharedMarkerRef {
+                    loaded_id: MarkerId::for_marker(MarkerPath::with_parts(map_path, MarkerIndex::with_poi(loaded.path))),
+                    index: MarkerIndex::with_poi(poi.path),
+                    map_info,
+                    map,
+                }).chain(map_info.loaded_trails().map(move |(loaded, trail)| SharedMarkerRef {
+                    loaded_id: MarkerId::for_marker(MarkerPath::with_parts(map_path, MarkerIndex::with_trail(loaded.path))),
+                    index: MarkerIndex::with_trail(trail.path),
+                    map_info,
+                    map,
+                }))
+            )
     }
 }
 
@@ -489,6 +512,53 @@ impl SharedMapPackState {
             })
             .cloned()
             .collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct SharedMarkerRef<'a> {
+    pub loaded_id: MarkerId,
+    pub index: MarkerIndex,
+    pub map_info: &'a SharedMapPackLoaded,
+    pub map: &'a SharedMapPackState,
+}
+impl<'a> SharedMarkerRef<'a> {
+    pub fn pack_path(&self) -> PackPath {
+        let (i1, i2) = self.loaded_id.index12();
+        FromMarkerId1::from_index12(i1, i2)
+    }
+    pub fn map_path(&self) -> PackMapPath {
+        let (i1, i2) = self.loaded_id.index12();
+        FromMarkerId1::from_index12(i1, i2)
+    }
+    pub fn loaded_path(&self) -> MarkerPath<PackMapPath> {
+        match self.loaded_id.variant() {
+            IdVariant::MarkerLoaded(path) => path,
+            _ => {
+                log::error!("SharedMarkerRef invalid id: {}", self.loaded_id);
+                MarkerPath::with_parts(self.map_path(), MarkerIndex::UNK)
+            },
+        }
+    }
+    /// as opposed to [self.loaded_path]
+    pub fn path(&self) -> MarkerPath<PackPath> {
+        match self.index {
+            MarkerIndex::UNK => {
+                let path = self.loaded_path();
+                match self.map_info.info.path_from_loaded(self.loaded_path()) {
+                    Some(p) => p,
+                    None => {
+                        log::error!("SharedMarkerRef invalid id: {}", self.loaded_id);
+                        MarkerPath::with_parts(path.root.root, MarkerIndex::UNK)
+                    },
+                }
+            },
+            i => MarkerPath::with_parts(self.pack_path(), i),
+        }
+    }
+    /// as opposed to [self.loaded_id]
+    pub fn marker_id(&self) -> MarkerId {
+        MarkerId::for_marker(self.path())
     }
 }
 

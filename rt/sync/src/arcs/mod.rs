@@ -6,6 +6,11 @@ use std::sync::{
     RwLock,
 };
 use crate::typemap::{empty_any_map_sync, AnyMapSync};
+#[cfg(todo)]
+pub use self::iters::{ArcSliceAt, ArcSliceIter};
+
+pub mod iters;
+pub mod moveshare;
 
 /// unallocated refs are [equivalent](Weak::ptr_eq) to [Weak::new()]
 pub fn weak_is_null<T>(weak: &Weak<T>) -> bool {

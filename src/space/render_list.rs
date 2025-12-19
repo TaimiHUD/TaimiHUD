@@ -217,6 +217,7 @@ where
         while let Some(next) = self.bvh_iter.next() {
             let entity = &self.entities[next];
             let cam_dist = match entity.draw_ordered {
+                _ if entity.render_id.is_none() => continue,
                 false => return Some(entity),
                 #[cfg(todo)]
                 true => {
@@ -253,11 +254,22 @@ struct RenderEntityShape {
 #[cfg(feature = "space-list")]
 impl RenderEntityShape {
     fn new((entity_idx, entity): (usize, &RenderEntity)) -> Self {
+        if entity.render_id.is_none() {
+            return Self::invalid(entity_idx)
+        }
         RenderEntityShape {
             bounds: bvh::aabb::Aabb {
                 min: [entity.bounds.min.x, entity.bounds.min.y, entity.bounds.min.z].into(),
                 max: [entity.bounds.max.x, entity.bounds.max.y, entity.bounds.max.z].into(),
             },
+            entity_idx,
+            bh_idx: 0,
+        }
+    }
+    fn invalid(entity_idx: usize) -> Self {
+        use taimi_meta::spatial;
+        Self {
+            bounds: spatial::box3aabb(spatial::irrelevant_box3::<DrawSpace>()),
             entity_idx,
             bh_idx: 0,
         }

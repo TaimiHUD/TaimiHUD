@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             pathing::{
-                space::{SpacePackCollection, PoiScale, TrailScale, TrailTextureMap},
+                space::{PoiScale, TrailScale, TrailTextureMap},
                 PathingEvent,
             },
             Controller,
@@ -11,6 +11,7 @@ use {
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
+            pack::PackRender,
             render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
@@ -20,7 +21,7 @@ use {
     glam::Vec3,
     glamour::{Box2, Size2, TransformMap},
     std::{
-        collections::{HashMap, HashSet},
+        collections::HashMap,
         mem,
         num::NonZeroU32,
         sync::Arc,
@@ -132,7 +133,7 @@ pub struct Engine {
     // ECS stuff
     pub world: World,
 
-    pub packs: Arc<SpacePackCollection>,
+    pub packs: PackRender,
 
     settings: Option<PathingSettings>,
 }
@@ -179,7 +180,7 @@ impl Engine {
 
         schedule.add_systems(handle_marker_timings);
 
-        let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
+        let packs = PackRender::new(&render_backend).context("Initializing packs")?;
         PathingEvent::LoadAll.try_send();
 
         let mut gameplay = Watched::start_watching(gameplay);
@@ -377,9 +378,9 @@ impl Engine {
         self.phase_states.clear();
     }
 
+    #[cfg(todo)]
     pub fn stop(&mut self) {
-        self.packs.clear_active();
-        self.packs.clear();
+        self.packs.stop();
     }
 
     pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<bool> {
@@ -485,10 +486,7 @@ impl Engine {
                 },
             _ => Ok(()),
         }
-    }
-
-    pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
-        self.packs.disable_paths(disabled_paths);
+        .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"))
     }
 
     #[allow(dead_code)]
@@ -555,12 +553,14 @@ impl Engine {
             return Ok(())
         }
 
+        #[cfg(deleteme)] {
         self.packs.trail_params.y_offset = trail_y_offset.unwrap_or(0.0);
         self.packs.trail_params.resolution = Some(trail_resolution);
         self.packs.trail_params.width = trail_width;
+        }
 
         self.packs.prepare(&self.render_backend.device, machine)?;
-        self.packs.update();
+        //self.packs.update();
 
         let render_map = match visible_map {
             Some(true) =>
@@ -661,6 +661,7 @@ impl Engine {
                     .perspective_handler
                     .set_map_cb(&device_context, perspective_slot);
 
+                #[cfg(todo)] {
                 let entities = self.packs.entities_map(local_bounds);
                 PackCollection::draw_map_entities(
                     &self.packs.loaded_packs,
@@ -669,7 +670,7 @@ impl Engine {
                     &backend,
                     map_ctx,
                     entities,
-                );
+                );}
             }
         }
 
@@ -831,6 +832,8 @@ impl Engine {
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
+                #[cfg(todo)]
+                {
                 let entities = self.packs.entities_obscured(cull);
                 PackCollection::draw_entities(
                     &self.packs.loaded_packs,
@@ -838,7 +841,7 @@ impl Engine {
                     &device_context,
                     &backend,
                     entities,
-                );
+                );}
 
                 backend.depth_handler.set_state_obscured(&device_context, false);
             }
@@ -847,8 +850,10 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
+                #[cfg(todo)] {
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
+                }
             }
         }
 
@@ -913,7 +918,6 @@ impl Engine {
                 let _ = sender.take();
             }
             // pack cleanup kinda unnecessary since it's done on drop anyway?
-            // self.packs.clear();
         } else {
             self.packs.destroy_buffers();
         }
@@ -924,7 +928,9 @@ impl Engine {
         device_context: &Dx11Context,
         prev_map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
+        #[cfg(todo)]
         let res = self.packs.unload_map(device_context, prev_map_id.get());
+        let res = Ok(());
 
         res
     }
@@ -934,9 +940,11 @@ impl Engine {
         device_context: &Dx11Context,
         map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
+        #[cfg(deleteme)]
         let res = self
             .packs
             .load_map(&self.render_backend.device, device_context, map_id.get());
+        let res = Ok(());
 
         self.goggles_enter(true);
 

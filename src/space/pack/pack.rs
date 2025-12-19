@@ -1,9 +1,12 @@
 use {
     taimi_hoard::statistics::Counter,
+    taimi_meta::packs::MapIndex,
     super::PoiCommonRenderData,
     crate::{
         controller::pathing::{
+            registry::{PackVecOf, LoadedPoiNs, LoadedTrailNs},
             space::{SpacePack, SpacePackCollection, TrailParams},
+            visible::{LoadedPoi, LoadedTrail},
             ExternalFilterState, FestivalFixup, PathingController, PathingEvent,
         },
         exports::runtime::{
@@ -22,9 +25,11 @@ use {
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
+            pack::{PoiRender, TrailRender},
         },
         with_i18n,
     },
+    std::ops,
     anyhow::{anyhow, Context},
     bitvec::vec::BitVec,
     glamour::Box3,
@@ -40,7 +45,11 @@ use {
         },
     },
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
-    taimi_meta::ui::{LocalContext, MapContext},
+    taimi_meta::{
+        packs::{PackTrailNs, PackPoiNs, PoiIndex, TrailIndex},
+        ui::{LocalContext, MapContext},
+    },
+    taimi_hoard::loc::indexed::IndexedList,
     taimi_pack::{
         attributes::{Festival, FilterAttributes, MarkerAttributes},
         category::CategoryId,
@@ -948,28 +957,157 @@ impl AsRef<Pack> for ActivePack {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PackTextureHandle(usize);
 
-pub struct PackRender {
-    pub packs: SpacePackCollection,
+/// Internal rendering data.
+pub(super) struct PackRenderData {
+    #[cfg(todo)]
+    pub render_list_bookmark: Option<usize>,
+    pub pois: IndexedList<LoadedPoiNs, PoiIndex, Vec<PoiRender>>,
+    pub trails: IndexedList<LoadedTrailNs, TrailIndex, Vec<TrailRender>>,
+    pub loaded_pois: IndexedList<LoadedPoiNs, PoiIndex, Arc<[LoadedPoi]>>,
+    pub loaded_trails: IndexedList<LoadedTrailNs, TrailIndex, Arc<[LoadedTrail]>>,
+    render_poi_bookmark: usize,
+    #[cfg(todo)]
+    poi_bookmark: usize,
+}
 
-    pub current_map: Option<i32>,
+impl PackRenderData {
+    pub fn new() -> Self {
+        Self {
+            pois: Default::default(),
+            trails: Default::default(),
+            loaded_pois: Default::default(),
+            loaded_trails: Default::default(),
+            render_poi_bookmark: 0,
+        }
+    }
+
+    pub fn render_poi_bookmarks(&self) -> ops::Range<PoiIndex> {
+        match self.render_poi_bookmark {
+            0 => 0..0,
+            start => {
+                let end = (start + self.pois.len()) as PoiIndex;
+                let start = start as PoiIndex;
+                start..end
+            },
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let trails = self.trails.is_empty();
+        let pois = self.render_poi_bookmark == 0 || self.pois.is_empty();
+        trails && pois
+    }
+
+    pub fn clear(&mut self) {
+        self.pois.clear();
+        self.trails.clear();
+        self.render_poi_bookmark = 0;
+    }
+}
+
+pub struct PackRender {
+    pub packs: Arc<SpacePackCollection>,
+    pub pack_data: PackVecOf<PackRenderData>,
+    pub current_map: Option<MapIndex>,
+    #[cfg(todo)]
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
 }
 
-#[cfg(todo)]
-impl PackCollection {
-    pub fn new(backend: &RenderBackend) -> anyhow::Result<PackCollection> {
+impl PackRender {
+    pub fn new(backend: &RenderBackend) -> anyhow::Result<Self> {
         let poi_common = PoiCommonRenderData::new(backend)?;
-        Ok(PackCollection {
-            loaded_packs: IndexMap::new(),
-            unloaded_packs: IndexMap::new(),
+        Ok(Self {
+            packs: Arc::new(SpacePackCollection::new()),
+            pack_data: Default::default(),
             current_map: None,
+            #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
-            trail_params: TrailParams::default(),
             poi_common,
-            festival_categories: FestivalFixup::festival_categories(),
         })
     }
+
+    fn mark_buffers_dirty(&mut self) {
+        self.poi_common.clear();
+        for pack in self.pack_data.values_mut() {
+            pack.render_poi_bookmark = 0;
+        }
+    }
+
+    pub fn destroy_buffers(&mut self) {
+        self.mark_buffers_dirty();
+    }
+
+    pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+        if self.pack_data.values().any(|p| p.render_poi_bookmarks().is_empty() != p.pois.is_empty()) {
+            self.allocate_poi_buffers(1);
+        }
+        self.poi_common.update(device, machine, &self.pack_data);
+
+        Ok(())
+    }
+    fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+        let res = self
+            .recreate_buffers_inner(device, machine)
+            .context("preparing POI instance buffers");
+        #[cfg(todo)]
+        if res.is_err() {
+            self.mark_buffers_dirty();
+        }
+        res
+    }
+    fn recreate_buffers_inner(
+        &mut self,
+        device: &Dx11Device,
+        machine: &RenderMachine,
+    ) -> anyhow::Result<()> {
+        self.allocate_poi_buffers(1);
+        self.poi_common.rebuild_ib(device, machine, &self.pack_data)?;
+
+        Ok(())
+    }
+
+    /// offset (starting len) currently = 1 to leave space for an identity buffer
+    /// at index 0 for drawing trails with
+    ///
+    /// also [SpacePack::render_poi_bookmark] of 0 is treated as empty so uh don't
+    /// use that
+    pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
+        for pack in self.pack_data.values_mut() {
+            pack.render_poi_bookmark = offset;
+            offset += pack.active_pois.len();
+        }
+        offset
+    }
+    pub fn reset_poi_buffers(&mut self) {
+        for pack in self.pack_data.values_mut() {
+            pack.render_poi_bookmark = 0;
+        }
+    }
+    pub fn clear_packs(&mut self) {
+        for pack in self.pack_data.values_mut() {
+            pack.clear();
+        }
+    }
+    pub fn stop(&mut self) {
+        self.clear_packs();
+        self.cleanup_textures();
+        self.poi_common.clear();
+    }
+    /// See [crate::space::engine::Engine::cleanup_background]
+    ///
+    /// TODO: revisit, avoid, etc
+    pub fn cleanup_background(self) {
+        let Self { loaded_packs, poi_common, .. } = self;
+        mem::forget((loaded_packs, poi_common));
+    }
+
+    pub fn cleanup_textures(&mut self) {
+        let todo = ();
+    }
+}
+#[cfg(todo)]
+impl PackCollection {
 
     pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
         let external = PathingController::external_filter_state();
@@ -1212,70 +1350,6 @@ impl PackCollection {
         res
     }
 
-    fn recreate_buffers_inner(
-        &mut self,
-        device: &Dx11Device,
-        machine: &RenderMachine,
-    ) -> anyhow::Result<()> {
-        // identity at start for trail drawing
-        let mut data_world = vec![InstanceBufferData::IDENTITY; 1];
-        let mut data_map = vec![InstanceBufferData::IDENTITY; 1];
-
-        let mut render_poi_bookmark = 1;
-        for pack in self.loaded_packs.values_mut() {
-            data_world.extend(pack.active_pois.values().map(|poi| poi.instance_data()));
-            data_map.extend(
-                pack.active_pois
-                    .values()
-                    .map(|poi| poi.instance_data_map(machine)),
-            );
-            pack.render_poi_bookmark = render_poi_bookmark;
-            render_poi_bookmark += pack.active_pois.len();
-        }
-        let (data_world, data_map) = (&data_world[..], &data_map[..]);
-        super::poi::STATS_POI_INSTANCE_SIZE
-            .reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
-        let (poi_ib_world, poi_ib_map) = (
-            Some(BufferOf::new_with_data(device, Ok(data_world), ())?),
-            Some(BufferOf::new_with_data(device, Ok(data_map), ())?),
-        );
-        self.poi_common.world_ib = poi_ib_world;
-        self.poi_common.map_ib = poi_ib_map;
-
-        Ok(())
-    }
-
-    fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
-        let res = self
-            .recreate_buffers_inner(device, machine)
-            .context("preparing POI instance buffers");
-        if res.is_err() {
-            self.mark_buffers_dirty();
-        }
-        res
-    }
-
-    fn mark_buffers_dirty(&mut self) {
-        self.poi_common.clear();
-        for pack in self.loaded_packs.values_mut() {
-            pack.render_poi_bookmark = 0;
-        }
-    }
-
-    pub fn destroy_buffers(&mut self) {
-        self.mark_buffers_dirty();
-    }
-
-    pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
-        if
-        /* !self.loaded_packs.is_empty() &&*/
-        self.poi_common.is_empty() {
-            self.recreate_buffers(device, machine)?;
-        }
-
-        Ok(())
-    }
-
     pub fn update(&mut self) {
         for (_, pack) in &mut self.loaded_packs {
             pack.update(&mut self.render_list);
@@ -1502,20 +1576,6 @@ impl PackCollection {
         }
 
         self.poi_common.clear();
-    }
-
-    pub fn cleanup_textures(&mut self) {
-        for pack in self.loaded_packs.values_mut() {
-            pack.cleanup_textures();
-        }
-    }
-
-    /// See [crate::space::engine::Engine::cleanup_background]
-    ///
-    /// TODO: revisit, avoid, etc
-    pub fn cleanup_background(self) {
-        let Self { loaded_packs, poi_common, .. } = self;
-        mem::forget((loaded_packs, poi_common));
     }
 }
 

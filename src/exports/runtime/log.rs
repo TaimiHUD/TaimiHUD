@@ -9,13 +9,14 @@ use {
     log::{Level, LevelFilter, Log, Metadata, Record},
     std::{
         ffi::CStr,
+        error::Error as StdError,
         fmt,
         fs,
         io,
         mem::transmute,
         path::PathBuf,
         slice,
-        sync::{LazyLock, Mutex, OnceLock, TryLockError},
+        sync::{Arc, LazyLock, Mutex, OnceLock, TryLockError},
         time,
     },
 };
@@ -707,4 +708,16 @@ where
     E: fmt::Display,
 {
     log_ok(Level::Error, res)
+}
+
+pub type DynError = dyn StdError + Send + Sync;
+pub fn error_into_box<E>(e: E) -> Box<DynError> where
+    E: Into<Box::<DynError>>,
+{
+    e.into()
+}
+pub fn error_into_arc<E>(e: E) -> Arc<DynError> where
+    E: Into<Box::<DynError>>,
+{
+    Arc::from(error_into_box(e))
 }

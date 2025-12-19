@@ -1,11 +1,15 @@
 use {
     crate::{
-        controller::pathing::space::{SpacePoi, SpacePack, SpaceLoader},
+        controller::pathing::{
+            space::SpaceLoader,
+            visible::LoadedPoi,
+        },
         exports::runtime::Counter,
         render::machine::RenderMachine,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             resources::{Model, ShaderPair, Texture, Vertex},
+            pack::PackRenderData,
         },
         TEXTURES,
     }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::sync::Arc, taimi_d3d::{
@@ -15,6 +19,7 @@ use {
         },
         state::PrimitiveTopology,
     }, taimi_meta::ui::LocalContext,
+    taimi_pack::attributes::AttrString,
 };
 
 pub struct PoiCommonRenderData {
@@ -125,7 +130,7 @@ impl PoiCommonRenderData {
         let _ = self.map_ib.take();
     }
 
-    pub fn update(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[SpacePack]) -> anyhow::Result<()> {
+    pub fn update(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[PackRenderData]) -> anyhow::Result<()> {
         if self.fallback_texture.is_none() {
             self.fallback_texture = TEXTURES.lookup_resource(RenderMachine::TEXTURE_LOGO_KEY).flatten();
         }
@@ -140,8 +145,12 @@ impl PoiCommonRenderData {
 
         Ok(())
     }
-    pub fn rebuild_ib(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[SpacePack]) -> anyhow::Result<()> {
+    pub fn rebuild_ib(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[PackRenderData]) -> anyhow::Result<()> {
         let ib_len = self.ib_len_for_packs(packs);
+        if ib_len == 0 {
+            // usually we'd reserve one for trails but this probably means 0 packs loaded?
+            return Ok(())
+        }
         let mut data_world = vec![InstanceBufferData::IDENTITY; ib_len];
         let mut data_map = vec![InstanceBufferData::IDENTITY; ib_len];
         self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
@@ -157,7 +166,7 @@ impl PoiCommonRenderData {
         self.map_ib = Some(poi_ib_map);
         Ok(())
     }
-    pub fn write_ib(&self, machine: &RenderMachine, packs: &[SpacePack], ib_world: &mut [InstanceBufferData], ib_map: &mut [InstanceBufferData]) -> anyhow::Result<()> {
+    pub fn write_ib(&self, machine: &RenderMachine, packs: &[PackRenderData], ib_world: &mut [InstanceBufferData], ib_map: &mut [InstanceBufferData]) -> anyhow::Result<()> {
         let ib_len = self.ib_len_for_packs(packs);
         if (ib_world.len() > 1 && ib_world.len() != ib_len) || (ib_map.len() > 1 && ib_map.len() != ib_len) {
             anyhow::bail!("expected {ib_len} POI instances, got {}(world) and {}(map) instead", ib_world.len(), ib_map.len());
@@ -165,9 +174,8 @@ impl PoiCommonRenderData {
         let mut gaps: BitVec = BitVec::with_capacity(ib_len);
         gaps.resize(ib_len, false);
         for (_packi, pack) in packs.iter().enumerate() {
-            for i in pack.render_poi_bookmarks() {
+            for ((i, poi), lpoi) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.loaded_pois.values())) {
                 let index = i as usize;
-                let Some(poi) = pack.active_pois.get(index) else { continue };
                 if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
                         log::error!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
@@ -176,10 +184,10 @@ impl PoiCommonRenderData {
                     *b = true;
                 }
                 if let Some(world) = ib_world.get_mut(index) {
-                    *world = poi.instance_data();
+                    *world = poi.instance_data(lpoi);
                 }
                 if let Some(map) = ib_map.get_mut(index) {
-                    *map = poi.instance_data_map(machine);
+                    *map = poi.instance_data_map(machine, lpoi);
                 }
             }
         }
@@ -195,8 +203,10 @@ impl PoiCommonRenderData {
 
         Ok(())
     }
-    fn ib_len_for_packs(&self, packs: &[SpacePack]) -> usize {
-        packs.iter().map(|p| p.render_poi_bookmarks().end as usize).max()
+    fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
+        packs.iter()
+            .map(|p| p.render_poi_bookmarks().end as usize).max()
+            .map(|l| l.min(1))
             .unwrap_or(0)
     }
     fn ib_len(&self) -> usize {
@@ -242,20 +252,27 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
     },
 ];
 
-impl SpacePoi {
-    pub fn setup(
+pub struct PoiRender {
+    pub icon: Option<Arc<Texture>>,
+    #[cfg(todo)]
+    pub render_bookmark: u32,
+}
+impl PoiRender {
+    pub const EMPTY: Self = Self {
+        icon: None,
+    };
+
+    pub fn setup_texture(
         &mut self,
         loader: &mut SpaceLoader<'_>,
+        icon_name: &AttrString,
     ) -> anyhow::Result<()> {
         if self.icon.is_some() { return Ok(()) }
 
-        let icon_handle = self.poi_attrs().icon_file
-            .as_ref()
-            .context("POI is missing icon");
-        let icon_handle = icon_handle.map(|h| loader.register_texture(h));
-        let icon = icon_handle.and_then(|icon_handle| loader
-            .get_or_load_texture(icon_handle)
-            .context("Loading poi texture"));
+        let handle = loader.register_texture(icon_name);
+        let icon = loader
+            .get_or_load_texture(handle)
+            .context("Loading poi texture");
 
         match icon {
             Ok(icon) => {
@@ -269,23 +286,26 @@ impl SpacePoi {
         }
     }
 
-    pub fn instance_data(&self) -> InstanceBufferData {
+    pub fn instance_data(&self, poi: &LoadedPoi) -> InstanceBufferData {
+        let render = poi.render_attrs();
+        let attrs = poi.poi_attrs();
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(self.scale)),
-            colour: self.tint(),
+            world: Mat4::from_translation(poi.position.into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
+            colour: render.tint(),
         }
     }
 
-    pub fn instance_data_map(&self, machine: &RenderMachine) -> InstanceBufferData {
+    pub fn instance_data_map(&self, poi: &LoadedPoi, machine: &RenderMachine) -> InstanceBufferData {
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-        let size = Vector2::splat(self.scale_map / 2.0);
+        let scale_map = poi.poi_attrs().map_display_size();
+        let size = Vector2::splat(scale_map / 2.0);
 
         // TODO: DPI/UI scaling is irrelevant here right?
         let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into())
+            world: Mat4::from_translation(poi.position.into())
                 * Mat4::from_scale(scale.extend(scale.y).into()),
-            colour: self.tint(),
+            colour: poi.render_attrs().tint(),
         }
     }
 

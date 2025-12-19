@@ -4,15 +4,17 @@ use {
             Controller,
             pathing::{
                 registry::ActivePack,
-                space::{SpacePack, SpacePoi, SpaceTrail, TrailParams},
-                state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry},
+                space::{SpacePack, TrailParams},
+                state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry, LoadedTrailSectionInfo, LoadedTrailGeometrySection},
             },
         },
+        exports::runtime as rt,
+        space::pack::{TrailRender, PoiRender},
         resources::Texture,
     },
     anyhow::Context,
     std::sync::Arc,
-    taimi_meta::packs::{PoiPath, TrailPath, CategoryPath},
+    taimi_meta::packs::{PoiPath, TrailPath},
     taimi_pack::{attributes::{AttrString, RenderAttributes}, Poi as PackPoi},
 };
 
@@ -47,15 +49,18 @@ pub struct SpacePoiBuilder {
 }
 
 impl SpacePoiBuilder {
-    pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<SpacePoi> {
+    pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<PoiRender> {
         let visibility = poi.visibility;
-        let mut poi = SpacePoi::new(visibility, path.unscope(), CategoryPath::with_path(poi.category), self.attrs);
-        poi.setup(loader)
-            .map(move |()| poi)
+        let mut render = PoiRender::empty();
+        let texture = poi.poi_attrs().icon_file.as_ref()
+            .with_context(|| format!("{path} missing texture"))
+            .and_then(|texture| render.setup_texture(loader, texture));
+        let _ = rt::log::error_ok(texture);
+        Ok(render)
     }
 
-    pub fn build_empty() -> SpacePoi {
-        SpacePoi::empty()
+    pub fn build_empty() -> PoiRender {
+        PoiRender::empty()
     }
 
     pub fn from_pack(poi: &PackPoi) -> Option<Self> {
@@ -69,19 +74,28 @@ impl SpacePoiBuilder {
 pub struct SpaceTrailBuilder {
     pub attrs: Arc<RenderAttributes>,
     pub geometry: LoadedTrailGeometry,
+    pub sections: Vec<LoadedTrailSectionInfo>,
 }
 
 impl SpaceTrailBuilder {
-    pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<SpaceTrail> {
+    pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<TrailRender> {
         let visibility = trail.visibility;
         let sections = trail.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
-        let mut trail = SpaceTrail::new(self.attrs, self.geometry, sections, visibility, path.unscope(), CategoryPath::with_path(trail.category));
-        trail.setup(loader, 0)
-            .map(move |()| trail)
+        let mut render = TrailRender::EMPTY;
+        if self.geometry.vertices.is_empty() {
+            log::info!("empty trail {path}");
+        } else {
+            render.setup_geometry(loader, self.geometry)?;
+        }
+        let texture = trail.trail_attrs().texture.as_ref()
+            .with_context(|| format!("{path} missing texture"))
+            .and_then(|texture| render.setup_texture(loader, texture));
+        let _ = rt::log::error_ok(texture);
+        Ok(render)
     }
 
-    pub fn build_empty() -> SpaceTrail {
-        SpaceTrail::empty()
+    pub fn build_empty() -> TrailRender {
+        TrailRender::empty()
     }
 
     #[cfg(todo = "unused")]
@@ -103,8 +117,12 @@ impl SpaceTrailBuilder {
             let trail = trail.clone();
             move || Ok(trail.vertices_for(&trail_data, &params))
         }).await?;
+        let sections = trail.sections(&geometry).collect::<Vec<_>>();
+        let cap = LoadedTrailSectionInfo::cap(&sections);
+        trail.populate_geometry_info(sections.iter().map(LoadedTrailGeometrySection::with_info), cap);
         let setup = SpaceTrailBuilder {
             geometry,
+            sections,
             attrs: attrs.unwrap_or_default(),
         };
         Ok(setup)

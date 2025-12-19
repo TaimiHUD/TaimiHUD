@@ -152,6 +152,31 @@ impl<N> From<MarkerPath<N>> for MarkerIndex {
         i.path
     }
 }
+impl fmt::Display for MarkerIndex {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.variant() {
+            MarkerIndexVariant::Trail(i) => {
+                let p: TrailPath = TrailPath::with_path(i);
+                fmt::Display::fmt(&p, f)
+            },
+            MarkerIndexVariant::TrailSection(i, section) => {
+                let t: TrailPath = TrailPath::with_path(i);
+                let s: TrailSectionPath = TrailSectionPath::with_path(section);
+                let p = t.rel(s.path);
+                fmt::Display::fmt(&p, f)
+            },
+            MarkerIndexVariant::Poi(i) => {
+                let p: PoiPath = PoiPath::with_path(i);
+                fmt::Display::fmt(&p, f)
+            },
+            MarkerIndexVariant::Category(i) => {
+                let p: CategoryPath = CategoryPath::with_path(i);
+                fmt::Display::fmt(&p, f)
+            },
+            _ => fmt::Display::fmt(&self.index, f),
+        }
+    }
+}
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MarkerIndexVariant {
     Trail(TrailIndex),
@@ -436,6 +461,17 @@ impl AsRef<MarkerId> for Guid {
         MarkerId::from_uuid_ref(self)
     }
 }
+impl fmt::Display for MarkerId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.variant() {
+            IdVariant::MarkerRegistered(p) => fmt::Display::fmt(&p, f),
+            IdVariant::MarkerLoaded(p) => fmt::Display::fmt(&p, f),
+            IdVariant::MarkerUnscoped(p) => fmt::Display::fmt(&p, f),
+            _ => fmt::Display::fmt(&self.uuid, f),
+        }
+    }
+}
+
 pub trait MarkerId1 {
     fn ns1(&self) -> u8;
     fn index1(&self) -> u16;
@@ -479,7 +515,6 @@ impl MarkerId1 for PackPath {
 impl FromMarkerId1 for PackPath {
     const NS1: u8 = MarkerId::NS1_PACK;
     fn from_index12(_index1: u16, index2: u16) -> Self {
-        debug_assert_eq!(_index1, 0);
         Self::with_path(index2 as PackIndex)
     }
 }

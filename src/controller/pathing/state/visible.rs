@@ -13,7 +13,7 @@ use {
     taimi_hoard::flags::set::{BitFlagForSet, FlagSet},
     taimi_meta::packs::{
         collections::CategorySet,
-        CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath,
+        CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath, TrailSectionPath, TrailSectionIndex,
     },
     taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
     bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
@@ -181,6 +181,8 @@ pub struct LoadedTrail {
     pub category: CategoryIndex,
     pub visibility: VisibilityFlags,
     pub sections: Option<Arc<[LoadedTrailSection]>>,
+    pub geometry_sections: Option<Arc<[LoadedTrailGeometrySection]>>,
+    pub geometry_sections_cap: u32,
     attrs: Arc<RenderAttributes>,
     overrides: Option<Box<RenderAttributes>>,
     // TODO: y_offset?
@@ -192,6 +194,8 @@ impl LoadedTrail {
             category: CategoryIndex::MAX,
             visibility: VisibilityFlags::empty(),
             sections: None,
+            geometry_sections: None,
+            geometry_sections_cap: 0,
             attrs: EMPTY_RENDER_ATTRS.clone(),
             overrides: None,
         }
@@ -227,6 +231,8 @@ impl LoadedTrail {
             attrs,
             overrides: None,
             sections: None,
+            geometry_sections: None,
+            geometry_sections_cap: 0,
         }
     }
 
@@ -271,26 +277,88 @@ impl LoadedTrail {
         }
     }
 
+    fn next_section(idx: usize, section: &LoadedTrailSection, len: u32, y_offsets: &mut dyn Iterator<Item = f32>, bookmark: &mut u32) -> Option<LoadedTrailSectionInfo> {
+        let len = NonZero::new(len)?.get();
+        let mut bounds = section.bounds;
+        let y_offset = y_offsets.next();
+        if let Some(y_offset) = y_offset {
+            bounds.min.y += y_offset;
+            bounds.max.y += y_offset;
+        }
+        let start = *bookmark;
+        *bookmark += len;
+        let end = *bookmark;
+        Some(LoadedTrailSectionInfo {
+            path: TrailSectionPath::with_path(idx as TrailSectionIndex),
+            vertex_range: start..end,
+            bounds,
+            y_offset: y_offset.unwrap_or_default(),
+        })
+    }
+    pub fn sections<'a, 'g>(&'a self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> +'a where
+        'g: 'a,
+    {
+        let y_offsets = &geometry.y_offsets;
+        self.sections.iter().flat_map(move |sections| {
+            let mut bookmark = 0u32;
+            let mut y_offsets = y_offsets.iter().copied();
+            sections.iter().zip(&geometry.section_lengths).enumerate().filter_map(move |(i, (section, &len))|
+                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
+            )
+        })
+    }
+    #[cfg(todo = "unnecessary")]
+    pub fn get_sections<'g>(&self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> + 'g {
+        let sections = self.sections.clone().map(ArcSliceIter::new_iter);
+        let y_offsets = &geometry.y_offsets;
+        sections.into_iter().flat_map(move |sections| {
+            let mut y_offsets = y_offsets.iter().copied();
+            let mut bookmark = 0u32;
+            sections.into_iter_arc().zip(&geometry.section_lengths).enumerate().filter_map(move |(i, (section, &len))|
+                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
+            )
+        })
+    }
+
     pub fn populate_data(&mut self, trail_data: &TrailData) -> bool {
         if self.sections.is_some() {
             return false
         }
-
-        let _ = self.sections.insert(trail_data.sections.iter()
+        self.set_sections(&mut trail_data.sections.iter()
             .map(|section| LoadedTrailSection::with_section(section))
-            .collect()
         );
         true
+    }
+    pub fn populate_geometry_info(&mut self, section_info: impl IntoIterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) -> bool {
+        if self.geometry_sections.is_some() {
+            return false
+        }
+        self.set_geometry_info(&mut section_info.into_iter(), cap);
+        true
+    }
+    fn set_sections(&mut self, sections: &mut dyn Iterator<Item = LoadedTrailSection>) {
+        let _ = self.sections.insert(sections.into_iter().collect());
+    }
+    fn set_geometry_info(&mut self, section_info: &mut dyn Iterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) {
+        let _ = self.geometry_sections.insert(section_info.into_iter().collect());
+        self.geometry_sections_cap = cap.unwrap_or(0);
     }
 
     pub fn vertices_for(&self, trail_data: &TrailData, params: &TrailParams) -> LoadedTrailGeometry {
         let section_count = self.sections.as_ref().map(|s| s.len()).unwrap_or(0);
         // TODO
-        let y_offset_sig = (self.category as usize) << 24 | section_count;
         let trail = self.trail_attrs();
-        let scale = trail.trail_scale();
+        let scale = trail.scale();
         let is_wall = trail.is_wall();
-        Self::vertices_with_data(trail_data, params, scale, is_wall, params.y_offset_for(y_offset_sig))
+        let y_offset = match () {
+            #[cfg(todo)]
+            _ => params.y_offset_for_trail(pack, path),
+            _ => {
+                let y_offset_sig = (self.category as usize) << 24 | section_count;
+                params.y_offset_for(y_offset_sig)
+            },
+        };
+        Self::vertices_with_data(trail_data, params, scale, is_wall, y_offset)
     }
 
     pub fn vertices_with_pack_trail(trail_data: &TrailData, trail: &Trail, params: &TrailParams, y_offset: f32) -> LoadedTrailGeometry {
@@ -354,6 +422,17 @@ impl LoadedTrail {
             false => Some(CategoryPath::with_path(self.category)),
             true => None,
         }
+    }
+
+    pub fn section_geometry_vertices(&self, path: TrailSectionPath) -> Option<ops::Range<u32>> {
+        let i = path.path as usize;
+        let mut sections = self.geometry_sections.as_ref()?.iter().skip(i);
+        let start = sections.next()?.vertex_start;
+        let end = match sections.next() {
+            Some(s) => s.vertex_start,
+            None => self.geometry_sections_cap,
+        };
+        Some(start..end)
     }
 }
 
@@ -479,11 +558,59 @@ impl LoadedTrailSection {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LoadedTrailSectionInfo {
+    pub path: TrailSectionPath,
+    pub bounds: Box3<DrawSpace>,
+    pub vertex_range: ops::Range<u32>,
+    pub y_offset: f32,
+}
+impl LoadedTrailSectionInfo {
+    /// [self.bounds] without [self.y_offset]
+    pub fn pack_bounds(&self) -> Box3<DrawSpace> {
+        let mut bounds = self.bounds;
+        if self.y_offset != 0.0 {
+            bounds.min.y -= self.y_offset;
+            bounds.max.y -= self.y_offset;
+        }
+        bounds
+    }
+
+    pub fn cap(sections: &[Self]) -> Option<u32> {
+        sections.last().map(|s| s.vertex_range.end)
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct LoadedTrailGeometrySection {
+    pub vertex_start: u32,
+    pub y_offset: f32,
+}
+impl LoadedTrailGeometrySection {
+    pub fn with_info(info: &LoadedTrailSectionInfo) -> Self {
+        Self {
+            vertex_start: info.vertex_range.start,
+            y_offset: info.y_offset,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedTrailGeometry {
     pub vertices: Vec<Vertex>,
     pub section_lengths: Vec<u32>,
     pub y_offsets: Vec<f32>,
+}
+impl LoadedTrailGeometry {
+    pub fn clone_metadata(&self) -> Self {
+        Self {
+            section_lengths: self.section_lengths.clone(),
+            y_offsets: self.y_offsets.clone(),
+            vertices: Default::default(),
+        }
+    }
+    pub fn take_vertices(&mut self) -> Vec<Vertex> {
+        mem::take(&mut self.vertices)
+    }
 }
 
 fn get_overrides_mut<'a>(overrides: &'a mut Option<Box<RenderAttributes>>) -> &'a mut Box<RenderAttributes> {

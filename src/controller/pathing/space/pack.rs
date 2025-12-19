@@ -1,43 +1,51 @@
 use {
-    super::{
-        poi::SpacePoi,
-        trail::SpaceTrail,
-    },
     crate::{
         controller::pathing::{
-            registry::ActivePack,
+            registry::PackVecOf,
             space::DrawSpace,
+            shared::SharedGameplayMap,
         },
         space::render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
     },
-    taimi_meta::packs::{PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
+    bitvec::vec::BitVec,
+    taimi_meta::{
+        spatial::{box3aabb, irrelevant_box3, BvhShape},
+        packs::{id::{IdVariant, MarkerId}, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
+    },
     glamour::Box3,
     std::{mem, sync::Arc, ops},
+    bvh::aabb,
 };
 
 pub struct SpacePack {
-    pub pack: Option<Arc<ActivePack>>,
-    pub active_trails: Vec<SpaceTrail>,
-    pub active_pois: Vec<SpacePoi>,
-
     // Internal rendering data.
+    #[cfg(todo)]
     pub render_list_bookmark: Option<usize>,
-    render_poi_bookmark: usize,
+    #[cfg(todo)]
     poi_bookmark: usize,
 }
 
 impl SpacePack {
     pub fn new() -> Self {
         SpacePack {
-            pack: None,
-            active_pois: Default::default(),
-            active_trails: Default::default(),
+            #[cfg(todo)]
             render_list_bookmark: Default::default(),
-            render_poi_bookmark: Default::default(),
+            #[cfg(todo)]
             poi_bookmark: Default::default(),
         }
     }
 
+    pub fn clear(&mut self) {
+        #[cfg(todo)]
+        {
+            self.render_list_bookmark = None;
+            self.poi_bookmark = 0;
+        }
+    }
+}
+
+#[cfg(deleteme)]
+impl SpacePack {
     fn prepare_new_map<P, T>(
         &mut self,
         pack_idx: PackIndex,
@@ -95,24 +103,54 @@ impl SpacePack {
             self.active_pois.push(poi);
         }
     }
+}
 
-    pub fn clear(&mut self) {
-        self.active_trails.clear();
-        self.active_pois.clear();
-        self.render_list_bookmark = None;
-        self.render_poi_bookmark = 0;
-        self.poi_bookmark = 0;
+pub struct SpaceEntity {
+    pub id: MarkerId,
+    pub bounds: aabb::Aabb<f32, 3>,
+}
+impl SpaceEntity {
+    pub fn invalid() -> Self {
+        Self {
+            id: MarkerId::EMPTY,
+            bounds: box3aabb(irrelevant_box3::<DrawSpace>()),
+        }
+    }
+}
+impl aabb::Bounded<f32, 3> for SpaceEntity {
+    fn aabb(&self) -> aabb::Aabb<f32, 3> {
+        self.bounds
+    }
+}
+pub struct SpaceEntities {
+    pub entities: Vec<BvhShape<SpaceEntity>>,
+}
+impl SpaceEntities {
+    pub fn new() -> Self {
+        Self {
+            entities: Vec::new(),
+        }
     }
 
-    pub fn render_poi_bookmarks(&self) -> ops::Range<PoiIndex> {
-        match self.render_poi_bookmark {
-            0 => 0..0,
-            start => {
-                let end = (start + self.active_pois.len()) as PoiIndex;
-                let start = start as PoiIndex;
-                start..end
-            },
+    pub fn retain<F: FnMut(&mut SpaceEntity) -> bool>(&mut self, mut cond: F) -> BitVec {
+        let mut removed: BitVec = Default::default();
+        removed.resize(self.entities.len(), false);
+        for (i, e) in self.entities.iter_mut().enumerate() {
+            if !cond(e) {
+                *e = BvhShape::new(SpaceEntity::invalid());
+                if let Some(mut b) = removed.get_mut(i) {
+                    *b = true;
+                }
+            }
         }
+        removed
+    }
+    pub fn remove_pack(&mut self, pack: PackPath) -> BitVec {
+        self.retain(|e| match e.id.variant() {
+            IdVariant::MarkerRegistered(p) => p.root != pack,
+            IdVariant::MarkerLoaded(p) => p.root.root != pack,
+            _ => true,
+        })
     }
 }
 
@@ -121,17 +159,21 @@ impl SpacePack {
 pub struct PackTextureHandle(usize);
 
 pub struct SpacePackCollection {
-    pub loaded_packs: Vec<SpacePack>,
+    pub loaded_packs: PackVecOf<SpacePack>,
+    pub render_entities: SpaceEntities,
 
+    #[cfg(todo)]
     pub render_list: RenderList,
 }
 
 impl SpacePackCollection {
-    pub fn new() -> anyhow::Result<SpacePackCollection> {
-        Ok(SpacePackCollection {
+    pub fn new() -> SpacePackCollection {
+        SpacePackCollection {
             loaded_packs: Default::default(),
+            #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
-        })
+            render_entities: SpaceEntities::new(),
+        }
     }
 
     pub fn clear(&mut self) {
@@ -221,6 +263,7 @@ impl SpacePackCollection {
         res
     }
 
+    #[cfg(todo)]
     pub fn rebuild_active(&mut self) -> anyhow::Result<()> {
         let mut render_builder = self.render_list.rebuild();
 
@@ -254,25 +297,7 @@ impl SpacePackCollection {
         res
     }
 
-    /// offset (starting len) currently = 1 to leave space for an identity buffer
-    /// at index 0 for drawing trails with
-    ///
-    /// also [SpacePack::render_poi_bookmark] of 0 is treated as empty so uh don't
-    /// use that
-    pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
-        for pack in &mut self.loaded_packs {
-            pack.render_poi_bookmark = offset;
-            offset += pack.active_pois.len();
-        }
-        offset
-    }
-
-    pub fn reset_poi_buffers(&mut self) {
-        for pack in &mut self.loaded_packs {
-            pack.render_poi_bookmark = 0;
-        }
-    }
-
+    #[cfg(todo)]
     #[cfg(feature = "goggles")]
     pub fn entities_obscured<'a>(
         &'a self,
@@ -281,6 +306,7 @@ impl SpacePackCollection {
         self.render_list.visible_entities(frustum)
     }
 
+    #[cfg(todo)]
     pub fn entities_map<'a>(
         &'a self,
         mut bounds: Box3<DrawSpace>,
@@ -295,6 +321,7 @@ impl SpacePackCollection {
         self.render_list.map_entities(bounds)
     }
 
+    #[cfg(todo)]
     pub fn deactivate(&mut self, pack_idx: PackIndex, cleanup: bool) {
         let Some(pack) = self.loaded_packs.get_mut(pack_idx as usize) else { return };
         if let Some(bookmark) = pack.render_list_bookmark {
@@ -315,6 +342,7 @@ impl SpacePackCollection {
         }
     }
 
+    #[cfg(todo)]
     pub fn clear_active(&mut self) {
         self.render_list.clear();
         for pack in &mut self.loaded_packs {
@@ -324,5 +352,9 @@ impl SpacePackCollection {
         #[cfg(deleteme)] {
             self.reset_poi_buffers();
         }
+    }
+
+    #[cfg(todo)]
+    pub fn all_entities(&self, map: &SharedGameplayMap) -> impl Iterator<Item = MarkerId> + '_ {
     }
 }

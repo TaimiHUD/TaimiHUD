@@ -1,4 +1,8 @@
-use mint::IntoMint;
+use {
+    bvh::{aabb, bounding_hierarchy::BHValue},
+    glamour::{Box2, Box3, Point2, Point3, Unit},
+    mint::IntoMint,
+};
 pub use self::bounded::*;
 
 mod bounded;
@@ -32,6 +36,38 @@ pub fn to_nalg<O, T: mint::IntoMint>(value: T) -> O where
     T::MintType: Into<O>,
 {
     value.into().into()
+}
+const IRRELEVANT_MIN: f32 = -9999.0;
+const IRRELEVANT_MAX: f32 = -9990.0;
+pub const fn irrelevant_box2<U: Unit<Scalar = f32>>() -> Box2<U> {
+    let min = Point2::new(IRRELEVANT_MIN, IRRELEVANT_MIN);
+    let max = Point2::new(IRRELEVANT_MAX, IRRELEVANT_MAX);
+    Box2::new(min, max)
+}
+pub const fn irrelevant_box3<U: Unit<Scalar = f32>>() -> Box3<U> {
+    let min = Point3::new(IRRELEVANT_MIN, IRRELEVANT_MIN, IRRELEVANT_MIN);
+    let max = Point3::new(IRRELEVANT_MAX, IRRELEVANT_MAX, IRRELEVANT_MAX);
+    Box3::new(min, max)
+}
+pub fn box2aabb<U: Unit>(bounds: Box2<U>) -> aabb::Aabb<U::Scalar, 2> where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point2<U>: MintConv<MintNalg = nalgebra::Point2<U::Scalar>>,
+{
+    let Box2 { min, max } = bounds;
+    aabb::Aabb::with_bounds(
+        min.into_nalg(),
+        max.into_nalg(),
+    )
+}
+pub fn box3aabb<U: Unit>(bounds: Box3<U>) -> aabb::Aabb<U::Scalar, 3> where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
+{
+    let Box3 { min, max } = bounds;
+    aabb::Aabb::with_bounds(
+        min.into_nalg(),
+        max.into_nalg(),
+    )
 }
 
 pub trait MintConv: Sized {
