@@ -160,14 +160,14 @@ impl MapPackInfo {
         match () {
             #[cfg(todo = "unnecessary")]
             _ => self.pois().position(|t| t.path == path.path)
-                .map(|i| LoadedTrailPath::with_path(i as TrailIndex)),
+                .map(|i| LoadedPoiPath::with_path(i as PoiIndex)),
             _ => match self.pois.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b =>
                     None,
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
-                    let preceding = self.pois.get_unchecked(..path.path as usize);
+                    let preceding = self.pois.get_unchecked(..index);
                     LoadedPoiPath::with_path(preceding.count_ones() as PoiIndex)
                 }),
             },
@@ -215,7 +215,7 @@ impl MapPackInfo {
                     None,
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
-                    let preceding = self.trails.get_unchecked(..path.path as usize);
+                    let preceding = self.trails.get_unchecked(..index);
                     LoadedTrailPath::with_path(preceding.count_ones() as TrailIndex)
                 }),
             },

@@ -176,6 +176,7 @@ impl SpacePackCollection {
         }
     }
 
+    #[cfg(todo)]
     pub fn clear(&mut self) {
         self.loaded_packs.clear();
 

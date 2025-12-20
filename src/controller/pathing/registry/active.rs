@@ -270,8 +270,8 @@ impl PackLoader {
                 .iter()
                 .find_map(|(&prefix, &fest)| category.full_id.id_starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                let festivals = Arc::make_mut(&mut category.marker_attributes).filters_mut().festivals.insert(festival.into());
-                fixed_festival_categories.insert(&category.full_id, festivals.clone());
+                let festivals = category.attributes_mut().filters_mut().festivals.insert(festival.into()).clone();
+                fixed_festival_categories.insert(&category.full_id, festivals);
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
             }

@@ -12,7 +12,7 @@ use {
             pack::PackRenderData,
         },
         TEXTURES,
-    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::sync::Arc, taimi_d3d::{
+    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::{mem, sync::Arc}, taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
@@ -174,7 +174,7 @@ impl PoiCommonRenderData {
         let mut gaps: BitVec = BitVec::with_capacity(ib_len);
         gaps.resize(ib_len, false);
         for (_packi, pack) in packs.iter().enumerate() {
-            for ((i, poi), lpoi) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.loaded_pois.values())) {
+            for (i, (poi, lpoi)) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.loaded_pois().values())) {
                 let index = i as usize;
                 if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
@@ -187,7 +187,7 @@ impl PoiCommonRenderData {
                     *world = poi.instance_data(lpoi);
                 }
                 if let Some(map) = ib_map.get_mut(index) {
-                    *map = poi.instance_data_map(machine, lpoi);
+                    *map = poi.instance_data_map(lpoi, machine);
                 }
             }
         }
@@ -222,6 +222,12 @@ impl PoiCommonRenderData {
 
     pub fn is_empty(&self) -> bool {
         self.world_ib.is_none() && self.map_ib.is_none()
+    }
+
+    /// whole thing lol
+    #[inline]
+    pub fn cleanup_background(self) {
+        mem::forget(self);
     }
 }
 
@@ -258,9 +264,11 @@ pub struct PoiRender {
     pub render_bookmark: u32,
 }
 impl PoiRender {
-    pub const EMPTY: Self = Self {
-        icon: None,
-    };
+    pub fn empty() -> Self {
+        Self {
+            icon: None,
+        }
+    }
 
     pub fn setup_texture(
         &mut self,
@@ -335,6 +343,11 @@ impl PoiRender {
         unsafe {
             device_context.Draw(4, 0);
         }*/
+    }
+
+    #[inline]
+    pub fn cleanup_background(mut self) {
+        mem::forget(self.icon.take());
     }
 }
 

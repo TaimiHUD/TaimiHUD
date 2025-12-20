@@ -28,8 +28,13 @@ type SpaceTextureHandle = String;
 impl<'a> SpaceLoader<'a> {
     pub fn register_texture(&mut self, texture: &AttrString) -> SpaceTextureHandle {
         let texture = &texture[..];
-        let name = match &self.active_pack.pack {
-            Some(pack) => &pack.pack.name,
+        let pack_name: Option<&str> = match &self.active_pack {
+            #[cfg(todo)]
+            SpacePack { pack: Some(pack), .. } => p.pack.pack.name,
+            _ => None,
+        };
+        let name = match pack_name {
+            Some(name) => name,
             None => {
                 log::error!("texture for EMPTY PACK?");
                 "pack_unspecified_TODO"
@@ -81,7 +86,7 @@ impl SpaceTrailBuilder {
     pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<TrailRender> {
         let visibility = trail.visibility;
         let sections = trail.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
-        let mut render = TrailRender::EMPTY;
+        let mut render = TrailRender::empty();
         if self.geometry.vertices.is_empty() {
             log::info!("empty trail {path}");
         } else {

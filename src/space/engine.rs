@@ -378,7 +378,6 @@ impl Engine {
         self.phase_states.clear();
     }
 
-    #[cfg(todo)]
     pub fn stop(&mut self) {
         self.packs.stop();
     }
@@ -524,8 +523,7 @@ impl Engine {
             )
         });
         let gameplay_prev = self.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
-        if self.gameplay.watch.has_changed() {
-            let gameplay = *self.gameplay.get_mut();
+        if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);
             let res = self
                 .process_gameplay_event(gameplay, trans)

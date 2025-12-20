@@ -53,6 +53,14 @@ impl PathingWindowState {
         machine: &mut RenderMachine,
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
+    }
+    #[cfg(todo)]
+    pub fn draw(
+        &mut self,
+        ui: &Ui,
+        machine: &mut RenderMachine,
+        engine: Option<&mut anyhow::Result<Engine>>,
+    ) {
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
             open = settings.pathing_window_open;
@@ -60,8 +68,7 @@ impl PathingWindowState {
                 self.ui_state.restart_watching(&settings.ui_state.pathing_window);
             }
         };
-        if self.ui_state.watch.has_changed() {
-            let ui_state = self.ui_state.get_mut();
+        if let Some(ui_state) = self.ui_state.try_read_if_changed() {
             self.filter_open = ui_state.search.open;
             self.filter_state = ui_state.filter.flags;
             self.search_state.flags = ui_state.search.flags;

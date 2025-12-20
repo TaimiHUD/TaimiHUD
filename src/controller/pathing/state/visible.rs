@@ -141,7 +141,7 @@ impl LoadedPoi {
     }
 
     pub fn coords_for(poi: &Poi) -> (Point3<DrawSpace>, Box3<DrawSpace>) {
-        let edge_len = poi.icon_scale();
+        let edge_len = poi.icon_size();
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
         let pos = Self::position_for(poi);
         let bounds = Box3::from_origin_and_size(pos, Size3::splat(max_diagonal));
@@ -738,12 +738,12 @@ impl LoadedMapPack {
     pub fn poi_at<'a>(&'a self, path: PoiPath<&'_ MapPackInfo>) -> Option<&'a LoadedPoi> {
         let info = path.root;
         info.poi_index(path.unscope())
-            .and_then(|i| self.pois.get(i as usize))
+            .and_then(|i| self.pois.get(i.path as usize))
     }
     pub fn poi_at_mut<'a>(&'a mut self, path: PoiPath<&'_ MapPackInfo>) -> Option<&'a mut LoadedPoi> {
         let info = path.root;
         info.poi_index(path.unscope())
-            .and_then(|i| self.pois.get_mut(i as usize))
+            .and_then(|i| self.pois.get_mut(i.path as usize))
     }
 
     pub fn trails<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (TrailPath, &'a LoadedTrail)> + 'i where
@@ -765,12 +765,12 @@ impl LoadedMapPack {
     pub fn trail_at<'a>(&'a self, path: TrailPath<&'_ MapPackInfo>) -> Option<&'a LoadedTrail> {
         let info = path.root;
         info.trail_index(path.unscope())
-            .and_then(|i| self.trails.get(i as usize))
+            .and_then(|i| self.trails.get(i.path as usize))
     }
     pub fn trail_at_mut<'a>(&'a mut self, path: TrailPath<&'_ MapPackInfo>) -> Option<&'a mut LoadedTrail> {
         let info = path.root;
         info.trail_index(path.unscope())
-            .and_then(|i| self.trails.get_mut(i as usize))
+            .and_then(|i| self.trails.get_mut(i.path as usize))
     }
 
     pub fn categories<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where

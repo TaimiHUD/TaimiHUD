@@ -75,7 +75,7 @@ impl ApiTabState {
                 .last_updated_achievements()
                 .map(|time| TimeZone::from_utc_datetime(&chrono::Local, &time.naive_utc()).to_rfc2822());
         }
-        let account_state = self.account_state.borrow_mut();
+        let account_state = self.account_state.get_mut_();
         let tree_token = (!self.tokens.is_empty() || !account_state.is_empty()).then(|| {
             with_i18n!("data", |label| rt::imgui::TreeNode::new(&label)
                 .opened(true, Condition::Once)
@@ -142,7 +142,7 @@ impl ApiTabState {
 
         #[cfg(feature = "paths")]
         {
-            let enables = self.pathing_enables.get_mut();
+            let enables = self.pathing_enables.read_mut();
             if enables.contains(PathingEnables::KATRENDER) && enables.contains(PathingEnables::API_BYPASS) {
                 with_i18n!("pathing-config-api-bypass", |label| ui.text(&label));
                 let hovered = ui.is_item_hovered();

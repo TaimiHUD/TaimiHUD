@@ -981,6 +981,15 @@ impl PackRenderData {
         }
     }
 
+    #[inline]
+    pub fn loaded_pois(&self) -> &IndexedList<LoadedPoiNs, PoiIndex, [LoadedPoi]> {
+        self.loaded_pois.map_ref_as_slice()
+    }
+    #[inline]
+    pub fn loaded_trails(&self) -> &IndexedList<LoadedTrailNs, TrailIndex, [LoadedTrail]> {
+        self.loaded_trails.map_ref_as_slice()
+    }
+
     pub fn render_poi_bookmarks(&self) -> ops::Range<PoiIndex> {
         match self.render_poi_bookmark {
             0 => 0..0,
@@ -1002,6 +1011,16 @@ impl PackRenderData {
         self.pois.clear();
         self.trails.clear();
         self.render_poi_bookmark = 0;
+    }
+
+    pub fn cleanup_background(mut self) {
+        // mostly just make a point of not cleaning up render resources...
+        for poi in self.pois.drain(..) {
+            poi.cleanup_background();
+        }
+        for trail in self.trails.drain(..) {
+            trail.cleanup_background();
+        }
     }
 }
 
@@ -1025,6 +1044,12 @@ impl PackRender {
             render_list: RenderListBuilder::default().build(),
             poi_common,
         })
+    }
+
+    pub fn any_loaded(&self) -> bool {
+        log::debug!("TODO: any_loaded?");
+        // !self.packs.is_empty()
+        true
     }
 
     fn mark_buffers_dirty(&mut self) {
@@ -1075,7 +1100,7 @@ impl PackRender {
     pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
         for pack in self.pack_data.values_mut() {
             pack.render_poi_bookmark = offset;
-            offset += pack.active_pois.len();
+            offset += pack.loaded_pois().len();
         }
         offset
     }
@@ -1098,8 +1123,11 @@ impl PackRender {
     ///
     /// TODO: revisit, avoid, etc
     pub fn cleanup_background(self) {
-        let Self { loaded_packs, poi_common, .. } = self;
-        mem::forget((loaded_packs, poi_common));
+        let Self { pack_data, poi_common, .. } = self;
+        poi_common.cleanup_background();
+        for pack in pack_data.data.into_iter() {
+            pack.cleanup_background();
+        }
     }
 
     pub fn cleanup_textures(&mut self) {

@@ -1,5 +1,6 @@
 pub use tokio::sync::watch::{self, Receiver as Rx, Ref, Sender as Tx};
 use {
+    crate::arcs::default_static_of,
     futures_util::future,
     std::{borrow::Cow, mem, ops, pin::Pin, ptr, sync::OnceLock},
     tokio::time,
@@ -301,15 +302,22 @@ impl<T: Clone> Watched<T> {
     }
     pub fn start_watching(sender: &watch::Sender<T>) -> Self {
         let mut watched = Self::new_with_watcher(Watcher::subscribe_to(sender));
-        let _ = watched.watch.try_mark_changed();
+        watched.mark_changed();
         watched
     }
     pub fn resubscribe_to(&mut self, sender: &watch::Sender<T>) {
         self.watch = Watcher::subscribe_to(sender);
+        self.cached = None;
     }
     pub fn restart_watching(&mut self, sender: &watch::Sender<T>) {
         self.resubscribe_to(sender);
+        self.mark_changed();
+    }
+    pub fn mark_changed(&mut self) {
         let _ = self.watch.try_mark_changed();
+    }
+    pub fn mark_unchanged(&mut self) {
+        let _ = self.watch.mark_unchanged();
     }
 
     pub const fn new_with_watcher(watch: Watcher<T>) -> Self {
@@ -331,6 +339,13 @@ impl<T: Clone> Watched<T> {
         Self::with_receiver(receiver)
     }
 
+    #[cfg(todo)]
+    pub fn try_read(&mut self) -> Option<&mut T> {
+        match self.watch.try_read().map(|w| w.clone()) {
+            Some(v) => Some(self.cached.insert(v)),
+            None => None,
+        }
+    }
     pub fn try_read_update(&mut self) -> Option<&mut T> {
         match self.watch.try_read_update().map(|w| w.clone()) {
             Some(v) => Some(self.cached.insert(v)),
@@ -380,41 +395,113 @@ impl<T: Clone> Watched<T> {
         match self.watch.get_sender() {
             Some(sender) => {
                 sender.send_modify(f);
+                self.mark_unchanged();
                 let _ = self.cached.take();
             },
-            None =>
+            None => {
+                log::debug!("writing to empty Watched");
                 if let Some(cached) = &mut self.cached {
-                    log::debug!("writing to empty Watched");
                     f(cached)
-                },
+                }
+            },
+        }
+        self.mark_unchanged();
+    }
+    /// after making local changes to the cache via [self.get_mut] and similar
+    /// accessors, commit changes in [self.cached] to other receivers
+    pub fn commit_send(&mut self) {
+        if let Some(cached) = &mut self.cached {
+            if let Some(sender) = self.watch.get_sender() {
+                sender.send_modify(|s| {
+                    // take the value so we can drop it outside of this closure
+                    mem::swap(s, cached);
+                });
+            }
+        }
+        self.mark_unchanged();
+        self.cached = None;
+    }
+    /// like [self.commit_send], but keep the cached value around
+    pub fn commit_cloned(&mut self) {
+        if let Some(mut cached) = self.cached.clone() {
+            if let Some(sender) = self.watch.get_sender() {
+                sender.send_modify(|s| {
+                    // take the value so we can drop it outside of this closure
+                    mem::swap(s, &mut cached);
+                });
+                self.mark_unchanged();
+            }
         }
     }
     /// unlike [Watcher::write_if], this differentiates `Some(false)` (unchanged)
     /// from `None` (do not notify receivers of changes)
+    ///
+    /// see also: [self.clone_write_if]
     pub fn write_if<F: FnOnce(&mut T) -> Option<bool>>(&mut self, f: F) -> Option<bool> {
-        let Some(sender) = self.watch.get_sender() else {
-            if let Some(cached) = &mut self.cached {
-                return f(cached)
+        let changed = match self.watch.get_sender() {
+            None => if let Some(cached) = &mut self.cached {
+                f(cached)
             } else {
-                return Some(false)
-            }
-        };
-        let mut changed = false;
-        let notified = sender.send_if_modified(|w| match f(w) {
-            None => {
-                changed = true;
-                false
+                Some(false)
             },
-            Some(notify) => notify,
-        });
-        if changed || notified {
-            let _ = self.cached.take();
+            Some(sender) => {
+                let mut changed = Some(false);
+                sender.send_if_modified(|w| {
+                    changed = f(w);
+                    changed == Some(true)
+                });
+                changed
+            },
+        };
+        match changed {
+            Some(true) | None => {
+                self.cached = None;
+                // TODO: this should happen inside the above closure, while lock is held
+                self.mark_unchanged();
+            },
+            Some(false) => (),
         }
-        match (changed, notified) {
-            (_, true) => Some(true),
-            (true, false) => None,
-            (false, false) => Some(false),
+        changed
+    }
+    /// like [self.write_if] but clone and release lock while running `f`,
+    /// optionally retaining the new value in [self.cached]
+    ///
+    /// since this operates on [self.cached], changes may be clobbered or raced
+    /// by concurrent senders
+    pub fn clone_write_if<F: FnOnce(&mut T) -> Option<bool>>(&mut self, keep_clone: bool, f: F) -> Option<bool> {
+        let changed = if let Some(cached) = self.try_read_mut() {
+            f(cached)
+        } else { Some(false) };
+        match self.watch.get_sender() {
+            None => (),
+            Some(sender) => {
+                let notify = match changed {
+                    _ if self.cached.is_none() => return changed,
+                    changed @ Some(false) => return changed,
+                    None => false,
+                    Some(true) => true,
+                };
+                let mut value = match keep_clone {
+                    false => self.cached.take(),
+                    true => self.cached.clone(),
+                };
+                sender.send_if_modified(|w| {
+                    let value = unsafe {
+                        // early return checked this to be extra sure
+                        // (if it had to, somehow lazy init of self.watch happened..?)
+                        value.as_mut().unwrap_unchecked()
+                    };
+                    mem::swap(w, value);
+                    // TODO: we could check if self.receiver.has_changed inside this closure
+                    // (while lock is held), in case another sender mutated while we were
+                    // running `f` :<
+                    notify
+                });
+                drop(value);
+            },
         }
+        self.mark_unchanged();
+        changed
     }
 }
 
@@ -423,9 +510,20 @@ impl<T: Clone + Default> Watched<T> {
         Self::new(T::default())
     }
 
-    pub fn get_ref(&mut self) -> &T {
-        &*self.get_mut()
+    pub fn read_ref(&mut self) -> &T {
+        &*self.read_mut()
     }
+    /// TODO: remove underscore once existing users migrate to read_mut
+    pub fn get_mut_(&mut self) -> &mut T {
+        match &mut self.cached {
+            Some(cached) => cached,
+            cached @ None => {
+                let latest = self.watch.try_read().map(|v| v.clone());
+                cached.insert(latest.unwrap_or_default())
+            },
+        }
+    }
+    #[cfg(todo = "unnecessary")]
     pub fn borrow_mut(&mut self) -> &mut T {
         match self.watch.has_changed() {
             false if self.cached.is_some() => unsafe { self.cached.as_mut().unwrap_unchecked() },
@@ -435,12 +533,12 @@ impl<T: Clone + Default> Watched<T> {
             },
         }
     }
-    pub fn get_mut(&mut self) -> &mut T {
+    pub fn read_mut(&mut self) -> &mut T {
         match self.watch.has_changed() {
             false if self.cached.is_some() => unsafe { self.cached.as_mut().unwrap_unchecked() },
             _ => {
-                let latest = self.watch.read_update().clone();
-                self.cached.insert(latest)
+                let latest = self.watch.try_read_update().map(|v| v.clone());
+                self.cached.insert(latest.unwrap_or_default())
             },
         }
     }
@@ -466,8 +564,8 @@ where
         match &self.cached {
             Some(c) => c,
             None => {
-                log::debug!("Watched default_ref fallback hit, likely a bug!");
-                default_ref::<T>()
+                log::debug!("Watched::deref fallback hit, likely a bug!");
+                default_static_of::<T>()
             },
         }
     }
@@ -478,7 +576,7 @@ where
     Self: ops::Deref<Target = T>,
 {
     fn deref_mut(&mut self) -> &mut T {
-        self.get_mut()
+        self.get_mut_()
     }
 }
 
@@ -505,17 +603,6 @@ fn watcher_sender_receiver_abi() {
     };
     assert_eq!(read_version, 0);
     assert_ne!(read_shared, 0);
-}
-
-static DEFAULT_REFS: std::sync::Mutex<std::collections::BTreeMap<std::any::TypeId, usize>> =
-    std::sync::Mutex::new(std::collections::BTreeMap::new());
-pub fn default_ref<T: Default + Send + Sync>() -> &'static T {
-    let id = std::any::TypeId::of::<T>();
-    let default_ref: usize = *DEFAULT_REFS.lock().unwrap().entry(id).or_insert_with(|| {
-        let default = Box::<T>::default();
-        Box::into_raw(default) as usize
-    });
-    unsafe { &*(default_ref as *const T) }
 }
 
 /// TODO: Option because unclear if sleep is fused or what...

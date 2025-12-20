@@ -22,6 +22,12 @@ pub fn weak_is_dangling<T: ?Sized>(weak: &Weak<T>) -> bool {
     weak.strong_count() == 0
 }
 
+/// I'd care to make this correct but `Arc::is_unique` is unstable so
+/// don't be pathological thanks
+pub fn arc_is_unique<T>(arc: &Arc<T>) -> bool {
+    Arc::strong_count(arc) == 1 && Arc::weak_count(arc) == 0
+}
+
 pub trait DefaultStatic {
     fn default_static() -> &'static Self;
 }
@@ -44,6 +50,9 @@ fn leak_default_static<T>(v: Box<T>) -> &'static T {
     // TODO: consider try_write + downgrade silliness?
     log::error!("leak_default_static should not be hit");
     Box::leak(v)
+}
+pub fn default_static_of<T: Send + Sync + Default + 'static>() -> &'static T {
+    get_default_static(T::default)
 }
 /// this is so dumb...
 fn get_default_static<T: Send + Sync + 'static, F: FnOnce() -> T>(default: F) -> &'static T {

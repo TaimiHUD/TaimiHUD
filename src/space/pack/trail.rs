@@ -11,7 +11,7 @@ use {
         },
         resources::Texture,
     },
-    std::ops,
+    std::{ops, mem},
     anyhow::Context,
     std::sync::Arc,
     taimi_d3d::dx11::{
@@ -118,6 +118,12 @@ impl TrailRender {
 
     pub fn is_empty(&self) -> bool {
         self.section_vbuffer.is_none()
+    }
+
+    #[inline]
+    pub fn cleanup_background(mut self) {
+        mem::forget(self.texture.take());
+        mem::forget(self.section_vbuffer.take());
     }
 }
 

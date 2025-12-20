@@ -132,6 +132,33 @@ impl PathingController {
         drop(settings_lock);
     }
 
+    async fn toggle_katrender(&self) {
+        let mut settings_lock = Settings::async_write()
+            .await
+            .expect("Settings unitialized, impossible");
+        settings_lock.toggle_katrender();
+        let katrender = settings_lock.enable_katrender;
+        drop(settings_lock);
+        self.rx
+            .enables
+            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
+    }
+
+    fn toggle_api_bypass(&self, set: Option<bool>) {
+        self.rx.enables.send_modify(|en| match set {
+            Some(set) => en.set(PathingEnables::API_BYPASS, set),
+            None => en.toggle(PathingEnables::API_BYPASS),
+        });
+    }
+
+    async fn provide_disabled_paths(&self) {
+        log::debug!("TODO: provide_disabled_paths (filter/config dirty bs)");
+    }
+}
+
+/// moving back to registry loader Soon
+#[cfg(todo = "deleteme")]
+impl PathingController {
     pub(crate) async fn reload_all(&self, remove: bool) {
         if !remove {
             log::debug!("TODO: pack refresh rather than reload");
@@ -252,25 +279,6 @@ impl PathingController {
         Ok(())
     }
 
-    async fn toggle_katrender(&self) {
-        let mut settings_lock = Settings::async_write()
-            .await
-            .expect("Settings unitialized, impossible");
-        settings_lock.toggle_katrender();
-        let katrender = settings_lock.enable_katrender;
-        drop(settings_lock);
-        self.rx
-            .enables
-            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
-    }
-
-    fn toggle_api_bypass(&self, set: Option<bool>) {
-        self.rx.enables.send_modify(|en| match set {
-            Some(set) => en.set(PathingEnables::API_BYPASS, set),
-            None => en.toggle(PathingEnables::API_BYPASS),
-        });
-    }
-
     fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
         use taimi_pack::loader::ZipLoader;
         let mut loader = ZipLoader::new(&path)?;
@@ -364,14 +372,21 @@ impl PathingController {
             log::error!("{e:#}");
         }
     }
+}
 
+impl PathingController {
     pub(crate) async fn handle_event(&mut self, event: PathingEvent) -> Option<Interruption> {
         use PathingEvent::*;
         match event {
             Exit(interruption) => return Some(interruption),
+            #[cfg(deleteme)]
             ReloadAll(remove) => self.reload_all(remove).await,
+            #[cfg(deleteme)]
             LoadAll => self.load_all().await,
+            #[cfg(deleteme)]
             UnloadAll => self.unload_all().await,
+            ReloadAll(..) | UnloadAll | LoadAll =>
+                log::debug!("TODO: pathing load"),
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,

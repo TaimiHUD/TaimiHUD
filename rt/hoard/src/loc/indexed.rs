@@ -1,17 +1,17 @@
 use {
     crate::{
         collections::TaimiExtend,
-        loc::{LocationGet, LocationMut, LocationRef, Locator},
+        loc::{LocationGet, LocationMut, LocationRef, Locator, PhantomNamespace},
     },
-    core::{hash::Hash, iter, marker::PhantomData, ops},
+    core::{hash::Hash, iter, marker::PhantomData, mem, ops},
     num_traits::AsPrimitive,
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IndexedList<N, P, T> {
+pub struct IndexedList<N, P, T: ?Sized> {
     pub root: N,
-    pub data: T,
     pub _index: PhantomData<P>,
+    pub data: T,
 }
 
 impl<N, P, T> IndexedList<N, P, T> {
@@ -34,7 +34,23 @@ impl<N, P, T> IndexedList<N, P, T> {
     {
         Self::with_parts(root, T::default())
     }
+    #[inline(always)]
+    pub fn into_values(self) -> <T as IntoIterator>::IntoIter where
+        T: IntoIterator,
+    {
+        IntoIterator::into_iter(self.data)
+    }
+}
 
+impl<N, P, T: ?Sized> IndexedList<N, P, T> {
+    #[inline]
+    pub fn from_ref(data: &T) -> &IndexedList<N, P, T> where
+        N: PhantomNamespace,
+    {
+        unsafe {
+            mem::transmute(data)
+        }
+    }
     #[inline]
     pub fn len<'a>(&'a self) -> usize where
         &'a T: IntoIterator,
@@ -78,12 +94,6 @@ impl<N, P, T> IndexedList<N, P, T> {
         &'a mut T: IntoIterator,
     {
         IntoIterator::into_iter(&mut self.data)
-    }
-    #[inline(always)]
-    pub fn into_values(self) -> <T as IntoIterator>::IntoIter where
-        T: IntoIterator,
-    {
-        IntoIterator::into_iter(self.data)
     }
 
     #[inline(always)]
@@ -137,8 +147,43 @@ impl<N, P, T> IndexedList<N, P, T> {
             },
         }
     }
+    #[inline]
+    pub fn map_full(&self, _: ops::RangeFull) -> IndexedList<N, P, &<T as ops::Index<ops::RangeFull>>::Output> where
+        T: ops::Index<ops::RangeFull>,
+        N: Clone,
+    {
+        IndexedList::with_parts(self.root.clone(), &self.data[..])
+    }
+    #[inline]
+    pub fn map_as_ref<U: ?Sized>(&self) -> IndexedList<N, P, &U> where
+        T: AsRef<U>,
+        N: Clone,
+    {
+        IndexedList::with_parts(self.root.clone(), self.data.as_ref())
+    }
+    #[inline]
+    pub fn map_ref<U: ?Sized>(&self) -> &IndexedList<N, P, U> where
+        T: AsRef<U>,
+        N: PhantomNamespace,
+    {
+        IndexedList::from_ref(self.data.as_ref())
+    }
+    #[inline]
+    pub fn map_as_slice<U>(&self) -> IndexedList<N, P, &[U]> where
+        T: AsRef<[U]>,
+        N: Clone,
+    {
+        self.map_as_ref()
+    }
+    #[inline]
+    pub fn map_ref_as_slice<U>(&self) -> &IndexedList<N, P, [U]> where
+        T: AsRef<[U]>,
+        N: PhantomNamespace,
+    {
+        self.map_ref()
+    }
 }
-impl<N, P, T> IndexedList<N, P, T> where
+impl<N, P, T: ?Sized> IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
     usize: AsPrimitive<P>,
@@ -188,14 +233,14 @@ impl<N, P, T> IndexedList<N, P, T> where
     }
     #[inline]
     pub fn into_iter(self) -> LocatorEnumerateAsRel<N, P, T::IntoIter> where
-        T: IntoIterator,
+        T: Sized + IntoIterator,
     {
         let Self { root, data, _index: _ } = self;
         let data = IntoIterator::into_iter(data);
         LocatorRelIter0::enumerate(root, data)
     }
 }
-impl<'a, N, P, T> IntoIterator for &'a IndexedList<N, P, T> where
+impl<'a, N, P, T: ?Sized> IntoIterator for &'a IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
     usize: AsPrimitive<P>,
@@ -208,7 +253,7 @@ impl<'a, N, P, T> IntoIterator for &'a IndexedList<N, P, T> where
         self.iter()
     }
 }
-impl<'a, N, P, T> IntoIterator for &'a mut IndexedList<N, P, T> where
+impl<'a, N, P, T: ?Sized> IntoIterator for &'a mut IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,
     usize: AsPrimitive<P>,
@@ -234,7 +279,7 @@ impl<N, P, T> IntoIterator for IndexedList<N, P, T> where
         self.into_iter()
     }
 }
-impl<N, P, T, TI> LocationGet<N, P> for IndexedList<N, P, T> where
+impl<N, P, T: ?Sized, TI> LocationGet<N, P> for IndexedList<N, P, T> where
     for<'a> &'a T: IntoIterator<Item = TI>,
     P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
@@ -249,7 +294,7 @@ impl<N, P, T, TI> LocationGet<N, P> for IndexedList<N, P, T> where
         self.at(*path)
     }
 }
-impl<N, P, T, TI> LocationRef<N, P> for IndexedList<N, P, T> where
+impl<N, P, T: ?Sized, TI> LocationRef<N, P> for IndexedList<N, P, T> where
     for<'a> &'a T: IntoIterator<Item = &'a TI>,
     P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
@@ -263,7 +308,7 @@ impl<N, P, T, TI> LocationRef<N, P> for IndexedList<N, P, T> where
         self.at(*path)
     }
 }
-impl<N, P, T> LocationMut<N, P> for IndexedList<N, P, T> where
+impl<N, P, T: ?Sized> LocationMut<N, P> for IndexedList<N, P, T> where
     for<'a> &'a mut T: IntoIterator<Item = &'a mut <Self as LocationRef<N, P>>::LookupRef>,
     Self: LocationRef<N, P>,
     P: AsPrimitive<usize> + Copy + 'static,
@@ -277,14 +322,14 @@ impl<N, P, T> LocationMut<N, P> for IndexedList<N, P, T> where
         self.at_mut(*path)
     }
 }
-impl<N, P, T> ops::Deref for IndexedList<N, P, T> {
+impl<N, P, T: ?Sized> ops::Deref for IndexedList<N, P, T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
-impl<N, P, T> ops::DerefMut for IndexedList<N, P, T> {
+impl<N, P, T: ?Sized> ops::DerefMut for IndexedList<N, P, T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data

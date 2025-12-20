@@ -2,7 +2,7 @@ use {
     super::PathingWindowState,
     crate::{
         controller::pathing::{PathingController, PathingEvent},
-        space::{engine::Engine, pack::ActivePack},
+        space::{engine::Engine},
         with_i18n,
     },
     glam::Vec2,
@@ -14,7 +14,7 @@ type CategoryMenuContext = (Vec<u32>, bool);
 impl PathingWindowState {
     pub fn draw_context_menu(&mut self, ui: &Ui, engine: &mut Engine) {
         self.draw_context_menu_packs(ui, engine, false);
-        if !engine.packs.loaded_packs.is_empty() {
+        if engine.packs.any_loaded() {
             Self::dead_zone_spacing(ui, false);
             ui.separator();
             if let Some(_menu) = with_i18n!("show-all", |label| ui.begin_menu(&label)) {
@@ -22,6 +22,12 @@ impl PathingWindowState {
             }
         }
     }
+    pub fn draw_context_menu_packs(&mut self, ui: &Ui, engine: &mut Engine, filtered: bool) {
+        ui.text("TODO: draw_context_menu_packs");
+    }
+}
+#[cfg(todo)]
+impl PathingWindowState {
     pub fn draw_context_menu_packs(&mut self, ui: &Ui, engine: &mut Engine, filtered: bool) {
         let _id = ui.push_id(match filtered {
             false => "packmenu-active",
@@ -397,6 +403,8 @@ impl PathingWindowState {
         }
         toggled && ui.io().key_shift
     }
+}
+impl PathingWindowState {
     /// create a dead zone for the mouse to rest without triggering a menu change
     const MENU_DEAD_ZONE: Vec2 = Vec2::new(2.0, 2.0);
     fn dead_zone_spacing(ui: &Ui, branch: bool) {
