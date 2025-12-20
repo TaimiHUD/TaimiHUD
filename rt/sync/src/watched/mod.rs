@@ -514,7 +514,7 @@ impl<T: Clone + Default> Watched<T> {
         &*self.read_mut()
     }
     /// TODO: remove underscore once existing users migrate to read_mut
-    pub fn get_mut_(&mut self) -> &mut T {
+    pub fn get_mut(&mut self) -> &mut T {
         match &mut self.cached {
             Some(cached) => cached,
             cached @ None => {
@@ -576,7 +576,7 @@ where
     Self: ops::Deref<Target = T>,
 {
     fn deref_mut(&mut self) -> &mut T {
-        self.get_mut_()
+        self.get_mut()
     }
 }
 

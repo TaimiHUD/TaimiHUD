@@ -161,7 +161,7 @@ impl PathingConfig {
     fn draw_header(&mut self, ui: &Ui) {
         {
             let _font = (!self.katrender()).then(|| RenderState::push_font("big", ui));
-            let enables = self.enables.get_mut_();
+            let enables = self.enables.get_mut();
             if ui.checkbox_flags(&fl!("pathing-config-enable"), enables, PathingEnables::KATRENDER) {
                 PathingController::try_send(PathingEvent::ToggleKatRender);
             }
@@ -458,7 +458,7 @@ impl PathingConfig {
             .tree_push_on_open(true)
             .push(ui));
         if let Some(_tree) = filters_tree {
-            let enables = self.enables.get_mut_();
+            let enables = self.enables.get_mut();
             if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
                 &label,
                 enables,
