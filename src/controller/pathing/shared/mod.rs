@@ -9,11 +9,11 @@ use {
     },
     std::{collections::btree_map, sync::Arc},
     taimi_meta::ui::GameplayState,
-    taimi_sync::watched::watch,
+    taimi_sync::watched::{Watched, watch},
     tokio::sync::mpsc,
 };
 pub use self::{
-    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPackInfo, SharedLoaderPackConfig},
+    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPacksInfo, SharedLoaderPackInfo, SharedLoaderPackConfig, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad},
     maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState},
     info::MapPackInfo,
 };
@@ -34,8 +34,8 @@ pub struct PathingSender {
 }
 impl PathingSender {
     pub fn new(
-        gameplay: watch::Receiver<GameplayState>,
-        mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
+        gameplay: &watch::Sender<GameplayState>,
+        mumble_identity: &watch::Sender<Option<MumbleIdentityUpdate>>,
         festivals: &watch::Sender<FestivalState>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(48);
@@ -52,8 +52,8 @@ impl PathingSender {
             shared: sender.shared.clone(),
             command: command_rx,
             festivals: festivals.subscribe(),
-            gameplay,
-            mumble_identity,
+            gameplay: Watched::subscribe_to(gameplay),
+            mumble_identity: mumble_identity.subscribe(),
             enables: sender.enables.clone(),
             #[cfg(todo)]
             interactions_rx: interactions.subscribe(),
@@ -72,7 +72,7 @@ pub struct PathingReceiver {
     pub command: mpsc::Receiver<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
     pub festivals: watch::Receiver<FestivalState>,
-    pub gameplay: watch::Receiver<GameplayState>,
+    pub gameplay: Watched<GameplayState>,
     pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
     #[cfg(todo)]
     pub interactions: broadcast::Sender<InteractionEvent>,
@@ -107,7 +107,7 @@ impl PathingShared {
 
     /// TODO: cache as atomic
     pub fn pack_count(&self) -> usize {
-        self.packs.info.borrow().len()
+        self.packs.packs.borrow().len()
     }
 
     pub fn clear_for_shutdown(&self) {
@@ -124,18 +124,27 @@ impl PathingShared {
                 notify
             });
         }
-        self.packs.info.send_if_modified(|info| {
-            *info = Default::default();
+        self.packs.packs.send_if_modified(|shared_packs| {
+            for shared_pack in shared_packs.values_mut() {
+                shared_pack.clear_for_shutdown(notify);
+            }
             notify
         });
-        self.packs.config.send_if_modified(|config| {
-            *config = Default::default();
-            notify
-        });
-        self.packs.data.send_if_modified(|data| {
-            *data = Default::default();
-            notify
-        });
+        #[cfg(deleteme)]
+        {
+            self.packs.info.send_if_modified(|info| {
+                *info = Default::default();
+                notify
+            });
+            self.packs.config.send_if_modified(|config| {
+                *config = Default::default();
+                notify
+            });
+            self.packs.data.send_if_modified(|data| {
+                *data = Default::default();
+                notify
+            });
+        }
     }
 }
 

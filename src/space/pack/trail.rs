@@ -4,7 +4,10 @@ use {
             visible::{LoadedTrail, LoadedTrailGeometry},
             space::SpaceLoader,
         },
-        exports::runtime::Counter,
+        exports::runtime::{
+            textures::{TextureKey, TextureSlot},
+            Counter,
+        },
         space::{
             pack::PoiCommonRenderData,
             resources::Model,
@@ -28,13 +31,15 @@ use {
 
 /// World render data
 pub struct TrailRender {
-    pub texture: Option<Arc<Texture>>,
+    pub texture_handle: Option<TextureKey>,
+    pub texture: Option<TextureSlot>,
     pub section_vbuffer: Option<VertexBuffer>,
 }
 
 impl TrailRender {
     pub fn empty() -> Self {
         Self {
+            texture_handle: None,
             texture: None,
             section_vbuffer: None,
         }
@@ -44,22 +49,14 @@ impl TrailRender {
         &mut self,
         loader: &mut SpaceLoader<'_>,
         texture_name: &AttrString,
-    ) -> anyhow::Result<()> {
-        if self.texture.is_some() { return Ok(()) }
-        let handle = loader.register_texture(texture_name);
-        let texture = loader
-            .get_or_load_texture(handle)
-            .context("Loading trail texture");
-
-        match texture {
-            Ok(texture) => {
-                self.texture = Some(texture);
-                Ok(())
-            },
-            Err(e) => {
-                self.texture = None;
-                Err(e)
-            },
+    ) {
+        if let Some(handle) = &mut self.texture_handle {
+            loader.setup_texture(handle, &mut self.texture)
+        } else {
+            let handle = loader.register_texture(texture_name);
+            let (handle, texture) = loader.get_or_load_texture(handle);
+            self.texture_handle = Some(handle);
+            self.texture = texture;
         }
     }
     pub fn setup_geometry(
@@ -82,8 +79,15 @@ impl TrailRender {
         }
     }
 
+    pub fn update(&mut self, _device: &Dx11Device) {
+        if let Some(handle) = &mut self.texture_handle {
+            SpaceLoader::get_texture(handle, &mut self.texture)
+        }
+    }
+
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
         let texture = self.texture.as_ref()
+            .and_then(TextureSlot::get)
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {
             texture.set(device_context, 0);

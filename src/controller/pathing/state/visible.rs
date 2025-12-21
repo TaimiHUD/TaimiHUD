@@ -1,19 +1,21 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{LoadedPack, PackCategoryInfo, PackConfig},
+            registry::{LoadedPack, PackCategoryInfo, PackConfig, PackPath, PackInfoSignature},
             space::{DrawSpace, TrailParams},
             shared::MapPackInfo,
             PackSpace,
         },
         resources::Vertex,
     },
-    std::{iter, mem, sync::{Arc, LazyLock}, num::NonZero, ops, hash::Hash, collections::VecDeque},
+    std::{iter, mem, sync::{Arc, LazyLock}, num::NonZero, ops, hash::Hash, collections::{VecDeque, BTreeMap}},
     taimi_hoard::collections::lru::RecentlyUsed,
     taimi_hoard::flags::set::{BitFlagForSet, FlagSet},
+    taimi_hoard::loc::{LocationMut, LocationRef},
     taimi_meta::packs::{
         collections::CategorySet,
         CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath, TrailSectionPath, TrailSectionIndex,
+        PackMapPath,
     },
     taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
     bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
@@ -46,8 +48,7 @@ impl LoadedCategory {
 pub struct LoadedPoi {
     pub category: CategoryIndex,
     pub visibility: VisibilityFlags,
-    pub bounds: Box3<DrawSpace>,
-    pub position: Point3<DrawSpace>,
+    pub marker_position: Point3<DrawSpace>,
     attrs: Arc<RenderAttributes>,
     overrides: Option<Box<RenderAttributes>>,
 }
@@ -57,8 +58,7 @@ impl LoadedPoi {
         Self {
             category: CategoryIndex::MAX,
             visibility: VisibilityFlags::empty(),
-            position: Point3::INFINITY,
-            bounds: Box3::ZERO,
+            marker_position: Point3::INFINITY,
             attrs: EMPTY_RENDER_ATTRS.clone(),
             overrides: None,
         }
@@ -80,7 +80,7 @@ impl LoadedPoi {
             }),
         }.unwrap_or(CategoryIndex::MAX);
         visibility.set_defaults_from_attributes(&poi.attributes);
-        let (position, bounds) = Self::coords_for(poi);
+        let marker_position = Self::marker_position_for(poi);
 
         let mut attrs = poi.attributes.render.clone()
             .unwrap_or_else(|| EMPTY_RENDER_ATTRS.clone());
@@ -92,8 +92,7 @@ impl LoadedPoi {
         Self {
             category,
             visibility: visibility.restore_default_toggles(),
-            bounds,
-            position,
+            marker_position,
             attrs,
             overrides: None,
         }
@@ -140,22 +139,32 @@ impl LoadedPoi {
         }
     }
 
-    pub fn coords_for(poi: &Poi) -> (Point3<DrawSpace>, Box3<DrawSpace>) {
-        let edge_len = poi.icon_size();
-        let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
-        let pos = Self::position_for(poi);
-        let bounds = Box3::from_origin_and_size(pos, Size3::splat(max_diagonal));
-        (pos, bounds)
+    pub fn bounds(&self) -> Box3<DrawSpace> {
+        let max_diagonal = match self.poi_attrs().icon_size {
+            Some(edge_len) =>
+                (edge_len.powi(2) * 2.0).sqrt(),
+            None => {
+                const DEFAULT_DIAG: f32 = match taimi_pack::attributes::keys::IconSize::DEFAULT.0 {
+                    // 2.0.sqrt()
+                    1.0 => 1.41421,
+                    #[cfg(todo = "unnecessary")]
+                    ohno => (ohno.powi(2) * 2.0).sqrt(),
+                    _ => panic!("default poi size changed!"),
+                };
+                DEFAULT_DIAG
+            },
+        };
+        Box3::from_origin_and_size(self.position(), Size3::splat(max_diagonal))
+    }
+    pub fn position(&self) -> Point3<DrawSpace> {
+        self.marker_position + self.offset()
     }
 
-    pub fn offset_for(poi: &Poi) -> Point3<PackSpace> {
-        Point3::ZERO.with_y(poi.height_offset())
+    pub fn offset(&self) -> Point3<PackSpace> {
+        Point3::ZERO.with_y(self.poi_attrs().height_offset())
     }
     pub fn marker_position_for(poi: &Poi) -> Point3<PackSpace> {
         Point3::from_raw(poi.position.into())
-    }
-    pub fn position_for(poi: &Poi) -> Point3<PackSpace> {
-        Self::marker_position_for(poi) + Self::offset_for(poi)
     }
 
     pub fn is_invalid(&self) -> bool {
@@ -627,6 +636,7 @@ static EMPTY_RENDER_ATTRS: LazyLock<Arc<RenderAttributes>> = LazyLock::new(|| {
 #[derive(Debug, Clone)]
 pub struct LoadedMapPack {
     pub map_id: NonZero<MapID>,
+    pub info_sig: PackInfoSignature,
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
     #[cfg(todo)]
@@ -647,6 +657,7 @@ impl LoadedMapPack {
     pub fn empty(map_id: MapIndex) -> Self {
         Self {
             map_id,
+            info_sig: PackInfoSignature::EMPTY,
             used: RecentlyUsed::DEFAULT,
             #[cfg(todo)]
             interactive_pois: Default::default(),
@@ -664,12 +675,7 @@ impl LoadedMapPack {
         }
     }
 
-    pub fn from_pack(map_id: MapIndex, info: &MapPackInfo, pack: &LoadedPack) -> Self {
-        let Some(active) = &pack.active else {
-            return Self::empty(map_id)
-        };
-        let pack = &active.pack;
-
+    pub fn from_pack(map_id: MapIndex, info: &MapPackInfo, pack: &Pack) -> Self {
         let pois = info.pois()
             .map(|path| LoadedPoi::from_pack(path, pack))
             .collect();
@@ -696,6 +702,7 @@ impl LoadedMapPack {
 
         let mut loaded = Self {
             map_id,
+            info_sig: info.info_sig.clone(),
             #[cfg(todo)]
             interactive_pois_nearby: BitVec::new(),
             #[cfg(todo)]

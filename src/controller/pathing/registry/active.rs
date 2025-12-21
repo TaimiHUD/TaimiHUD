@@ -4,7 +4,7 @@ use {
             pathing::{
                 festivals::FestivalFixup,
                 registry::{
-                    PackInfo,
+                    PackInfo, PackInfoSignature,
                     PackConfig,
                     LoadedPack, UnloadedReason,
                 },
@@ -36,86 +36,50 @@ use {
 };
 
 impl LoadedPack {
-    pub fn activate_start(&mut self) -> anyhow::Result<Option<(PackFormat, String, Option<bool>)>> {
+    pub fn activate_start(&mut self) -> anyhow::Result<Option<PackActivateContext>> {
         if self.active.is_some() {
             return Ok(None)
         }
 
-        let (format, context) = match &self.info.info {
-            Ok(info) => (
-                Some(info.format),
-                format!("Reloading pack {info}"),
-            ),
-            Err(UnloadedReason::Pending) => {
-                let name = self.info.path.file_name()
-                    .map(Path::new)
-                    .unwrap_or_else(|| rt::relative_path(&self.info.path));
-                (
-                    PackFormat::guess_for_path(&self.info.path),
-                    format!("Loading pack {}", name.display()),
-                )
-            },
+        let prev_info = match &self.info.info {
+            Ok(info) => Some(&**info),
+            Err(UnloadedReason::Pending) => None,
             Err(_reason) => return Ok(None),
         };
+        let activate = PackActivateContext::new(&*self.info.path, None, prev_info);
 
-        match format {
-            Some(format) => {
-                let wants_config = match &self.config {
-                    None => Some(true),
-                    #[cfg(todo)]
-                    Some(config) if !config.borrow().is_empty() => Some(false),
-                    _ => None,
+        match activate {
+            Ok(mut activate) => {
+                activate.config_sig_prev = match &self.config {
+                    None => PackInfoSignature::EMPTY,
+                    Some(config) if config.borrow().is_empty() =>
+                        PackInfoSignature::INVALID,
+                    Some(..) => activate.sig_prev,
                 };
-                Ok(Some((format, context, wants_config)))
+                Ok(Some(activate))
             },
-            None => {
+            Err(e) => {
                 self.info.info = Err(UnloadedReason::UnknownFormat);
-                Err(anyhow!("unknown pack format").context(context))
+                Err(e)
             },
         }
     }
 
-    pub async fn activate_load((format, context, wants_config): (PackFormat, String, Option<bool>), path: PathBuf, manager: &PackLoader) -> anyhow::Result<(Arc<ActivePack>, Arc<PackInfo>, Option<PackConfig>)> {
-        let loader = format.loader_for_path(path).await;
-        let pack = match loader {
-            Ok(loader) => manager.load_pack(loader).await,
-            Err(e) => Err(e),
-        }.context(context);
-        let res = pack.map(|pack| {
-            let info = PackInfo::from_pack(&pack.pack, format);
-            (pack, Arc::new(info))
-        });
-
-        match res {
-            Ok((pack, info)) => {
-                let settings = match wants_config {
-                    Some(true) => Some(manager.settings.read().await),
-                    None => manager.settings.try_read().ok(),
-                    Some(false) => None,
-                };
-                let config = settings.map(|settings| {
-                    let mut config = PackConfig::default();
-                    config.fill_settings(&pack.pack, &settings.pathing(), &settings.disabled_paths);
-                    config
-                });
-                Ok((Arc::new(pack), info, config))
-            },
-            Err(e) => Err(e),
-        }
+    pub async fn activate_load(context: PackActivateContext, manager: &PackLoader) -> anyhow::Result<PackActivateLoaded> {
+        context.load(manager).await
     }
 
-    pub fn activate_finish(&mut self, pack: anyhow::Result<(Arc<ActivePack>, Arc<PackInfo>, Option<PackConfig>)>, manager: &PackLoader) -> anyhow::Result<()> {
+    pub fn activate_finish(&mut self, pack: anyhow::Result<PackActivateLoaded>, manager: &PackLoader) -> anyhow::Result<()> {
         match pack {
             Err(e) => {
-                #[cfg(todo)]
-                let e = e.into_boxed_dyn_error().into();
-                let e: Arc<dyn StdError + Send + Sync> = Box::<dyn StdError + Send + Sync>::from(e).into();
+                let e = rt::log::anyhow_into_arc(e);
                 self.info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
                 manager.shared.packs.update_pack_info(self.info.index, &self.info);
                 Err(e.into())
             },
-            Ok((pack, info, config)) => {
+            Ok(PackActivateLoaded { pack, loader, info, config }) => {
                 self.info.info = Ok(info);
+                let pack = Arc::new(ActivePack::with_pack(pack, loader));
                 let active = self.active.insert(pack);
                 if let Some(config) = config {
                     let update_config = self.config.is_none();
@@ -135,7 +99,7 @@ impl LoadedPack {
             None => return Ok(None),
             Some(activate) => activate,
         };
-        let res = Self::activate_load(activate, self.info.path.to_path_buf(), manager).await;
+        let res = Self::activate_load(activate, manager).await;
         self.activate_finish(res, manager).map(Some)
     }
 
@@ -176,6 +140,99 @@ impl LoadedPack {
         }
         Self::try_update_config_inner(out, config)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct PackActivateContext {
+    pub format: PackFormat,
+    pub path: PathBuf,
+    pub context: String,
+    pub sig_prev: PackInfoSignature,
+    pub config_sig_prev: PackInfoSignature,
+}
+impl PackActivateContext {
+    /// fails if format cannot be guessed
+    pub fn new<P>(path: P, format: Option<PackFormat>, prev_info: Option<&PackInfo>) -> anyhow::Result<Self> where
+        P: AsRef<Path> + Into<PathBuf>,
+    {
+        let (format, sig_prev, context) = match prev_info {
+            Some(info) => (
+                Some(format.unwrap_or(info.format)),
+                PackInfoSignature::from_info(info),
+                format!("Reloading pack {info}"),
+            ),
+            None => {
+                let path = path.as_ref();
+                let name = path.file_name()
+                    .map(Path::new)
+                    .unwrap_or_else(|| rt::relative_path(path));
+                (
+                    format.or_else(|| PackFormat::guess_for_path(path)),
+                    PackInfoSignature::EMPTY,
+                    format!("Loading pack {}", name.display()),
+                )
+            },
+        };
+
+        match format {
+            Some(format) => {
+                Ok(Self {
+                    path: path.into(),
+                    format,
+                    context,
+                    config_sig_prev: sig_prev.clone(),
+                    sig_prev,
+                })
+            },
+            None => {
+                Err(anyhow!("unknown pack format").context(context))
+            },
+        }
+    }
+
+    pub async fn load(self, manager: &PackLoader) -> anyhow::Result<PackActivateLoaded> {
+        let loader = self.format.loader_for_path(self.path).await
+            .map(|loader| Arc::new(Mutex::new(loader)));
+        let pack = match loader {
+            Ok(loader) => manager.load_pack(loader.clone()).await
+                .map(|p| (loader, p)),
+            Err(e) => Err(e),
+        }.context(self.context);
+        let res = pack.map(|(l, pack)| {
+            let info = PackInfo::from_pack(&pack, self.format);
+            (l, Arc::new(pack), Arc::new(info))
+        });
+
+        match res {
+            Ok((loader, pack, info)) => {
+                let sig = PackInfoSignature::from_info(&info);
+                let settings = match self.config_sig_prev {
+                    prev if prev == sig => None,
+                    PackInfoSignature::EMPTY => Some(manager.settings.read().await),
+                    _prev => manager.settings.try_read().ok(),
+                };
+                let config = settings.map(|settings| {
+                    let mut config = PackConfig::default();
+                    config.fill_settings(&pack, &settings.pathing(), &settings.disabled_paths);
+                    config
+                });
+                Ok(PackActivateLoaded {
+                    pack,
+                    loader,
+                    info,
+                    config,
+                })
+            },
+            Err(e) => Err(e),
+        }
+    }
+}
+#[derive(Clone)]
+pub struct PackActivateLoaded {
+    pub pack: Arc<Pack>,
+    pub loader: SharedLoaderBox,
+    pub info: Arc<PackInfo>,
+    pub config: Option<PackConfig>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -243,15 +300,19 @@ impl PackLoader {
         }
     }
 
-    pub async fn load_pack(&self, mut loader: LoaderBox) -> anyhow::Result<ActivePack> {
-        let context = "loading TacO pack";
-        let (mut pack, loader) = Controller::try_run_blocking(context, move || Pack::load(&mut loader)
-            .context(context)
-            .map(move |pack| (pack, loader))
-        ).await?;
+    pub async fn load_pack(&self, loader: SharedLoaderBox) -> anyhow::Result<Pack> {
+        let mut pack = Self::load_pack_data(loader).await?;
 
         self.fixup_pack(&mut pack);
-        Ok(ActivePack::with_pack(Arc::new(pack), loader))
+        Ok(pack)
+    }
+    pub async fn load_pack_data(loader: SharedLoaderBox) -> anyhow::Result<Pack> {
+        let context = "loading TacO pack";
+        let mut loader = loader.lock_owned().await;
+        Controller::try_run_blocking(context, move || {
+            Pack::load(&mut *loader)
+                .context(context)
+        }).await
     }
 
     fn fixup_pack(&self, pack: &mut Pack) {
@@ -305,14 +366,14 @@ impl PackLoader {
 #[derive(Clone)]
 pub struct ActivePack {
     pub pack: Arc<Pack>,
-    pub loader: Arc<Mutex<LoaderBox>>,
+    pub loader: SharedLoaderBox,
 }
 
 impl ActivePack {
-    pub fn with_pack(pack: Arc<Pack>, loader: LoaderBox) -> Self {
+    pub fn with_pack(pack: Arc<Pack>, loader: SharedLoaderBox) -> Self {
         Self {
             pack,
-            loader: Arc::new(Mutex::new(loader)),
+            loader,
         }
     }
 
@@ -375,3 +436,4 @@ impl AsRef<Pack> for ActivePack {
 }
 
 pub type LoaderBox = Box<dyn PackLoaderContext + Send + 'static>;
+pub type SharedLoaderBox = Arc<Mutex<LoaderBox>>;

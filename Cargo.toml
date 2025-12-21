@@ -285,6 +285,7 @@ bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
 semver = { version = "1", optional = true }
 uuid = { version = "1", features = ["v3", "v4", "serde"] }
+rustc-hash = "2"
 regex = "1"
 croner = "3"
 bitvec = { workspace = true }

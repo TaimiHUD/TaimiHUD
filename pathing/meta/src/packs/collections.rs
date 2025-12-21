@@ -15,8 +15,26 @@ pub struct MapSet(BTreeSet<MapID>);
 pub struct MapSet(BitVec);
 
 impl MapSet {
+    #[inline]
+    pub fn insert<M: Into<MapID>>(&mut self, map: M) -> bool {
+        self.0.insert(map.into())
+    }
+    #[inline]
+    pub fn remove<M: Into<MapID>>(&mut self, map: M) -> bool {
+        self.0.remove(&map.into())
+    }
+
+    #[inline]
     pub fn contains<M: Into<MapID>>(&self, map: M) -> bool {
         self.0.contains(&map.into())
+    }
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 

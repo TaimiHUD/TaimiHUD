@@ -198,6 +198,14 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> where
             EnumerateAs::<P, _>::new(0..len)
         )
     }
+    #[inline(always)]
+    pub fn end_path<'a>(&'a self) -> Locator<N, P> where
+        &'a T: IntoIterator,
+        <&'a T as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        let len = self.len();
+        Locator::with_parts(self.root.clone(), len.as_())
+    }
 
     #[inline]
     pub fn position<'a, F: FnMut(<&'a T as IntoIterator>::Item) -> bool>(&'a self, pred: F) -> Option<Locator<N, P>> where

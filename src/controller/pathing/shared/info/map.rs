@@ -1,7 +1,7 @@
 use {
     crate::controller::pathing::registry::{
-        PackLoader, LoadedPack, PackMapPath, PackPath,
-        LoadedPoiPath, LoadedTrailPath,
+        PackMapPath, PackPath, PackInfo,
+        LoadedPoiPath, LoadedTrailPath, PackInfoSignature,
     },
     bitvec::vec::BitVec,
     taimi_meta::packs::{
@@ -11,12 +11,13 @@ use {
         TrailIndex, TrailPath,
         CategoryIndex, CategoryPath,
     },
-    taimi_pack::category::id::FullIdRef,
+    taimi_pack::{pack::Pack, category::id::FullIdRef},
     taimi_hoard::iters::IterExt as _,
 };
 
 #[derive(Debug, Clone)]
 pub struct MapPackInfo {
+    pub info_sig: PackInfoSignature,
     pub pois: BitVec,
     pub trails: BitVec,
     pub categories: Box<[CategoryIndex]>,
@@ -31,25 +32,24 @@ pub struct MapPackInfo {
 impl MapPackInfo {
     pub fn empty() -> Self {
         Self {
+            info_sig: PackInfoSignature::EMPTY,
             pois: BitVec::new(),
             trails: BitVec::new(),
             categories: Default::default(),
         }
     }
 
-    pub fn with_pack(pack: &LoadedPack, map_id: MapIndex) -> Self {
-        let Some(active) = &pack.active else {
-            return Self::empty()
-        };
+    pub fn with_pack(map_id: MapIndex, pack: &Pack, info: &PackInfo) -> Self {
+        let info_sig = PackInfoSignature::from_info(info);
 
         // TODO: this doesn't need to use the string ids anymore...
         let id32 = map_id.get() as i32;
         let mut categories = {
-            let category_estimate = active.pack.categories.all_categories.len() / 32;
+            let category_estimate = pack.categories.all_categories.len() / 32;
             Vec::<CategoryIndex>::with_capacity(category_estimate)
         };
         let mut insert_cat = |category: &FullIdRef| -> bool {
-            if let Some(idx) = active.pack.categories.all_categories.get_index_of(category) {
+            if let Some(idx) = pack.categories.all_categories.get_index_of(category) {
                 let idx = idx as CategoryIndex;
                 let insert = categories.partition_point(|&i| i < idx);
                 match categories.get(insert) {
@@ -78,7 +78,7 @@ impl MapPackInfo {
             }
         };
         let mut pois = BitVec::new();
-        let mut active_pois = active.pack.pois.iter().enumerate()
+        let mut active_pois = pack.pois.iter().enumerate()
             .filter(|(_i, poi)| filter_mapid(poi.map_id, poi.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
@@ -93,7 +93,7 @@ impl MapPackInfo {
         // TODO: use some sort of space-efficient encoding like RLE for these masks
         // even just an initial offset or vec of bit group lengths (pos/neg for 0 vs 1) would help?
         let mut trails = BitVec::new();
-        let mut active_trails = active.pack.trails.iter().enumerate()
+        let mut active_trails = pack.trails.iter().enumerate()
             .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), trail.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
@@ -109,20 +109,17 @@ impl MapPackInfo {
         let categories = categories.into_boxed_slice();
 
         Self {
+            info_sig,
             pois,
             trails,
             categories,
         }
     }
 
-    pub async fn load_from_pack(pack: &mut LoadedPack, map_id: MapIndex, _manager: &PackLoader) -> anyhow::Result<Self> {
-        // TODO...
-        Ok(Self::with_pack(&*pack, map_id))
-    }
-
     pub fn is_empty(&self) -> bool {
-        (self.trails.is_empty() || self.trails[..].not_any())
-            && (self.pois.is_empty() || self.pois[..].not_any())
+        self.info_sig.is_empty()
+        || ((self.trails.is_empty() || self.trails[..].not_any())
+            && (self.pois.is_empty() || self.pois[..].not_any()))
     }
 
     /// None if ![self.is_empty()]

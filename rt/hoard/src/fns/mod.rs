@@ -16,7 +16,7 @@ pub unsafe trait Zfn<A>: Sized {
     }
 }
 
-/// ZST [ZF] + [Fn]
+/// ZST [Zfn] + [Fn]
 pub unsafe trait ZFn<A>: Zfn<A> {
     fn call(self, args: A) -> Self::Output {
         unsafe {

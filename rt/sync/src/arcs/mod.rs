@@ -41,7 +41,7 @@ impl DefaultStatic for CStr {
     fn default_static() -> &'static Self { c"" }
 }
 
-/// Box<T>s that are expected to never be cleaned up or removed, thus can be &'static
+/// `Box<T>`s that are expected to never be cleaned up or removed, thus can be &'static
 ///
 /// TODO: consider actually using Box::leak if destructors on shutdown
 /// is a terrible idea (it is a bad one, but...)

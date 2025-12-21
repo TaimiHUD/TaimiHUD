@@ -4,15 +4,18 @@ use {
             space::SpaceLoader,
             visible::LoadedPoi,
         },
-        exports::runtime::Counter,
+        exports::runtime::{
+            textures::{TextureSlot, TextureKey},
+            Counter,
+        },
         render::machine::RenderMachine,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            resources::{Model, ShaderPair, Texture, Vertex},
+            resources::{Model, ShaderPair, Vertex},
             pack::PackRenderData,
         },
         TEXTURES,
-    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::{mem, sync::Arc}, taimi_d3d::{
+    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::mem, taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
@@ -36,7 +39,7 @@ pub struct PoiCommonRenderData {
     pub world_ib: Option<BufferOf<InstanceBufferData>>,
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
 
-    pub fallback_texture: Option<Arc<Texture>>,
+    pub fallback_texture: Option<TextureSlot>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -132,7 +135,9 @@ impl PoiCommonRenderData {
 
     pub fn update(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[PackRenderData]) -> anyhow::Result<()> {
         if self.fallback_texture.is_none() {
-            self.fallback_texture = TEXTURES.lookup_resource(RenderMachine::TEXTURE_LOGO_KEY).flatten();
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
+                self.fallback_texture = texture;
+            }
         }
 
         let ib_len = self.ib_len_for_packs(packs);
@@ -259,13 +264,15 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 ];
 
 pub struct PoiRender {
-    pub icon: Option<Arc<Texture>>,
+    pub icon_handle: Option<TextureKey>,
+    pub icon: Option<TextureSlot>,
     #[cfg(todo)]
     pub render_bookmark: u32,
 }
 impl PoiRender {
     pub fn empty() -> Self {
         Self {
+            icon_handle: None,
             icon: None,
         }
     }
@@ -274,23 +281,19 @@ impl PoiRender {
         &mut self,
         loader: &mut SpaceLoader<'_>,
         icon_name: &AttrString,
-    ) -> anyhow::Result<()> {
-        if self.icon.is_some() { return Ok(()) }
-
-        let handle = loader.register_texture(icon_name);
-        let icon = loader
-            .get_or_load_texture(handle)
-            .context("Loading poi texture");
-
-        match icon {
-            Ok(icon) => {
-                self.icon = Some(icon);
-                Ok(())
-            },
-            Err(e) => {
-                self.icon = None;
-                Err(e)
-            },
+    ) {
+        if let Some(handle) = &mut self.icon_handle {
+            loader.setup_texture(handle, &mut self.icon)
+        } else {
+            let handle = loader.register_texture(icon_name);
+            let (handle, icon) = loader.get_or_load_texture(handle);
+            self.icon_handle = Some(handle);
+            self.icon = icon;
+        }
+    }
+    pub fn update(&mut self, _device: &Dx11Device) {
+        if let Some(handle) = &mut self.icon_handle {
+            SpaceLoader::get_texture(handle, &mut self.icon)
         }
     }
 
@@ -319,6 +322,7 @@ impl PoiRender {
 
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
         let texture = self.icon.as_ref()
+            .and_then(TextureSlot::get)
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {
             texture.set(device_context, 0);

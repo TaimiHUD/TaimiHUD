@@ -12,9 +12,9 @@ use {
         spatial::{box3aabb, irrelevant_box3, BvhShape},
         packs::{id::{IdVariant, MarkerId}, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
     },
-    glamour::Box3,
+    glamour::{Box3, Point3},
     std::{mem, sync::Arc, ops},
-    bvh::aabb,
+    bvh::{aabb, bvh::Bvh}
 };
 
 pub struct SpacePack {
@@ -122,14 +122,36 @@ impl aabb::Bounded<f32, 3> for SpaceEntity {
         self.bounds
     }
 }
+/// associated data with a [SpaceEntity] but not strictly required for bvh
+pub struct SpaceEntityExtra {
+    /// could consider moving this here and just use the index/offset into here?
+    #[cfg(todo)]
+    pub id: MarkerId,
+    pub position: Point3<DrawSpace>,
+}
 pub struct SpaceEntities {
     pub entities: Vec<BvhShape<SpaceEntity>>,
+    pub extra: Vec<SpaceEntityExtra>,
 }
 impl SpaceEntities {
     pub fn new() -> Self {
         Self {
             entities: Vec::new(),
+            extra: Vec::new(),
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.entities.clear();
+        self.extra.clear();
+    }
+
+    pub fn needs_rebuild(&self) -> bool {
+        self.extra.len() != self.entities.len()
+    }
+
+    pub fn rebuild_extra(&mut self) {
+        log::info!("TODO: rebuild_extra");
     }
 
     pub fn retain<F: FnMut(&mut SpaceEntity) -> bool>(&mut self, mut cond: F) -> BitVec {
@@ -143,24 +165,27 @@ impl SpaceEntities {
                 }
             }
         }
+        #[cfg(todo = "unnecessary")]
+        for i in removed.iter_ones() {
+            let Some(extra) = self.extra.get_mut(i) else { continue };
+            *extra = SpaceEntityExtra::invalid();
+        }
         removed
     }
-    pub fn remove_pack(&mut self, pack: PackPath) -> BitVec {
+    pub fn remove_pack(&mut self, pack: PackPath) {
         self.retain(|e| match e.id.variant() {
             IdVariant::MarkerRegistered(p) => p.root != pack,
             IdVariant::MarkerLoaded(p) => p.root.root != pack,
             _ => true,
-        })
+        });
+        self.extra = Vec::new();
     }
 }
-
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct PackTextureHandle(usize);
 
 pub struct SpacePackCollection {
     pub loaded_packs: PackVecOf<SpacePack>,
     pub render_entities: SpaceEntities,
+    pub bvh: Bvh<f32, 3>,
 
     #[cfg(todo)]
     pub render_list: RenderList,
@@ -173,16 +198,38 @@ impl SpacePackCollection {
             #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
             render_entities: SpaceEntities::new(),
+            bvh: Bvh { nodes: Vec::new() },
         }
     }
 
-    #[cfg(todo)]
-    pub fn clear(&mut self) {
-        self.loaded_packs.clear();
-
-        self.render_list.clear();
+    pub fn rebuild_entities(&mut self) {
+        log::debug!("TODO: rebuild entities");
+        self.render_entities.rebuild_extra();
+    }
+    /// TODO
+    pub fn entities_dirty(&self) -> bool {
+        self.render_entities.needs_rebuild() || true
     }
 
+    pub fn rebuild_bvh(&mut self) {
+        log::debug!("TODO: rebuild bvh");
+        self.bvh = Bvh::build(&mut self.render_entities.entities);
+    }
+
+    pub fn rebuild(&mut self) {
+        if self.entities_dirty() {
+            self.rebuild_entities();
+        }
+        self.rebuild_bvh();
+    }
+
+    pub fn clear(&mut self) {
+        self.loaded_packs.clear();
+        self.render_entities.clear();
+        self.bvh = Bvh { nodes: Vec::new() };
+    }
+
+    #[cfg(todo)]
     pub fn pack_mut<'a>(&'a mut self, path: &PackPath) -> &'a mut SpacePack {
         let index = path.path as usize;
         if self.loaded_packs.len() <= index {

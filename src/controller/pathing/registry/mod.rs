@@ -7,9 +7,10 @@ use {
         settings::{sources::DataSourcePath, PathingSettings},
         controller::pathing::state::{VisibilityFlagSet, VisibilityFlags},
     },
+    rustc_hash::FxHasher,
     anyhow::anyhow,
     bitvec::vec::BitVec,
-    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, hash, iter, path::{Path, PathBuf}, ptr, sync::Arc},
+    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, hash::{Hash, Hasher}, iter, path::{Path, PathBuf}, ptr, sync::Arc},
     taimi_meta::{
         packs::{
             collections::{CategorySet, MapSet},
@@ -31,7 +32,7 @@ use {
     taimi_hoard::loc::LocationMut,
 };
 pub use self::{
-    active::{ActivePack, PackFormat, PackLoader, LoaderBox},
+    active::{ActivePack, PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, LoaderBox, SharedLoaderBox},
     namespace::*,
 };
 
@@ -140,18 +141,16 @@ impl PackRegistry {
             let start = match pack {
                 Some(mut pack) => match pack.activate_start().transpose() {
                     None => Either::Left(Some(pack)),
-                    Some(start) => Either::Right(
-                        start.map(|start| (start, pack.info.path.clone()))
-                    ),
+                    Some(start) => Either::Right(start),
                 },
                 pack => Either::Left(pack),
             };
             match start {
                 Either::Left(pack) => Either::Left(future::ready(Ok(pack))),
                 Either::Right(start) => Either::Right(async move {
-                    let (start, filepath) = start?;
+                    let start = start?;
 
-                    let res = LoadedPack::activate_load(start, filepath.to_path_buf(), manager).await;
+                    let res = LoadedPack::activate_load(start, manager).await;
 
                     let pack = RwLockWriteGuard::try_map(
                         registry.write().await,
@@ -175,6 +174,7 @@ impl PackRegistry {
         }
     }
 
+    #[cfg(todo)]
     pub fn preload<P>(&mut self, path: P, datasource: Option<DataSourcePath>, manager: &PackLoader) -> PackPath where
         P : AsRef<Path> + Into<PathBuf>,
     {
@@ -259,6 +259,7 @@ impl LoadedPack {
     }
 
     /// leave a gravestone marker so our index is never used again
+    #[cfg(todo)]
     pub fn mark_dead(&mut self, manager: &PackLoader) {
         let _ = self.config.take();
         self.info = LoadedPackInfo::gravestone(self.info.index);
@@ -410,6 +411,59 @@ impl fmt::Display for PackInfo {
                 f.write_str(&root.display_name),
             None =>
                 fmt::Display::fmt(&self.format, f),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct PackInfoSignature {
+    // TODO: consider atomic variant? sad that the traits are unstable...
+    pub hash: u32,
+}
+impl PackInfoSignature {
+    pub const EMPTY: Self = Self { hash: 0 };
+    pub const INVALID: Self = Self { hash: u32::MAX };
+    pub const HASHER_SEED: usize = 0x2673f7efbc5f2804u64 as usize;
+
+    pub const fn with_hash(hash: u32) -> Self {
+        Self { hash }
+    }
+
+    /// [Self::hashpart_info] with [Self::hasher()]
+    pub fn from_info(info: &PackInfo) -> Self {
+        let mut hasher = Self::hasher();
+        Self::hashpart_info(&mut hasher, info);
+        Self {
+            hash: hasher.finish() as u32,
+        }
+    }
+
+    /// basic checks for pack changes
+    pub fn hashpart_info<H: Hasher>(hasher: &mut H, info: &PackInfo) {
+        (info.maps.len() as u16).hash(hasher);
+        Self::hashpart_categories(hasher, &info.categories);
+    }
+    pub fn hashpart_categories<H: Hasher>(hasher: &mut H, categories: &PackCategoryInfo) {
+        categories.all.hash(hasher);
+        categories.roots.hash(hasher);
+    }
+
+    /// [FxHasher] with [Self::HASHER_SEED]
+    pub fn hasher() -> impl Hasher + Clone + 'static {
+        FxHasher::with_seed(Self::HASHER_SEED)
+    }
+
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        matches!(*self, Self::EMPTY)
+    }
+
+    #[inline]
+    pub const fn get(&self) -> Option<Self> {
+        match self.is_empty() {
+            true => None,
+            false => Some(*self),
         }
     }
 }
@@ -865,6 +919,10 @@ impl PackConfig {
                 default_toggle ^ deviation
             })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.category_visibility.is_empty() && self.visibility_overrides.is_empty()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -929,8 +987,8 @@ impl PartialOrd for UnloadedReason {
         Some(self.cmp(rhs))
     }
 }
-impl hash::Hash for UnloadedReason {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+impl Hash for UnloadedReason {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         let e = match self {
             Self::LoadingFailed(e) => Arc::as_ptr(e) as *const (),
             _ => ptr::null(),

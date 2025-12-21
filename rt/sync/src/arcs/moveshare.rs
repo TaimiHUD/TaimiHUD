@@ -60,7 +60,6 @@ impl<T: ?Sized> MoveShareArc<T> {
         Some(MoveShared::subscribe_unchecked_unsized(self))
     }
 
-    /// prefer [Self::new_unshared]
     pub const fn new_with(inner: MoveShareInner<T>) -> Self {
         Self { inner }
     }
@@ -80,6 +79,12 @@ pub struct MoveShare<T> {
     pub working: Option<T>,
 }
 impl<T> MoveShare<T> {
+    pub fn new<V: Into<Arc<T>>>(initial: V) -> (Self, MoveShared<T>) {
+        let this = Self::new_unshared(initial.into());
+        let rx = MoveShared::subscribe_unchecked(&this);
+        (this, rx)
+    }
+
     /// prefer [Self::new_unshared]
     pub const fn new_with(inner: MoveShareArc<T>) -> Self {
         Self { inner, working: None }

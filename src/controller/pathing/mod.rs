@@ -24,14 +24,17 @@ use {
         Interruption,
         InterruptionSignal,
     },
+    self::registry::PackLoader,
+    self::state::{LoadedMaps, LoadedMapInfo},
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
     strum_macros::Display,
-    taimi_meta::ui::MapContext,
+    taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
     taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
     tokio::{
         fs::create_dir_all,
+        task::JoinSet,
         select,
         time::{sleep, Duration},
     },
@@ -47,7 +50,8 @@ pub use taimi_meta::coords::LocalSpace as PackSpace;
 
 mod festivals;
 pub mod registry;
-mod shared;
+mod setup;
+pub mod shared;
 mod state;
 pub mod space;
 
@@ -67,60 +71,125 @@ pub(crate) enum PathingEvent {
 }
 
 pub(crate) struct PathingController {
+    loader: Arc<PackLoader>,
     rx: PathingReceiver,
+    tasks: JoinSet<anyhow::Result<Option<PathingEvent>>>,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,
     settings: SettingsLock,
+    active: bool,
+    map_info: LoadedMapInfo,
+    maps: LoadedMaps,
 }
 
 impl PathingController {
     pub fn new(rx: PathingReceiver, settings: SettingsLock) -> Self {
+        let loader = rx.make_loader(settings.clone());
         Self {
             rx,
+            loader,
             controls: CONTROLS.subscribe_controls(),
             keybinds: CONTROLS.subscribe_taimi(),
+            tasks: Default::default(),
             settings,
+            active: true,
+            map_info: Default::default(),
+            maps: Default::default(),
         }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        let mut enables = self.rx.enables.borrow().clone();
-        {
-            let settings = self.settings.read().await;
-            enables.set(PathingEnables::KATRENDER, settings.enable_katrender);
+        self.setup().await;
+
+        while self.active {
+            let int = self.turn().await;
+            if let Some(reason) = int {
+                let res = self.exit(reason).await;
+                self.active = false;
+                return res
+            }
         }
-        self.rx.enables.send_replace(enables);
-        let _interruption = loop {
-            select! {
-                e = self.rx.command.recv() => {
-                    let res = match e {
-                        None => break Interruption::Unspecified,
-                        Some(e) =>
-                            self.handle_event(e).await,
-                    };
-                    match res {
-                        Some(int) => break int,
-                        None => (),
-                    }
+
+        Ok(())
+    }
+    pub async fn turn(&mut self) -> Option<Interruption> {
+        if self.rx.command.is_closed() {
+            return Some(
+                Interruption::try_drain_signals(&mut self.rx.command).unwrap_or(Interruption::Unspecified)
+            )
+        }
+        let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
+        select! {
+            e = self.rx.command.recv() => {
+                let res = match e {
+                    None => Ok(Some(Interruption::Unspecified)),
+                    Some(e) =>
+                        self.handle_message(e).await,
+                }.context("Pathing controller");
+                match rt::log::error_ok(res) {
+                    Some(Some(int)) => return Some(int),
+                    Some(None) | None => (),
+                }
+            },
+            Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
+                Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
+                    Some(Some(m)) =>
+                        return rt::log::error_ok(self.handle_message(m).await).flatten(),
+                    None | Some(None) => (),
                 },
-                _ = self.rx.festivals.changed() => {
-                    self.provide_disabled_paths().await;
+                Err(e) => crate::log_join_error("pathing", e),
+            },
+            _ = self.rx.festivals.changed() => {
+                self.provide_disabled_paths().await;
+            },
+            controls = self.controls.wait() => match controls {
+                Err(e) => log::error!("Control bindings error! {e:#}"),
+                Ok((&controls_state, controls_changed)) => {
+                    self.handle_presses(controls_state, controls_changed).await;
                 },
-                controls = self.controls.wait() => match controls {
-                    Err(e) => log::error!("Control bindings error! {e:#}"),
-                    Ok((&controls_state, controls_changed)) => {
-                        self.handle_presses(controls_state, controls_changed).await;
-                    },
+            },
+            keybinds = self.keybinds.wait() => match keybinds {
+                Err(e) => log::error!("Keybind receive error! {e:#}"),
+                Ok((binds_state, binds_changed)) => {
+                    self.handle_keybinds(binds_state, binds_changed).await;
                 },
-                keybinds = self.keybinds.wait() => match keybinds {
-                    Err(e) => log::error!("Keybind receive error! {e:#}"),
-                    Ok((binds_state, binds_changed)) => {
-                        self.handle_keybinds(binds_state, binds_changed).await;
-                    },
-                },
+            },
+            gameplay = self.rx.gameplay.when_changed() => {
+                let gameplay = *gameplay;
+                let trans = gameplay.latest_transition_from(gameplay_prev);
+                self.handle_gameplay(gameplay, trans).await;
+            },
+        }
+        None
+    }
+
+    async fn exit(&mut self, reason: Interruption) -> anyhow::Result<()> {
+        self.tasks.abort_all();
+
+        match reason {
+            Interruption::Abort => return Ok(()),
+            _ => (),
+        }
+
+        self.tasks.shutdown().await;
+
+        Ok(())
+    }
+
+    async fn setup(&mut self) {
+        let get_settings = {
+            let enables = self.rx.enables.clone();
+            let settings = self.settings.clone();
+            async move {
+                let mut enable_flags = enables.borrow().clone();
+                let settings = settings.read().await;
+                enable_flags.set(PathingEnables::KATRENDER, settings.enable_katrender);
+                drop(settings);
+                enables.send_replace(enable_flags);
             }
         };
-        Ok(())
+        let preload = self.preload_all();
+        let ((), ()) = tokio::join!(preload, get_settings);
     }
 
     async fn pathing_state_update(&mut self, path: CategoryId, state: bool) {
@@ -154,6 +223,20 @@ impl PathingController {
     async fn provide_disabled_paths(&self) {
         log::debug!("TODO: provide_disabled_paths (filter/config dirty bs)");
     }
+
+    async fn load_all(&mut self) {
+        let res = Self::do_load_all(self.loader.clone())
+            .await
+            .context("Loading all paths");
+        if let Err(e) = res {
+            log::error!("{e:#}");
+        }
+    }
+
+    async fn handle_gameplay(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
+        if let GameplayTransition::Loaded { initial: true, .. } = trans {
+        }
+    }
 }
 
 /// moving back to registry loader Soon
@@ -169,15 +252,6 @@ impl PathingController {
             .context("Reloading all paths");
         if let Err(e) = res {
             log::error!("{e:#}");
-        }
-    }
-
-    async fn load_all(&self) {
-        let res = Self::load_all_inner(self.settings.clone())
-            .await
-            .context("Loading all paths");
-        if let Err(e) = res {
-            log::error!("{e}");
         }
     }
 
@@ -226,7 +300,7 @@ impl PathingController {
                         Ok(())
                     },
                     Err(e) | Ok(Err(e)) => {
-                        let e = rt::log::error_into_arc(e);
+                        let e = rt::log::anyhow_into_arc(e);
                         Self::pathing_notify_pack_error(
                             name,
                             UnloadedReason::LoadingFailed(e.clone()),
@@ -375,17 +449,16 @@ impl PathingController {
 }
 
 impl PathingController {
-    pub(crate) async fn handle_event(&mut self, event: PathingEvent) -> Option<Interruption> {
+    pub(crate) async fn handle_message(&mut self, event: PathingEvent) -> anyhow::Result<Option<Interruption>> {
         use PathingEvent::*;
         match event {
-            Exit(interruption) => return Some(interruption),
+            Exit(interruption) => return Ok(Some(interruption)),
+            LoadAll => self.load_all().await,
             #[cfg(deleteme)]
             ReloadAll(remove) => self.reload_all(remove).await,
             #[cfg(deleteme)]
-            LoadAll => self.load_all().await,
-            #[cfg(deleteme)]
             UnloadAll => self.unload_all().await,
-            ReloadAll(..) | UnloadAll | LoadAll =>
+            ReloadAll(..) | UnloadAll =>
                 log::debug!("TODO: pathing load"),
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
@@ -393,7 +466,7 @@ impl PathingController {
             ApiBypass(set) => self.toggle_api_bypass(set),
             VisibleToggle { context, set } => self.set_visible(context, set).await,
         }
-        None
+        Ok(None)
     }
 
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {

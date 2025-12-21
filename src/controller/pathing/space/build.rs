@@ -8,11 +8,16 @@ use {
                 state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry, LoadedTrailSectionInfo, LoadedTrailGeometrySection},
             },
         },
-        exports::runtime as rt,
+        exports::runtime::{
+            self as rt,
+            textures::{TextureKey, TextureSlot},
+        },
         space::pack::{TrailRender, PoiRender},
         resources::Texture,
+        TEXTURES,
     },
     anyhow::Context,
+    futures::future::Either,
     std::sync::Arc,
     taimi_meta::packs::{PoiPath, TrailPath},
     taimi_pack::{attributes::{AttrString, RenderAttributes}, Poi as PackPoi},
@@ -24,9 +29,9 @@ pub struct SpaceLoader<'a> {
     pub device: &'a taimi_d3d::dx11::Dx11Device,
 }
 
-type SpaceTextureHandle = String;
+type SpaceTextureHandle = (TextureKey, Result<TextureSlot, AttrString>);
 impl<'a> SpaceLoader<'a> {
-    pub fn register_texture(&mut self, texture: &AttrString) -> SpaceTextureHandle {
+    fn texture_key(&mut self, texture: &AttrString) -> String {
         let texture = &texture[..];
         let pack_name: Option<&str> = match &self.active_pack {
             #[cfg(todo)]
@@ -42,9 +47,84 @@ impl<'a> SpaceLoader<'a> {
         };
         format!("{name}{texture}")
     }
+    pub fn register_texture(&mut self, texture: &AttrString) -> SpaceTextureHandle {
+        let key = self.texture_key(texture);
+        let tex = TEXTURES.lookup_pair_with(&key, |canon, tex| canon.map(|canon| {
+            let tex = (!tex.is_loading() && !tex.can_load()).then_some(tex.clone());
+            (canon.clone(), tex)
+        })).flatten();
+        let (key, tex) = match tex {
+            Some((key, tex)) => (key, tex),
+            None => (key.into(), None),
+        };
+        let tex = tex.map(Ok).unwrap_or_else(|| Err(texture.clone()));
+        (key, tex)
+    }
 
-    pub fn get_or_load_texture(&mut self, handle: SpaceTextureHandle) -> anyhow::Result<Arc<Texture>> {
-        Err(anyhow::anyhow!("TODO: get_or_load_texture {handle}"))
+    pub fn get_texture(key: &mut TextureKey, slot: &mut Option<TextureSlot>) {
+        if slot.is_some() { return }
+
+        let mut replacement = None;
+        TEXTURES.lookup_pair_with(&key, |canon, tex| if let Some(canon) = canon {
+            if Arc::as_ptr(key) as *const () != Arc::as_ptr(canon) as *const () {
+                replacement = Some(canon.clone());
+            }
+            if tex.is_loading() { return }
+            if tex.can_load() {
+                return log::debug!("TODO: reload texture");
+            }
+            *slot = Some(tex.clone());
+        });
+        if let Some(replacement) = replacement {
+            *key = replacement.clone();
+        }
+    }
+    pub fn setup_texture(&mut self, key: &mut TextureKey, slot: &mut Option<TextureSlot>) {
+        Self::get_texture(key, slot)
+    }
+
+    pub fn get_or_load_texture(&mut self, (mut key, tex): SpaceTextureHandle) -> (TextureKey, Option<TextureSlot>) {
+        let name = match tex {
+            Ok(TextureSlot::Loading) => return (key, None),
+            Ok(slot) => return (key, Some(slot)),
+            Err(name) => {
+                // maybe pointless idk
+                let _ = TEXTURES.try_canonicalize_key_mut(&mut key);
+                name
+            },
+        };
+
+        let data = if let Some(path) = self.loader.asset_absolute_path(&name[..]) {
+            Some(path)
+        } else { None };
+        let data = match data {
+            None => {
+                let res = self.loader.load_asset_dyn(&name[..]).and_then(|mut asset| {
+                        let mut bytes = Vec::new();
+                        asset.read_to_end(&mut bytes)
+                            .map(move |_amt| bytes)
+                            .map_err(Into::into)
+                }).with_context(|| format!("reading texture {}", name));
+                match res {
+                    Ok(bytes) => Either::Left(bytes),
+                    Err(e) => {
+                        log::error!("{e:#}");
+                        return (key, Some(TextureSlot::Unavailable))
+                    },
+                }
+            },
+            Some(path) => Either::Right(path),
+        };
+
+        match data {
+            Either::Left(bytes) => {
+                crate::texture_schedule_bytes(key.clone(), bytes);
+            },
+            Either::Right(path) => {
+                crate::texture_schedule_file(key.clone(), path);
+            },
+        }
+        (key, None)
     }
 }
 
@@ -59,7 +139,7 @@ impl SpacePoiBuilder {
         let mut render = PoiRender::empty();
         let texture = poi.poi_attrs().icon_file.as_ref()
             .with_context(|| format!("{path} missing texture"))
-            .and_then(|texture| render.setup_texture(loader, texture));
+            .map(|texture| render.setup_texture(loader, texture));
         let _ = rt::log::error_ok(texture);
         Ok(render)
     }
@@ -94,7 +174,7 @@ impl SpaceTrailBuilder {
         }
         let texture = trail.trail_attrs().texture.as_ref()
             .with_context(|| format!("{path} missing texture"))
-            .and_then(|texture| render.setup_texture(loader, texture));
+            .map(|texture| render.setup_texture(loader, texture));
         let _ = rt::log::error_ok(texture);
         Ok(render)
     }

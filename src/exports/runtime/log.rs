@@ -711,6 +711,19 @@ where
 }
 
 pub type DynError = dyn StdError + Send + Sync;
+/// TODO: update anyhow?
+pub fn anyhow_into_box(e: anyhow::Error) -> Box<DynError> {
+    match e {
+        #[cfg(todo)]
+        e => e.into_boxed_dyn_error(),
+        e => error_into_box(e),
+    }
+}
+#[inline]
+pub fn anyhow_into_arc(e: anyhow::Error) -> Arc<DynError> {
+    error_into_arc(anyhow_into_box(e))
+}
+#[inline]
 pub fn error_into_box<E>(e: E) -> Box<DynError> where
     E: Into<Box::<DynError>>,
 {

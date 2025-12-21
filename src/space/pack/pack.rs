@@ -1095,7 +1095,7 @@ impl PackRender {
     /// offset (starting len) currently = 1 to leave space for an identity buffer
     /// at index 0 for drawing trails with
     ///
-    /// also [SpacePack::render_poi_bookmark] of 0 is treated as empty so uh don't
+    /// also [PackRenderData::render_poi_bookmark] of 0 is treated as empty so uh don't
     /// use that
     pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
         for pack in self.pack_data.values_mut() {
