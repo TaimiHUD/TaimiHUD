@@ -22,7 +22,8 @@ use {
 #[cfg(feature = "texture-loader")]
 pub use crate::resources::Texture;
 
-pub type TextureMap = HashMap<Arc<str>, TextureSlot>;
+pub type TextureKey = Arc<str>;
+pub type TextureMap = HashMap<TextureKey, TextureSlot>;
 
 pub struct TextureLoader {
     pub textures: StdRwLock<TextureMap>,
@@ -109,7 +110,7 @@ impl TextureLoader {
 
     pub async fn report_begin_load(
         &self,
-        key: &Arc<str>,
+        key: &TextureKey,
         request: impl Future<Output = anyhow::Result<()>>,
     ) -> anyhow::Result<()> {
         {
@@ -138,7 +139,7 @@ impl TextureLoader {
     }
     async fn begin_load(
         &self,
-        key: &Arc<str>,
+        key: &TextureKey,
         request: impl FnOnce() -> TextureRequest,
     ) -> anyhow::Result<()> {
         #[cfg(feature = "texture-loader")]
@@ -152,23 +153,61 @@ impl TextureLoader {
         .await
     }
 
-    #[cfg(feature = "texture-loader")]
-    pub fn lookup_resource(&self, key: &str) -> Option<Option<Arc<Texture>>> {
+    pub fn lookup_pair_with<R, F: FnOnce(Option<&TextureKey>, &TextureSlot) -> R>(&self, key: &str, f: F) -> Option<R> {
         let textures = match self.textures.try_read() {
             Ok(t) => t,
             // temporary failure, just pretend it's loading or something
-            Err(..) => return Some(None),
+            Err(..) => return Some(f(None, &TextureSlot::Loading)),
         };
-        textures.get(key).map(|texture| texture.resource())
+        textures.get_key_value(key).map(|(k, i)| f(Some(k), i))
+    }
+    pub fn lookup_with<R, F: FnOnce(&TextureSlot) -> R>(&self, key: &str, f: F) -> Option<R> {
+        self.lookup_pair_with(key, |_k, i| f(i))
+    }
+    /// `Some(None)` if texture isn't ready yet
+    pub fn lookup_loaded(&self, key: &str) -> Option<Option<TextureSlot>> {
+        self.lookup_with(key, |i| (!i.is_loading()).then_some(i.clone()))
+    }
+    #[cfg(feature = "texture-loader")]
+    pub fn lookup_resource(&self, key: &str) -> Option<Option<Arc<Texture>>> {
+        self.lookup_with(key, |t| {
+            t.resource()
+        })
     }
 
     pub fn lookup_imgui(&self, key: &str) -> Option<Option<ImguiTexture>> {
+        self.lookup_with(key, |t| {
+            t.imgui_texture()
+        })
+    }
+
+    /// expect temporary failure due to lock contention
+    pub fn try_canonicalize_key(&self, key: &str) -> Result<Option<TextureKey>, ()> {
         let textures = match self.textures.try_read() {
             Ok(t) => t,
-            // temporary failure, just pretend it's loading or something
-            Err(..) => return Some(None),
+            Err(..) => return Err(()),
         };
-        textures.get(key).map(|texture| texture.imgui_texture())
+        let canon = textures.get_key_value(key)
+            .map(|(canon, _)| canon.clone());
+        Ok(canon)
+    }
+    /// expect temporary failure due to lock contention
+    pub fn try_canonicalize_key_mut(&self, key: &mut TextureKey) -> Result<bool, ()> {
+        let textures = match self.textures.try_read() {
+            Ok(t) => t,
+            Err(..) => return Err(()),
+        };
+        let ptr = Arc::as_ptr(key) as *const ();
+        let replacement = match textures.get_key_value(key) {
+            None => return Ok(false),
+            Some((canon, _)) if Arc::as_ptr(canon) as *const () == ptr =>
+                // already canon
+                return Ok(true),
+            Some((canon, _)) => canon.clone(),
+        };
+        *key = replacement;
+        // now it is!
+        Ok(true)
     }
 
     #[cfg(todo = "unused")]
@@ -189,33 +228,35 @@ impl TextureLoader {
         self.request_load_file(rel.into(), abs).await
     }
 
-    pub async fn request_load_file<K: Into<Arc<str>>, P: Into<PathBuf>>(
+    pub async fn request_load_file<K: Into<TextureKey>, P: Into<PathBuf>>(
         &self,
         key: K,
         path: P,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<TextureKey> {
         let key = key.into();
         self.begin_load(&key, || TextureRequest::LoadFile {
             key: key.clone(),
             path: path.into(),
         })
         .await
+        .map(move |()| key)
     }
 
-    pub async fn request_load_bytes<K: Into<Arc<str>>, D: Into<Vec<u8>>>(
+    pub async fn request_load_bytes<K: Into<TextureKey>, D: Into<Vec<u8>>>(
         &self,
         key: K,
         bytes: D,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<TextureKey> {
         let key = key.into();
         self.begin_load(&key, || TextureRequest::LoadBytes {
             key: key.clone(),
             bytes: bytes.into(),
         })
         .await
+        .map(move |()| key)
     }
 
-    pub fn report_load<K: Into<Arc<str>>, T: Into<TextureSlot>>(&self, key: K, texture: anyhow::Result<T>) {
+    pub fn report_load<K: Into<TextureKey>, T: Into<TextureSlot>>(&self, key: K, texture: anyhow::Result<T>) {
         let key = key.into();
         let slot = match texture {
             Ok(slot) => slot.into(),
@@ -231,7 +272,7 @@ impl TextureLoader {
         }
     }
 
-    pub fn report_failure<K: Into<Arc<str>>>(&self, key: K) {
+    pub fn report_failure<K: Into<TextureKey>>(&self, key: K) {
         if let Ok(mut textures) = self.textures.write() {
             textures.insert(key.into(), TextureSlot::Unavailable);
         }
@@ -390,7 +431,7 @@ impl TextureLoader {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TextureSlot {
     Loading,
     Unavailable,
@@ -453,6 +494,19 @@ impl TextureSlot {
             _ => false,
         }
     }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(*self, Self::Loading)
+    }
+    pub fn get(&self) -> Option<&Self> {
+        match self {
+            #[cfg(feature = "texture-loader")]
+            TextureSlot::Loaded(..) => Some(self),
+            #[cfg(feature = "extension-nexus")]
+            TextureSlot::Nexus(..) => Some(self),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "extension-nexus")]
@@ -510,15 +564,15 @@ impl TextureLoaderHandle {
 #[cfg(feature = "texture-loader")]
 #[derive(Debug, Clone)]
 pub enum TextureRequest {
-    LoadFile { key: Arc<str>, path: PathBuf },
-    LoadBytes { key: Arc<str>, bytes: Vec<u8> },
+    LoadFile { key: TextureKey, path: PathBuf },
+    LoadBytes { key: TextureKey, bytes: Vec<u8> },
     Shutdown,
 }
 
 #[cfg(feature = "texture-loader")]
 impl TextureRequest {
     #[cfg(todo)]
-    pub fn key(&self) -> Option<&Arc<str>> {
+    pub fn key(&self) -> Option<&TextureKey> {
         Some(match self {
             Self::LoadFile { key, .. } | Self::LoadBytes { key, .. } => key,
             _ => return None,
@@ -541,7 +595,7 @@ impl TextureRequest {
     #[cfg(feature = "image")]
     fn decode_image_read<R: io::BufRead + io::Seek>(
         image: image::ImageReader<R>,
-        key: Arc<str>,
+        key: TextureKey,
     ) -> anyhow::Result<TextureResponse> {
         let image = image
             .with_guessed_format()
@@ -569,14 +623,14 @@ impl TextureRequest {
 #[derive(Debug)]
 pub enum TextureResponse {
     Decoded {
-        key: Arc<str>,
+        key: TextureKey,
         pixels: Vec<u8>,
         stride: usize,
         dimensions: [u32; 2],
         format: DXGI_FORMAT,
     },
     DecodeFailed {
-        key: Arc<str>,
+        key: TextureKey,
         error: anyhow::Error,
     },
     LoopEnter {
