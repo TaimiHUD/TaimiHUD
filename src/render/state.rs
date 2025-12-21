@@ -598,10 +598,16 @@ impl RenderState {
     }
 
     pub fn pre_render(host: AddonHostName) -> Option<bool> {
-        match Self::is_host(host) {
+        let host = match Self::is_host(host) {
             None => {
                 Self::select_host();
-                // *shrug* try again next frame
+                Self::is_host(host)
+            },
+            h => h,
+        };
+        match host {
+            None => {
+                // *shrug*
                 None
             },
             Some(false) => None,
