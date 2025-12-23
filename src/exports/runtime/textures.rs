@@ -25,7 +25,7 @@ pub use crate::resources::Texture;
 pub type TextureMap = HashMap<Arc<str>, TextureSlot>;
 
 pub struct TextureLoader {
-    pub textures: RwLock<TextureMap>,
+    pub textures: StdRwLock<TextureMap>,
     #[cfg(feature = "texture-loader")]
     loader: StdRwLock<Option<TextureLoaderHandle>>,
 }
@@ -113,7 +113,7 @@ impl TextureLoader {
         request: impl Future<Output = anyhow::Result<()>>,
     ) -> anyhow::Result<()> {
         {
-            let mut textures = self.textures.write().await;
+            let mut textures = self.textures.write().ok().context("texture map poisoned")?;
             let entry = textures.entry(key.clone());
             match entry {
                 hash_map::Entry::Occupied(e) if !e.get().can_load() =>
@@ -129,8 +129,9 @@ impl TextureLoader {
         match request.await {
             Ok(()) => Ok(()),
             Err(e) => {
-                let mut textures = self.textures.write().await;
-                textures.insert(key.clone(), TextureSlot::Unavailable);
+                if let Ok(mut textures) = self.textures.write() {
+                    textures.insert(key.clone(), TextureSlot::Unavailable);
+                }
                 Err(e)
             },
         }
@@ -223,13 +224,17 @@ impl TextureLoader {
                 return self.report_failure(key);
             },
         };
-        let mut textures = self.textures.blocking_write();
-        textures.insert(key, slot);
+        if let Ok(mut textures) = self.textures.write() {
+            textures.insert(key, slot);
+        } else {
+            log::error!("texture map poisoned");
+        }
     }
 
     pub fn report_failure<K: Into<Arc<str>>>(&self, key: K) {
-        let mut textures = self.textures.blocking_write();
-        textures.insert(key.into(), TextureSlot::Unavailable);
+        if let Ok(mut textures) = self.textures.write() {
+            textures.insert(key.into(), TextureSlot::Unavailable);
+        }
     }
 
     #[cfg(feature = "texture-loader")]
@@ -273,7 +278,10 @@ impl TextureLoader {
             _ => true,
         };
 
-        let mut textures = mem::replace(&mut *self.textures.blocking_write(), HashMap::new());
+        let mut textures = {
+            let mut textures = self.textures.write().unwrap_or_else(|e| e.into_inner());
+            mem::replace(&mut *textures, HashMap::new())
+        };
         match unload {
             false => {
                 textures.retain(|_key, texture| match texture {

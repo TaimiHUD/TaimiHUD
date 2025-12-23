@@ -38,7 +38,7 @@ impl Texture {
             }
         } else {
             let texture = Self::new_path(device, path)?;
-            let mut textures = TEXTURES.textures.blocking_write();
+            let mut textures = TEXTURES.textures.write().ok().context("poisoned")?;
             let texture = Arc::new(texture);
             textures.insert(key.into(), texture.clone().into());
             Ok(texture)
