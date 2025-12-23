@@ -3,6 +3,7 @@ use {
         controller::pathing::{
             space::SpaceLoader,
             visible::LoadedPoi,
+            shared::{SharedPackInfo, LoadedPoiRef},
         },
         exports::runtime::{
             textures::{TextureSlot, TextureKey},
@@ -277,6 +278,7 @@ impl PoiRender {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn setup_texture(
         &mut self,
         loader: &mut SpaceLoader<'_>,
@@ -291,9 +293,9 @@ impl PoiRender {
             self.icon = icon;
         }
     }
-    pub fn update(&mut self, _device: &Dx11Device) {
-        if let Some(handle) = &mut self.icon_handle {
-            SpaceLoader::get_texture(handle, &mut self.icon)
+    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, poi: LoadedPoiRef<'_>) {
+        if let Some(icon_name) = poi.poi_attrs().icon_file.as_ref() {
+            SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name)
         }
     }
 
@@ -301,7 +303,7 @@ impl PoiRender {
         let render = poi.render_attrs();
         let attrs = poi.poi_attrs();
         InstanceBufferData {
-            world: Mat4::from_translation(poi.position.into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
+            world: Mat4::from_translation(poi.position().into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
             colour: render.tint(),
         }
     }
@@ -314,7 +316,7 @@ impl PoiRender {
         // TODO: DPI/UI scaling is irrelevant here right?
         let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
-            world: Mat4::from_translation(poi.position.into())
+            world: Mat4::from_translation(poi.position().into())
                 * Mat4::from_scale(scale.extend(scale.y).into()),
             colour: poi.render_attrs().tint(),
         }

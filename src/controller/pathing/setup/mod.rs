@@ -2,16 +2,18 @@ use {
     crate::{
         controller::pathing::{
             PathingController,
-            shared::{SharedPackInfo, SharedPackLoad, PathingShared},
-            registry::{PackLoader, PackActivateContext, UnloadedReason},
+            visible::LoadedMapPack,
+            shared::{SharedPackInfo, SharedPackLoad, PathingShared, MapPackInfo},
+            registry::{PackLoader, PackActivateContext, UnloadedReason, PackInfo},
         },
         exports::runtime as rt,
         controller::Controller,
         render::{machine::RenderTaskPriority, RenderState},
         settings::{Settings, SettingsLock, SourceKind},
     }, anyhow::Context, futures::StreamExt, std::sync::Arc,
-    taimi_hoard::loc::Locator,
-    taimi_meta::packs::MapIndex,
+    taimi_hoard::loc::{Locator, LocationRef},
+    taimi_meta::packs::{PackPath, PackMapPath, MapIndex, collections::PackSet},
+    taimi_pack::Pack,
     std::collections::BTreeSet,
     std::future::Future,
     std::iter,
@@ -125,30 +127,81 @@ impl PathingController {
     }
 
     /// eager [self.handle_map_leave()]
-    fn handle_map_suspend(&mut self) {
+    pub(super) fn handle_map_suspend(&mut self) {
         log::info!("TODO: clear_active() on suspend");
+        self.maps.prune(Some(&self.map_info));
     }
-    fn handle_map_leave(&mut self) {
+    pub(super) fn handle_map_leave(&mut self) {
         log::info!("TODO: handle_map_leave()");
-        self.maps.cleanup(None);
+        self.map_info.age_tick(None);
+        self.map_info.prune(Some(&self.packs));
+        self.maps.age_tick(None);
+        self.maps.prune(Some(&self.map_info));
         // TODO: shared map update to None ig
         //self.filter_state.hidden.reset_map_leave();
     }
-    fn handle_map_enter(&mut self, map_id: MapIndex) {
-        self.maps.cleanup(Some(map_id));
-        let map_packs = {
-            TODO("map_info first, then pass on to map state init thanks");
-            let packs = self.loader.shared.packs.packs.borrow();
-            packs.iter().filter_map(|(path, pack)| pack.info.info.as_ref().and_then(|info| match info.maps.contains(map_id) {
-                true => Some((path, info.clone())),
-                false => None,
-            })).collect::<Vec<_>>()
-        };
-        for &(path, ref info) in &map_packs {
-            let map = self.maps.write(path.rel(map_id));
-            if map.info_sig == info.sig { continue }
-            *map = LoadedMapPack::from_pack(map_id, map_info, pack);
+    pub(super) fn handle_map_enter(&mut self, map_id: MapIndex) {
+        self.map_info.age_tick(Some(map_id));
+        self.maps.age_tick(Some(map_id));
+        let mut need_load = PackSet::new();
+        // TODO: could use a `pack_data_for(path).await` here instead of scheduling for load,
+        // but would want to spawn it anwyay to avoid blocking event loop so kinda irrelevant
+        let map_packs = self.packs.on_map(map_id).filter_map(|(path, pack)| {
+            if pack.is_loaded() {
+                Some(path)
+            } else {
+                if pack.can_reload() {
+                    need_load.insert(path);
+                }
+                None
+            }
+        }).collect::<PackSet>();
+        self.map_info.prune(Some(&self.packs));
+        self.maps.prune(Some(&self.map_info));
+        let mut shared_map_dirty = false;
+        for path in &map_packs {
+            let map_path = path.rel(map_id);
+            shared_map_dirty |= self.prepare_for_pack_map(map_path, false);
         }
+        if shared_map_dirty {
+            self.loader.shared.update_map_notify(map_id);
+        }
+        self.packs.age_tick(Some(&self.map_info));
+        for path in &need_load {
+            self.packs.mark_used(path);
+            log::debug!("TODO: load {path}");
+        }
+    }
+    fn prepare_for_pack_map(
+        &mut self,
+        map_path: PackMapPath,
+        notify: bool,
+    ) -> bool {
+        let Some((data, pack_info, info)) = Self::pack_data_if_loaded(&self.loader, map_path.root) else { return false };
+        let info_sig = info.sig;
+        let map_info = self.map_info.write(map_path);
+        if map_info.info_sig != info_sig {
+            map_info.set_info(MapPackInfo::with_pack(map_path.path, &data, &pack_info));
+        }
+        let map = self.maps.write(map_path);
+        if map.info_sig != info_sig {
+            *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
+            self.loader.shared.update_map(map_path, &map_info.info, &*map, notify)
+        } else {
+            false
+        }
+    }
+
+    fn pack_data_if_loaded(manager: &PackLoader, path: PackPath) -> Option<(Arc<Pack>, Arc<PackInfo>, Arc<SharedPackInfo>)> {
+        let (shared, loaded) = {
+            let packs = manager.shared.packs.packs.borrow();
+            packs.lookup_ref(&path).map(|pack|
+                (pack.info.clone(), pack.loaded.clone())
+            )
+        }?;
+        let info = shared.info.clone()?;
+        let data = loaded.borrow().pack.clone();
+        data.map(|data| (data, info, shared))
     }
 }
 #[cfg(todo)]

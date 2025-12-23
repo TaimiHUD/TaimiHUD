@@ -1,9 +1,13 @@
 use {
     crate::controller::pathing::registry::{
         PackMapPath, PackPath, PackInfo,
-        LoadedPoiPath, LoadedTrailPath, PackInfoSignature,
+        LoadedPoiPath, LoadedPoiIndex,
+        LoadedTrailPath, LoadedTrailIndex,
+        PackInfoSignature,
+        LoadedCategoryPath, LoadedCategoryIndex,
     },
     bitvec::vec::BitVec,
+    std::{ops, sync::{LazyLock, Arc}},
     taimi_meta::packs::{
         id::{MarkerIndexVariant, MarkerIndex, MarkerPath},
         MapIndex,
@@ -11,7 +15,7 @@ use {
         TrailIndex, TrailPath,
         CategoryIndex, CategoryPath,
     },
-    taimi_pack::{pack::Pack, category::id::FullIdRef},
+    taimi_pack::{pack::Pack, category::id::FullIdRef, attributes::RenderAttributes},
     taimi_hoard::iters::IterExt as _,
 };
 
@@ -136,7 +140,7 @@ impl MapPackInfo {
     }
     pub fn loaded_pois(&self) -> impl Iterator<Item = (LoadedPoiPath, PoiPath)> + '_ {
         self.pois().enumerate()
-            .map(|(i, path)| (LoadedPoiPath::with_path(i as PoiIndex), path))
+            .lazy_map(|(i, path)| (LoadedPoiPath::with_path(i as LoadedPoiIndex), path))
     }
     #[cfg(todo)]
     pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
@@ -157,7 +161,7 @@ impl MapPackInfo {
         match () {
             #[cfg(todo = "unnecessary")]
             _ => self.pois().position(|t| t.path == path.path)
-                .map(|i| LoadedPoiPath::with_path(i as PoiIndex)),
+                .map(|i| LoadedPoiPath::with_path(i as LoadedPoiIndex)),
             _ => match self.pois.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b =>
@@ -165,7 +169,7 @@ impl MapPackInfo {
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
                     let preceding = self.pois.get_unchecked(..index);
-                    LoadedPoiPath::with_path(preceding.count_ones() as PoiIndex)
+                    LoadedPoiPath::with_path(preceding.count_ones() as LoadedPoiIndex)
                 }),
             },
         }
@@ -184,7 +188,7 @@ impl MapPackInfo {
     }
     pub fn loaded_trails(&self) -> impl Iterator<Item = (LoadedTrailPath, TrailPath)> + '_ {
         self.trails().enumerate()
-            .map(|(i, path)| (LoadedTrailPath::with_path(i as TrailIndex), path))
+            .lazy_map(|(i, path)| (LoadedTrailPath::with_path(i as LoadedTrailIndex), path))
     }
     #[cfg(todo)]
     pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
@@ -205,7 +209,7 @@ impl MapPackInfo {
         match () {
             #[cfg(todo = "unnecessary")]
             _ => self.trails().position(|t| t.path == path.path)
-                .map(|i| LoadedTrailPath::with_path(i as TrailIndex)),
+                .map(|i| LoadedTrailPath::with_path(i as LoadedTrailIndex)),
             _ => match self.trails.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b =>
@@ -213,7 +217,7 @@ impl MapPackInfo {
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
                     let preceding = self.trails.get_unchecked(..index);
-                    LoadedTrailPath::with_path(preceding.count_ones() as TrailIndex)
+                    LoadedTrailPath::with_path(preceding.count_ones() as LoadedTrailIndex)
                 }),
             },
         }
@@ -235,11 +239,19 @@ impl MapPackInfo {
             .unwrap_or(0)
     }
     pub fn categories(&self) -> impl Iterator<Item = CategoryPath> + '_ {
-        self.categories.iter().copied().map(CategoryPath::with_path)
+        self.categories.iter().lazy_map(|&i| CategoryPath::with_path(i))
     }
-    pub fn category_index(&self, path: CategoryPath) -> Option<CategoryIndex> {
-        self.categories[..].iter().position(|&c| c == path.path)
-            .map(|i| i as CategoryIndex)
+    pub fn category_path(&self, path: LoadedCategoryPath) -> Option<CategoryPath> {
+        self.categories().nth(path.path as usize)
+    }
+    pub fn category_index(&self, path: CategoryPath) -> Option<LoadedCategoryPath> {
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => self.categories().position(|t| t.path == path.path)
+                .map(|i| LoadedCategoryPath::with_path(i as CategoryIndex)),
+            _ => self.categories.binary_search(&path.path).ok()
+                .map(|i| LoadedCategoryPath::with_path(i as LoadedCategoryIndex)),
+        }
     }
 
     pub fn path_from_loaded(&self, loaded: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {

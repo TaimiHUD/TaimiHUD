@@ -52,6 +52,14 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> {
         }
     }
     #[inline]
+    pub fn from_mut(data: &mut T) -> &mut IndexedList<N, P, T> where
+        N: PhantomNamespace,
+    {
+        unsafe {
+            mem::transmute(data)
+        }
+    }
+    #[inline]
     pub fn len<'a>(&'a self) -> usize where
         &'a T: IntoIterator,
         <&'a T as IntoIterator>::IntoIter: ExactSizeIterator,
@@ -328,6 +336,21 @@ impl<N, P, T: ?Sized> LocationMut<N, P> for IndexedList<N, P, T> where
             return None
         }
         self.at_mut(*path)
+    }
+}
+impl<N, P, T, A> FromIterator<A> for IndexedList<N, P, T> where
+    N: Default,
+    T: FromIterator<A>,
+{
+    fn from_iter<I: IntoIterator<Item = A>>(iter: I) -> Self {
+        Self::new(T::from_iter(iter))
+    }
+}
+impl<N, P, T, A> Extend<A> for IndexedList<N, P, T> where
+    T: Extend<A>,
+{
+    fn extend<I: IntoIterator<Item = A>>(&mut self, iter: I) {
+        self.data.extend(iter)
     }
 }
 impl<N, P, T: ?Sized> ops::Deref for IndexedList<N, P, T> {

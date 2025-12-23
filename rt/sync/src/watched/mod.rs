@@ -313,6 +313,9 @@ impl<T: Clone> Watched<T> {
         self.resubscribe_to(sender);
         self.mark_changed();
     }
+    pub fn is_watching(&self) -> bool {
+        self.watch.get_receiver().is_some()
+    }
     pub fn mark_changed(&mut self) {
         let _ = self.watch.try_mark_changed();
     }

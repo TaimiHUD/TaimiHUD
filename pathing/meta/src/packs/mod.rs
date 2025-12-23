@@ -1,5 +1,5 @@
 use {
-    taimi_hoard::loc::locator_ns,
+    taimi_hoard::loc::{locator_ns, Locator},
     crate::map::MapID,
     core::num::NonZero,
 };
@@ -54,6 +54,7 @@ locator_ns! {
         }
     }
 }
+pub type SectionOfTrail<N = TrailPath> = Locator<N, TrailSectionPath>;
 
 locator_ns! {
     /// TODO: move this out of crate?

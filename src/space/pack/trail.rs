@@ -3,6 +3,7 @@ use {
         controller::pathing::{
             visible::{LoadedTrail, LoadedTrailGeometry},
             space::SpaceLoader,
+            shared::{SharedPackInfo, LoadedTrailRef},
         },
         exports::runtime::{
             textures::{TextureKey, TextureSlot},
@@ -45,6 +46,7 @@ impl TrailRender {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn setup_texture(
         &mut self,
         loader: &mut SpaceLoader<'_>,
@@ -79,9 +81,9 @@ impl TrailRender {
         }
     }
 
-    pub fn update(&mut self, _device: &Dx11Device) {
-        if let Some(handle) = &mut self.texture_handle {
-            SpaceLoader::get_texture(handle, &mut self.texture)
+    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, trail: LoadedTrailRef<'_>) {
+        if let Some(texture) = trail.trail_attrs().texture.as_ref() {
+            SpaceLoader::setup_texture(&mut self.texture_handle, &mut self.texture, pack_info, texture)
         }
     }
 
@@ -95,14 +97,20 @@ impl TrailRender {
     }
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders and texture must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, trail: &LoadedTrail, section: TrailSectionPath, ctx: LocalContext) {
+    pub fn draw_section(&self, device_context: &Dx11Context, trail: LoadedTrailRef<'_>, section: TrailSectionPath, ctx: LocalContext) {
+        let ltrail = trail.ltrail();
+        let Some(ops::Range { start, end }) = ltrail.section_info.section_geometry_vertices(section) else {
+            log::error!("attempted to draw invalid {section} in {}", trail.category_path());
+            return
+        };
+        if start >= end {
+            // ignore empty sections
+            log::debug!("TODO: filter out empty sections earlier (prior to binding state)!");
+            return
+        }
         if let Some(section_vbuffer) = &self.section_vbuffer {
             section_vbuffer.set(device_context, 0);
         }
-        let Some(ops::Range { start, end }) = trail.section_geometry_vertices(section) else {
-            log::error!("attempted to draw invalid {section} in {}", lazyfmt::or_unavail(trail.category()));
-            return
-        };
         unsafe {
             //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {

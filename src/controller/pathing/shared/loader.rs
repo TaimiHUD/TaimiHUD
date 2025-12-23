@@ -10,11 +10,15 @@ use {
         PackActivateLoaded,
         SharedLoaderBox,
     },
+    crate::exports::runtime as rt,
     crate::settings::sources::DataSourcePath,
-    std::{iter, fmt, mem, sync::{Arc, Weak}, path::Path},
+    rustc_hash::FxHashMap,
+    std::{iter, fmt, mem, sync::{Arc, Weak, RwLock}, path::Path},
     taimi_sync::{arcs::weak_is_null, watched::watch},
-    taimi_pack::Pack,
+    taimi_meta::packs::MapIndex,
+    taimi_pack::{attributes::AttrString, Pack},
     taimi_hoard::loc::LocationMut,
+    taimi_sync::arcs::ArcPtrCmp,
 };
 
 pub type SharedLoaderPacksInfo = PackBoxOf<SharedPackLoad>;
@@ -218,6 +222,7 @@ pub struct SharedPackInfo {
     pub info: Option<Arc<PackInfo>>,
     pub datasource: Option<DataSourcePath>,
     pub sig: PackInfoSignature,
+    allocated_keys: ArcPtrCmp<RwLock<FxHashMap<AttrString, Arc<str>>>>,
 }
 impl SharedPackInfo {
     pub fn new_unloaded(index: PackPath, path: Arc<Path>, datasource: Option<DataSourcePath>) -> Self {
@@ -227,6 +232,7 @@ impl SharedPackInfo {
             datasource,
             info: None,
             sig: PackInfoSignature::EMPTY,
+            allocated_keys: Default::default(),
         }
     }
     pub fn empty(index: Option<PackPath>) -> Self {
@@ -236,6 +242,7 @@ impl SharedPackInfo {
             info: None,
             datasource: None,
             sig: PackInfoSignature::EMPTY,
+            allocated_keys: Default::default(),
         }
     }
 
@@ -243,6 +250,12 @@ impl SharedPackInfo {
         self.info.as_ref().map(|i|
             (self.index, i, self.sig)
         )
+    }
+
+    /// check [self.info] manually if `None` matters
+    pub fn has_map(&self, map_id: MapIndex) -> bool {
+        self.info.as_ref().map(|i| i.maps.contains(map_id))
+            .unwrap_or(false)
     }
 
     /// forcibly unload because it's expected to change on the filesystem for
@@ -266,6 +279,49 @@ impl SharedPackInfo {
         self.sig = PackInfoSignature::EMPTY;
         let _ = self.info.take();
         let _ = self.datasource.take();
+    }
+
+    /// unique texture names
+    pub fn key_for_subresource(&self, resource: &AttrString) -> Arc<str> {
+        if let Ok(keys) = self.allocated_keys.try_read() {
+            if let Some(v) = keys.get(resource) {
+                return v.clone()
+            }
+        }
+
+        let Ok(mut keys) = self.allocated_keys.write() else {
+            log::error!("poisoned");
+            return Arc::from(self.gen_key_for_subresource(resource))
+        };
+        keys.entry(resource.clone()).or_insert_with(|| Arc::from(self.gen_key_for_subresource(resource)))
+            .clone()
+    }
+    pub fn gen_key_for_subresource(&self, resource: &AttrString) -> String {
+        let packname = rt::relative_path(&self.path);
+        let resource = &resource[..];
+        let storage;
+        let resourceid = match resource.len() {
+            0..=24 => resource,
+            _toolong => {
+                use std::hash::{Hash, Hasher, DefaultHasher};
+                // don't care sorry
+                let mut hasher = DefaultHasher::new();
+                resource.hash(&mut hasher);
+                storage = format!("{:x}", hasher.finish());
+                &storage
+            },
+        };
+        format!("{}_{resourceid}", packname.display())
+    }
+    pub fn drain_subresource_keys(&self) -> impl IntoIterator<Item = (AttrString, Arc<str>)> + 'static {
+        let mut keys = self.allocated_keys.write()
+            .unwrap_or_else(|e| e.into_inner());
+        keys.drain().collect::<Vec<_>>()
+    }
+}
+impl Default for SharedPackInfo {
+    fn default() -> Self {
+        Self::empty(None)
     }
 }
 

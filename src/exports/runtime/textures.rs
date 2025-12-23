@@ -154,7 +154,14 @@ impl TextureLoader {
     }
 
     pub fn lookup_pair_with<R, F: FnOnce(Option<&TextureKey>, &TextureSlot) -> R>(&self, key: &str, f: F) -> Option<R> {
-        let textures = match self.textures.try_read() {
+        let textures = match &self.textures {
+            // write locks are held so infrequently that we shouldn't need to care
+            // (and if we need to, switch to a lock-free map instead or just cache the slot)
+            textures => textures.read(),
+            #[cfg(todo = "unnecessary")]
+            textures => textures.try_read(),
+        };
+        let textures = match textures {
             Ok(t) => t,
             // temporary failure, just pretend it's loading or something
             Err(..) => return Some(f(None, &TextureSlot::Loading)),
@@ -166,7 +173,18 @@ impl TextureLoader {
     }
     /// `Some(None)` if texture isn't ready yet
     pub fn lookup_loaded(&self, key: &str) -> Option<Option<TextureSlot>> {
-        self.lookup_with(key, |i| (!i.is_loading()).then_some(i.clone()))
+        self.lookup_with(key, |i| {
+            let ready = !matches!(i, TextureSlot::Loading | TextureSlot::Reserved);
+            (ready).then_some(i.clone())
+        })
+    }
+    pub fn lookup_slot(&self, key: &str) -> Option<TextureSlot> {
+        let textures = match self.textures.read() {
+            Ok(t) => t,
+            // poisoned, goodbye
+            Err(..) => return Some(TextureSlot::Unavailable)
+        };
+        textures.get(key).cloned()
     }
     #[cfg(feature = "texture-loader")]
     pub fn lookup_resource(&self, key: &str) -> Option<Option<Arc<Texture>>> {
@@ -181,29 +199,58 @@ impl TextureLoader {
         })
     }
 
-    /// expect temporary failure due to lock contention
-    pub fn try_canonicalize_key(&self, key: &str) -> Result<Option<TextureKey>, ()> {
-        let textures = match self.textures.try_read() {
-            Ok(t) => t,
-            Err(..) => return Err(()),
+    /// produces a texture slot unless newly reserved
+    pub fn reserve_key_mut(&self, key: &mut TextureKey) -> Option<TextureSlot> {
+        let mut replacement = None;
+        let slot = {
+            let mut textures = match self.textures.write() {
+                Ok(t) => t,
+                Err(..) => return None,
+            };
+            let ptr = Arc::as_ptr(key) as *const ();
+            let entry = textures.entry(key.clone());
+            match entry {
+                hash_map::Entry::Occupied(e) => {
+                    let key = e.key();
+                    if Arc::as_ptr(key) as *const () != ptr {
+                        replacement = Some(key.clone());
+                    }
+                    Some(e.get().clone())
+                },
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(TextureSlot::Reserved);
+                    None
+                },
+            }
         };
-        let canon = textures.get_key_value(key)
-            .map(|(canon, _)| canon.clone());
-        Ok(canon)
+        if let Some(replacement) = replacement {
+            *key = replacement
+        }
+        slot
+    }
+    pub fn try_canonicalize_key(&self, key: &str) -> Option<TextureKey> {
+        let textures = match self.textures.read() {
+            Ok(t) => t,
+            Err(..) => return None,
+        };
+        textures.get_key_value(key)
+            .map(|(canon, _)| canon.clone())
     }
     /// expect temporary failure due to lock contention
     pub fn try_canonicalize_key_mut(&self, key: &mut TextureKey) -> Result<bool, ()> {
-        let textures = match self.textures.try_read() {
-            Ok(t) => t,
-            Err(..) => return Err(()),
-        };
-        let ptr = Arc::as_ptr(key) as *const ();
-        let replacement = match textures.get_key_value(key) {
-            None => return Ok(false),
-            Some((canon, _)) if Arc::as_ptr(canon) as *const () == ptr =>
-                // already canon
-                return Ok(true),
-            Some((canon, _)) => canon.clone(),
+        let replacement = {
+            let textures = match self.textures.try_read() {
+                Ok(t) => t,
+                Err(..) => return Err(()),
+            };
+            let ptr = Arc::as_ptr(key) as *const ();
+            match textures.get_key_value(key) {
+                None => return Ok(false),
+                Some((canon, _)) if Arc::as_ptr(canon) as *const () == ptr =>
+                    // already canon
+                    return Ok(true),
+                Some((canon, _)) => canon.clone(),
+            }
         };
         *key = replacement;
         // now it is!
@@ -434,6 +481,7 @@ impl TextureLoader {
 #[derive(Debug, Clone)]
 pub enum TextureSlot {
     Loading,
+    Reserved,
     Unavailable,
     /// TODO: Arc is unnecessary but it's more compatible with Texture::load so...
     #[cfg(feature = "texture-loader")]
@@ -491,6 +539,7 @@ impl TextureSlot {
         match self {
             // maybe someday...
             //Self::Unloaded => true,
+            Self::Reserved => true,
             _ => false,
         }
     }

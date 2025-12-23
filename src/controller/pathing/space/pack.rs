@@ -1,33 +1,37 @@
 use {
     crate::{
         controller::pathing::{
-            registry::PackVecOf,
+            registry::{PackVecOf, PackInfoSignature, LoadedTrailSectionPath},
             space::DrawSpace,
             shared::SharedGameplayMap,
+            state::{LoadedPacks, LoadedMaps, LoadedMapInfo},
         },
         space::render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
     },
+    taimi_hoard::loc::LocationRef,
     bitvec::vec::BitVec,
     taimi_meta::{
         spatial::{box3aabb, irrelevant_box3, BvhShape},
-        packs::{id::{IdVariant, MarkerId}, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
+        packs::{id::{IdVariant, MarkerId, MarkerIndex, MarkerPath}, MapIndex, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
     },
     glamour::{Box3, Point3},
     std::{mem, sync::Arc, ops},
     bvh::{aabb, bvh::Bvh}
 };
 
+#[derive(Clone)]
 pub struct SpacePack {
+    pub info_sig: PackInfoSignature,
     // Internal rendering data.
     #[cfg(todo)]
     pub render_list_bookmark: Option<usize>,
     #[cfg(todo)]
     poi_bookmark: usize,
 }
-
 impl SpacePack {
     pub fn new() -> Self {
         SpacePack {
+            info_sig: PackInfoSignature::EMPTY,
             #[cfg(todo)]
             render_list_bookmark: Default::default(),
             #[cfg(todo)]
@@ -36,12 +40,16 @@ impl SpacePack {
     }
 
     pub fn clear(&mut self) {
+        self.info_sig = PackInfoSignature::EMPTY;
         #[cfg(todo)]
         {
             self.render_list_bookmark = None;
             self.poi_bookmark = 0;
         }
     }
+}
+impl Default for SpacePack {
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(deleteme)]
@@ -105,6 +113,7 @@ impl SpacePack {
     }
 }
 
+#[derive(Clone)]
 pub struct SpaceEntity {
     pub id: MarkerId,
     pub bounds: aabb::Aabb<f32, 3>,
@@ -123,12 +132,14 @@ impl aabb::Bounded<f32, 3> for SpaceEntity {
     }
 }
 /// associated data with a [SpaceEntity] but not strictly required for bvh
+#[derive(Clone)]
 pub struct SpaceEntityExtra {
     /// could consider moving this here and just use the index/offset into here?
     #[cfg(todo)]
     pub id: MarkerId,
     pub position: Point3<DrawSpace>,
 }
+#[derive(Clone)]
 pub struct SpaceEntities {
     pub entities: Vec<BvhShape<SpaceEntity>>,
     pub extra: Vec<SpaceEntityExtra>,
@@ -150,6 +161,7 @@ impl SpaceEntities {
         self.extra.len() != self.entities.len()
     }
 
+    #[cfg(todo)]
     pub fn rebuild_extra(&mut self) {
         log::info!("TODO: rebuild_extra");
     }
@@ -181,8 +193,33 @@ impl SpaceEntities {
         self.extra = Vec::new();
     }
 }
+impl Extend<(MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)> for SpaceEntities {
+    fn extend<T: IntoIterator<Item = (MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)>>(&mut self, iter: T) {
+        if self.entities.len() != self.extra.len() {
+            log::error!("SpaceEntities len mismatch");
+            return
+        }
+        let iter = iter.into_iter();
+        let (min, max) = iter.size_hint();
+        let cap = max.unwrap_or(min);
+        self.entities.reserve(cap);
+        self.extra.reserve(cap);
+        for (id, bounds, position) in iter {
+            let entity = SpaceEntity {
+                id,
+                bounds: box3aabb(bounds),
+            };
+            self.entities.push(BvhShape::new(entity));
+            self.extra.push(SpaceEntityExtra {
+                position,
+            });
+        }
+    }
+}
 
+#[derive(Clone)]
 pub struct SpacePackCollection {
+    pub map_id: Option<MapIndex>,
     pub loaded_packs: PackVecOf<SpacePack>,
     pub render_entities: SpaceEntities,
     pub bvh: Bvh<f32, 3>,
@@ -194,6 +231,7 @@ pub struct SpacePackCollection {
 impl SpacePackCollection {
     pub fn new() -> SpacePackCollection {
         SpacePackCollection {
+            map_id: None,
             loaded_packs: Default::default(),
             #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
@@ -202,25 +240,63 @@ impl SpacePackCollection {
         }
     }
 
-    pub fn rebuild_entities(&mut self) {
-        log::debug!("TODO: rebuild entities");
-        self.render_entities.rebuild_extra();
+    pub fn needs_rebuild(&self, map_id: MapIndex, packs: &LoadedPacks) -> bool {
+        self.map_id != Some(map_id) ||
+            packs.sigs_match(self.loaded_packs.values().map(|p| p.info_sig))
     }
-    /// TODO
-    pub fn entities_dirty(&self) -> bool {
-        self.render_entities.needs_rebuild() || true
+
+    pub fn rebuild_entities_if_dirty(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
+        if self.needs_rebuild(map_id, packs) {
+            self.rebuild_entities(map_id, packs, map_info, maps);
+        }
+    }
+    pub fn rebuild_entities(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
+        if self.map_id != Some(map_id) {
+            self.clear();
+        }
+        self.map_id = Some(map_id);
+        for (path, pack) in packs.packs.iter() {
+            let spacepack = self.loaded_packs.lookup_extend_with(path.path, SpacePack::default);
+            if !pack.is_loaded() {
+                spacepack.clear();
+                continue
+            }
+            spacepack.info_sig = pack.info.sig;
+            if !pack.info.has_map(map_id) {
+                self.render_entities.remove_pack(path);
+                continue
+            }
+            let map_path = path.rel(map_id);
+            let Some(map_info) = map_info.lookup_ref(&map_path) else { continue };
+            let Some(map) = maps.lookup_ref(&map_path) else { continue };
+            // TODO: support searching through existing entities for partial rebuild support
+            log::debug!("TODO: partial space rebuild");
+            self.render_entities.remove_pack(path);
+            // to iter of (marker_id, bounds, position)
+            let pois = map.lpois().into_iter().map(|(lpoi_path, lpoi)| {
+                let marker_path: MarkerPath = lpoi_path.pivot_to();
+                let path = map_path.rel(marker_path.path);
+                (MarkerId::for_marker(path), lpoi.bounds(), lpoi.position())
+            });
+            let trails = map.ltrails().into_iter().flat_map(move |(ltrail_path, ltrail)| ltrail.section_info.trail_section_bounds().map(move |(section_path, bounds)| {
+                let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
+                let marker_path: MarkerPath = ts_path.pivot_to();
+                let path = map_path.rel(marker_path.path);
+                let pos = bounds.center();
+                (MarkerId::for_marker(path), bounds, pos)
+            }));
+            self.render_entities.extend(pois.chain(trails));
+        }
+        //self.render_entities.rebuild_extra();
+    }
+    /// TODO: check map state sigs or something idk what needs to change
+    pub fn entities_dirty(&self, map_id: MapIndex, packs: &LoadedPacks) -> bool {
+        self.render_entities.needs_rebuild()
     }
 
     pub fn rebuild_bvh(&mut self) {
         log::debug!("TODO: rebuild bvh");
         self.bvh = Bvh::build(&mut self.render_entities.entities);
-    }
-
-    pub fn rebuild(&mut self) {
-        if self.entities_dirty() {
-            self.rebuild_entities();
-        }
-        self.rebuild_bvh();
     }
 
     pub fn clear(&mut self) {
@@ -404,5 +480,10 @@ impl SpacePackCollection {
 
     #[cfg(todo)]
     pub fn all_entities(&self, map: &SharedGameplayMap) -> impl Iterator<Item = MarkerId> + '_ {
+    }
+}
+impl Default for SpacePackCollection {
+    fn default() -> Self {
+        Self::new()
     }
 }

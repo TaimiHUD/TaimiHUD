@@ -5,7 +5,7 @@ use {
     crate::{
         controller::pathing::{
             registry::{PackVecOf, LoadedPoiNs, LoadedTrailNs},
-            space::{SpacePack, SpacePackCollection, TrailParams},
+            space::{SpacePack, SpacePackCollection, TrailParams, SpacePackShared},
             visible::{LoadedPoi, LoadedTrail},
             ExternalFilterState, FestivalFixup, PathingController, PathingEvent,
         },
@@ -963,8 +963,6 @@ pub(super) struct PackRenderData {
     pub render_list_bookmark: Option<usize>,
     pub pois: IndexedList<LoadedPoiNs, PoiIndex, Vec<PoiRender>>,
     pub trails: IndexedList<LoadedTrailNs, TrailIndex, Vec<TrailRender>>,
-    pub loaded_pois: IndexedList<LoadedPoiNs, PoiIndex, Arc<[LoadedPoi]>>,
-    pub loaded_trails: IndexedList<LoadedTrailNs, TrailIndex, Arc<[LoadedTrail]>>,
     render_poi_bookmark: usize,
     #[cfg(todo)]
     poi_bookmark: usize,
@@ -975,19 +973,8 @@ impl PackRenderData {
         Self {
             pois: Default::default(),
             trails: Default::default(),
-            loaded_pois: Default::default(),
-            loaded_trails: Default::default(),
             render_poi_bookmark: 0,
         }
-    }
-
-    #[inline]
-    pub fn loaded_pois(&self) -> &IndexedList<LoadedPoiNs, PoiIndex, [LoadedPoi]> {
-        self.loaded_pois.map_ref_as_slice()
-    }
-    #[inline]
-    pub fn loaded_trails(&self) -> &IndexedList<LoadedTrailNs, TrailIndex, [LoadedTrail]> {
-        self.loaded_trails.map_ref_as_slice()
     }
 
     pub fn render_poi_bookmarks(&self) -> ops::Range<PoiIndex> {
@@ -1025,9 +1012,8 @@ impl PackRenderData {
 }
 
 pub struct PackRender {
-    pub packs: Arc<SpacePackCollection>,
-    pub pack_data: PackVecOf<PackRenderData>,
-    pub current_map: Option<MapIndex>,
+    pub packs: Arc<SpacePackShared>,
+    pub(super) pack_data: PackVecOf<PackRenderData>,
     #[cfg(todo)]
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
@@ -1037,9 +1023,8 @@ impl PackRender {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<Self> {
         let poi_common = PoiCommonRenderData::new(backend)?;
         Ok(Self {
-            packs: Arc::new(SpacePackCollection::new()),
+            packs: Default::default(),
             pack_data: Default::default(),
-            current_map: None,
             #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
             poi_common,

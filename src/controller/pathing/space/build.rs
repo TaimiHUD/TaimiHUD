@@ -6,6 +6,7 @@ use {
                 registry::ActivePack,
                 space::{SpacePack, TrailParams},
                 state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry, LoadedTrailSectionInfo, LoadedTrailGeometrySection},
+                shared::SharedPackInfo,
             },
         },
         exports::runtime::{
@@ -13,7 +14,6 @@ use {
             textures::{TextureKey, TextureSlot},
         },
         space::pack::{TrailRender, PoiRender},
-        resources::Texture,
         TEXTURES,
     },
     anyhow::Context,
@@ -61,24 +61,24 @@ impl<'a> SpaceLoader<'a> {
         (key, tex)
     }
 
-    pub fn get_texture(key: &mut TextureKey, slot: &mut Option<TextureSlot>) {
-        if slot.is_some() { return }
-
-        let mut replacement = None;
-        TEXTURES.lookup_pair_with(&key, |canon, tex| if let Some(canon) = canon {
-            if Arc::as_ptr(key) as *const () != Arc::as_ptr(canon) as *const () {
-                replacement = Some(canon.clone());
-            }
-            if tex.is_loading() { return }
-            if tex.can_load() {
-                return log::debug!("TODO: reload texture");
-            }
-            *slot = Some(tex.clone());
-        });
-        if let Some(replacement) = replacement {
-            *key = replacement.clone();
-        }
+    pub fn setup_texture(key: &mut Option<TextureKey>, slot: &mut Option<TextureSlot>, pack_info: &SharedPackInfo, texture: &AttrString) {
+        let key = match key {
+            Some(key) =>
+                return Self::get_texture(&*key, slot),
+            None => key.insert(pack_info.key_for_subresource(texture)),
+        };
+        *slot = TEXTURES.reserve_key_mut(key);
     }
+    pub fn get_texture(key: &TextureKey, slot: &mut Option<TextureSlot>) {
+        if Self::slot_loaded(slot.as_ref()) { return }
+        *slot = TEXTURES.lookup_slot(key);
+    }
+    pub fn slot_loaded(slot: Option<&TextureSlot>) -> bool {
+        slot
+            .map(|slot| !slot.is_loading() && !slot.can_load())
+            .unwrap_or(false)
+    }
+    #[cfg(deleteme)]
     pub fn setup_texture(&mut self, key: &mut TextureKey, slot: &mut Option<TextureSlot>) {
         Self::get_texture(key, slot)
     }
@@ -134,6 +134,7 @@ pub struct SpacePoiBuilder {
 }
 
 impl SpacePoiBuilder {
+    #[cfg(deleteme)]
     pub fn build(self, path: PoiPath, loader: &mut SpaceLoader<'_>, poi: &LoadedPoi) -> anyhow::Result<PoiRender> {
         let visibility = poi.visibility;
         let mut render = PoiRender::empty();
@@ -163,6 +164,7 @@ pub struct SpaceTrailBuilder {
 }
 
 impl SpaceTrailBuilder {
+    #[cfg(deleteme)]
     pub fn build(self, path: TrailPath, loader: &mut SpaceLoader<'_>, trail: &LoadedTrail) -> anyhow::Result<TrailRender> {
         let visibility = trail.visibility;
         let sections = trail.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
@@ -202,7 +204,7 @@ impl SpaceTrailBuilder {
             let trail = trail.clone();
             move || Ok(trail.vertices_for(&trail_data, &params))
         }).await?;
-        let sections = trail.sections(&geometry).collect::<Vec<_>>();
+        let sections = trail.section_info.sections(&geometry).collect::<Vec<_>>();
         let cap = LoadedTrailSectionInfo::cap(&sections);
         trail.populate_geometry_info(sections.iter().map(LoadedTrailGeometrySection::with_info), cap);
         let setup = SpaceTrailBuilder {
@@ -215,10 +217,10 @@ impl SpaceTrailBuilder {
 
     /// Also indicates if `trail` was [populated](LoadedTrail::populate_data) with section metadata
     pub async fn load_from_pack(path: TrailPath, active: Arc<ActivePack>, mut trail: LoadedTrail, params: TrailParams) -> (anyhow::Result<Self>, LoadedTrail, bool) {
-        let sections_prev = trail.sections.as_ref().map(|s| Arc::as_ptr(s) as *const () as usize);
+        let sections_prev = trail.section_info.sections.as_ref().map(|s| Arc::as_ptr(s) as *const () as usize);
         let setup = Self::read_from_pack(path, &active, &mut trail, params).await
             .with_context(|| format!("loading {path} from {active}"));
-        let sections_changed = trail.sections.as_ref().map(|s| Arc::as_ptr(s) as *const () as usize) != sections_prev;
+        let sections_changed = trail.section_info.sections.as_ref().map(|s| Arc::as_ptr(s) as *const () as usize) != sections_prev;
         match setup {
             Ok(setup) =>
                 (Ok(setup), trail, sections_changed),

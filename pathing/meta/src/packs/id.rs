@@ -1,23 +1,26 @@
 use std::{borrow::Borrow, fmt, iter, mem};
 use uuid::Uuid;
 use {
-    taimi_hoard::loc::Locator,
+    taimi_hoard::loc::{locator_ns, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     crate::packs::{
-        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath,
+        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath, SectionOfTrail,
+        PackPoiNs, PackTrailNs,
     },
 };
 use uuid::Uuid as Guid;
 #[cfg(todo)]
 use taimi_pack::attributes::keys::Guid;
 
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackMarkerNs;
-impl fmt::Display for PackMarkerNs {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("pack/marker")
+locator_ns! {
+    pub struct PackMarkerNs;
+    impl LocatorNamespace {
+        index PackMarkerIndex = MarkerIndex;
+        pub path MarkerPath;
+        fn fmt(&self, f) {
+            f.write_str("pack/marker")
+        }
     }
 }
-pub type MarkerPath<N = PackMarkerNs> = Locator<N, MarkerIndex>;
 pub type MarkerIndexNamespace = u32;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -229,6 +232,82 @@ impl<N> From<MarkerPath<N>> for MarkerIndexVariant {
 impl From<MarkerIndex> for MarkerIndexVariant {
     fn from(i: MarkerIndex) -> Self {
         Self::from_index(i)
+    }
+}
+
+impl NamespacePivotFrom<PackPoiNs, PoiIndex> for PackMarkerNs {
+    type NsPivotFromPath = MarkerIndex;
+    fn loc_pivot_from(path: PoiPath) -> Locator<Self, Self::NsPivotFromPath> {
+        Locator::with_path(MarkerIndex::with_poi(path.path))
+    }
+}
+impl NamespacePivotFrom<PackTrailNs, TrailIndex> for PackMarkerNs {
+    type NsPivotFromPath = MarkerIndex;
+    fn loc_pivot_from(path: TrailPath) -> Locator<Self, Self::NsPivotFromPath> {
+        Locator::with_path(MarkerIndex::with_trail(path.path))
+    }
+}
+impl NamespacePivotFrom<TrailPath, TrailSectionPath> for PackMarkerNs {
+    type NsPivotFromPath = MarkerIndex;
+    fn loc_pivot_from(path: SectionOfTrail) -> Locator<Self, Self::NsPivotFromPath> {
+        Locator::with_path(MarkerIndex::with_trail_section(path.root.path, path.path.path))
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, TrailPath> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<TrailPath> {
+        match path.path.variant() {
+            | MarkerIndexVariant::Trail(i)
+            | MarkerIndexVariant::TrailSection(i, _)
+                => Some(TrailPath::with_path(i)),
+            _ => None,
+        }
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, TrailSectionPath> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<TrailSectionPath> {
+        match path.path.variant() {
+            MarkerIndexVariant::TrailSection(_, section)
+                => Some(TrailSectionPath::with_path(section)),
+            _ => None,
+        }
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, SectionOfTrail> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<SectionOfTrail> {
+        match path.path.variant() {
+            MarkerIndexVariant::TrailSection(i, section)
+                => Some(TrailPath::with_path(i).rel(TrailSectionPath::with_path(section))),
+            _ => None,
+        }
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, Locator<TrailPath, Option<TrailSectionPath>>> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<Locator<TrailPath, Option<TrailSectionPath>>> {
+        match path.path.variant() {
+            MarkerIndexVariant::Trail(i) =>
+                Some(TrailPath::with_path(i).rel(None)),
+            MarkerIndexVariant::TrailSection(i, section)
+                => Some(TrailPath::with_path(i).rel(Some(TrailSectionPath::with_path(section)))),
+            _ => None,
+        }
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, PoiPath> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<PoiPath> {
+        match path.path.variant() {
+            MarkerIndexVariant::Poi(i) =>
+                Some(PoiPath::with_path(i)),
+            _ => None,
+        }
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, CategoryPath> for PackMarkerNs {
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<CategoryPath> {
+        match path.path.variant() {
+            MarkerIndexVariant::Category(i) =>
+                Some(CategoryPath::with_path(i)),
+            _ => None,
+        }
     }
 }
 

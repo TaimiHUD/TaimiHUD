@@ -1,22 +1,27 @@
 use {
     super::PathingShared,
     crate::controller::pathing::{
-        registry::{PackBoxOf, PackMapPath, PackPath, LoadedPoiPath, LoadedPoiIndex, LoadedTrailPath, LoadedTrailIndex},
-        visible::{LoadedCategory, LoadedMapPack},
-        shared::MapPackInfo,
+        registry::{PackBoxOf, PackMapPath, PoiMapPath, TrailMapPath, PackPath, LoadedPoiPath, LoadedPoiIndex, LoadedTrailPath, LoadedTrailIndex, LoadedPoiNs, LoadedTrailNs, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath},
+        visible::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail, LoadedTrailGeometryInfo, VisibilityFlags},
+        shared::{MapPackInfo, LoadedPoiInfo, LoadedTrailInfo},
+        space::DrawSpace,
     },
+    glamour::Point3,
     std::{cmp, ops, sync::Arc},
     taimi_hoard::{
         collections::TaimiSet,
         loc::{
+            indexed::IndexedList,
             Locator,
             LocationRef, LocationMut,
         },
     },
     taimi_meta::packs::{
-        id::{IdVariant, MarkerIndexVariant, MarkerId, MarkerIndex, MarkerPath, FromMarkerId1},
-        MapIndex, CategoryPath,
+        id::{IdVariant, MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1},
+        MapIndex, CategoryIndex, CategoryPath, PoiPath, PoiIndex, TrailPath, TrailIndex,
     },
+    taimi_sync::arcs::ArcPtrCmp,
+    taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
 };
 #[cfg(todo)]
 use {
@@ -367,6 +372,8 @@ impl super::PathingSender {
 #[derive(Debug, Clone)]
 pub struct SharedMapPackLoaded {
     pub info: Arc<MapPackInfo>,
+    pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiInfo]>>,
+    pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailInfo]>>,
     #[cfg(todo)]
     pub interactive_pois: Arc<[InteractivePoi]>,
     #[cfg(todo)]
@@ -380,7 +387,15 @@ impl SharedMapPackLoaded {
             #[cfg(todo)]
             poi_guids: Default::default(),
             info,
+            pois: Default::default(),
+            trails: Default::default(),
         }
+    }
+    pub fn pois(&self) -> &IndexedList<LoadedPoiNs, LoadedPoiIndex, [LoadedPoiInfo]> {
+        IndexedList::from_ref(&self.pois)
+    }
+    pub fn trails(&self) -> &IndexedList<LoadedTrailNs, LoadedTrailIndex, [LoadedTrailInfo]> {
+        IndexedList::from_ref(&self.trails)
     }
 
     pub fn with_loaded(info: Arc<MapPackInfo>, map_pack: &LoadedMapPack) -> Self {
@@ -390,6 +405,8 @@ impl SharedMapPackLoaded {
             #[cfg(todo)]
             poi_guids: map_pack.poi_guids.clone(),
             info,
+            pois: map_pack.pois.iter().map(|poi| poi.info().clone()).collect(),
+            trails: map_pack.trails.iter().map(|trail| trail.info().clone()).collect(),
         }
     }
     #[cfg(todo)]
@@ -424,6 +441,8 @@ impl ops::Deref for SharedMapPackLoaded {
 #[derive(Debug, Clone, Default)]
 pub struct SharedMapPackState {
     pub categories: Arc<[LoadedCategory]>,
+    pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiShared]>>,
+    pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailShared]>>,
     #[cfg(todo)]
     pub interactive_pois_nearby: Arc<BitVec>,
     #[cfg(todo)]
@@ -436,6 +455,8 @@ impl SharedMapPackState {
     pub fn with_static(_path: PackMapPath, map_pack: &LoadedMapPack) -> Self {
         Self {
             categories: map_pack.categories.clone(),
+            pois: map_pack.pois.iter().map(LoadedPoiShared::with_loaded).collect(),
+            trails: map_pack.trails.iter().map(LoadedTrailShared::with_loaded).collect(),
             #[cfg(todo)]
             interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
             #[cfg(todo)]
@@ -447,6 +468,8 @@ impl SharedMapPackState {
     pub fn with_loaded(path: PackMapPath, map_pack: &LoadedMapPack, state: &MarkerState) -> Self {
         Self {
             categories: map_pack.categories.clone(),
+            pois: map_pack.pois.iter().map(LoadedPoiShared::with_loaded).collect(),
+            trails: map_pack.trails.iter().map(LoadedTrailShared::with_loaded).collect(),
             #[cfg(todo)]
             interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
             #[cfg(todo)]
@@ -455,6 +478,17 @@ impl SharedMapPackState {
             hidden_markers: Self::hidden_markers_from(path, state, map_pack),
         }
     }
+
+    pub fn pois(&self) -> &IndexedList<LoadedPoiNs, LoadedPoiIndex, [LoadedPoiShared]> {
+        IndexedList::from_ref(&self.pois)
+    }
+    pub fn trails(&self) -> &IndexedList<LoadedTrailNs, LoadedTrailIndex, [LoadedTrailShared]> {
+        IndexedList::from_ref(&self.trails)
+    }
+    pub fn categories(&self) -> &IndexedList<LoadedCategoryNs, LoadedCategoryIndex, [LoadedCategory]> {
+        IndexedList::from_ref(&self.categories)
+    }
+
     pub fn update_static(&mut self, map_pack: &LoadedMapPack) -> bool {
         if Arc::ptr_eq(&self.categories, &map_pack.categories) {
             return false
@@ -462,18 +496,51 @@ impl SharedMapPackState {
         self.categories = map_pack.categories.clone();
         true
     }
-    #[cfg(todo)]
     pub fn update_with_loaded(&mut self, map_pack: &LoadedMapPack) -> bool {
-        let nearby_dirty = self.interactive_pois_nearby[..] != map_pack.interactive_pois_nearby[..];
-        if nearby_dirty {
-            self.interactive_pois_nearby = Arc::new(map_pack.interactive_pois_nearby.clone());
+        let mut trails_dirty = self.trails.data.len() != map_pack.trails.len();
+        if trails_dirty {
+            self.trails = map_pack.trails.iter().map(LoadedTrailShared::with_loaded).collect();
+        } else {
+            let has_changes = self.trails.data.iter().map(|t| t.sig())
+                .zip(map_pack.trails.iter().map(LoadedTrailShared::sig_loaded))
+                .any(|(l, r)| l != r);
+            if has_changes {
+                let trails_mut = Arc::make_mut(&mut self.trails.data).iter_mut();
+                for (dest, trail) in trails_mut.zip(map_pack.trails.iter()) {
+                    trails_dirty |= dest.update_from_loaded(trail);
+                }
+            }
         }
-        // TODO: check if changed?
-        let interactive_dirty = true;
-        if interactive_dirty {
-            self.interactive_poi_pois = Self::interactive_pois_from(map_pack);
+        let mut pois_dirty = self.pois.data.len() != map_pack.pois.len();
+        if pois_dirty {
+            self.pois = map_pack.pois.iter().map(LoadedPoiShared::with_loaded).collect();
+        } else {
+            let has_changes = self.pois.data.iter().map(|t| t.sig())
+                .zip(map_pack.pois.iter().map(LoadedPoiShared::sig_loaded))
+                .any(|(l, r)| l != r);
+            if has_changes {
+                let pois_mut = Arc::make_mut(&mut self.pois.data).iter_mut();
+                for (dest, poi) in pois_mut.zip(map_pack.pois.iter()) {
+                    pois_dirty |= dest.update_from_loaded(poi);
+                }
+            }
         }
-        nearby_dirty | interactive_dirty
+        let dirty = trails_dirty | pois_dirty;
+
+        #[cfg(todo)]
+        {
+            let nearby_dirty = self.interactive_pois_nearby[..] != map_pack.interactive_pois_nearby[..];
+            if nearby_dirty {
+                self.interactive_pois_nearby = Arc::new(map_pack.interactive_pois_nearby.clone());
+            }
+            // TODO: check if changed?
+            let interactive_dirty = true;
+            if interactive_dirty {
+                self.interactive_poi_pois = Self::interactive_pois_from(map_pack);
+            }
+            let dirty = dirty | nearby_dirty | interactive_dirty;
+        }
+        dirty
     }
     #[cfg(todo)]
     pub fn update_with_hidden(&mut self, path: PackMapPath, state: &MarkerState, map_pack: &LoadedMapPack) -> bool {
@@ -485,7 +552,7 @@ impl SharedMapPackState {
         hidden_dirty
     }
 
-    pub fn categories<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where
+    pub fn category_paths<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (CategoryPath, &'a LoadedCategory)> + 'i where
         'a: 'i,
     {
         info.categories().zip(self.categories.iter())
@@ -512,6 +579,87 @@ impl SharedMapPackState {
             })
             .cloned()
             .collect()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadedPoiShared {
+    pub visibility: VisibilityFlags,
+    pub position: Point3<DrawSpace>,
+    #[cfg(todo)]
+    overrides: Option<Box<RenderAttributes>>,
+}
+impl LoadedPoiShared {
+    pub fn with_loaded(lpoi: &LoadedPoi) -> Self {
+        Self {
+            visibility: lpoi.visibility,
+            position: lpoi.position(),
+        }
+    }
+    pub fn update_from_loaded(&mut self, lpoi: &LoadedPoi) -> bool {
+        let mut dirty = self.visibility != lpoi.visibility;
+        self.visibility = lpoi.visibility;
+        let position = lpoi.position();
+        dirty |= self.position != position;
+        self.position = position;
+        dirty
+    }
+
+    pub(crate) fn sig(&self) -> [u32; 3] {
+        let [s0, s1, s2] = self.position.to_array();
+        let mut s0 = f32::to_bits(s0);
+        s0 ^= self.visibility.bits() as u32;
+        [
+            s0,
+            f32::to_bits(s1),
+            f32::to_bits(s2),
+        ]
+    }
+    pub(crate) fn sig_loaded(lpoi: &LoadedPoi) -> [u32; 3] {
+        Self::with_loaded(lpoi).sig()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LoadedTrailShared {
+    pub visibility: VisibilityFlags,
+    pub section_info: Arc<LoadedTrailGeometryInfo>,
+}
+impl LoadedTrailShared {
+    pub fn with_loaded(ltrail: &LoadedTrail) -> Self {
+        Self {
+            visibility: ltrail.visibility,
+            section_info: ltrail.section_info.clone(),
+        }
+    }
+    pub fn update_from_loaded(&mut self, ltrail: &LoadedTrail) -> bool {
+        let mut dirty = self.visibility != ltrail.visibility;
+        self.visibility = ltrail.visibility;
+        dirty |= ArcPtrCmp::from_mut(&mut self.section_info).clone_from_arc(&ltrail.section_info);
+        dirty
+    }
+
+    pub(crate) fn sig(&self) -> [u32; 2] {
+        let mut sig = Self::sig_sections(&self.section_info);
+        sig[0] ^= self.visibility.bits() as u32;
+        sig
+    }
+    pub(crate) fn sig_loaded(ltrail: &LoadedTrail) -> [u32; 2] {
+        let mut sig = Self::sig_sections(&ltrail.section_info);
+        sig[0] ^= ltrail.visibility.bits() as u32;
+        sig
+    }
+    pub fn sig_sections(sections: &LoadedTrailGeometryInfo) -> [u32; 2] {
+        let s = sections as *const _ as usize;
+        [s as u32, (s >> 32) as u32]
+    }
+    #[cfg(todo = "unnecessary")]
+    pub fn sig_sections(sections: &LoadedTrailGeometryInfo) -> [u32; 2] {
+        let (s0, s1) = self.section_info.sections_sig();
+        [
+            s0.map(|v| v as u32).unwrap_or(u32::MAX),
+            s1,
+        ]
     }
 }
 
@@ -560,6 +708,289 @@ impl<'a> SharedMarkerRef<'a> {
     pub fn marker_id(&self) -> MarkerId {
         MarkerId::for_marker(self.path())
     }
+
+    pub fn loaded_category_path(&self) -> Option<LoadedCategoryPath> {
+        match self.loaded_path().path.variant() {
+            MarkerIndexVariant::Category(i) =>
+                Some(LoadedCategoryPath::with_path(i)),
+            _ => None,
+        }
+    }
+    pub fn loaded_poi_path(&self) -> Option<LoadedPoiPath> {
+        match self.loaded_path().path.variant() {
+            MarkerIndexVariant::Poi(i) => Some(LoadedPoiPath::with_path(i)),
+            _ => None,
+        }
+    }
+    pub fn category_path(&self) -> Option<CategoryPath> {
+        let lpath = self.loaded_category_path()?;
+        self.map_info.info.category_path(lpath)
+    }
+    pub fn poi_path(&self) -> Option<PoiPath> {
+        let lpath = self.loaded_poi_path()?;
+        self.map_info.info.poi_path(lpath)
+    }
+    pub fn loaded_trail_path(&self) -> Option<LoadedTrailPath> {
+        match self.loaded_path().path.variant() {
+            MarkerIndexVariant::Trail(i) | MarkerIndexVariant::TrailSection(i, _) =>
+                Some(LoadedTrailPath::with_path(i)),
+            _ => None,
+        }
+    }
+    pub fn trail_path(&self) -> Option<TrailPath> {
+        let lpath = self.loaded_trail_path()?;
+        self.map_info.info.trail_path(lpath)
+    }
+    /// TODO
+    pub fn poi_info(&self) -> Option<&()> {
+        self.poi_path().map(|_| &())
+    }
+    /// TODO
+    pub fn trail_info(&self) -> Option<&()> {
+        self.trail_path().map(|_| &())
+    }
+    pub fn loaded_category(&self) -> Option<&LoadedCategory> {
+        let lpath = self.loaded_category_path()?;
+        self.map.categories.get(lpath.path as usize)
+    }
+    pub fn loaded_poi_info(&self) -> Option<&LoadedPoiInfo> {
+        let lpath = self.loaded_poi_path()?;
+        self.map_info.pois().lookup_ref(&lpath)
+    }
+    pub fn loaded_trail_info(&self) -> Option<&LoadedTrailInfo> {
+        let lpath = self.loaded_trail_path()?;
+        self.map_info.trails().lookup_ref(&lpath)
+    }
+    pub fn loaded_poi(&self) -> Option<&LoadedPoiShared> {
+        let lpath = self.loaded_poi_path()?;
+        self.map.pois().lookup_ref(&lpath)
+    }
+    pub fn loaded_trail(&self) -> Option<&LoadedTrailShared> {
+        let lpath = self.loaded_trail_path()?;
+        self.map.trails().lookup_ref(&lpath)
+    }
+}
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct SharedPoiRef<'a> {
+    marker: SharedMarkerRef<'a>,
+}
+pub type SharedPoiInfo = CategoryIndex;
+impl<'a> SharedPoiRef<'a> {
+    pub fn try_new(marker: SharedMarkerRef<'a>) -> Option<Self> {
+        let _ = marker.poi_info()?;
+
+        Some(unsafe { Self::new_unchecked(marker) })
+    }
+    pub unsafe fn new_unchecked(marker: SharedMarkerRef<'a>) -> Self {
+        Self { marker }
+    }
+
+    pub fn loaded_map_path(&self) -> PoiMapPath {
+        self.loaded_path().pivot(self.marker.map_path())
+    }
+    pub fn loaded_path(&self) -> LoadedPoiPath {
+        let index = MarkerIndex::from_repr(self.marker.loaded_id.index0());
+        LoadedPoiPath::with_path(index.index() as LoadedPoiIndex)
+    }
+    pub fn poi_path(&self) -> PoiPath {
+        let loaded = self.loaded_path();
+        match self.marker.map_info.poi_path(loaded) {
+            #[cfg(todo = "unnecessary")]
+            path => unsafe { path.unwrap_unchecked() },
+            path => path.unwrap_or(PoiPath::with_path(PoiIndex::MAX))
+        }
+    }
+    #[cfg(todo)]
+    pub fn poi_info(&self) -> &SharedPoiInfo {
+        let path = self.loaded_path().path;
+        unsafe {
+            self.marker.map_info.pois.get_unchecked(path as usize)
+        }
+    }
+    pub fn category_path(&self) -> CategoryPath {
+        self.lpoi_info().map(|info| info.category_path)
+            .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
+    }
+    pub fn lpoi_info(&self) -> Option<&LoadedPoiInfo> {
+        let path = self.loaded_path().path;
+        self.marker.map_info.pois.get(path as usize)
+    }
+    pub fn lpoi(&self) -> Option<&LoadedPoiShared> {
+        let path = self.loaded_path().path;
+        self.marker.map.pois.get(path as usize)
+    }
+    pub fn render_attrs(&self) -> Option<&Arc<RenderAttributes>> {
+        self.lpoi_info().map(|info| &info.attrs)
+    }
+    pub fn poi_attrs(&self) -> Option<&Box<PoiAttributes>> {
+        self.render_attrs().and_then(|render| render.poi.as_ref())
+    }
+    #[inline]
+    pub fn to_loaded(self) -> Option<LoadedPoiRef<'a>> {
+        LoadedPoiRef::try_new(self)
+    }
+}
+#[cfg(todo)]
+impl ops::Deref for SharedPoiRef<'a> {}
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct LoadedPoiRef<'a> {
+    marker: SharedPoiRef<'a>,
+}
+impl<'a> LoadedPoiRef<'a> {
+    pub fn try_new(marker: SharedPoiRef<'a>) -> Option<Self> {
+        #[cfg(todo = "unnecessary")]
+        let _ = marker.lpoi_info()?;
+        let _ = marker.poi_attrs()?;
+        let _ = marker.lpoi()?;
+
+        Some(unsafe { Self::new_unchecked(marker) })
+    }
+    pub unsafe fn new_unchecked(marker: SharedPoiRef<'a>) -> Self {
+        Self { marker }
+    }
+    #[inline]
+    pub fn lpoi_info(&self) -> &LoadedPoiInfo {
+        let path = self.marker.loaded_path().path;
+        unsafe {
+            self.marker.marker.map_info.pois.get_unchecked(path as usize)
+        }
+    }
+    #[inline]
+    pub fn lpoi(&self) -> &LoadedPoiShared {
+        let path = self.marker.loaded_path().path;
+        unsafe {
+            self.marker.marker.map.pois.get_unchecked(path as usize)
+        }
+    }
+    #[inline]
+    pub fn render_attrs(&self) -> &Arc<RenderAttributes> {
+        &self.lpoi_info().attrs
+    }
+    #[inline]
+    pub fn poi_attrs(&self) -> &Box<PoiAttributes> {
+        unsafe {
+            self.render_attrs().poi.as_ref().unwrap_unchecked()
+        }
+    }
+}
+impl<'a> ops::Deref for LoadedPoiRef<'a> {
+    type Target = SharedPoiRef<'a>;
+    #[inline]
+    fn deref(&self) -> &Self::Target { &self.marker }
+}
+
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct SharedTrailRef<'a> {
+    marker: SharedMarkerRef<'a>,
+}
+pub type SharedTrailInfo = CategoryIndex;
+impl<'a> SharedTrailRef<'a> {
+    pub fn try_new(marker: SharedMarkerRef<'a>) -> Option<Self> {
+        let _ = marker.trail_info()?;
+
+        Some(unsafe { Self::new_unchecked(marker) })
+    }
+    pub unsafe fn new_unchecked(marker: SharedMarkerRef<'a>) -> Self {
+        Self { marker }
+    }
+
+    pub fn loaded_map_path(&self) -> TrailMapPath {
+        self.loaded_path().pivot(self.marker.map_path())
+    }
+    pub fn loaded_path(&self) -> LoadedTrailPath {
+        let index = MarkerIndex::from_repr(self.marker.loaded_id.index0());
+        let idx = (index.index() & !MarkerIndex::EXTRA_MASK_TRAIL) as LoadedTrailIndex;
+        LoadedTrailPath::with_path(idx)
+    }
+    pub fn trail_path(&self) -> TrailPath {
+        let loaded = self.loaded_path();
+        match self.marker.map_info.trail_path(loaded) {
+            #[cfg(todo = "unnecessary")]
+            path => unsafe { path.unwrap_unchecked() },
+            path => path.unwrap_or(TrailPath::with_path(TrailIndex::MAX))
+        }
+    }
+    #[cfg(todo)]
+    pub fn trail_info(&self) -> &SharedTrailInfo {
+        let path = self.loaded_path().path;
+        unsafe {
+            self.marker.map_info.trails.get_unchecked(path as usize)
+        }
+    }
+    pub fn category_path(&self) -> CategoryPath {
+        self.ltrail_info().map(|info| info.category_path)
+            .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
+    }
+    pub fn ltrail_info(&self) -> Option<&LoadedTrailInfo> {
+        let path = self.loaded_path().path;
+        self.marker.map_info.trails.get(path as usize)
+    }
+    pub fn ltrail(&self) -> Option<&LoadedTrailShared> {
+        let path = self.loaded_path().path;
+        self.marker.map.trails.get(path as usize)
+    }
+    pub fn render_attrs(&self) -> Option<&Arc<RenderAttributes>> {
+        self.ltrail_info().map(|info| &info.attrs)
+    }
+    pub fn trail_attrs(&self) -> Option<&Box<TrailAttributes>> {
+        self.render_attrs().and_then(|render| render.trail.as_ref())
+    }
+    #[inline]
+    pub fn to_loaded(self) -> Option<LoadedTrailRef<'a>> {
+        LoadedTrailRef::try_new(self)
+    }
+}
+#[cfg(todo)]
+impl ops::Deref for SharedTrailRef<'a> {}
+#[derive(Clone)]
+#[repr(transparent)]
+pub struct LoadedTrailRef<'a> {
+    marker: SharedTrailRef<'a>,
+}
+impl<'a> LoadedTrailRef<'a> {
+    pub fn try_new(marker: SharedTrailRef<'a>) -> Option<Self> {
+        #[cfg(todo = "unnecessary")]
+        let _ = marker.ltrail_info()?;
+        let _ = marker.trail_attrs()?;
+        let _ = marker.ltrail()?;
+
+        Some(unsafe { Self::new_unchecked(marker) })
+    }
+    pub unsafe fn new_unchecked(marker: SharedTrailRef<'a>) -> Self {
+        Self { marker }
+    }
+    #[inline]
+    pub fn ltrail_info(&self) -> &LoadedTrailInfo {
+        let path = self.marker.loaded_path().path;
+        unsafe {
+            self.marker.marker.map_info.trails.get_unchecked(path as usize)
+        }
+    }
+    #[inline]
+    pub fn ltrail(&self) -> &LoadedTrailShared {
+        let path = self.marker.loaded_path().path;
+        unsafe {
+            self.marker.marker.map.trails.get_unchecked(path as usize)
+        }
+    }
+    #[inline]
+    pub fn render_attrs(&self) -> &Arc<RenderAttributes> {
+        &self.ltrail_info().attrs
+    }
+    #[inline]
+    pub fn trail_attrs(&self) -> &Box<TrailAttributes> {
+        unsafe {
+            self.render_attrs().trail.as_ref().unwrap_unchecked()
+        }
+    }
+}
+impl<'a> ops::Deref for LoadedTrailRef<'a> {
+    type Target = SharedTrailRef<'a>;
+    #[inline]
+    fn deref(&self) -> &Self::Target { &self.marker }
 }
 
 impl PathingShared {
@@ -589,12 +1020,12 @@ impl PathingShared {
             if let Some(ref mut shared) = shared {
                 shared.clone_from(&state);
             } else {
-                shared.insert(state);
+                *shared = Some(state);
             }
             if let Some(ref mut shared_info) = shared_info {
                 shared_info.clone_from(&info);
             } else {
-                shared_info.insert(info);
+                *shared_info = Some(info);
             }
             dirty |= true;
             dirty && notify

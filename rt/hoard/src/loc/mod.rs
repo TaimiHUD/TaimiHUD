@@ -30,6 +30,11 @@ impl<N, L> Locator<N, L> {
         self.path
     }
 
+    pub fn borrowed(&self) -> Locator<&N, &L> {
+        let Locator { root, path } = self;
+        Locator::with_parts(root, path)
+    }
+
     /// TODO: rename to `from_path` so this can be const version? .-.
     pub fn with_path<P: Into<L>>(path: P) -> Self where
         N: Default,
@@ -71,6 +76,13 @@ impl<N, L> Locator<N, L> {
     pub fn rel<P>(self, path: P) -> Locator<Self, P> {
         Locator::with_parts(self, path)
     }
+    pub fn rel_zip<R, P>(self, path: Locator<R, P>) -> Locator<Locator<N, R>, (L, P)> {
+        let Locator { root, path } = path;
+        Locator::with_parts(
+            Locator::with_parts(self.root, root),
+            (self.path, path),
+        )
+    }
 
     #[inline]
     pub fn lookup_get<R: ?Sized + LocationGet<N, L>>(&self, repo: &R) -> Option<R::LookupGet> {
@@ -83,6 +95,92 @@ impl<N, L> Locator<N, L> {
     #[inline]
     pub fn lookup_mut<'a, R: ?Sized + LocationMut<N, L>>(&self, repo: &'a mut R) -> Option<&'a mut R::LookupRef> {
         repo.lookup_mut(self)
+    }
+}
+impl<N, L> Locator<N, L> {
+    #[cfg(todo)]
+    pub fn map_to<P>(self) -> Locator<N::ConvMapNs, P> where
+        N: NamespaceConvMap<L, P>,
+    {
+        N::conv_map(self)
+    }
+    pub fn pivot_to<R>(self) -> Locator<R, N::NsPivotToPath> where
+        N: NamespacePivotTo<R, L>,
+    {
+        N::loc_pivot_to(self)
+    }
+    pub fn pivot_to_ref<'a, R>(&'a self) -> Locator<R, <&'a N as NamespacePivotTo<R, &'a L>>::NsPivotToPath> where
+        &'a N: NamespacePivotTo<R, &'a L>,
+    {
+        NamespacePivotTo::loc_pivot_to(self.borrowed())
+    }
+    #[cfg(todo)]
+    pub fn pivot_as<'l, R>(&'l self) -> Locator<R, N::NsPivotToRefPath<'l>> where
+        N: NamespacePivotToRef<R, L>,
+    {
+        N::loc_pivot_to_ref(self)
+    }
+    pub fn pivot_from<R>(self) -> Locator<R, R::NsPivotFromPath> where
+        R: NamespacePivotFrom<N, L>,
+    {
+        R::loc_pivot_from(self)
+    }
+    pub fn to<O>(self) -> O where
+        N: NamespaceConvTo<L, O>,
+    {
+        N::conv_to(self)
+    }
+    pub fn try_to<O>(self) -> Option<O> where
+        N: NamespaceTryConvTo<L, O>,
+    {
+        N::try_conv_to(self)
+    }
+    pub fn try_pivot_to<O>(self) -> Option<O> where
+        N: NamespaceTryConvTo<L, O>,
+    {
+        N::try_conv_to(self)
+    }
+    pub fn conv<O>(self) -> O where
+        O: NamespaceConvFrom<N, L>,
+    {
+        O::conv_from(self)
+    }
+}
+impl<N0, N1, L0, L1> Locator<Locator<N0, N1>, (L0, L1)> {
+    pub fn zipped_root0(&self) -> Locator<&N0, &L0> {
+        Locator::with_parts(&self.root.root, &self.path.0)
+    }
+    pub fn zipped_path1(&self) -> Locator<&N1, &L1> {
+        Locator::with_parts(&self.root.path, &self.path.1)
+    }
+    pub fn unzip(self) -> (Locator<N0, L0>, Locator<N1, L1>) {
+        let Locator { root, path: (l0, l1) } = self;
+        (
+            Locator::with_parts(root.root, l0),
+            Locator::with_parts(root.path, l1),
+        )
+    }
+}
+impl<N0, N1, N2, L0, L1, L2> Locator<Locator<N0, Locator<N1, N2>>, (L0, (L1, L2))> {
+    pub fn zipped_root1(&self) -> Locator<&N1, &L1> {
+        Locator::with_parts(&self.root.path.root, &self.path.1.0)
+    }
+    pub fn zipped_path2(&self) -> Locator<&N2, &L2> {
+        Locator::with_parts(&self.root.path.path, &self.path.1.1)
+    }
+    #[inline]
+    pub fn unzip1(self) -> (Locator<N0, L0>, (Locator<N1, L1>, Locator<N2, L2>)) {
+        let (r0, l12) = self.unzip();
+        (r0, l12.unzip())
+    }
+}
+impl<N0, N1: Namespace, L0, L1> Locator<Locator<N0, L0>, Locator<N1, L1>> {
+    pub fn zip_rel(self) -> Locator<Locator<N0, N1>, (L0, L1)> {
+        let Locator { root, path } = self;
+        Locator::with_parts(
+            Locator::with_parts(root.root, path.root),
+            (root.path, path.path),
+        )
     }
 }
 impl<N: PhantomNamespace, L> Locator<N, L> {
@@ -120,6 +218,20 @@ impl<N: PhantomNamespace, L> Locator<N, L> {
         }
     }
 }
+impl<'a, N, L> Locator<&'a N, &'a L> {
+    #[inline]
+    pub fn borrowed_path(self) -> &'a Locator<N, L> where
+        N: PhantomNamespace,
+    {
+        Locator::from_path_ref(self.path)
+    }
+    #[inline(always)]
+    pub const fn borrowed_path_const(self) -> &'a Locator<N, L> where
+        N: PhantomNamespace,
+    {
+        Locator::from_path_ref_const(self.path)
+    }
+}
 
 impl<N, L> From<(N, L)> for Locator<N, L> {
     fn from((root, path): (N, L)) -> Self {
@@ -132,6 +244,21 @@ impl<N, L> From<Locator<N, L>> for (N, L) {
         loc.into_tuple()
     }
 }
+#[cfg(todo = "unnecessary")]
+impl<'a, N, L> Into<Locator<&'a N, &'a L>> for &'a Locator<N, L> {
+    fn into(self) -> Locator<&'a N, &'a L> {
+        self.borrowed()
+    }
+}
+impl<'a, N, L> From<&'a Locator<N, L>> for Locator<&'a N, &'a L> {
+    fn from(loc: &'a Locator<N, L>) -> Self {
+        loc.borrowed()
+    }
+}
+#[cfg(todo)]
+impl<'a, N, L, R> NamespaceConvFrom<N, L> for Locator<R, R::NsConvFromPath> where
+    R: NamespaceConvFrom<N, L>,
+{}
 
 impl<N, L> fmt::Display for Locator<N, L> where
     N: fmt::Display,
@@ -239,6 +366,195 @@ unsafe impl<N, L> PhantomNamespace for Locator<N, L> where
     const ZST: Self = Locator::with_parts(N::ZST, L::ZST);
 }
 
+pub trait Namespace: Sized {
+    #[cfg(todo)]
+    pub const UNSAFE_IS_ZST: bool;
+}
+pub trait NamespacePivotTo<R, L>: Namespace {
+    type NsPivotToPath;
+    fn loc_pivot_to(path: Locator<Self, L>) -> Locator<R, Self::NsPivotToPath>;
+}
+/// seems excessive...
+#[cfg(todo)]
+pub trait NamespacePivotToRef<R, L>: Namespace {
+    type NsPivotToRefPath<'l> where
+        Self: 'l,
+        R: 'l,
+        L: 'l,
+        ;
+    fn loc_pivot_to_ref<'l>(path: &'l Locator<Self, L>) -> Locator<R, Self::NsPivotToRefPath<'l>>;
+}
+pub struct RootScopeNs(core::convert::Infallible);
+impl LocationParent for RootScopeNs {
+    type NsParentGet = Self;
+    #[inline]
+    fn get_parent(self) -> Option<Self::NsParentGet> {
+        match self.0 {}
+    }
+}
+/*impl LocationParent for T {
+    type NsParentGet = RootScopeNs;
+    fn get_parent(self) -> Option<Self::NsParentGet> {
+        None
+    }
+}*/
+pub trait LocationLeaf<P> {
+    fn ns_leaf(self) -> P;
+    #[cfg(todo)]
+    fn root_parent(self) -> <Self::NsParentGet as BornLocation>::NsParent where
+        Self::NsParentGet: BornLocation,
+    {
+
+    }
+}
+pub trait LocationLeafExt {
+    #[inline]
+    fn leaf_of<L>(self) -> L where
+        Self: Sized + LocationLeaf<L>,
+    {
+        LocationLeaf::ns_leaf(self)
+    }
+}
+impl<T: Sized> LocationLeafExt for T {}
+impl<N, L, P> LocationLeaf<P> for Locator<N, L> where
+    N: LocationLeaf<P>,
+{
+    #[inline]
+    fn ns_leaf(self) -> P {
+        self.root.ns_leaf()
+    }
+}
+impl<'a, N, L> LocationLeaf<L> for &'a Locator<N, L> where
+    L: Copy,
+{
+    #[inline]
+    fn ns_leaf(self) -> L {
+        self.path
+    }
+}
+pub trait LocationParent {
+    type NsParentGet;
+    fn get_parent(self) -> Option<Self::NsParentGet>;
+    #[cfg(todo)]
+    fn root_parent(self) -> <Self::NsParentGet as BornLocation>::NsParent where
+        Self::NsParentGet: BornLocation,
+    {
+
+    }
+}
+impl<T: BornLocation> LocationParent for T {
+    type NsParentGet = <T as BornLocation>::NsParent;
+    fn get_parent(self) -> Option<Self::NsParentGet> {
+        Some(self.ns_parent())
+    }
+}
+pub trait BornLocation: LocationParent<NsParentGet = <Self as BornLocation>::NsParent> {
+    type NsParent;
+    type NsParentRoot /*: BornLocation<NsParentRoot = <<Self as BornLocation>::NsParent as BornLocation>::NsParentRoot> where*/
+        //<Self as BornLocation>::NsParent: BornLocation,
+        ;
+    fn ns_parent(self) -> Self::NsParent;
+    fn ns_root(self) -> Self::NsParentRoot;
+    #[cfg(todo)]
+    fn parent_ref(&self) -> &Self::NsParent;
+    #[inline]
+    #[cfg(todo)]
+    fn next_parent(self) -> Option<Self::NsParent> where
+        Self: Sized,
+    {
+        Some(self.parent())
+    }
+    #[inline]
+    #[cfg(todo)]
+    fn next_parent_ref(&self) -> Option<&Self::NsParent> {
+        Some(self.parent_ref())
+    }
+}
+impl<N: BornLocation, L> BornLocation for Locator<N, L> {
+    type NsParent = N;
+    type NsParentRoot = N::NsParentRoot;
+    #[inline]
+    fn ns_parent(self) -> Self::NsParent {
+        self.root
+    }
+    #[inline]
+    fn ns_root(self) -> Self::NsParentRoot {
+        self.ns_parent().ns_root()
+    }
+    #[inline]
+    #[cfg(todo)]
+    fn parent_ref(&self) -> &Self::NsParent {
+        &self.root
+    }
+}
+#[cfg(todo)]
+impl<N: Namespace> BornLocation for N {
+    #[inline]
+    fn parent(self) -> Self::NsParent {
+        Some(self)
+    }
+}
+#[cfg(todo)]
+impl<N: Namespace + PhantomNamespace> BornLocation for N {
+    type NsParent = Option<N>;
+    #[inline]
+    fn parent(self) -> Self::NsParent {
+        Some(self)
+    }
+    #[inline]
+    #[cfg(todo)]
+    fn parent_ref(&self) -> &Self::NsParent {
+        unsafe {
+            mem::transmute(self)
+        }
+    }
+}
+#[cfg(todo)]
+impl<N: BornLocation> BornLocation for Option<N> {
+    type NsParent = Option<N>;
+    #[inline]
+    fn parent(self) -> Self::NsParent {
+        None
+    }
+    #[inline]
+    fn next_parent(self) -> Option<Self::NsParent> {
+        None
+    }
+    #[inline]
+    #[cfg(todo)]
+    fn parent_ref(&self) -> &Self::NsParent {
+        self
+    }
+    #[cfg(todo)]
+    #[inline]
+    fn next_parent_ref(&self) -> Option<&Self::NsParent> {
+        None
+    }
+}
+pub trait NamespacePivotFrom<R, L>: Namespace {
+    type NsPivotFromPath;
+    fn loc_pivot_from(path: Locator<R, L>) -> Locator<Self, Self::NsPivotFromPath>;
+}
+pub trait NamespaceConvTo<L, O>: Namespace {
+    fn conv_to(path: Locator<Self, L>) -> O;
+}
+pub trait NamespaceTryConvTo<L, O>: Namespace {
+    fn try_conv_to(path: Locator<Self, L>) -> Option<O>;
+}
+pub trait NamespaceConvFrom<N, L> {
+    fn conv_from(path: Locator<N, L>) -> Self;
+}
+#[cfg(todo)]
+pub trait NamespaceConvRef<L>: Namespace {
+    type ConvOutputRef<'a> where
+        Self: 'a,
+        L: 'a,
+    ;
+    fn conv_ref<'a>(path: &'a Locator<Self, L>) -> Self::ConvOutputRef<'a> where
+        Self: 'a,
+    ;
+}
+
 pub trait LocationGet<N, L> {
     type LookupGet: Sized;
 
@@ -293,6 +609,18 @@ macro_rules! locator_ns {
             ) ($($fmt_this, $fmt_arg)?)
             ; $($rest)*
         }
+        impl $crate::loc::BornLocation for $ns {
+            type NsParent = Self;
+            type NsParentRoot = Self;
+            #[inline]
+            fn ns_parent(self) -> Self::NsParent {
+                self
+            }
+            #[inline]
+            fn ns_root(self) -> Self::NsParentRoot {
+                self
+            }
+        }
     };
     (@def
         (
@@ -305,6 +633,10 @@ macro_rules! locator_ns {
         #[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         $ns_vis struct $ns;
 
+        impl $crate::loc::Namespace for $ns {
+            #[cfg(todo)]
+            const UNSAFE_IS_ZST: bool = true;
+        }
         unsafe impl $crate::loc::PhantomNamespace for $ns {
             const ZST: Self = $ns;
         }
@@ -319,6 +651,10 @@ macro_rules! locator_ns {
     ) => {
         $(#[$meta])*
         $ns_vis struct $ns {$($ns_struct)*}
+        impl $crate::loc::Namespace for $ns {
+            #[cfg(todo)]
+            const UNSAFE_IS_ZST: bool = false;
+        }
         $($crate::loc::locator_ns! { $($rest)+ })?
     };
     (@def
@@ -330,6 +666,9 @@ macro_rules! locator_ns {
     ) => {
         $(#[$meta])*
         $ns_vis struct $ns ($($ns_struct)*);
+        unsafe impl $crate::loc::Namespace for $ns {
+            const IS_ZST: bool = false;
+        }
         $($crate::loc::locator_ns! { $($rest)+ })?
     };
     (@def

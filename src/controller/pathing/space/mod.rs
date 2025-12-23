@@ -11,12 +11,14 @@ pub use self::{
     poi::PoiScale,
     trail::{TrailParams, TrailScale, TrailTextureMap},
     pack::{SpacePack, SpacePackCollection},
+    shared::SpacePackShared,
 };
 pub use super::PackSpace as DrawSpace;
 
 mod build;
 mod pack;
 mod poi;
+mod shared;
 mod trail;
 
 impl PathingController {

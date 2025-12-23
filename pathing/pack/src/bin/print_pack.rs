@@ -1,4 +1,5 @@
 use {
+    anyhow::Context,
     std::{env, fs, path::Path, time::Instant},
     taimi_hoard::statistics::allocator::CounterAllocator,
     taimi_pack::{loader, Pack},
@@ -39,6 +40,34 @@ fn main() -> anyhow::Result<()> {
         time_consumed.as_secs_f64(),
         (mem_consumed as f64) / (1024.0 * 1024.0),
     );
+
+    for (traili, trail) in pack.trails.iter().enumerate() {
+        let trl_name = trail.trail_path.as_ref().map(|p| &p[..]).unwrap_or("<unavail>");
+        let context = format!("{trl_name} (trail#{traili} of {})", &trail.category);
+        let res = trail.read_trl_data(&mut loader)
+            .context(context.clone());
+        let trl = match res {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("{e:#}");
+                continue
+            },
+        };
+        let mut empty_count = 0usize;
+        for (_sectioni, section) in trl.sections.iter().enumerate() {
+            if section.is_empty() {
+                empty_count += 1;
+                if _sectioni == 0 || _sectioni + 1 == trl.sections.len() {
+                    eprintln!("cap section#{_sectioni} was empty");
+                }
+            }
+        }
+        if empty_count > 0 {
+            eprintln!("{empty_count} sections empty in {context}");
+        } else if trl.sections.is_empty() {
+            eprintln!("empty trail? {context}");
+        }
+    }
 
     Ok(())
 }

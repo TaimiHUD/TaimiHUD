@@ -1,9 +1,10 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{LoadedPack, PackCategoryInfo, PackConfig, PackPath, PackInfoSignature},
+            registry::{LoadedPack, PackCategoryInfo, PackConfig, PackPath, PackInfoSignature, LoadedPoiNs, LoadedTrailNs, LoadedPoiIndex, LoadedTrailIndex},
             space::{DrawSpace, TrailParams},
-            shared::MapPackInfo,
+            shared::{MapPackInfo, LoadedPoiInfo, LoadedTrailInfo, LoadedMarkerInfo},
+            shared::EMPTY_RENDER_ATTRS,
             PackSpace,
         },
         resources::Vertex,
@@ -11,12 +12,14 @@ use {
     std::{iter, mem, sync::{Arc, LazyLock}, num::NonZero, ops, hash::Hash, collections::{VecDeque, BTreeMap}},
     taimi_hoard::collections::lru::RecentlyUsed,
     taimi_hoard::flags::set::{BitFlagForSet, FlagSet},
-    taimi_hoard::loc::{LocationMut, LocationRef},
+    taimi_hoard::loc::{indexed::{self, IndexedList}, LocationMut, LocationRef},
+    taimi_hoard::iters::IterExt,
     taimi_meta::packs::{
         collections::CategorySet,
         CategoryIndex, CategoryPath, MapIndex, PoiPath, TrailPath, TrailSectionPath, TrailSectionIndex,
-        PackMapPath,
+        PackTrailSectionNs,
     },
+    taimi_meta::spatial::irrelevant_box3,
     taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
     bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
 };
@@ -46,20 +49,18 @@ impl LoadedCategory {
 
 #[derive(Debug, Clone, Default)]
 pub struct LoadedPoi {
-    pub category: CategoryIndex,
     pub visibility: VisibilityFlags,
     pub marker_position: Point3<DrawSpace>,
-    attrs: Arc<RenderAttributes>,
+    info: LoadedPoiInfo,
     overrides: Option<Box<RenderAttributes>>,
 }
 
 impl LoadedPoi {
     pub fn invalid() -> Self {
         Self {
-            category: CategoryIndex::MAX,
+            info: LoadedPoiInfo::empty(),
             visibility: VisibilityFlags::empty(),
             marker_position: Point3::INFINITY,
-            attrs: EMPTY_RENDER_ATTRS.clone(),
             overrides: None,
         }
     }
@@ -90,17 +91,21 @@ impl LoadedPoi {
         }
 
         Self {
-            category,
+            info: LoadedPoiInfo {
+                marker_info: LoadedMarkerInfo {
+                    category_path: CategoryPath::with_path(category),
+                    attrs,
+                },
+            },
             visibility: visibility.restore_default_toggles(),
             marker_position,
-            attrs,
             overrides: None,
         }
     }
 
     pub fn render_attrs(&self) -> &RenderAttributes {
         self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(&self.attrs)
+            .unwrap_or(&self.info.attrs)
     }
     pub fn poi_attrs(&self) -> &PoiAttributes {
         let poi = self.render_attrs().poi.as_ref()
@@ -116,7 +121,7 @@ impl LoadedPoi {
     pub fn set_overrides(&mut self, overrides: RenderAttributes) {
         let overrides = self.overrides.insert(Box::new(overrides));
         let _ = overrides.poi.get_or_insert_default();
-        overrides.merge(&self.attrs);
+        overrides.merge(&self.info.attrs);
     }
     #[inline]
     pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
@@ -168,7 +173,7 @@ impl LoadedPoi {
     }
 
     pub fn is_invalid(&self) -> bool {
-        self.category == CategoryIndex::MAX
+        self.info.is_empty()
     }
     pub fn get(&self) -> Option<&Self> {
         match self.is_invalid() {
@@ -177,35 +182,35 @@ impl LoadedPoi {
         }
     }
 
+    #[inline]
+    pub fn category_path(&self) -> CategoryPath {
+        self.info.category_path
+    }
     pub fn category(&self) -> Option<CategoryPath> {
         match self.is_invalid() {
-            false => Some(CategoryPath::with_path(self.category)),
+            false => Some(self.category_path()),
             true => None,
         }
+    }
+    pub fn info(&self) -> &LoadedPoiInfo {
+        &self.info
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct LoadedTrail {
-    pub category: CategoryIndex,
     pub visibility: VisibilityFlags,
-    pub sections: Option<Arc<[LoadedTrailSection]>>,
-    pub geometry_sections: Option<Arc<[LoadedTrailGeometrySection]>>,
-    pub geometry_sections_cap: u32,
-    attrs: Arc<RenderAttributes>,
+    pub section_info: Arc<LoadedTrailGeometryInfo>,
+    info: LoadedTrailInfo,
     overrides: Option<Box<RenderAttributes>>,
-    // TODO: y_offset?
 }
 
 impl LoadedTrail {
     pub fn invalid() -> Self {
         Self {
-            category: CategoryIndex::MAX,
+            info: LoadedTrailInfo::empty(),
             visibility: VisibilityFlags::empty(),
-            sections: None,
-            geometry_sections: None,
-            geometry_sections_cap: 0,
-            attrs: EMPTY_RENDER_ATTRS.clone(),
+            section_info: LoadedTrailGeometryInfo::empty_arc().clone(),
             overrides: None,
         }
     }
@@ -235,19 +240,21 @@ impl LoadedTrail {
         }
 
         Self {
-            category,
+            info: LoadedTrailInfo {
+                marker_info: LoadedMarkerInfo {
+                    category_path: CategoryPath::with_path(category),
+                    attrs,
+                },
+            },
             visibility: visibility.restore_default_toggles(),
-            attrs,
             overrides: None,
-            sections: None,
-            geometry_sections: None,
-            geometry_sections_cap: 0,
+            section_info: LoadedTrailGeometryInfo::empty_arc().clone(),
         }
     }
 
     pub fn render_attrs(&self) -> &RenderAttributes {
         self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(&self.attrs)
+            .unwrap_or(&self.info.attrs)
     }
     pub fn trail_attrs(&self) -> &TrailAttributes {
         let trail = self.render_attrs().trail.as_ref()
@@ -263,7 +270,7 @@ impl LoadedTrail {
     pub fn set_overrides(&mut self, overrides: RenderAttributes) {
         let overrides = self.overrides.insert(Box::new(overrides));
         let _ = overrides.trail.get_or_insert_default();
-        overrides.merge(&self.attrs);
+        overrides.merge(&self.info.attrs);
     }
     #[inline]
     pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
@@ -286,75 +293,24 @@ impl LoadedTrail {
         }
     }
 
-    fn next_section(idx: usize, section: &LoadedTrailSection, len: u32, y_offsets: &mut dyn Iterator<Item = f32>, bookmark: &mut u32) -> Option<LoadedTrailSectionInfo> {
-        let len = NonZero::new(len)?.get();
-        let mut bounds = section.bounds;
-        let y_offset = y_offsets.next();
-        if let Some(y_offset) = y_offset {
-            bounds.min.y += y_offset;
-            bounds.max.y += y_offset;
-        }
-        let start = *bookmark;
-        *bookmark += len;
-        let end = *bookmark;
-        Some(LoadedTrailSectionInfo {
-            path: TrailSectionPath::with_path(idx as TrailSectionIndex),
-            vertex_range: start..end,
-            bounds,
-            y_offset: y_offset.unwrap_or_default(),
-        })
+    pub fn section_info_mut(&mut self) -> &mut LoadedTrailGeometryInfo {
+        Arc::make_mut(&mut self.section_info)
     }
-    pub fn sections<'a, 'g>(&'a self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> +'a where
-        'g: 'a,
-    {
-        let y_offsets = &geometry.y_offsets;
-        self.sections.iter().flat_map(move |sections| {
-            let mut bookmark = 0u32;
-            let mut y_offsets = y_offsets.iter().copied();
-            sections.iter().zip(&geometry.section_lengths).enumerate().filter_map(move |(i, (section, &len))|
-                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
-            )
-        })
-    }
-    #[cfg(todo = "unnecessary")]
-    pub fn get_sections<'g>(&self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> + 'g {
-        let sections = self.sections.clone().map(ArcSliceIter::new_iter);
-        let y_offsets = &geometry.y_offsets;
-        sections.into_iter().flat_map(move |sections| {
-            let mut y_offsets = y_offsets.iter().copied();
-            let mut bookmark = 0u32;
-            sections.into_iter_arc().zip(&geometry.section_lengths).enumerate().filter_map(move |(i, (section, &len))|
-                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
-            )
-        })
-    }
-
     pub fn populate_data(&mut self, trail_data: &TrailData) -> bool {
-        if self.sections.is_some() {
+        if self.section_info.sections.is_some() {
             return false
         }
-        self.set_sections(&mut trail_data.sections.iter()
-            .map(|section| LoadedTrailSection::with_section(section))
-        );
-        true
+        self.section_info_mut().populate_data(trail_data)
     }
     pub fn populate_geometry_info(&mut self, section_info: impl IntoIterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) -> bool {
-        if self.geometry_sections.is_some() {
+        if self.section_info.geometry_sections.is_some() {
             return false
         }
-        self.set_geometry_info(&mut section_info.into_iter(), cap);
-        true
-    }
-    fn set_sections(&mut self, sections: &mut dyn Iterator<Item = LoadedTrailSection>) {
-        let _ = self.sections.insert(sections.into_iter().collect());
-    }
-    fn set_geometry_info(&mut self, section_info: &mut dyn Iterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) {
-        let _ = self.geometry_sections.insert(section_info.into_iter().collect());
-        self.geometry_sections_cap = cap.unwrap_or(0);
+        self.section_info_mut().populate_geometry_info(section_info, cap)
     }
 
     pub fn vertices_for(&self, trail_data: &TrailData, params: &TrailParams) -> LoadedTrailGeometry {
-        let section_count = self.sections.as_ref().map(|s| s.len()).unwrap_or(0);
+        let section_count = self.section_info.sections.as_ref().map(|s| s.len()).unwrap_or(0);
         // TODO
         let trail = self.trail_attrs();
         let scale = trail.scale();
@@ -363,7 +319,7 @@ impl LoadedTrail {
             #[cfg(todo)]
             _ => params.y_offset_for_trail(pack, path),
             _ => {
-                let y_offset_sig = (self.category as usize) << 24 | section_count;
+                let y_offset_sig = (self.category_path().path as usize) << 24 | section_count;
                 params.y_offset_for(y_offset_sig)
             },
         };
@@ -384,15 +340,15 @@ impl LoadedTrail {
         let mut y_offsets = Vec::new();
         for (isec, section) in trail_data.sections.iter().enumerate() {
             y_offset = (y_offset - f32::EPSILON * 40.0).max(0.0);
+            if y_offset != 0.0 {
+                y_offsets.push(y_offset);
+            }
 
             let prior_count = vertices.len();
             let vertex_count = if section.points.is_empty() {
                 log::trace!("Section {isec} is empty.");
                 0
             } else {
-                if y_offset != 0.0 {
-                    y_offsets.push(y_offset);
-                }
                 LoadedTrailSection::vertices_for(&mut vertices, section, scale, is_wall, width, resolution, smoothing, y_offset);
                 let vertex_count = vertices.len() - prior_count;
                 if log::log_enabled!(log::Level::Trace) {
@@ -417,7 +373,7 @@ impl LoadedTrail {
     }
 
     pub fn is_invalid(&self) -> bool {
-        self.category == CategoryIndex::MAX
+        self.info.is_empty()
     }
     pub fn get(&self) -> Option<&Self> {
         match self.is_invalid() {
@@ -426,11 +382,63 @@ impl LoadedTrail {
         }
     }
 
+    #[inline]
+    pub fn category_path(&self) -> CategoryPath {
+        self.info.category_path
+    }
     pub fn category(&self) -> Option<CategoryPath> {
         match self.is_invalid() {
-            false => Some(CategoryPath::with_path(self.category)),
+            false => Some(self.category_path()),
             true => None,
         }
+    }
+
+    pub fn info(&self) -> &LoadedTrailInfo {
+        &self.info
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct LoadedTrailGeometryInfo {
+    pub sections: Option<Arc<[LoadedTrailSection]>>,
+    pub geometry_sections: Option<Arc<[LoadedTrailGeometrySection]>>,
+    pub geometry_sections_cap: u32,
+}
+impl LoadedTrailGeometryInfo {
+    pub fn empty() -> Self {
+        Self {
+            sections: None,
+            geometry_sections: None,
+            geometry_sections_cap: 0,
+        }
+    }
+    fn empty_arc() -> &'static Arc<Self> {
+        static EMPTY: LazyLock<Arc<LoadedTrailGeometryInfo>> = LazyLock::new(|| Arc::new(LoadedTrailGeometryInfo::empty()));
+        &EMPTY
+    }
+
+    fn set_sections(&mut self, sections: &mut dyn Iterator<Item = LoadedTrailSection>) {
+        let _ = self.sections.insert(sections.into_iter().collect());
+    }
+    fn set_geometry_info(&mut self, section_info: &mut dyn Iterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) {
+        let _ = self.geometry_sections.insert(section_info.into_iter().collect());
+        self.geometry_sections_cap = cap.unwrap_or(0);
+    }
+    pub fn populate_data(&mut self, trail_data: &TrailData) -> bool {
+        if self.sections.is_some() {
+            return false
+        }
+        self.set_sections(&mut trail_data.sections.iter()
+            .map(|section| LoadedTrailSection::with_section(section))
+        );
+        true
+    }
+
+    pub fn populate_geometry_info(&mut self, section_info: impl IntoIterator<Item = LoadedTrailGeometrySection>, cap: Option<u32>) -> bool {
+        if self.geometry_sections.is_some() {
+            return false
+        }
+        self.set_geometry_info(&mut section_info.into_iter(), cap);
+        true
     }
 
     pub fn section_geometry_vertices(&self, path: TrailSectionPath) -> Option<ops::Range<u32>> {
@@ -442,6 +450,73 @@ impl LoadedTrail {
             None => self.geometry_sections_cap,
         };
         Some(start..end)
+    }
+
+    pub fn trail_section_bounds(&self) -> indexed::LocatorEnumerateAsRel<PackTrailSectionNs, TrailSectionIndex, impl Iterator<Item = Box3<DrawSpace>> + '_> {
+        let geometry = self.geometry_sections.as_ref().map(|g| &g[..]).unwrap_or(&[]);
+        let geometry_offsets = geometry.into_iter().map(|g| g.y_offset);
+        let sections = self.sections.as_ref().map(|s| &s[..]).unwrap_or(&[]);
+        let bounds =sections.iter()
+            .zip(geometry_offsets.chain(iter::repeat(0.0f32)))
+            .lazy_map(|(section, offset)| match offset {
+                0.0 => section.bounds,
+                offset => Box3 {
+                    min: section.bounds.min + Vector3::ZERO.with_y(offset),
+                    max: section.bounds.max + Vector3::ZERO.with_y(offset),
+                },
+            });
+        indexed::LocatorRelIter0::enumerate(Default::default(), bounds)
+    }
+
+    fn next_section(idx: usize, section: &LoadedTrailSection, len: u32, y_offsets: &mut dyn Iterator<Item = f32>, bookmark: &mut u32) -> LoadedTrailSectionInfo {
+        let mut bounds = section.bounds;
+        let y_offset = y_offsets.next();
+        if len > 0 {
+            if let Some(y_offset) = y_offset {
+                bounds.min.y += y_offset;
+                bounds.max.y += y_offset;
+            }
+        }
+        let start = *bookmark;
+        *bookmark += len;
+        let end = *bookmark;
+        LoadedTrailSectionInfo {
+            path: TrailSectionPath::with_path(idx as TrailSectionIndex),
+            vertex_range: start..end,
+            bounds,
+            y_offset: y_offset.unwrap_or_default(),
+        }
+    }
+    pub fn sections<'a, 'g>(&'a self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> +'a where
+        'g: 'a,
+    {
+        let y_offsets = &geometry.y_offsets;
+        self.sections.iter().flat_map(move |sections| {
+            let mut bookmark = 0u32;
+            let mut y_offsets = y_offsets.iter().copied();
+            sections.iter().zip(&geometry.section_lengths).enumerate().map(move |(i, (section, &len))|
+                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
+            )
+        })
+    }
+    #[cfg(todo = "unnecessary")]
+    pub fn get_sections<'g>(&self, geometry: &'g LoadedTrailGeometry) -> impl Iterator<Item = LoadedTrailSectionInfo> + 'g {
+        let sections = self.sections.clone().map(ArcSliceIter::new_iter);
+        let y_offsets = &geometry.y_offsets;
+        sections.into_iter().flat_map(move |sections| {
+            let mut y_offsets = y_offsets.iter().copied();
+            let mut bookmark = 0u32;
+            sections.into_iter_arc().zip(&geometry.section_lengths).enumerate().map(move |(i, (section, &len))|
+                Self::next_section(i, section, len, &mut y_offsets, &mut bookmark)
+            )
+        })
+    }
+
+    pub(crate) fn sections_sig(&self) -> (Option<usize>, u32) {
+        (
+            self.sections.as_ref().map(|s| s.len()),
+            self.geometry_sections_cap,
+        )
     }
 }
 
@@ -465,6 +540,9 @@ impl LoadedTrailSection {
     }
 
     pub fn bounds_for(section: &TrailSection) -> Box3<PackSpace> {
+        if section.is_empty() {
+            return irrelevant_box3()
+        }
         let min = section.bounds.min.cast();
         let max = section.bounds.max.cast();
         Box3::new(min, max)
@@ -625,13 +703,6 @@ impl LoadedTrailGeometry {
 fn get_overrides_mut<'a>(overrides: &'a mut Option<Box<RenderAttributes>>) -> &'a mut Box<RenderAttributes> {
     overrides.get_or_insert_with(|| Box::new((**EMPTY_RENDER_ATTRS).clone()))
 }
-static EMPTY_RENDER_ATTRS: LazyLock<Arc<RenderAttributes>> = LazyLock::new(|| {
-    Arc::new(RenderAttributes {
-        poi: Some(Default::default()),
-        trail: Some(Default::default()),
-        .. Default::default()
-    })
-});
 
 #[derive(Debug, Clone)]
 pub struct LoadedMapPack {
@@ -726,6 +797,12 @@ impl LoadedMapPack {
         loaded
     }
 
+    pub fn lpois(&self) -> &IndexedList<LoadedPoiNs, LoadedPoiIndex, [LoadedPoi]> {
+        IndexedList::from_ref(&self.pois[..])
+    }
+    pub fn lpois_mut(&mut self) -> &mut IndexedList<LoadedPoiNs, LoadedPoiIndex, [LoadedPoi]> {
+        IndexedList::from_mut(&mut self.pois[..])
+    }
     pub fn pois<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (PoiPath, &'a LoadedPoi)> + 'i where
         'a: 'i,
     {
@@ -753,6 +830,12 @@ impl LoadedMapPack {
             .and_then(|i| self.pois.get_mut(i.path as usize))
     }
 
+    pub fn ltrails(&self) -> &IndexedList<LoadedTrailNs, LoadedTrailIndex, [LoadedTrail]> {
+        IndexedList::from_ref(&self.trails[..])
+    }
+    pub fn ltrails_mut(&mut self) -> &mut IndexedList<LoadedTrailNs, LoadedTrailIndex, [LoadedTrail]> {
+        IndexedList::from_mut(&mut self.trails[..])
+    }
     pub fn trails<'a, 'i>(&'a self, info: &'i MapPackInfo) -> impl Iterator<Item = (TrailPath, &'a LoadedTrail)> + 'i where
         'a: 'i,
     {
@@ -794,12 +877,12 @@ impl LoadedMapPack {
     pub fn category_at<'a>(&'a self, path: CategoryPath<&'_ MapPackInfo>) -> Option<&'a LoadedCategory> {
         let info = path.root;
         info.category_index(path.unscope())
-            .and_then(|i| self.categories.get(i as usize))
+            .and_then(|i| self.categories.get(i.path as usize))
     }
     pub fn category_at_mut<'a>(&'a mut self, path: CategoryPath<&'_ MapPackInfo>) -> Option<&'a mut LoadedCategory> {
         let info = path.root;
         info.category_index(path.unscope())
-            .and_then(|i| Arc::make_mut(&mut self.categories).get_mut(i as usize))
+            .and_then(|i| Arc::make_mut(&mut self.categories).get_mut(i.path as usize))
     }
 
     /// Only updates default flags
@@ -897,13 +980,13 @@ impl LoadedMapPack {
                 continue
             };
             let is_override = config.visibility_overrides.contains(path);
-            let default_vis = loaded.get(index as usize)
+            let default_vis = loaded.get(index.path as usize)
                 .map(|cat| cat.visibility.default_toggles());
             let visibility = match is_override {
                 true => default_vis,
                 false => {
                     let inherited = parent_vis.or_else(|| categories.parent_of(path)
-                        .map(|parent| info.category_index(parent).and_then(|i| loaded.get(i as usize))
+                        .map(|parent| info.category_index(parent).and_then(|i| loaded.get(i.path as usize))
                             .map(|parent| parent.visibility & VisibilityFlags::TOGGLES)
                             .or_else(|| categories.visibility.get_for(parent))
                         ).unwrap_or(default_vis)
@@ -917,7 +1000,7 @@ impl LoadedMapPack {
                     }
                 },
             }.unwrap_or(pack_default);
-            if let Some(loaded) = loaded.get_mut(index as usize) {
+            if let Some(loaded) = loaded.get_mut(index.path as usize) {
                 loaded.visibility.set_toggles(visibility);
             }
             children.extend(categories.children_of(path).map(|c| (c, is_override, Some(visibility))));
@@ -974,14 +1057,14 @@ impl LoadedMapPack {
         let dirty_pois = self.pois_mut(info)
             .filter(|(_, poi)| poi.category().map(is_damaged).unwrap_or(false));
         for (_path, poi) in dirty_pois {
-            let Some(state) = category_state.get(poi.category as usize).map(|b| *b) else { continue };
+            let Some(state) = category_state.get(poi.category_path().path as usize).map(|b| *b) else { continue };
             poi.visibility.set(VisibilityFlags::TOGGLE, state);
         }
 
         let dirty_trails = self.trails_mut(info)
             .filter(|(_, trail)| trail.category().map(is_damaged).unwrap_or(false));
         for (_path, trail) in dirty_trails {
-            let Some(state) = category_state.get(trail.category as usize).map(|b| *b) else { continue };
+            let Some(state) = category_state.get(trail.category_path().path as usize).map(|b| *b) else { continue };
             trail.visibility.set(VisibilityFlags::TOGGLE, state);
         }
     }

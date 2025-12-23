@@ -25,7 +25,7 @@ use {
         InterruptionSignal,
     },
     self::registry::PackLoader,
-    self::state::{LoadedMaps, LoadedMapInfo},
+    self::state::{LoadedMaps, LoadedMapInfo, LoadedPacks},
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
@@ -78,8 +78,10 @@ pub(crate) struct PathingController {
     keybinds: TaimiReceiver,
     settings: SettingsLock,
     active: bool,
+    packs: LoadedPacks,
     map_info: LoadedMapInfo,
     maps: LoadedMaps,
+    space: space::SpacePackCollection,
 }
 
 impl PathingController {
@@ -93,8 +95,10 @@ impl PathingController {
             tasks: Default::default(),
             settings,
             active: true,
+            packs: Default::default(),
             map_info: Default::default(),
             maps: Default::default(),
+            space: Default::default(),
         }
     }
 
@@ -235,6 +239,30 @@ impl PathingController {
 
     async fn handle_gameplay(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
         if let GameplayTransition::Loaded { initial: true, .. } = trans {
+        }
+        match gameplay {
+            GameplayState::Gameplay { map_id: Some(map_id) } => {
+                let (new_map, instantaneous) = match trans {
+                    | GameplayTransition::Map { prev_map_id: Some(prev), .. }
+                    | GameplayTransition::Loaded { prev_map_id: Some(prev), .. }
+                    if prev != map_id => (
+                        true,
+                        matches!(trans, GameplayTransition::Map { .. }),
+                    ),
+                    _ => (false, false),
+                };
+                if new_map {
+                    if instantaneous {
+                        // make up for missing the loading screen...
+                        self.handle_map_suspend();
+                    }
+                    self.handle_map_leave();
+                }
+                self.handle_map_enter(map_id)
+            },
+            GameplayState::Intermission { initial: false, .. } =>
+                self.handle_map_suspend(),
+            _ => (),
         }
     }
 }
