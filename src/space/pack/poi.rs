@@ -180,7 +180,8 @@ impl PoiCommonRenderData {
         let mut gaps: BitVec = BitVec::with_capacity(ib_len);
         gaps.resize(ib_len, false);
         for (_packi, pack) in packs.iter().enumerate() {
-            for (i, (poi, lpoi)) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.loaded_pois().values())) {
+            let Some(map_info) = &pack.map_info else { continue };
+            for (i, (poi, lpoi)) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.map_state.loaded_pois(map_info))) {
                 let index = i as usize;
                 if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
@@ -190,10 +191,10 @@ impl PoiCommonRenderData {
                     *b = true;
                 }
                 if let Some(world) = ib_world.get_mut(index) {
-                    *world = poi.instance_data(lpoi);
+                    *world = poi.instance_data(&lpoi);
                 }
                 if let Some(map) = ib_map.get_mut(index) {
-                    *map = poi.instance_data_map(lpoi, machine);
+                    *map = poi.instance_data_map(&lpoi, machine);
                 }
             }
         }
@@ -293,32 +294,31 @@ impl PoiRender {
             self.icon = icon;
         }
     }
-    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, poi: LoadedPoiRef<'_>) {
-        if let Some(icon_name) = poi.poi_attrs().icon_file.as_ref() {
-            SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name)
-        }
+    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, lpoi: Option<LoadedPoiRef<'_>>) {
+        let icon_name = lpoi.as_ref().and_then(|lpoi| lpoi.poi_attrs().icon_file.as_ref());
+        SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name);
     }
 
-    pub fn instance_data(&self, poi: &LoadedPoi) -> InstanceBufferData {
+    pub fn instance_data(&self, poi: &LoadedPoiRef) -> InstanceBufferData {
         let render = poi.render_attrs();
         let attrs = poi.poi_attrs();
         InstanceBufferData {
-            world: Mat4::from_translation(poi.position().into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
+            world: Mat4::from_translation(poi.lpoi().position.into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
             colour: render.tint(),
         }
     }
 
-    pub fn instance_data_map(&self, poi: &LoadedPoi, machine: &RenderMachine) -> InstanceBufferData {
+    pub fn instance_data_map(&self, lpoi: &LoadedPoiRef, machine: &RenderMachine) -> InstanceBufferData {
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-        let scale_map = poi.poi_attrs().map_display_size();
+        let scale_map = lpoi.poi_attrs().map_display_size();
         let size = Vector2::splat(scale_map / 2.0);
 
         // TODO: DPI/UI scaling is irrelevant here right?
         let scale = size * machine.map.calibration.local_space().scale.abs();
         InstanceBufferData {
-            world: Mat4::from_translation(poi.position().into())
+            world: Mat4::from_translation(lpoi.lpoi().position.into())
                 * Mat4::from_scale(scale.extend(scale.y).into()),
-            colour: poi.render_attrs().tint(),
+            colour: lpoi.render_attrs().tint(),
         }
     }
 

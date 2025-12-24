@@ -1,11 +1,13 @@
 use {
     taimi_hoard::statistics::Counter,
     taimi_meta::packs::MapIndex,
+    taimi_sync::watched::{watch, Watched},
     super::PoiCommonRenderData,
     crate::{
         controller::pathing::{
             registry::{PackVecOf, LoadedPoiNs, LoadedTrailNs},
             space::{SpacePack, SpacePackCollection, TrailParams, SpacePackShared},
+            shared::{MapPackInfo, SharedPackInfo, SharedLoaderPacksInfo, SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState},
             visible::{LoadedPoi, LoadedTrail},
             ExternalFilterState, FestivalFixup, PathingController, PathingEvent,
         },
@@ -959,6 +961,9 @@ pub struct PackTextureHandle(usize);
 
 /// Internal rendering data.
 pub(super) struct PackRenderData {
+    pub info: Arc<SharedPackInfo>,
+    pub map_info: Option<SharedMapPackLoaded>,
+    pub map_state: SharedMapPackState,
     #[cfg(todo)]
     pub render_list_bookmark: Option<usize>,
     pub pois: IndexedList<LoadedPoiNs, PoiIndex, Vec<PoiRender>>,
@@ -971,6 +976,9 @@ pub(super) struct PackRenderData {
 impl PackRenderData {
     pub fn new() -> Self {
         Self {
+            info: Default::default(),
+            map_info: None,
+            map_state: Default::default(),
             pois: Default::default(),
             trails: Default::default(),
             render_poi_bookmark: 0,
@@ -997,6 +1005,7 @@ impl PackRenderData {
     pub fn clear(&mut self) {
         self.pois.clear();
         self.trails.clear();
+        self.map_info = None;
         self.render_poi_bookmark = 0;
     }
 
@@ -1012,18 +1021,23 @@ impl PackRenderData {
 }
 
 pub struct PackRender {
-    pub packs: Arc<SpacePackShared>,
     pub(super) pack_data: PackVecOf<PackRenderData>,
     #[cfg(todo)]
     pub render_list: RenderList,
     pub poi_common: PoiCommonRenderData,
+
+    pub spacepacks: Watched<Arc<SpacePackShared>>,
+    packs_rx: Option<watch::Receiver<SharedLoaderPacksInfo>>,
+    packs_map: Option<watch::Receiver<SharedGameplayMap>>,
 }
 
 impl PackRender {
     pub fn new(backend: &RenderBackend) -> anyhow::Result<Self> {
         let poi_common = PoiCommonRenderData::new(backend)?;
         Ok(Self {
-            packs: Default::default(),
+            spacepacks: Default::default(),
+            packs_rx: None,
+            packs_map: None,
             pack_data: Default::default(),
             #[cfg(todo)]
             render_list: RenderListBuilder::default().build(),
@@ -1049,6 +1063,67 @@ impl PackRender {
     }
 
     pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+        let Some(pathing) = &machine.pathing else {
+            anyhow::bail!("no shared data")
+        };
+        let packs_rx = self.packs_rx.get_or_insert_with(|| {
+            let mut rx = pathing.packs.packs.subscribe();
+            rx.mark_changed();
+            rx
+        });
+        let packs_map = self.packs_map.get_or_insert_with(|| {
+            let mut rx = pathing.gameplay.subscribe();
+            rx.mark_changed();
+            rx
+        });
+        if !self.spacepacks.is_watching() {
+            self.spacepacks.restart_watching(&pathing.space);
+        }
+        if packs_rx.has_changed().unwrap_or(false) {
+            let packs = packs_rx.borrow_and_update();
+            if self.pack_data.len() < packs.len() {
+                self.pack_data.data.resize_with(packs.len(), PackRenderData::new);
+            }
+            for (pack, dest) in packs.values().zip(self.pack_data.values_mut()) {
+                #[cfg(todo)]
+                let prev_sig = dest.info.sig;
+                dest.info = pack.info.clone();
+            }
+        }
+        let spacepacks = self.spacepacks.read_ref();
+        if packs_map.has_changed().unwrap_or(false) {
+            let packs_map = packs_map.borrow_and_update();
+            let map_id = spacepacks.collection.map_id;
+            if let Some(maps) = map_id.and_then(|map_id| packs_map.get_ref(map_id)) {
+                for (pack_path, pack) in self.pack_data.iter_mut() {
+                    let Some((packmap_path, map_info)) = maps.get_info_for(pack_path) else {
+                        pack.clear();
+                        continue
+                    };
+                    let map_info = pack.map_info.insert(map_info.clone());
+
+                    let poi_len = map_info.info.poi_count();
+                    if pack.pois.len() != poi_len {
+                        pack.pois.resize_with(poi_len, PoiRender::empty);
+                    }
+
+                    let trail_len = map_info.trail_count();
+                    if pack.trails.len() != trail_len {
+                        pack.trails.resize_with(trail_len, TrailRender::empty);
+                    }
+
+                    if let Some(map) = maps.get_state(packmap_path) {
+                        pack.map_state = map.clone();
+                    }
+                    for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info)) {
+                        poi.update(device, &pack.info, Some(lpoi))
+                    }
+                    for (trail, ltrail) in pack.trails.values_mut().zip(pack.map_state.loaded_trails(map_info)) {
+                        trail.update(device, &pack.info, Some(ltrail))
+                    }
+                }
+            }
+        }
         if self.pack_data.values().any(|p| p.render_poi_bookmarks().is_empty() != p.pois.is_empty()) {
             self.allocate_poi_buffers(1);
         }
@@ -1085,7 +1160,11 @@ impl PackRender {
     pub fn allocate_poi_buffers(&mut self, mut offset: usize) -> usize {
         for pack in self.pack_data.values_mut() {
             pack.render_poi_bookmark = offset;
-            offset += pack.loaded_pois().len();
+            let poi_count = match &pack.map_info {
+                Some(map_info) => map_info.poi_count(),
+                None => 0,
+            };
+            offset += poi_count;
         }
         offset
     }

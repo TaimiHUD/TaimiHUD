@@ -12,10 +12,10 @@ use {
 #[cfg(feature = "space")]
 use {
     crate::{
-        controller::pathing::shared::SharedGameplayMap,
+        controller::pathing::shared::{SharedGameplayMap, PathingShared},
         space::engine::Engine,
     },
-    std::ops::Range,
+    std::{ops::Range, sync::Arc},
     taimi_sync::watched::Watched,
 };
 use {
@@ -103,6 +103,8 @@ pub struct RenderMachine {
     #[cfg(not(any(feature = "markers", feature = "space")))]
     pub display_size: Size2<ScreenSpace>,
     #[cfg(feature = "paths")]
+    pub pathing: Option<Arc<PathingShared>>,
+    #[cfg(feature = "paths")]
     pub pack_map: Watched<SharedGameplayMap>,
 }
 
@@ -163,6 +165,8 @@ impl RenderMachine {
             gameplay: GameplayState::INITIAL,
             #[cfg(not(any(feature = "markers", feature = "space")))]
             display_size: Size2::ZERO,
+            #[cfg(feature = "paths")]
+            pathing: None,
             #[cfg(feature = "paths")]
             pack_map: Watched::EMPTY,
         }
@@ -321,11 +325,15 @@ impl RenderMachine {
 
     pub fn turn_render_pre(&mut self) {
         #[cfg(feature = "paths")]
-        {
+        if self.pathing.is_none() {
+            Controller::with_sender(|s| if let Some(pathing) = &s.pathing {
+                self.pathing = Some(pathing.shared.clone());
+            });
+        }
+        #[cfg(feature = "paths")]
+        if let Some(pathing) = &self.pathing {
             if !self.pack_map.is_watching() {
-                Controller::with_sender(|s| if let Some(pathing) = &s.pathing {
-                    self.pack_map.restart_watching(&pathing.shared.gameplay);
-                });
+                self.pack_map.restart_watching(&pathing.gameplay);
             }
             let _ = self.pack_map.try_read_mut();
         }

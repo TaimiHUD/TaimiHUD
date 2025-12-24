@@ -61,11 +61,14 @@ impl<'a> SpaceLoader<'a> {
         (key, tex)
     }
 
-    pub fn setup_texture(key: &mut Option<TextureKey>, slot: &mut Option<TextureSlot>, pack_info: &SharedPackInfo, texture: &AttrString) {
+    pub fn setup_texture(key: &mut Option<TextureKey>, slot: &mut Option<TextureSlot>, pack_info: &SharedPackInfo, texture: Option<&AttrString>) {
         let key = match key {
             Some(key) =>
                 return Self::get_texture(&*key, slot),
-            None => key.insert(pack_info.key_for_subresource(texture)),
+            None => match texture {
+                Some(texture) => key.insert(pack_info.key_for_subresource(texture)),
+                None => return,
+            },
         };
         *slot = TEXTURES.reserve_key_mut(key);
     }

@@ -81,10 +81,9 @@ impl TrailRender {
         }
     }
 
-    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, trail: LoadedTrailRef<'_>) {
-        if let Some(texture) = trail.trail_attrs().texture.as_ref() {
-            SpaceLoader::setup_texture(&mut self.texture_handle, &mut self.texture, pack_info, texture)
-        }
+    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, ltrail: Option<LoadedTrailRef<'_>>) {
+        let texture = ltrail.as_ref().and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
+        SpaceLoader::setup_texture(&mut self.texture_handle, &mut self.texture, pack_info, texture);
     }
 
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {

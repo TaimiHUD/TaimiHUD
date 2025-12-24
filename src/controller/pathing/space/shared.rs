@@ -3,6 +3,7 @@ use {
     taimi_meta::{packs::MapIndex, spatial::BvhShape},
     bvh::{aabb, bvh::Bvh},
 };
+use std::fmt;
 
 #[derive(Clone)]
 pub struct SpacePackShared {
@@ -17,5 +18,10 @@ impl Default for SpacePackShared {
         Self {
             collection: super::SpacePackCollection::new(),
         }
+    }
+}
+impl fmt::Debug for SpacePackShared {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("SpacePackShared").finish()
     }
 }

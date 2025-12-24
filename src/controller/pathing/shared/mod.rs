@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             api::FestivalState,
-            pathing::{registry::PackLoader, PathingEvent},
+            pathing::{registry::PackLoader, space::SpacePackShared, PathingEvent},
         },
         render::machine::MumbleIdentityUpdate,
         settings::SettingsLock,
@@ -95,6 +95,8 @@ pub struct PathingShared {
     pub maps: watch::Sender<SharedMaps>,
     /// current map
     pub gameplay: watch::Sender<SharedGameplayMap>,
+    /// rendering
+    pub space: watch::Sender<Arc<SpacePackShared>>,
 }
 impl PathingShared {
     pub fn new() -> Self {
@@ -103,6 +105,7 @@ impl PathingShared {
             #[cfg(todo)]
             maps: watch::Sender::new(Default::default()),
             gameplay: watch::Sender::new(SharedGameplayMap::default()),
+            space: watch::Sender::new(Default::default()),
         }
     }
 
@@ -116,6 +119,10 @@ impl PathingShared {
         let notify = false;
         self.gameplay.send_if_modified(|shared_map| {
             *shared_map = SharedGameplayMap::default();
+            notify
+        });
+        self.space.send_if_modified(|shared_space| {
+            *Arc::make_mut(shared_space) = Default::default();
             notify
         });
         #[cfg(todo)]

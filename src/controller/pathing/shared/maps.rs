@@ -17,7 +17,7 @@ use {
         },
     },
     taimi_meta::packs::{
-        id::{IdVariant, MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1},
+        id::{IdVariant, MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1, PackMarkerNs},
         MapIndex, CategoryIndex, CategoryPath, PoiPath, PoiIndex, TrailPath, TrailIndex,
     },
     taimi_sync::arcs::ArcPtrCmp,
@@ -371,6 +371,7 @@ impl super::PathingSender {
 
 #[derive(Debug, Clone)]
 pub struct SharedMapPackLoaded {
+    pub path: PackMapPath,
     pub info: Arc<MapPackInfo>,
     pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiInfo]>>,
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailInfo]>>,
@@ -380,8 +381,9 @@ pub struct SharedMapPackLoaded {
     pub poi_guids: Arc<[Guid]>,
 }
 impl SharedMapPackLoaded {
-    pub fn with_info(info: Arc<MapPackInfo>) -> Self {
+    pub fn with_info(path: PackMapPath, info: Arc<MapPackInfo>) -> Self {
         Self {
+            path,
             #[cfg(todo)]
             interactive_pois: Default::default(),
             #[cfg(todo)]
@@ -398,8 +400,9 @@ impl SharedMapPackLoaded {
         IndexedList::from_ref(&self.trails)
     }
 
-    pub fn with_loaded(info: Arc<MapPackInfo>, map_pack: &LoadedMapPack) -> Self {
+    pub fn with_loaded(path: PackMapPath, info: Arc<MapPackInfo>, map_pack: &LoadedMapPack) -> Self {
         Self {
+            path,
             #[cfg(todo)]
             interactive_pois: map_pack.interactive_pois.clone(),
             #[cfg(todo)]
@@ -579,6 +582,33 @@ impl SharedMapPackState {
             })
             .cloned()
             .collect()
+    }
+
+    pub fn loaded_pois<'a>(&'a self, info: &'a SharedMapPackLoaded) -> impl Iterator<Item = LoadedPoiRef<'a>> {
+        let count = info.info.poi_count()
+            .min(self.pois.data.len());
+        info.info.loaded_pois().take(count)
+            .map(move |(path, p)| unsafe {
+                LoadedPoiRef::new_unchecked(SharedPoiRef::new_unchecked(SharedMarkerRef {
+                    loaded_id: MarkerId::for_marker(Locator::with_parts(info.path, path.pivot_to::<PackMarkerNs>().path)),
+                    index: p.into(),
+                    map_info: info,
+                    map: self,
+                }))
+            })
+    }
+    pub fn loaded_trails<'a>(&'a self, info: &'a SharedMapPackLoaded) -> impl Iterator<Item = LoadedTrailRef<'a>> {
+        let count = info.info.trail_count()
+            .min(self.trails.data.len());
+        info.info.loaded_trails().take(count)
+            .map(move |(path, p)| unsafe {
+                LoadedTrailRef::new_unchecked(SharedTrailRef::new_unchecked(SharedMarkerRef {
+                    loaded_id: MarkerId::for_marker(Locator::with_parts(info.path, path.pivot_to::<PackMarkerNs>().path)),
+                    index: p.into(),
+                    map_info: info,
+                    map: self,
+                }))
+            })
     }
 }
 
@@ -996,7 +1026,7 @@ impl<'a> ops::Deref for LoadedTrailRef<'a> {
 impl PathingShared {
     /// TODO: consider how/when this isn't dirty?
     pub fn update_map(&self, path: PackMapPath, map_info: &Arc<MapPackInfo>, map: &LoadedMapPack, notify: bool) -> bool {
-        let info = SharedMapPackLoaded::with_loaded(map_info.clone(), map);
+        let info = SharedMapPackLoaded::with_loaded(path, map_info.clone(), map);
         let state = SharedMapPackState::with_static(path, map);
         let mut dirty = false;
         #[cfg(todo)]
