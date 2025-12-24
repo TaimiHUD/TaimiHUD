@@ -29,6 +29,7 @@ use {
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
+    std::collections::VecDeque,
     strum_macros::Display,
     taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
     taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
@@ -67,13 +68,15 @@ pub(crate) enum PathingEvent {
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
     ApiBypass(Option<bool>),
+    FanOut(Vec<PathingEvent>),
     Exit(Interruption),
+    Nop,
 }
 
 pub(crate) struct PathingController {
     loader: Arc<PackLoader>,
     rx: PathingReceiver,
-    tasks: JoinSet<anyhow::Result<Option<PathingEvent>>>,
+    tasks: JoinSet<anyhow::Result<PathingEvent>>,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,
     settings: SettingsLock,
@@ -81,13 +84,17 @@ pub(crate) struct PathingController {
     packs: LoadedPacks,
     map_info: LoadedMapInfo,
     maps: LoadedMaps,
-    space: space::SpacePackCollection,
+    space: space::SpaceContext,
 }
 
 impl PathingController {
     pub fn new(rx: PathingReceiver, settings: SettingsLock) -> Self {
         let loader = rx.make_loader(settings.clone());
         Self {
+            space: space::SpaceContext {
+                packs: Default::default(),
+                maps_rx: loader.shared.gameplay.subscribe(),
+            },
             rx,
             loader,
             controls: CONTROLS.subscribe_controls(),
@@ -98,7 +105,6 @@ impl PathingController {
             packs: Default::default(),
             map_info: Default::default(),
             maps: Default::default(),
-            space: Default::default(),
         }
     }
 
@@ -126,22 +132,46 @@ impl PathingController {
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {
-                    None => Ok(Some(Interruption::Unspecified)),
+                    None => Some(Interruption::Unspecified),
+                    Some(PathingEvent::Nop) => None,
                     Some(e) =>
                         self.handle_message(e).await,
-                }.context("Pathing controller");
-                match rt::log::error_ok(res) {
-                    Some(Some(int)) => return Some(int),
-                    Some(None) | None => (),
+                };
+                match res {
+                    Some(int) => return Some(int),
+                    None => (),
                 }
             },
             Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
                 Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
-                    Some(Some(m)) =>
-                        return rt::log::error_ok(self.handle_message(m).await).flatten(),
-                    None | Some(None) => (),
+                    None | Some(PathingEvent::Nop) => (),
+                    Some(m) =>
+                        return self.handle_message(m).await,
                 },
                 Err(e) => crate::log_join_error("pathing", e),
+            },
+            _ = self.space.maps_rx.changed() => {
+                if let Some(map_id) = gameplay_prev.gameplay_map() {
+                    let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
+                        self.space.packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                        true
+                    } else {
+                        self.space.packs.needs_bvh_rebuild()
+                    };
+                    let space_dirty = bvh_dirty;
+                    if bvh_dirty {
+                        self.space.packs.rebuild_bvh();
+                    }
+                    if space_dirty {
+                        let new_copy = Arc::new(space::SpacePackShared {
+                            collection: self.space.packs.clone(),
+                        });
+                        self.loader.shared.space.send_if_modified(|shared| {
+                            *shared = new_copy;
+                            true
+                        });
+                    }
+                }
             },
             _ = self.rx.festivals.changed() => {
                 self.provide_disabled_paths().await;
@@ -254,14 +284,14 @@ impl PathingController {
                 if new_map {
                     if instantaneous {
                         // make up for missing the loading screen...
-                        self.handle_map_suspend();
+                        self.handle_map_suspend(true);
                     }
                     self.handle_map_leave();
                 }
                 self.handle_map_enter(map_id)
             },
             GameplayState::Intermission { initial: false, .. } =>
-                self.handle_map_suspend(),
+                self.handle_map_suspend(false),
             _ => (),
         }
     }
@@ -477,10 +507,46 @@ impl PathingController {
 }
 
 impl PathingController {
-    pub(crate) async fn handle_message(&mut self, event: PathingEvent) -> anyhow::Result<Option<Interruption>> {
+    async fn handle_message(&mut self, event: PathingEvent) -> Option<Interruption> {
+        match event {
+            PathingEvent::Nop => None,
+            PathingEvent::Exit(interruption) => Some(interruption),
+            PathingEvent::FanOut(events) => {
+                let mut events = VecDeque::from(events);
+                let mut out = None;
+                while let Some(e) = events.pop_front() {
+                    match e {
+                        PathingEvent::Exit(int) => {
+                            out = Some(int);
+                            break
+                        },
+                        PathingEvent::FanOut(more) => {
+                            let more = more.into_iter();
+                            #[cfg(todo = "unnecessary")]
+                            let e = match more.next() {
+                                Some(e) => e,
+                                None => continue,
+                            };
+                            for more in more.rev() {
+                                events.push_front(more);
+                            }
+                            continue
+                        },
+                        PathingEvent::Nop => continue,
+                        e => self.process_message(e).await,
+                    }
+                }
+                out
+            },
+            e => {
+                self.process_message(e).await;
+                None
+            },
+        }
+    }
+    async fn process_message(&mut self, event: PathingEvent) {
         use PathingEvent::*;
         match event {
-            Exit(interruption) => return Ok(Some(interruption)),
             LoadAll => self.load_all().await,
             #[cfg(deleteme)]
             ReloadAll(remove) => self.reload_all(remove).await,
@@ -493,8 +559,12 @@ impl PathingController {
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             VisibleToggle { context, set } => self.set_visible(context, set).await,
+            Nop => (),
+            #[cfg(debug_assertions)]
+            Exit(..) | FanOut(..) => unreachable!(),
+            #[cfg(not(debug_assertions))]
+            Exit(..) | FanOut(..) => (),
         }
-        Ok(None)
     }
 
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {

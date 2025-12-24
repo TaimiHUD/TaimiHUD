@@ -1,7 +1,7 @@
 use {
     crate::{
         controller::pathing::{
-            PathingController,
+            PathingController, PathingEvent,
             visible::LoadedMapPack,
             shared::{SharedPackInfo, SharedPackLoad, PathingShared, MapPackInfo},
             registry::{PackLoader, PackActivateContext, UnloadedReason, PackInfo},
@@ -17,6 +17,7 @@ use {
     std::collections::BTreeSet,
     std::future::Future,
     std::iter,
+    std::path::Path,
     tokio::fs::create_dir_all,
 };
 #[cfg(todo)]
@@ -89,50 +90,40 @@ impl PathingController {
     }
 
     pub(super) async fn do_load_all(manager: Arc<PackLoader>) -> anyhow::Result<()> {
-        let pending_packs = {
-            let packs = manager.shared.packs.packs.borrow();
-            packs.iter().map(|(i, pack)| (i, pack.info.path.clone(), pack.info.info.clone()))
-                .collect::<Vec<_>>()
-        };
-        let mut failed = Vec::new();
-        let pending_packs = pending_packs.into_iter().filter_map(|(i, path, prev_info)| {
-            let prev_info = prev_info.as_ref().map(|i| &**i);
-            let activate = PackActivateContext::new(&*path, None, prev_info);
-            match activate {
-                Err(e) => {
-                    log::error!("{e:#}");
-                    failed.push((i, e));
-                    None
-                },
-                Ok(a) => Some((i, a)),
-            }
-        }).collect::<Vec<_>>();
-        // TODO: parallel loading and batch shared updates
-        for (i, activate) in pending_packs {
-            match activate.load(&manager).await {
-                Ok(loaded) => {
-                    manager.shared.packs.update_packs_loaded(&mut iter::once((i, Ok(loaded))));
-                },
-                Err(e) => {
-                    log::error!("{e:#}");
-                    failed.push((i, e));
-                },
-            }
+        let res = Self::new_task_load_all(manager).await;
+        match res {
+            res @ (Ok(PathingEvent::Nop) | Err(..)) =>
+                res.map(drop),
+            Ok(event) => {
+                let event_name = format!("{event}");
+                if !PathingController::try_send(event) {
+                    anyhow::bail!("TODO: failed to send {event_name} after pack load, oh no")
+                }
+                Ok(())
+            },
         }
-        manager.shared.packs.update_packs_loaded(&mut failed.into_iter().map(|(i, e)| (
-            i,
-            Err(Some(UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e)))),
-        )));
-        Ok(())
+    }
+    pub(super) fn new_task_load_all(manager: Arc<PackLoader>) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
+        let paths = {
+            let packs = manager.shared.packs.packs.borrow();
+            packs.iter().filter_map(|(i, pack)| match &pack.info {
+                _ => Some(i),
+                _ => None,
+            }).collect()
+        };
+        Self::new_task_pack_loads(manager, paths)
     }
 
     /// eager [self.handle_map_leave()]
-    pub(super) fn handle_map_suspend(&mut self) {
-        log::info!("TODO: clear_active() on suspend");
-        self.maps.prune(Some(&self.map_info));
+    ///
+    /// unless reentering, which indicates leave+enter will immediately follow
+    pub(super) fn handle_map_suspend(&mut self, reentering_urgent: bool) {
+        self.space.packs.clear();
+        if !reentering_urgent {
+            self.maps.prune(Some(&self.map_info));
+        }
     }
     pub(super) fn handle_map_leave(&mut self) {
-        log::info!("TODO: handle_map_leave()");
         self.map_info.age_tick(None);
         self.map_info.prune(Some(&self.packs));
         self.maps.age_tick(None);
@@ -167,10 +158,7 @@ impl PathingController {
             self.loader.shared.update_map_notify(map_id);
         }
         self.packs.age_tick(Some(&self.map_info));
-        for path in &need_load {
-            self.packs.mark_used(path);
-            log::debug!("TODO: load {path}");
-        }
+        self.request_pack_loads(need_load);
     }
     fn prepare_for_pack_map(
         &mut self,
@@ -202,6 +190,63 @@ impl PathingController {
         let info = shared.info.clone()?;
         let data = loaded.borrow().pack.clone();
         data.map(|data| (data, info, shared))
+    }
+
+    fn request_pack_loads(&mut self, packs: PackSet) {
+        if packs.is_empty() { return }
+        for path in &packs {
+            self.packs.mark_used(path);
+        }
+        let loads = Self::new_task_pack_loads(self.loader.clone(), packs);
+        let _cancel = self.tasks.spawn(loads);
+    }
+    fn new_task_pack_loads(manager: Arc<PackLoader>, paths: PackSet) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
+        let pending_packs = {
+            let packs = manager.shared.packs.packs.borrow();
+            paths.iter().map(|path| packs.lookup_ref(&path).map(|pack| {
+                (pack.info.path.clone(), pack.info.info.clone())
+            }))
+                .collect::<Box<[_]>>()
+        };
+        async move {
+            let mut pending = paths.iter().zip(Box::into_iter(pending_packs));
+            Self::task_pack_loads(manager, &mut pending).await
+        }
+    }
+    async fn task_pack_loads(manager: Arc<PackLoader>, pending: &mut (dyn Iterator<Item = (PackPath, Option<(Arc<Path>, Option<Arc<PackInfo>>)>)> + Send)) -> anyhow::Result<PathingEvent> {
+        let pending_packs = pending
+            .filter_map(|(i, info)| info.map(move |(path, prev_info)| {
+            let prev_info = prev_info.as_ref().map(|i| &**i);
+            let res = match PackActivateContext::new(&*path, None, prev_info) {
+                Ok(a) => Ok(a),
+                Err(e) => {
+                    log::error!("{e:#}");
+                    Err(UnloadedReason::UnknownFormat)
+                },
+            };
+            (i, res)
+        }));
+        let mut failed = Vec::new();
+        // TODO: parallel loading and batch shared updates
+        for (i, activate) in pending_packs {
+            let res = match activate {
+                Ok(activate) => activate.load(&manager).await
+                    .inspect_err(|e| log::error!("{e:#}"))
+                    .map_err(|e| UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e))),
+                Err(e) => Err(e),
+            };
+            match res {
+                Ok(loaded) => {
+                    manager.shared.packs.update_packs_loaded(&mut iter::once((i, Ok(loaded))));
+                },
+                Err(e) => failed.push((i, e)),
+            }
+        }
+        manager.shared.packs.update_packs_loaded(&mut failed.into_iter().map(|(i, e)| (
+            i,
+            Err(Some(e)),
+        )));
+        Ok(PathingEvent::Nop)
     }
 }
 #[cfg(todo)]

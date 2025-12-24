@@ -8,6 +8,7 @@ use {
         },
         space::render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
     },
+    taimi_hoard::collections::slice_offset_from,
     taimi_hoard::loc::LocationRef,
     bitvec::vec::BitVec,
     taimi_meta::{
@@ -294,15 +295,45 @@ impl SpacePackCollection {
         self.render_entities.needs_rebuild()
     }
 
+    pub fn needs_bvh_rebuild(&self) -> bool {
+        let entity_count = self.render_entities.entities.len();
+        if entity_count > 0 && self.bvh.nodes.is_empty() {
+            return true
+        }
+
+        let bvh_leaf_count = self.bvh.nodes.iter()
+            .filter(|node| matches!(node, bvh::bvh::BvhNode::Leaf { .. }))
+            .count();
+
+        entity_count != bvh_leaf_count
+    }
+
     pub fn rebuild_bvh(&mut self) {
         log::debug!("TODO: rebuild bvh");
         self.bvh = Bvh::build(&mut self.render_entities.entities);
     }
 
     pub fn clear(&mut self) {
-        self.loaded_packs.clear();
+        for pack in self.loaded_packs.values_mut() {
+            pack.clear();
+        }
         self.render_entities.clear();
         self.bvh = Bvh { nodes: Vec::new() };
+        self.map_id = None;
+    }
+
+    #[inline]
+    pub fn bvh_traverse_shapes<'a, Q: bvh::aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> bvh::bvh::BvhTraverseIterator<'a, 'a, f32, 3, Q, BvhShape<SpaceEntity>> {
+        self.bvh.traverse_iterator(query, &self.render_entities.entities)
+    }
+    #[inline]
+    pub fn bvh_traverse<'a, Q: bvh::aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
+        let shapes = &self.render_entities.entities[..];
+        self.bvh.traverse_iterator(query, shapes)
+            .map(move |shape| {
+                let idx = slice_offset_from(shapes, shape);
+                (idx, &shape.value.id)
+            })
     }
 
     #[cfg(todo)]

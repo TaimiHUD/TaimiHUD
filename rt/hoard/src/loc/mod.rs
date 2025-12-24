@@ -352,6 +352,11 @@ impl<N: PhantomNamespace, L> Borrow<L> for Locator<N, L> {
         &self.path
     }
 }
+impl<T: Copy + 'static, N: PhantomNamespace + Copy + 'static, L: num_traits::AsPrimitive<T>> num_traits::AsPrimitive<T> for Locator<N, L> {
+    fn as_(self) -> T {
+        self.path.as_()
+    }
+}
 
 pub unsafe trait PhantomNamespace: Sized {
     const ZST: Self;

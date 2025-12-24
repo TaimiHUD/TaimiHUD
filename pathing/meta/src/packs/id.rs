@@ -3,7 +3,7 @@ use uuid::Uuid;
 use {
     taimi_hoard::loc::{locator_ns, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     crate::packs::{
-        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath, SectionOfTrail,
+        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath, SectionOfTrail, MapPath,
         PackPoiNs, PackTrailNs,
     },
 };
@@ -98,13 +98,15 @@ impl MarkerIndex {
     }
     pub const fn extra(self) -> u32 {
         match self.namespace() {
-            Self::NS_TRAIL => (self.repr() & Self::EXTRA_MASK_TRAIL) >> Self::EXTRA_SHIFT_TRAIL,
+            Self::NS_TRAIL => self.extra_unchecked(),
             _ => 0,
         }
     }
+    pub const fn extra_unchecked(self) -> u32 {
+        (self.repr() & Self::EXTRA_MASK_TRAIL) >> Self::EXTRA_SHIFT_TRAIL
+    }
     pub fn trail_section_unchecked(&self) -> TrailSectionIndex {
-        let extra = (self.repr() & Self::EXTRA_MASK_TRAIL) >> Self::EXTRA_SHIFT_TRAIL;
-        let section = extra as TrailSectionIndex;
+        let section = self.extra_unchecked() as TrailSectionIndex;
         section.wrapping_sub(1)
     }
 
@@ -126,6 +128,24 @@ impl MarkerIndex {
             Some(i) => i,
             None => Self::INDEX_MAX,
         }
+    }
+
+    pub const fn index_poi_unchecked(&self) -> PoiIndex {
+        self.index() as PoiIndex
+    }
+    pub const fn index_category_unchecked(&self) -> CategoryIndex {
+        self.index() as CategoryIndex
+    }
+    pub const fn index_trail_unchecked(&self) -> TrailIndex {
+        self.index() as TrailIndex
+    }
+    pub fn index_trail_section_unchecked(&self) -> (TrailIndex, TrailSectionIndex) {
+        let section = self.trail_section_unchecked();
+        let index = self.trail_index_unchecked();
+        (index, section)
+    }
+    pub const fn trail_index_unchecked(&self) -> TrailIndex {
+        (self.index() & !Self::EXTRA_MASK_TRAIL) as TrailIndex
     }
 }
 impl From<PoiPath> for MarkerIndex {
@@ -408,6 +428,22 @@ impl MarkerId {
         let index2 = u16::from_ne_bytes(*index2).swap_bytes();
         (index1, index2)
     }
+    pub fn index1(&self) -> u16 {
+        let bytes = self.uuid.as_bytes();
+        let index1 = unsafe {
+            let bytes = bytes as *const [u8; 16] as *const [u8; 2];
+            &*bytes.add(2)
+        };
+        u16::from_ne_bytes(*index1).swap_bytes()
+    }
+    pub fn index2(&self) -> u16 {
+        let bytes = self.uuid.as_bytes();
+        let index1 = unsafe {
+            let bytes = bytes as *const [u8; 16] as *const [u8; 2];
+            &*bytes.add(3)
+        };
+        u16::from_ne_bytes(*index1).swap_bytes()
+    }
     pub fn index3(&self) -> u64 {
         let bytes = self.uuid.as_bytes();
         let index3 = unsafe {
@@ -420,7 +456,7 @@ impl MarkerId {
     pub fn marker_index(&self) -> Option<MarkerIndex> {
         match self.ns01() {
             (Self::NS0_MARKER, _ns1) =>
-                Some(MarkerIndex::from_repr(self.index0())),
+                Some(self.get_marker_index()),
             _ => None,
         }
     }
@@ -433,6 +469,27 @@ impl MarkerId {
             }),
             _ => None,
         }
+    }
+
+    /// making assumptions here
+    #[inline]
+    pub fn get_marker_pack_path(&self) -> PackPath {
+        PackPath::from_index12(0, self.index2())
+    }
+    /// making assumptions here
+    #[inline]
+    pub fn get_marker_map_path(&self) -> Option<MapPath> {
+        MapIndex::new(self.index1() as _).map(MapPath::with_path)
+    }
+    /// making assumptions here
+    pub fn get_marker_pack_map_path(&self) -> PackMapPath {
+        let (index1, index2) = self.index12();
+        PackMapPath::from_index12(index1, index2)
+    }
+    /// making assumptions here
+    #[inline]
+    pub fn get_marker_index(&self) -> MarkerIndex {
+        MarkerIndex::from_repr(self.index0())
     }
 
     fn new_uuidv3_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
@@ -593,6 +650,7 @@ impl MarkerId1 for PackPath {
 }
 impl FromMarkerId1 for PackPath {
     const NS1: u8 = MarkerId::NS1_PACK;
+    #[inline]
     fn from_index12(_index1: u16, index2: u16) -> Self {
         Self::with_path(index2 as PackIndex)
     }

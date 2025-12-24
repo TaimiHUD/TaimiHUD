@@ -1,10 +1,12 @@
 use {
     crate::{controller::pathing::{
         PathingController, PathingEvent,
+        shared::{SharedGameplayMap, SharedLoaderPacksInfo},
     }, exports::runtime as rt},
     futures::{future::Future, stream, FutureExt, StreamExt},
     taimi_meta::packs::{PackMapPath, PoiPath, TrailPath},
     taimi_hoard::loc::LocationRef,
+    taimi_sync::watched::watch,
 };
 pub use self::{
     build::{SpacePoiBuilder, SpaceTrailBuilder, SpaceLoader},
@@ -21,6 +23,15 @@ mod poi;
 mod shared;
 mod trail;
 
+pub struct SpaceContext {
+    pub packs: SpacePackCollection,
+    pub maps_rx: watch::Receiver<SharedGameplayMap>,
+}
+impl SpaceContext {
+    pub fn mark_inputs_dirty(&mut self) {
+        self.maps_rx.mark_changed();
+    }
+}
 impl PathingController {
     #[cfg(todo)]
     pub async fn setup_pack(&mut self,

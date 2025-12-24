@@ -267,6 +267,19 @@ impl SharedGameplayMap {
                 }))
             )
     }
+
+    pub fn ref_loaded_marker(&self, loaded_id: MarkerId) -> Option<SharedMarkerRef<'_>> {
+        let pack = loaded_id.get_marker_pack_path();
+        match (self.info.lookup_ref(&pack), self.state.lookup_ref(&pack)) {
+            (Some(Some(map_info)), Some(Some(map))) => Some(SharedMarkerRef {
+                loaded_id,
+                index: MarkerIndex::UNK,
+                map_info,
+                map,
+            }),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(todo)]
@@ -702,21 +715,24 @@ pub struct SharedMarkerRef<'a> {
 }
 impl<'a> SharedMarkerRef<'a> {
     pub fn pack_path(&self) -> PackPath {
-        let (i1, i2) = self.loaded_id.index12();
-        FromMarkerId1::from_index12(i1, i2)
+        self.loaded_id.get_marker_pack_path()
     }
     pub fn map_path(&self) -> PackMapPath {
-        let (i1, i2) = self.loaded_id.index12();
-        FromMarkerId1::from_index12(i1, i2)
+        self.loaded_id.get_marker_pack_map_path()
     }
     pub fn loaded_path(&self) -> MarkerPath<PackMapPath> {
-        match self.loaded_id.variant() {
-            IdVariant::MarkerLoaded(path) => path,
-            _ => {
-                log::error!("SharedMarkerRef invalid id: {}", self.loaded_id);
-                MarkerPath::with_parts(self.map_path(), MarkerIndex::UNK)
-            },
-        }
+        let root = self.map_path();
+        let path = match self.loaded_id.marker_index() {
+            #[cfg(debug_assertions)]
+            _ if self.loaded_id.ns01().1 != <PackMapPath as FromMarkerId1>::NS1 =>
+                None,
+            path => path,
+        };
+        let path = path.unwrap_or_else(|| {
+            log::error!("SharedMarkerRef invalid id: {}", self.loaded_id);
+            MarkerIndex::UNK
+        });
+        MarkerPath::with_parts(root, path)
     }
     /// as opposed to [self.loaded_path]
     pub fn path(&self) -> MarkerPath<PackPath> {
@@ -799,6 +815,57 @@ impl<'a> SharedMarkerRef<'a> {
         let lpath = self.loaded_trail_path()?;
         self.map.trails().lookup_ref(&lpath)
     }
+
+    #[inline]
+    pub fn to_loaded(self) -> Option<LoadedMarkerRef<'a>> {
+        LoadedMarkerRef::try_new(self)
+    }
+    #[inline]
+    pub fn to_poi(self) -> Option<SharedPoiRef<'a>> {
+        SharedPoiRef::try_new(self)
+    }
+    #[inline]
+    pub fn to_loaded_poi(self) -> Option<LoadedPoiRef<'a>> {
+        self.to_poi().and_then(LoadedPoiRef::try_new)
+    }
+    #[inline]
+    pub fn to_trail(self) -> Option<SharedTrailRef<'a>> {
+        SharedTrailRef::try_new(self)
+    }
+    #[inline]
+    pub fn to_loaded_trail(self) -> Option<LoadedTrailRef<'a>> {
+        self.to_trail().and_then(LoadedTrailRef::try_new)
+    }
+}
+pub enum LoadedMarkerRef<'a> {
+    Poi(LoadedPoiRef<'a>),
+    Trail(LoadedTrailRef<'a>),
+    #[cfg(todo)]
+    Category(),
+}
+impl<'a> LoadedMarkerRef<'a> {
+    pub fn try_new(marker: SharedMarkerRef<'a>) -> Option<Self> {
+        match marker.loaded_id.get_marker_index().namespace() {
+            MarkerIndex::NS_POI => marker.to_loaded_poi().map(Self::Poi),
+            MarkerIndex::NS_TRAIL => marker.to_loaded_trail().map(Self::Trail),
+            #[cfg(todo)]
+            MarkerIndex::NS_CAT => marker.to_loaded_trail().map(Self::Trail),
+            _ => None,
+        }
+    }
+    pub unsafe fn new_unchecked(marker: SharedMarkerRef<'a>) -> Option<Self> {
+        match marker.loaded_id.get_marker_index().namespace() {
+            MarkerIndex::NS_POI => Some(Self::Poi(LoadedPoiRef::new_unchecked(
+                SharedPoiRef::new_unchecked(marker)
+            ))),
+            MarkerIndex::NS_TRAIL => Some(Self::Trail(LoadedTrailRef::new_unchecked(
+                SharedTrailRef::new_unchecked(marker)
+            ))),
+            #[cfg(todo)]
+            MarkerIndex::NS_CAT => (),
+            _ => None,
+        }
+    }
 }
 #[derive(Clone)]
 #[repr(transparent)]
@@ -820,8 +887,8 @@ impl<'a> SharedPoiRef<'a> {
         self.loaded_path().pivot(self.marker.map_path())
     }
     pub fn loaded_path(&self) -> LoadedPoiPath {
-        let index = MarkerIndex::from_repr(self.marker.loaded_id.index0());
-        LoadedPoiPath::with_path(index.index() as LoadedPoiIndex)
+        let index = self.marker.loaded_id.get_marker_index();
+        LoadedPoiPath::with_path(index.index_poi_unchecked() as LoadedPoiIndex)
     }
     pub fn poi_path(&self) -> PoiPath {
         let loaded = self.loaded_path();
@@ -931,9 +998,8 @@ impl<'a> SharedTrailRef<'a> {
         self.loaded_path().pivot(self.marker.map_path())
     }
     pub fn loaded_path(&self) -> LoadedTrailPath {
-        let index = MarkerIndex::from_repr(self.marker.loaded_id.index0());
-        let idx = (index.index() & !MarkerIndex::EXTRA_MASK_TRAIL) as LoadedTrailIndex;
-        LoadedTrailPath::with_path(idx)
+        let index = self.marker.loaded_id.get_marker_index();
+        LoadedTrailPath::with_path(index.trail_index_unchecked())
     }
     pub fn trail_path(&self) -> TrailPath {
         let loaded = self.loaded_path();
