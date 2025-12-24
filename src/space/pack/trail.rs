@@ -3,7 +3,7 @@ use {
         controller::pathing::{
             visible::{LoadedTrail, LoadedTrailGeometry},
             space::SpaceLoader,
-            shared::{SharedPackInfo, LoadedTrailRef},
+            shared::{SharedPackInfo, LoadedTrailRef, LoadedTrailShared},
         },
         exports::runtime::{
             textures::{TextureKey, TextureSlot},
@@ -96,10 +96,9 @@ impl TrailRender {
     }
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders and texture must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, trail: LoadedTrailRef<'_>, section: TrailSectionPath, ctx: LocalContext) {
-        let ltrail = trail.ltrail();
+    pub fn draw_section(&self, device_context: &Dx11Context, ltrail: &LoadedTrailShared, section: TrailSectionPath, ctx: LocalContext) {
         let Some(ops::Range { start, end }) = ltrail.section_info.section_geometry_vertices(section) else {
-            log::error!("attempted to draw invalid {section} in {}", trail.category_path());
+            log::error!("attempted to draw invalid {section}");
             return
         };
         if start >= end {

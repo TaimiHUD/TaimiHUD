@@ -11,7 +11,7 @@ use {
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::PackRender,
+            pack::{PackRender, PackRenderList},
             render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
@@ -659,16 +659,15 @@ impl Engine {
                     .perspective_handler
                     .set_map_cb(&device_context, perspective_slot);
 
-                #[cfg(todo)] {
-                let entities = self.packs.entities_map(local_bounds);
-                PackCollection::draw_map_entities(
-                    &self.packs.loaded_packs,
+                let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
+                let entities = self.packs.render_list.iter_markers_map(self.packs.pack_data.map_ref_as_slice(), map_ctx, &map_query);
+                PackRender::draw_map_entities(
                     &self.packs.poi_common,
                     &device_context,
                     &backend,
                     map_ctx,
                     entities,
-                );}
+                );
             }
         }
 
@@ -830,16 +829,8 @@ impl Engine {
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
-                #[cfg(todo)]
-                {
-                let entities = self.packs.entities_obscured(cull);
-                PackCollection::draw_entities(
-                    &self.packs.loaded_packs,
-                    &self.packs.poi_common,
-                    &device_context,
-                    &backend,
-                    entities,
-                );}
+                self.packs
+                    .draw_obscured(camera.clone(), cull, &*backend, &device_context);
 
                 backend.depth_handler.set_state_obscured(&device_context, false);
             }
@@ -848,10 +839,8 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
-                #[cfg(todo)] {
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
-                }
             }
         }
 

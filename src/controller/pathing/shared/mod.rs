@@ -14,7 +14,7 @@ use {
 };
 pub use self::{
     loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPacksInfo, SharedLoaderPackInfo, SharedLoaderPackConfig, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad},
-    maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef},
+    maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
     info::{MapPackInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
 };
 pub(crate) use self::info::EMPTY_RENDER_ATTRS;

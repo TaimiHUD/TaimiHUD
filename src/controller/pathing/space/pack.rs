@@ -323,11 +323,11 @@ impl SpacePackCollection {
     }
 
     #[inline]
-    pub fn bvh_traverse_shapes<'a, Q: bvh::aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> bvh::bvh::BvhTraverseIterator<'a, 'a, f32, 3, Q, BvhShape<SpaceEntity>> {
+    pub fn bvh_traverse_shapes<'a, Q: aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> bvh::bvh::BvhTraverseIterator<'a, 'a, f32, 3, Q, BvhShape<SpaceEntity>> {
         self.bvh.traverse_iterator(query, &self.render_entities.entities)
     }
     #[inline]
-    pub fn bvh_traverse<'a, Q: bvh::aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
+    pub fn bvh_traverse<'a, Q: aabb::IntersectsAabb<f32, 3>>(&'a self, query: &'a Q) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
         let shapes = &self.render_entities.entities[..];
         self.bvh.traverse_iterator(query, shapes)
             .map(move |shape| {

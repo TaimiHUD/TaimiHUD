@@ -324,6 +324,21 @@ impl Default for SharedPackInfo {
         Self::empty(None)
     }
 }
+impl fmt::Display for SharedPackInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let info = self.info.as_ref().and_then(|i| i.primary_root());
+        if let Some(root) = info {
+            f.write_str(&root.display_name)
+        } else if let Some(datasource) = &self.datasource {
+            fmt::Display::fmt(&datasource.path, f)
+        } else if !self.path.as_os_str().is_empty() {
+            let path = rt::relative_path(&self.path);
+            fmt::Display::fmt(&path.display(), f)
+        } else {
+            fmt::Display::fmt(&self.index, f)
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct SharedPackLoaded {
