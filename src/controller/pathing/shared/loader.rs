@@ -1,6 +1,7 @@
 use {
     crate::controller::pathing::registry::{
         PackBoxOf,
+        PackCategoryInfo,
         ActivePack,
         PackPath, PackIndex,
         PackConfig,
@@ -249,6 +250,11 @@ impl SharedPackInfo {
     pub fn info(&self) -> Option<(PackPath, &Arc<PackInfo>, PackInfoSignature)> {
         self.info.as_ref().map(|i|
             (self.index, i, self.sig)
+        )
+    }
+    pub fn category_info(&self) -> Option<(&Arc<PackCategoryInfo>, &Arc<PackInfo>)> {
+        self.info.as_ref().map(|i|
+            (&i.categories, i)
         )
     }
 

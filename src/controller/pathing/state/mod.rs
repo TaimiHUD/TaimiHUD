@@ -9,7 +9,7 @@ use taimi_meta::packs::{MapIndex, MapPath, PackIndex, PackMapPath, PackPath, Pac
 use crate::controller::pathing::{
     visible::LoadedMapPack,
     shared::MapPackInfo,
-    registry::PackInfoSignature,
+    registry::{PackInfoSignature, PackInfo},
     shared::SharedPackInfo,
     UnloadedReason,
 };
@@ -173,6 +173,70 @@ impl LoadedMaps {
     pub fn clear(&mut self) {
         self.maps.clear();
     }
+
+    pub fn lookup_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, path: &'_ PackMapPath) -> Option<(&'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        let map = self.lookup_ref(path)?;
+        map_info.lookup_ref(path).map(move |map_info|
+            (map, &map_info.info)
+        )
+    }
+    pub fn iter_pack<'a>(&'a self, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().filter_map(move |(path, map)|
+            match pack_path {
+                p if path.root != p =>
+                    None,
+                _ => Some((*path, map)),
+            }
+        )
+    }
+    pub fn iter_pack_mut<'a>(&'a mut self, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
+        self.maps.iter_mut().filter_map(move |(path, map)|
+            match pack_path {
+                p if path.root != p =>
+                    None,
+                _ => Some((*path, map)),
+            }
+        )
+    }
+    pub fn iter_pack_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_pack(pack_path).filter_map(|(path, map)|
+            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
+        )
+    }
+    pub fn iter_pack_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_pack_mut(pack_path).filter_map(|(path, map)|
+            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
+        )
+    }
+
+    pub fn iter<'a>(&'a self, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().filter_map(move |(path, map)|
+            match map_id {
+                Some(map_id) if map_id != path.path =>
+                    None,
+                _ => Some((*path, map)),
+            }
+        )
+    }
+    pub fn iter_mut<'a>(&'a mut self, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
+        self.maps.iter_mut().filter_map(move |(path, map)|
+            match map_id {
+                Some(map_id) if map_id != path.path =>
+                    None,
+                _ => Some((*path, map)),
+            }
+        )
+    }
+    pub fn iter_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter(map_id).filter_map(|(path, map)|
+            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
+        )
+    }
+    pub fn iter_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_mut(map_id).filter_map(|(path, map)|
+            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
+        )
+    }
 }
 impl LocationRef<PackPath, MapIndex> for LoadedMaps {
     type LookupRef = LoadedMapPack;
@@ -228,6 +292,13 @@ pub struct LoadedPacks {
 impl LoadedPacks {
     pub fn write(&mut self, path: PackPath) -> &mut LoadedPackInfo {
         self.packs.lookup_extend_with(path.path, LoadedPackInfo::default)
+    }
+
+    pub fn lookup_info(&self, path: PackPath) -> Option<(&LoadedPackInfo, &Arc<PackInfo>)> {
+        self.lookup_ref(&path)
+            .and_then(|info| info.info.info.as_ref().map(|i|
+                (info, i)
+            ))
     }
 
     pub fn need_load(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {

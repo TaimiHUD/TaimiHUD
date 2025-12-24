@@ -49,6 +49,7 @@ pub use self::{
 };
 pub use taimi_meta::coords::LocalSpace as PackSpace;
 
+mod config;
 mod festivals;
 pub mod registry;
 mod setup;
@@ -568,34 +569,17 @@ impl PathingController {
     }
 
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
-        let Ok(mut settings) = Settings::async_write().await else { return };
-
-        let pathing = settings.pathing_mut();
-        let (_control, is_visible, out) = match context {
-            Some(MapContext::Global) => (
-                TaimiControls::PATHING_MAP,
-                pathing.space.visible_worldmap(),
-                &mut pathing.space.visible_map_world,
-            ),
-            Some(MapContext::Minimap) => (
-                TaimiControls::PATHING_MINIMAP,
-                pathing.space.visible_minimap(),
-                &mut pathing.space.visible_map_mini,
-            ),
-            None => (
-                TaimiControls::PATHING_SPACE,
-                pathing.space.visible_space(),
-                &mut pathing.space.visible_space,
-            ),
-        };
-        let set = set.unwrap_or(!is_visible);
-        *out = Some(set);
-        drop(settings);
+        let set = self.set_visible_settings(context, set).await;
 
         #[cfg(feature = "extension-nexus")]
         crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
-            if state.contains(_control) != set {
-                state.toggle(_control);
+            let control = match context {
+                Some(MapContext::Global) => TaimiControls::PATHING_MAP,
+                Some(MapContext::Minimap) => TaimiControls::PATHING_MINIMAP,
+                None => TaimiControls::PATHING_SPACE,
+            };
+            if state.contains(control) != set {
+                state.toggle(control);
                 true
             } else {
                 false
@@ -609,7 +593,6 @@ impl PathingController {
             (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
             _ => (),
         }
-        Engine::try_send(SpaceEvent::SettingsDirty);
     }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {

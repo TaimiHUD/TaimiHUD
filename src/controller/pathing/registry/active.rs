@@ -9,12 +9,14 @@ use {
                     LoadedPack, UnloadedReason,
                 },
                 PathingShared,
+                shared::{SharedPackConfig, SharedPackLoaded, SharedPackInfo},
             },
             Controller,
         },
         exports::runtime as rt,
         settings::SettingsLock,
     },
+    taimi_hoard::loc::LocationRef,
     anyhow::{anyhow, Context},
     std::{
         collections::BTreeMap,
@@ -298,6 +300,25 @@ impl PackLoader {
             shared,
             festival_categories: FestivalFixup::festival_categories(),
         }
+    }
+
+    pub fn pack_info(&self, path: PackPath) -> Option<Arc<SharedPackInfo>> {
+        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
+            i.info.clone()
+        )
+    }
+    pub fn pack_loaded(&self, path: PackPath) -> Option<watch::Sender<SharedPackLoaded>> {
+        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
+            i.loaded.clone()
+        )
+    }
+    pub fn pack_config(&self, path: PackPath) -> Option<watch::Sender<SharedPackConfig>> {
+        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
+            i.config.clone()
+        )
+    }
+    pub fn get_pack_loaded_data(&self, path: PackPath) -> Option<Arc<Pack>> {
+        self.pack_loaded(path).and_then(|l| l.borrow().pack.clone())
     }
 
     pub async fn load_pack(&self, loader: SharedLoaderBox) -> anyhow::Result<Pack> {
