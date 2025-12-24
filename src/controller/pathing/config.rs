@@ -3,7 +3,7 @@ use {
         controller::{
             pathing::{
                 registry::{PackLoader, PackPath, PackConfig},
-                shared::SharedPacks,
+                shared::SharedPackConfig,
                 visible::VisibilityFlags,
                 PathingController, PathingEvent
             }, Controller
@@ -14,6 +14,7 @@ use {
             engine::SpaceEvent, Engine
         },
     },
+    taimi_sync::watched::watch,
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{
         CategoryPath, MapIndex, MarkerIndex, MarkerPath, 
@@ -24,16 +25,17 @@ use {
 };
 
 impl PathingController {
-    pub(super) async fn handle_config_change(&mut self, path: PackPath, config: &PackConfig) {
+    pub(super) async fn handle_config_change(&mut self, path: PackPath, config: &watch::Receiver<SharedPackConfig>) {
         let Some((_info, info)) = self.packs.lookup_info(path) else { return };
         let mut dirty = false;
         for (map_path, map, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, path) {
             {
-                let damage = map.update_category_config(&map_info, &info.categories, &config);
+                let config = config.borrow();
+                let damage = map.update_category_config(&map_info, &info.categories, &config.config);
                 if let Ok(true) = damage {
                     continue
                 }
-                map.refresh_categories(&map_info, &info.categories, &config, damage.err().as_ref());
+                map.refresh_categories(&map_info, &info.categories, &config.config, damage.err().as_ref());
             }
             dirty = true;
             self.loader.shared.gameplay.send_if_modified(|shared_map| {

@@ -39,7 +39,10 @@ use {
         select,
         time::{sleep, Duration},
     },
+    taimi_sync::watched::watch,
+    taimi_meta::packs::PackPath,
 };
+use futures::stream::{self, FusedStream};
 
 pub use self::{
     registry::{LoaderBox, UnloadedReason},
@@ -86,6 +89,11 @@ pub(crate) struct PathingController {
     map_info: LoadedMapInfo,
     maps: LoadedMaps,
     space: space::SpaceContext,
+    // watchers...
+    pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<shared::SharedPackConfig>)> + Send + Sync + Unpin + 'static>,
+    /// we only need to regen if a new pack slot is allocated
+    pack_configs_sig: usize,
+    packs_rx: watch::Receiver<shared::SharedLoaderPacksInfo>,
 }
 
 impl PathingController {
@@ -96,6 +104,7 @@ impl PathingController {
                 packs: Default::default(),
                 maps_rx: loader.shared.gameplay.subscribe(),
             },
+            packs_rx: loader.shared.packs.packs.subscribe(),
             rx,
             loader,
             controls: CONTROLS.subscribe_controls(),
@@ -106,6 +115,8 @@ impl PathingController {
             packs: Default::default(),
             map_info: Default::default(),
             maps: Default::default(),
+            pack_configs: Box::new(stream::pending()),
+            pack_configs_sig: 0,
         }
     }
 
@@ -193,6 +204,20 @@ impl PathingController {
                 let gameplay = *gameplay;
                 let trans = gameplay.latest_transition_from(gameplay_prev);
                 self.handle_gameplay(gameplay, trans).await;
+            },
+            Ok(_) = self.packs_rx.changed() => {
+                let pack_count = {
+                    let packs = self.packs_rx.borrow_and_update();
+                    packs.len()
+                };
+                if self.pack_configs_sig < pack_count {
+                    // we only need to resubscribe when length changes...
+                    self.pack_configs_sig = pack_count;
+                    self.pack_configs = Box::new(self.loader.shared.watch_config_changes());
+                }
+            },
+            Some((pack, config)) = self.pack_configs.next() => {
+                self.handle_config_change(pack, &config).await
             },
         }
         None
