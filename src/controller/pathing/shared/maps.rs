@@ -394,6 +394,7 @@ pub struct SharedMapPackLoaded {
     pub poi_guids: Arc<[Guid]>,
 }
 impl SharedMapPackLoaded {
+    #[cfg(todo)]
     pub fn with_info(path: PackMapPath, info: Arc<MapPackInfo>) -> Self {
         Self {
             path,
@@ -425,10 +426,13 @@ impl SharedMapPackLoaded {
             trails: map_pack.trails.iter().map(|trail| trail.info().clone()).collect(),
         }
     }
-    #[cfg(todo)]
     pub fn update_with(&mut self, map_pack: &LoadedMapPack) {
-        self.interactive_pois = map_pack.interactive_pois.clone();
-        self.poi_guids = map_pack.poi_guids.clone();
+        #[cfg(todo)] {
+            self.interactive_pois = map_pack.interactive_pois.clone();
+            self.poi_guids = map_pack.poi_guids.clone();
+        }
+        self.pois = map_pack.pois.iter().map(|poi| poi.info().clone()).collect();
+        self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
     }
 
     #[cfg(todo)]

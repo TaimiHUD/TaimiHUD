@@ -204,7 +204,7 @@ impl SpaceEntities {
 impl Extend<(MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)> for SpaceEntities {
     fn extend<T: IntoIterator<Item = (MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)>>(&mut self, iter: T) {
         if self.entities.len() != self.extra.len() {
-            log::error!("SpaceEntities len mismatch");
+            log::error!("SpaceEntities len({}) mismatches extra({})", self.entities.len(), self.extra.len());
             return
         }
         let iter = iter.into_iter();

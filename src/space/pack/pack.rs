@@ -1091,6 +1091,7 @@ impl PackRender {
         if packs_rx.has_changed().unwrap_or(false) {
             let packs = packs_rx.borrow_and_update();
             if self.pack_data.len() < packs.len() {
+                log::debug!("PATHY: space packs resized to {}", packs.len());
                 self.pack_data.data.resize_with(packs.len(), PackRenderData::new);
             }
             for (pack, dest) in packs.values().zip(self.pack_data.values_mut()) {
@@ -1105,9 +1106,11 @@ impl PackRender {
         if packs_map.has_changed().unwrap_or(false) {
             let packs_map = packs_map.borrow_and_update();
             let map_id = packs_map.map_id;
+            log::debug!("PATHY: gameplay maps rx @ {map_id:?}");
             if let Some(maps) = map_id.and_then(|map_id| packs_map.get_ref(map_id)) {
                 for (pack_path, pack) in self.pack_data.iter_mut() {
                     let Some((packmap_path, map_info)) = maps.get_info_for(pack_path) else {
+                        log::debug!("PATHY: nothing for {pack_path}@{map_id:?}?");
                         pack.clear();
                         continue
                     };
@@ -1203,6 +1206,10 @@ impl PackRender {
             frustum,
             camera,
         );
+        #[cfg(deleteme)]
+        let entities = self.render_list.iter_markers_all(
+            self.pack_data.map_ref_as_slice(),
+        );
         Self::draw_entities(
             &self.poi_common,
             device_context,
@@ -1260,6 +1267,7 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
+                    #[cfg(TODO)]
                     if !ltrail.visibility.is_visible_for_space() {
                         continue
                     }
@@ -1280,6 +1288,7 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
+                    #[cfg(TODO)]
                     if !lpoi.visibility.is_visible_for_space() {
                         continue
                     }
@@ -1330,6 +1339,7 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
+                    #[cfg(TODO)]
                     if !ltrail.visibility.is_visible_for_map(map) {
                         continue
                     }
@@ -1338,8 +1348,9 @@ impl PackRender {
                         poi_common.set_primitive(device_context);
                         poi_common.set_instance(device_context, ctx);
                     }
-                    if shader_state != ShaderState::Trail {}
-                    shader_state = ShaderState::Trail;
+                    if shader_state != ShaderState::Trail {
+                        shader_state = ShaderState::Trail;
+                    }
                     trail.bind_texture(device_context, poi_common, ctx);
                     trail.draw_section(device_context, ltrail, path.path, ctx);
                 },
@@ -1353,12 +1364,9 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
+                    #[cfg(TODO)]
                     if !lpoi.visibility.is_visible_for_map(map) {
                         continue
-                    }
-                    if shader_state != ShaderState::Poi {
-                        shader_state = ShaderState::Poi;
-                        poi_common.set(device_context);
                     }
                     if shader_state == ShaderState::None {
                         backend.shaders.set_named(device_context, "map");
@@ -1444,10 +1452,16 @@ impl PackRenderList {
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
         let shapes = &self.spacepacks.collection.render_entities.entities[..];
-        shapes.iter().filter_map(|shape| {
+        let mut x = false;
+        shapes.iter().filter_map(move |shape| {
             let id = &shape.value.id;
             let pack_path = id.get_marker_pack_path();
-            pack_data.lookup_ref(&pack_path)
+            let pack = pack_data.lookup_ref(&pack_path);
+            if x == false && pack.is_none() {
+                x = true;
+                log::info!("PATHY: {pack_path} of {id} missing?");
+            }
+            pack
                 .map(|p| (p, id))
         })
     }

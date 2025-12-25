@@ -232,6 +232,7 @@ impl PackRegistry {
     }
 }
 impl super::PathingShared {
+    /// TODO: move this out of here ew
     pub fn watch_config_changes(&self) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)> + Unpin + Send + Sync + 'static {
         Self::watch_config_changes_on(&self.packs.packs.borrow())
     }

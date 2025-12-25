@@ -92,6 +92,8 @@ impl TrailRender {
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {
             texture.set(device_context, 0);
+        } else {
+            log::warn!("PATHY: fallback missing??");
         }
     }
     /// Draw a trail segment.
@@ -108,6 +110,8 @@ impl TrailRender {
         }
         if let Some(section_vbuffer) = &self.section_vbuffer {
             section_vbuffer.set(device_context, 0);
+        } else {
+            // TODO log::warn!("PATHY: vbuffer missing??");
         }
         unsafe {
             //PrimitiveTopology::TriangleStrip.set(device_context);

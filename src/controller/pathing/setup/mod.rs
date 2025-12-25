@@ -169,13 +169,16 @@ impl PathingController {
         let info_sig = info.sig;
         let map_info = self.map_info.write(map_path);
         if map_info.info_sig != info_sig {
+            log::info!("PATHY: updating map info {map_path}");
             map_info.set_info(MapPackInfo::with_pack(map_path.path, &data, &pack_info));
         }
         let map = self.maps.write(map_path);
         if map.info_sig != info_sig {
+            log::info!("PATHY: updating map {map_path}");
             *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
             self.loader.shared.update_map(map_path, &map_info.info, &*map, notify)
         } else {
+            log::info!("PATHY: skipping map??? {map_path}");
             false
         }
     }

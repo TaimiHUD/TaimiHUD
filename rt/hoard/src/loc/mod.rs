@@ -676,7 +676,7 @@ macro_rules! locator_ns {
         }
         $($crate::loc::locator_ns! { $($rest)+ })?
     };
-    (@def
+    /*(@def
         (
             ($(#[$meta:meta])*)
             $ns_vis:vis struct $ns:ident () ()
@@ -687,7 +687,7 @@ macro_rules! locator_ns {
         #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         $ns_vis struct $ns {$($ns_struct)*}
         $($crate::loc::locator_ns! { $($rest)+ })?
-    };
+    };*/
     (@impl(Debug)
         (
             $ns_meta:tt
