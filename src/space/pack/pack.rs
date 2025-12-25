@@ -1135,10 +1135,15 @@ impl PackRender {
                 }
             }
         }
-        if self.pack_data.values().any(|p| p.render_poi_bookmarks().is_empty() != p.pois.is_empty()) {
+        let mut ibs_dirty = false;
+        if self.pack_data.values().any(|p| p.render_poi_bookmarks().len() != p.pois.len()) {
             self.allocate_poi_buffers(1);
+            ibs_dirty = true;
         }
-        self.poi_common.update(device, machine, &self.pack_data);
+        self.poi_common.update(device, machine, &self.pack_data)?;
+        if self.poi_common.is_empty() {
+            self.recreate_buffers(device, machine)?;
+        }
 
         Ok(())
     }
@@ -1262,6 +1267,7 @@ impl PackRender {
                         shader_state = ShaderState::Trail;
                         backend.shaders.set_named(device_context, "trail");
                     }
+                    trail.bind_texture(device_context, poi_common, LocalContext::World);
                     trail.draw_section(device_context, ltrail, path.path, LocalContext::World);
                 },
                 MarkerIndex::NS_POI => {
@@ -1281,6 +1287,7 @@ impl PackRender {
                         shader_state = ShaderState::Poi;
                         poi_common.set(device_context);
                     }
+                    poi.bind_texture(device_context, poi_common, LocalContext::World);
                     poi.draw(
                         device_context,
                         pack_data.render_poi_bookmark + path.path as usize,
@@ -1333,6 +1340,7 @@ impl PackRender {
                     }
                     if shader_state != ShaderState::Trail {}
                     shader_state = ShaderState::Trail;
+                    trail.bind_texture(device_context, poi_common, ctx);
                     trail.draw_section(device_context, ltrail, path.path, ctx);
                 },
                 MarkerIndex::NS_POI => {
@@ -1361,6 +1369,7 @@ impl PackRender {
                         shader_state = ShaderState::Poi;
                         poi_common.set_vertex(device_context, ctx);
                     }
+                    poi.bind_texture(device_context, poi_common, ctx);
                     poi.draw(device_context, pack_data.render_poi_bookmark + path.path as usize, ctx);
                 },
                 _ => {
@@ -1430,7 +1439,7 @@ impl PackRenderList {
                 .map(|p| (p, id))
         })
     }
-    pub fn iter_markers_all<'a, 'e, Q: aabb::IntersectsAabb<f32, 3>>(
+    pub fn iter_markers_all<'a, 'e>(
         &'a self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {

@@ -350,6 +350,8 @@ impl MarkerId {
     /// [PackNs]
     pub const NS1_PACK: u8 = 2;
     pub const NS1_PACK_MAP: u8 = 3;
+    pub const I2_MASK: u16 = 0x0fff;
+    pub const I3_MASK: u64 = 0x00ffffff_ffffffff;
 
     pub const fn with_uuid(uuid: Uuid) -> Self {
         Self { uuid }
@@ -426,7 +428,7 @@ impl MarkerId {
         };
         let index1 = u16::from_ne_bytes(*index1).swap_bytes();
         let index2 = u16::from_ne_bytes(*index2).swap_bytes();
-        (index1, index2)
+        (index1, index2 & Self::I2_MASK)
     }
     pub fn index1(&self) -> u16 {
         let bytes = self.uuid.as_bytes();
@@ -442,7 +444,7 @@ impl MarkerId {
             let bytes = bytes as *const [u8; 16] as *const [u8; 2];
             &*bytes.add(3)
         };
-        u16::from_ne_bytes(*index1).swap_bytes()
+        u16::from_ne_bytes(*index1).swap_bytes() & Self::I2_MASK
     }
     pub fn index3(&self) -> u64 {
         let bytes = self.uuid.as_bytes();
@@ -748,4 +750,47 @@ pub fn hash_bytes_md5<'a, B: IntoIterator<Item = &'a [u8]>>(bytes: B) -> [u8; 16
         hasher.update(b);
     }
     hasher.finalize().into()
+}
+
+#[test]
+fn marker_id_paths() {
+    fn test_pack_marker(marker_path: MarkerPath<PackPath>) {
+        let mid = MarkerId::for_marker(marker_path);
+        eprintln!("{marker_path} = {mid}");
+        let reversed = MarkerPath::with_parts(mid.get_marker_pack_path(), mid.get_marker_index());
+        eprintln!("\treversed = {reversed}");
+        assert_eq!(reversed, marker_path);
+        let reversed = mid.marker_path::<PackPath>().unwrap();
+        assert_eq!(reversed, marker_path);
+    }
+    fn test_map_marker(marker_path: MarkerPath<PackMapPath>) {
+        let mid = MarkerId::for_marker(marker_path);
+        eprintln!("{marker_path} = {mid}");
+        let reversed = MarkerPath::with_parts(mid.get_marker_pack_map_path(), mid.get_marker_index());
+        eprintln!("\treversed = {reversed}");
+        assert_eq!(reversed, marker_path);
+        let reversed = mid.marker_path::<PackMapPath>().unwrap();
+        assert_eq!(reversed, marker_path);
+    }
+    let pack_path: PackPath = PackPath::with_path(5 as PackIndex);
+    let map_id = MapIndex::new(1301).unwrap();
+    let map_path = pack_path.rel(map_id);
+    test_pack_marker(MarkerPath::with_parts(pack_path, MarkerIndex::with_poi(4001)));
+
+    let poi_path = MarkerPath::with_parts(map_path, MarkerIndex::with_poi(4001));
+    test_map_marker(poi_path);
+    assert!(matches!(poi_path.path.variant(), MarkerIndexVariant::Poi(4001)));
+
+    let trail_section_path = MarkerPath::with_parts(map_path, MarkerIndex::with_trail_section(4001, 101));
+    test_map_marker(trail_section_path);
+    assert!(matches!(trail_section_path.path.variant(), MarkerIndexVariant::TrailSection(4001, 101)));
+    test_map_marker(MarkerPath::with_parts(map_path, MarkerIndex::with_trail_section(4001, 0)));
+    let trail_path = MarkerPath::with_parts(map_path, MarkerIndex::with_trail(4001));
+    test_map_marker(trail_path);
+    assert!(matches!(trail_path.path.variant(), MarkerIndexVariant::Trail(4001)));
+    {
+        let (empty_trail, empty_trail_section) = trail_path.path.index_trail_section_unchecked();
+        assert_eq!(empty_trail, 4001);
+        assert_eq!(empty_trail_section, TrailSectionIndex::MAX);
+    }
 }

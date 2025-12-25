@@ -140,6 +140,13 @@ pub struct SpaceEntityExtra {
     pub id: MarkerId,
     pub position: Point3<DrawSpace>,
 }
+impl SpaceEntityExtra {
+    pub fn invalid() -> Self {
+        Self {
+            position: Point3::INFINITY,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct SpaceEntities {
     pub entities: Vec<BvhShape<SpaceEntity>>,
@@ -252,10 +259,51 @@ impl SpacePackCollection {
         }
     }
     pub fn rebuild_entities(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
+        #[cfg(todo)]
         if self.map_id != Some(map_id) {
             self.clear();
+        } else {
+            let entities_len = self.render_entities.entities.len();
+            if self.render_entities.extra.is_empty() && entities_len > 0 {
+                let trailing_entities = self.render_entities.entities.iter()
+                    .enumerate()
+                    .skip(self.render_entities.extra.len());
+                for (_i, entity) in trailing_entities {
+                    let mid = &entity.value.id;
+                    let lidx = mid.get_marker_index();
+                    let map_path = mid.get_marker_pack_map_path();
+                    let map = if map_path.path == map_id {
+                        maps.lookup_ref(&map_path)
+                    } else { None };
+                    let position = map.and_then(|map| {
+                        match lidx.namespace() {
+                            MarkerIndex::NS_TRAIL => {
+                                let (idx, s) = lidx.index_trail_section_unchecked();
+                                map.trails.get(idx as usize)
+                                    .and_then(|trail| trail.section_info.sections.as_ref())
+                                    .and_then(|sections| sections.get(s as usize))
+                                    .map(|s| s.bounds.center())
+                            },
+                            MarkerIndex::NS_POI => {
+                                let idx = lidx.index_poi_unchecked();
+                                map.pois.get(idx as usize).map(|p| p.position())
+                            },
+                            _ => None,
+                        }
+                    });
+                    let extra = position.map(|position| SpaceEntityExtra {
+                        position,
+                    }).unwrap_or_else(|| {
+                        log::error!("PATHY: lost marker {mid} @ {lidx}?");
+                        SpaceEntityExtra::invalid()
+                    });
+                    self.render_entities.extra.push(extra);
+                }
+            }
         }
+        self.clear();
         self.map_id = Some(map_id);
+        let mut ents = Vec::new();
         for (path, pack) in packs.packs.iter() {
             let spacepack = self.loaded_packs.lookup_extend_with(path.path, SpacePack::default);
             if !pack.is_loaded() {
@@ -286,8 +334,9 @@ impl SpacePackCollection {
                 let pos = bounds.center();
                 (MarkerId::for_marker(path), bounds, pos)
             }));
-            self.render_entities.extend(pois.chain(trails));
+            ents.extend(pois.chain(trails));
         }
+        self.render_entities.extend(ents);
         //self.render_entities.rebuild_extra();
     }
     /// TODO: check map state sigs or something idk what needs to change

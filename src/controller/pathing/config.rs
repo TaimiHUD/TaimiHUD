@@ -52,6 +52,14 @@ impl PathingController {
             PathingEvent::RequestDisabledPaths.try_send();
         }
     }
+    pub(super) fn reload_config_for(&mut self, path: PackPath) {
+        let Some(info) = self.packs.lookup_ref(&path) else { return };
+        if !info.is_loaded() {
+            return
+        }
+
+        log::info!("TODO: config reload {path}? did activate not do this?");
+    }
 
     pub(super) async fn handle_toggle(loader: &PackLoader, path: CategoryPath<PackPath>, state: Option<bool>) {
         // TODO: rethink whether controller wants to use loader like this or not?

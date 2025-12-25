@@ -40,7 +40,7 @@ use {
         time::{sleep, Duration},
     },
     taimi_sync::watched::watch,
-    taimi_meta::packs::PackPath,
+    taimi_meta::packs::{collections::PackSet, PackPath},
 };
 use futures::stream::{self, FusedStream};
 
@@ -163,15 +163,18 @@ impl PathingController {
                 Err(e) => crate::log_join_error("pathing", e),
             },
             _ = self.space.maps_rx.changed() => {
+                log::info!("PATHY: gameplay maps rx");
                 if let Some(map_id) = gameplay_prev.gameplay_map() {
                     let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
                         self.space.packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                        log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
                         true
                     } else {
                         self.space.packs.needs_bvh_rebuild()
                     };
                     let space_dirty = bvh_dirty;
                     if bvh_dirty {
+                        log::info!("PATHY: space dirty");
                         self.space.packs.rebuild_bvh();
                     }
                     if space_dirty {
@@ -206,14 +209,38 @@ impl PathingController {
                 self.handle_gameplay(gameplay, trans).await;
             },
             Ok(_) = self.packs_rx.changed() => {
-                let pack_count = {
+                let (pack_count, packs_dirty, configs_dirty) = {
                     let packs = self.packs_rx.borrow_and_update();
-                    packs.len()
+                    if let Some(last) = packs.paths().last() {
+                        // extend pack state to same length...
+                        let _ = self.packs.write(last);
+                    }
+                    let mut packs_dirty = PackSet::default();
+                    for ((path, dest), info) in self.packs.packs.iter_mut().zip(packs.values()) {
+                        if dest.update_with(info) {
+                            packs_dirty.insert(path);
+                        }
+                    }
+                    let pack_count = packs.len();
+                    // XXX: avoid two locks please?
+                    let config_sigs = packs.values().map(|p| p.config.borrow().info_sig);
+                    let info_sigs = packs.values().map(|p| p.info.sig);
+                    let configs_dirty = self.packs.sigs_dirty(config_sigs);
+                    (pack_count, packs_dirty, configs_dirty)
                 };
                 if self.pack_configs_sig < pack_count {
                     // we only need to resubscribe when length changes...
                     self.pack_configs_sig = pack_count;
                     self.pack_configs = Box::new(self.loader.shared.watch_config_changes());
+                }
+                let map_id = gameplay_prev.gameplay_map();
+                for path in &packs_dirty {
+                    if let Some(map_path) = map_id.map(|map| path.rel(map)) {
+                        self.prepare_for_pack_map(map_path, true);
+                    }
+                }
+                for path in &configs_dirty {
+                    self.reload_config_for(path);
                 }
             },
             Some((pack, config)) = self.pack_configs.next() => {

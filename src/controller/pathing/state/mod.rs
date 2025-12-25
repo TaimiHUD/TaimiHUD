@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
+use taimi_meta::packs::collections::PackSet;
 use std::sync::Arc;
-use std::ops;
+use std::{ops, iter};
 use taimi_hoard::loc::indexed::IndexedList;
 use taimi_hoard::loc::{LocationMut, LocationRef};
 use taimi_hoard::collections::lru::RecentlyUsed;
 use taimi_hoard::collections::TaimiSet;
+use taimi_sync::arcs::ArcPtrCmp;
 use taimi_meta::packs::{MapIndex, MapPath, PackIndex, PackMapPath, PackPath, PackRegistryNs};
 use crate::controller::pathing::{
     visible::LoadedMapPack,
-    shared::MapPackInfo,
+    shared::{MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded},
     registry::{PackInfoSignature, PackInfo},
-    shared::SharedPackInfo,
     UnloadedReason,
 };
 pub use self::visible::{VisibilityFlags, VisibilityFlagSet};
@@ -263,20 +264,55 @@ impl TaimiSet<PackMapPath> for LoadedMaps {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct LoadedPackInfo {
     pub used: RecentlyUsed,
     pub sig: PackInfoSignature,
     pub info: Arc<SharedPackInfo>,
-    pub reason: Option<UnloadedReason>,
+    pub unloaded: Option<UnloadedReason>,
 }
 impl LoadedPackInfo {
+    pub fn empty() -> Self {
+        Self {
+            used: RecentlyUsed::DEFAULT,
+            sig: PackInfoSignature::EMPTY,
+            info: Arc::new(SharedPackInfo::empty(None)),
+            unloaded: Some(UnloadedReason::Gravestone),
+        }
+    }
+
     pub fn is_loaded(&self) -> bool {
-        self.reason.is_none()
+        self.unloaded.is_none()
     }
     pub fn can_reload(&self) -> bool {
-        self.reason.as_ref().map(|r| r.can_reload())
+        self.unloaded.as_ref().map(|r| r.can_reload())
             .unwrap_or(false)
+    }
+
+    pub fn update_with(&mut self, info: &SharedPackLoad) -> bool {
+        let mut dirty = self.update_with_info(&info.info);
+        dirty |= self.update_with_loaded(&info.loaded.borrow());
+        dirty
+    }
+    pub fn update_with_info(&mut self, info: &Arc<SharedPackInfo>) -> bool {
+        let dirty = ArcPtrCmp::from_mut(&mut self.info).clone_from_arc(info);
+        if dirty {
+            self.sig = info.sig;
+        }
+        dirty
+    }
+    pub fn update_with_loaded(&mut self, loaded: &SharedPackLoaded) -> bool {
+        let mut dirty = false;
+        if self.unloaded != loaded.unloaded {
+            self.unloaded = loaded.unloaded.clone();
+            dirty = true;
+        }
+        dirty
+    }
+}
+impl Default for LoadedPackInfo {
+    fn default() -> Self {
+        Self::empty()
     }
 }
 impl TaimiSet<MapPath> for LoadedPackInfo {
@@ -303,7 +339,7 @@ impl LoadedPacks {
 
     pub fn need_load(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
         self.packs.iter()
-            .filter(|(_p, pack)| matches!(pack.reason, Some(UnloadedReason::Pending)))
+            .filter(|(_p, pack)| matches!(pack.unloaded, Some(UnloadedReason::Pending)))
     }
     pub fn on_map(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
         let map_path: MapPath = MapPath::with_path(map_id);
@@ -360,6 +396,33 @@ impl LoadedPacks {
             }
         }
         packs.next().is_none()
+    }
+    #[inline]
+    pub fn sigs_dirty<S>(&self, sigs: S) -> PackSet where
+        S: IntoIterator<Item = PackInfoSignature>,
+    {
+        self.sigs_dirty_dyn(&mut sigs.into_iter()).collect()
+    }
+    pub fn sigs_dirty_dyn<'a, 's>(&'a self, sigs: &'s mut dyn Iterator<Item = PackInfoSignature>) -> impl Iterator<Item = PackPath> + 'a + 's where
+        's: 'a,
+        'a: 's,
+    {
+        let mut packs = self.packs.iter();
+        let mut sigs = sigs.fuse();
+        iter::from_fn(move || {
+            while let Some(sig) = sigs.next() {
+                match packs.next() {
+                    Some((_, pack)) if pack.info.sig == sig => (),
+                    Some((path, _)) =>
+                        return Some(path),
+                    None => {
+                        // strange...
+                        return None
+                    },
+                }
+            }
+            packs.next().map(|(path, _)| path)
+        })
     }
     pub fn clear(&mut self) {
         self.packs.clear();

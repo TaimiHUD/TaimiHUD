@@ -160,7 +160,7 @@ impl PathingController {
         self.packs.age_tick(Some(&self.map_info));
         self.request_pack_loads(need_load);
     }
-    fn prepare_for_pack_map(
+    pub(super) fn prepare_for_pack_map(
         &mut self,
         map_path: PackMapPath,
         notify: bool,

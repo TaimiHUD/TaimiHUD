@@ -2,6 +2,7 @@ use {
     crate::{
         collections::TaimiExtend,
         loc::{LocationGet, LocationMut, LocationRef, Locator, PhantomNamespace},
+        iters::IterExt as _,
     },
     core::{hash::Hash, iter, marker::PhantomData, mem, ops},
     num_traits::AsPrimitive,
@@ -197,14 +198,15 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> where
     usize: AsPrimitive<P>,
 {
     #[inline(always)]
-    pub fn paths<'a>(&'a self) -> LocatorRelIter<N, EnumerateAs<P, ops::Range<usize>>> where
+    pub fn paths<'a, 'n>(&'a self) -> /*LocatorRelIter<N, EnumerateAs<P, ops::Range<usize>>>*/ impl Iterator<Item = Locator<N, P>> + 'n where
         &'a T: IntoIterator,
         <&'a T as IntoIterator>::IntoIter: ExactSizeIterator,
+        N: 'n,
     {
         let len = self.len();
         LocatorRelIter::new(self.root.clone(),
-            EnumerateAs::<P, _>::new(0..len)
-        )
+            EnumerateAs::<P, _>::new(iter::repeat_n((), len))
+        ).lazy_map(|p| p.map_path(|(p, ())| p))
     }
     #[inline(always)]
     pub fn end_path<'a>(&'a self) -> Locator<N, P> where

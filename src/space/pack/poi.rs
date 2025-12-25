@@ -213,7 +213,7 @@ impl PoiCommonRenderData {
     fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
         packs.iter()
             .map(|p| p.render_poi_bookmarks().end as usize).max()
-            .map(|l| l.min(1))
+            .map(|l| l.max(1))
             .unwrap_or(0)
     }
     fn ib_len(&self) -> usize {
