@@ -58,7 +58,7 @@ impl<T: ?Sized, R: ?Sized> PartialOrd<CmpIgnore<R>> for CmpIgnore<T> {
 /// always equal
 impl<T: ?Sized> Ord for CmpIgnore<T> {
     #[inline(always)]
-    fn cmp(&self, rhs: &Self) -> cmp::Ordering { cmp::Ordering::Equal }
+    fn cmp(&self, _rhs: &Self) -> cmp::Ordering { cmp::Ordering::Equal }
 }
 /// no-op, as if we were never here
 impl<T: ?Sized> Hash for CmpIgnore<T> {
