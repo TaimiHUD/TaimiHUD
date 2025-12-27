@@ -13,9 +13,9 @@ use {
     tokio::sync::mpsc,
 };
 pub use self::{
-    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPacksInfo, SharedLoaderPackInfo, SharedLoaderPackConfig, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad},
+    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPacksInfo, SharedLoaderPackInfo, SharedLoaderPackConfig, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx},
     maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
-    info::{MapPackInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
+    info::{MapPackInfo, MapTrailInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
 };
 pub(crate) use self::info::EMPTY_RENDER_ATTRS;
 #[cfg(todo)]
@@ -96,7 +96,7 @@ pub struct PathingShared {
     /// current map
     pub gameplay: watch::Sender<SharedGameplayMap>,
     /// rendering
-    pub space: watch::Sender<Arc<SpacePackShared>>,
+    pub space: SpacePackShared,
 }
 impl PathingShared {
     pub fn new() -> Self {
@@ -105,7 +105,7 @@ impl PathingShared {
             #[cfg(todo)]
             maps: watch::Sender::new(Default::default()),
             gameplay: watch::Sender::new(SharedGameplayMap::default()),
-            space: watch::Sender::new(Default::default()),
+            space: SpacePackShared::new(),
         }
     }
 
@@ -121,7 +121,7 @@ impl PathingShared {
             *shared_map = SharedGameplayMap::default();
             notify
         });
-        self.space.send_if_modified(|shared_space| {
+        self.space.collection.send_if_modified(|shared_space| {
             *Arc::make_mut(shared_space) = Default::default();
             notify
         });

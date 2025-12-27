@@ -192,6 +192,22 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> {
         self.map_ref()
     }
 }
+impl<N, P, T: ?Sized> IndexedList<N, P, T> {
+    #[inline]
+    pub fn empty_ref<'a>() -> &'a IndexedList<N, P, T> where
+        N: PhantomNamespace,
+        &'a T: Default,
+    {
+        Self::from_ref(Default::default())
+    }
+    #[inline]
+    pub fn empty_mut<'a>() -> &'a mut IndexedList<N, P, T> where
+        N: PhantomNamespace,
+        &'a mut T: Default,
+    {
+        Self::from_mut(Default::default())
+    }
+}
 impl<N, P, T: ?Sized> IndexedList<N, P, T> where
     N: Clone,
     P: Copy + 'static,

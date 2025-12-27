@@ -1,12 +1,15 @@
 use {
-    std::{ops, sync::{LazyLock, Arc}},
+    std::{ops, sync::{Arc, LazyLock}},
     taimi_meta::packs::{
         CategoryIndex, CategoryPath,
     },
-    taimi_pack::attributes::RenderAttributes,
+    taimi_pack::{
+        attributes::{self, AttrString, RenderAttributes},
+        trail::{Trail, TrlPath},
+    },
 };
 
-pub use self::map::MapPackInfo;
+pub use self::map::{MapPackInfo, MapTrailInfo};
 
 mod map;
 
@@ -34,11 +37,13 @@ impl Default for LoadedMarkerInfo {
 #[derive(Debug, Clone, Default)]
 pub struct LoadedTrailInfo {
     pub marker_info: LoadedMarkerInfo,
+    pub trl: Option<TrlPath>,
 }
 impl LoadedTrailInfo {
     pub fn empty() -> Self {
         Self {
             marker_info: LoadedMarkerInfo::empty(),
+            trl: None,
         }
     }
 }

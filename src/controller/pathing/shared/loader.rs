@@ -14,8 +14,8 @@ use {
     crate::exports::runtime as rt,
     crate::settings::sources::DataSourcePath,
     rustc_hash::FxHashMap,
-    std::{iter, fmt, mem, sync::{Arc, Weak, RwLock}, path::Path},
-    taimi_sync::{arcs::weak_is_null, watched::watch},
+    std::{iter, fmt, mem, sync::{Arc, Weak, RwLock}, path::Path, collections::{BTreeMap, BTreeSet, btree_map}},
+    taimi_sync::{arcs::weak_is_null, watched::{watch, Watcher}},
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
     taimi_hoard::loc::LocationMut,
@@ -492,5 +492,179 @@ impl SharedPackLoad {
             l.kill();
             notify
         });
+    }
+}
+
+pub type SharedResourceRequestsTx<K, T> = watch::Sender<BTreeMap<K, Option<T>>>;
+#[derive(Clone)]
+pub struct SharedResourceRequests<K, T> {
+    /// idk these things just seem like bad condvars but bleh
+    pub resources: Watcher<BTreeMap<K, Option<T>>>
+}
+impl<K, T> SharedResourceRequests<K, T> {
+    pub fn empty() -> Self {
+        Self {
+            resources: Watcher::EMPTY,
+        }
+    }
+    pub fn new() -> Self {
+        Self {
+            resources: Watcher::new(BTreeMap::new()),
+        }
+    }
+    pub fn new_sender() -> SharedResourceRequestsTx<K, T> {
+        watch::Sender::new(BTreeMap::new())
+    }
+    pub fn subscribed_to(sender: &SharedResourceRequestsTx<K, T>) -> Self {
+        Self {
+            resources: Watcher::start_watching(sender),
+        }
+    }
+    pub fn subscribe_to(&mut self, sender: &SharedResourceRequestsTx<K, T>) {
+        self.resources.restart_watching(sender);
+    }
+    pub fn is_watching(&self) -> bool {
+        self.resources.is_watching()
+    }
+}
+impl<K, T> SharedResourceRequests<K, T> where
+    K: Ord,
+{
+    /// `Err(T)` if `take` and already completed
+    pub fn request(&self, id: K, take: bool) -> Result<(), T> {
+        let mut res = Ok(());
+        self.resources.write_if(|resources| {
+            match Self::request_one(resources, id, take) {
+                Ok(newly_requested) =>
+                    newly_requested,
+                Err(r) => {
+                    res = Err(r);
+                    false
+                },
+            }
+        });
+        // would do this if it weren't a race condition...
+        // self.resources.mark_unchanged();
+        res
+    }
+    pub fn request_many<I: IntoIterator<Item = K>>(&self, ids: I) {
+        self.request_many_dyn(&mut ids.into_iter())
+    }
+    pub fn request_many_dyn(&self, ids: &mut dyn Iterator<Item = K>) {
+        self.resources.write_if(|resources| {
+            let mut notify = false;
+            for id in ids {
+                match Self::request_one(resources, id, false) {
+                    Ok(true) =>
+                        notify = true,
+                    #[cfg(debug_assertions)]
+                    Err(..) => unreachable!(),
+                    _ => (),
+                }
+            }
+            notify
+        });
+        // would do this if it weren't a race condition...
+        // self.resources.mark_unchanged();
+    }
+    fn request_one(resources: &mut BTreeMap<K, Option<T>>, id: K, take: bool) -> Result<bool, T> {
+        match resources.entry(id) {
+            btree_map::Entry::Occupied(e) => {
+                let res = if e.get().is_some() && take {
+                    let (_, resource) = e.remove_entry();
+                    resource
+                } else {
+                    None
+                };
+                match res {
+                    Some(r) => Err(r),
+                    None =>
+                        // don't need to tell other side whether we "took" it or not
+                        Ok(false)
+                }
+            },
+            btree_map::Entry::Vacant(e) => {
+                e.insert(None);
+                Ok(true)
+            },
+        }
+    }
+    pub fn fill_request(&mut self, id: K, v: T) {
+        self.resources.write_if(|resources| {
+            resources.insert(id, Some(v));
+            true
+        });
+        // would do this if it weren't a race condition...
+        // self.resources.mark_unchanged();
+    }
+    /// Leaving them unfulfilled isn't unreasonable, so consider if this is needed?
+    pub fn cancel_request(&mut self, id: &K) {
+        self.resources.write_if(|resources| {
+            resources.remove(id);
+            // no point in waking them up, just please don't repeat it thanks
+            false
+        });
+    }
+    pub fn retain<F: FnMut(&K, &mut Option<T>) -> bool>(&mut self, filter: F) {
+        self.resources.write_if(|resources| {
+            resources.retain(filter);
+            // no point in waking them up
+            false
+        });
+    }
+    pub fn clear_all(&mut self) {
+        self.resources.write_if(|resources| {
+            resources.clear();
+            // no point in waking them up
+            false
+        });
+    }
+}
+impl<K, T> SharedResourceRequests<K, T> where
+    K: Ord + Clone,
+{
+    pub fn take_fulfilled<F: FnMut(&K) -> bool>(&self, mut filter: F, out: &mut Vec<(K, T)>) {
+        self.resources.write_if(|resources| {
+            resources.retain(|id, v| {
+                if v.is_some() && !filter(id) { return true }
+                match v.take() {
+                    Some(v) => {
+                        out.push((id.clone(), v));
+                        false
+                    },
+                    None => true,
+                }
+            });
+            // no need to notify when removing
+            false
+        });
+    }
+    pub fn try_recv_fulfilled(&self) -> impl ExactSizeIterator<Item = (K, T)> {
+        let mut out = Vec::new();
+        if self.resources.has_changed() {
+            self.take_fulfilled(|_| true, &mut out);
+        }
+        out.into_iter()
+    }
+    pub fn get_requests<F: FnMut(&K) -> bool>(&mut self, mut filter: F) -> Vec<K> {
+        let resources = self.resources.read_update();
+        resources.iter().filter_map(|(id, v)| match v {
+            None if filter(id) => Some(id.clone()),
+            _ => None,
+        }).collect()
+    }
+    pub async fn recv_requests<F: FnMut(&K) -> bool>(&mut self, mut filter: F) -> Vec<K> {
+        loop {
+            self.resources.when_changed().await;
+            let reqs = self.get_requests(&mut filter);
+            if !reqs.is_empty() {
+                break reqs
+            }
+        }
+    }
+}
+impl<K, T> Default for SharedResourceRequests<K, T> {
+    fn default() -> Self {
+        Self::empty()
     }
 }

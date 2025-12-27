@@ -493,6 +493,12 @@ impl MarkerId {
     pub fn get_marker_index(&self) -> MarkerIndex {
         MarkerIndex::from_repr(self.index0())
     }
+    pub fn get_marker_path_pack_map(&self) -> MarkerPath<PackMapPath> {
+        MarkerPath::with_parts(self.get_marker_pack_map_path(), self.get_marker_index())
+    }
+    pub fn get_marker_path_pack(&self) -> MarkerPath<PackPath> {
+        MarkerPath::with_parts(self.get_marker_pack_path(), self.get_marker_index())
+    }
 
     fn new_uuidv3_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
         'n: 'b,

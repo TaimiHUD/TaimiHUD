@@ -1,22 +1,15 @@
 use {
-    crate::controller::pathing::registry::{
-        PackMapPath, PackPath, PackInfo,
-        LoadedPoiPath, LoadedPoiIndex,
-        LoadedTrailPath, LoadedTrailIndex,
-        PackInfoSignature,
-        LoadedCategoryPath, LoadedCategoryIndex,
+    crate::controller::pathing::{
+        registry::{
+            LoadedCategoryIndex, LoadedCategoryPath, LoadedPoiIndex, LoadedPoiPath, LoadedTrailIndex, LoadedTrailNs, LoadedTrailPath, PackInfo, PackInfoSignature, PackMapPath, PackPath
+        },
+        space::{TrailParams, DrawSpace},
+        visible::{LoadedTrailGeometry, LoadedTrailSection},
     },
-    bitvec::vec::BitVec,
-    std::{ops, sync::{LazyLock, Arc}},
-    taimi_meta::packs::{
-        id::{MarkerIndexVariant, MarkerIndex, MarkerPath},
-        MapIndex,
-        PoiIndex, PoiPath,
-        TrailIndex, TrailPath,
-        CategoryIndex, CategoryPath,
-    },
-    taimi_pack::{pack::Pack, category::id::FullIdRef, attributes::RenderAttributes},
-    taimi_hoard::iters::IterExt as _,
+    std::iter,
+    bitvec::vec::BitVec, glamour::Box3, std::{mem, ops, sync::{Arc, LazyLock}}, taimi_hoard::{iters::IterExt as _, loc::indexed::IndexedList}, taimi_meta::packs::{
+        id::{MarkerIndex, MarkerIndexVariant, MarkerPath}, CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionNs, TrailSectionPath
+    }, taimi_pack::{attributes::RenderAttributes, category::id::FullIdRef, pack::Pack, trail::TrailData}
 };
 
 #[derive(Debug, Clone)]
@@ -24,6 +17,7 @@ pub struct MapPackInfo {
     pub info_sig: PackInfoSignature,
     pub pois: BitVec,
     pub trails: BitVec,
+    pub trail_info: IndexedList<LoadedTrailNs, LoadedTrailIndex, Box<[MapTrailInfo]>>,
     pub categories: Box<[CategoryIndex]>,
     /// TODO: not all GUIDs are needed at runtime,
     /// if for example the marker can't be interacted with
@@ -39,6 +33,7 @@ impl MapPackInfo {
             info_sig: PackInfoSignature::EMPTY,
             pois: BitVec::new(),
             trails: BitVec::new(),
+            trail_info: Default::default(),
             categories: Default::default(),
         }
     }
@@ -117,6 +112,7 @@ impl MapPackInfo {
             pois,
             trails,
             categories,
+            trail_info: Default::default(),
         }
     }
 
@@ -279,6 +275,61 @@ impl MapPackInfo {
                 MarkerPath::with_parts(pack_path, index)
             },
             _ => return None,
+        })
+    }
+
+    pub(crate) fn update_trail_section_info(&mut self, path: LoadedTrailPath, sections: Arc<[LoadedTrailSection]>) {
+        let trail_info = self.trail_info.lookup_extend_with(path.path, MapTrailInfo::default);
+        trail_info.sections = Some(IndexedList::new(sections));
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MapTrailInfo {
+    pub sections: Option<IndexedList<TrailSectionNs, TrailSectionIndex, Arc<[LoadedTrailSection]>>>,
+    pub y_offset: f32,
+}
+impl MapTrailInfo {
+    #[inline]
+    pub fn sections(&self) -> &IndexedList<TrailSectionNs, TrailSectionIndex, [LoadedTrailSection]> {
+        self.sections.as_ref().map(IndexedList::map_ref_as_slice)
+            .unwrap_or(IndexedList::empty_ref())
+    }
+
+    pub fn update_with_data(&mut self, trl: &TrailData) {
+        let data = trl.sections.iter().map(LoadedTrailSection::with_section);
+        self.sections = Some(IndexedList::new(data.collect()));
+    }
+
+    pub fn get_y_offsets(&'_ self) -> impl Iterator<Item = f32> + 'static {
+        let mut y_offset = self.y_offset;
+        iter::from_fn(move || {
+            let next_offset = (y_offset - TrailParams::Y_OFFSET_SECTION_GAP).max(0.0);
+            match mem::replace(&mut y_offset, next_offset) {
+                0.0 => None,
+                off => Some(off),
+            }
+        })
+    }
+    pub fn y_offsets(&'_ self) -> impl Iterator<Item = (TrailSectionPath, f32)> {
+        let mut y_offsets = self.get_y_offsets();
+        self.sections().paths().zip(iter::repeat(0.0).map(move |fallback|
+            y_offsets.next().unwrap_or(fallback)
+        ))
+    }
+
+    pub fn section_bounds(&self) -> impl Iterator<Item = (TrailSectionPath, Box3<DrawSpace>)> + '_ {
+        let mut y_offsets = self.get_y_offsets();
+        self.sections().iter().map(move |(path, section)| {
+            let mut bounds = section.bounds;
+            match y_offsets.next() {
+                None | Some(0.0) => (),
+                Some(off) => {
+                    bounds.min.y += off;
+                    bounds.max.y += off;
+                },
+            }
+            (path, bounds)
         })
     }
 }

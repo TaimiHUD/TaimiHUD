@@ -26,10 +26,11 @@ use {
     },
     self::registry::PackLoader,
     self::state::{LoadedMaps, LoadedMapInfo, LoadedPacks},
+    self::space::{SpaceContext, SpacePackShared},
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
-    std::collections::VecDeque,
+    std::collections::{VecDeque, BTreeSet},
     strum_macros::Display,
     taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
     taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
@@ -40,7 +41,7 @@ use {
         time::{sleep, Duration},
     },
     taimi_sync::watched::watch,
-    taimi_meta::packs::{collections::PackSet, PackPath},
+    taimi_meta::packs::{collections::PackSet, id::MarkerId, PackPath},
 };
 use futures::stream::{self, FusedStream};
 
@@ -62,7 +63,7 @@ pub mod space;
 
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
-#[derive(Debug, Clone, Display)]
+#[derive(Debug, Display)]
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
     ReloadAll(bool),
@@ -72,6 +73,7 @@ pub(crate) enum PathingEvent {
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
     ApiBypass(Option<bool>),
+    ReportLoaded(space::LoadReport),
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
     Nop,
@@ -88,7 +90,7 @@ pub(crate) struct PathingController {
     packs: LoadedPacks,
     map_info: LoadedMapInfo,
     maps: LoadedMaps,
-    space: space::SpaceContext,
+    space: SpaceContext,
     // watchers...
     pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<shared::SharedPackConfig>)> + Send + Sync + Unpin + 'static>,
     /// we only need to regen if a new pack slot is allocated
@@ -100,10 +102,7 @@ impl PathingController {
     pub fn new(rx: PathingReceiver, settings: SettingsLock) -> Self {
         let loader = rx.make_loader(settings.clone());
         Self {
-            space: space::SpaceContext {
-                packs: Default::default(),
-                maps_rx: loader.shared.gameplay.subscribe(),
-            },
+            space: SpaceContext::subscribe_to(&loader.shared),
             packs_rx: loader.shared.packs.packs.subscribe(),
             rx,
             loader,
@@ -166,7 +165,7 @@ impl PathingController {
                 log::info!("PATHY: gameplay maps rx");
                 if let Some(map_id) = gameplay_prev.gameplay_map() {
                     let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
-                        self.space.packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                        Arc::make_mut(&mut self.space.packs).rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
                         log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
                         true
                     } else {
@@ -175,17 +174,29 @@ impl PathingController {
                     let space_dirty = bvh_dirty;
                     if bvh_dirty {
                         log::info!("PATHY: space dirty");
-                        self.space.packs.rebuild_bvh();
+                        Arc::make_mut(&mut self.space.packs).rebuild_bvh();
                     }
                     if space_dirty {
-                        let new_copy = Arc::new(space::SpacePackShared {
-                            collection: self.space.packs.clone(),
-                        });
-                        self.loader.shared.space.send_if_modified(|shared| {
+                        let new_copy = self.space.packs.clone();
+                        self.loader.shared.space.collection.send_if_modified(|shared| {
                             *shared = new_copy;
                             true
                         });
                     }
+                }
+            },
+            trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
+                for trail in trail_reqs {
+                    log::debug!("processing trail req {trail}");
+                    let id = SpacePackShared::trail_geometry_id(&trail);
+                    self.request_trail_load(id);
+                }
+            },
+            texture_reqs = SpaceContext::recv_texture_requests(&mut self.space.texture_loads, &self.space.inflight) => {
+                for path in texture_reqs {
+                    log::debug!("processing tex req {path}");
+                    let id = MarkerId::for_marker(path);
+                    self.request_texture_load(id);
                 }
             },
             _ = self.rx.festivals.changed() => {
@@ -611,6 +622,7 @@ impl PathingController {
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
+            ReportLoaded(loaded) => self.report_load(loaded).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
             Nop => (),
             #[cfg(debug_assertions)]

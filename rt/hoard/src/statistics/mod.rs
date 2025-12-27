@@ -26,12 +26,14 @@ impl Dummy {
     pub fn increment_by<F: FnOnce() -> usize>(&self, _f: F) -> usize {
         0
     }
-
     #[inline(always)]
     pub fn decrement_by<F: FnOnce() -> usize>(&self, _f: F) -> usize {
         0
     }
-
+    #[inline(always)]
+    pub fn adjust_by<F: FnOnce() -> isize>(&self, _f: F) -> isize {
+        0
+    }
     #[inline(always)]
     pub fn reset_with<F: FnOnce() -> isize>(&self, _f: F) -> isize {
         0
@@ -62,9 +64,10 @@ impl Dummy {
 
     #[inline(always)]
     pub fn increment(&self, _amt: usize) {}
-
     #[inline(always)]
     pub fn decrement(&self, _amt: usize) {}
+    #[inline(always)]
+    pub fn adjust(&self, _amt: isize) {}
 
     #[inline(always)]
     pub fn reset(&self, _amt: isize) {}

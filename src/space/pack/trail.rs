@@ -1,33 +1,20 @@
 use {
-    crate::{
+    super::PackRenderState, crate::{
         controller::pathing::{
-            visible::{LoadedTrail, LoadedTrailGeometry},
-            space::SpaceLoader,
-            shared::{SharedPackInfo, LoadedTrailRef, LoadedTrailShared},
-        },
-        exports::runtime::{
+            registry::LoadedTrailPath, shared::{LoadedTrailRef, LoadedTrailShared, SharedPackInfo}, space::SpaceLoader, visible::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection}
+        }, exports::runtime::{
             textures::{TextureKey, TextureSlot},
             Counter,
-        },
-        space::{
+        }, resources::Texture, space::{
             pack::PoiCommonRenderData,
             resources::Model,
-        },
-        resources::Texture,
+        }
     },
-    std::{ops, mem},
-    anyhow::Context,
-    std::sync::Arc,
-    taimi_d3d::dx11::{
+    taimi_hoard::loc::Locator,
+    anyhow::Context, std::{mem, ops, sync::Arc}, taimi_d3d::dx11::{
         buffer::VertexBuffer,
         prelude::*,
-    },
-    taimi_hoard::lazyfmt,
-    taimi_meta::{
-        packs::TrailSectionPath,
-        ui::LocalContext,
-    },
-    taimi_pack::attributes::AttrString,
+    }, taimi_hoard::lazyfmt, taimi_meta::{packs::{id::{MarkerId, MarkerIndex}, TrailSectionIndex, TrailSectionPath}, ui::LocalContext}, taimi_pack::attributes::AttrString
 };
 
 /// World render data
@@ -35,6 +22,7 @@ pub struct TrailRender {
     pub texture_handle: Option<TextureKey>,
     pub texture: Option<TextureSlot>,
     pub section_vbuffer: Option<VertexBuffer>,
+    pub vbuffer_section_end: Vec<u32>,
 }
 
 impl TrailRender {
@@ -43,6 +31,7 @@ impl TrailRender {
             texture_handle: None,
             texture: None,
             section_vbuffer: None,
+            vbuffer_section_end: Vec::new(),
         }
     }
 
@@ -63,18 +52,24 @@ impl TrailRender {
     }
     pub fn setup_geometry(
         &mut self,
-        loader: &mut SpaceLoader<'_>,
-        mut geometry: LoadedTrailGeometry,
+        device: &Dx11Device,
+        geometry: LoadedTrailGeometry,
     ) -> anyhow::Result<()> {
-        if self.section_vbuffer.is_some() {
-            return Ok(())
-        }
-        let model = Model::from_vertices(geometry.take_vertices());
-        let section_vbuffer = model.to_buffer(loader.device).context("Creating trail vbuffer");
+        let model = Model::from_vertices(geometry.vertices);
+        let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
+        #[cfg(feature = "statistics")]
+        let prev_size = self.section_vbuffer.as_ref().map(|v| v.size() as isize).unwrap_or(0);
         match section_vbuffer {
             Ok(vbuffer) => {
-                STATS_TRAIL_VERTEX_SIZE.increment_by(|| vbuffer.size());
+                #[cfg(feature = "statistics")]
+                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size);
                 self.section_vbuffer = Some(vbuffer);
+                self.vbuffer_section_end = geometry.section_lengths;
+                let mut start = 0u32;
+                for out in &mut self.vbuffer_section_end {
+                    *out += start;
+                    start = *out;
+                }
                 Ok(())
             },
             Err(e) => Err(e),
@@ -84,6 +79,30 @@ impl TrailRender {
     pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, ltrail: Option<LoadedTrailRef<'_>>) {
         let texture = ltrail.as_ref().and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
         SpaceLoader::setup_texture(&mut self.texture_handle, &mut self.texture, pack_info, texture);
+    }
+    pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState, path: Locator<LoadedTrailPath, TrailSectionPath>) -> bool {
+        let mut incomplete = false;
+        if self.section_vbuffer.is_none() {
+            if !self.is_empty() {
+                // marked broken, ignore this section...
+                return true
+            }
+            let id = match id {
+                id if path.path.path != 0 => {
+                    // replace section index with 0 since we can't partially load trl data (yet?)
+                    let id = id.get_marker_pack_map_path().rel(MarkerIndex::with_trail_section(path.root.path, 0));
+                    MarkerId::for_marker(id)
+                },
+                id => id.clone(),
+            };
+            draw_state.drawn_incomplete.insert(id);
+            incomplete = true;
+        }
+        if self.texture.is_none() && self.texture_handle.is_none() {
+            let id = id.get_marker_pack_map_path().rel(MarkerIndex::with_trail(path.root.path));
+            draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
+        }
+        incomplete
     }
 
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
@@ -98,8 +117,8 @@ impl TrailRender {
     }
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders and texture must already be set.
-    pub fn draw_section(&self, device_context: &Dx11Context, ltrail: &LoadedTrailShared, section: TrailSectionPath, ctx: LocalContext) {
-        let Some(ops::Range { start, end }) = ltrail.section_info.section_geometry_vertices(section) else {
+    pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionPath, ctx: LocalContext) {
+        let Some(ops::Range { start, end }) = self.section_geometry_vertices(section.path) else {
             log::error!("attempted to draw invalid {section}");
             return
         };
@@ -130,8 +149,30 @@ impl TrailRender {
         }
     }
 
+    pub fn section_geometry_vertices(&self, section: TrailSectionIndex) -> Option<ops::Range<u32>> {
+        let section = section as usize;
+        let end = *self.vbuffer_section_end.get(section)?;
+        let start = match section {
+            #[cfg(todo = "unnecessary")]
+            section => section.checked_sub(1).map(|prev| unsafe {
+                *self.vbuffer_section_end.get_unchecked(prev)
+            }).unwrap_or(0),
+            section =>
+                *self.vbuffer_section_end.get(section.wrapping_sub(1))
+                    .unwrap_or(&0),
+        };
+        Some(start..end)
+    }
+
+    /// mark broken
+    pub fn disable(&mut self) {
+        self.section_vbuffer = None;
+        self.vbuffer_section_end.clear();
+        self.vbuffer_section_end.push(0);
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.section_vbuffer.is_none()
+        self.section_vbuffer.is_none() && self.vbuffer_section_end.is_empty()
     }
 
     #[inline]

@@ -56,6 +56,8 @@ impl TrailParams {
             + pack.categories.all_categories.len();
         self.y_offset_for(pack_signature ^ (path.path.wrapping_mul(73)))
     }
+
+    pub const Y_OFFSET_SECTION_GAP: f32 = f32::EPSILON * 40.0;
 }
 
 impl Default for TrailParams {

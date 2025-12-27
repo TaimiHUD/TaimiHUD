@@ -10,17 +10,18 @@ use {
                 },
                 PathingShared,
                 shared::{SharedPackConfig, SharedPackLoaded, SharedPackInfo},
+                space::TrailParams,
             },
             Controller,
         },
         exports::runtime as rt,
-        settings::SettingsLock,
+        settings::{SettingsLock, PathingSettings},
     },
+    futures::future::FutureExt,
     taimi_hoard::loc::LocationRef,
     anyhow::{anyhow, Context},
     std::{
         collections::BTreeMap,
-        error::Error as StdError,
         fmt,
         future::Future,
         path::{Path, PathBuf},
@@ -380,6 +381,26 @@ impl PackLoader {
                     filters.festivals = Some(f.clone());
                 }
             }
+        }
+    }
+
+    pub fn get_trail_params(&self) -> impl Future<Output = TrailParams> + Send + 'static {
+        let settings = self.settings.clone();
+        settings.read_owned().map(|settings|
+            Self::trail_params_for(&settings.pathing())
+        )
+    }
+    pub async fn trail_params(&self) -> TrailParams {
+        let settings = self.settings.read().await;
+        Self::trail_params_for(&settings.pathing())
+    }
+    pub fn trail_params_for(pathing: &PathingSettings) -> TrailParams {
+        let space = &pathing.space;
+        TrailParams {
+            resolution: Some(space.trail_resolution()),
+            y_offset: space.trail_y_offset().unwrap_or(0.0),
+            width: space.trail_width(),
+            smoothing: TrailParams::DEFAULT.smoothing,
         }
     }
 }

@@ -16,7 +16,9 @@ use {
             pack::PackRenderData,
         },
         TEXTURES,
-    }, anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::mem, taimi_d3d::{
+    },
+    taimi_meta::packs::id::{MarkerId, MarkerIndex},
+    anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::mem, taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
@@ -24,6 +26,7 @@ use {
         state::PrimitiveTopology,
     }, taimi_meta::ui::LocalContext,
     taimi_pack::attributes::AttrString,
+    super::PackRenderState,
 };
 
 pub struct PoiCommonRenderData {
@@ -297,6 +300,12 @@ impl PoiRender {
     pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, lpoi: Option<LoadedPoiRef<'_>>) {
         let icon_name = lpoi.as_ref().and_then(|lpoi| lpoi.poi_attrs().icon_file.as_ref());
         SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name);
+    }
+    pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState) -> bool {
+        if self.icon.is_none() && self.icon_handle.is_none() {
+            draw_state.drawn_incomplete.insert(id.clone());
+        }
+        false
     }
 
     pub fn instance_data(&self, poi: &LoadedPoiRef) -> InstanceBufferData {

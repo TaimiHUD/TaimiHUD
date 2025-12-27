@@ -36,7 +36,7 @@ locator_ns! {
         }
     }
 
-    pub struct PackTrailSectionNs;
+    pub struct TrailSectionNs;
     impl LocatorNamespace {
         pub index TrailSectionIndex = u16;
         pub path TrailSectionPath;

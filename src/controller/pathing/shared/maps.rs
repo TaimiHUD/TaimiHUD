@@ -426,13 +426,18 @@ impl SharedMapPackLoaded {
             trails: map_pack.trails.iter().map(|trail| trail.info().clone()).collect(),
         }
     }
-    pub fn update_with(&mut self, map_pack: &LoadedMapPack) {
+    pub fn update_with_info(&mut self, info: &Arc<MapPackInfo>) -> bool {
+        ArcPtrCmp::from_mut(&mut self.info).clone_from_arc(info)
+    }
+    /// TODO: only if dirty
+    pub fn update_with(&mut self, map_pack: &LoadedMapPack) -> bool {
         #[cfg(todo)] {
             self.interactive_pois = map_pack.interactive_pois.clone();
             self.poi_guids = map_pack.poi_guids.clone();
         }
         self.pois = map_pack.pois.iter().map(|poi| poi.info().clone()).collect();
         self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
+        true
     }
 
     #[cfg(todo)]
@@ -1095,8 +1100,7 @@ impl<'a> ops::Deref for LoadedTrailRef<'a> {
 
 impl PathingShared {
     /// TODO: consider how/when this isn't dirty?
-    pub fn update_map(&self, path: PackMapPath, map_info: &Arc<MapPackInfo>, map: &LoadedMapPack, notify: bool) -> bool {
-        let info = SharedMapPackLoaded::with_loaded(path, map_info.clone(), map);
+    pub(crate) fn update_map(&self, path: PackMapPath, map_info: &Arc<MapPackInfo>, map: &LoadedMapPack, notify: bool) -> bool {
         let state = SharedMapPackState::with_static(path, map);
         let mut dirty = false;
         #[cfg(todo)]
@@ -1122,12 +1126,34 @@ impl PathingShared {
             } else {
                 *shared = Some(state);
             }
-            if let Some(ref mut shared_info) = shared_info {
-                shared_info.clone_from(&info);
-            } else {
-                *shared_info = Some(info);
-            }
             dirty |= true;
+            match shared_info {
+                #[cfg(todo = "unnecessary")]
+                Some(ref mut shared_info) =>
+                    shared_info.clone_from(&info),
+                Some(ref mut shared_info) => {
+                    dirty |= shared_info.update_with_info(map_info);
+                    dirty |= shared_info.update_with(map);
+                },
+                shared_info => {
+                    *shared_info = Some(
+                        SharedMapPackLoaded::with_loaded(path, map_info.clone(), map)
+                    );
+                    dirty = true;
+                },
+            }
+            dirty && notify
+        });
+        dirty
+    }
+    pub fn update_map_info(&self, path: PackMapPath, info: &Arc<MapPackInfo>, notify: bool) -> bool {
+        let mut dirty = false;
+        self.gameplay.send_if_modified(move |shared_map| {
+            let Some(shared_map) = shared_map.get_mut(path.path) else { return false };
+            let Some(Some(shared_info)) = shared_map.info.lookup_mut(&path.root) else {
+                return false
+            };
+            dirty |= shared_info.update_with_info(info);
             dirty && notify
         });
         dirty

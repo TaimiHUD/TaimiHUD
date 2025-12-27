@@ -1,26 +1,24 @@
 use {
     crate::{
         controller::{
-            Controller,
             pathing::{
-                registry::ActivePack,
-                space::{SpacePack, TrailParams},
-                state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry, LoadedTrailSectionInfo, LoadedTrailGeometrySection},
-                shared::SharedPackInfo,
-            },
+                registry::{ActivePack, LoadedTrailPath, LoadedMarkerPath}, shared::SharedPackInfo, space::{SpacePack, TrailParams}, state::visible::{LoadedPoi, LoadedTrail, LoadedTrailGeometry, LoadedTrailGeometrySection, LoadedTrailSectionInfo},
+                shared::{SharedResourceRequests, SharedResourceRequestsTx},
+            }, Controller
         },
         exports::runtime::{
             self as rt,
             textures::{TextureKey, TextureSlot},
         },
-        space::pack::{TrailRender, PoiRender},
+        space::pack::{PoiRender, TrailRender},
         TEXTURES,
     },
     anyhow::Context,
     futures::future::Either,
-    std::sync::Arc,
-    taimi_meta::packs::{PoiPath, TrailPath},
+    std::{collections::{btree_map, BTreeMap}, sync::Arc},
+    taimi_meta::packs::{MarkerId, PackMapPath, PoiPath, TrailPath},
     taimi_pack::{attributes::{AttrString, RenderAttributes}, Poi as PackPoi},
+    taimi_sync::watched::Watcher,
 };
 
 pub struct SpaceLoader<'a> {
@@ -47,8 +45,8 @@ impl<'a> SpaceLoader<'a> {
         };
         format!("{name}{texture}")
     }
-    pub fn register_texture(&mut self, texture: &AttrString) -> SpaceTextureHandle {
-        let key = self.texture_key(texture);
+    pub fn register_texture(info: &SharedPackInfo, texture: &AttrString) -> SpaceTextureHandle {
+        let key = info.key_for_subresource(texture);
         let tex = TEXTURES.lookup_pair_with(&key, |canon, tex| canon.map(|canon| {
             let tex = (!tex.is_loading() && !tex.can_load()).then_some(tex.clone());
             (canon.clone(), tex)
@@ -86,7 +84,7 @@ impl<'a> SpaceLoader<'a> {
         Self::get_texture(key, slot)
     }
 
-    pub fn get_or_load_texture(&mut self, (mut key, tex): SpaceTextureHandle) -> (TextureKey, Option<TextureSlot>) {
+    pub fn get_or_load_texture(loader: &mut dyn taimi_pack::loader::PackLoaderContext, (mut key, tex): SpaceTextureHandle) -> (TextureKey, Option<TextureSlot>) {
         let name = match tex {
             Ok(TextureSlot::Loading) => return (key, None),
             Ok(slot) => return (key, Some(slot)),
@@ -97,12 +95,12 @@ impl<'a> SpaceLoader<'a> {
             },
         };
 
-        let data = if let Some(path) = self.loader.asset_absolute_path(&name[..]) {
+        let data = if let Some(path) = loader.asset_absolute_path(&name[..]) {
             Some(path)
         } else { None };
         let data = match data {
             None => {
-                let res = self.loader.load_asset_dyn(&name[..]).and_then(|mut asset| {
+                let res = loader.load_asset_dyn(&name[..]).and_then(|mut asset| {
                         let mut bytes = Vec::new();
                         asset.read_to_end(&mut bytes)
                             .map(move |_amt| bytes)
@@ -112,6 +110,7 @@ impl<'a> SpaceLoader<'a> {
                     Ok(bytes) => Either::Left(bytes),
                     Err(e) => {
                         log::error!("{e:#}");
+                        TEXTURES.report_failure(key.clone());
                         return (key, Some(TextureSlot::Unavailable))
                     },
                 }
@@ -196,6 +195,7 @@ impl SpaceTrailBuilder {
             attrs: pack_trail.attributes.render.clone().unwrap_or_default(),
         })
     }
+    #[cfg(deleteme)]
     pub async fn read_from_pack(path: TrailPath, active: &ActivePack, trail: &mut LoadedTrail, params: TrailParams) -> anyhow::Result<Self> {
         let Some(pack_trail) = active.pack.trails.get(path.path as usize) else {
             anyhow::bail!("expected trail to exist")
@@ -219,6 +219,7 @@ impl SpaceTrailBuilder {
     }
 
     /// Also indicates if `trail` was [populated](LoadedTrail::populate_data) with section metadata
+    #[cfg(deleteme)]
     pub async fn load_from_pack(path: TrailPath, active: Arc<ActivePack>, mut trail: LoadedTrail, params: TrailParams) -> (anyhow::Result<Self>, LoadedTrail, bool) {
         let sections_prev = trail.section_info.sections.as_ref().map(|s| Arc::as_ptr(s) as *const () as usize);
         let setup = Self::read_from_pack(path, &active, &mut trail, params).await
@@ -231,3 +232,8 @@ impl SpaceTrailBuilder {
         }
     }
 }
+
+pub type TrailGeometryRequests = SharedResourceRequests<LoadedTrailPath<PackMapPath>, LoadedTrailGeometry>;
+pub type TrailGeometryRequestsTx = SharedResourceRequestsTx<LoadedTrailPath<PackMapPath>, LoadedTrailGeometry>;
+pub type TextureLoadRequests = SharedResourceRequests<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;
+pub type TextureLoadRequestsTx = SharedResourceRequestsTx<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;

@@ -241,8 +241,6 @@ impl SpacePackCollection {
         SpacePackCollection {
             map_id: None,
             loaded_packs: Default::default(),
-            #[cfg(todo)]
-            render_list: RenderListBuilder::default().build(),
             render_entities: SpaceEntities::new(),
             bvh: Bvh { nodes: Vec::new() },
         }
@@ -327,7 +325,7 @@ impl SpacePackCollection {
                 let path = map_path.rel(marker_path.path);
                 (MarkerId::for_marker(path), lpoi.bounds(), lpoi.position())
             });
-            let trails = map.ltrails().into_iter().flat_map(move |(ltrail_path, ltrail)| ltrail.section_info.trail_section_bounds().map(move |(section_path, bounds)| {
+            let trails = map_info.trail_info.iter().flat_map(move |(ltrail_path, ltrail)| ltrail.section_bounds().map(move |(section_path, bounds)| {
                 let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
                 let marker_path: MarkerPath = ts_path.pivot_to();
                 let path = map_path.rel(marker_path.path);

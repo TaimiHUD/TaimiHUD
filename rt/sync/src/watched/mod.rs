@@ -31,8 +31,24 @@ impl<T> Watcher<T> {
         this.set_sender(watch);
         this
     }
+
     pub fn subscribe_to(sender: &watch::Sender<T>) -> Self {
         Self::with_sender(sender.clone())
+    }
+    pub fn start_watching(sender: &watch::Sender<T>) -> Self {
+        let mut this = Self::subscribe_to(sender);
+        let _ = this.try_mark_changed();
+        this
+    }
+    pub fn resubscribe_to(&mut self, sender: &watch::Sender<T>) {
+        self.set_sender(sender.clone());
+    }
+    pub fn restart_watching(&mut self, sender: &watch::Sender<T>) {
+        self.resubscribe_to(sender);
+        let _ = self.try_mark_changed();
+    }
+    pub fn is_watching(&self) -> bool {
+        self.get_receiver().is_some()
     }
 
     pub fn watched(&self) -> Watched<T>
@@ -301,12 +317,10 @@ impl<T: Clone> Watched<T> {
         Self::new_with_watcher(Watcher::subscribe_to(sender))
     }
     pub fn start_watching(sender: &watch::Sender<T>) -> Self {
-        let mut watched = Self::new_with_watcher(Watcher::subscribe_to(sender));
-        watched.mark_changed();
-        watched
+        Self::new_with_watcher(Watcher::start_watching(sender))
     }
     pub fn resubscribe_to(&mut self, sender: &watch::Sender<T>) {
-        self.watch = Watcher::subscribe_to(sender);
+        self.watch.resubscribe_to(sender);
         self.cached = None;
     }
     pub fn restart_watching(&mut self, sender: &watch::Sender<T>) {

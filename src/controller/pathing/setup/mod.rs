@@ -1,9 +1,11 @@
+use super::registry::SharedLoaderBox;
+
 use {
     crate::{
         controller::pathing::{
             PathingController, PathingEvent,
             visible::LoadedMapPack,
-            shared::{SharedPackInfo, SharedPackLoad, PathingShared, MapPackInfo},
+            shared::{SharedPackInfo, SharedPackLoad, PathingShared, MapPackInfo, SharedPackLoaded},
             registry::{PackLoader, PackActivateContext, UnloadedReason, PackInfo},
         },
         exports::runtime as rt,
@@ -11,6 +13,7 @@ use {
         render::{machine::RenderTaskPriority, RenderState},
         settings::{Settings, SettingsLock, SourceKind},
     }, anyhow::Context, futures::StreamExt, std::sync::Arc,
+    taimi_sync::watched::watch,
     taimi_hoard::loc::{Locator, LocationRef},
     taimi_meta::packs::{PackPath, PackMapPath, MapIndex, collections::PackSet},
     taimi_pack::Pack,
@@ -118,7 +121,12 @@ impl PathingController {
     ///
     /// unless reentering, which indicates leave+enter will immediately follow
     pub(super) fn handle_map_suspend(&mut self, reentering_urgent: bool) {
-        self.space.packs.clear();
+        match &mut self.space.packs {
+            #[cfg(todo = "unnecessary")]
+            packs => Arc::make_mut(packs).clear(),
+            packs =>
+                *packs = Arc::new(Default::default()),
+        };
         if !reentering_urgent {
             self.maps.prune(Some(&self.map_info));
         }
@@ -250,6 +258,28 @@ impl PathingController {
             Err(Some(e)),
         )));
         Ok(PathingEvent::Nop)
+    }
+
+    /// TODO: move this to a SharedPacks method?
+    fn pack_loader_if_loaded(manager: &PackLoader, path: PackPath) -> Option<Result<SharedLoaderBox, watch::Receiver<SharedPackLoaded>>> {
+        let mut loaded = manager.shared.packs.packs.borrow().lookup_ref(&path)?.loaded.subscribe();
+        let loader = loaded.borrow_and_update().loader.clone();
+        Some(match loader {
+            Some(loader) => Ok(loader),
+            None => Err(loaded),
+        })
+    }
+    /// TODO: move this to a PackLoader or SharedPacks method?
+    pub(super) async fn pack_loader_for(manager: &PackLoader, path: PackPath) -> anyhow::Result<SharedLoaderBox> {
+        let loader = Self::pack_loader_if_loaded(manager, path)
+            .with_context(|| format!("{path} unrecognized?"))?;
+        match loader {
+            Ok(l) => Ok(l),
+            Err(loaded) => {
+                anyhow::bail!("TODO: request loader for {path} idk");
+                // TODO: loaded.watch_for(|| loader).timeout(1minuteidk)
+            },
+        }
     }
 }
 #[cfg(todo)]

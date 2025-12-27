@@ -662,6 +662,7 @@ impl Engine {
                 let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
                 let entities = self.packs.render_list.iter_markers_map(self.packs.pack_data.map_ref_as_slice(), map_ctx, &map_query);
                 PackRender::draw_map_entities(
+                    &mut self.packs.draw_state,
                     &self.packs.poi_common,
                     &device_context,
                     &backend,
