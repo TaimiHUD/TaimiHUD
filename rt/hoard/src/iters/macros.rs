@@ -83,6 +83,7 @@ macro_rules! impl_iter_wrap {
             )?
             $(fn $($inner_iter)+)?
         }
+        $(impl_iter_wrap!{$($rest)*})?
     };
     (
         impl{$($imp:tt)*} DoubleEndedIterator for $ty:ty, $iter_map:ty
@@ -119,6 +120,25 @@ macro_rules! impl_iter_wrap {
                 }
             )?
             $(fn $($inner_double)+)?
+        }
+        $(impl_iter_wrap!{$($rest)*})?
+    };
+    (
+        impl{$($imp:tt)*} &IntoIterator<Clone> for $ty:ty
+            $(where{$($where:tt)*})?
+        {
+        }
+        $($($rest:tt)+)?
+    ) => {
+        impl<$($imp)*> ::core::iter::IntoIterator for &'_ $ty where
+            $ty: ::core::iter::Iterator + ::core::clone::Clone,
+            $($($where)*)?
+        {
+            type IntoIter = $ty;
+            type Item = <$ty as ::core::iter::Iterator>::Item;
+            fn into_iter(self) -> Self::IntoIter {
+                ::core::clone::Clone::clone(self)
+            }
         }
         $(impl_iter_wrap!{$($rest)*})?
     };

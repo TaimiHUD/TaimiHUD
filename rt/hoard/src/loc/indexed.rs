@@ -542,6 +542,7 @@ impl_iter_wrap! {
     {
         let iter = |&this| &this.iter;
     }
+    impl{N, I} &IntoIterator<Clone> for LocatorRelIter<N, I> {}
 }
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocatorRelIter0<N, I> {
@@ -599,7 +600,7 @@ impl_iter_wrap! {
         }
     {
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| Self::map_item(item);
+        let item = |&mut _this, item| Self::map_item(item);
     }
     impl{N: Clone, I} ExactSizeIterator for LocatorRelIter0<N, I>, I
         where{
@@ -608,6 +609,7 @@ impl_iter_wrap! {
     {
         let iter = |&this| &this.iter.iter;
     }
+    impl{N, I} &IntoIterator<Clone> for LocatorRelIter0<N, I> {}
 }
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -664,7 +666,7 @@ impl_iter_wrap! {
         }
     {
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| LocatorPathAs::<P, _>::new(item).path_as();
+        let item = |&mut _this, item| LocatorPathAs::<P, _>::new(item).path_as();
     }
     impl{P, I} ExactSizeIterator for LocatorPathAs<P, I>, I
         where{
@@ -673,6 +675,7 @@ impl_iter_wrap! {
     {
         let iter = |&this| &this.iter;
     }
+    impl{P, I} &IntoIterator<Clone> for LocatorPathAs<P, I> {}
 }
 
 #[derive(Debug, Default, Clone)]
@@ -738,7 +741,7 @@ impl_iter_wrap! {
         }
     {
         let iter = |&mut this| &mut this.iter;
-        let item = |&mut this, item| Self::map_item(item);
+        let item = |&mut _this, item| Self::map_item(item);
     }
     impl{P, I} ExactSizeIterator for EnumerateAs<P, I>, iter::Enumerate<I>
         where{
@@ -748,6 +751,7 @@ impl_iter_wrap! {
     {
         let iter = |&this| &this.iter;
     }
+    impl{P, I} &IntoIterator<Clone> for EnumerateAs<P, I> {}
 }
 
 #[derive(Debug, Default, Clone)]
@@ -826,8 +830,8 @@ impl_iter_wrap! {
             Self::map_item(item, self.prefix.next_back())
         }
         fn nth_back(&mut self, n: usize) -> Option<<Self as Iterator>::Item> {
-            let item = self.iter.nth_back(i)?;
-            Self::map_item(item, self.prefix.nth_back(i))
+            let item = self.iter.nth_back(n)?;
+            Self::map_item(item, self.prefix.nth_back(n))
         }
     }
     impl{P, I} ExactSizeIterator for ZipPrefix<P, I>, I
@@ -839,6 +843,7 @@ impl_iter_wrap! {
     {
         let iter = |&this| &this.iter;
     }
+    impl{P, I} &IntoIterator<Clone> for ZipPrefix<P, I> {}
 }
 
 #[derive(Debug, Default, Clone)]
