@@ -1066,6 +1066,7 @@ impl PackRender {
             self.texture_rx.subscribe_to(&pathing.space.texture_loads);
         }
         if packs_rx.has_changed().unwrap_or(false) {
+            log::debug!("PATHY: packs changed");
             let packs = packs_rx.borrow_and_update();
             if self.pack_data.len() < packs.len() {
                 log::debug!("PATHY: space packs resized to {}", packs.len());
@@ -1281,6 +1282,8 @@ impl PackRender {
             self.texture_rx.request_many(incomplete_textures);
         }
         self.draw_state.clear_active();
+        // TODO: rewrite this ib stuff because len depends on both poi info being uptodate *and* knowing if any packs have non-empty trails (while poi buffer empty)...
+        // TODO: also skip or dealloc when mapid none and stuff
         let mut ibs_dirty = false;
         if self.pack_data.values().any(|p| p.render_poi_bookmarks().len() != p.pois.len()) {
             self.allocate_poi_buffers(1);
@@ -1291,7 +1294,13 @@ impl PackRender {
         let ib_len = self.poi_common.ib_len();
         ibs_dirty |= ib_pack_len != ib_len;
         if self.poi_common.is_empty() || ibs_dirty {
+            let ib_empty = self.poi_common.is_empty();
+            log::debug!("PATHY IBS needs creation: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}");
             self.recreate_buffers(device, machine)?;
+            let ib_empty = self.poi_common.is_empty();
+            let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
+            let ib_len = self.poi_common.ib_len();
+            log::debug!("PATHY IBS: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}");
         }
 
         Ok(map_id.is_some())
@@ -1378,6 +1387,8 @@ impl PackRender {
             frustum,
             camera,
         );
+        #[cfg(deleteme)]
+        let entities = self.render_list.iter_markers_all(self.pack_data.map_ref_as_slice());
         Self::draw_entities(
             &mut self.draw_state,
             &self.poi_common,

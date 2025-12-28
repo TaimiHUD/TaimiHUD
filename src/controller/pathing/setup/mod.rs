@@ -49,6 +49,10 @@ pub use self::{
 mod config;
 
 impl PathingController {
+    #[cfg(deleteme)]
+    pub(super) async fn handle_pack_loaded(&mut self, path: PackPath, loaded: Result<PackActivateLoaded, Option<UnloadedReason>>) {
+    }
+
     pub(super) fn preload_all(&self) -> impl Future<Output = ()> + Send + 'static {
         Self::do_preload_all(self.loader.clone())
     }

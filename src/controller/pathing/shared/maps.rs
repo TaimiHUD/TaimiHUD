@@ -678,6 +678,7 @@ impl LoadedPoiShared {
 #[derive(Debug, Clone, Default)]
 pub struct LoadedTrailShared {
     pub visibility: VisibilityFlags,
+    /// TODO: deleteme aaaa
     pub section_info: Arc<LoadedTrailGeometryInfo>,
 }
 impl LoadedTrailShared {
