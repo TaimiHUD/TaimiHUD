@@ -119,9 +119,12 @@ impl SharedGameplayMap {
         self.clear();
         self.map_id = map_id;
     }
-    pub fn prepare_for_map(&mut self, map_id: Option<MapIndex>) {
+    pub fn prepare_for_map(&mut self, map_id: Option<MapIndex>) -> bool {
         if self.map_id != map_id {
             self.clear_for(map_id);
+            true
+        } else {
+            false
         }
     }
 
@@ -1119,7 +1122,7 @@ impl PathingShared {
             });
         }
         self.gameplay.send_if_modified(move |shared_map| {
-            shared_map.prepare_for_map(Some(path.path));
+            dirty |= shared_map.prepare_for_map(Some(path.path));
             let (shared_info, shared) = shared_map.for_mut(path);
             if let Some(ref mut shared) = shared {
                 shared.clone_from(&state);
@@ -1168,6 +1171,11 @@ impl PathingShared {
     pub fn update_gameplay_notify(&self, map_id: MapIndex) -> bool {
         self.gameplay.send_if_modified(|shared_map| {
             shared_map.map_id == Some(map_id)
+        })
+    }
+    pub fn update_map_id(&self, map_id: Option<MapIndex>, notify: bool) -> bool {
+        self.gameplay.send_if_modified(|shared_map| {
+            shared_map.prepare_for_map(map_id) && notify
         })
     }
 

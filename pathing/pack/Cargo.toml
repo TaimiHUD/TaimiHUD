@@ -35,6 +35,7 @@ fixup-ladyelyssa = []
 fixup-tehstrails = []
 
 [dependencies]
+taimi_hoard = { path = "../../rt/hoard" }
 anyhow = "1"
 log = "0.4"
 # TODO? tokio = { version = "1", features = [ "fs", "macros" ] }
@@ -54,4 +55,3 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 env_logger = "0.11"
-taimi_hoard = { path = "../../rt/hoard" }

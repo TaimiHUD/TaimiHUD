@@ -138,6 +138,17 @@ impl PathingController {
         match path.path.variant() {
             MarkerIndexVariant::Poi(poii) => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
+                match map.lpois().lookup_ref(&lpath) {
+                    None => {
+                        log::error!("PATHY: missing {lpath} on {}", map.map_id);
+                    },
+                    Some(lpoi) => {
+                        if lpoi.poi_attrs().icon_file.is_none() {
+                            log::error!("PATHY: missing icon on {lpath}???");
+                            log::error!("{:?}", lpoi.render_attrs());
+                        }
+                    }
+                }
                 map.lpois().lookup_ref(&lpath)?.poi_attrs().icon_file.as_ref()
             },
             MarkerIndexVariant::Trail(traili) | MarkerIndexVariant::TrailSection(traili, _) => {
@@ -160,7 +171,7 @@ impl PathingController {
             return
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
-            let texture = self.maps.lookup_ref(&path.root).and_then(|map| Self::texture_for_loaded_marker(map, path.unscope()).cloned());
+            let texture = self.maps.lookup_ref(&path.root).map(|map| Self::texture_for_loaded_marker(map, path.unscope()).cloned());
             (path, texture)
         });
         let Some((path, texture)) = path else {
@@ -168,7 +179,10 @@ impl PathingController {
             self.space.inflight.remove(&id);
             return
         };
-        let load = Self::new_task_texture_load(self.loader.clone(), path, texture);
+        if texture.is_none() {
+            log::error!("maps missing {path} but tex requested???");
+        }
+        let load = Self::new_task_texture_load(self.loader.clone(), path, texture.flatten());
         let _cancel = self.tasks.spawn(load);
     }
     pub(super) fn request_trail_load(&mut self, id: MarkerId) {
@@ -213,7 +227,7 @@ impl PathingController {
             geometry,
             section_info,
         };
-        Ok(PathingEvent::ReportLoaded(response))
+        Ok(PathingEvent::ReportResourceLoaded(response))
     }
     async fn trail_load_geometry(manager: &PackLoader, path: Locator<PackMapPath, LoadedTrailPath>, loader: SharedLoaderBox, ctx: TrlLoadContext) -> anyhow::Result<(LoadedTrailGeometry, LoadedTrailSections)> {
         let (trl_path, scale, is_wall) = ctx;
@@ -261,7 +275,7 @@ impl PathingController {
             path,
             texture,
         };
-        Ok(PathingEvent::ReportLoaded(response))
+        Ok(PathingEvent::ReportResourceLoaded(response))
     }
 
     #[cfg(todo)]

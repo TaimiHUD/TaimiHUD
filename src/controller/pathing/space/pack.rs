@@ -320,18 +320,24 @@ impl SpacePackCollection {
             log::debug!("TODO: partial space rebuild");
             self.render_entities.remove_pack(path);
             // to iter of (marker_id, bounds, position)
-            let pois = map.lpois().into_iter().map(|(lpoi_path, lpoi)| {
+            let pois = map.lpois().into_iter()
+                .filter(|(_, lpoi)| lpoi.visibility.is_visible())
+                .map(|(lpoi_path, lpoi)| {
                 let marker_path: MarkerPath = lpoi_path.pivot_to();
                 let path = map_path.rel(marker_path.path);
                 (MarkerId::for_marker(path), lpoi.bounds(), lpoi.position())
             });
-            let trails = map_info.trail_info.iter().flat_map(move |(ltrail_path, ltrail)| ltrail.section_bounds().map(move |(section_path, bounds)| {
-                let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
-                let marker_path: MarkerPath = ts_path.pivot_to();
-                let path = map_path.rel(marker_path.path);
-                let pos = bounds.center();
-                (MarkerId::for_marker(path), bounds, pos)
-            }));
+            let trails = map.ltrails().into_iter()
+                .zip(map_info.trail_info.data.iter());
+            let trails = trails
+                .filter(|((_, ltrail), _)| ltrail.visibility.is_visible())
+                .flat_map(move |((ltrail_path, _ltrail), trail_info)| trail_info.section_bounds().map(move |(section_path, bounds)| {
+                    let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
+                    let marker_path: MarkerPath = ts_path.pivot_to();
+                    let path = map_path.rel(marker_path.path);
+                    let pos = bounds.center();
+                    (MarkerId::for_marker(path), bounds, pos)
+                }));
             ents.extend(pois.chain(trails));
         }
         self.render_entities.extend(ents);

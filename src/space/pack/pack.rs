@@ -18,7 +18,9 @@ use {
             dx11::{InstanceBufferData, RenderBackend}, pack::{PoiRender, TrailRender}, render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder}, resources::Texture, DrawSpace
         },
         with_i18n,
-    }, anyhow::{anyhow, Context}, bitvec::vec::BitVec, bvh::aabb, glamour::{Box3, Point3}, indexmap::IndexMap, rustc_hash::FxHashSet, std::{collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet}, fs::{create_dir_all, read_dir}, mem, ops, path::Path, sync::{
+    },
+    taimi_meta::packs::MapIndex,
+    anyhow::{anyhow, Context}, bitvec::vec::BitVec, bvh::aabb, glamour::{Box3, Point3}, indexmap::IndexMap, rustc_hash::FxHashSet, std::{collections::{BTreeMap, BTreeSet, BinaryHeap, HashSet}, fs::{create_dir_all, read_dir}, mem, ops, path::Path, sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
         }}, taimi_d3d::dx11::{buffer::BufferOf, prelude::*}, taimi_hoard::{iters::IterExt as _, loc::{indexed::IndexedList, LocationMut, LocationRef}, statistics::Counter}, taimi_meta::{packs::{id::{MarkerIndexVariant, MarkerId, MarkerIndex}, PackMapPath, PackPoiNs, PackTrailNs, PoiIndex, TrailIndex, TrailSectionPath}, spatial::box3aabb, ui::{LocalContext, MapContext}}, taimi_pack::{
@@ -1036,7 +1038,11 @@ impl PackRender {
         self.mark_buffers_dirty();
     }
 
-    pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
+    /// `Ok(false)` if not ready to render
+    ///
+    /// won't render if not in a map, or if too early in load and
+    /// more setup may be pending
+    pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<bool> {
         let Some(pathing) = &machine.pathing else {
             anyhow::bail!("no shared data")
         };
@@ -1074,7 +1080,11 @@ impl PackRender {
         if let Some(spacepacks) = self.spacepacks.try_read_if_changed() {
             ArcPtrCmp::from_mut(&mut self.render_list.spacepacks).clone_from_arc(&*spacepacks);
         }
-        let map_id = self.render_list.spacepacks.map_id;
+        let map_id = match self.render_list.spacepacks.map_id {
+            map_id if map_id != machine.is_ingame() =>
+                None,
+            map_id => map_id,
+        };
         if let Some(map_id) = map_id {
             if packs_map.has_changed().unwrap_or(false) {
                 let packs_map = packs_map.borrow_and_update();
@@ -1098,9 +1108,27 @@ impl PackRender {
                             pack.trails.resize_with(trail_len, TrailRender::empty);
                         }
 
-                        if let Some(map) = maps.get_state(packmap_path) {
-                            pack.map_state = map.clone();
+                        let map = maps.get_state(packmap_path);
+                        if let Some(map) = map {
+                            pack.map_state.clone_from(map);
+
+                            let empty_trails = pack.trails.iter()
+                                .filter(|(path, trail)| {
+                                    if !trail.is_empty() { return false }
+                                    if map_info.info.is_trail_info_loaded(*path) { return false }
+                                    if let Some(ltrail) = map.trails().lookup_ref(path) {
+                                        if !ltrail.visibility.is_visible() { return false }
+                                    }
+                                    true
+                                });
+                            for (ltrail_path, _trail) in empty_trails {
+                                // schedule geometry load imminently
+                                let ltrail_path = packmap_path.rel(ltrail_path.path);
+                                self.draw_state.drawn_incomplete.insert(SpacePackShared::trail_geometry_id(&ltrail_path));
+                            }
                         }
+
+
                         #[cfg(todo)]
                         for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info)) {
                             poi.update(device, &pack.info, Some(lpoi))
@@ -1204,21 +1232,41 @@ impl PackRender {
                 let pack_data = self.pack_data.lookup_mut(&path.root.root);
                 match path.path.variant() {
                     MarkerIndexVariant::Poi(poii) => {
-                        incomplete_textures.insert(path);
-                        if let Some(pack_data) = pack_data {
+                        let has_texture = pack_data.and_then(|pack_data| {
                             let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
-                            if let Some(poi) = pack_data.pois.lookup_mut(&lpath) {
-                                poi.update(device, &pack_data.info, None);
+                            let info = &pack_data.info;
+                            match pack_data.pois.lookup_mut(&lpath) {
+                                Some(poi) if poi.needs_texture_info() =>
+                                    None,
+                                poi => poi.map(move |r| (info, r)),
                             }
+                        });
+                        match has_texture {
+                            Some((pack_info, poi)) => {
+                                poi.update(device, pack_info, None);
+                            },
+                            None => {
+                                incomplete_textures.insert(path);
+                            },
                         }
                     },
                     MarkerIndexVariant::Trail(traili) => {
-                        incomplete_textures.insert(path);
-                        if let Some(pack_data) = pack_data {
+                        let has_texture = pack_data.and_then(|pack_data| {
                             let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
-                            if let Some(trail) = pack_data.trails.lookup_mut(&lpath) {
-                                trail.update(device, &pack_data.info, None);
+                            let info = &pack_data.info;
+                            match pack_data.trails.lookup_mut(&lpath) {
+                                Some(trail) if trail.needs_texture_info() =>
+                                    None,
+                                trail => trail.map(move |r| (info, r)),
                             }
+                        });
+                        match has_texture {
+                            Some((pack_info, trail)) => {
+                                trail.update(device, pack_info, None);
+                            },
+                            None => {
+                                incomplete_textures.insert(path);
+                            },
                         }
                     },
                     MarkerIndexVariant::TrailSection(traili, _sectioni) => {
@@ -1239,11 +1287,14 @@ impl PackRender {
             ibs_dirty = true;
         }
         self.poi_common.update(device, machine, &self.pack_data)?;
+        let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
+        let ib_len = self.poi_common.ib_len();
+        ibs_dirty |= ib_pack_len != ib_len;
         if self.poi_common.is_empty() || ibs_dirty {
             self.recreate_buffers(device, machine)?;
         }
 
-        Ok(())
+        Ok(map_id.is_some())
     }
     fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         let res = self
@@ -1357,12 +1408,7 @@ impl PackRender {
                         let (t, s) = render_id.index_trail_section_unchecked();
                         LoadedTrailPath::with_path(t).rel(TrailSectionPath::with_path(s))
                     };
-                    let trail = match pack_data.trails.lookup_ref(&path.root) {
-                        Some(trail) if trail.report_incomplete(&marker_id, draw_state, path) =>
-                            continue,
-                        trail => trail,
-                    };
-                    let trail = trail.and_then(|trail|
+                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail|
                         pack_data.map_state.trails().lookup_ref(&path.root)
                         .map(|ltrail| (trail, ltrail))
                     );
@@ -1370,8 +1416,10 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(TODO)]
                     if !ltrail.visibility.is_visible_for_space() {
+                        continue
+                    }
+                    if trail.report_incomplete(&marker_id, draw_state, path) {
                         continue
                     }
                     if shader_state != ShaderState::Trail {
@@ -1391,7 +1439,6 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(TODO)]
                     if !lpoi.visibility.is_visible_for_space() {
                         continue
                     }
@@ -1438,12 +1485,7 @@ impl PackRender {
                         let (t, s) = render_id.index_trail_section_unchecked();
                         LoadedTrailPath::with_path(t).rel(TrailSectionPath::with_path(s))
                     };
-                    let trail = match pack_data.trails.lookup_ref(&path.root) {
-                        Some(trail) if trail.report_incomplete(&marker_id, draw_state, path) =>
-                            continue,
-                        trail => trail,
-                    };
-                    let trail = trail.and_then(|trail|
+                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail|
                         pack_data.map_state.trails().lookup_ref(&path.root)
                         .map(|ltrail| (trail, ltrail))
                     );
@@ -1451,8 +1493,10 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(TODO)]
                     if !ltrail.visibility.is_visible_for_map(map) {
+                        continue
+                    }
+                    if trail.report_incomplete(&marker_id, draw_state, path) {
                         continue
                     }
                     if shader_state == ShaderState::None {
@@ -1476,7 +1520,6 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(TODO)]
                     if !lpoi.visibility.is_visible_for_map(map) {
                         continue
                     }

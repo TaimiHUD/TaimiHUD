@@ -66,6 +66,8 @@ pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>
 #[derive(Debug, Display)]
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
+    ReloadPack(PackPath, bool),
+    UnloadPack(PackPath, bool),
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
@@ -73,7 +75,9 @@ pub(crate) enum PathingEvent {
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
     ApiBypass(Option<bool>),
-    ReportLoaded(space::LoadReport),
+    ReportResourceLoaded(space::LoadReport),
+    #[cfg(deleteme)]
+    ReportPackLoaded(PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>),
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
     Nop,
@@ -103,7 +107,11 @@ impl PathingController {
         let loader = rx.make_loader(settings.clone());
         Self {
             space: SpaceContext::subscribe_to(&loader.shared),
-            packs_rx: loader.shared.packs.packs.subscribe(),
+            packs_rx: {
+                let mut packs_rx = loader.shared.packs.packs.subscribe();
+                packs_rx.mark_changed();
+                packs_rx
+            },
             rx,
             loader,
             controls: CONTROLS.subscribe_controls(),
@@ -153,72 +161,6 @@ impl PathingController {
                     None => (),
                 }
             },
-            Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
-                Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
-                    None | Some(PathingEvent::Nop) => (),
-                    Some(m) =>
-                        return self.handle_message(m).await,
-                },
-                Err(e) => crate::log_join_error("pathing", e),
-            },
-            _ = self.space.maps_rx.changed() => {
-                log::info!("PATHY: gameplay maps rx");
-                if let Some(map_id) = gameplay_prev.gameplay_map() {
-                    let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
-                        Arc::make_mut(&mut self.space.packs).rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
-                        log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
-                        true
-                    } else {
-                        self.space.packs.needs_bvh_rebuild()
-                    };
-                    let space_dirty = bvh_dirty;
-                    if bvh_dirty {
-                        log::info!("PATHY: space dirty");
-                        Arc::make_mut(&mut self.space.packs).rebuild_bvh();
-                    }
-                    if space_dirty {
-                        let new_copy = self.space.packs.clone();
-                        self.loader.shared.space.collection.send_if_modified(|shared| {
-                            *shared = new_copy;
-                            true
-                        });
-                    }
-                }
-            },
-            trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
-                for trail in trail_reqs {
-                    log::debug!("processing trail req {trail}");
-                    let id = SpacePackShared::trail_geometry_id(&trail);
-                    self.request_trail_load(id);
-                }
-            },
-            texture_reqs = SpaceContext::recv_texture_requests(&mut self.space.texture_loads, &self.space.inflight) => {
-                for path in texture_reqs {
-                    log::debug!("processing tex req {path}");
-                    let id = MarkerId::for_marker(path);
-                    self.request_texture_load(id);
-                }
-            },
-            _ = self.rx.festivals.changed() => {
-                self.provide_disabled_paths().await;
-            },
-            controls = self.controls.wait() => match controls {
-                Err(e) => log::error!("Control bindings error! {e:#}"),
-                Ok((&controls_state, controls_changed)) => {
-                    self.handle_presses(controls_state, controls_changed).await;
-                },
-            },
-            keybinds = self.keybinds.wait() => match keybinds {
-                Err(e) => log::error!("Keybind receive error! {e:#}"),
-                Ok((binds_state, binds_changed)) => {
-                    self.handle_keybinds(binds_state, binds_changed).await;
-                },
-            },
-            gameplay = self.rx.gameplay.when_changed() => {
-                let gameplay = *gameplay;
-                let trans = gameplay.latest_transition_from(gameplay_prev);
-                self.handle_gameplay(gameplay, trans).await;
-            },
             Ok(_) = self.packs_rx.changed() => {
                 let (pack_count, packs_dirty, configs_dirty) = {
                     let packs = self.packs_rx.borrow_and_update();
@@ -253,6 +195,72 @@ impl PathingController {
                 for path in &configs_dirty {
                     self.reload_config_for(path);
                 }
+            },
+            gameplay = self.rx.gameplay.when_changed() => {
+                let gameplay = *gameplay;
+                let trans = gameplay.latest_transition_from(gameplay_prev);
+                self.handle_gameplay(gameplay, trans).await;
+            },
+            Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
+                Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
+                    None | Some(PathingEvent::Nop) => (),
+                    Some(m) =>
+                        return self.handle_message(m).await,
+                },
+                Err(e) => crate::log_join_error("pathing", e),
+            },
+            trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
+                for trail in trail_reqs {
+                    log::debug!("processing trail req {trail}");
+                    let id = SpacePackShared::trail_geometry_id(&trail);
+                    self.request_trail_load(id);
+                }
+            },
+            texture_reqs = SpaceContext::recv_texture_requests(&mut self.space.texture_loads, &self.space.inflight) => {
+                for path in texture_reqs {
+                    log::debug!("processing tex req {path}");
+                    let id = MarkerId::for_marker(path);
+                    self.request_texture_load(id);
+                }
+            },
+            Ok(_) = self.space.maps_rx.changed() => {
+                log::info!("PATHY: gameplay maps rx");
+                if let Some(map_id) = gameplay_prev.gameplay_map() {
+                    let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
+                        Arc::make_mut(&mut self.space.packs).rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                        log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
+                        true
+                    } else {
+                        self.space.packs.needs_bvh_rebuild()
+                    };
+                    let space_dirty = bvh_dirty;
+                    if bvh_dirty {
+                        log::info!("PATHY: space dirty");
+                        Arc::make_mut(&mut self.space.packs).rebuild_bvh();
+                    }
+                    if space_dirty {
+                        let new_copy = self.space.packs.clone();
+                        self.loader.shared.space.collection.send_if_modified(|shared| {
+                            *shared = new_copy;
+                            true
+                        });
+                    }
+                }
+            },
+            _ = self.rx.festivals.changed() => {
+                self.provide_disabled_paths().await;
+            },
+            controls = self.controls.wait() => match controls {
+                Err(e) => log::error!("Control bindings error! {e:#}"),
+                Ok((&controls_state, controls_changed)) => {
+                    self.handle_presses(controls_state, controls_changed).await;
+                },
+            },
+            keybinds = self.keybinds.wait() => match keybinds {
+                Err(e) => log::error!("Keybind receive error! {e:#}"),
+                Ok((binds_state, binds_changed)) => {
+                    self.handle_keybinds(binds_state, binds_changed).await;
+                },
             },
             Some((pack, config)) = self.pack_configs.next() => {
                 self.handle_config_change(pack, &config).await
@@ -616,13 +624,15 @@ impl PathingController {
             ReloadAll(remove) => self.reload_all(remove).await,
             #[cfg(deleteme)]
             UnloadAll => self.unload_all().await,
-            ReloadAll(..) | UnloadAll =>
+            ReloadAll(..) | UnloadAll | ReloadPack(..) | UnloadPack(..) =>
                 log::debug!("TODO: pathing load"),
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
-            ReportLoaded(loaded) => self.report_load(loaded).await,
+            ReportResourceLoaded(loaded) => self.report_load(loaded).await,
+            #[cfg(deleteme)]
+            ReportPackLoaded(path, loaded) => self.handle_pack_loaded(path, loaded).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
             Nop => (),
             #[cfg(debug_assertions)]

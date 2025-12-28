@@ -64,6 +64,7 @@ impl Trail {
                 attributes.try_add(attr.name.borrow(), attr.value)
             }
             .with_context(|| format!("Trail attribute '{}'", attr.name));
+            #[cfg(todo = "silence warnings")]
             match res {
                 Err(e) => log::warn!("{e:#}"),
                 Ok(false) => log::info!("unrecognized trail attribute `{}`", attr.name),

@@ -7,7 +7,7 @@ use {
         visible::{LoadedTrailGeometry, LoadedTrailSection},
     },
     std::iter,
-    bitvec::vec::BitVec, glamour::Box3, std::{mem, ops, sync::{Arc, LazyLock}}, taimi_hoard::{iters::IterExt as _, loc::indexed::IndexedList}, taimi_meta::packs::{
+    bitvec::vec::BitVec, glamour::Box3, std::{mem, ops, sync::{Arc, LazyLock}}, taimi_hoard::{iters::IterExt as _, loc::{indexed::IndexedList, LocationRef}}, taimi_meta::packs::{
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath}, CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionNs, TrailSectionPath
     }, taimi_pack::{attributes::RenderAttributes, category::id::FullIdRef, pack::Pack, trail::TrailData}
 };
@@ -223,6 +223,10 @@ impl MapPackInfo {
     pub fn trail_path(&self, path: LoadedTrailPath) -> Option<TrailPath> {
         self.trails().nth(path.path as usize)
     }
+    #[cfg(todo = "unnecessary")]
+    pub fn trail_info(&self) -> &IndexedList<LoadedTrailNs, LoadedTrailIndex, [MapTrailInfo]> {
+        self.trail_info.map_ref_as_slice()
+    }
     pub fn category_count(&self) -> usize {
         self.categories.len()
     }
@@ -278,6 +282,10 @@ impl MapPackInfo {
         })
     }
 
+    pub fn is_trail_info_loaded(&self, path: LoadedTrailPath) -> bool {
+        self.trail_info.lookup_ref(&path).map(|info| info.is_loaded())
+            .unwrap_or(false)
+    }
     pub(crate) fn update_trail_section_info(&mut self, path: LoadedTrailPath, sections: Arc<[LoadedTrailSection]>) {
         let trail_info = self.trail_info.lookup_extend_with(path.path, MapTrailInfo::default);
         trail_info.sections = Some(IndexedList::new(sections));
@@ -290,6 +298,10 @@ pub struct MapTrailInfo {
     pub y_offset: f32,
 }
 impl MapTrailInfo {
+    pub fn is_loaded(&self) -> bool {
+        self.sections.is_some()
+    }
+
     #[inline]
     pub fn sections(&self) -> &IndexedList<TrailSectionNs, TrailSectionIndex, [LoadedTrailSection]> {
         self.sections.as_ref().map(IndexedList::map_ref_as_slice)

@@ -6,7 +6,12 @@ use {
     },
     anyhow::{anyhow, Context},
     bitflags::bitflags,
-    std::{mem, sync::Arc},
+    std::sync::Arc,
+    core::{mem, ops},
+    taimi_hoard::flags::{
+        set::{BitFlagForSet, FlagSet},
+        BitSlice, BitsNative, BitVec, BitView,
+    },
 };
 
 pub use self::id::CategoryId;
@@ -223,18 +228,23 @@ pub enum CategoryFlag {
     Hidden = 2,
     /// !defaulttoggle
     Disabled = 3,
+    /// no parent
+    Root = Self::REPR_MAX,
 }
 impl CategoryFlag {
-    pub const INDEX_MAX: u8 = 2;
+    pub const INDEX_MAX: u8 = Self::REPR_MAX - Self::REPR_MIN;
     pub const REPR_MIN: u8 = 1;
-    pub const REPR_MAX: u8 = 3;
+    pub const REPR_MAX: u8 = 4;
 
+    #[inline]
     pub const fn index(self) -> u8 {
-        self.repr() - 1
+        self.repr() - Self::REPR_MIN
     }
+    #[inline]
     pub const fn bit(self) -> CategoryFlags {
         CategoryFlags::from_bits_retain(1u8 << self.index())
     }
+    #[inline]
     pub const fn repr(self) -> u8 {
         self as u8
     }
@@ -250,9 +260,11 @@ impl CategoryFlag {
             _ => None,
         }
     }
+    #[inline]
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
-        Self::from_repr_unchecked(index + 1)
+        Self::from_repr_unchecked(index + Self::REPR_MIN)
     }
+    #[inline]
     pub const unsafe fn from_repr_unchecked(repr: u8) -> Self {
         mem::transmute(repr)
     }
@@ -264,6 +276,7 @@ bitflags! {
         const SEPARATOR = 1u8 << CategoryFlag::Separator.index();
         const HIDDEN = 1u8 << CategoryFlag::Hidden.index();
         const DISABLED = 1u8 << CategoryFlag::Disabled.index();
+        const ROOT = 1u8 << CategoryFlag::Root.index();
     }
 }
 impl CategoryFlags {
@@ -289,5 +302,38 @@ impl FromIterator<CategoryFlag> for CategoryFlags {
 impl Extend<CategoryFlag> for CategoryFlags {
     fn extend<I: IntoIterator<Item = CategoryFlag>>(&mut self, iter: I) {
         self.extend(iter.into_iter().map(Self::from))
+    }
+}
+
+pub type CategoryFlagSet<V = BitVec<u8>> = FlagSet<CategoryFlags, V>;
+impl BitFlagForSet for CategoryFlags {
+    type Repr = u8;
+    const BIT_WIDTH: usize = CategoryFlag::INDEX_MAX as usize + 1;
+
+    fn as_bits(&self) -> &Self::Repr {
+        unsafe {
+            &*(self as *const Self as *const u8)
+        }
+    }
+    fn as_bits_mut(&mut self) -> &mut Self::Repr {
+        unsafe {
+            &mut *(self as *mut Self as *mut u8)
+        }
+    }
+    fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsNative> {
+        unsafe {
+            self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH)
+        }
+    }
+    fn as_bitslice_mut(&mut self) -> &mut BitSlice<Self::Repr, BitsNative> {
+        unsafe {
+            self.as_bits_mut().view_bits_mut().get_unchecked_mut(..Self::BIT_WIDTH)
+        }
+    }
+
+    fn range_for(index: usize) -> ops::Range<usize> {
+        let start = index << 2;
+        let end = start + Self::BIT_WIDTH;
+        start..end
     }
 }

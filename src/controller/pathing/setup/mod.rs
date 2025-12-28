@@ -157,12 +157,13 @@ impl PathingController {
         }).collect::<PackSet>();
         self.map_info.prune(Some(&self.packs));
         self.maps.prune(Some(&self.map_info));
+        self.loader.shared.update_map_id(Some(map_id), false);
         let mut shared_map_dirty = false;
         for path in &map_packs {
             let map_path = path.rel(map_id);
             shared_map_dirty |= self.prepare_for_pack_map(map_path, false);
         }
-        if shared_map_dirty {
+        if /*shared_map_dirty*/ true {
             self.loader.shared.update_map_notify(map_id);
         }
         self.packs.age_tick(Some(&self.map_info));
@@ -184,11 +185,10 @@ impl PathingController {
         if map.info_sig != info_sig {
             log::info!("PATHY: updating map {map_path}");
             *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
-            self.loader.shared.update_map(map_path, &map_info.info, &*map, notify)
         } else {
             log::info!("PATHY: skipping map??? {map_path}");
-            false
         }
+        self.loader.shared.update_map(map_path, &map_info.info, &*map, notify)
     }
 
     fn pack_data_if_loaded(manager: &PackLoader, path: PackPath) -> Option<(Arc<Pack>, Arc<PackInfo>, Arc<SharedPackInfo>)> {

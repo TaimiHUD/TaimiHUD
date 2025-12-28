@@ -98,11 +98,14 @@ impl TrailRender {
             draw_state.drawn_incomplete.insert(id);
             incomplete = true;
         }
-        if self.texture.is_none() && self.texture_handle.is_none() {
+        if matches!(self.texture, None | Some(TextureSlot::Reserved | TextureSlot::Loading)) {
             let id = id.get_marker_pack_map_path().rel(MarkerIndex::with_trail(path.root.path));
             draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
         }
         incomplete
+    }
+    pub fn needs_texture_info(&self) -> bool {
+        self.texture.is_none() && self.texture_handle.is_none()
     }
 
     pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {

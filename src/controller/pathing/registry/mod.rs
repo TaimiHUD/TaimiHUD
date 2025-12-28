@@ -15,6 +15,7 @@ use {
         packs::{
             collections::{CategorySet, MapSet},
             CategoryPath, CategoryIndex, MapIndex,
+            PackCategoryNs,
         },
         map::MapID,
     },
@@ -22,6 +23,8 @@ use {
         category::{
             id::{AsFullId, CategoryId},
             Category,
+            CategoryFlags,
+            CategoryFlagSet,
         },
         pack::CategoryCollection,
         Pack,
@@ -29,7 +32,10 @@ use {
     taimi_sync::watched::watch,
     tokio_util::sync::ReusableBoxFuture,
     tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockWriteGuard},
-    taimi_hoard::loc::LocationMut,
+    taimi_hoard::{
+        iters::IterExt as _,
+        loc::{indexed::IndexedList, LocationMut},
+    },
 };
 pub use self::{
     active::{ActivePack, PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, LoaderBox, SharedLoaderBox},
@@ -753,7 +759,44 @@ impl PackCategoryInfo {
         self.separators.iter()
             .map(CategoryPath::with_path)
     }
+
+    #[inline]
+    pub fn all(&self) -> &IndexedList<PackCategoryNs, CategoryIndex, [PackCategory]> {
+        IndexedList::from_ref(&self.all)
+    }
+
+    pub fn all_flags(&self) -> impl Iterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
+        self.all().iter().lazy_map(|(path, cat)| {
+            let mut flag = CategoryFlags::empty();
+            if cat.parent().is_none() {
+                flag.insert(CategoryFlags::ROOT);
+            }
+            if self.hidden.contains(path) {
+                flag.insert(CategoryFlags::HIDDEN);
+            }
+            if self.disabled.contains(path) {
+                flag.insert(CategoryFlags::DISABLED);
+            }
+            if self.separators.contains(path) {
+                flag.insert(CategoryFlags::SEPARATOR);
+            }
+            (path, cat, flag)
+        })
+    }
+    pub fn lookup_flags(&self, path: CategoryPath) -> CategoryFlags {
+        self.all_flags().nth(path.path as usize)
+            .map(|(_, _, flags)| flags)
+            .unwrap_or(CategoryFlags::empty())
+    }
+
+    pub fn collect_all_flags(&self) -> PackCategoryFlags {
+        let flags = self.all_flags()
+            .map(|(_, _, flags)| flags)
+            .collect();
+        IndexedList::new(flags)
+    }
 }
+pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
 
 /// TODO: anything else interesting about the root category?
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

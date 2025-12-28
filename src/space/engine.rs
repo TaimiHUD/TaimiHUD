@@ -495,7 +495,6 @@ impl Engine {
 
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         let map_ctx = machine.is_map_visible();
-        let map_id = machine.is_ingame();
         let (
             visible_space,
             visible_map,
@@ -507,7 +506,7 @@ impl Engine {
             (_obscured_alpha,),
         ) = self.map_settings(|s| {
             (
-                map_id.and_then(|_| s.space.visible_space().then_some(s.space.distance_max())),
+                s.space.visible_space().then_some(s.space.distance_max()),
                 map_ctx.map(|ctx| s.space.visible_map(ctx)),
                 s.space.camera_source(),
                 s.space.edge_feather_scale(),
@@ -547,17 +546,10 @@ impl Engine {
         let device_context =
             unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
 
-        if map_id.is_none() {
+        if !self.packs.prepare(&self.render_backend.device, machine)? {
             return Ok(())
         }
 
-        #[cfg(deleteme)] {
-        self.packs.trail_params.y_offset = trail_y_offset.unwrap_or(0.0);
-        self.packs.trail_params.resolution = Some(trail_resolution);
-        self.packs.trail_params.width = trail_width;
-        }
-
-        self.packs.prepare(&self.render_backend.device, machine)?;
         //self.packs.update();
 
         let render_map = match visible_map {
@@ -850,7 +842,7 @@ impl Engine {
         }
 
         #[cfg(feature = "goggles")]
-        if let Some(map_id) = map_id {
+        if let Some(map_id) = machine.is_ingame() {
             let goggles_tick = self
                 .goggles_select_lens_delay
                 .as_mut()

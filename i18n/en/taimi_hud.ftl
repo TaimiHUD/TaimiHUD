@@ -35,6 +35,7 @@ files = Files
 clear = Clear
 refresh = Refresh
 refresh-files = Refresh files
+loading = Loading
 # as in 3D
 model = Model
 revert = Revert
@@ -70,6 +71,7 @@ default = Default
 disable = Disable
 enabled = { enable }d
 disabled = { disable }d
+unloaded = Unloaded
 author-arg = { author }: { $author }
 reset = Reset
 timer = Timer
@@ -228,7 +230,6 @@ multi-addon-host = All
 
 reload-markers = Reload { markers }
 marker-tab = { marker-window }
-pathing-tab = { pathing-config }
 marker = Marker
 markers = { marker }s
 markers-place = Place { markers }
@@ -291,12 +292,17 @@ reset-timers = { reset } { timers }
 
 ## Pathing
 
+pathing-tab = { pathing-config }
 pathing = Pathing
 trail = Trail
 poi = POI
 space = KatRender
-reload-packs = Reload
+#pack = Pack
+reload-pack = Reload
+reload-packs = {reload-pack}
 unload-packs = Unload All
+unload-pack = Unload
+
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
 show-filter = Show filter options
@@ -310,7 +316,18 @@ show-all = Show all
 #off-map = Elsewhere
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
+
 toggle = Toggle
+enable-all = Enable all
+disable-all = Disable all
+enable-to = Enable above
+disable-to = Disable to
+reset-all = Reset all
+isolate = Isolate
+unisolate = Reset adjacent
+hide = Hide
+unhide = Unhide
+
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing (Experimental)
 pathing-config-minimap = Minimap Options
@@ -360,7 +377,7 @@ render-notice-gameplay = Load in to the game to get started
 render-notice-gameplay-initial = Select a character to get started
 render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 packs-empty = No files loaded
-packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "Reload" button should pick them up!
+packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "{ reload-packs }" button should pick them up!
 
 ## Festivals
 

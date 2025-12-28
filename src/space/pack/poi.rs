@@ -145,7 +145,7 @@ impl PoiCommonRenderData {
         }
 
         let ib_len = self.ib_len_for_packs(packs);
-        let ib_dirty = !self.is_empty() && self.ib_len() == ib_len;
+        let ib_dirty = !self.is_empty() && self.ib_len() != ib_len;
         if !ib_dirty {
             return Ok(())
         }
@@ -213,13 +213,13 @@ impl PoiCommonRenderData {
 
         Ok(())
     }
-    fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
+    pub(super) fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
         packs.iter()
             .map(|p| p.render_poi_bookmarks().end as usize).max()
             .map(|l| l.max(1))
             .unwrap_or(0)
     }
-    fn ib_len(&self) -> usize {
+    pub(super) fn ib_len(&self) -> usize {
         let ib = self.world_ib.as_ref()
             .or(self.map_ib.as_ref());
         let Some(ib) = ib else { return 0 };
@@ -302,10 +302,13 @@ impl PoiRender {
         SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name);
     }
     pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState) -> bool {
-        if self.icon.is_none() && self.icon_handle.is_none() {
+        if matches!(self.icon, None | Some(TextureSlot::Reserved | TextureSlot::Loading)) {
             draw_state.drawn_incomplete.insert(id.clone());
         }
         false
+    }
+    pub fn needs_texture_info(&self) -> bool {
+        self.icon.is_none() && self.icon_handle.is_none()
     }
 
     pub fn instance_data(&self, poi: &LoadedPoiRef) -> InstanceBufferData {

@@ -3704,6 +3704,7 @@ dependencies = [
  "log",
  "num-traits",
  "serde",
+ "wyz",
 ]
 
 [[package]]
