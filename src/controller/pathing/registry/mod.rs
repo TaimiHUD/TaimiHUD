@@ -630,8 +630,8 @@ impl PackCategoryInfo {
         }
     }
 
-    pub fn root_paths(&self) -> impl Iterator<Item = CategoryPath> + '_ {
-        self.roots.iter().copied().map(CategoryPath::with_path)
+    pub fn root_paths(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+        self.roots.iter().lazy_map(|&p| CategoryPath::with_path(p))
     }
 
     pub fn count(&self) -> usize {
@@ -749,15 +749,15 @@ impl PackCategoryInfo {
 
     pub fn disabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
         self.disabled.iter()
-            .map(CategoryPath::with_path)
+            .lazy_map(CategoryPath::with_path)
     }
     pub fn hidden(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
         self.hidden.iter()
-            .map(CategoryPath::with_path)
+            .lazy_map(CategoryPath::with_path)
     }
     pub fn separators(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
         self.separators.iter()
-            .map(CategoryPath::with_path)
+            .lazy_map(CategoryPath::with_path)
     }
 
     #[inline]

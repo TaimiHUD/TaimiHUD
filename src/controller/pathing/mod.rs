@@ -41,7 +41,7 @@ use {
         time::{sleep, Duration},
     },
     taimi_sync::watched::watch,
-    taimi_meta::packs::{collections::PackSet, id::MarkerId, PackPath},
+    taimi_meta::packs::{collections::PackSet, id::MarkerId, PackPath, CategoryPath},
 };
 use futures::stream::{self, FusedStream};
 
@@ -73,6 +73,7 @@ pub(crate) enum PathingEvent {
     UnloadAll,
     RequestDisabledPaths,
     PathingStateUpdate(CategoryId, bool),
+    CategoryToggle(PackPath, CategoryPath, Option<bool>),
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(space::LoadReport),
@@ -626,6 +627,8 @@ impl PathingController {
             UnloadAll => self.unload_all().await,
             ReloadAll(..) | UnloadAll | ReloadPack(..) | UnloadPack(..) =>
                 log::debug!("TODO: pathing load"),
+            CategoryToggle(..) =>
+                log::debug!("TODO: toggle"),
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,

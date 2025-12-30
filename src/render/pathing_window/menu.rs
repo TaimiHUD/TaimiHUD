@@ -1,66 +1,74 @@
 use {
     super::PathingWindowState,
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::pathing::{
+            PathingController, PathingEvent,
+        },
         space::{engine::Engine},
+        render::{
+            element::pack::{PackElement, CategoryInfo},
+            machine::RenderMachine,
+        },
         with_i18n,
     },
     glam::Vec2,
     nexus::imgui::{Id, MenuItem, MouseButton, StyleVar, Ui},
-    taimi_pack::Category,
+    taimi_pack::category::{Category, CategoryFlags},
+    taimi_meta::packs::CategoryPath,
 };
 
-type CategoryMenuContext = (Vec<u32>, bool);
+#[derive(Default)]
+struct CategoryMenuContext {
+    recompute: Vec<u32>,
+    filtered: bool,
+}
 impl PathingWindowState {
-    pub fn draw_context_menu(&mut self, ui: &Ui, engine: &mut Engine) {
-        self.draw_context_menu_packs(ui, engine, false);
-        if engine.packs.any_loaded() {
+    pub fn draw_context_menu(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+        self.draw_context_menu_packs(ui, machine, false);
+        if machine.pack_ui_state.any_loaded() {
             Self::dead_zone_spacing(ui, false);
             ui.separator();
             if let Some(_menu) = with_i18n!("show-all", |label| ui.begin_menu(&label)) {
-                self.draw_context_menu_packs(ui, engine, true);
+                self.draw_context_menu_packs(ui, machine, true);
             }
         }
     }
-    pub fn draw_context_menu_packs(&mut self, ui: &Ui, engine: &mut Engine, filtered: bool) {
-        ui.text("TODO: draw_context_menu_packs");
-    }
-}
-#[cfg(todo)]
-impl PathingWindowState {
-    pub fn draw_context_menu_packs(&mut self, ui: &Ui, engine: &mut Engine, filtered: bool) {
-        let _id = ui.push_id(match filtered {
-            false => "packmenu-active",
-            true => "packmenu-all",
+    pub fn draw_context_menu_packs(&mut self, ui: &Ui, machine: &mut RenderMachine, unfiltered: bool) {
+        let _id = ui.push_id(match unfiltered {
+            false => "packmenu-all",
+            true => "packmenu-active",
         });
         let mut was_multi_root = None;
-        for (pack_idx, pack) in engine.packs.loaded_packs.values_mut().enumerate() {
-            let _id_pack = ui.push_id(Id::Int(pack_idx as _));
-            if !filtered && pack.available_categories.is_empty() {
+        for (pack_idx, pack) in machine.pack_ui_state.pack_state.iter() {
+            let _id_pack = ui.push_id(pack.state.ui_id());
+            #[cfg(deleteme)]
+            if !unfiltered && pack.available_categories.is_empty() {
                 pack.update_available_categories();
             }
-            let roots = pack
-                .pack
-                .categories
-                .root_categories
-                .iter()
-                .filter_map(|id| pack.pack.categories.all_categories.get_full(id))
-                .filter(|(_, _, cat)| !cat.is_hidden())
-                .filter_map(|(idx, id, cat)| {
-                    let filtered = match pack.available_categories.get(idx).map(|b| !*b) {
-                        Some(true) | None if !filtered => return None,
+            let pack_info = pack.state.info.info.as_ref();
+            let cats = pack_info.map(|i| i.categories.as_ref());
+            let roots = cats.into_iter().flat_map(|cats| cats.root_paths()
+                .filter_map(|path| cats.info_of(path).map(|_| (path, cats.lookup_flags(path))))
+                .filter(|(_p, flags)| !flags.contains(CategoryFlags::HIDDEN))
+                .filter_map(|(path, flags)| {
+                    let filtered = match pack.categories.category_is_on_map(path) {
+                        true if !unfiltered => return None,
                         #[cfg(todo = "unnecessary")]
                         _ if filtered => None,
-                        f => f,
+                        f => Some(f),
                     };
-                    Some((idx, id, cat, filtered))
-                });
-            if pack.pack.categories.root_categories.is_empty() {
-                if filtered {
-                    MenuItem::new(&pack.pack.name).enabled(false).build(ui);
-                }
-                continue
-            }
+                    Some((path, flags, filtered))
+                })
+            );
+            let (cats, pack_data) = match (cats, pack.state.pack_data()) {
+                (Some(cats), Some(pack_data)) if roots.clone().next().is_some() => (cats, pack_data),
+                _ => {
+                    if unfiltered {
+                        MenuItem::new(&pack.state.display_name).enabled(false).build(ui);
+                    }
+                    continue
+                },
+            };
             let multi_root = roots.clone().count() > 1;
             match was_multi_root {
                 Some(was) if multi_root || was => {
@@ -72,23 +80,28 @@ impl PathingWindowState {
             }
             was_multi_root = Some(multi_root);
             let mut ctx: CategoryMenuContext = Default::default();
-            ctx.1 = filtered;
-            for (idx, _id, cat, filtered) in roots {
-                let state = pack.user_category_state.get(idx).map(|b| *b);
+            ctx.filtered = unfiltered;
+            for (path, flags, filtered) in roots {
+                let cat = pack.categories.categories.get(&path).unwrap_or(&CategoryInfo::EMPTY);
+                let has_toggle = !flags.contains(CategoryFlags::SEPARATOR) && !cats.lonely.contains(path);
+                let state = has_toggle.then(|| pack.state.category_get_visibility(path).is_visible());
+                ui.text(format!("TODO: {}", cat.display_name().unwrap_or("")));
+                #[cfg(todo)]
                 let act =
-                    Self::draw_context_menu_cat(ui, false, &pack, idx, cat, filtered, state, &mut ctx);
+                    Self::draw_context_menu_cat(ui, false, &pack, path, cat, flags, filtered, state, &mut ctx);
+                #[cfg(todo)]
                 let _ = Self::act_context_menu_cat(
                     ui,
                     pack,
-                    idx,
-                    cat,
+                    path,
+                    cat, flags,
                     filtered,
                     state,
                     act,
                     &mut ctx,
                     Some(&mut |part| {
                         if part == 0 {
-                            ui.text(&pack.pack.name);
+                            ui.text(&pack.state.display_name);
                         }
                         #[cfg(todo = "unnecessary")]
                         if part == 1 {
@@ -97,8 +110,9 @@ impl PathingWindowState {
                     }),
                 );
             }
-            let (recompute, ..) = ctx;
-            if !recompute.is_empty() {
+            if !ctx.recompute.is_empty() {
+                log::warn!("TODO: recompute cats");
+                #[cfg(deleteme)] {
                 for cat_idx in recompute {
                     if let Some(mut b) = pack.user_category_state.get_mut(cat_idx as usize) {
                         *b ^= true;
@@ -106,37 +120,37 @@ impl PathingWindowState {
                 }
                 let external = PathingController::external_filter_state();
                 pack.recompute_enabled(external.as_ref());
+                }
             }
         }
     }
+}
+#[cfg(todo)]
+impl PathingWindowState {
     pub fn draw_context_menu_cat_leaf(
         ui: &Ui,
-        cat_index: usize,
-        cat: &Category,
+        cat_index: CategoryPath,
+        cat: &CategoryInfo,
+        cat_flags: CategoryFlags,
         filtered: Option<bool>,
         state: Option<bool>,
         _ctx: &mut CategoryMenuContext,
     ) -> (bool, bool) {
-        let _id = ui.push_id(Id::Int(cat_index as _));
+        let _id = ui.push_id(Id::Int(cat_index.path as _));
         Self::dead_zone_spacing(ui, false);
-        let decorative = cat.is_separator();
-        let is_copyable = cat
-            .marker_attributes
-            .interaction
-            .as_ref()
-            .and_then(|i| i.copy_value.as_ref())
-            .is_some();
-        let item = MenuItem::new(&cat.display_name)
+        let decorative = cat_flags.contains(CategoryFlags::SEPARATOR);
+        let is_copyable = cat.copyable().is_some();
+        let item = MenuItem::new(cat.display_name().unwrap_or(""))
             .selected(state.unwrap_or(false))
             .enabled(!decorative || is_copyable);
         let mut toggled = match () {
-            _ if cat.is_separator() && cat.display_name.is_empty() => {
+            _ if decorative && cat.display_name().is_none() => {
                 ui.separator();
                 Self::dead_zone_spacing(ui, false);
                 return (false, false)
             },
             _ if is_copyable => with_i18n!("copy", |label| item.shortcut(&label).build(ui)),
-            _ if ActivePack::category_has_tooltip(cat) => item.shortcut("?").build(ui),
+            _ if PackElement::category_has_tooltip(cat) => item.shortcut("?").build(ui),
             _ if filtered == Some(true) && !decorative =>
                 with_i18n!("inactive", |label| item.shortcut(&label).build(ui)),
             _ => item.build(ui),
@@ -152,17 +166,18 @@ impl PathingWindowState {
     }
     pub fn draw_context_menu_cat_branch(
         ui: &Ui,
-        pack: &ActivePack,
-        cat_index: usize,
-        cat: &Category,
+        pack: &PackElement,
+        cat_index: CategoryPath,
+        cat: &CategoryInfo,
+        cat_flags: CategoryFlags,
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
     ) -> (bool, bool) {
-        let _id = ui.push_id(Id::Int(cat_index as _));
+        let _id = ui.push_id(Id::Int(cat_index.path as _));
         Self::dead_zone_spacing(ui, true);
 
-        let tooltip_hint = match ActivePack::category_has_tooltip(cat) {
+        let tooltip_hint = match PackElement::category_has_tooltip(cat) {
             true => "❓",
             #[cfg(todo)]
             true => "(?)",
@@ -175,11 +190,12 @@ impl PathingWindowState {
         // TODO: manually igSetNextWindowSize when opening a new category
         // because it seems to "inherit" the last menu's size and that's dumb
         let menu_start = Vec2::from_array(ui.cursor_pos());
-        let menu_size = Vec2::from_array(ui.calc_text_size(&cat.display_name));
-        let menu = ui.begin_menu_with_enabled(&cat.display_name, true);
+        let display_name = cat.display_name().unwrap_or("");
+        let menu_size = Vec2::from_array(ui.calc_text_size(display_name));
+        let menu = ui.begin_menu_with_enabled(display_name, true);
         let mut toggled = false;
         if let Some(_menu) = &menu {
-            toggled |= Self::draw_context_menu_cat_children(ui, pack, cat_index, cat, filtered, state, ctx);
+            toggled |= Self::draw_context_menu_cat_children(ui, pack, cat_index, cat, cat_flags, filtered, state, ctx);
         }
         drop(menu);
         toggled |= ui.is_item_clicked();
@@ -199,14 +215,14 @@ impl PathingWindowState {
     }
     pub fn draw_context_menu_cat_children(
         ui: &Ui,
-        pack: &ActivePack,
-        _cat_index: usize,
-        cat: &Category,
+        pack: &PackElement,
+        _cat_index: CategoryPath,
+        cat: &CategoryInfo,
+        cat_flags: CategoryFlags,
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
     ) -> bool {
-        let &mut (_, ctx_filtered, ..) = ctx;
         let mut toggled = false;
 
         let children = cat
@@ -257,7 +273,7 @@ impl PathingWindowState {
         }
         let children_filtered = children
             .clone()
-            .filter(|(_, _, _, f, _state)| f == &Some(true) && ctx_filtered);
+            .filter(|(_, _, _, f, _state)| f == &Some(true) && ctx.filtered);
         for (i, (child_idx, _child_id, child, child_filtered, child_state)) in children_filtered.enumerate()
         {
             if any_visible && i == 0 {
@@ -324,51 +340,51 @@ impl PathingWindowState {
     pub fn draw_context_menu_cat(
         ui: &Ui,
         inline: bool,
-        pack: &ActivePack,
-        cat_index: usize,
-        cat: &Category,
+        pack: &PackElement,
+        cat_index: CategoryPath,
+        cat: &CategoryInfo,
+        cat_flags: CategoryFlags,
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
     ) -> (bool, bool) {
-        let &mut (_, ctx_filtered, ..) = ctx;
-        if filtered == Some(true) && !ctx_filtered {
+        if filtered == Some(true) && !ctx.filtered {
             return (false, false)
         }
         let (toggled, hovered) = match (inline, cat.sub_categories.len()) {
             //#[cfg(todo = "unnecessary")]
-            (_, 0) => Self::draw_context_menu_cat_leaf(ui, cat_index, cat, filtered, state, ctx),
+            (_, 0) => Self::draw_context_menu_cat_leaf(ui, cat_index, cat, cat_flags, filtered, state, ctx),
             #[cfg(todo)]
             (true, amt) | (_, amt @ 0..=2) => {
                 let (mut toggled, hovered) =
-                    Self::draw_context_menu_cat_leaf(ui, cat_index, cat, filtered, state, ctx);
+                    Self::draw_context_menu_cat_leaf(ui, cat_index, cat, cat_flags, filtered, state, ctx);
                 if amt > 0 {
                     let _id = ui.push_id(Id::Int(cat_index as _));
                     ui.indent();
                     toggled |= Self::draw_context_menu_cat_children(
-                        ui, pack, cat_index, cat, filtered, state, ctx,
+                        ui, pack, cat_index, cat, cat_flags, filtered, state, ctx,
                     );
                     ui.unindent();
                 }
                 (toggled, hovered)
             },
-            _ => Self::draw_context_menu_cat_branch(ui, pack, cat_index, cat, filtered, state, ctx),
+            _ => Self::draw_context_menu_cat_branch(ui, pack, cat_index, cat, cat_flags, filtered, state, ctx),
         };
 
         (toggled, hovered)
     }
     pub fn act_context_menu_cat(
         ui: &Ui,
-        _pack: &ActivePack,
-        cat_index: usize,
-        cat: &Category,
+        _pack: &PackElement,
+        cat_index: CategoryPath,
+        cat: &CategoryInfo,
+        cat_flags: CategoryFlags,
         filtered: Option<bool>,
         state: Option<bool>,
         (toggled, hovered): (bool, bool),
         ctx: &mut CategoryMenuContext,
         mut draw_tooltip: Option<&mut dyn FnMut(usize)>,
     ) -> bool {
-        let (recompute, ..) = ctx;
         if toggled {
             let is_copyable = cat
                 .marker_attributes
@@ -378,17 +394,17 @@ impl PathingWindowState {
                 .is_some();
             if let Some(state) = state {
                 PathingEvent::PathingStateUpdate(cat.full_id.clone(), !state).try_send();
-                recompute.push(cat_index as u32);
+                ctx.recompute.push(cat_index as u32);
             } else if is_copyable {
-                ActivePack::copy_copyable(ui, &cat.marker_attributes);
+                PackElement::copy_copyable(ui, &cat.marker_attributes);
             }
         }
-        if hovered && (ActivePack::category_has_tooltip(cat) || draw_tooltip.is_some()) {
-            ActivePack::draw_tooltip(ui, &cat.display_name, || {
+        if hovered && (PackElement::category_has_tooltip(cat) || draw_tooltip.is_some()) {
+            PackElement::draw_tooltip(ui, &cat.display_name, || {
                 if let Some(draw) = &mut draw_tooltip {
                     draw(0);
                 }
-                ActivePack::draw_tooltip_category(ui, cat);
+                PackElement::draw_tooltip_category(ui, cat);
                 if let Some(draw) = &mut draw_tooltip {
                     draw(1);
                 }

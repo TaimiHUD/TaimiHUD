@@ -1,8 +1,9 @@
 #[cfg(feature = "serde")]
 use serde::{ser, de};
 use crate::{
+    collections::TaimiSet,
     iters::IterExt as _,
-    loc::Locator,
+    loc::{Locator, LocationGet, LocationRef, LocationMut},
     flags::{bitslice, bitidx::BitIdx, BitAddr, BitOrder, BitsNative, BitsLsb, BitSlice, BitVec, BitView, bitptr, BitRef, BitStore},
 };
 use core::{ops, hash, marker::PhantomData, mem};
@@ -67,7 +68,7 @@ impl BitFlagForSet for bool {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct BitSet<V: ?Sized = BitVec, T: BitStore = usize, O: BitOrder = BitsNative> {
     pub _bits: PhantomData<bitptr::BitPtr<bitptr::Mut, T, O>>,
@@ -169,6 +170,7 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     #[inline]
     pub fn get_ref_at<L: AsPrimitive<usize>>(&self, offset: L) -> Option<BitRef<'_, bitptr::Const, T, O>> {
         let offset = offset.as_();
+        #[cfg(todo = "unnecessary")]
         let Some(offset) = Self::check_offset(offset) else { return None };
         self.get_ref_at_offset(offset)
     }
@@ -180,6 +182,23 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     #[inline]
     pub fn get_ref_at_offset(&self, offset: usize) -> Option<BitRef<'_, bitptr::Const, T, O>> {
         self.flags.as_ref().get(offset)
+    }
+    #[inline]
+    pub fn slice_ref_at_offset(&self, offset: usize) -> Option<&BitSlice<T, O>> {
+        self.get_ref_at_offset(offset).map(|p| unsafe {
+            &*bitptr::bitslice_from_raw_parts(p.into_bitptr(), 1)
+        })
+    }
+    #[inline]
+    pub fn as_bitslice(&self) -> &BitSlice<T, O> {
+        self.as_ref()
+    }
+
+    pub fn iter_of<L>(&self) -> impl Iterator<Item = L> + '_ where
+        L: Copy + 'static,
+        usize: AsPrimitive<L>,
+    {
+        self.as_bitslice().iter_ones().lazy_map(|i| i.as_())
     }
 }
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
@@ -194,6 +213,82 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     #[inline]
     pub fn get_mut_at_offset(&mut self, offset: usize) -> Option<BitRef<'_, bitptr::Mut, T, O>> {
         self.flags.as_mut().get_mut(offset)
+    }
+    #[inline]
+    pub fn slice_mut_at_offset(&mut self, offset: usize) -> Option<&mut BitSlice<T, O>> {
+        self.get_mut_at(offset).map(|p| unsafe {
+            &mut *bitptr::bitslice_from_raw_parts_mut(p.into_bitptr(), 1)
+        })
+    }
+    #[inline]
+    pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<T, O> {
+        self.as_mut()
+    }
+}
+impl<L, V: ?Sized, T: BitStore, O: BitOrder> TaimiSet<L> for BitSet<V, T, O> where
+    V: AsRef<BitSlice<T, O>>,
+    L: AsPrimitive<usize>,
+{
+    #[inline]
+    fn set_contains(&self, offset: &L) -> bool {
+        self.contains(*offset)
+    }
+}
+/// TODO: consider whether `None` is meaningful (length) vs `Some(false)`
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationGet<N, L> for BitSet<V, T, O> where
+    V: AsRef<BitSlice<T, O>>,
+    L: AsPrimitive<usize>,
+{
+    type LookupGet = bool;
+    #[inline]
+    fn lookup_get(&self, loc: &Locator<N, L>) -> Option<Self::LookupGet> {
+        Some(self.contains(loc.path))
+    }
+}
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationRef<N, L> for BitSet<V, T, O> where
+    V: AsRef<BitSlice<T, O>>,
+    L: AsPrimitive<usize>,
+{
+    type LookupRef = BitSlice<T, O>;
+    #[inline]
+    fn lookup_ref(&self, loc: &Locator<N, L>) -> Option<&Self::LookupRef> {
+        self.slice_ref_at_offset(loc.path.as_())
+    }
+}
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationMut<N, L> for BitSet<V, T, O> where
+    V: AsRef<BitSlice<T, O>> + AsMut<BitSlice<T, O>>,
+    L: AsPrimitive<usize>,
+{
+    #[inline]
+    fn lookup_mut(&mut self, loc: &Locator<N, L>) -> Option<&mut Self::LookupRef> {
+        self.slice_mut_at_offset(loc.path.as_())
+    }
+}
+impl<T: BitStore, O: BitOrder, L: AsPrimitive<usize>> Extend<L> for BitSet<BitVec<T, O>, T, O> {
+    fn extend<I: IntoIterator<Item = L>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+        let (min, max) = iter.size_hint();
+        if let Some(max) = max {
+            self.reserve_exact(max);
+        } else {
+            self.reserve(min);
+        }
+        for offset in iter {
+            self.insert_at(offset);
+        }
+    }
+}
+impl<T: BitStore, O: BitOrder, L: AsPrimitive<usize>> FromIterator<L> for BitSet<BitVec<T, O>, T, O> {
+    fn from_iter<I: IntoIterator<Item = L>>(iter: I) -> Self {
+        let mut set = Self::default();
+        set.extend(iter);
+        set
+    }
+}
+impl<V: Default, T: BitStore, O: BitOrder> Default for BitSet<V, T, O> {
+    #[inline]
+    fn default() -> Self {
+        Self::new(V::default())
     }
 }
 impl<V: ?Sized, T: BitStore, O: BitOrder> ops::Deref for BitSet<V, T, O> {
@@ -286,16 +381,18 @@ impl<F: BitFlagForSet> FlagSet<F> {
 impl<F: BitFlagForSet, V> FlagSet<F, V> where
     V: AsRef<BitSlice<F::Repr, BitsOrder>>,
 {
+    #[inline]
     pub fn get(&self, index: usize) -> Option<F> {
-        let range = F::range_for(index);
-        let flags = self.flags.as_ref();
-        flags.as_ref().get(range).map(|flags| unsafe {
+        self.get_ref(index).map(|flags| unsafe {
             F::from_bitslice_unchecked(flags)
         })
     }
-    pub fn get_for<N, L: Into<u32>>(&self, path: Locator<N, L>) -> Option<F> {
-        let idx = path.path.into() as usize;
-        self.get(idx)
+    pub fn get_ref(&self, index: usize) -> Option<&BitSlice<F::Repr, BitsOrder>> {
+        let range = F::range_for(index);
+        self.as_bitslice().get(range)
+    }
+    pub fn get_for<L: AsPrimitive<usize>>(&self, path: L) -> Option<F> {
+        self.get(path.as_())
     }
 
     #[inline]
@@ -317,21 +414,19 @@ impl<F: BitFlagForSet, V> FlagSet<F, V> where
 impl<F: BitFlagForSet, V> FlagSet<F, V> where
     V: AsMut<BitSlice<F::Repr, BitsOrder>>,
 {
+    /// TODO: copy unchecked?
     pub fn set(&mut self, index: usize, value: F) -> Result<(), ()> {
-        let value = value.as_bitslice();
-        let range = F::range_for(index);
-        let flags = self.flags.as_mut();
-        if flags.len() >= range.end {
-            Err(())
-        } else {
-            unsafe {
-                flags.as_mut().get_unchecked_mut(range).copy_from_bitslice(value)
-            }
-            Ok(())
-        }
+        self.get_mut(index).map(|flags| {
+            let value = value.as_bitslice();
+            flags.copy_from_bitslice(value)
+        }).ok_or(())
     }
-    pub fn set_at<N, L: Into<usize>>(&mut self, path: Locator<N, L>, value: F) -> Result<(), ()> {
-        self.set(path.path.into(), value)
+    pub fn set_at<L: AsPrimitive<usize>>(&mut self, path: L, value: F) -> Result<(), ()> {
+        self.set(path.as_(), value)
+    }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut BitSlice<F::Repr, BitsOrder>> {
+        let range = F::range_for(index);
+        self.as_bitslice_mut().get_mut(range)
     }
 
     #[inline]
@@ -363,6 +458,35 @@ impl<F: BitFlagForSet> FromIterator<F> for FlagSet<F> {
         let mut set = Self::default();
         set.extend(iter);
         set
+    }
+}
+impl<'a, N, L, F: BitFlagForSet, V> LocationGet<N, L> for FlagSet<F, V> where
+    V: AsRef<BitSlice<F::Repr, BitsOrder>>,
+    L: AsPrimitive<usize>,
+{
+    type LookupGet = F;
+    #[inline]
+    fn lookup_get(&self, loc: &Locator<N, L>) -> Option<Self::LookupGet> {
+        self.get(loc.path.as_())
+    }
+}
+impl<'a, N, L, F: BitFlagForSet, V> LocationRef<N, L> for FlagSet<F, V> where
+    V: AsRef<BitSlice<F::Repr, BitsOrder>>,
+    L: AsPrimitive<usize>,
+{
+    type LookupRef = BitSlice<F::Repr, BitsOrder>;
+    #[inline]
+    fn lookup_ref(&self, loc: &Locator<N, L>) -> Option<&Self::LookupRef> {
+        self.get_ref(loc.path.as_())
+    }
+}
+impl<'a, N, L, F: BitFlagForSet, V> LocationMut<N, L> for FlagSet<F, V> where
+    V: AsRef<BitSlice<F::Repr, BitsOrder>> + AsMut<BitSlice<F::Repr, BitsOrder>>,
+    L: AsPrimitive<usize>,
+{
+    #[inline]
+    fn lookup_mut(&mut self, loc: &Locator<N, L>) -> Option<&mut Self::LookupRef> {
+        self.get_mut(loc.path.as_())
     }
 }
 fn bitslice_chunk_into_exact_unchecked<'a, F: BitFlagForSet>(bits: &'a BitSlice<F::Repr, BitsOrder>) -> F {

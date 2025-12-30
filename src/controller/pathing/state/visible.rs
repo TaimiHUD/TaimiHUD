@@ -1,3 +1,9 @@
+#[cfg(todo)]
+use crate::controller::pathing::{
+    state::interactive::InteractivePoi,
+    filter::MapFilters,
+    taimi_pack::attributes::keys::Guid,
+};
 use {
     crate::{
         controller::pathing::{
@@ -23,17 +29,11 @@ use {
     taimi_pack::attributes::{self, RenderAttributes, PoiAttributes, TrailAttributes},
     bitvec::{order::Lsb0, slice::BitSlice, vec::BitVec, view::BitView},
 };
-#[cfg(todo)]
-use crate::controller::pathing::{
-    state::interactive::InteractivePoi,
-    filter::MapFilters,
-    taimi_pack::attributes::keys::Guid,
-};
 use bitflags::bitflags;
 use glam::Vec3Swizzles;
 use glamour::{Box3, Point3, Size3, Vector3};
 use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
-use taimi_pack::Category;
+use taimi_pack::category::{Category, CategoryFlags};
 use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
 
 #[derive(Debug, Clone, Default)]
@@ -1145,11 +1145,17 @@ impl VisibilityFlags {
         Self::from_bits_retain((self.bits() & Self::TOGGLES.bits()) << 4)
     }
 
+    pub fn from_category_flags(cat_flags: CategoryFlags) -> Self {
+        let mut flags = Self::empty();
+        flags.set_from_category_flags(cat_flags);
+        flags
+    }
+    pub fn set_from_category_flags(&mut self, cat_flags: CategoryFlags) {
+        self.set(Self::TOGGLE, !cat_flags.contains(CategoryFlags::DISABLED));
+    }
     pub fn from_pack_category(category: &Category) -> Self {
         let mut flags = Self::from_attributes(&category.marker_attributes);
-        if category.default_toggle() {
-            flags.insert(Self::TOGGLE);
-        }
+        flags.set_from_category_flags(category.flags);
         flags
     }
     pub fn from_attributes(marker_attributes: &MarkerAttributes) -> Self {

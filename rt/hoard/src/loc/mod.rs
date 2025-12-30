@@ -352,9 +352,22 @@ impl<N: PhantomNamespace, L> Borrow<L> for Locator<N, L> {
         &self.path
     }
 }
-impl<T: Copy + 'static, N: PhantomNamespace + Copy + 'static, L: num_traits::AsPrimitive<T>> num_traits::AsPrimitive<T> for Locator<N, L> {
+impl<T, N, L> num_traits::AsPrimitive<T> for Locator<N, L> where
+    T: Copy + 'static,
+    N: PhantomNamespace + Copy + 'static,
+    L: num_traits::AsPrimitive<T>,
+{
     fn as_(self) -> T {
         self.path.as_()
+    }
+}
+impl<N: Default, L> num_traits::AsPrimitive<Locator<N, L>> for usize where
+    usize: num_traits::AsPrimitive<L>,
+    L: Copy + Clone + 'static,
+    N: Copy + Clone + 'static,
+{
+    fn as_(self) -> Locator<N, L> {
+        Locator::with_parts(N::default(), self.as_())
     }
 }
 
@@ -567,7 +580,7 @@ pub trait LocationGet<N, L> {
 }
 
 pub trait LocationRef<N, L> {
-    type LookupRef;
+    type LookupRef: ?Sized;
 
     fn lookup_ref<'a>(&'a self, loc: &Locator<N, L>) -> Option<&'a Self::LookupRef>;
 }

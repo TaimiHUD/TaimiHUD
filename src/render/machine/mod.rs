@@ -14,6 +14,7 @@ use {
     crate::{
         controller::pathing::shared::{SharedGameplayMap, PathingShared},
         space::engine::Engine,
+        render::element::pack::PackElements,
     },
     std::{ops::Range, sync::Arc},
     taimi_sync::watched::Watched,
@@ -106,6 +107,8 @@ pub struct RenderMachine {
     pub pathing: Option<Arc<PathingShared>>,
     #[cfg(feature = "paths")]
     pub pack_map: Watched<SharedGameplayMap>,
+    #[cfg(feature = "paths")]
+    pub pack_ui_state: PackElements,
 }
 
 pub type RenderPositioning<S = LocalSpace> = (Point3<S>, Vector3<S>);
@@ -169,6 +172,8 @@ impl RenderMachine {
             pathing: None,
             #[cfg(feature = "paths")]
             pack_map: Watched::EMPTY,
+            #[cfg(feature = "paths")]
+            pack_ui_state: PackElements::default(),
         }
     }
 
@@ -304,6 +309,7 @@ impl RenderMachine {
         let mut state = RenderState::lock();
         if let Some(state) = state.as_mut() {
             state.machine.turn_render_pre();
+            state.pre_render_ui();
 
             Self::run_tasks(state);
 
