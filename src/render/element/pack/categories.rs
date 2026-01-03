@@ -1,0 +1,735 @@
+use {
+    crate::{
+        controller::{
+            pathing::{
+                registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent
+            },
+            Controller,
+        }, exports::runtime::imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar, IdStackToken},
+        render::RenderState, with_i18n
+    },
+    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport},
+    std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
+    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+};
+
+#[derive(Debug)]
+pub struct DrawCategoryHeader<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub display_name: &'a str,
+    pub open: bool,
+    pub open_cond: Condition,
+    pub toggle_state: bool,
+    pub is_leaf: Option<bool>,
+    pub is_decorative: bool,
+    pub button_interact: Option<bool>,
+    pub allow_overlap: bool,
+}
+impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
+    pub fn draw(
+        &mut self,
+    ) -> (Option<UiAction>, Option<TreeNodeToken<'u>>) {
+        let mut unbuilt = TreeNode::new(self.display_name);
+        match self.button_interact {
+            Some(false) if self.is_decorative || self.is_leaf.unwrap_or(true) =>
+                unbuilt = unbuilt.flags(TreeNodeFlags::SPAN_AVAIL_WIDTH),
+            None =>
+                unbuilt = unbuilt.allow_item_overlap(true),
+            _ => (),
+        }
+        unbuilt = unbuilt.frame_padding(true)
+            .tree_push_on_open(false)
+            .allow_item_overlap(self.allow_overlap)
+            .leaf(self.is_leaf.unwrap_or(true));
+        let mut framed = false;
+        match self.is_leaf {
+            Some(false) => if !self.is_decorative {
+                framed = true;
+            },
+            Some(true) =>
+                unbuilt = unbuilt.bullet(true),
+            None => (),
+        }
+        if self.is_decorative {
+            match self.is_leaf {
+                Some(true) =>
+                    unbuilt = unbuilt.selected(true),
+                Some(false) => {
+                    framed = true;
+                    unbuilt = unbuilt.bullet(true);
+                },
+                None => {
+                    // needs to stand out more among branches too..?
+                    // TODO: less necessary once checkboxes become left-aligned
+                    unbuilt = unbuilt.selected(true);
+                    // would use this but leaf|framed results in strange text alignment...
+                    // framed = true
+                },
+            }
+        }
+        if framed {
+            unbuilt = unbuilt
+                .framed(true)
+                .opened(self.open, self.open_cond);
+        }
+        let tree_token = unbuilt.push(self.ui);
+        let action = match (self.open_cond, self.open, &tree_token) {
+            (Condition::Always, open, token) if framed && open != token.is_some() =>
+                Some(UiAction::Primary),
+            _ if self.ui.is_item_clicked_with_button(MouseButton::Right) =>
+                Some(UiAction::RIGHT_CLICK),
+            #[cfg(todo)]
+            _ if !framed && self.ui.is_item_clicked() => Some(UiAction::Primary),
+            _ if !framed && self.ui.is_item_clicked() => Some(UiAction::LEFT_CLICK),
+            _ if self.ui.is_item_hovered() =>
+                Some(UiAction::Hovered),
+            _ => None,
+        };
+        (action, tree_token)
+    }
+    pub fn draw_toggle_inline(&mut self) -> Option<bool> {
+        self.ui.same_line();
+        self.ui.dummy([4.0, 0.0]);
+        self.ui.same_line();
+        self.draw_toggle_checkbox()
+    }
+    pub fn draw_toggle_prefix(&mut self) -> (Option<bool>, imgui::StyleStackToken<'a>) {
+        self.ui.unindent();
+        let checkbox_gap = self.ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+        #[cfg(todo = "unnecessary")]
+        let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
+        let act = self.draw_toggle_checkbox();
+        self.ui.same_line();
+        (act, checkbox_gap)
+    }
+    pub fn end_toggle_prefix(&mut self) {
+        self.ui.indent();
+    }
+    pub fn draw_toggle_checkbox(&mut self) -> Option<bool> {
+        self.ui.checkbox("", &mut self.toggle_state).then(move || {
+            self.toggle_state
+        })
+    }
+}
+
+pub struct DrawPackUnloaded<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub state: &'a PackElementState,
+}
+impl DrawPackUnloaded<'_, '_> {
+    pub fn draw(&mut self) {
+        if let Some(UnloadedReason::Gravestone) = &self.state.unloaded {
+            return
+        }
+        self.ui.popup("pack-context-unloaded", || {
+            self.menu_unloaded();
+        });
+        let action = self.header_unloaded();
+        match action {
+            Some(UiAction::RIGHT_CLICK) =>
+                self.ui.open_popup("pack-context-unloaded"),
+            Some(UiAction::Primary) =>
+                PathingEvent::ReloadPack(self.state.pack_path(), false).try_send(),
+            _ => (),
+        }
+    }
+
+    fn header_unloaded(&self) -> Option<UiAction> {
+        let reason = self.state.unloaded.as_ref();
+        let is_button = match reason {
+            | Some(UnloadedReason::Loading | UnloadedReason::Pending)
+            | None
+            =>
+                false,
+            Some(..) => true,
+        };
+        let ui = self.ui;
+        let node = TreeNode::new(&self.state.display_name)
+            .flags(TreeNodeFlags::SPAN_AVAIL_WIDTH)
+            .frame_padding(true)
+            .tree_push_on_open(false)
+            .opened(false, Condition::Always)
+            .leaf(is_button)
+            .push(ui);
+        let hovered = ui.is_item_hovered();
+        let pressed = is_button && ui.is_item_clicked();
+        let open_context = ui.is_item_clicked_with_button(MouseButton::Right);
+
+        match reason {
+            Some(UnloadedReason::Disabled | UnloadedReason::Gravestone) => {
+                ui.same_line();
+                with_i18n!("disabled", |msg| ui.text(msg));
+            },
+            Some(UnloadedReason::Loading) => {
+                ui.same_line();
+                with_i18n!("loading", |msg| ui.text(msg));
+            },
+            Some(UnloadedReason::Pending) | None => {
+                ui.same_line();
+                with_i18n!("unloaded", |msg| ui.text(msg));
+                if reason.is_some() && hovered {
+                    with_i18n!("render-notice-gameplay", |msg| ui.tooltip_text(msg));
+                }
+            },
+            Some(reason @ (UnloadedReason::LoadingFailed(..) | UnloadedReason::UnknownFormat)) => {
+                ui.same_line();
+                match reason {
+                    UnloadedReason::UnknownFormat =>
+                        with_i18n!("unknown", |msg| ui.text(msg)),
+                    _ =>
+                        with_i18n!("error", |msg| ui.text(msg)),
+                }
+                if hovered {
+                    ui.tooltip_text(reason.to_string());
+                }
+            },
+        }
+        //ui.table_next_column();
+        let res = if let Some(node) = node {
+            node.pop();
+            !is_button || pressed
+        } else {
+            pressed
+        };
+        if open_context {
+            Some(UiAction::Clicked(MouseButton::Right))
+        } else if res {
+            Some(UiAction::Primary)
+        } else if hovered {
+            Some(UiAction::Hovered)
+        } else {
+            None
+        }
+    }
+
+    fn menu_unloaded(&self) {
+        let action_remove = with_i18n!("remove", |label| Selectable::new(&label).build(self.ui));
+        let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(self.ui));
+        if action_reload {
+            PathingEvent::ReloadPack(self.state.pack_path(), true).try_send();
+        } else if action_remove {
+            PathingEvent::UnloadPack(self.state.pack_path(), true).try_send();
+        }
+    }
+}
+
+pub struct DrawCategoryTooltip<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub info: &'a CategoryInfo,
+    pub tooltip: PackTooltipRef<'a>,
+    pub display_name_visible: bool,
+    pub include_copyable: bool,
+}
+impl DrawCategoryTooltip<'_, '_> {
+    const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";
+    pub fn draw(&mut self) {
+        let title_template = self.info.display_name()
+            .and_then(str_opt)
+            .unwrap_or(Self::NAME_TEMPLATE);
+        Self::draw_tooltip(self.ui, title_template, move || self.draw_contents());
+    }
+
+    pub fn draw_contents(&mut self) {
+        let desc = self.tooltip.description();
+        let title = match self.tooltip.title() {
+            Some(title) if self.display_name_visible && self.info.display_name().unwrap_or("").starts_with(title) =>
+                None,
+            title => title,
+        };
+
+        if let Some(title) = title {
+            let _title_font = desc.map(|_| RenderState::push_font("big", self.ui));
+            self.ui.text(title);
+        }
+
+        if let Some(tip) = desc {
+            self.ui.text_wrapped(tip);
+        }
+
+        let copyable = self.include_copyable.then(|| self.info.copyable()).flatten();
+        if let Some((copy_value, copy_message)) = copyable {
+            Self::draw_tooltip_copyable(self.ui, copy_value, copy_message);
+        }
+    }
+
+    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+        let _id = ui.push_id("category_tooltip");
+        let [minwidth, lineheight] = ui.calc_text_size(title_template);
+        unsafe {
+            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
+        };
+        let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
+        ui.tooltip(|| {
+            {
+                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                ui.dummy([minwidth, f32::EPSILON]);
+            }
+            f()
+        })
+    }
+
+    /// since these aren't intended to be displayed, there's no canon name to use...
+    /// if it looks like more than just a location link, we'll try to preview it
+    fn copyable_value_has_message(copy_value: &str) -> bool {
+        if !copy_value[..].starts_with('[') || !copy_value.ends_with(']') {
+            return true
+        }
+        false
+    }
+
+    fn draw_tooltip_copyable(ui: &Ui, copy_value: &str, copy_message: Option<&str>) {
+        let copy_message = match copy_message {
+            // TODO: consider stubbing out generic success messages
+            // like "x has been copied to your clipboard"
+            m => m,
+        };
+        if let Some(copy_message) = copy_message {
+            ui.text_wrapped(copy_message);
+        } else if Self::copyable_value_has_message(copy_value) {
+            ui.text_wrapped(&format!("\"{copy_value}\""));
+        }
+    }
+}
+
+impl super::PackElement {
+    pub(super) fn any_roots_open(&self) -> bool {
+        self.state.info.info.as_ref().map(|i|
+            i.categories.root_paths().any(|r| self.categories.open_mask.contains(r))
+        ).unwrap_or(false)
+    }
+}
+
+impl PackElementState {
+    pub fn category_flags(&self, path: CategoryPath) -> CategoryFlags {
+        let category_flags = self.category_flags.as_ref()
+            .and_then(|f| f.lookup_get(&path));
+        if let Some(category_flags) = category_flags {
+            category_flags
+        } else if let Some(info) = &self.info.info {
+            info.categories.lookup_flags(path)
+        } else {
+            CategoryFlags::empty()
+        }
+    }
+    pub fn category_info(&self, path: CategoryPath) -> Option<&PackCategory> {
+        self.info.info.as_ref().and_then(|info|
+            info.categories.all().lookup_ref(&path)
+        )
+    }
+    pub fn category_visibility_deviation(&self, path: CategoryPath) -> VisibilityFlags {
+        self.config.cached.as_ref().map(|config|
+            config.config.visibility_deviation_for(path)
+        ).unwrap_or(VisibilityFlags::empty())
+    }
+    pub fn category_get_visibility(&self, path: CategoryPath) -> VisibilityFlags {
+        let dev = self.category_visibility_deviation(path);
+        VisibilityFlags::from_category_flags(self.category_flags(path)) ^ dev
+    }
+}
+
+pub struct DrawCategoryCollection<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub state: &'a CategoryCollectionState,
+    pub pack: &'a PackElementState,
+    pub path_stack: Vec<CategoryPath>,
+    /// TODO: these are ZSTs, just make a collection type for this?
+    pub id_stack: Vec<IdStackToken<'ui>>,
+}
+impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
+    pub fn new(ui: &'a Ui<'u>, state: &'a CategoryCollectionState, pack: &'a PackElementState) -> Self {
+        Self {
+            ui,
+            state,
+            pack,
+            path_stack: Vec::new(),
+            id_stack: Vec::new(),
+        }
+    }
+
+    const DEPTH_LIMIT: usize = 78;
+    #[cfg(todo)]
+    pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
+        self.push_and_draw(path, Some(pseudo_root));
+        let cats = self.pack.info.info.as_ref().map(|i| &i.categories);
+
+        while self.node_contents_visible() {
+            if self.path_stack.len() >= Self::DEPTH_LIMIT {
+                log::warn!("category nesting limit reached");
+                break
+            }
+            let Some(cats) = cats else { continue };
+            let cat_info = cats.all().lookup_ref(&self.category_path());
+            let mut next = None;
+            let popping = if let Some(child) = cat_info.and_then(|c| c.child()) {
+                next = Some(child);
+                false
+            } else if let Some(sibling) = cat_info.and_then(|c| c.sibling()) {
+                next = Some(sibling);
+                self.ui.table_next_column();
+                true
+            } else { true };
+            if popping && self.pop_to(path).is_none() {
+                break
+            }
+            if let Some(next) = next.map(CategoryPath::with_path) {
+                self.draw_one(next);
+            }
+        }
+        while let Some(..) = self.pop_to(path) {}
+        #[cfg(todo)]
+        if draw_footer_idk {
+            self.pop_draw(token);
+            footer_stuff();
+        }
+        self.pop();
+    }
+
+    fn prepare_toggle(&self, path: CategoryPath, pseudo_root: Option<bool>) -> DrawCategoryToggle<'a, 'u> {
+        let cats = self.pack.info.info.as_ref().map(|i| &i.categories);
+        let cat = self.pack.category_info(path);
+        let mut vis = VisibilityFlags::TOGGLES;
+        let info = match self.state.categories.get(&path) {
+            Some(info) => {
+                vis = info.visibility;
+                info
+            },
+            None =>&CategoryInfo::EMPTY,
+        };
+        vis ^= self.pack.category_visibility_deviation(path);
+        
+        DrawCategoryToggle {
+            ui: self.ui,
+            info,
+            pack_path: self.pack.pack_path(),
+            category_path: path,
+            flags: self.pack.category_flags(path),
+            toggle_state: vis,
+            open_state: self.state.open_mask.contains(path),
+            is_lonely: match pseudo_root {
+                Some(..) => false,
+                None => cats.map(|cats| cats.lonely.contains(path))
+                    .unwrap_or(false),
+            },
+            is_copyable: info.copyable().is_some(),
+            has_children: cat.map(|cat| cat.child().is_some()).unwrap_or(true),
+            // caller should decide this...
+            #[cfg(todo)]
+            pseudo_root: cats.map(|cats| cats.root_paths().all(|p| p == path))
+                .unwrap_or(false),
+            pseudo_root: pseudo_root.unwrap_or(false),
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<CategoryPath> {
+        let path = self.path_stack.pop();
+        drop(self.id_stack.pop());
+        path
+    }
+    pub fn pop_to(&mut self, root: CategoryPath) -> Option<(CategoryPath, Option<IdStackToken<'u>>)> {
+        let path = self.path_stack.pop_if(|p| *p != root);
+        if path.is_none() && self.path_stack.is_empty() {
+            log::error!("cat stack missing {root}?");
+        }
+        path.map(|path| (
+            path,
+            self.id_stack.pop(),
+        ))
+    }
+    pub fn push(&mut self, path: CategoryPath) -> Option<()> {
+        if self.path_stack.len() >= DrawCategoryCollection::DEPTH_LIMIT {
+            log::warn!("category nesting limit reached");
+            return None
+        }
+        self.path_stack.push(path);
+        let id = self.ui.push_id(self.category_info().ui_id(path));
+        self.id_stack.push(id);
+        Some(())
+    }
+
+    pub fn root_path(&self) -> CategoryPath {
+        self.path_stack.first().copied().unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
+    }
+    pub fn category_path(&self) -> CategoryPath {
+        self.path_stack.last().copied().unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
+    }
+    #[cfg(todo)]
+    pub fn category_visibility_defaults(&self) -> VisibilityFlags {
+        self.state.categories.get(&self.category_path())
+            .map(|info| info.visibility)
+            .unwrap_or_else(|| VisibilityFlags::from_category_flags(self.pack.category_flags()))
+    }
+    pub fn category_info(&self) -> &'a CategoryInfo {
+        self.state.categories.get(&self.category_path())
+            .unwrap_or(&CategoryInfo::EMPTY)
+    }
+
+    pub fn node_contents_visible(&self) -> bool {
+        self.node_stack.last().map(Option::is_some).unwrap_or(false)
+    }
+}
+/// TODO: redo generic-y
+pub struct DrawCategoryCollectionTree<'a, 'ui> {
+    pub draw: DrawCategoryCollection<'a, 'ui>,
+    /// XXX: same as [self.draw.id_stack]
+    pub node_stack: Vec<Option<TreeNodeToken<'ui>>>,
+    pub act_open: Option<(CategoryPath, bool)>,
+    pub act: Option<(CategoryPath, UiAction)>,
+}
+impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
+    pub fn new(draw: DrawCategoryCollection<'a, 'u>) -> Self {
+        Self {
+            draw,
+            node_stack: Vec::new(),
+            act_open: None,
+            act: None,
+        }
+    }
+
+    pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
+        self.push_and_draw(path, Some(pseudo_root));
+        let cats = self.node_contents_visible()
+            .then(|| self.draw.pack.info.info.as_ref().map(|i| &i.categories))
+            .flatten();
+
+        if let Some(cats) = cats {
+            while let Some(cat_path) = self.path_stack.last().copied() {
+                let cat_info = cats.all().lookup_ref(&cat_path);
+                let mut next = None;
+                let popping = if let Some(child) = cat_info.and_then(|c| c.child()) {
+                    next = Some(child);
+                    false
+                } else if let Some(sibling) = cat_info.and_then(|c| c.sibling()) {
+                    next = Some(sibling);
+                    self.draw.ui.table_next_column();
+                    true
+                } else { true };
+                if popping && self.pop_to(path).is_none() {
+                    break
+                }
+                if let Some(next) = next.map(CategoryPath::with_path) {
+                    self.draw_one(next);
+                }
+            }
+        }
+        while let Some(..) = self.pop_to(path) {}
+        #[cfg(todo)]
+        if draw_footer_idk {
+            self.pop_draw(token);
+            footer_stuff();
+        }
+        self.pop();
+    }
+    pub fn draw_one(&mut self, path: CategoryPath) -> Option<()> {
+        let token = self.push_and_draw(path, None);
+        token
+    }
+
+    fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
+        self.push(path)?;
+        let mut toggle = self.draw.prepare_toggle(path, pseudo_root);
+        let (act, token) = toggle.draw();
+        let res = token.as_ref().map(drop);
+        self.set_draw_node(token);
+        match act {
+            Some(UiAction::Primary) => {
+                if self.act_open.is_none() {
+                    self.act_open = Some((path, toggle.toggle_state.is_visible()));
+                } else {
+                    log::debug!("DELETEME: category action already set? {:?}", self.act);
+                }
+            },
+            Some(act) => {
+                if self.act.is_none() {
+                    self.act = Some((path, act));
+                } else {
+                    log::debug!("DELETEME: category action already set? {:?}", self.act);
+                }
+            },
+            None => (),
+        }
+        res
+    }
+
+    /// in case we want to keep id token active for footer/menus/etc
+    pub fn pop_draw(&mut self) {
+        if self.pop_node().is_some() {
+            self.node_stack.push(None);
+        }
+    }
+    fn pop_node(&mut self) -> Option<Option<TreeNodeToken<'u>>> {
+        let token = self.node_stack.pop();
+        if let Some(Some(..)) = &token {
+            self.draw.ui.unindent();
+        }
+        token
+    }
+
+    pub fn pop(&mut self) -> Option<CategoryPath> {
+        drop(self.pop_node());
+        self.draw.pop()
+    }
+    pub fn pop_all(&mut self) {
+        while self.pop().is_some() {}
+    }
+    pub fn pop_to(&mut self, root: CategoryPath) -> Option<CategoryPath> {
+        let (path, id) = self.draw.pop_to(root)?;
+        drop(self.pop_node());
+        drop(id);
+        Some(path)
+    }
+    pub fn push(&mut self, path: CategoryPath) -> Option<()> {
+        let token = self.draw.push(path)?;
+        self.node_stack.push(None);
+        Some(token)
+    }
+    pub fn set_draw_node(&mut self, token: Option<TreeNodeToken<'u>>) {
+        match self.node_stack.pop_if(|n| n.is_none()) {
+            Some(..) => {
+                if token.is_some() {
+                    self.draw.ui.indent();
+                }
+                self.node_stack.push(token);
+            },
+            None =>
+                log::error!("cat node tree({}) inconsistent", self.node_stack.len()),
+        }
+    }
+
+    pub fn node_contents_visible(&self) -> bool {
+        self.node_stack.last().map(Option::is_some).unwrap_or(false)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct CategoryCollectionState {
+    pub info_sig: PackInfoSignature,
+    pub categories: BTreeMap<CategoryPath, CategoryInfo>,
+    pub open_mask: BitSet,
+}
+impl CategoryCollectionState {
+    pub fn pre_draw(&mut self, pack: &PackElementState, pack_damage: &PackDamageReport, visibility: PackVisibility) {
+        if pack_damage.info.is_some() {
+            if pack.info.sig.is_empty() {
+                self.cleanup_cache(true);
+            } else if self.info_sig != pack.info.sig {
+                self.categories.clear();
+                //self.open_mask.clear();
+            }
+            self.info_sig = pack.info.sig;
+        } else if !pack_damage.loaded {
+            return
+        }
+        if let PackVisibility::Closed = visibility {
+            self.cleanup_cache(false);
+            return
+        }
+        let Some(info) = &pack.info.info else {
+            return
+        };
+        let cats = &info.categories;
+        match visibility {
+            PackVisibility::Visible => {
+                let Some(pack_data) = pack.pack_data() else { return };
+                let visible_cats = info.categories.root_paths().flat_map(|root| {
+                    self.all_visible_children(cats, root).chain(iter::once(root))
+                });
+                let missing_info: BitSet = visible_cats
+                    .filter(|path| !self.categories.contains_key(path))
+                    .collect();
+                for path in missing_info.iter_of::<CategoryPath>() {
+                    let Some((_id, category)) = pack_data.categories.all_categories.get_index(path.path as usize) else {
+                        log::error!("missing {path} from {}", pack.info);
+                        continue
+                    };
+                    self.categories.insert(path, CategoryInfo::from_pack_category(category));
+                }
+            },
+            PackVisibility::Pending => {
+                self.categories.retain(|&path, _| Self::is_path_visible(&cats, &self.open_mask, path));
+            },
+            _ => (),
+        }
+    }
+    fn cleanup_cache(&mut self, purge: bool) {
+        self.categories = Default::default();
+        if purge {
+            self.open_mask = Default::default();
+        }
+        self.info_sig = PackInfoSignature::EMPTY;
+    }
+
+    /// don't assume order (DFS atm)
+    ///
+    /// excludes the root, and produces nothing if root isn't open
+    pub fn all_visible_children<'a, 'c>(&'a self, cats: &'c PackCategoryInfo, root: CategoryPath) -> impl Iterator<Item = CategoryPath> + 'a + 'c where
+        'a: 'c,
+        'c: 'a,
+    {
+        let open_mask = &self.open_mask;
+        cats.descendents_of(root).filter(|&path|
+            Self::is_path_visible(cats, open_mask, path)
+        )
+    }
+
+    /// TODO: also apply filters like current-map
+    /// (beware multiple UI elements may have differing filter states?)
+    pub fn is_path_visible(cats: &PackCategoryInfo, open_mask: &BitSet, path: CategoryPath) -> bool {
+        if open_mask.contains(path) { return true }
+        let direct_parent_open = cats.parent_of(path).map(|p| {
+            open_mask.contains(p)
+        });
+        direct_parent_open.unwrap_or(true)
+    }
+
+    /// TODO
+    pub fn category_is_on_map(&self, path: CategoryPath) -> bool {
+        true
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct CategoryInfo {
+    /// TODO: probably not yet used?
+    pub id: Option<CategoryId>,
+    pub display_name: Option<Arc<str>>,
+    pub tooltip: PackTooltip,
+    pub interaction: Option<Arc<InteractionAttributes>>,
+    pub visibility: VisibilityFlags,
+}
+impl CategoryInfo {
+    pub const EMPTY: Self = Self {
+        id: None,
+        display_name: None,
+        tooltip: PackTooltip::EMPTY,
+        interaction: None,
+        visibility: VisibilityFlags::empty(),
+    };
+
+    pub fn from_pack_category(category: &Category) -> Self {
+        Self {
+            id: Some(category.full_id.clone()),
+            display_name: Some(category.display_name.clone()),
+            tooltip: PackTooltip::from_attrs(&category.marker_attributes),
+            interaction: category.marker_attributes.interaction.clone(),
+            visibility: VisibilityFlags::from_pack_category(category),
+        }
+    }
+
+    pub fn display_name(&self) -> Option<&str> {
+        self.display_name.as_ref().map(|n| &n[..])
+    }
+    pub fn tooltip(&self) -> Option<PackTooltipRef<'_>> {
+        self.tooltip.get().map(PackTooltip::borrowed)
+    }
+    pub fn ui_id(&self, path: CategoryPath) -> imgui::Id<'_> {
+        self.id.as_ref().map(|id| imgui::Id::Str(id.as_str()))
+            .unwrap_or(imgui::Id::Int(path.path as _))
+    }
+
+    pub fn copyable(&self) -> Option<(&str, Option<&str>)> {
+        let interaction = self.interaction.as_ref()?;
+        let copy_value = interaction.copy_value.as_ref().map(|c| &c[..]).and_then(str_opt_ref)?;
+        let copy_message = interaction.copy_message.as_ref().map(|c| &c[..]).and_then(str_opt_ref);
+        Some((copy_value, copy_message))
+    }
+}

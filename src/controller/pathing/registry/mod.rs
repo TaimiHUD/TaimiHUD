@@ -797,6 +797,9 @@ impl PackCategoryInfo {
     }
 }
 pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
+pub struct DescendentIter<'a> {
+    cats: &'a PackCategory,
+}
 
 /// TODO: anything else interesting about the root category?
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
