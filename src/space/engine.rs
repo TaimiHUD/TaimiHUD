@@ -567,8 +567,11 @@ impl Engine {
 
         let is_rendering = render_map.is_some() || render_world.is_some();
 
-        let perspective_slot = 0;
+        let (perspective_slot, texture_trail_slot) = (0, 0);
         if is_rendering {
+            self.render_backend
+                .sampler_state
+                .set(&device_context, texture_trail_slot);
             self.render_backend.blend_state.set(&device_context);
             self.render_backend.depth_handler.setup(&device_context);
             self.render_backend.viewport.set(&device_context);
