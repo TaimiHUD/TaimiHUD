@@ -2,6 +2,7 @@ use {
     crate::controller::pathing::registry::{
         PackBoxOf,
         PackCategoryInfo,
+        PackRoot,
         ActivePack,
         PackPath, PackIndex,
         PackConfig,
@@ -257,6 +258,20 @@ impl SharedPackInfo {
             (&i.categories, i)
         )
     }
+    pub fn primary_root(&self) -> Option<&PackRoot> {
+        self.info.as_ref().and_then(|i| i.primary_root())
+    }
+    pub fn unique_root(&self) -> Option<&PackRoot> {
+        let mut roots = self.info.as_ref()?.roots.iter()
+            .filter(|r| !r.hidden);
+        let root = roots.next()?;
+        if roots.next().is_none() {
+            // as long as no additional visible roots were found...
+            Some(root)
+        } else {
+            None
+        }
+    }
 
     /// check [self.info] manually if `None` matters
     pub fn has_map(&self, map_id: MapIndex) -> bool {
@@ -332,13 +347,12 @@ impl Default for SharedPackInfo {
 }
 impl fmt::Display for SharedPackInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let info = self.info.as_ref().and_then(|i| i.primary_root());
-        if let Some(root) = info {
+        if let Some(root) = self.primary_root() {
             f.write_str(&root.display_name)
         } else if let Some(datasource) = &self.datasource {
             fmt::Display::fmt(&datasource.path, f)
         } else if !self.path.as_os_str().is_empty() {
-            let path = rt::relative_path(&self.path);
+            let path = self.path.file_name().unwrap_or_else(|| rt::relative_path(&self.path).as_os_str());
             fmt::Display::fmt(&path.display(), f)
         } else {
             fmt::Display::fmt(&self.index, f)

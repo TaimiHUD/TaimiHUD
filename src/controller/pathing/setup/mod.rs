@@ -121,6 +121,34 @@ impl PathingController {
         Self::new_task_pack_loads(manager, paths)
     }
 
+    pub(super) fn gameplay_map(&self) -> Option<MapIndex> {
+        self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map())
+    }
+    pub(super) fn latest_map(&self) -> Option<MapIndex> {
+        self.rx.gameplay.cached.as_ref().and_then(|g| g.latest_map())
+    }
+
+    /// discard cached data related to all maps except the most recent
+    pub(super) fn trim_inactive_maps(&mut self, info_too: bool) {
+        let latest_map = self.latest_map();
+        if info_too {
+            self.map_info.clear(latest_map);
+        }
+        if let Some(latest_map) = self.latest_map() {
+            for (path, map) in self.maps.iter_mut(None) {
+                if path.path != latest_map {
+                    map.used.mark_for_death();
+                }
+            }
+            self.maps.prune(Some(&self.map_info));
+        } else {
+            if !self.rx.gameplay.cached.as_ref().map(|g| g.is_initial()).unwrap_or(true) {
+                log::info!("unsure of active map - pruning everything");
+            }
+            self.maps.clear();
+        }
+    }
+
     /// eager [self.handle_map_leave()]
     ///
     /// unless reentering, which indicates leave+enter will immediately follow
@@ -189,6 +217,19 @@ impl PathingController {
         if map.info_sig != info_sig {
             log::info!("PATHY: updating map {map_path}");
             *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
+            // TODO: if config is going to trigger update immediately after, this may be unnecessary?
+            let config = self.loader.shared.packs.packs.borrow().lookup_ref(&map_path.root).as_ref().map(|p| p.config.clone());
+            let vis_dirty = if let Some(config) = config.as_ref().map(|c| c.borrow()) {
+                if config.info_sig == info_sig {
+                    map.refresh_categories(&*map_info, &pack_info.categories, &config.config, None);
+                    true
+                } else {
+                    false
+                }
+            } else { false };
+            if vis_dirty {
+                Self::update_loaded_visibility_inner(map_path, map, &*map_info, Some(&self.rx.get_filter_state()));
+            }
         } else {
             log::info!("PATHY: skipping map??? {map_path}");
         }

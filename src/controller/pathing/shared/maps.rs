@@ -521,8 +521,13 @@ impl SharedMapPackState {
         if Arc::ptr_eq(&self.categories, &map_pack.categories) {
             return false
         }
-        self.categories = map_pack.categories.clone();
         true
+    }
+    pub fn write_with_loaded(&mut self, map_pack: &LoadedMapPack) {
+        self.trails = map_pack.trails.iter().map(LoadedTrailShared::with_loaded).collect();
+        self.pois = map_pack.pois.iter().map(LoadedPoiShared::with_loaded).collect();
+        #[cfg(todo)]
+        interaction_pois_etc();
     }
     pub fn update_with_loaded(&mut self, map_pack: &LoadedMapPack) -> bool {
         let mut trails_dirty = self.trails.data.len() != map_pack.trails.len();
@@ -931,7 +936,7 @@ impl<'a> SharedPoiRef<'a> {
         self.marker.map.pois.get(path as usize)
     }
     pub fn render_attrs(&self) -> Option<&Arc<RenderAttributes>> {
-        self.lpoi_info().map(|info| &info.attrs)
+        self.lpoi_info().map(|info| info.attrs())
     }
     pub fn poi_attrs(&self) -> Option<&Box<PoiAttributes>> {
         self.render_attrs().and_then(|render| render.poi.as_ref())
@@ -976,7 +981,7 @@ impl<'a> LoadedPoiRef<'a> {
     }
     #[inline]
     pub fn render_attrs(&self) -> &Arc<RenderAttributes> {
-        &self.lpoi_info().attrs
+        self.lpoi_info().attrs()
     }
     #[inline]
     pub fn poi_attrs(&self) -> &Box<PoiAttributes> {
@@ -1042,7 +1047,7 @@ impl<'a> SharedTrailRef<'a> {
         self.marker.map.trails.get(path as usize)
     }
     pub fn render_attrs(&self) -> Option<&Arc<RenderAttributes>> {
-        self.ltrail_info().map(|info| &info.attrs)
+        self.ltrail_info().map(|info| info.attrs())
     }
     pub fn trail_attrs(&self) -> Option<&Box<TrailAttributes>> {
         self.render_attrs().and_then(|render| render.trail.as_ref())
@@ -1087,7 +1092,7 @@ impl<'a> LoadedTrailRef<'a> {
     }
     #[inline]
     pub fn render_attrs(&self) -> &Arc<RenderAttributes> {
-        &self.ltrail_info().attrs
+        self.ltrail_info().attrs()
     }
     #[inline]
     pub fn trail_attrs(&self) -> &Box<TrailAttributes> {

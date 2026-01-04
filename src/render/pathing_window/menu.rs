@@ -39,7 +39,7 @@ impl PathingWindowState {
             true => "packmenu-active",
         });
         let mut was_multi_root = None;
-        for (pack_idx, pack) in machine.pack_ui_state.pack_state.iter() {
+        for (pack_idx, pack) in machine.pack_ui_state.pack_state.iter_mut() {
             let _id_pack = ui.push_id(pack.state.ui_id());
             #[cfg(deleteme)]
             if !unfiltered && pack.available_categories.is_empty() {
@@ -81,6 +81,9 @@ impl PathingWindowState {
             was_multi_root = Some(multi_root);
             let mut ctx: CategoryMenuContext = Default::default();
             ctx.filtered = unfiltered;
+            drop(roots);
+            pack.draw_menu(ui);
+            #[cfg(todo)]
             for (path, flags, filtered) in roots {
                 let cat = pack.categories.categories.get(&path).unwrap_or(&CategoryInfo::EMPTY);
                 let has_toggle = !flags.contains(CategoryFlags::SEPARATOR) && !cats.lonely.contains(path);

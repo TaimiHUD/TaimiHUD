@@ -7,7 +7,7 @@ use crate::controller::pathing::{
 use {
     crate::{
         controller::pathing::{
-            registry::{LoadedPack, PackCategoryInfo, PackConfig, PackPath, PackInfoSignature, LoadedPoiNs, LoadedTrailNs, LoadedPoiIndex, LoadedTrailIndex},
+            registry::{LoadedPack, PackRoot, PackCategoryInfo, PackConfig, PackPath, PackInfoSignature, LoadedPoiNs, LoadedTrailNs, LoadedPoiIndex, LoadedTrailIndex},
             space::{DrawSpace, TrailParams},
             shared::{MapPackInfo, LoadedPoiInfo, LoadedTrailInfo, LoadedMarkerInfo},
             shared::EMPTY_RENDER_ATTRS,
@@ -34,7 +34,7 @@ use glam::Vec3Swizzles;
 use glamour::{Box3, Point3, Size3, Vector3};
 use taimi_meta::{map::MapID, ui::{MapContext, LocalContext}};
 use taimi_pack::category::{Category, CategoryFlags};
-use taimi_pack::{trail::{TrailData, TrailSection}, MarkerAttributes, Pack, Poi, Trail};
+use taimi_pack::{trail::{TrailData, TrailSection}, attributes::{MarkerAttributes, FilterAttributes}, Pack, Poi, Trail};
 
 #[derive(Debug, Clone, Default)]
 pub struct LoadedCategory {
@@ -51,7 +51,7 @@ impl LoadedCategory {
 pub struct LoadedPoi {
     pub visibility: VisibilityFlags,
     pub marker_position: Point3<DrawSpace>,
-    info: LoadedPoiInfo,
+    pub(crate) info: LoadedPoiInfo,
     overrides: Option<Box<RenderAttributes>>,
 }
 
@@ -83,20 +83,11 @@ impl LoadedPoi {
         visibility.set_defaults_from_attributes(&poi.attributes);
         let marker_position = Self::marker_position_for(poi);
 
-        let mut attrs = poi.attributes.render.clone()
-            .unwrap_or_else(|| EMPTY_RENDER_ATTRS.clone());
-        if !attrs.poi.is_some() {
-            log::warn!("{path} has incomplete render attrs?");
-            let _ = Arc::make_mut(&mut attrs).poi.get_or_insert_default();
-        }
-
         Self {
-            info: LoadedPoiInfo {
-                marker_info: LoadedMarkerInfo {
-                    category_path: CategoryPath::with_path(category),
-                    attrs,
-                },
-            },
+            info: LoadedPoiInfo::with_marker_attrs(
+                CategoryPath::with_path(category),
+                &poi.attributes,
+            ),
             visibility: visibility.restore_default_toggles(),
             marker_position,
             overrides: None,
@@ -105,7 +96,7 @@ impl LoadedPoi {
 
     pub fn render_attrs(&self) -> &RenderAttributes {
         self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(&self.info.attrs)
+            .unwrap_or(self.info.attrs())
     }
     pub fn poi_attrs(&self) -> &PoiAttributes {
         let poi = self.render_attrs().poi.as_ref()
@@ -114,6 +105,10 @@ impl LoadedPoi {
             poi.unwrap_unchecked()
         }
     }
+    #[cfg(todo = "unused")]
+    pub fn filter_attrs(&self) -> Option<&FilterAttributes> {
+        self.info.get_filter_attrs().map(|f| &**f)
+    }
 
     pub fn clear_overrides(&mut self) {
         self.overrides = None;
@@ -121,7 +116,7 @@ impl LoadedPoi {
     pub fn set_overrides(&mut self, overrides: RenderAttributes) {
         let overrides = self.overrides.insert(Box::new(overrides));
         let _ = overrides.poi.get_or_insert_default();
-        overrides.merge(&self.info.attrs);
+        overrides.merge(self.info.attrs());
     }
     #[inline]
     pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
@@ -202,7 +197,7 @@ pub struct LoadedTrail {
     pub visibility: VisibilityFlags,
     /// TODO: deleteme? not much more than starting yoffset is needed tbh
     pub section_info: Arc<LoadedTrailGeometryInfo>,
-    info: LoadedTrailInfo,
+    pub(crate) info: LoadedTrailInfo,
     overrides: Option<Box<RenderAttributes>>,
 }
 
@@ -233,20 +228,14 @@ impl LoadedTrail {
         }.unwrap_or(CategoryIndex::MAX);
         visibility.set_defaults_from_attributes(&trail.attributes);
 
-        let mut attrs = trail.attributes.render.clone()
-            .unwrap_or_else(|| EMPTY_RENDER_ATTRS.clone());
-        if !attrs.trail.is_some() {
-            log::warn!("{path} has incomplete render attrs?");
-            let _ = Arc::make_mut(&mut attrs).trail.get_or_insert_default();
-        }
-
         Self {
-            info: LoadedTrailInfo {
-                marker_info: LoadedMarkerInfo {
-                    category_path: CategoryPath::with_path(category),
-                    attrs,
-                },
-                trl: trail.trail_path.clone(),
+            info: {
+                let mut info = LoadedTrailInfo::with_marker_attrs(
+                    CategoryPath::with_path(category),
+                    &trail.attributes,
+                );
+                info.trl = trail.trail_path.clone();
+                info
             },
             visibility: visibility.restore_default_toggles(),
             overrides: None,
@@ -256,7 +245,7 @@ impl LoadedTrail {
 
     pub fn render_attrs(&self) -> &RenderAttributes {
         self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(&self.info.attrs)
+            .unwrap_or(self.info.attrs())
     }
     pub fn trail_attrs(&self) -> &TrailAttributes {
         let trail = self.render_attrs().trail.as_ref()
@@ -265,6 +254,10 @@ impl LoadedTrail {
             trail.unwrap_unchecked()
         }
     }
+    #[cfg(todo = "unused")]
+    pub fn filter_attrs(&self) -> Option<&FilterAttributes> {
+        self.info.get_filter_attrs().map(|f| &**f)
+    }
 
     pub fn clear_overrides(&mut self) {
         self.overrides = None;
@@ -272,7 +265,7 @@ impl LoadedTrail {
     pub fn set_overrides(&mut self, overrides: RenderAttributes) {
         let overrides = self.overrides.insert(Box::new(overrides));
         let _ = overrides.trail.get_or_insert_default();
-        overrides.merge(&self.info.attrs);
+        overrides.merge(self.info.attrs());
     }
     #[inline]
     pub fn set_attrs(&mut self, overrides: Option<RenderAttributes>) {
@@ -1033,6 +1026,8 @@ impl LoadedMapPack {
         }
     }
 
+    /// TODO: unsure if this is used???
+    #[cfg(todo)]
     pub fn apply_category_visibility(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, damage: Option<&CategorySet>) {
         let range = 0..info.category_max_count();
         let mut category_state: BitVec = BitVec::with_capacity(range.end as usize);
@@ -1157,6 +1152,10 @@ impl VisibilityFlags {
         let mut flags = Self::from_attributes(&category.marker_attributes);
         flags.set_from_category_flags(category.flags);
         flags
+    }
+    /// TODO: if [PackRoot] survives, give it a [CategoryFlags] field
+    pub fn from_pack_root(_root: &PackRoot) -> Self {
+        Self::TOGGLES
     }
     pub fn from_attributes(marker_attributes: &MarkerAttributes) -> Self {
         let mut flags = Self::empty();

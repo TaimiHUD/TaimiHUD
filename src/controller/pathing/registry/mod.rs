@@ -411,7 +411,7 @@ impl PackInfo {
         let roots = pack.categories.root_categories
             .iter()
             .filter_map(|id| pack.categories.all_categories.get_full(id))
-            .map(|(i, _, cat)| PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat))
+            .map(|(i, _, cat)| PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat, Some(&pack.categories)))
             .collect();
 
         let trail_maps = pack.trails.iter()
@@ -633,6 +633,10 @@ impl PackCategoryInfo {
     pub fn root_paths(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
         self.roots.iter().lazy_map(|&p| CategoryPath::with_path(p))
     }
+    /// TODO: sorted lookup? probably a bad idea when there's likely just 1 or 2 at the most though...
+    pub fn is_root(&self, path: CategoryPath) -> bool {
+        self.roots.contains(&path.path)
+    }
 
     pub fn count(&self) -> usize {
         self.all.len()
@@ -713,6 +717,10 @@ impl PackCategoryInfo {
                 break Some(next)
             }
         })
+    }
+    /// like [self.descendents_of()] but emits parents before children
+    pub fn nested_descendents_of(&self, path: CategoryPath) -> DescendentIter<'_> {
+        DescendentIter::with_root(self, path)
     }
 
     /// TODO: rename to ancestors_of
@@ -797,8 +805,208 @@ impl PackCategoryInfo {
     }
 }
 pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
+#[derive(Debug, Copy, Clone)]
+struct DescendentIterNode {
+    pub prev: CategoryPath,
+    pub sibling: CategoryPath,
+}
+impl DescendentIterNode {
+    pub const fn new(firstborn: CategoryPath) -> Self {
+        Self {
+            sibling: firstborn,
+            prev: firstborn,
+        }
+    }
+    pub const fn depleted(prev: CategoryPath) -> Self {
+        Self {
+            prev,
+            sibling: CategoryPath::new_path(CategoryIndex::MAX),
+        }
+    }
+
+    pub fn is_initial(&self) -> bool {
+        self.sibling == self.prev
+    }
+}
 pub struct DescendentIter<'a> {
-    cats: &'a PackCategory,
+    cats: &'a PackCategoryInfo,
+    stack: Vec<DescendentIterNode>,
+    cycle_limit: u32,
+}
+impl<'a> DescendentIter<'a> {
+    pub fn with_root(cats: &'a PackCategoryInfo, root: CategoryPath) -> Self {
+        let mut iter = Self::empty(cats);
+        iter.start_from(root);
+        iter
+    }
+    pub fn empty(cats: &'a PackCategoryInfo) -> Self {
+        Self { cats, stack: Vec::new(), cycle_limit: cats.all.len() as _ }
+    }
+    pub fn start_from(&mut self, root: CategoryPath) {
+        let target = self.cats.info_of(root);
+        let firstborn = target.and_then(|c| c.child());
+        let capacity = match &target {
+            #[cfg(todo = "unnecessary")]
+            Some(info) if firstborn.is_some() => {
+                // rough count of categories under a root...
+                let amt = (self.all.len() - self.lonely.len()) / self.roots.len();
+                let depth = match info.parent() {
+                    Some(p) => self.parents_of(p).count(),
+                    None => 0,
+                } + 1;
+                let stride = self.younger_siblings_of(path).count();
+                #[cfg(todo = "unnecessary")]
+                let mut child_cap = amt / 4;
+
+                let cap = 0x40;
+                let cap = match amt.checked_ilog2() {
+                    Some(est) => {
+                        let depth_rem = est.saturating_sub(depth) + 1;
+                        #[cfg(todo = "unnecessary")]
+                        child_cap = 2usize.ipow2(depth_rem).min(self.all.len());
+                        (depth_rem + 1) * 2
+                    },
+                    None => cap,
+                };
+                (
+                    cap,
+                    #[cfg(todo = "unnecessary")]
+                    CategorySet::with_capacity(child_cap),
+                )
+            },
+            Some(..) if firstborn.is_some() =>
+                0x40,
+            _ => 0,
+        };
+        self.stack.reserve(capacity);
+        #[cfg(todo = "unnecessary")] {
+            self.stack.push(DescendentIterNode::depleted(root));
+        }
+        if let Some(firstborn) = firstborn.map(CategoryPath::with_path) {
+            self.stack.push(DescendentIterNode::new(firstborn));
+        }
+    }
+
+    pub fn current_chain(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
+        let fresh_child = self.peek_next_is_child();
+        let mut chain = self.stack.iter();
+        if fresh_child {
+            let _ = chain.next_back();
+        }
+        chain.lazy_map(|node| node.prev)
+    }
+    /// of the last-produced node
+    pub fn current_ancestors(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
+        self.current_chain().rev().skip(1)
+    }
+
+    /// of the last-produced node
+    pub fn depth(&self) -> usize {
+        self.current_chain().count()
+    }
+
+    /// (path, depth)
+    pub fn peek_next(&self) -> Option<(CategoryPath, usize)> {
+        let mut chain = self.stack.iter().rev();
+        while let Some(node) = chain.next() {
+            if node.sibling.path != CategoryIndex::MAX {
+                return Some((node.sibling, chain.count() + 1))
+            }
+        }
+        None
+    }
+    pub fn peek_next_path(&self) -> Option<CategoryPath> {
+        self.peek_next().map(|(path, _depth)| path)
+    }
+    pub fn peek_next_depth(&self) -> usize {
+        self.peek_next().map(|(_path, depth)| depth)
+            .unwrap_or(0)
+    }
+    pub fn peek_next_is_child(&self) -> bool {
+        self.stack.last().map(|node| node.is_initial())
+            .unwrap_or(false)
+    }
+    pub fn peek_next_is_ancestor(&self) -> bool {
+        self.stack.last().map(|node| node.sibling.path == CategoryIndex::MAX)
+            .unwrap_or(true)
+    }
+    /// repeat the latest value produced by the iter
+    ///
+    /// its depth was just [self.depth()]
+    pub fn peek_prev(&self) -> Option<CategoryPath> {
+        self.current_chain().rev().next()
+    }
+
+    /// skip any children of the current node (true if any existed)
+    pub fn skip_to_sibling(&mut self) -> bool {
+        let has_children = self.peek_next_is_child();
+        if has_children {
+            self.stack.pop();
+        }
+        has_children
+    }
+    fn skip_to_direct_parent(&mut self) -> bool {
+        self.stack.pop();
+        self.peek_next_is_ancestor()
+    }
+
+    /// true if there's still more to pop up from
+    /// (or empty because the next would be the original root)
+    ///
+    /// false indicates parent had a sibling
+    pub fn skip_to_parent(&mut self) -> bool {
+        let _ = self.skip_to_sibling();
+        self.skip_to_direct_parent()
+    }
+    /// returns amount of depth levels popped
+    ///
+    /// expect at least 1 while popping to direct parent of the latest node
+    /// (unless iter was empty?)
+    pub fn skip_up(&mut self) -> usize {
+        let _ = self.skip_to_sibling();
+        let mut count = 0;
+        while !self.stack.is_empty() {
+            if !self.skip_to_direct_parent() {
+                break
+            }
+        }
+        count
+    }
+}
+impl Iterator for DescendentIter<'_> {
+    type Item = CategoryPath;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let current = self.stack.last_mut()?;
+            let next_path = current.sibling;
+            current.prev = next_path;
+            let info = match self.cats.info_of(next_path) {
+                None => {
+                    // out of children at this level...
+                    self.stack.pop();
+                    continue
+                },
+                Some(i) => i,
+            };
+            current.sibling = CategoryPath::with_path(
+                info.sibling().unwrap_or(CategoryIndex::MAX)
+            );
+            match self.cycle_limit.checked_sub(1) {
+                Some(l) =>
+                    self.cycle_limit = l,
+                None => {
+                    // who knows, mistakes and/or corruption can happen!
+                    log::error!("category descendents exceeded cycle limit, stuck at {next_path} while {} deep", self.stack.len());
+                    break None
+                },
+            }
+            if let Some(firstborn) = info.child().map(CategoryPath::with_path) {
+                self.stack.push(DescendentIterNode::new(firstborn));
+            }
+
+            break Some(next_path)
+        }
+    }
 }
 
 /// TODO: anything else interesting about the root category?
@@ -813,7 +1021,7 @@ pub struct PackRoot {
 }
 
 impl PackRoot {
-    pub fn from_category(path: CategoryPath, category: &Category) -> Self {
+    pub fn from_category(path: CategoryPath, category: &Category, collection: Option<&CategoryCollection>) -> Self {
         #[cfg(todo = "unnecessary")]
         if category.full_id != category.id {
             return None
@@ -824,7 +1032,10 @@ impl PackRoot {
             display_name: category.display_name.clone(),
             hidden: category.is_hidden(),
             separator: category.is_separator(),
-            child_count: category.sub_categories.len(),
+            child_count: match collection {
+                Some(c) => c.all_categories.values().filter(|c| c.full_id.id_starts_with(&category.full_id)).count(),
+                None => category.sub_categories.len(),
+            },
         }
     }
 

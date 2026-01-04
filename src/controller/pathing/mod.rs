@@ -41,7 +41,7 @@ use {
         time::{sleep, Duration},
     },
     taimi_sync::watched::watch,
-    taimi_meta::packs::{collections::PackSet, id::MarkerId, PackPath, CategoryPath},
+    taimi_meta::packs::{collections::{PackSet, CategorySet}, id::MarkerId, PackPath, CategoryPath},
 };
 use futures::stream::{self, FusedStream};
 
@@ -71,9 +71,13 @@ pub(crate) enum PathingEvent {
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
+    #[cfg(deleteme)]
     RequestDisabledPaths,
     PathingStateUpdate(CategoryId, bool),
-    CategoryToggle(PackPath, CategoryPath, Option<bool>),
+    /// toggle or set category state
+    CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
+    /// act upon a batch of changes to [shared::SharedPackLoad::config]
+    CategoryEnableCommit(PackPath, CategorySet),
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(space::LoadReport),
@@ -227,7 +231,10 @@ impl PathingController {
             Ok(_) = self.space.maps_rx.changed() => {
                 log::info!("PATHY: gameplay maps rx");
                 if let Some(map_id) = gameplay_prev.gameplay_map() {
-                    let bvh_dirty = if self.space.packs.needs_rebuild(map_id, &self.packs) {
+                    #[cfg(todo)]
+                    let bvh_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);
+                    let bvh_dirty = true;
+                    let bvh_dirty = if bvh_dirty {
                         Arc::make_mut(&mut self.space.packs).rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
                         log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
                         true
@@ -249,7 +256,13 @@ impl PathingController {
                 }
             },
             _ = self.rx.festivals.changed() => {
-                self.provide_disabled_paths().await;
+                self.external_filters_updated().await;
+            },
+            _ = self.rx.achievements.changed() => {
+                self.external_filters_updated().await;
+            },
+            _ = self.rx.raids.changed() => {
+                self.external_filters_updated().await;
             },
             controls = self.controls.wait() => match controls {
                 Err(e) => log::error!("Control bindings error! {e:#}"),
@@ -327,8 +340,9 @@ impl PathingController {
         });
     }
 
-    async fn provide_disabled_paths(&self) {
-        log::debug!("TODO: provide_disabled_paths (filter/config dirty bs)");
+    /// TODO: this sanely
+    async fn external_filters_updated(&mut self) {
+        self.update_loaded_visibility();
     }
 
     async fn load_all(&mut self) {
@@ -627,8 +641,13 @@ impl PathingController {
             UnloadAll => self.unload_all().await,
             ReloadAll(..) | UnloadAll | ReloadPack(..) | UnloadPack(..) =>
                 log::debug!("TODO: pathing load"),
-            CategoryToggle(..) =>
-                log::debug!("TODO: toggle"),
+            CategoryEnableSet(pack_path, cat, state) =>
+                Self::handle_toggle(&self.loader, pack_path.rel(cat.path), state).await,
+            CategoryEnableCommit(pack_path, cats) => {
+                let changed = cats.into_iter().map(CategoryPath::with_path);
+                Self::category_commit_vis(&self.loader, pack_path, changed).await
+            },
+            #[cfg(deleteme)]
             RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,

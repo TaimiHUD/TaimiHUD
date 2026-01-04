@@ -153,6 +153,19 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
         let mut dest = self.extend_for_offset(offset, false);
         mem::replace(&mut *dest, true)
     }
+    /// like [self.insert_at()] unless present is false, which will instead [self.remove_at()]
+    #[inline]
+    pub fn insert_at_if<L: AsPrimitive<usize>>(&mut self, offset: L, present: bool) -> bool {
+        let offset = offset.as_();
+        let Some(offset) = Self::check_offset(offset) else { return false };
+        self.insert_at_offset_if(offset, present)
+    }
+    pub fn insert_at_offset_if(&mut self, offset: usize, present: bool) -> bool {
+        match present {
+            true => self.insert_at_offset(offset),
+            false => self.remove_at_offset(offset).unwrap_or(false),
+        }
+    }
 }
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     V: AsRef<BitSlice<T, O>>,
@@ -204,6 +217,16 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     V: AsMut<BitSlice<T, O>>,
 {
+    #[inline]
+    pub fn remove_at<L: AsPrimitive<usize>>(&mut self, offset: L) -> Option<bool> {
+        self.remove_at_offset(offset.as_())
+    }
+    pub fn remove_at_offset(&mut self, offset: usize) -> Option<bool> {
+        self.get_mut_at_offset(offset).map(|mut b|
+            mem::replace(&mut *b, false)
+        )
+    }
+
     #[inline]
     pub fn get_mut_at<L: AsPrimitive<usize>>(&mut self, offset: L) -> Option<BitRef<'_, bitptr::Mut, T, O>> {
         let offset = offset.as_();

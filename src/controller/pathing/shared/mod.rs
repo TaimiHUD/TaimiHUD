@@ -1,8 +1,8 @@
 use {
     crate::{
         controller::{
-            api::FestivalState,
-            pathing::{registry::PackLoader, space::SpacePackShared, PathingEvent},
+            api::{AchievementState, FestivalState, RaidState},
+            pathing::{registry::PackLoader, space::SpacePackShared, PathingEvent, ExternalFilterState},
         },
         render::machine::MumbleIdentityUpdate,
         settings::SettingsLock,
@@ -38,6 +38,8 @@ impl PathingSender {
         gameplay: &watch::Sender<GameplayState>,
         mumble_identity: &watch::Sender<Option<MumbleIdentityUpdate>>,
         festivals: &watch::Sender<FestivalState>,
+        achievements: &watch::Sender<Arc<AchievementState>>,
+        raids: &watch::Sender<Arc<RaidState>>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(48);
         #[cfg(todo)]
@@ -53,6 +55,8 @@ impl PathingSender {
             shared: sender.shared.clone(),
             command: command_rx,
             festivals: festivals.subscribe(),
+            achievements: achievements.subscribe(),
+            raids: raids.subscribe(),
             gameplay: Watched::subscribe_to(gameplay),
             mumble_identity: mumble_identity.subscribe(),
             enables: sender.enables.clone(),
@@ -73,6 +77,10 @@ pub struct PathingReceiver {
     pub command: mpsc::Receiver<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
     pub festivals: watch::Receiver<FestivalState>,
+    /// TODO: cfg(feature = "api")
+    pub achievements: watch::Receiver<Arc<AchievementState>>,
+    /// TODO: cfg(feature = "api")
+    pub raids: watch::Receiver<Arc<RaidState>>,
     pub gameplay: Watched<GameplayState>,
     pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
     #[cfg(todo)]
@@ -84,6 +92,18 @@ impl PathingReceiver {
     pub(crate) fn make_loader(&self, settings: SettingsLock) -> Arc<PackLoader> {
         let loader = PackLoader::new(self.shared.clone(), settings);
         Arc::new(loader)
+    }
+
+    /// TODO: with_filter_state borrowing variant to avoid clone?
+    /// lock should be fine to hold...
+    pub(super) fn get_filter_state(&self) -> ExternalFilterState {
+        let festivals = self.festivals.borrow().get();
+        let bypass = self.enables.borrow().contains(PathingEnables::API_BYPASS);
+        let (clears, achievements) = match bypass {
+            true => Default::default(),
+            false => (self.raids.borrow().clone(), self.achievements.borrow().clone()),
+        };
+        (festivals, clears, achievements)
     }
 }
 

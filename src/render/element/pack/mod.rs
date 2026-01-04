@@ -10,11 +10,12 @@ use {
     },
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
     taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+    taimi_sync::arcs::ArcPtrCmp,
 };
 pub use self::{
-    categories::{DrawCategoryHeader, DrawCategoryTooltip, DrawPackUnloaded, CategoryInfo, CategoryCollectionState},
-    menu::DrawCategoryMenu,
-    toggles::{DrawPackRoots, DrawCategoryToggle, DrawCategoryCollection, DecorateCategoryHeader},
+    categories::{DrawCategoryHeader, DrawCategoryTooltip, DrawPackUnloaded, CategoryInfo, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryCollectionState, CategoryAction, CategoryActionSlot},
+    menu::{DrawCategoryMenu, DrawCategoryCollectionMenu},
+    toggles::{DrawPackRoots, DrawCategoryToggle, DecorateCategoryHeader},
 };
 
 mod categories;
@@ -43,9 +44,15 @@ impl PackElements {
         }
         let Some(_shared) = &self.shared else { return };
         if let Some(packs) = self.packs_rx.try_read_if_changed() {
-            log::debug!("TODO: packs damage report and setup etc");
-            let new_packs = packs.iter().skip(self.pack_state.len());
-            for (_path, pack) in new_packs {
+            let mut packs_iter = packs.values();
+            for (pack_state, pack) in self.pack_state.values_mut().zip(&mut packs_iter) {
+                let prev_info_sig = pack_state.state.info.sig;
+                if ArcPtrCmp::from_mut(&mut pack_state.state.info).clone_from_arc(&pack.info) {
+                    pack_state.state.damage.info = Some(prev_info_sig);
+                }
+            }
+            // any remainding are new packs...
+            for pack in packs_iter {
                 self.pack_state.data.push(PackElement::new(&pack));
             }
         }
@@ -53,8 +60,8 @@ impl PackElements {
             pack.pre_draw(visibility);
         }
     }
-    pub fn draw(&self, ui: &Ui) {
-        for pack in self.pack_state.values() {
+    pub fn draw(&mut self, ui: &Ui) {
+        for pack in self.pack_state.values_mut() {
             pack.draw(ui);
         }
     }
@@ -85,12 +92,6 @@ impl PackElement {
         };
         self.categories.pre_draw(&self.state, &damage, category_visibility);
     }
-
-    fn any_roots_open(&self) -> bool {
-        self.state.info.info.as_ref().map(|i|
-            i.categories.root_paths().any(|r| self.categories.open_mask.contains(r))
-        ).unwrap_or(false)
-    }
 }
 
 #[derive(Debug)]
@@ -116,7 +117,7 @@ impl PackElementState {
             config: Watched::start_watching(&pack.config),
             loaded,
             damage: PackDamageReport {
-                info: Some(pack.info.sig),
+                info: Some(PackInfoSignature::EMPTY),
                 .. PackDamageReport::ALL
             },
             unloaded: None,
@@ -129,6 +130,10 @@ impl PackElementState {
 
     pub fn pre_draw(&mut self, visibility: PackVisibility) -> PackDamageReport {
         let mut damage = mem::take(&mut self.damage);
+        self.damage.visibility = Some(visibility);
+        if damage.visibility == Some(visibility) {
+            damage.visibility = None;
+        }
         if let Some(_config) = self.config.try_read_if_changed() {
             damage.config = true;
         }
@@ -152,18 +157,8 @@ impl PackElementState {
                 let _ = write!(&mut self.display_name, "{}", self.info);
             }
         }
-        if self.id_name.is_empty() {
-            let root = || self.info.info.as_ref().and_then(|i| match i.roots.iter().next() {
-                Some(root) if i.roots.len() == 1 =>
-                    Some(root),
-                _ => None,
-            });
-            if let Some(datasource) = self.info.datasource.as_ref() {
-                // TODO: just ref this inline self.ui_id() instead
-                self.id_name.push_str(&datasource.path[..]);
-            } else if let Some(root) = root() {
-                self.id_name.push_str(root.id.as_str());
-            } else if let Some(fname) = self.info.path.file_name() {
+        if self.id_name.is_empty() && self.info.datasource.is_none() {
+            if let Some(fname) = self.info.path.file_name() {
                 let _ = write!(&mut self.id_name, "{}", fname.display());
             }
         }
@@ -178,9 +173,11 @@ impl PackElementState {
     }
 
     pub fn ui_id(&self) -> imgui::Id<'_> {
-        str_opt_ref(&self.id_name)
-            .or(str_opt_ref(&self.display_name))
-            .map(imgui::Id::Str)
+        let id_name =
+            str_opt_ref(&self.id_name)
+            .or_else(|| self.info.datasource.as_ref().map(|ds| &ds.path[..]));
+        //let id_name = id_name.or(str_opt_ref(&self.display_name));
+        id_name.map(imgui::Id::Str)
             .unwrap_or(imgui::Id::Int(self.info.index.path as _))
     }
     pub fn pack_path(&self) -> PackPath {
@@ -494,17 +491,20 @@ impl ToOwned for PackTooltipRef<'_> {
 
 #[derive(Debug, Clone, Default)]
 pub struct PackDamageReport {
+    visibility: Option<PackVisibility>,
     info: Option<PackInfoSignature>,
     config: bool,
     loaded: bool,
 }
 impl PackDamageReport {
     pub const CLEAN: Self = Self {
+        visibility: None,
         info: None,
         config: false,
         loaded: false,
     };
     pub const ALL: Self = Self {
+        visibility: Some(PackVisibility::Pending),
         info: Some(PackInfoSignature::EMPTY),
         config: true,
         loaded: true,
@@ -512,24 +512,24 @@ impl PackDamageReport {
 }
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PackVisibility {
-    Visible,
+    Visible = 4,
     /// would be visible, but scrolled off-screen
-    Offset,
+    Offset = 3,
     /// relevant and available (can be navigated to),
     /// usually inside a collapsed tree node or menu
     #[default]
-    Pending,
+    Pending = 2,
     /// window closed
-    Closed,
+    Closed = 1,
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[must_use]
 pub enum UiAction {
-    Clicked(MouseButton),
-    /// toggled/selected/committed/etc
-    Primary,
     Hovered,
     Dismissed,
+    /// toggled/selected/committed/etc
+    Primary,
+    Clicked(MouseButton),
 }
 impl UiAction {
     pub const LEFT_CLICK: Self = Self::Clicked(MouseButton::Left);

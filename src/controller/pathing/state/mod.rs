@@ -181,6 +181,12 @@ impl LoadedMaps {
             (map, &map_info.info)
         )
     }
+    pub fn lookup_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, path: &'_ PackMapPath) -> Option<(&'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        let map = self.lookup_mut(path)?;
+        map_info.lookup_ref(path).map(move |map_info|
+            (map, &map_info.info)
+        )
+    }
     pub fn iter_pack<'a>(&'a self, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
         self.maps.iter().filter_map(move |(path, map)|
             match pack_path {

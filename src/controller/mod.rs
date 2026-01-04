@@ -1060,7 +1060,7 @@ impl ControllerSender {
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
         #[cfg(feature = "paths")]
         let (pathing, pathing_rx) =
-            PathingSender::new(&gameplay, &mumble_identity_tx, &api.festivals);
+            PathingSender::new(&gameplay, &mumble_identity_tx, &api.festivals, &api.achievements, &api.raids);
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),

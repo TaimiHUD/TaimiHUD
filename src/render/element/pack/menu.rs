@@ -10,7 +10,7 @@ use {
             imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, MenuItem, StyleVar, MenuToken},
         }, render::RenderState, with_i18n
     },
-    super::{DrawCategoryHeader, UiAction},
+    super::{DrawCategoryHeader, DrawCategoryCollection, CategoryAction, CategoryActionSlot, UiAction, DrawPackRoots},
     glam::Vec2,
     glamour::Rect,
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
@@ -25,6 +25,62 @@ impl<'a, 'u> super::DrawCategoryToggle<'a, 'u> {
         menu.is_copyable = self.is_copyable;
         menu.has_toggle = self.has_toggle();
         menu
+    }
+}
+impl<'a, 'u> DrawPackRoots<'a, 'u> {
+    pub fn draw_menu(&mut self) {
+        let _id = self.ui.push_id(self.state.ui_id());
+        let categories = match self.state.unloaded.as_ref() {
+            None if self.state.pack.is_some() => self.prepare_menu_categories(),
+            _reason => None,
+        };
+        match categories {
+            Some(cats) => self.draw_menu_loaded(cats),
+            None => self.draw_menu_unloaded(),
+        }
+    }
+    pub fn draw_menu_loaded(&mut self, mut categories: DrawCategoryCollectionMenu<'a, 'u>) {
+        if let Some(cats) = self.state.info.info.as_ref().map(|i| &i.categories) {
+            for root in cats.root_paths() {
+                categories.draw_root(root, true);
+                if let Some((path, act_cat)) = categories.act.take() {
+                    let clobbered = act_cat.clobber(path, &mut self.act_cat);
+                    CategoryAction::warn_clobbered(&self.act_cat, clobbered);
+                }
+            }
+            // TODO: record categories.act_open? with its depth then can track open/close events...
+        }
+    }
+    pub fn draw_menu_unloaded(&mut self) {
+        let mut menu = DrawCategoryMenu::new(self.prepare_header(), true);
+        let (act, token) = menu.draw_start();
+        if let Some(token) = &token {
+            self.ui.text("uhhhh wasn't I a leaf?");
+        }
+        menu.draw_end(token);
+        if let Some(act) = act {
+            if act != UiAction::Hovered {
+                log::error!("TODO: {} {act:?}", self.state.info);
+            }
+        }
+    }
+
+    pub fn prepare_menu_categories(&self) -> Option<DrawCategoryCollectionMenu<'a, 'u>> {
+        self.categories.map(|state|
+            DrawCategoryCollectionMenu::new(DrawCategoryCollection::new(self.ui, state, self.state))
+        )
+    }
+}
+impl super::PackElement {
+    pub fn draw_menu(&mut self, ui: &Ui) {
+        let mut roots = self.prepare_draw(ui);
+        roots.draw_menu();
+        let DrawPackRoots { mut act_cat, act_pack, .. } = roots;
+        if let Some((path, CategoryAction::Open(..))) = act_cat {
+            log::debug!("DELETEME: ignoring menu open event for {path}");
+            act_cat = None;
+        }
+        self.act_post_draw(act_cat, act_pack);
     }
 }
 
@@ -190,5 +246,96 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
     }
     fn draw_spacing(&self) -> bool {
         Self::dead_zone_spacing(self.draw.ui, !self.is_leaf())
+    }
+}
+pub struct DrawCategoryCollectionMenu<'a, 'ui> {
+    pub draw: DrawCategoryCollection<'a, 'ui>,
+    pub menu_stack: Vec<(Option<MenuToken<'a>>, bool)>,
+    pub act: CategoryActionSlot,
+    pub act_open: Vec<CategoryPath>,
+}
+impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
+    pub fn new(draw: DrawCategoryCollection<'a, 'u>) -> Self {
+        Self {
+            draw,
+            menu_stack: Vec::new(),
+            act: Default::default(),
+            act_open: Vec::new(),
+        }
+    }
+    pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
+        self.menu_stack.clear();
+        let root = self.push_and_draw(path, Some(pseudo_root));
+        let cats = root.and_then(|()| self.draw.pack.info.info.as_ref().map(|i| &i.categories));
+        if let Some(cats) = cats {
+            let mut cat_iter = cats.nested_descendents_of(path);
+            let mut prev_depth = cat_iter.depth();
+            'cats: while let Some(cat_path) = cat_iter.next() {
+                let depth = cat_iter.depth();
+                if let Some(popping) = prev_depth.checked_sub(depth) {
+                    for _ in 0..=popping {
+                        if self.pop().is_none() {
+                            break 'cats
+                        }
+                    }
+                }
+                prev_depth = depth;
+                if self.push_and_draw(path, None).is_none() {
+                    cat_iter.skip_to_sibling();
+                }
+            }
+        }
+        while let Some(..) = self.pop() {}
+    }
+
+    pub fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
+        self.draw.push(path)?;
+        let toggle = self.draw.prepare_toggle(path, pseudo_root);
+        let mut menu = toggle.prepare_menu();
+        let is_leaf = menu.is_leaf();
+        let (act, token) = menu.draw_start();
+        let res = token.as_ref().map(drop);
+        self.menu_stack.push((token, is_leaf));
+        let act = match act {
+            Some(UiAction::Primary) if is_leaf && menu.is_copyable =>
+                Some(CategoryAction::Copy),
+            Some(UiAction::LEFT_CLICK) if menu.is_copyable =>
+                Some(CategoryAction::Copy),
+            Some(UiAction::Primary) if is_leaf =>
+                Some(CategoryAction::Enable(None)),
+            Some(UiAction::RIGHT_CLICK) =>
+                Some(CategoryAction::Enable(None)),
+            Some(UiAction::LEFT_CLICK) if !is_leaf =>
+                Some(CategoryAction::Enable(None)),
+            Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
+            Some(act) => {
+                log::debug!("DELETEME: category menu action {act:?} unexpected");
+                None
+            },
+            None => None,
+        };
+        if let Some(act) = act {
+            let clobbered = act.clobber(path, &mut self.act);
+            CategoryAction::warn_clobbered(&self.act, clobbered);
+        }
+
+        if res.is_some() {
+            if self.draw.path_stack.len() > self.act_open.len() {
+                self.act_open = self.draw.path_stack.clone();
+            } else if self.draw.path_stack.len() == self.act_open.len() {
+                log::debug!("DELETEME: category menu open already set? {:?} vs {:?}", self.act_open, self.draw.path_stack);
+            }
+        }
+        res
+    }
+    pub fn pop(&mut self) -> Option<CategoryPath> {
+        let path = self.draw.pop();
+        if let Some((token, is_leaf)) = self.menu_stack.pop() {
+            // TODO: menu.draw_end(token);
+            drop(token);
+            DrawCategoryMenu::dead_zone_spacing(self.draw.ui, !is_leaf);
+        }
+
+        path
     }
 }

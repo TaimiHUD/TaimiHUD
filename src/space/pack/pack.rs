@@ -1051,7 +1051,7 @@ impl PackRender {
             rx.mark_changed();
             rx
         });
-        let packs_map = self.packs_map.get_or_insert_with(|| {
+        let _ = self.packs_map.get_or_insert_with(|| {
             let mut rx = pathing.gameplay.subscribe();
             rx.mark_changed();
             rx
@@ -1078,17 +1078,38 @@ impl PackRender {
                 dest.info = pack.info.clone();
             }
         }
+        let mut space_dirty = false;
         if let Some(spacepacks) = self.spacepacks.try_read_if_changed() {
             ArcPtrCmp::from_mut(&mut self.render_list.spacepacks).clone_from_arc(&*spacepacks);
+            log::debug!("TODO: IB dirty check bleh");
+            space_dirty = true;
+        }
+        if space_dirty {
+            self.mark_buffers_dirty();
         }
         let map_id = match self.render_list.spacepacks.map_id {
             map_id if map_id != machine.is_ingame() =>
                 None,
             map_id => map_id,
         };
+        if map_id.is_some() && self.draw_state.prev_map_id != map_id {
+            self.clear();
+            self.draw_state.prev_map_id = map_id;
+        }
+        let packs_map_changed = {
+            let packs_changed = match self.packs_map.as_mut() {
+                Some(packs_map) if space_dirty || packs_map.has_changed().unwrap_or(false) =>
+                    Some(packs_map.borrow_and_update()),
+                _ => None,
+            };
+            match packs_changed {
+                Some(packs_map) if packs_map.map_id != map_id =>
+                    None,
+                packs_map => packs_map,
+            }
+        };
         if let Some(map_id) = map_id {
-            if packs_map.has_changed().unwrap_or(false) {
-                let packs_map = packs_map.borrow_and_update();
+            if let Some(packs_map) = &packs_map_changed {
                 log::debug!("PATHY: gameplay maps rx @ {map_id}");
                 if let Some(maps) = packs_map.get_ref(map_id) {
                     for (pack_path, pack) in self.pack_data.iter_mut() {
@@ -1141,6 +1162,7 @@ impl PackRender {
                     }
                 }
             }
+            drop(packs_map_changed);
             for (ltrail_path, trail_incoming) in self.trail_rx.try_recv_fulfilled() {
                 self.draw_state.drawn_incomplete.remove(&SpacePackShared::trail_geometry_id(&ltrail_path));
                 match self.render_list.spacepacks.map_id {
@@ -1280,19 +1302,25 @@ impl PackRender {
             }
             self.trail_rx.request_many(incomplete_trail_geometry);
             self.texture_rx.request_many(incomplete_textures);
+        } else {
+            drop(packs_map_changed);
         }
         self.draw_state.clear_active();
         // TODO: rewrite this ib stuff because len depends on both poi info being uptodate *and* knowing if any packs have non-empty trails (while poi buffer empty)...
         // TODO: also skip or dealloc when mapid none and stuff
-        let mut ibs_dirty = false;
-        if self.pack_data.values().any(|p| p.render_poi_bookmarks().len() != p.pois.len()) {
-            self.allocate_poi_buffers(1);
-            ibs_dirty = true;
+        let mut ibs_dirty = self.poi_common.is_empty() && map_id.is_some();
+        if !ibs_dirty {
+            if self.pack_data.values().any(|p| p.render_poi_bookmarks().len() != p.pois.len()) {
+                self.allocate_poi_buffers(1);
+                ibs_dirty = true;
+            }
         }
         self.poi_common.update(device, machine, &self.pack_data)?;
         let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
         let ib_len = self.poi_common.ib_len();
-        ibs_dirty |= ib_pack_len != ib_len;
+        if !ibs_dirty {
+            ibs_dirty |= ib_pack_len != ib_len;
+        }
         if self.poi_common.is_empty() || ibs_dirty {
             let ib_empty = self.poi_common.is_empty();
             log::debug!("PATHY IBS needs creation: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}");
@@ -1591,6 +1619,7 @@ impl PackRender {
 #[derive(Debug, Default)]
 pub struct PackRenderState {
     pub drawn_incomplete: FxHashSet<MarkerId>,
+    pub prev_map_id: Option<MapIndex>,
 }
 impl PackRenderState {
     pub fn clear(&mut self) {

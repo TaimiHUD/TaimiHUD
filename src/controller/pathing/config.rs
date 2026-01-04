@@ -2,10 +2,11 @@ use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackLoader, PackPath, PackConfig},
-                shared::SharedPackConfig,
-                visible::VisibilityFlags,
-                PathingController, PathingEvent
+                registry::{PackLoader, PackPath, PackMapPath, PackConfig},
+                shared::{SharedPackConfig, MapPackInfo},
+                visible::{LoadedMapPack, VisibilityFlags},
+                PathingController, PathingEvent,
+                ExternalFilterState,
             }, Controller
         },
         render::machine::RenderTaskPriority,
@@ -17,8 +18,9 @@ use {
     taimi_sync::watched::watch,
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{
-        CategoryPath, MapIndex, MarkerIndex, MarkerPath, 
+        CategoryPath, MapIndex, MarkerIndex, MarkerPath,
     },
+    taimi_pack::attributes::FilterAttributes,
     anyhow::Context,
     std::{iter, sync::Arc},
     taimi_meta::ui::MapContext,
@@ -26,8 +28,10 @@ use {
 
 impl PathingController {
     pub(super) async fn handle_config_change(&mut self, path: PackPath, config: &watch::Receiver<SharedPackConfig>) {
+        self.trim_inactive_maps(false);
         let Some((_info, info)) = self.packs.lookup_info(path) else { return };
         let mut dirty = false;
+        let mut external_filters = None;
         for (map_path, map, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, path) {
             {
                 let config = config.borrow();
@@ -36,20 +40,26 @@ impl PathingController {
                     continue
                 }
                 map.refresh_categories(&map_info, &info.categories, &config.config, damage.err().as_ref());
+                // TODO: filter out unaffected pack+maps here using damage
+                dirty |= true;
             }
-            dirty = true;
+            let rx = &self.rx;
+            let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
+            dirty |= Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&*external_filters));
+        }
+        if dirty {
+            // TODO: shouldn't a signal or common fn do this?
             self.loader.shared.gameplay.send_if_modified(|shared_map| {
+                let Some(map_id) = shared_map.map_id else { return false };
+                let map_path = path.rel(map_id);
+                let Some((map, map_info)) = self.maps.lookup_with_info(&self.map_info, &map_path) else { return false };
                 let Some(shared_state) = shared_map.get_state_mut(map_path) else {
                     return false
                 };
-                shared_state.categories = map.categories.clone();
-                false
+                let _dirty = shared_state.update_static(&map);
+                shared_state.write_with_loaded(&map);
+                true
             });
-        }
-        if dirty {
-            self.loader.shared.gameplay.send_if_modified(|_| true);
-            //ctx.filter_state_signal = true;
-            PathingEvent::RequestDisabledPaths.try_send();
         }
     }
     pub(super) fn reload_config_for(&mut self, path: PackPath) {
@@ -143,65 +153,157 @@ impl PathingController {
             }
         }
     }
-
-    pub(super) fn update_loaded_visibility(&mut self) -> bool {
+    pub(super) fn update_loaded_visibility_inner(
+        path: PackMapPath,
+        map_pack: &mut LoadedMapPack,
+        map_info: &MapPackInfo,
+        filter_state: Option<&ExternalFilterState>,
+    ) -> bool {
+        let pois = map_info.pois().zip(
+            map_pack.pois.iter_mut()
+        );
+        let pois = pois
+            .map(|(poi_path, poi)| {
+                let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path));
+                (marker_path, poi.category_path(), &mut poi.visibility, poi.info.get_filter_attrs())
+            });
+        let trails = map_info.trails().zip(
+            map_pack.trails.iter_mut()
+        );
+        let trails = trails
+            .map(|(trail_path, trail)| {
+                let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path));
+                (marker_path, trail.category_path(), &mut trail.visibility, trail.info.get_filter_attrs())
+            });
+        let mut dirty = false;
+        for (_marker_path, category_index, visibility, filters) in pois.chain(trails) {
+            let prev = *visibility & VisibilityFlags::TOGGLES;
+            *visibility = visibility.restore_default_toggles();
+            let cat_vis = map_info.category_index(category_index)
+                .and_then(|i| map_pack.categories.get(i.path as usize))
+                .map(|cat| cat.visibility);
+            if let Some(cat_vis) = cat_vis {
+                // TODO: if cat vis is override, set directly or something!
+                visibility.set_toggles((cat_vis & VisibilityFlags::TOGGLE) | (*visibility & !VisibilityFlags::TOGGLE));
+                visibility.set(VisibilityFlags::TOGGLE, cat_vis.contains(VisibilityFlags::TOGGLE));
+            }
+            match (filters, filter_state) {
+                (Some(filters), Some(filter_state)) if visibility.is_visible() => {
+                    if Self::is_filtered(filters, filter_state) {
+                        visibility.remove(VisibilityFlags::TOGGLE);
+                    }
+                },
+                _ => (),
+            }
+            #[cfg(todo)]
+            if visibility.is_visible() {
+                if let Some(filter) = &filter {
+                    if let filter::FILTER_HIDDEN = filter.is_visible(filter_state) {
+                        visibility.remove(VisibilityFlags::TOGGLE);
+                    }
+                }
+            }
+            #[cfg(todo)]
+            if visibility.is_visible() {
+                let marker_path: MarkerPath = MarkerPath::with_path(marker_path.path);
+                if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
+                    if let filter::FILTER_HIDDEN = hidden.is_visible(filter_state) {
+                        visibility.remove(VisibilityFlags::TOGGLE);
+                    }
+                }
+            }
+            if *visibility & VisibilityFlags::TOGGLES != prev {
+                dirty = true;
+            }
+        }
+        dirty
+    }
+    #[cfg(todo = "unused")]
+    pub(super) fn update_loaded_visibility_for(&mut self, pack_path: PackPath) -> bool {
         let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
         #[cfg(todo)]
         let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         #[cfg(todo)]
         let filter_state = &self.filter_state;
         let mut dirty = false;
-        for (path, map_pack, map_info) in self.maps.iter_mut_with_info(&self.map_info, None) {
-            let pois = map_info.pois().zip(
-                map_pack.pois.iter_mut()
-            );
-            let pois = pois
-                .map(|(poi_path, poi)| {
-                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path));
-                    (marker_path, poi.category_path(), &mut poi.visibility)
-                });
-            let trails = map_info.trails().zip(
-                map_pack.trails.iter_mut()
-            );
-            let trails = trails
-                .map(|(trail_path, trail)| {
-                    let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path));
-                    (marker_path, trail.category_path(), &mut trail.visibility)
-                });
-            for (_marker_path, category_index, visibility) in pois.chain(trails) {
-                let prev = *visibility & VisibilityFlags::TOGGLES;
-                *visibility = visibility.restore_default_toggles();
-                let cat_vis = map_info.category_index(category_index)
-                    .and_then(|i| map_pack.categories.get(i.path as usize))
-                    .map(|cat| cat.visibility);
-                if let Some(cat_vis) = cat_vis {
-                    // TODO: if cat vis is override, set directly or something!
-                    visibility.set_toggles((cat_vis & VisibilityFlags::TOGGLE) | (*visibility & !VisibilityFlags::TOGGLE));
-                    visibility.set(VisibilityFlags::TOGGLE, cat_vis.contains(VisibilityFlags::TOGGLE));
-                }
-                if visibility.is_visible() {
-                    #[cfg(todo)]
-                    if let Some(filter) = &filter {
-                        if let filter::FILTER_HIDDEN = filter.is_visible(filter_state) {
-                            visibility.remove(VisibilityFlags::TOGGLE);
-                        }
-                    }
-                }
-                #[cfg(todo)]
-                if visibility.is_visible() {
-                    let marker_path: MarkerPath = MarkerPath::with_path(marker_path.path);
-                    if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
-                        if let filter::FILTER_HIDDEN = hidden.is_visible(filter_state) {
-                            visibility.remove(VisibilityFlags::TOGGLE);
-                        }
-                    }
-                }
-                if *visibility & VisibilityFlags::TOGGLES != prev && Some(path.path) == map_id {
-                    dirty = true;
-                }
+        for (path, map_pack, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, pack_path) {
+            if Self::update_loaded_visibility_inner(path, map_pack, map_info) && Some(path.path) == map_id {
+                dirty = true;
             }
         }
         dirty
+    }
+    pub(super) fn update_loaded_visibility(&mut self) -> bool {
+        let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
+        #[cfg(todo)]
+        let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
+        #[cfg(todo)]
+        let filter_state = &self.filter_state;
+        let mut external_filters = None;
+        let mut dirty = false;
+        for (path, map_pack, map_info) in self.maps.iter_mut_with_info(&self.map_info, None) {
+            let rx = &self.rx;
+            let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
+            if Self::update_loaded_visibility_inner(path, map_pack, map_info, Some(&*external_filters)) && Some(path.path) == map_id {
+                dirty = true;
+            }
+        }
+        if dirty {
+            // TODO: shouldn't a signal or common fn do this?
+            self.loader.shared.gameplay.send_if_modified(|shared_map| {
+                let mut dirty = false;
+                for (path, map, map_info) in self.maps.iter_with_info(&self.map_info, None) {
+                    let Some(shared_state) = shared_map.get_state_mut(path) else {
+                        continue
+                    };
+                    dirty |= shared_state.update_static(&map);
+                    dirty |= shared_state.update_with_loaded(&map);
+                }
+                dirty
+            });
+        }
+        dirty
+    }
+    fn is_filtered(filters: &FilterAttributes, external: &ExternalFilterState) -> bool {
+        let (festivals, clears, achievements) = external;
+        if let Some(id) = filters.achievement_id {
+            let completed = filters
+                .achievement_bit
+                .and_then(|bit| achievements.is_bit_complete(id as _, bit as _))
+                .unwrap_or_else(|| achievements.is_complete(id as _));
+            if completed {
+                return true
+            }
+        }
+        if let Some(raids) = &filters.raids {
+            let completed = !raids.is_empty() && raids.iter().all(|r| clears.contains(r));
+            if completed {
+                return true
+            }
+        }
+        if let Some(f) = &filters.festivals {
+            if !f.is_empty() && !f.intersects(*festivals) {
+                return true
+            }
+        }
+        false
+    }
+    /// limited support atm
+    pub(super) fn can_filter(filters: &FilterAttributes) -> bool {
+        match filters.achievement_id {
+            None | Some(0) => (),
+            Some(..) => return true,
+        }
+        match filters.festivals {
+            Some(f) if !f.is_empty() => return true,
+            _ => (),
+        }
+        match &filters.raids {
+            Some(r) if !r[..].is_empty() => return true,
+            _ => (),
+        }
+
+        false
     }
 
     fn visibility_update(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, Box<[VisibilityFlags]>, Box<[VisibilityFlags]>)> + '_ {

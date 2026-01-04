@@ -2,13 +2,13 @@ use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent
+                registry::{PackCategory, PackRoot, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent, PathingController,
             },
             Controller,
         }, exports::runtime::imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar, IdStackToken},
         render::RenderState, with_i18n
     },
-    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport},
+    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport, DrawCategoryToggle, DrawPackRoots},
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
     taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
 };
@@ -149,6 +149,7 @@ impl DrawPackUnloaded<'_, '_> {
             .frame_padding(true)
             .tree_push_on_open(false)
             .opened(false, Condition::Always)
+            .allow_item_overlap(true)
             .leaf(is_button)
             .push(ui);
         let hovered = ui.is_item_hovered();
@@ -297,6 +298,38 @@ impl super::PackElement {
             i.categories.root_paths().any(|r| self.categories.open_mask.contains(r))
         ).unwrap_or(false)
     }
+    pub(super) fn act_post_draw(&mut self, act_cat: CategoryActionSlot, act_pack: Option<CategoryAction>) {
+        if let Some((path, act)) = act_cat {
+            if let Some(msg) = act.as_pathing_message(path, self.state.pack_path()) {
+                msg.try_send();
+            } else {
+                match act {
+                    CategoryAction::HoverTooltip => {
+                        //log::error!("DELETEME TODO: cat hover")
+                    },
+                    CategoryAction::ContextMenu =>
+                        log::error!("DELETEME TODO: cat menu"),
+                    CategoryAction::Copy =>
+                        log::error!("DELETEME TODO: cat copy"),
+                    CategoryAction::Open(new_state) =>
+                        self.categories.update_open(path, new_state),
+                    CategoryAction::Enable(..) | CategoryAction::Isolate(..) => {
+                        #[cfg(debug_assertions)]
+                        unreachable!();
+                    },
+                }
+            }
+        }
+        if let Some(act) = act_pack {
+            match act {
+                CategoryAction::HoverTooltip => {
+                    let TODO = ();
+                },
+                act =>
+                    log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+            }
+        }
+    }
 }
 
 impl PackElementState {
@@ -384,7 +417,7 @@ impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
         self.pop();
     }
 
-    fn prepare_toggle(&self, path: CategoryPath, pseudo_root: Option<bool>) -> DrawCategoryToggle<'a, 'u> {
+    pub(super) fn prepare_toggle(&self, path: CategoryPath, pseudo_root: Option<bool>) -> DrawCategoryToggle<'a, 'u> {
         let cats = self.pack.info.info.as_ref().map(|i| &i.categories);
         let cat = self.pack.category_info(path);
         let mut vis = VisibilityFlags::TOGGLES;
@@ -393,7 +426,7 @@ impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
                 vis = info.visibility;
                 info
             },
-            None =>&CategoryInfo::EMPTY,
+            None => &CategoryInfo::EMPTY,
         };
         vis ^= self.pack.category_visibility_deviation(path);
         
@@ -462,26 +495,21 @@ impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
         self.state.categories.get(&self.category_path())
             .unwrap_or(&CategoryInfo::EMPTY)
     }
-
-    pub fn node_contents_visible(&self) -> bool {
-        self.node_stack.last().map(Option::is_some).unwrap_or(false)
-    }
 }
-/// TODO: redo generic-y
+
+/// TODO: don't hard-code toggles .-.
 pub struct DrawCategoryCollectionTree<'a, 'ui> {
     pub draw: DrawCategoryCollection<'a, 'ui>,
     /// XXX: same as [self.draw.id_stack]
     pub node_stack: Vec<Option<TreeNodeToken<'ui>>>,
-    pub act_open: Option<(CategoryPath, bool)>,
-    pub act: Option<(CategoryPath, UiAction)>,
+    pub act: CategoryActionSlot,
 }
 impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
     pub fn new(draw: DrawCategoryCollection<'a, 'u>) -> Self {
         Self {
             draw,
             node_stack: Vec::new(),
-            act_open: None,
-            act: None,
+            act: Default::default(),
         }
     }
 
@@ -492,22 +520,25 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
             .flatten();
 
         if let Some(cats) = cats {
-            while let Some(cat_path) = self.path_stack.last().copied() {
-                let cat_info = cats.all().lookup_ref(&cat_path);
-                let mut next = None;
-                let popping = if let Some(child) = cat_info.and_then(|c| c.child()) {
-                    next = Some(child);
-                    false
-                } else if let Some(sibling) = cat_info.and_then(|c| c.sibling()) {
-                    next = Some(sibling);
-                    self.draw.ui.table_next_column();
-                    true
-                } else { true };
-                if popping && self.pop_to(path).is_none() {
-                    break
+            let mut cat_iter = cats.nested_descendents_of(path);
+            let mut prev_depth = cat_iter.depth();
+            'cats: while let Some(cat_path) = cat_iter.next() {
+                let depth = cat_iter.depth();
+                if let Some(popping) = prev_depth.checked_sub(depth) {
+                    for _ in 0..=popping {
+                        if self.pop_to(path).is_none() {
+                            break 'cats
+                        }
+                    }
                 }
-                if let Some(next) = next.map(CategoryPath::with_path) {
-                    self.draw_one(next);
+                if depth <= prev_depth {
+                    self.draw.ui.table_next_column();
+                } else {
+                    self.draw.ui.spacing();
+                }
+                prev_depth = depth;
+                if self.draw_one(cat_path).is_none() {
+                    cat_iter.skip_to_sibling();
                 }
             }
         }
@@ -527,25 +558,28 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
     fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
         self.push(path)?;
         let mut toggle = self.draw.prepare_toggle(path, pseudo_root);
+        let prev_toggle = toggle.toggle_state.is_visible();
         let (act, token) = toggle.draw();
         let res = token.as_ref().map(drop);
         self.set_draw_node(token);
-        match act {
-            Some(UiAction::Primary) => {
-                if self.act_open.is_none() {
-                    self.act_open = Some((path, toggle.toggle_state.is_visible()));
-                } else {
-                    log::debug!("DELETEME: category action already set? {:?}", self.act);
-                }
-            },
+        let act = match act {
+            _ if prev_toggle != toggle.toggle_state.is_visible() =>
+                Some(CategoryAction::Enable(Some(toggle.toggle_state.is_visible()))),
+            Some(UiAction::Primary) =>
+                Some(CategoryAction::Open(res.is_some())),
+            Some(UiAction::LEFT_CLICK) if toggle.is_copyable =>
+                Some(CategoryAction::Copy),
+            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
+            Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
-                if self.act.is_none() {
-                    self.act = Some((path, act));
-                } else {
-                    log::debug!("DELETEME: category action already set? {:?}", self.act);
-                }
+                log::debug!("DELETEME: category action {act:?} unexpected");
+                None
             },
-            None => (),
+            None => None,
+        };
+        if let Some(act) = act {
+            let clobbered = act.clobber(path, &mut self.act);
+            CategoryAction::warn_clobbered(&self.act, clobbered);
         }
         res
     }
@@ -605,9 +639,14 @@ pub struct CategoryCollectionState {
     pub info_sig: PackInfoSignature,
     pub categories: BTreeMap<CategoryPath, CategoryInfo>,
     pub open_mask: BitSet,
+    /// TODO: visible draw elements (or acting on an open event) could just
+    /// mark specific cats as dirty/visible instead?
+    pub open_sig_prev: CategoryIndex,
 }
 impl CategoryCollectionState {
     pub fn pre_draw(&mut self, pack: &PackElementState, pack_damage: &PackDamageReport, visibility: PackVisibility) {
+        let open_sig = self.open_mask.count_ones() as CategoryIndex;
+        let cats_dirty = pack_damage.info.is_some() || pack_damage.loaded || pack_damage.visibility.is_some() || self.open_sig_prev != open_sig;
         if pack_damage.info.is_some() {
             if pack.info.sig.is_empty() {
                 self.cleanup_cache(true);
@@ -616,38 +655,45 @@ impl CategoryCollectionState {
                 //self.open_mask.clear();
             }
             self.info_sig = pack.info.sig;
-        } else if !pack_damage.loaded {
-            return
         }
         if let PackVisibility::Closed = visibility {
-            self.cleanup_cache(false);
+            if pack_damage.visibility.is_some() {
+                self.cleanup_cache(false);
+            }
             return
         }
+        self.open_sig_prev = open_sig;
         let Some(info) = &pack.info.info else {
             return
         };
-        let cats = &info.categories;
-        match visibility {
-            PackVisibility::Visible => {
-                let Some(pack_data) = pack.pack_data() else { return };
-                let visible_cats = info.categories.root_paths().flat_map(|root| {
-                    self.all_visible_children(cats, root).chain(iter::once(root))
-                });
-                let missing_info: BitSet = visible_cats
-                    .filter(|path| !self.categories.contains_key(path))
-                    .collect();
-                for path in missing_info.iter_of::<CategoryPath>() {
-                    let Some((_id, category)) = pack_data.categories.all_categories.get_index(path.path as usize) else {
-                        log::error!("missing {path} from {}", pack.info);
-                        continue
-                    };
-                    self.categories.insert(path, CategoryInfo::from_pack_category(category));
-                }
-            },
-            PackVisibility::Pending => {
-                self.categories.retain(|&path, _| Self::is_path_visible(&cats, &self.open_mask, path));
-            },
-            _ => (),
+        if cats_dirty {
+            let cats = &info.categories;
+            match visibility {
+                PackVisibility::Visible => {
+                    let Some(pack_data) = pack.pack_data() else { return };
+                    let visible_cats = info.categories.root_paths().flat_map(|root| {
+                        self.all_visible_children(cats, root).chain(iter::once(root))
+                    });
+                    let missing_info: BitSet = visible_cats
+                        .filter(|path| !self.categories.contains_key(path))
+                        .collect();
+                    for path in missing_info.iter_of::<CategoryPath>() {
+                        let Some((_id, category)) = pack_data.categories.all_categories.get_index(path.path as usize) else {
+                            log::error!("missing {path} from {}", pack.info);
+                            continue
+                        };
+                        self.categories.insert(path, CategoryInfo::from_pack_category(category));
+                    }
+                },
+                PackVisibility::Pending => {
+                    self.categories.retain(|&path, _| Self::is_path_visible(&cats, &self.open_mask, path));
+                },
+                _ => (),
+            }
+            for root in &info.roots {
+                let path = root.path();
+                self.categories.entry(path).or_insert_with(|| CategoryInfo::from_pack_root(root));
+            }
         }
     }
     fn cleanup_cache(&mut self, purge: bool) {
@@ -655,6 +701,7 @@ impl CategoryCollectionState {
         if purge {
             self.open_mask = Default::default();
         }
+        self.open_sig_prev = 0;
         self.info_sig = PackInfoSignature::EMPTY;
     }
 
@@ -674,7 +721,7 @@ impl CategoryCollectionState {
     /// TODO: also apply filters like current-map
     /// (beware multiple UI elements may have differing filter states?)
     pub fn is_path_visible(cats: &PackCategoryInfo, open_mask: &BitSet, path: CategoryPath) -> bool {
-        if open_mask.contains(path) { return true }
+        if open_mask.contains(path) || cats.is_root(path) { return true }
         let direct_parent_open = cats.parent_of(path).map(|p| {
             open_mask.contains(p)
         });
@@ -684,6 +731,10 @@ impl CategoryCollectionState {
     /// TODO
     pub fn category_is_on_map(&self, path: CategoryPath) -> bool {
         true
+    }
+
+    pub fn update_open(&mut self, path: CategoryPath, open: bool) {
+        self.open_mask.insert_at_if(path, open);
     }
 }
 
@@ -714,6 +765,15 @@ impl CategoryInfo {
             visibility: VisibilityFlags::from_pack_category(category),
         }
     }
+    pub fn from_pack_root(root: &PackRoot) -> Self {
+        Self {
+            id: Some(root.id.clone()),
+            display_name: Some(root.display_name.clone()),
+            visibility: VisibilityFlags::from_pack_root(root),
+            tooltip: PackTooltip::EMPTY,
+            interaction: None,
+        }
+    }
 
     pub fn display_name(&self) -> Option<&str> {
         self.display_name.as_ref().map(|n| &n[..])
@@ -733,3 +793,89 @@ impl CategoryInfo {
         Some((copy_value, copy_message))
     }
 }
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CategoryAction {
+    Isolate(Option<bool>),
+    Enable(Option<bool>),
+    Copy,
+    Open(bool),
+    /// right-clicked
+    ContextMenu,
+    HoverTooltip,
+}
+impl CategoryAction {
+    pub const ISOLATE: Self = Self::Isolate(None);
+    pub const TOGGLE: Self = Self::Enable(None);
+    pub const ENABLE: Self = Self::Enable(Some(true));
+    pub const DISABLE: Self = Self::Enable(Some(false));
+
+    pub fn clobber(self, path: CategoryPath, dest: &mut CategoryActionSlot) -> Result<Option<(CategoryPath, Self)>, Self> {
+        match &*dest {
+            Some((_, present)) if *present > self =>
+                return Err(self),
+            _ => (),
+        }
+        Ok(mem::replace(dest, Some((path, self))))
+    }
+    pub fn try_clobber(self, path: CategoryPath, pack_path: PackPath, dest: &mut CategoryActionSlot) -> Result<Option<(CategoryPath, Self)>, Self> {
+        if let Some((dest_path, present)) = dest.take() {
+            if let Some(couldnt_dismiss) = present.try_act(dest_path, pack_path) {
+                *dest = Some((dest_path, couldnt_dismiss));
+                if self.try_act(path, pack_path).is_none() {
+                    // but we were able to dismiss self, good enough!
+                    return Ok(None)
+                }
+            }
+        }
+        self.clobber(path, dest)
+    }
+    pub fn as_pathing_message(self, path: CategoryPath, pack_path: PackPath) -> Option<PathingEvent> {
+        match self {
+            Self::Enable(enable) =>
+                Some(PathingEvent::CategoryEnableSet(pack_path, path, enable)),
+            #[cfg(todo)]
+            Self::Isolate(isolate) => (),
+            #[cfg(todo)]
+            Self::Copy => {
+                // technically doable via render sender or something if we can find attrs but ew
+            },
+            // anything else requires context or state we don't have access to
+            _unactionable => None,
+        }
+    }
+    pub fn try_act(self, path: CategoryPath, pack_path: PackPath) -> Option<Self> {
+        let msg = match self {
+            #[cfg(todo)]
+            Self::Copy => {
+                // technically doable via render sender or something if we can find attrs but ew
+            },
+            // not important enough to keep around...
+            Self::HoverTooltip | Self::ContextMenu => return None,
+            action => action.as_pathing_message(path, pack_path),
+        };
+        match msg.map(PathingController::try_send) {
+            Some(true) => None,
+            _ => Some(self),
+        }
+    }
+    pub fn clobbered_action(res: Result<Option<(CategoryPath, Self)>, Self>) -> Option<Self> {
+        match res {
+            Err(lost) | Ok(Some((_, lost))) =>
+                Some(lost),
+            _ => None,
+        }
+    }
+    pub(super) fn warn_clobbered(slot: &CategoryActionSlot, res: Result<Option<(CategoryPath, Self)>, Self>) {
+        if let Some(clobbered) = Self::clobbered_action(res) {
+            let slot = match slot {
+                #[cfg(debug_assertions)]
+                None => unreachable!("clobbered {clobbered:?} by nothing? weird..."),
+                #[cfg(not(debug_assertions))]
+                None => return,
+                Some(slot) => slot,
+            };
+            log::debug!("clobbered action {clobbered:?} in favour of {slot:?}");
+        }
+    }
+}
+pub type CategoryActionSlot = Option<(CategoryPath, CategoryAction)>;

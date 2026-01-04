@@ -382,6 +382,7 @@ impl PackLoader {
                 }
             }
         }
+        pack.categories.trim_attributes();
     }
 
     pub fn get_trail_params(&self) -> impl Future<Output = TrailParams> + Send + 'static {

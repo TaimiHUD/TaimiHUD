@@ -10,7 +10,7 @@ use {
             imgui::{self, Condition, MouseButton, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar},
         }, with_i18n,
     },
-    super::{DrawCategoryHeader, DrawPackUnloaded, UiAction, PackElementState, CategoryInfo, CategoryCollectionState, DrawCategoryTooltip},
+    super::{DrawCategoryHeader, DrawPackUnloaded, UiAction, PackElementState, CategoryInfo, CategoryCollectionState, DrawCategoryTooltip, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryAction, CategoryActionSlot},
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath},
     taimi_pack::category::CategoryFlags,
@@ -20,6 +20,8 @@ pub struct DrawPackRoots<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub state: &'a PackElementState,
     pub categories: Option<&'a CategoryCollectionState>,
+    pub act_cat: CategoryActionSlot,
+    pub act_pack: Option<CategoryAction>,
 }
 impl<'a, 'u> DrawPackRoots<'a, 'u> {
     pub fn draw(&mut self) {
@@ -35,7 +37,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
         }
     }
 
-    fn draw_loaded(&self, mut categories: DrawCategoryCollection<'a, 'u>) {
+    fn draw_loaded(&mut self, mut categories: DrawCategoryCollectionTree<'a, 'u>) {
         let cats = self.state.info.info.as_ref().map(|i| &i.categories);
         let pseudo_root = cats.and_then(|cats| match &cats.roots[..] {
             &[root] => Some(root),
@@ -55,36 +57,50 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                 for root in cats.root_paths() {
                     categories.draw_root(root, pseudo_root.is_some());
                     self.ui.table_next_column();
+                    if let Some((path, act_cat)) = categories.act.take() {
+                        let clobbered = act_cat.clobber(path, &mut self.act_cat);
+                        CategoryAction::warn_clobbered(&self.act_cat, clobbered);
+                    }
                 }
                 categories.pop_all();
             }
         }
         drop(token);
-        if let Some(act) = pack_act {
-            if act != UiAction::Hovered {
-                log::error!("TODO: {} {act:?}", self.state.info);
-            }
-        }
         if let Some(act) = pack_toggle {
-            log::error!("TODO: toggle {} {act}", self.state.info);
+            self.act_pack = Some(CategoryAction::Enable(Some(act)));
         }
-        if let Some((path, open)) = categories.act_open {
-            log::error!("TODO: open {path}");
-        }
-        if let Some((path, act)) = categories.act {
-            if act != UiAction::Hovered {
-                log::error!("TODO: {path} {act:?}");
+        let pack_act = match pack_act {
+            #[cfg(todo)]
+            Some(UiAction::LEFT_CLICK) => Some(CategoryAction::Enable(None)),
+            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
+            Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
+            Some(act) => {
+                log::debug!("DELETEME: pack action {act:?} unexpected");
+                None
+            },
+            None => None,
+        };
+        match (&mut self.act_pack, pack_act) {
+            (Some(prev), Some(act)) if *prev >= act => {
+                log::debug!("DELETEME: clobbering pack action {act:?} with {prev:?}");
+            },
+            (prev, Some(act)) => {
+                if let Some(prev) = &*prev {
+                    log::debug!("DELETEME: clobbering pack action {prev:?} with {act:?}");
+                }
+                *prev = Some(act);
             }
+            (_, None) => (),
         }
     }
-    fn draw_unloaded(&self) {
+    fn draw_unloaded(&mut self) {
         self.ui.table_next_column();
         DrawPackUnloaded {
             ui: self.ui,
             state: self.state,
         }.draw();
     }
-    fn prepare_header(&self) -> DrawCategoryHeader<'a, 'u> {
+    pub(super) fn prepare_header(&self) -> DrawCategoryHeader<'a, 'u> {
         DrawCategoryHeader {
             ui: self.ui,
             display_name: &self.state.display_name,
@@ -98,9 +114,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
         }
     }
 
-    fn prepare_categories(&self) -> Option<DrawCategoryCollection<'a, 'u>> {
+    pub(super) fn prepare_categories(&self) -> Option<DrawCategoryCollectionTree<'a, 'u>> {
         self.categories.map(|state|
-            DrawCategoryCollection::new(self.ui, state, self.state)
+            DrawCategoryCollectionTree::new(DrawCategoryCollection::new(self.ui, state, self.state))
         )
     }
 }
@@ -140,11 +156,12 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
         } else if has_toggle {
             header.end_toggle_prefix();
         }
+        #[cfg(todo = "unnecessary")]
         if let Some(state) = toggle_act {
             self.act_toggle(Some(state));
         }
-        if toggle_act.is_some() {
-            self.toggle_state.toggle(VisibilityFlags::TOGGLE);
+        if let Some(state) = toggle_act {
+            self.toggle_state.set(VisibilityFlags::TOGGLE, state);
         }
 
         let act = DecorateCategoryHeader {
@@ -158,6 +175,7 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
         };
         (act, header_token)
     }
+    #[cfg(todo = "unnecessary")]
     fn act_toggle(&self, state: Option<bool>) {
         PathingEvent::CategoryToggle(
             self.pack_path, self.category_path,
@@ -264,8 +282,11 @@ impl super::PackElements {
     }
 }
 impl super::PackElement {
-    pub fn draw(&self, ui: &Ui) {
-        self.prepare_draw(ui).draw();
+    pub fn draw(&mut self, ui: &Ui) {
+        let mut roots = self.prepare_draw(ui);
+        roots.draw();
+        let DrawPackRoots { act_cat, act_pack, .. } = roots;
+        self.act_post_draw(act_cat, act_pack);
     }
 
     pub fn prepare_draw<'a, 'u>(&'a self, ui: &'a Ui<'u>) -> DrawPackRoots<'a, 'u> {
@@ -273,10 +294,13 @@ impl super::PackElement {
             ui,
             state: &self.state,
             categories: Some(&self.categories),
+            act_cat: Default::default(),
+            act_pack: Default::default(),
         }
     }
 }
 
+#[cfg(deleteme)]
 pub struct DrawCategoryCollection<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub state: &'a CategoryCollectionState,
@@ -289,6 +313,7 @@ pub struct DrawCategoryCollection<'a, 'ui> {
     pub act_open: Option<(CategoryPath, bool)>,
     pub act: Option<(CategoryPath, UiAction)>,
 }
+#[cfg(deleteme)]
 impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
     pub fn new(ui: &'a Ui<'u>, state: &'a CategoryCollectionState, pack: &'a PackElementState) -> Self {
         Self {
