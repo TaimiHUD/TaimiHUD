@@ -328,7 +328,7 @@ impl<T: Clone> Watched<T> {
         self.mark_changed();
     }
     pub fn is_watching(&self) -> bool {
-        self.watch.get_receiver().is_some()
+        self.watch.is_watching()
     }
     pub fn mark_changed(&mut self) {
         let _ = self.watch.try_mark_changed();
