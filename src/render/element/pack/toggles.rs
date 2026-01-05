@@ -22,6 +22,7 @@ pub struct DrawPackRoots<'a, 'ui> {
     pub categories: Option<&'a CategoryCollectionState>,
     pub act_cat: CategoryActionSlot,
     pub act_pack: Option<CategoryAction>,
+    pub last_menu_open: Option<CategoryPath>,
 }
 impl<'a, 'u> DrawPackRoots<'a, 'u> {
     pub fn draw(&mut self) {
@@ -286,7 +287,7 @@ impl super::PackElement {
         let mut roots = self.prepare_draw(ui);
         roots.draw();
         let DrawPackRoots { act_cat, act_pack, .. } = roots;
-        self.act_post_draw(act_cat, act_pack);
+        self.act_post_draw(ui, act_cat, act_pack, true);
     }
 
     pub fn prepare_draw<'a, 'u>(&'a self, ui: &'a Ui<'u>) -> DrawPackRoots<'a, 'u> {
@@ -296,6 +297,7 @@ impl super::PackElement {
             categories: Some(&self.categories),
             act_cat: Default::default(),
             act_pack: Default::default(),
+            last_menu_open: self.categories.open_menu.last().copied(),
         }
     }
 }

@@ -156,34 +156,19 @@ impl DrawPackUnloaded<'_, '_> {
         let pressed = is_button && ui.is_item_clicked();
         let open_context = ui.is_item_clicked_with_button(MouseButton::Right);
 
-        match reason {
-            Some(UnloadedReason::Disabled | UnloadedReason::Gravestone) => {
-                ui.same_line();
-                with_i18n!("disabled", |msg| ui.text(msg));
-            },
-            Some(UnloadedReason::Loading) => {
-                ui.same_line();
-                with_i18n!("loading", |msg| ui.text(msg));
-            },
-            Some(UnloadedReason::Pending) | None => {
-                ui.same_line();
-                with_i18n!("unloaded", |msg| ui.text(msg));
-                if reason.is_some() && hovered {
-                    with_i18n!("render-notice-gameplay", |msg| ui.tooltip_text(msg));
-                }
-            },
-            Some(reason @ (UnloadedReason::LoadingFailed(..) | UnloadedReason::UnknownFormat)) => {
-                ui.same_line();
-                match reason {
-                    UnloadedReason::UnknownFormat =>
-                        with_i18n!("unknown", |msg| ui.text(msg)),
-                    _ =>
-                        with_i18n!("error", |msg| ui.text(msg)),
-                }
-                if hovered {
-                    ui.tooltip_text(reason.to_string());
-                }
-            },
+        ui.same_line();
+        Self::draw_reason_name(ui, reason);
+        if hovered {
+            match reason {
+                #[cfg(todo = "unnecessary")]
+                Some(UnloadedReason::Pending) =>
+                    with_i18n!("render-notice-gameplay", |msg| ui.tooltip_text(msg)),
+                reason => {
+                    Self::with_reason_details(reason, |details|
+                        ui.tooltip_text(details)
+                    );
+                },
+            }
         }
         //ui.table_next_column();
         let res = if let Some(node) = node {
@@ -200,6 +185,34 @@ impl DrawPackUnloaded<'_, '_> {
             Some(UiAction::Hovered)
         } else {
             None
+        }
+    }
+    pub(super) fn draw_reason_name(ui: &Ui, reason: Option<&UnloadedReason>) {
+        match reason {
+            Some(UnloadedReason::Disabled | UnloadedReason::Gravestone) =>
+                with_i18n!("disabled", |msg| ui.text(msg)),
+            Some(UnloadedReason::Loading) =>
+                with_i18n!("loading", |msg| ui.text(msg)),
+            Some(UnloadedReason::Pending) | None =>
+                with_i18n!("unloaded", |msg| ui.text(msg)),
+            Some(reason @ (UnloadedReason::LoadingFailed(..) | UnloadedReason::UnknownFormat)) =>
+                match reason {
+                    UnloadedReason::UnknownFormat =>
+                        with_i18n!("unknown-pack-format", |msg| ui.text(msg)),
+                    _ =>
+                        with_i18n!("pack-error", |msg| ui.text(msg)),
+                },
+        }
+    }
+    pub(super) fn with_reason_details<R, F: FnOnce(&str) -> R>(reason: Option<&UnloadedReason>, f: F) -> Option<R> {
+        match reason {
+            Some(UnloadedReason::LoadingFailed(e)) =>
+                Some(f(&format!("{e:#}"))),
+            Some(UnloadedReason::Pending) =>
+                Some(with_i18n!("render-notice-gameplay", |msg| f(&msg))),
+            Some(UnloadedReason::UnknownFormat) =>
+                Some(with_i18n!("pack-format-notice", |msg| f(&msg))),
+            _ => None,
         }
     }
 
@@ -221,12 +234,11 @@ pub struct DrawCategoryTooltip<'a, 'ui> {
     pub display_name_visible: bool,
     pub include_copyable: bool,
 }
-impl DrawCategoryTooltip<'_, '_> {
-    const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";
+impl<'a> DrawCategoryTooltip<'a, '_> {
+    pub(super) const NAME_TEMPLATE: &'static str = "Generic Copyable Marker Name";
     pub fn draw(&mut self) {
-        let title_template = self.info.display_name()
-            .and_then(str_opt)
-            .unwrap_or(Self::NAME_TEMPLATE);
+        if self.is_empty() { return }
+        let title_template = self.title_template();
         Self::draw_tooltip(self.ui, title_template, move || self.draw_contents());
     }
 
@@ -252,8 +264,29 @@ impl DrawCategoryTooltip<'_, '_> {
             Self::draw_tooltip_copyable(self.ui, copy_value, copy_message);
         }
     }
+    pub(super) fn title_template(&self) -> &'a str {
+        self.info.display_name()
+            .and_then(str_opt)
+            .unwrap_or(Self::NAME_TEMPLATE)
+    }
+    pub fn is_empty(&self) -> bool {
+        if self.tooltip.description().is_some() { return false }
+        if let Some(title) = self.tooltip.title() {
+            if !self.display_name_visible || !self.info.display_name().unwrap_or("").starts_with(title) {
+                return false
+            }
+        }
+        let copyable = self.include_copyable.then(|| self.info.copyable()).flatten();
+        if let Some((copy_value, copy_message)) = copyable {
+            if Self::copyable_has_tooltip(copy_value, copy_message) {
+                return false
+            }
+        }
 
-    fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+        true
+    }
+
+    pub(super) fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
         let _id = ui.push_id("category_tooltip");
         let [minwidth, lineheight] = ui.calc_text_size(title_template);
         unsafe {
@@ -267,6 +300,12 @@ impl DrawCategoryTooltip<'_, '_> {
             }
             f()
         })
+    }
+    fn copyable_has_tooltip(copy_value: &str, copy_message: Option<&str>) -> bool {
+        copy_message.is_some() || Self::copyable_value_has_message(copy_value)
+    }
+    fn named_has_tooltip(tip: PackTooltipRef, display_name: &str) -> bool {
+        tip.description().is_some() || !display_name.starts_with(tip.title)
     }
 
     /// since these aren't intended to be displayed, there's no canon name to use...
@@ -294,17 +333,24 @@ impl DrawCategoryTooltip<'_, '_> {
 
 impl super::PackElement {
     pub(super) fn any_roots_open(&self) -> bool {
+        if !self.categories.open_menu.is_empty() { return true }
+
         self.state.info.info.as_ref().map(|i|
             i.categories.root_paths().any(|r| self.categories.open_mask.contains(r))
         ).unwrap_or(false)
     }
-    pub(super) fn act_post_draw(&mut self, act_cat: CategoryActionSlot, act_pack: Option<CategoryAction>) {
+
+    pub(super) fn act_post_draw(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: Option<CategoryAction>, am_toggle: bool) {
+        #[cfg(todo = "unnecessary")]
+        let was_hovered = self.hovered.is_some();
+        let mut hovered = None;
         if let Some((path, act)) = act_cat {
             if let Some(msg) = act.as_pathing_message(path, self.state.pack_path()) {
                 msg.try_send();
             } else {
                 match act {
                     CategoryAction::HoverTooltip => {
+                        hovered = Some(Some(path));
                         //log::error!("DELETEME TODO: cat hover")
                     },
                     CategoryAction::ContextMenu =>
@@ -320,15 +366,63 @@ impl super::PackElement {
                 }
             }
         }
-        if let Some(act) = act_pack {
-            match act {
-                CategoryAction::HoverTooltip => {
-                    let TODO = ();
-                },
-                act =>
-                    log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+        if let Some(mut act) = act_pack {
+            if let CategoryAction::Enable(enable @ None) = &mut act {
+                let pack_enabled = self.state.unloaded.is_none() && self.state.info.info.is_some();
+                *enable = Some(!pack_enabled);
+            }
+            if let Some(msg) = act.as_pack_message(self.state.pack_path()) {
+                msg.try_send();
+            } else {
+                match act {
+                    CategoryAction::HoverTooltip => {
+                        hovered = Some(None);
+                    },
+                    CategoryAction::Enable(..) => {
+                        #[cfg(debug_assertions)]
+                        unreachable!();
+                    },
+                    act =>
+                        log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+                }
             }
         }
+        match hovered {
+            Some(Some(path)) => {
+                self.draw_category_tooltip(ui, path, true, !am_toggle);
+            },
+            Some(None) => {
+                self.draw_pack_tooltip(ui, true, am_toggle);
+            },
+            None => (),
+        };
+    }
+
+    pub fn draw_category_tooltip(&mut self, ui: &Ui, path: CategoryPath, display_name_visible: bool, include_copyable: bool) -> bool {
+        self.hovered = Some(Some(path));
+        let info = self.categories.categories.get(&path)
+            .unwrap_or(&CategoryInfo::EMPTY);
+        let is_root = self.state.info.info.as_ref().map(|i| i.categories.is_root(path)).unwrap_or(false);
+        let mut draw = DrawCategoryTooltip {
+            ui,
+            info,
+            tooltip: info.tooltip().unwrap_or(PackTooltipRef::EMPTY),
+            display_name_visible,
+            include_copyable,
+        };
+        if draw.is_empty() && !is_root {
+            return false
+        }
+        if is_root {
+            let title_template = draw.title_template();
+            DrawCategoryTooltip::draw_tooltip(ui, title_template, || {
+                self.draw_pack_tooltip_contents(ui, display_name_visible, !include_copyable);
+                draw.draw_contents();
+            });
+        } else {
+            draw.draw();
+        }
+        true
     }
 }
 
@@ -638,6 +732,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
 pub struct CategoryCollectionState {
     pub info_sig: PackInfoSignature,
     pub categories: BTreeMap<CategoryPath, CategoryInfo>,
+    pub open_menu: Vec<CategoryPath>,
     pub open_mask: BitSet,
     /// TODO: visible draw elements (or acting on an open event) could just
     /// mark specific cats as dirty/visible instead?
@@ -645,7 +740,8 @@ pub struct CategoryCollectionState {
 }
 impl CategoryCollectionState {
     pub fn pre_draw(&mut self, pack: &PackElementState, pack_damage: &PackDamageReport, visibility: PackVisibility) {
-        let open_sig = self.open_mask.count_ones() as CategoryIndex;
+        let open_menu_sig = self.open_menu.last().copied().unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)).path;
+        let open_sig = self.open_mask.count_ones() as CategoryIndex ^ open_menu_sig;
         let cats_dirty = pack_damage.info.is_some() || pack_damage.loaded || pack_damage.visibility.is_some() || self.open_sig_prev != open_sig;
         if pack_damage.info.is_some() {
             if pack.info.sig.is_empty() {
@@ -671,9 +767,10 @@ impl CategoryCollectionState {
             match visibility {
                 PackVisibility::Visible => {
                     let Some(pack_data) = pack.pack_data() else { return };
-                    let visible_cats = info.categories.root_paths().flat_map(|root| {
-                        self.all_visible_children(cats, root).chain(iter::once(root))
-                    });
+                    let visible_cats = info.categories.root_paths()
+                        .flat_map(|root| {
+                            self.all_visible_children(cats, root).chain(iter::once(root))
+                        });
                     let missing_info: BitSet = visible_cats
                         .filter(|path| !self.categories.contains_key(path))
                         .collect();
@@ -686,7 +783,7 @@ impl CategoryCollectionState {
                     }
                 },
                 PackVisibility::Pending => {
-                    self.categories.retain(|&path, _| Self::is_path_visible(&cats, &self.open_mask, path));
+                    self.categories.retain(|&path, _| Self::is_path_visible(&cats, &self.open_mask, &self.open_menu, path));
                 },
                 _ => (),
             }
@@ -708,22 +805,28 @@ impl CategoryCollectionState {
     /// don't assume order (DFS atm)
     ///
     /// excludes the root, and produces nothing if root isn't open
+    ///
+    /// TODO: use the nested iter that can skip across closed branches
     pub fn all_visible_children<'a, 'c>(&'a self, cats: &'c PackCategoryInfo, root: CategoryPath) -> impl Iterator<Item = CategoryPath> + 'a + 'c where
         'a: 'c,
         'c: 'a,
     {
         let open_mask = &self.open_mask;
+        let open_menu = &self.open_menu[..];
         cats.descendents_of(root).filter(|&path|
-            Self::is_path_visible(cats, open_mask, path)
+            Self::is_path_visible(cats, open_mask, open_menu, path)
         )
+    }
+    fn is_path_open_menu(open_menu: &[CategoryPath], path: CategoryPath) -> bool {
+        open_menu.contains(&path)
     }
 
     /// TODO: also apply filters like current-map
     /// (beware multiple UI elements may have differing filter states?)
-    pub fn is_path_visible(cats: &PackCategoryInfo, open_mask: &BitSet, path: CategoryPath) -> bool {
-        if open_mask.contains(path) || cats.is_root(path) { return true }
+    pub fn is_path_visible(cats: &PackCategoryInfo, open_mask: &BitSet, open_menu: &[CategoryPath], path: CategoryPath) -> bool {
+        if open_mask.contains(path) || cats.is_root(path) || Self::is_path_open_menu(open_menu, path) { return true }
         let direct_parent_open = cats.parent_of(path).map(|p| {
-            open_mask.contains(p)
+            open_mask.contains(p) || Self::is_path_open_menu(open_menu, p)
         });
         direct_parent_open.unwrap_or(true)
     }
@@ -795,13 +898,13 @@ impl CategoryInfo {
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CategoryAction {
-    Isolate(Option<bool>),
-    Enable(Option<bool>),
-    Copy,
-    Open(bool),
+    HoverTooltip,
     /// right-clicked
     ContextMenu,
-    HoverTooltip,
+    Open(bool),
+    Copy,
+    Enable(Option<bool>),
+    Isolate(Option<bool>),
 }
 impl CategoryAction {
     pub const ISOLATE: Self = Self::Isolate(None);
@@ -811,6 +914,8 @@ impl CategoryAction {
 
     pub fn clobber(self, path: CategoryPath, dest: &mut CategoryActionSlot) -> Result<Option<(CategoryPath, Self)>, Self> {
         match &*dest {
+            Some((p, present)) if *p == path && *present == self =>
+                return Ok(None),
             Some((_, present)) if *present > self =>
                 return Err(self),
             _ => (),
@@ -829,7 +934,7 @@ impl CategoryAction {
         }
         self.clobber(path, dest)
     }
-    pub fn as_pathing_message(self, path: CategoryPath, pack_path: PackPath) -> Option<PathingEvent> {
+    pub(crate) fn as_pathing_message(self, path: CategoryPath, pack_path: PackPath) -> Option<PathingEvent> {
         match self {
             Self::Enable(enable) =>
                 Some(PathingEvent::CategoryEnableSet(pack_path, path, enable)),
@@ -843,6 +948,15 @@ impl CategoryAction {
             _unactionable => None,
         }
     }
+    pub(crate) fn as_pack_message(self, pack_path: PackPath) -> Option<PathingEvent> {
+        match self {
+            Self::Enable(Some(true)) =>
+                Some(PathingEvent::ReloadPack(pack_path, false)),
+            Self::Enable(Some(false)) =>
+                Some(PathingEvent::UnloadPack(pack_path, false)),
+            _ => None,
+        }
+    }
     pub fn try_act(self, path: CategoryPath, pack_path: PackPath) -> Option<Self> {
         let msg = match self {
             #[cfg(todo)]
@@ -851,6 +965,8 @@ impl CategoryAction {
             },
             // not important enough to keep around...
             Self::HoverTooltip | Self::ContextMenu => return None,
+            #[cfg(todo = "unnecessary")]
+            action if path.path == CategoryIndex::MAX => action.as_pack_message(pack_path),
             action => action.as_pathing_message(path, pack_path),
         };
         match msg.map(PathingController::try_send) {
@@ -874,6 +990,7 @@ impl CategoryAction {
                 None => return,
                 Some(slot) => slot,
             };
+            if let CategoryAction::HoverTooltip = clobbered { return }
             log::debug!("clobbered action {clobbered:?} in favour of {slot:?}");
         }
     }

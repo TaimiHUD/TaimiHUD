@@ -48,7 +48,16 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                     CategoryAction::warn_clobbered(&self.act_cat, clobbered);
                 }
             }
-            // TODO: record categories.act_open? with its depth then can track open/close events...
+            let menu_open = categories.act_open.last().copied();
+            if menu_open != self.last_menu_open {
+                let path = match menu_open {
+                    Some(p) => p,
+                    None => self.last_menu_open.or(self.state.info.primary_root().map(|r| r.path()))
+                        .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
+                };
+                let clobbered = CategoryAction::Open(menu_open.is_some()).clobber(path, &mut self.act_cat);
+                CategoryAction::warn_clobbered(&self.act_cat, clobbered);
+            }
         }
     }
     pub fn draw_menu_unloaded(&mut self) {
@@ -58,17 +67,36 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             self.ui.text("uhhhh wasn't I a leaf?");
         }
         menu.draw_end(token);
-        if let Some(act) = act {
-            if act != UiAction::Hovered {
-                log::error!("TODO: {} {act:?}", self.state.info);
-            }
+        let act = match act {
+            Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
+            Some(UiAction::Primary | UiAction::RIGHT_CLICK | UiAction::LEFT_CLICK) =>
+                Some(CategoryAction::Enable(None)),
+            Some(act) => {
+                log::debug!("DELETEME: category menu action {act:?} unexpected");
+                None
+            },
+            None => None,
+        };
+        if act.is_some() {
+            self.act_pack = act;
+        }
+        if self.last_menu_open.is_some() {
+            let path = self.state.info.primary_root()
+                .map(|r| r.path())
+                .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX));
+            let clobbered = CategoryAction::Open(false).clobber(path, &mut self.act_cat);
+            CategoryAction::warn_clobbered(&self.act_cat, clobbered);
         }
     }
 
     pub fn prepare_menu_categories(&self) -> Option<DrawCategoryCollectionMenu<'a, 'u>> {
-        self.categories.map(|state|
-            DrawCategoryCollectionMenu::new(DrawCategoryCollection::new(self.ui, state, self.state))
-        )
+        self.categories.map(|state| {
+            let mut cats = DrawCategoryCollectionMenu::new(DrawCategoryCollection::new(self.ui, state, self.state));
+            if self.last_menu_open.is_some() {
+                cats.act_open.reserve(0x10);
+            }
+            cats
+        })
     }
 }
 impl super::PackElement {
@@ -76,11 +104,31 @@ impl super::PackElement {
         let mut roots = self.prepare_draw(ui);
         roots.draw_menu();
         let DrawPackRoots { mut act_cat, act_pack, .. } = roots;
-        if let Some((path, CategoryAction::Open(..))) = act_cat {
-            log::debug!("DELETEME: ignoring menu open event for {path}");
+        if let Some((path, CategoryAction::Open(opened))) = act_cat {
+            log::debug!("DELETEME: menu open({opened}) for {path}");
+            let cats = self.state.info.category_info();
+            let open_menu = &mut self.categories.open_menu;
+            if opened {
+                if let Some((cats, ..)) = cats {
+                    open_menu.clear();
+                    open_menu.push(path);
+                    open_menu.extend(cats.parents_of(path));
+                    open_menu.reverse();
+                } else if !open_menu.contains(&path) {
+                    open_menu.push(path);
+                }
+            } else {
+                if path.path == CategoryIndex::MAX || cats.map(|(c, ..)| c.is_root(path)).unwrap_or(true) {
+                    open_menu.clear();
+                } else if let Some(i) = open_menu.iter().rposition(|&p| p == path) {
+                    open_menu.truncate(i);
+                } else {
+                    open_menu.clear();
+                }
+            }
             act_cat = None;
         }
-        self.act_post_draw(act_cat, act_pack);
+        self.act_post_draw(ui, act_cat, act_pack, false);
     }
 }
 
@@ -179,13 +227,13 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
         )
     }
 
-    fn draw_end(&mut self, token: Option<MenuToken<'a>>) {
+    fn draw_end(&mut self, token: Option<MenuToken<'a>>) -> Option<UiAction> {
         drop(token);
-        #[cfg(todo)]
         let act = self.resolve_action();
         if !self.draw.is_decorative || !self.is_leaf() {
             self.draw_spacing();
         }
+        act
     }
     pub fn draw_decoration_with<R, F: FnOnce(&Self) -> R>(&mut self, f: F) -> Option<R> {
         if self.drawn_bounds.is_empty() { return None }
@@ -250,7 +298,7 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
 }
 pub struct DrawCategoryCollectionMenu<'a, 'ui> {
     pub draw: DrawCategoryCollection<'a, 'ui>,
-    pub menu_stack: Vec<(Option<MenuToken<'a>>, bool)>,
+    pub menu_stack: Vec<(Option<MenuToken<'a>>, DrawCategoryMenu<'a, 'ui>)>,
     pub act: CategoryActionSlot,
     pub act_open: Vec<CategoryPath>,
 }
@@ -280,7 +328,7 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
                     }
                 }
                 prev_depth = depth;
-                if self.push_and_draw(path, None).is_none() {
+                if self.push_and_draw(cat_path, None).is_none() {
                     cat_iter.skip_to_sibling();
                 }
             }
@@ -292,11 +340,27 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
         self.draw.push(path)?;
         let toggle = self.draw.prepare_toggle(path, pseudo_root);
         let mut menu = toggle.prepare_menu();
-        let is_leaf = menu.is_leaf();
         let (act, token) = menu.draw_start();
         let res = token.as_ref().map(drop);
-        self.menu_stack.push((token, is_leaf));
-        let act = match act {
+        let act = Self::act_to_action(&menu, act);
+        self.menu_stack.push((token, menu));
+        if let Some(act) = act {
+            let clobbered = act.clobber(path, &mut self.act);
+            CategoryAction::warn_clobbered(&self.act, clobbered);
+        }
+
+        if res.is_some() {
+            if self.draw.path_stack.len() > self.act_open.len() {
+                self.act_open.clone_from(&self.draw.path_stack);
+            } else if self.draw.path_stack.len() == self.act_open.len() && self.draw.path_stack.last() != self.act_open.last() {
+                log::debug!("DELETEME: category menu open already set? {:?} vs {:?}", self.act_open, self.draw.path_stack);
+            }
+        }
+        res
+    }
+    fn act_to_action(menu: &DrawCategoryMenu, act: Option<UiAction>) -> Option<CategoryAction> {
+        let is_leaf = menu.is_leaf();
+        match act {
             Some(UiAction::Primary) if is_leaf && menu.is_copyable =>
                 Some(CategoryAction::Copy),
             Some(UiAction::LEFT_CLICK) if menu.is_copyable =>
@@ -313,29 +377,25 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
                 None
             },
             None => None,
+        }
+    }
+    pub fn pop(&mut self) -> Option<CategoryPath> {
+        let act = if let Some((token, mut menu)) = self.menu_stack.pop() {
+            let act = menu.draw_end(token);
+            Some((menu, act))
+        } else {
+            None
         };
-        if let Some(act) = act {
+        let path = self.draw.pop();
+        let act = match (path, act) {
+            (Some(path), Some((menu, act))) =>
+             Self::act_to_action(&menu, act).map(|act| (act, menu, path)),
+            _ => None,
+        };
+        if let Some((act, menu, path)) = act {
             let clobbered = act.clobber(path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
-
-        if res.is_some() {
-            if self.draw.path_stack.len() > self.act_open.len() {
-                self.act_open = self.draw.path_stack.clone();
-            } else if self.draw.path_stack.len() == self.act_open.len() {
-                log::debug!("DELETEME: category menu open already set? {:?} vs {:?}", self.act_open, self.draw.path_stack);
-            }
-        }
-        res
-    }
-    pub fn pop(&mut self) -> Option<CategoryPath> {
-        let path = self.draw.pop();
-        if let Some((token, is_leaf)) = self.menu_stack.pop() {
-            // TODO: menu.draw_end(token);
-            drop(token);
-            DrawCategoryMenu::dead_zone_spacing(self.draw.ui, !is_leaf);
-        }
-
         path
     }
 }

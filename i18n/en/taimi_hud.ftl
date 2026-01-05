@@ -302,6 +302,9 @@ reload-pack = Reload
 reload-packs = {reload-pack}
 unload-packs = Unload All
 unload-pack = Unload
+pack-error = Failed
+unknown-pack-format = { unknown }
+pack-format-notice = Supported .taco zip file or extracted folder
 
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.

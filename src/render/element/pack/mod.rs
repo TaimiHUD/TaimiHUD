@@ -5,7 +5,11 @@ use {
                 registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent
             },
             Controller,
-        }, exports::runtime::imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar},
+        },
+        exports::runtime::{
+            self as rt,
+            imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar},
+        },
         render::RenderState, with_i18n
     },
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
@@ -74,23 +78,58 @@ impl PackElements {
 pub struct PackElement {
     pub state: PackElementState,
     pub categories: CategoryCollectionState,
+    /// displaying the tooltip for a category (or pack pseudo-root)
+    pub hovered: Option<Option<CategoryPath>>,
 }
 impl PackElement {
     pub fn new(pack: &SharedPackLoad) -> Self {
         Self {
             state: PackElementState::new(pack),
             categories: CategoryCollectionState::default(),
+            hovered: None,
         }
     }
 
     pub fn pre_draw(&mut self, visibility: PackVisibility) {
+        if let PackVisibility::Closed = visibility {
+            self.hovered = None;
+        }
         let damage = self.state.pre_draw(visibility);
+        if let Some(..) = self.hovered {
+            self.state.populate_display_name();
+        }
         let category_visibility = match visibility {
             PackVisibility::Visible if !self.any_roots_open() =>
                 PackVisibility::Pending,
             v => v,
         };
         self.categories.pre_draw(&self.state, &damage, category_visibility);
+    }
+
+    pub fn draw_pack_tooltip(&mut self, ui: &Ui, title_visible: bool, reason_visible: bool) {
+        self.hovered = Some(None);
+        let title_template = self.state.display_name().unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
+        DrawCategoryTooltip::draw_tooltip(ui, title_template, || self.draw_pack_tooltip_contents(ui, title_visible, reason_visible));
+    }
+    pub fn draw_pack_tooltip_contents(&self, ui: &Ui, title_visible: bool, reason_visible: bool) {
+        let title = (!title_visible).then_some(self.state.display_name()).flatten();
+        if let Some(title) = title {
+            let _title_font = RenderState::push_font("big", ui);
+            ui.text(title);
+            ui.spacing();
+        }
+        let path = rt::relative_path(&self.state.info.path);
+        let path = path.strip_prefix("addons/Taimi/pathing/").unwrap_or(path);
+        ui.text_wrapped(format!("{}", path.display()));
+
+        if let Some(unloaded) = &self.state.unloaded {
+            if !reason_visible {
+                DrawPackUnloaded::draw_reason_name(ui, Some(unloaded));
+            }
+            DrawPackUnloaded::with_reason_details(Some(unloaded), |msg|
+                ui.text_wrapped(&msg)
+            );
+        }
     }
 }
 
@@ -153,9 +192,7 @@ impl PackElementState {
             self.id_name.clear();
         }
         if let PackVisibility::Visible = visibility {
-            if self.display_name.is_empty() {
-                let _ = write!(&mut self.display_name, "{}", self.info);
-            }
+            self.populate_display_name();
         }
         if self.id_name.is_empty() && self.info.datasource.is_none() {
             if let Some(fname) = self.info.path.file_name() {
@@ -171,7 +208,15 @@ impl PackElementState {
         self.id_name = String::new();
         self.category_flags = None;
     }
+    fn populate_display_name(&mut self) {
+        if self.display_name.is_empty() {
+            let _ = write!(&mut self.display_name, "{}", self.info);
+        }
+    }
 
+    pub fn display_name(&self) -> Option<&str> {
+        str_opt_ref(&self.display_name)
+    }
     pub fn ui_id(&self) -> imgui::Id<'_> {
         let id_name =
             str_opt_ref(&self.id_name)
