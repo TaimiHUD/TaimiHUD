@@ -63,6 +63,10 @@ impl<T> Watcher<T> {
         unsafe { &mut *(receiver as *mut watch::Receiver<T> as *mut watch::Sender<T>) }
     }
 
+    pub fn init_with<F: FnOnce() -> T>(&self, init: F) -> &watch::Receiver<T> {
+        self.watch
+            .get_or_init(|| Self::sender_to_receiver(watch::Sender::new(init())))
+    }
     pub fn init(&self, value: T) -> &watch::Receiver<T> {
         let sender = watch::Sender::new(value);
         let watch = Self::sender_to_receiver(sender);
@@ -76,7 +80,13 @@ impl<T> Watcher<T> {
 
     /// Must have had reference counts adjusted by [Self::sender_to_receiver]
     pub unsafe fn init_receiver(&self, watch: watch::Receiver<T>) -> &watch::Receiver<T> {
-        self.watch.get_or_init(|| watch)
+        let mut watch = Some(watch);
+        let res = self.watch.get_or_init(|| watch.take().unwrap_unchecked());
+        if let Some(watch) = watch {
+            // was already initialized...
+            Self::receiver_to_parts(watch);
+        }
+        res
     }
 
     pub fn set_sender(&mut self, sender: watch::Sender<T>) {
@@ -214,7 +224,7 @@ impl<T: Default> Watcher<T> {
         Self::receiver_as_sender(self.receiver())
     }
     pub fn receiver(&self) -> &watch::Receiver<T> {
-        self.init(T::default())
+        self.init_with(T::default)
     }
 
     pub fn read(&self) -> watch::Ref<'_, T> {
