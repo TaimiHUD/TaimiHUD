@@ -281,10 +281,30 @@ impl<T> BvhShape<T> {
             bh_index: 0,
         }
     }
+    #[inline]
+    pub const fn new_removed(value: T) -> Self {
+        Self {
+            value,
+            bh_index: usize::MAX,
+        }
+    }
 
     #[inline]
     pub fn into_inner(self) -> T {
         self.value
+    }
+
+    #[inline]
+    pub fn set_bh_removed(&mut self) {
+        self.bh_index = usize::MAX;
+    }
+    #[inline]
+    pub fn is_bh_removed(&self) -> bool {
+        self.bh_index == usize::MAX
+    }
+    #[inline]
+    pub fn is_bh_removed_from<U: BHValue, const D: usize>(&self, bvh: &Bvh<U, D>) -> bool {
+        self.bh_index >= bvh.nodes.len()
     }
 }
 impl<T, U: BHValue, const D: usize> aabb::Bounded<U, D> for BvhShape<T> where

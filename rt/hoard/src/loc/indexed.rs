@@ -191,6 +191,21 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> {
     {
         self.map_ref()
     }
+
+    #[inline]
+    pub fn map_mut<U: ?Sized>(&mut self) -> &mut IndexedList<N, P, U> where
+        T: AsMut<U>,
+        N: PhantomNamespace,
+    {
+        IndexedList::from_mut(self.data.as_mut())
+    }
+    #[inline]
+    pub fn map_mut_as_slice<U>(&mut self) -> &mut IndexedList<N, P, [U]> where
+        T: AsMut<[U]>,
+        N: PhantomNamespace,
+    {
+        self.map_mut()
+    }
 }
 impl<N, P, T: ?Sized> IndexedList<N, P, T> {
     #[inline]

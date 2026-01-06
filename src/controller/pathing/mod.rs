@@ -230,29 +230,55 @@ impl PathingController {
             },
             Ok(_) = self.space.maps_rx.changed() => {
                 log::info!("PATHY: gameplay maps rx");
-                if let Some(map_id) = gameplay_prev.gameplay_map() {
+                let (space_dirty, is_empty) = if let Some(map_id) = gameplay_prev.gameplay_map() {
                     #[cfg(todo)]
-                    let bvh_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);
-                    let bvh_dirty = true;
-                    let bvh_dirty = if bvh_dirty {
-                        Arc::make_mut(&mut self.space.packs).rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
-                        log::info!("PATHY: space entities = {}", self.space.packs.render_entities.entities.len());
-                        true
+                    let entities_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);
+                    let entities_dirty = true;
+                    let space_dirty = if entities_dirty {
+                        let space_packs = Arc::make_mut(&mut self.space.packs);
+                        let bvh_dirty = space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                        log::info!("PATHY: space entities = {}", space_packs.render_entities.entities.len());
+                        match bvh_dirty {
+                            Err(true) => {
+                                space_packs.rebuild_bvh();
+                                true
+                            },
+                            Err(false) => true,
+                            Ok(()) => false,
+                        }
                     } else {
-                        self.space.packs.needs_bvh_rebuild()
+                        //self.space.packs.needs_bvh_rebuild()
+                        false
                     };
-                    let space_dirty = bvh_dirty;
-                    if bvh_dirty {
-                        log::info!("PATHY: space dirty");
-                        Arc::make_mut(&mut self.space.packs).rebuild_bvh();
-                    }
-                    if space_dirty {
-                        let new_copy = self.space.packs.clone();
-                        self.loader.shared.space.collection.send_if_modified(|shared| {
+                    let is_empty = self.space.packs.is_empty();
+                    (space_dirty, is_empty)
+                } else {
+                    let changed = match self.space.packs.map_id {
+                        None => false,
+                        #[cfg(todo)]
+                        Some(..) => {
+                            self.space.packs = Arc::new(space::SpacePackCollection::new());
+                            //Arc::make_mut(&mut self.space.packs).clear();
+                            true
+                        },
+                        Some(..) => true,
+                    };
+                    (changed, true)
+                };
+                if space_dirty || is_empty {
+                    log::info!("PATHY: space dirty");
+                    let new_copy = (!is_empty).then(|| self.space.packs.clone());
+                    self.loader.shared.space.collection.send_if_modified(|shared| {
+                        if let Some(new_copy) = new_copy {
                             *shared = new_copy;
                             true
-                        });
-                    }
+                        } else if !shared.is_empty() {
+                            Arc::make_mut(shared).clear();
+                            true
+                        } else {
+                            false
+                        }
+                    });
                 }
             },
             _ = self.rx.festivals.changed() => {

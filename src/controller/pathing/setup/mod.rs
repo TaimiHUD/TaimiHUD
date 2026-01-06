@@ -210,29 +210,34 @@ impl PathingController {
         let info_sig = info.sig;
         let map_info = self.map_info.write(map_path);
         if map_info.info_sig != info_sig {
-            log::info!("PATHY: updating map info {map_path}");
             map_info.set_info(MapPackInfo::with_pack(map_path.path, &data, &pack_info));
         }
         let map = self.maps.write(map_path);
         if map.info_sig != info_sig {
-            log::info!("PATHY: updating map {map_path}");
             *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
+        }
+        let vis_dirty = {
             // TODO: if config is going to trigger update immediately after, this may be unnecessary?
             let config = self.loader.shared.packs.packs.borrow().lookup_ref(&map_path.root).as_ref().map(|p| p.config.clone());
-            let vis_dirty = if let Some(config) = config.as_ref().map(|c| c.borrow()) {
+            let config = config.as_ref().map(|c| c.borrow());
+            if let Some(config) = config {
                 if config.info_sig == info_sig {
-                    map.refresh_categories(&*map_info, &pack_info.categories, &config.config, None);
-                    true
+                    let damage = map.update_category_config(&*map_info, &pack_info.categories, &config.config);
+                    if let Ok(true) = &damage {
+                        false
+                    } else {
+                        map.refresh_categories(&*map_info, &pack_info.categories, &config.config, damage.err().as_ref());
+                        true
+                    }
                 } else {
                     false
                 }
-            } else { false };
-            if vis_dirty {
-                Self::update_loaded_visibility_inner(map_path, map, &*map_info, Some(&self.rx.get_filter_state()));
-            }
-        } else {
-            log::info!("PATHY: skipping map??? {map_path}");
+            } else { false }
+        };
+        if vis_dirty {
+            Self::update_loaded_visibility_inner(map_path, map, &*map_info, Some(&self.rx.get_filter_state()));
         }
+
         self.loader.shared.update_map(map_path, &map_info.info, &*map, notify)
     }
 

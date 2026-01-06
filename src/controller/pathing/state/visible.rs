@@ -907,6 +907,8 @@ impl LoadedMapPack {
     /// Only updates default flags
     ///
     /// [self.categories] are dirty and require further processing unless `Ok(true)`
+    ///
+    /// TODO: starting damage mask via parameter and/or info sig instead
     pub fn update_category_config(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig) -> Result<bool, CategorySet> {
         let mut damage = match self.categories.len() {
             loaded if info.category_count() != loaded => {

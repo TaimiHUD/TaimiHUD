@@ -1,28 +1,22 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{PackVecOf, PackInfoSignature, LoadedTrailSectionPath},
-            space::DrawSpace,
-            shared::SharedGameplayMap,
-            state::{LoadedPacks, LoadedMaps, LoadedMapInfo},
+            registry::{LoadedPoiIndex, LoadedPoiPath, LoadedTrailIndex, LoadedTrailPath, LoadedTrailSectionPath, PackInfoSignature, PackVecOf}, shared::SharedGameplayMap, space::DrawSpace, state::{LoadedMapInfo, LoadedMaps, LoadedPacks}
         },
         space::render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
+    }, bitvec::vec::BitVec, bvh::{aabb, bvh::Bvh}, glamour::{Box3, Point3}, std::{collections::{BTreeMap, BTreeSet}, iter, mem, ops, sync::Arc}, taimi_hoard::{collections::slice_offset_from, flags::BitSet, iters::IterExt as _, loc::{indexed::IndexedList, LocationMut, LocationRef}}, taimi_meta::{
+        packs::{id::{IdVariant, MarkerId, MarkerIndex, MarkerPath}, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, TrailIndex, TrailSectionIndex, TrailSectionPath}, spatial::{box3aabb, irrelevant_box3, BvhShape, MintConv},
     },
-    taimi_hoard::collections::slice_offset_from,
-    taimi_hoard::loc::LocationRef,
-    bitvec::vec::BitVec,
-    taimi_meta::{
-        spatial::{box3aabb, irrelevant_box3, BvhShape},
-        packs::{id::{IdVariant, MarkerId, MarkerIndex, MarkerPath}, MapIndex, PackIndex, PackPath, PoiIndex, TrailIndex, TrailSectionIndex},
-    },
-    glamour::{Box3, Point3},
-    std::{mem, sync::Arc, ops},
-    bvh::{aabb, bvh::Bvh}
+    taimi_meta::coords::vec_eq,
 };
 
 #[derive(Clone)]
 pub struct SpacePack {
     pub info_sig: PackInfoSignature,
+    /// an entry is allocated in [SpaceEntities::entities]
+    pub populated_pois: BitSet,
+    /// an entry is allocated in [SpaceEntities::entities]
+    pub populated_trails: BitSet,
     // Internal rendering data.
     #[cfg(todo)]
     pub render_list_bookmark: Option<usize>,
@@ -33,6 +27,8 @@ impl SpacePack {
     pub fn new() -> Self {
         SpacePack {
             info_sig: PackInfoSignature::EMPTY,
+            populated_pois: BitSet::default(),
+            populated_trails: BitSet::default(),
             #[cfg(todo)]
             render_list_bookmark: Default::default(),
             #[cfg(todo)]
@@ -42,11 +38,65 @@ impl SpacePack {
 
     pub fn clear(&mut self) {
         self.info_sig = PackInfoSignature::EMPTY;
+        self.clear_entities();
         #[cfg(todo)]
         {
             self.render_list_bookmark = None;
             self.poi_bookmark = 0;
         }
+    }
+    pub fn clear_entities(&mut self) {
+        self.populated_pois.clear();
+        self.populated_trails.clear();
+    }
+
+    pub fn mark_unpopulated(&mut self, marker: MarkerIndex) -> bool {
+        match marker.namespace() {
+            MarkerIndex::NS_POI => {
+                let idx = marker.index_poi_unchecked();
+                self.populated_pois.remove_at(idx)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let idx = marker.trail_index_unchecked();
+                self.populated_trails.remove_at(idx)
+            },
+            _ => None,
+        }.unwrap_or(false)
+    }
+    pub fn mark_populated(&mut self, marker: MarkerIndex) -> bool {
+        match marker.namespace() {
+            MarkerIndex::NS_POI => {
+                let idx = marker.index_poi_unchecked();
+                self.populated_pois.insert_at(idx)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let idx = marker.trail_index_unchecked();
+                self.populated_trails.insert_at(idx)
+            },
+            _ => false,
+        }
+    }
+    pub fn is_populated(&self, marker: MarkerIndex) -> Option<bool> {
+        match marker.namespace() {
+            MarkerIndex::NS_POI => {
+                let idx = marker.index_poi_unchecked();
+                self.populated_pois.get_at(idx)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let idx = marker.trail_index_unchecked();
+                self.populated_trails.get_at(idx)
+            },
+            _ => None,
+        }
+    }
+    pub fn any_populated(&self) -> bool {
+        self.populated_pois.any() || self.populated_trails.any()
+    }
+    pub fn populated_pois(&self) -> impl Iterator<Item = LoadedPoiPath> + '_ {
+        self.populated_pois.iter_ones().lazy_map(|i| LoadedPoiPath::with_path(i as LoadedPoiIndex))
+    }
+    pub fn populated_trails(&self) -> impl Iterator<Item = LoadedTrailPath> + '_ {
+        self.populated_trails.iter_ones().lazy_map(|i| LoadedTrailPath::with_path(i as LoadedTrailIndex))
     }
 }
 impl Default for SpacePack {
@@ -120,11 +170,21 @@ pub struct SpaceEntity {
     pub bounds: aabb::Aabb<f32, 3>,
 }
 impl SpaceEntity {
+    pub fn new(id: MarkerId, bounds: Box3<DrawSpace>) -> Self {
+        Self {
+            id,
+            bounds: box3aabb(bounds),
+        }
+    }
+
     pub fn invalid() -> Self {
         Self {
             id: MarkerId::EMPTY,
             bounds: box3aabb(irrelevant_box3::<DrawSpace>()),
         }
+    }
+    pub fn is_invalid(&self) -> bool {
+        self.id.uuid.is_nil()
     }
 }
 impl aabb::Bounded<f32, 3> for SpaceEntity {
@@ -145,6 +205,9 @@ impl SpaceEntityExtra {
         Self {
             position: Point3::INFINITY,
         }
+    }
+    pub fn is_invalid(&self) -> bool {
+        self.position.x.is_infinite()
     }
 }
 #[derive(Clone)]
@@ -169,22 +232,162 @@ impl SpaceEntities {
         self.extra.len() != self.entities.len()
     }
 
-    #[cfg(todo)]
-    pub fn rebuild_extra(&mut self) {
-        log::info!("TODO: rebuild_extra");
+    #[inline]
+    fn is_residue(e: &BvhShape<SpaceEntity>, check_bvh: Option<&Bvh<f32, 3>>) -> bool {
+        e.is_invalid() &&
+            check_bvh.map(|bvh| e.is_bh_removed_from(bvh)).unwrap_or(true)
     }
-
-    pub fn retain<F: FnMut(&mut SpaceEntity) -> bool>(&mut self, mut cond: F) -> BitVec {
-        let mut removed: BitVec = Default::default();
-        removed.resize(self.entities.len(), false);
-        for (i, e) in self.entities.iter_mut().enumerate() {
-            if !cond(e) {
-                *e = BvhShape::new(SpaceEntity::invalid());
-                if let Some(mut b) = removed.get_mut(i) {
-                    *b = true;
+    /// number of unallocated entries at end of list
+    pub fn trailing_residue(&self, check_bvh: Option<&Bvh<f32, 3>>) -> usize {
+        self.entities.iter().rev().take_while(|e|
+            Self::is_residue(e, check_bvh)
+        ).count()
+    }
+    pub fn trim_trailing(&mut self, check_bvh: Option<&Bvh<f32, 3>>) {
+        let removed = self.trailing_residue(check_bvh);
+        if removed > 0 {
+            let residue_start = self.entities.len() - removed;
+            match () {
+                #[cfg(todo = "unnecessary")]
+                _ => self.drain_range(residue_start..),
+                _ => self.truncate(residue_start),
+            }
+        }
+    }
+    pub fn truncate(&mut self, new_len: usize) {
+        if self.entities.len() > new_len {
+            self.entities.truncate(new_len);
+        }
+        if self.extra.len() > new_len {
+            self.extra.truncate(new_len);
+        }
+    }
+    /// will ruin indices
+    pub fn prune_residue(&mut self) {
+        self.trim_trailing(None);
+        let mut iter = 0..self.entities.len();
+        while let Some(i) = iter.next() {
+            while self.entities.get(i).map(|e| e.is_invalid()).unwrap_or(false) {
+                self.swap_remove(i);
+                if iter.next_back().is_none() {
+                    break
                 }
             }
         }
+    }
+    pub fn drain_range<R: ops::RangeBounds<usize>>(&mut self, range: R) {
+        use ops::Bound;
+        let (start, end) = (range.start_bound().cloned(), range.end_bound().cloned());
+        drop(self.entities.drain(range));
+        let start = match start {
+            Bound::Included(s) => Some(s),
+            Bound::Excluded(s) => Some(s + 1),
+            Bound::Unbounded => None,
+        };
+        let extra_inrange_start = start.map(|s| self.extra.get(s).is_some());
+        if extra_inrange_start.unwrap_or(true) {
+            let end = match end {
+                Bound::Included(e) => e + 1,
+                Bound::Excluded(e) => e,
+                Bound::Unbounded => usize::MAX,
+            }.min(self.extra.len());
+            drop(self.extra.drain(start.unwrap_or(0)..end));
+        }
+    }
+    pub fn swap_remove(&mut self, index: usize) {
+        self.entities.swap_remove(index);
+        if self.extra.len() > index {
+            self.extra.swap_remove(index);
+        }
+    }
+    pub fn rebuild_extra(&mut self, dirty_indices: Option<&mut dyn Iterator<Item = usize>>, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
+        let entities_count = match () {
+            #[cfg(todo = "unnecessary")]
+            _ => self.entities.rposition(|e| !e.is_invalid()).map(|i| i + 1).unwrap_or(0),
+            _ => self.entities.len(),
+        };
+        self.extra.resize_with(entities_count, SpaceEntityExtra::invalid);
+        let mut range;
+        let (dirty_check, indices) = match dirty_indices {
+            Some(indices) => (false, indices),
+            None => {
+                range = 0..self.extra.len();
+                (true, &mut range as &mut dyn Iterator<Item = usize>)
+            },
+        };
+        for i in indices {
+            let Some(extra) = self.extra.get_mut(i) else { continue };
+            if dirty_check && !extra.is_invalid() { continue }
+            let Some(e) = self.entities.get_mut(i) else { continue };
+            if dirty_check && e.is_bh_removed() { continue }
+            let Some(path) = e.value.id.marker_path::<PackMapPath>() else { continue };
+            let map = maps.lookup_with_info(map_info, &path.root);
+            match path.path.namespace() {
+                MarkerIndex::NS_POI => {
+                    let lpath: LoadedPoiPath = LoadedPoiPath::with_path(path.path.index_poi_unchecked());
+                    let lpoi = map.and_then(|(map, _i)| map.lpois().lookup_ref(&lpath));
+                    if let Some(lpoi) = lpoi {
+                        extra.position = lpoi.position();
+                    }
+                },
+                MarkerIndex::NS_TRAIL => {
+                    // no need to look up pos since we can infer it from the bounds...
+                    extra.position = MintConv::from_nalg(e.bounds.center());
+                },
+                _ => (),
+            }
+        }
+    }
+
+    pub fn dead_mask(&self) -> impl DoubleEndedIterator<Item = usize> + '_ {
+        self.entities.iter().enumerate().filter_map(|(i, e)| e.is_invalid().then_some(i))
+    }
+    /// if not in order use swap_remove (TODO: rev or use it always bleh)
+    #[cfg(todo)]
+    pub fn prune<I: IntoIterator<Item = usize>>(&mut self, bvh: &mut Bvh<f32, 3>, i: I, swap_remove: bool) {
+        let bvh_empty = bvh.nodes.is_empty();
+        for (adj, i) in i.into_iter().enumerate() {
+            let i = match swap_remove {
+                true => i,
+                false => i - adj,
+            };
+            if !bvh_empty {
+                bvh.remove_shape(&mut self.entities[..], i, swap_remove);
+            }
+            match swap_remove {
+                false => self.entities.remove(i),
+                true => self.entities.swap_remove(i),
+            };
+            if self.extra.len() > i {
+                match swap_remove {
+                    false => self.extra.remove(i),
+                    true => self.extra.swap_remove(i),
+                };
+            }
+        }
+    }
+    pub fn retain<F: FnMut(usize, &mut BvhShape<SpaceEntity>, Option<&mut SpaceEntityExtra>, Option<(MarkerPath<PackMapPath>, &mut SpacePack)>) -> bool>(&mut self, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, mut cond: F) -> BitSet {
+        let mut removed: BitSet = Default::default();
+        removed.reserve_exact(self.entities.len());
+        removed.extend(self.entities.iter_mut().enumerate().filter_map(|(i, e)| {
+            let mut pack_data = e.value.id.marker_path::<PackMapPath>()
+                .and_then(|path| pack_data.lookup_mut(&path.root.root).map(|d|
+                    (path, d)
+                ));
+            let extra = self.extra.get_mut(i);
+            match cond(i, e, extra, pack_data.as_mut().map(|(p, pd)| (*p, &mut **pd))) {
+                #[cfg(todo = "unnecessary")]
+                _ if e.is_invalid() => None,
+                false => {
+                    if let Some((path, pack_data)) = pack_data {
+                        pack_data.mark_unpopulated(path.path);
+                    }
+                    e.value = SpaceEntity::invalid();
+                    Some(i)
+                },
+                true => None,
+            }
+        }));
         #[cfg(todo = "unnecessary")]
         for i in removed.iter_ones() {
             let Some(extra) = self.extra.get_mut(i) else { continue };
@@ -192,13 +395,50 @@ impl SpaceEntities {
         }
         removed
     }
-    pub fn remove_pack(&mut self, pack: PackPath) {
-        self.retain(|e| match e.id.variant() {
+    pub fn invalidate(&mut self, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, index: usize) {
+        let Some(e) = self.entities.get_mut(index) else { return };
+        let mut pack_data = e.value.id.marker_path::<PackMapPath>()
+            .and_then(|path| pack_data.lookup_mut(&path.root.root).map(|d|
+                (path, d)
+            ));
+        if let Some((path, pack_data)) = pack_data {
+            pack_data.mark_unpopulated(path.path);
+        }
+        e.value = SpaceEntity::invalid();
+        #[cfg(todo = "unnecessary")]
+        if let Some(extra) = self.extra.get_mut(i) {
+            *extra = SpaceEntityExtra::invalid();
+        }
+    }
+    #[cfg(deleteme)]
+    pub fn remove_pack(&mut self, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, bvh: &mut Bvh<f32, 3>, pack: PackPath) {
+        let removed = self.retain(pack_data, |_i, e, _, _| match e.id.variant() {
             IdVariant::MarkerRegistered(p) => p.root != pack,
             IdVariant::MarkerLoaded(p) => p.root.root != pack,
             _ => true,
         });
-        self.extra = Vec::new();
+        self.prune(bvh, removed.iter_ones(), true);
+    }
+    pub fn deactivate_entities_inplace(&mut self, _pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, bvh: &mut Bvh<f32, 3>, indices: &mut dyn Iterator<Item = usize>) {
+        for i in indices {
+            let Some(e) = self.entities.get_mut(i) else {
+                log::warn!("cannot deactivate missing entity #{i}");
+                continue
+            };
+            #[cfg(todo = "unnecessary")]
+            let pack_data = e.value.id.marker_path::<PackMapPath>()
+                .and_then(|path| pack_data.lookup_mut(&path.root.root).map(|d|
+                    (path, d)
+                ));
+            if e.is_bh_removed() {
+                continue
+            }
+            bvh.remove_shape(&mut self.entities, i, false);
+            let e = unsafe {
+                self.entities.get_unchecked_mut(i)
+            };
+            e.set_bh_removed();
+        }
     }
 }
 impl Extend<(MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)> for SpaceEntities {
@@ -246,21 +486,29 @@ impl SpacePackCollection {
         }
     }
 
-    pub fn needs_rebuild(&self, map_id: MapIndex, packs: &LoadedPacks) -> bool {
+    #[cfg(todo)]
+    pub fn needs_rebuild(&self, map_id: MapIndex, packs: &LoadedPacks, maps: &LoadedMaps) -> bool {
         self.map_id != Some(map_id) ||
-            packs.sigs_match(self.loaded_packs.values().map(|p| p.info_sig))
+            !packs.sigs_match(self.loaded_packs.values().map(|p| p.info_sig)) ||
+            self.loaded_packs.iter().any(|(path, pd)| pd.is_dirty(maps.lookup_ref(&path.rel(map_id))))
     }
 
+    #[cfg(todo)]
     pub fn rebuild_entities_if_dirty(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
-        if self.needs_rebuild(map_id, packs) {
+        if self.needs_rebuild(map_id, packs, maps) {
             self.rebuild_entities(map_id, packs, map_info, maps);
         }
     }
-    pub fn rebuild_entities(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
-        #[cfg(todo)]
+    /// hidden = activated && !visible, dirty = boundschanged || (visible && !activated)
+    fn prepare_entity_update(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) -> (BitSet, BTreeSet<usize>, BTreeMap<MarkerId, usize>, BTreeMap<MarkerId, usize>) {
+        self.loaded_packs.data.resize_with(packs.packs.len(), SpacePack::default);
         if self.map_id != Some(map_id) {
             self.clear();
-        } else {
+            self.prepare_entity_population(map_id, packs, map_info, maps);
+            return Default::default()
+        }
+        #[cfg(deleteme)]
+        if self.map_id == Some(map_id) {
             let entities_len = self.render_entities.entities.len();
             if self.render_entities.extra.is_empty() && entities_len > 0 {
                 let trailing_entities = self.render_entities.entities.iter()
@@ -299,55 +547,239 @@ impl SpacePackCollection {
                 }
             }
         }
-        self.clear();
+
+        for ((_path, pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
+            if pack.is_loaded() && pack.info.has_map(map_id) && pack_data.info_sig == pack.info.sig {
+                continue
+            }
+            pack_data.clear();
+        }
+        let mut dirty = BTreeMap::new();
+        let mut hidden = BTreeMap::new();
+        let mut unallocated = BTreeSet::new();
+        let removed = self.render_entities.retain(self.loaded_packs.map_mut_as_slice(), |i, e, extra, pack_data| {
+            if e.is_invalid() {
+                unallocated.insert(i);
+                return true
+            }
+            let Some((map_path, pack_data)) = pack_data else {
+                return true
+            };
+            if map_path.root.path == MapIndex::MAX {
+                log::debug!("TODO: mapless marker?");
+                return true
+            }
+            if map_path.root.path != map_id { return false }
+            if pack_data.info_sig.is_empty() { return false }
+
+            let Some((map, map_info)) = maps.lookup_with_info(map_info, &map_path.root) else {
+                log::debug!("TODO: {map_path} info missing for {}", e.id);
+                return false
+            };
+            let (vis, bounds) = match map_path.path.namespace() {
+                MarkerIndex::NS_POI => {
+                    let lpath: LoadedPoiPath = LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
+                    let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
+                    let bounds = lpoi.bounds();
+                    let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into()) || !vec_eq(bounds.max.to_array(), e.bounds.max.into()) {
+                        log::warn!("DELETEME: {map_path} poi bounds changed from {:?} to {bounds:?}", e.bounds);
+                        Some(bounds)
+                    } else {
+                        None
+                    };
+                    (lpoi.visibility, bounds)
+                },
+                MarkerIndex::NS_TRAIL => {
+                    let lpath: LoadedTrailPath = LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
+                    let seci = map_path.path.trail_index_unchecked();
+                    let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
+                    let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
+                    let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else { return false };
+                    let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else { return false };
+                    let bounds = &lsection.bounds;
+                    let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into()) || !vec_eq(bounds.max.to_array(), e.bounds.max.into()) {
+                        log::warn!("DELETEME: {map_path} trail bounds changed from {:?} to {bounds:?}", e.bounds);
+                        Some(*bounds)
+                    } else {
+                        None
+                    };
+                    (ltrail.visibility, bounds)
+                },
+                _ => return true,
+            };
+            let activated = !e.is_bh_removed_from(&self.bvh);
+            if !vis.is_visible() {
+                if activated {
+                    hidden.insert(e.id.clone(), i);
+                }
+            } else if !activated {
+                dirty.insert(e.id.clone(), i);
+            }
+            if let Some(bounds) = bounds {
+                e.bounds = box3aabb(bounds);
+                if activated {
+                    dirty.insert(e.id.clone(), i);
+                } else if let Some(extra) = extra {
+                    *extra = SpaceEntityExtra::invalid();
+                }
+            }
+            true
+        });
+        self.prepare_entity_population(map_id, packs, map_info, maps);
+        (removed, unallocated, dirty, hidden)
+    }
+    fn prepare_entity_population(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) {
+        for ((path, _pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
+            let path = path.rel(map_id);
+            let Some((map, _map_info)) = maps.lookup_with_info(map_info, &path) else {
+                continue
+            };
+            pack_data.populated_pois.extend_to_size(map.lpois().len() as usize, false);
+            pack_data.populated_trails.extend_to_size(map.ltrails().len() as usize, false);
+        }
+    }
+    /// `Err(true)` if bvh requires rebuild, `Err(false)` if mutated in-place
+    pub fn rebuild_entities(&mut self, map_id: MapIndex, packs: &LoadedPacks, map_info: &LoadedMapInfo, maps: &LoadedMaps) -> Result<(), bool> {
+        let (removed, mut unallocated, mut dirty, hidden) = self.prepare_entity_update(map_id, packs, map_info, maps);
         self.map_id = Some(map_id);
-        let mut ents = Vec::new();
-        for (path, pack) in packs.packs.iter() {
-            let spacepack = self.loaded_packs.lookup_extend_with(path.path, SpacePack::default);
-            if !pack.is_loaded() {
-                spacepack.clear();
-                continue
+
+        let prev_entities_end = self.render_entities.entities.len();
+        for ((path, pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
+            let path = path.rel(map_id);
+            let map = maps.lookup_with_info(map_info, &path);
+            if map.is_some() || !pack.info.has_map(map_id) {
+                let _info_sig_prev = mem::replace(&mut pack_data.info_sig, pack.info.sig);
             }
-            spacepack.info_sig = pack.info.sig;
-            if !pack.info.has_map(map_id) {
-                self.render_entities.remove_pack(path);
+            let Some((map, map_info)) = map else {
+                pack_data.clear_entities();
                 continue
-            }
-            let map_path = path.rel(map_id);
-            let Some(map_info) = map_info.lookup_ref(&map_path) else { continue };
-            let Some(map) = maps.lookup_ref(&map_path) else { continue };
-            // TODO: support searching through existing entities for partial rebuild support
-            log::debug!("TODO: partial space rebuild");
-            self.render_entities.remove_pack(path);
+            };
             // to iter of (marker_id, bounds, position)
             let pois = map.lpois().into_iter()
-                .filter(|(_, lpoi)| lpoi.visibility.is_visible())
-                .map(|(lpoi_path, lpoi)| {
-                let marker_path: MarkerPath = lpoi_path.pivot_to();
-                let path = map_path.rel(marker_path.path);
-                (MarkerId::for_marker(path), lpoi.bounds(), lpoi.position())
-            });
+                .zip(pack_data.populated_pois.iter_mut())
+                .filter(|((_, lpoi), _)| lpoi.visibility.is_visible())
+                .filter_map(|(v, mut populated)| {
+                    match mem::replace(&mut *populated, true) {
+                        false =>
+                            Some(v),
+                        true => None,
+                    }
+                }).filter_map(move |(lpoi_path, lpoi)| {
+                    let marker_path: MarkerPath = lpoi_path.pivot_to();
+                    let mpath = path.rel(marker_path.path);
+                    let mid = MarkerId::for_marker(mpath);
+                    Some((mid, lpoi.bounds()))
+                });
+
             let trails = map.ltrails().into_iter()
                 .zip(map_info.trail_info.data.iter());
             let trails = trails
-                .filter(|((_, ltrail), _)| ltrail.visibility.is_visible())
-                .flat_map(move |((ltrail_path, _ltrail), trail_info)| trail_info.section_bounds().map(move |(section_path, bounds)| {
-                    let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
-                    let marker_path: MarkerPath = ts_path.pivot_to();
-                    let path = map_path.rel(marker_path.path);
-                    let pos = bounds.center();
-                    (MarkerId::for_marker(path), bounds, pos)
-                }));
-            ents.extend(pois.chain(trails));
+                .zip(pack_data.populated_trails.iter_mut())
+                .filter(|(((_, ltrail), _), _)| ltrail.visibility.is_visible())
+                .filter_map(|(v, mut populated)| {
+                    match mem::replace(&mut *populated, true) {
+                        false =>
+                            Some(v),
+                        true => None,
+                    }
+                }).flat_map(move |((ltrail_path, _ltrail), trail_info)| {
+                    trail_info.section_bounds().map(move |(section_path, bounds)| {
+                        let ts_path: LoadedTrailSectionPath = LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
+                        let marker_path: MarkerPath = ts_path.pivot_to();
+                        let mpath = path.rel(marker_path.path);
+                        let mid = MarkerId::for_marker(mpath);
+                        (mid, bounds)
+                    })
+                });
+            for (mid, bounds) in pois.chain(trails) {
+                let entity = SpaceEntity::new(mid, bounds);
+                let entity = if let Some(i) = unallocated.pop_first() {
+                    if let Some(e) = self.render_entities.entities.get_mut(i) {
+                        debug_assert!(e.is_bh_removed_from(&self.bvh));
+                        e.value = entity;
+                        dirty.insert(mid, i);
+                        None
+                    } else {
+                        // TODO: could also start to reclaim from removed - just make sure to remove prior to adding
+                        Some(entity)
+                    }
+                } else {
+                    Some(entity)
+                };
+                if let Some(entity) = entity {
+                    self.render_entities.entities.push(BvhShape::new_removed(entity));
+                }
+            }
         }
-        self.render_entities.extend(ents);
-        //self.render_entities.rebuild_extra();
+        let new_entities = prev_entities_end..self.render_entities.entities.len();
+        let dirty_indices = dirty.values().copied().chain(new_entities.clone());
+
+        // update extra data that's been invalidated
+        self.render_entities.rebuild_extra(Some(&mut dirty_indices.clone()), map_info, maps);
+
+        let removed_count = removed.count_ones();
+        let partial_rebuild = {
+            let dead_space = removed_count + unallocated.len();
+            let wasted = dead_space + hidden.len();
+            let allocated = self.render_entities.entities.len();
+            let used = allocated.saturating_sub(wasted);
+            let threshold = allocated / 3;
+            let used_threshold = used / 5;
+            let update_count = dirty.len() + new_entities.len();
+            wasted < threshold && update_count < used_threshold
+        };
+        let full_rebuild = match partial_rebuild {
+            _ if self.bvh.nodes.len() <= 1 => true,
+            true if removed_count == 0 => false,
+            _ if dirty.is_empty() && new_entities.is_empty() => false,
+            _ => true,
+        };
+
+        if full_rebuild {
+            // since we're doing a full rebuild anyway, free up the filtered items
+            for (_mid, &i) in hidden.iter() {
+                self.render_entities.invalidate(self.loaded_packs.map_mut_as_slice(), i);
+            }
+            self.signal_bvh_rebuild();
+        } else {
+            log::debug!("DELETEME: attempting partial rebuild");
+            #[cfg(todo)]
+            let deactivations = dirty.values().copied().chain(removed.iter_ones());
+            let mut removed = removed;
+            removed.extend(dirty.values().copied());
+            let deactivations = removed.iter_ones().rev();
+            // TODO: may be able to use remove_swap here?
+            self.render_entities.deactivate_entities_inplace(self.loaded_packs.map_mut_as_slice(), &mut self.bvh, &mut {deactivations});
+            for i in dirty_indices.clone() {
+                self.bvh.add_shape(&mut self.render_entities.entities, i);
+            }
+            self.render_entities.trim_trailing(Some(&self.bvh));
+        }
+
+        #[cfg(deleteme)]
+        {
+            let TODO = ();
+            let wasted = unallocated.len() + removed.count_ones() + hidden.len();
+            if wasted > 0 {
+                log::debug!("DELETEME: spacepack wasting {wasted} nodes");
+            }
+        }
+
+        if full_rebuild || self.render_entities.entities.is_empty() != self.bvh.nodes.is_empty() {
+            Err(true)
+        } else {
+            match !dirty.is_empty() || !new_entities.is_empty() || removed_count > 0 {
+                true => Err(false),
+                false => Ok(()),
+            }
+        }
     }
     /// TODO: check map state sigs or something idk what needs to change
     pub fn entities_dirty(&self, map_id: MapIndex, packs: &LoadedPacks) -> bool {
         self.render_entities.needs_rebuild()
     }
 
+    #[cfg(todo)]
     pub fn needs_bvh_rebuild(&self) -> bool {
         let entity_count = self.render_entities.entities.len();
         if entity_count > 0 && self.bvh.nodes.is_empty() {
@@ -361,9 +793,25 @@ impl SpacePackCollection {
         entity_count != bvh_leaf_count
     }
 
+    pub fn clear_bvh(&mut self) {
+        self.bvh = Bvh { nodes: Vec::new() };
+    }
     pub fn rebuild_bvh(&mut self) {
+        self.render_entities.prune_residue();
+        if self.render_entities.entities.is_empty() {
+            for pack in self.loaded_packs.values_mut() {
+                pack.clear_entities();
+            }
+            self.clear_bvh();
+            return
+        }
         log::debug!("TODO: rebuild bvh");
         self.bvh = Bvh::build(&mut self.render_entities.entities);
+    }
+    fn signal_bvh_rebuild(&mut self) {
+        if !self.render_entities.entities.is_empty() {
+            self.clear_bvh();
+        }
     }
 
     pub fn clear(&mut self) {
@@ -373,6 +821,9 @@ impl SpacePackCollection {
         self.render_entities.clear();
         self.bvh = Bvh { nodes: Vec::new() };
         self.map_id = None;
+    }
+    pub fn is_empty(&self) -> bool {
+        self.map_id.is_none() || (self.bvh.nodes.is_empty() && self.render_entities.entities.is_empty())
     }
 
     #[inline]
