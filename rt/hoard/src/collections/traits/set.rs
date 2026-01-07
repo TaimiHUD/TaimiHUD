@@ -1,12 +1,16 @@
 use {
     core::{borrow::Borrow, cmp, hash::Hash},
-    std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc},
+    std::{
+        collections::{BTreeMap, BTreeSet, HashMap},
+        sync::Arc,
+    },
 };
 
 pub trait TaimiSet<T: ?Sized> {
     fn set_contains(&self, elem: &T) -> bool;
 }
-impl<K, V, T: ?Sized> TaimiSet<T> for HashMap<K, V> where
+impl<K, V, T: ?Sized> TaimiSet<T> for HashMap<K, V>
+where
     K: Borrow<T> + Hash + Eq,
     T: Hash + Eq,
 {
@@ -14,7 +18,8 @@ impl<K, V, T: ?Sized> TaimiSet<T> for HashMap<K, V> where
         self.contains_key(elem)
     }
 }
-impl<K, V, T: ?Sized> TaimiSet<T> for BTreeMap<K, V> where
+impl<K, V, T: ?Sized> TaimiSet<T> for BTreeMap<K, V>
+where
     K: Borrow<T> + Ord,
     T: Ord,
 {
@@ -22,7 +27,8 @@ impl<K, V, T: ?Sized> TaimiSet<T> for BTreeMap<K, V> where
         self.contains_key(elem)
     }
 }
-impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
+impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K>
+where
     K: Borrow<T> + Ord,
     T: Ord,
 {
@@ -31,14 +37,16 @@ impl<K, T: ?Sized> TaimiSet<T> for BTreeSet<K> where
     }
 }
 #[cfg(todo)]
-impl<E, T: ?Sized> TaimiSet<T> for [E] where
+impl<E, T: ?Sized> TaimiSet<T> for [E]
+where
     E: PartialEq<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {
         self.iter().any(|e| e == elem)
     }
 }
-impl<E, T: ?Sized> TaimiSet<T> for [E] where
+impl<E, T: ?Sized> TaimiSet<T> for [E]
+where
     E: Borrow<T>,
     T: PartialEq,
 {
@@ -46,21 +54,24 @@ impl<E, T: ?Sized> TaimiSet<T> for [E] where
         self.iter().any(|e| e.borrow() == elem)
     }
 }
-impl<E, T: ?Sized> TaimiSet<T> for Vec<E> where
+impl<E, T: ?Sized> TaimiSet<T> for Vec<E>
+where
     [E]: TaimiSet<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {
         TaimiSet::set_contains(&self[..], elem)
     }
 }
-impl<E, T: ?Sized> TaimiSet<T> for Box<[E]> where
+impl<E, T: ?Sized> TaimiSet<T> for Box<[E]>
+where
     [E]: TaimiSet<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {
         TaimiSet::set_contains(&self[..], elem)
     }
 }
-impl<E, T: ?Sized> TaimiSet<T> for Arc<[E]> where
+impl<E, T: ?Sized> TaimiSet<T> for Arc<[E]>
+where
     [E]: TaimiSet<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {
@@ -83,12 +94,13 @@ impl<T: ?Sized> TaimiSet<T> for bool {
         *self
     }
 }
-impl<C: /*?Sized +*/ TaimiSet<T>, T: ?Sized> TaimiSet<T> for cmp::Reverse<C> {
+impl<C: TaimiSet<T>, T: ?Sized> TaimiSet<T> for cmp::Reverse<C> {
     fn set_contains(&self, elem: &T) -> bool {
         !self.0.set_contains(elem)
     }
 }
-impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,) where
+impl<C: ?Sized, T: ?Sized> TaimiSet<T> for (C,)
+where
     C: PartialEq<T>,
 {
     fn set_contains(&self, elem: &T) -> bool {

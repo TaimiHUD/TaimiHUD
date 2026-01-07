@@ -1,11 +1,12 @@
-use std::ffi::CStr;
-use std::mem::MaybeUninit;
-use std::sync::{
-    Arc,
-    Weak,
-    RwLock,
+use {
+    crate::typemap::{empty_any_map_sync, AnyMapSync},
+    std::{
+        ffi::CStr,
+        mem::MaybeUninit,
+        sync::{Arc, RwLock, Weak},
+    },
 };
-use crate::typemap::{empty_any_map_sync, AnyMapSync};
+
 #[cfg(todo)]
 pub use self::iters::{ArcSliceAt, ArcSliceIter};
 pub use self::ptrcmp::ArcPtrCmp;
@@ -34,13 +35,19 @@ pub trait DefaultStatic {
     fn default_static() -> &'static Self;
 }
 impl DefaultStatic for str {
-    fn default_static() -> &'static Self { "" }
+    fn default_static() -> &'static Self {
+        ""
+    }
 }
 impl<T: Sized> DefaultStatic for [T] {
-    fn default_static() -> &'static Self { &[] }
+    fn default_static() -> &'static Self {
+        &[]
+    }
 }
 impl DefaultStatic for CStr {
-    fn default_static() -> &'static Self { c"" }
+    fn default_static() -> &'static Self {
+        c""
+    }
 }
 
 /// `Box<T>`s that are expected to never be cleaned up or removed, thus can be &'static
@@ -58,7 +65,9 @@ pub fn default_static_of<T: Send + Sync + Default + 'static>() -> &'static T {
 }
 /// this is so dumb...
 fn get_default_static<T: Send + Sync + 'static, F: FnOnce() -> T>(default: F) -> &'static T {
-    let static_ = DEFAULTS.read().map_err(drop)
+    let static_ = DEFAULTS
+        .read()
+        .map_err(drop)
         .map(|defaults| defaults.get::<Box<T>>().map(|d| &**d as *const T));
     let default = match static_ {
         Ok(Some(d)) => Ok(d),
@@ -67,16 +76,12 @@ fn get_default_static<T: Send + Sync + 'static, F: FnOnce() -> T>(default: F) ->
             let default = Box::new(default());
             match DEFAULTS.write() {
                 Err(..) => Err(default),
-                Ok(mut defaults) => Ok(
-                    &**defaults.entry::<Box<T>>().or_insert(default) as *const T
-                ),
+                Ok(mut defaults) => Ok(&**defaults.entry::<Box<T>>().or_insert(default) as *const T),
             }
         },
     };
     match default {
-        Ok(default) => unsafe {
-            &*default
-        },
+        Ok(default) => unsafe { &*default },
         Err(default) => {
             log::error!("static defaults poisoned?");
             return leak_default_static(default)

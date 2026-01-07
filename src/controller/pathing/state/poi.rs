@@ -1,19 +1,19 @@
 use {
+    super::get_overrides_mut,
     crate::controller::pathing::{
+        shared::LoadedPoiInfo,
         space::DrawSpace,
         state::VisibilityFlagsExt as _,
-        shared::LoadedPoiInfo,
         PackSpace,
     },
-    super::get_overrides_mut,
-    taimi_meta::packs::{
-        CategoryIndex, CategoryPath, PoiPath,
-        VisibilityFlags,
+    glamour::{Box3, Point3, Size3},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
+    taimi_pack::{
+        attributes::{PoiAttributes, RenderAttributes},
+        Pack,
+        Poi,
     },
-    taimi_pack::attributes::{RenderAttributes, PoiAttributes},
 };
-use glamour::{Box3, Point3, Size3};
-use taimi_pack::{Pack, Poi};
 
 /// a component of a [LoadedMapPack](super::LoadedMapPack)
 #[derive(Debug, Clone, Default)]
@@ -39,24 +39,29 @@ impl LoadedPoi {
             return Self::invalid()
         };
         let mut visibility = VisibilityFlags::DEFAULTS;
-        let category = match () {
-            #[cfg(todo)]
-            _ => pack.categories.all_categories.get_index_of(poi.category.as_id()).map(|c| c as CategoryIndex),
-            _ => pack.categories.all_categories.get_full(poi.category.as_id()).map(|(index, _, category)| {
-                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
-                #[cfg(todo = "unnecessary")]
-                visibility.set_defaults_from_attributes(&category.marker_attributes);
-                index as CategoryIndex
-            }),
-        }.unwrap_or(CategoryIndex::MAX);
+        let category =
+            match () {
+                #[cfg(todo)]
+                _ => pack
+                    .categories
+                    .all_categories
+                    .get_index_of(poi.category.as_id())
+                    .map(|c| c as CategoryIndex),
+                _ => pack.categories.all_categories.get_full(poi.category.as_id()).map(
+                    |(index, _, category)| {
+                        visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
+                        #[cfg(todo = "unnecessary")]
+                        visibility.set_defaults_from_attributes(&category.marker_attributes);
+                        index as CategoryIndex
+                    },
+                ),
+            }
+            .unwrap_or(CategoryIndex::MAX);
         visibility.set_defaults_from_attributes(&poi.attributes);
         let marker_position = Self::marker_position_for(poi);
 
         Self {
-            info: LoadedPoiInfo::with_marker_attrs(
-                CategoryPath::with_path(category),
-                &poi.attributes,
-            ),
+            info: LoadedPoiInfo::with_marker_attrs(CategoryPath::with_path(category), &poi.attributes),
             visibility: visibility.restore_default_toggles(),
             marker_position,
             overrides: None,
@@ -64,15 +69,11 @@ impl LoadedPoi {
     }
 
     pub fn render_attrs(&self) -> &RenderAttributes {
-        self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(self.info.attrs())
+        self.overrides.as_ref().map(|a| &**a).unwrap_or(self.info.attrs())
     }
     pub fn poi_attrs(&self) -> &PoiAttributes {
-        let poi = self.render_attrs().poi.as_ref()
-            .map(|p| &**p);
-        unsafe {
-            poi.unwrap_unchecked()
-        }
+        let poi = self.render_attrs().poi.as_ref().map(|p| &**p);
+        unsafe { poi.unwrap_unchecked() }
     }
     #[cfg(todo = "unused")]
     pub fn filter_attrs(&self) -> Option<&FilterAttributes> {
@@ -103,15 +104,12 @@ impl LoadedPoi {
     }
     pub fn poi_overrides_mut(&mut self) -> &mut PoiAttributes {
         let overrides = get_overrides_mut(&mut self.overrides);
-        unsafe {
-            overrides.poi.as_mut().unwrap_unchecked()
-        }
+        unsafe { overrides.poi.as_mut().unwrap_unchecked() }
     }
 
     pub fn bounds(&self) -> Box3<DrawSpace> {
         let max_diagonal = match self.poi_attrs().icon_size {
-            Some(edge_len) =>
-                (edge_len.powi(2) * 2.0).sqrt(),
+            Some(edge_len) => (edge_len.powi(2) * 2.0).sqrt(),
             None => {
                 const DEFAULT_DIAG: f32 = match taimi_pack::attributes::keys::IconSize::DEFAULT.0 {
                     // 2.0.sqrt()

@@ -1,25 +1,27 @@
 use {
+    super::get_overrides_mut,
     crate::{
         controller::pathing::{
-            space::{DrawSpace, TrailParams},
             shared::LoadedTrailInfo,
+            space::{DrawSpace, TrailParams},
             state::VisibilityFlagsExt as _,
             PackSpace,
         },
         resources::Vertex,
     },
-    super::get_overrides_mut,
+    glamour::Box3,
     std::mem,
     taimi_hoard::iters::IterExt,
-    taimi_meta::packs::{
-        CategoryIndex, CategoryPath, TrailPath,
+    taimi_meta::{
+        packs::{CategoryIndex, CategoryPath, TrailPath, VisibilityFlags},
+        spatial::irrelevant_box3,
     },
-    taimi_meta::spatial::irrelevant_box3,
-    taimi_pack::attributes::{RenderAttributes, TrailAttributes},
+    taimi_pack::{
+        attributes::{RenderAttributes, TrailAttributes},
+        trail::{TrailData, TrailSection},
+        Pack,
+    },
 };
-use glamour::Box3;
-use taimi_pack::{trail::{TrailData, TrailSection}, Pack};
-use taimi_meta::packs::VisibilityFlags;
 
 /// a component of a [LoadedMapPack](super::LoadedMapPack)
 #[derive(Debug, Clone, Default)]
@@ -45,14 +47,23 @@ impl LoadedTrail {
         let mut visibility = VisibilityFlags::DEFAULTS;
         let category = match () {
             #[cfg(todo)]
-            _ => pack.categories.all_categories.get_index_of(trail.category.as_id()).map(|c| c as CategoryIndex),
-            _ => pack.categories.all_categories.get_full(trail.category.as_id()).map(|(index, _, category)| {
-                visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
-                #[cfg(todo = "unnecessary")]
-                visibility.set_defaults_from_attributes(&category.marker_attributes);
-                index as CategoryIndex
-            }),
-        }.unwrap_or(CategoryIndex::MAX);
+            _ => pack
+                .categories
+                .all_categories
+                .get_index_of(trail.category.as_id())
+                .map(|c| c as CategoryIndex),
+            _ => pack
+                .categories
+                .all_categories
+                .get_full(trail.category.as_id())
+                .map(|(index, _, category)| {
+                    visibility.set(VisibilityFlags::DEFAULT_TOGGLE, category.default_toggle());
+                    #[cfg(todo = "unnecessary")]
+                    visibility.set_defaults_from_attributes(&category.marker_attributes);
+                    index as CategoryIndex
+                }),
+        }
+        .unwrap_or(CategoryIndex::MAX);
         visibility.set_defaults_from_attributes(&trail.attributes);
 
         Self {
@@ -70,15 +81,11 @@ impl LoadedTrail {
     }
 
     pub fn render_attrs(&self) -> &RenderAttributes {
-        self.overrides.as_ref().map(|a| &**a)
-            .unwrap_or(self.info.attrs())
+        self.overrides.as_ref().map(|a| &**a).unwrap_or(self.info.attrs())
     }
     pub fn trail_attrs(&self) -> &TrailAttributes {
-        let trail = self.render_attrs().trail.as_ref()
-            .map(|p| &**p);
-        unsafe {
-            trail.unwrap_unchecked()
-        }
+        let trail = self.render_attrs().trail.as_ref().map(|p| &**p);
+        unsafe { trail.unwrap_unchecked() }
     }
     #[cfg(todo = "unused")]
     pub fn filter_attrs(&self) -> Option<&FilterAttributes> {
@@ -109,17 +116,25 @@ impl LoadedTrail {
     }
     pub fn trail_overrides_mut(&mut self) -> &mut TrailAttributes {
         let overrides = get_overrides_mut(&mut self.overrides);
-        unsafe {
-            overrides.trail.as_mut().unwrap_unchecked()
-        }
+        unsafe { overrides.trail.as_mut().unwrap_unchecked() }
     }
 
     #[cfg(todo = "unused")]
-    pub fn vertices_with_pack_trail(trail_data: &TrailData, trail: &Trail, params: &TrailParams) -> LoadedTrailGeometry {
+    pub fn vertices_with_pack_trail(
+        trail_data: &TrailData,
+        trail: &Trail,
+        params: &TrailParams,
+    ) -> LoadedTrailGeometry {
         Self::vertices_with_data(trail_data, params, trail.scale(), trail.is_wall())
     }
 
-    pub fn vertices_with_data(trail_data: &TrailData, params: &TrailParams, scale: f32, is_wall: bool, y_offset: f32) -> LoadedTrailGeometry {
+    pub fn vertices_with_data(
+        trail_data: &TrailData,
+        params: &TrailParams,
+        scale: f32,
+        is_wall: bool,
+        y_offset: f32,
+    ) -> LoadedTrailGeometry {
         let mut params = params.bake();
         params.y_offset = y_offset;
         let mut vertices = Vec::new();
@@ -148,10 +163,7 @@ impl LoadedTrail {
             section_lengths.push(vertex_count);
         }
 
-        LoadedTrailGeometry {
-            vertices,
-            section_lengths,
-        }
+        LoadedTrailGeometry { vertices, section_lengths }
     }
 
     pub fn is_invalid(&self) -> bool {
@@ -187,10 +199,7 @@ pub struct LoadedTrailSection {
 }
 
 impl LoadedTrailSection {
-    pub const EMPTY: Self = Self {
-        bounds: Box3::ZERO,
-        point_count: 0,
-    };
+    pub const EMPTY: Self = Self { bounds: Box3::ZERO, point_count: 0 };
 
     pub fn with_section(section: &TrailSection) -> Self {
         Self {
@@ -198,7 +207,9 @@ impl LoadedTrailSection {
             bounds: Self::bounds_for(section),
         }
     }
-    pub fn with_sections<'a, S: AsRef<TrailSection>, I: IntoIterator<Item = S>>(sections: I) -> impl Iterator<Item = Self> {
+    pub fn with_sections<'a, S: AsRef<TrailSection>, I: IntoIterator<Item = S>>(
+        sections: I,
+    ) -> impl Iterator<Item = Self> {
         sections.into_iter().lazy_map(|s| Self::with_section(s.as_ref()))
     }
 

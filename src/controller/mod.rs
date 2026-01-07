@@ -793,7 +793,10 @@ impl Controller {
 
     async fn load_texture(&self, identifier: TextureKey, path: PathBuf) {
         if let Err(e) = rt::texture_schedule_path(identifier.clone(), &path).await {
-            log::warn!("Cannot load texture {identifier:?} at {}: {e}", rt::relative_path(&path).display());
+            log::warn!(
+                "Cannot load texture {identifier:?} at {}: {e}",
+                rt::relative_path(&path).display()
+            );
         }
     }
 
@@ -1059,8 +1062,13 @@ impl ControllerSender {
         #[cfg(any(feature = "markers", feature = "space"))]
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
         #[cfg(feature = "paths")]
-        let (pathing, pathing_rx) =
-            PathingSender::new(&gameplay, &mumble_identity_tx, &api.festivals, &api.achievements, &api.raids);
+        let (pathing, pathing_rx) = PathingSender::new(
+            &gameplay,
+            &mumble_identity_tx,
+            &api.festivals,
+            &api.achievements,
+            &api.raids,
+        );
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),

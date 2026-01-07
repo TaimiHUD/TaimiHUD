@@ -1,33 +1,59 @@
+pub use {
+    self::{
+        loader::{
+            LoadReport,
+            SharedLoaderPacksInfo,
+            SharedPackConfig,
+            SharedPackInfo,
+            SharedPackLoad,
+            SharedPackLoaded,
+            SharedPacks,
+            SharedResourceRequests,
+            SharedResourceRequestsTx,
+        },
+        maps::{
+            LoadedMarkerRef,
+            LoadedPoiRef,
+            LoadedTrailRef,
+            LoadedTrailShared,
+            SharedGameplayMap,
+            SharedMapPackLoaded,
+            SharedMapPackState,
+            SharedMarkerRef,
+            SharedPoiRef,
+            SharedTrailRef,
+        },
+        space::{
+            SpacePackShared,
+            TextureLoadRequests,
+            TextureLoadRequestsTx,
+            TrailGeometryRequests,
+            TrailGeometryRequestsTx,
+            TrailGeometrySections,
+        },
+    },
+    crate::controller::pathing::state::{LoadedTrailGeometry, LoadedTrailSection},
+};
 use {
     crate::{
         controller::{
             api::{AchievementState, FestivalState, RaidState},
-            pathing::{registry::PackLoader, PathingEvent, ExternalFilterState},
+            pathing::{registry::PackLoader, ExternalFilterState, PathingEvent},
         },
         render::machine::MumbleIdentityUpdate,
         settings::SettingsLock,
     },
     std::sync::Arc,
     taimi_meta::ui::GameplayState,
-    taimi_sync::watched::{Watched, watch},
+    taimi_sync::watched::{watch, Watched},
     tokio::sync::mpsc,
 };
-pub use {
-    self::{
-        loader::{SharedPacks, SharedLoaderPacksInfo, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx, LoadReport},
-        maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
-        space::{SpacePackShared, TrailGeometryRequests, TrailGeometryRequestsTx, TextureLoadRequests, TextureLoadRequestsTx, TrailGeometrySections},
-    },
-    crate::controller::pathing::state::{LoadedTrailSection, LoadedTrailGeometry},
-};
-/// TODO: deleteme
-#[doc(no_inline)]
-pub(crate) use super::info::{
-    MapPackInfo, LoadedPoiInfo, LoadedTrailInfo,
-    EMPTY_RENDER_ATTRS,
-};
+
 #[cfg(todo)]
 pub use self::maps::SharedMaps;
+/// TODO: deleteme
+#[doc(no_inline)]
+pub(crate) use super::info::{LoadedPoiInfo, LoadedTrailInfo, MapPackInfo, EMPTY_RENDER_ATTRS};
 
 mod loader;
 mod maps;

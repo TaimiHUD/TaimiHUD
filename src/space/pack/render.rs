@@ -1,7 +1,7 @@
 use {
     crate::controller::pathing::space::DrawSpace,
-    std::collections::BinaryHeap,
     glamour::{Point3, Vector3},
+    std::collections::BinaryHeap,
     taimi_hoard::cmp::CmpIgnore,
 };
 
@@ -23,8 +23,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((position, entity)) = self.bvh_iter.next() {
             let cam_dist = match position {
-                pos if pos.x.is_infinite() =>
-                    return Some(entity),
+                pos if pos.x.is_infinite() => return Some(entity),
                 #[cfg(todo)]
                 true => {
                     // TODO: broken or inaccurate idk
@@ -36,7 +35,8 @@ where
                 position => (position.distance_squared(self.cam_origin) * 1_000_000.0)
                     .min(0x40000000i32 as f32) as i32,
             };
-            self.draw_order_heap.push(HeapEntity { cam_dist, value: CmpIgnore(entity) });
+            self.draw_order_heap
+                .push(HeapEntity { cam_dist, value: CmpIgnore(entity) });
         }
 
         self.draw_order_heap.pop().map(|he| he.value.0)

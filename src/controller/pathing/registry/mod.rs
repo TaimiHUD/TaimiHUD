@@ -1,46 +1,64 @@
 #[cfg(doc)]
 use taimi_pack::attributes::keys;
-
 use {
     crate::{
+        controller::pathing::VisibilityFlagsExt,
         exports::runtime as rt,
         settings::sources::DataSourcePath,
-        controller::pathing::VisibilityFlagsExt,
     },
-    rustc_hash::FxHasher,
     anyhow::anyhow,
     bitvec::vec::BitVec,
-    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::BTreeSet, error::Error as StdError, fmt, hash::{Hash, Hasher}, iter, path::{Path, PathBuf}, ptr, sync::Arc},
+    futures::{
+        future::{self, Either},
+        stream::{self, FusedStream, Stream, StreamExt},
+        FutureExt,
+    },
+    rustc_hash::FxHasher,
+    std::{
+        cmp,
+        collections::BTreeSet,
+        error::Error as StdError,
+        fmt,
+        hash::{Hash, Hasher},
+        iter,
+        path::{Path, PathBuf},
+        ptr,
+        sync::Arc,
+    },
+    taimi_hoard::{
+        iters::IterExt as _,
+        loc::{indexed::IndexedList, LocationMut},
+    },
     taimi_meta::{
+        map::MapID,
         packs::{
             collections::{CategorySet, MapSet},
-            CategoryPath, CategoryIndex, MapIndex,
+            CategoryIndex,
+            CategoryPath,
+            MapIndex,
             PackCategoryNs,
-            VisibilityFlagSet, VisibilityFlags,
+            VisibilityFlagSet,
+            VisibilityFlags,
         },
-        map::MapID,
     },
     taimi_pack::{
         category::{
             id::{AsFullId, CategoryId},
             Category,
-            CategoryFlags,
             CategoryFlagSet,
+            CategoryFlags,
         },
         pack::CategoryCollection,
         Pack,
     },
     taimi_sync::watched::watch,
-    tokio_util::sync::ReusableBoxFuture,
     tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockWriteGuard},
-    taimi_hoard::{
-        iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationMut},
-    },
+    tokio_util::sync::ReusableBoxFuture,
 };
+
 #[doc(inline)]
 pub use self::{
-    active::{PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, LoaderBox, SharedLoaderBox},
+    active::{LoaderBox, PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, SharedLoaderBox},
     namespace::*,
 };
 pub use crate::controller::pathing::PackConfig;
@@ -50,16 +68,36 @@ mod namespace;
 
 impl super::PathingShared {
     /// TODO: move this out of here ew
-    pub fn watch_config_changes(&self) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)> + Unpin + Send + Sync + 'static {
+    pub fn watch_config_changes(
+        &self,
+    ) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
+           + Unpin
+           + Send
+           + Sync
+           + 'static {
         Self::watch_config_changes_on(&self.packs.packs.borrow())
     }
-    pub fn watch_config_changes_on(packs: &super::shared::SharedLoaderPacksInfo) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)> + Unpin + Send + Sync + 'static {
-        async fn changed_static<T>(mut watch: watch::Receiver<T>) -> Result<watch::Receiver<T>, watch::error::RecvError> {
-            watch.changed().await
-                .map(move |()| watch)
+    pub fn watch_config_changes_on(
+        packs: &super::shared::SharedLoaderPacksInfo,
+    ) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
+           + Unpin
+           + Send
+           + Sync
+           + 'static {
+        async fn changed_static<T>(
+            mut watch: watch::Receiver<T>,
+        ) -> Result<watch::Receiver<T>, watch::error::RecvError> {
+            watch.changed().await.map(move |()| watch)
         }
 
-        fn watch_config_change(path: PackPath, mut config: watch::Receiver<super::shared::SharedPackConfig>) -> impl Stream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)> + Unpin + Send + Sync + 'static {
+        fn watch_config_change(
+            path: PackPath,
+            mut config: watch::Receiver<super::shared::SharedPackConfig>,
+        ) -> impl Stream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
+               + Unpin
+               + Send
+               + Sync
+               + 'static {
             use std::task::Poll;
 
             config.mark_changed();
@@ -80,10 +118,10 @@ impl super::PathingShared {
             })
         }
 
-        packs.iter()
-            .map(|(path, pack)|
-                watch_config_change(path, pack.config.subscribe())
-            ).collect::<stream::SelectAll<_>>()
+        packs
+            .iter()
+            .map(|(path, pack)| watch_config_change(path, pack.config.subscribe()))
+            .collect::<stream::SelectAll<_>>()
     }
 }
 
@@ -98,17 +136,24 @@ pub struct PackInfo {
 impl PackInfo {
     /// TODO: deprecate this soon
     pub fn from_pack(pack: &Pack, format: PackFormat) -> Self {
-        let roots = pack.categories.root_categories
+        let roots = pack
+            .categories
+            .root_categories
             .iter()
             .filter_map(|id| pack.categories.all_categories.get_full(id))
-            .map(|(i, _, cat)| PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat, Some(&pack.categories)))
+            .map(|(i, _, cat)| {
+                PackRoot::from_category(
+                    CategoryPath::with_path(i as CategoryIndex),
+                    cat,
+                    Some(&pack.categories),
+                )
+            })
             .collect();
 
-        let trail_maps = pack.trails.iter()
-            .filter_map(|trail| trail.map_id);
-        let poi_maps = pack.pois.iter()
-            .map(|poi| poi.map_id);
-        let maps = trail_maps.chain(poi_maps)
+        let trail_maps = pack.trails.iter().filter_map(|trail| trail.map_id);
+        let poi_maps = pack.pois.iter().map(|poi| poi.map_id);
+        let maps = trail_maps
+            .chain(poi_maps)
             .filter_map(|id| MapID::try_from(id).ok())
             .collect();
 
@@ -116,7 +161,8 @@ impl PackInfo {
         let not_lonely = {
             let pois = pack.pois.iter().map(|m| &m.category);
             let trails = pack.trails.iter().map(|m| &m.category);
-            pois.chain(trails).filter_map(|c| pack.categories.all_categories.get_index_of(c.as_id()))
+            pois.chain(trails)
+                .filter_map(|c| pack.categories.all_categories.get_index_of(c.as_id()))
                 .map(|i| CategoryPath::with_path(i as CategoryIndex))
         };
         categories.fill_lonely(not_lonely);
@@ -130,22 +176,17 @@ impl PackInfo {
     }
 
     pub fn primary_root(&self) -> Option<&PackRoot> {
-        self.roots.iter().max_by_key(|root| (
-            !root.separator,
-            !root.hidden,
-            root.child_count,
-            &root.id,
-        ))
+        self.roots
+            .iter()
+            .max_by_key(|root| (!root.separator, !root.hidden, root.child_count, &root.id))
     }
 }
 
 impl fmt::Display for PackInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.primary_root() {
-            Some(root) =>
-                f.write_str(&root.display_name),
-            None =>
-                fmt::Display::fmt(&self.format, f),
+            Some(root) => f.write_str(&root.display_name),
+            None => fmt::Display::fmt(&self.format, f),
         }
     }
 }
@@ -169,9 +210,7 @@ impl PackInfoSignature {
     pub fn from_info(info: &PackInfo) -> Self {
         let mut hasher = Self::hasher();
         Self::hashpart_info(&mut hasher, info);
-        Self {
-            hash: hasher.finish() as u32,
-        }
+        Self { hash: hasher.finish() as u32 }
     }
 
     /// basic checks for pack changes
@@ -226,21 +265,36 @@ pub struct PackCategoryInfo {
 impl PackCategoryInfo {
     pub fn from_collection(collection: &CategoryCollection) -> Self {
         let all = PackCategory::build(collection);
-        let roots = collection.root_categories.iter()
+        let roots = collection
+            .root_categories
+            .iter()
             .filter_map(|id| collection.all_categories.get_index_of(id))
             .map(|i| i as CategoryIndex)
             .collect();
-        let visibility = collection.all_categories.values()
+        let visibility = collection
+            .all_categories
+            .values()
             .map(VisibilityFlags::from_pack_category)
             .collect();
-        let (separators, hidden, disabled, copyable) = collection.all_categories.values().enumerate()
+        let (separators, hidden, disabled, copyable) = collection
+            .all_categories
+            .values()
+            .enumerate()
             .map(|(i, cat)| (i as CategoryIndex, cat))
-            .map(|(i, cat)| (
-                cat.is_separator().then_some(i),
-                cat.is_hidden().then_some(i),
-                (!cat.default_toggle()).then_some(i),
-                cat.marker_attributes.interaction.as_ref().map(|i| i.copy_value.is_some()).unwrap_or(false).then_some(i),
-            )).collect();
+            .map(|(i, cat)| {
+                (
+                    cat.is_separator().then_some(i),
+                    cat.is_hidden().then_some(i),
+                    (!cat.default_toggle()).then_some(i),
+                    cat.marker_attributes
+                        .interaction
+                        .as_ref()
+                        .map(|i| i.copy_value.is_some())
+                        .unwrap_or(false)
+                        .then_some(i),
+                )
+            })
+            .collect();
 
         Self {
             all: all.into_boxed_slice(),
@@ -254,7 +308,8 @@ impl PackCategoryInfo {
         }
     }
 
-    pub fn fill_lonely<C>(&mut self, with_children: C) where
+    pub fn fill_lonely<C>(&mut self, with_children: C)
+    where
         C: IntoIterator<Item = CategoryPath>,
     {
         let mut marker_parents: BitVec = BitVec::with_capacity(self.all.len());
@@ -320,9 +375,7 @@ impl PackCategoryInfo {
     /// immediate, see [self.descendents_of] for recursion
     pub fn children_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
         let firstborn = self.firstborn_of(path).into_iter();
-        firstborn.flat_map(|firstborn| iter::once(firstborn)
-            .chain(self.younger_siblings_of(firstborn))
-        )
+        firstborn.flat_map(|firstborn| iter::once(firstborn).chain(self.younger_siblings_of(firstborn)))
     }
 
     /// DFS, excludes the path itself
@@ -359,8 +412,7 @@ impl PackCategoryInfo {
                     CategorySet::with_capacity(child_cap),
                 )
             },
-            Some(..) if firstborn.is_some() =>
-                Vec::with_capacity(0x40),
+            Some(..) if firstborn.is_some() => Vec::with_capacity(0x40),
             _ => Vec::new(),
         };
         if let Some(firstborn) = firstborn {
@@ -370,11 +422,13 @@ impl PackCategoryInfo {
             loop {
                 let next = stack.pop()?;
                 match cycle_limit.checked_sub(1) {
-                    Some(l) =>
-                        cycle_limit = l,
+                    Some(l) => cycle_limit = l,
                     None => {
                         // who knows, mistakes and/or corruption can happen!
-                        log::error!("category descendents exceeded cycle limit, stuck at {next} while {} deep", stack.len());
+                        log::error!(
+                            "category descendents exceeded cycle limit, stuck at {next} while {} deep",
+                            stack.len()
+                        );
                         return None
                     },
                 }
@@ -417,35 +471,37 @@ impl PackCategoryInfo {
             Some(..) => None,
             None => Some(self.root_paths()),
         };
-        parent.into_iter().flat_map(move |parent| self.children_of(parent))
+        parent
+            .into_iter()
+            .flat_map(move |parent| self.children_of(parent))
             .chain(root_fallback.into_iter().flatten())
             .filter(move |p| *p != path)
     }
 
     pub fn parent_of(&self, path: CategoryPath) -> Option<CategoryPath> {
-        self.info_of(path).and_then(|c| c.parent())
+        self.info_of(path)
+            .and_then(|c| c.parent())
             .map(CategoryPath::with_path)
     }
     pub fn sibling_of(&self, path: CategoryPath) -> Option<CategoryPath> {
-        self.info_of(path).and_then(|c| c.sibling())
+        self.info_of(path)
+            .and_then(|c| c.sibling())
             .map(CategoryPath::with_path)
     }
     pub fn firstborn_of(&self, path: CategoryPath) -> Option<CategoryPath> {
-        self.info_of(path).and_then(|c| c.child())
+        self.info_of(path)
+            .and_then(|c| c.child())
             .map(CategoryPath::with_path)
     }
 
     pub fn disabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
-        self.disabled.iter()
-            .lazy_map(CategoryPath::with_path)
+        self.disabled.iter().lazy_map(CategoryPath::with_path)
     }
     pub fn hidden(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
-        self.hidden.iter()
-            .lazy_map(CategoryPath::with_path)
+        self.hidden.iter().lazy_map(CategoryPath::with_path)
     }
     pub fn separators(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
-        self.separators.iter()
-            .lazy_map(CategoryPath::with_path)
+        self.separators.iter().lazy_map(CategoryPath::with_path)
     }
 
     #[inline]
@@ -472,15 +528,14 @@ impl PackCategoryInfo {
         })
     }
     pub fn lookup_flags(&self, path: CategoryPath) -> CategoryFlags {
-        self.all_flags().nth(path.path as usize)
+        self.all_flags()
+            .nth(path.path as usize)
             .map(|(_, _, flags)| flags)
             .unwrap_or(CategoryFlags::empty())
     }
 
     pub fn collect_all_flags(&self) -> PackCategoryFlags {
-        let flags = self.all_flags()
-            .map(|(_, _, flags)| flags)
-            .collect();
+        let flags = self.all_flags().map(|(_, _, flags)| flags).collect();
         IndexedList::new(flags)
     }
 }
@@ -492,10 +547,7 @@ struct DescendentIterNode {
 }
 impl DescendentIterNode {
     pub const fn new(firstborn: CategoryPath) -> Self {
-        Self {
-            sibling: firstborn,
-            prev: firstborn,
-        }
+        Self { sibling: firstborn, prev: firstborn }
     }
     pub const fn depleted(prev: CategoryPath) -> Self {
         Self {
@@ -520,7 +572,11 @@ impl<'a> DescendentIter<'a> {
         iter
     }
     pub fn empty(cats: &'a PackCategoryInfo) -> Self {
-        Self { cats, stack: Vec::new(), cycle_limit: cats.all.len() as _ }
+        Self {
+            cats,
+            stack: Vec::new(),
+            cycle_limit: cats.all.len() as _,
+        }
     }
     pub fn start_from(&mut self, root: CategoryPath) {
         let target = self.cats.info_of(root);
@@ -554,12 +610,12 @@ impl<'a> DescendentIter<'a> {
                     CategorySet::with_capacity(child_cap),
                 )
             },
-            Some(..) if firstborn.is_some() =>
-                0x40,
+            Some(..) if firstborn.is_some() => 0x40,
             _ => 0,
         };
         self.stack.reserve(capacity);
-        #[cfg(todo = "unnecessary")] {
+        #[cfg(todo = "unnecessary")]
+        {
             self.stack.push(DescendentIterNode::depleted(root));
         }
         if let Some(firstborn) = firstborn.map(CategoryPath::with_path) {
@@ -567,7 +623,9 @@ impl<'a> DescendentIter<'a> {
         }
     }
 
-    pub fn current_chain(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
+    pub fn current_chain(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
         let fresh_child = self.peek_next_is_child();
         let mut chain = self.stack.iter();
         if fresh_child {
@@ -576,7 +634,9 @@ impl<'a> DescendentIter<'a> {
         chain.lazy_map(|node| node.prev)
     }
     /// of the last-produced node
-    pub fn current_ancestors(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
+    pub fn current_ancestors(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = CategoryPath> + ExactSizeIterator + Clone + '_ {
         self.current_chain().rev().skip(1)
     }
 
@@ -599,15 +659,15 @@ impl<'a> DescendentIter<'a> {
         self.peek_next().map(|(path, _depth)| path)
     }
     pub fn peek_next_depth(&self) -> usize {
-        self.peek_next().map(|(_path, depth)| depth)
-            .unwrap_or(0)
+        self.peek_next().map(|(_path, depth)| depth).unwrap_or(0)
     }
     pub fn peek_next_is_child(&self) -> bool {
-        self.stack.last().map(|node| node.is_initial())
-            .unwrap_or(false)
+        self.stack.last().map(|node| node.is_initial()).unwrap_or(false)
     }
     pub fn peek_next_is_ancestor(&self) -> bool {
-        self.stack.last().map(|node| node.sibling.path == CategoryIndex::MAX)
+        self.stack
+            .last()
+            .map(|node| node.sibling.path == CategoryIndex::MAX)
             .unwrap_or(true)
     }
     /// repeat the latest value produced by the iter
@@ -669,15 +729,15 @@ impl Iterator for DescendentIter<'_> {
                 },
                 Some(i) => i,
             };
-            current.sibling = CategoryPath::with_path(
-                info.sibling().unwrap_or(CategoryIndex::MAX)
-            );
+            current.sibling = CategoryPath::with_path(info.sibling().unwrap_or(CategoryIndex::MAX));
             match self.cycle_limit.checked_sub(1) {
-                Some(l) =>
-                    self.cycle_limit = l,
+                Some(l) => self.cycle_limit = l,
                 None => {
                     // who knows, mistakes and/or corruption can happen!
-                    log::error!("category descendents exceeded cycle limit, stuck at {next_path} while {} deep", self.stack.len());
+                    log::error!(
+                        "category descendents exceeded cycle limit, stuck at {next_path} while {} deep",
+                        self.stack.len()
+                    );
                     break None
                 },
             }
@@ -702,7 +762,11 @@ pub struct PackRoot {
 }
 
 impl PackRoot {
-    pub fn from_category(path: CategoryPath, category: &Category, collection: Option<&CategoryCollection>) -> Self {
+    pub fn from_category(
+        path: CategoryPath,
+        category: &Category,
+        collection: Option<&CategoryCollection>,
+    ) -> Self {
         #[cfg(todo = "unnecessary")]
         if category.full_id != category.id {
             return None
@@ -714,7 +778,11 @@ impl PackRoot {
             hidden: category.is_hidden(),
             separator: category.is_separator(),
             child_count: match collection {
-                Some(c) => c.all_categories.values().filter(|c| c.full_id.id_starts_with(&category.full_id)).count(),
+                Some(c) => c
+                    .all_categories
+                    .values()
+                    .filter(|c| c.full_id.id_starts_with(&category.full_id))
+                    .count(),
                 None => category.sub_categories.len(),
             },
         }
@@ -773,14 +841,14 @@ impl PackCategory {
         cats.resize(collection.all_categories.len(), PackCategory::EMPTY);
         for (idx, (_name, category)) in collection.all_categories.iter().enumerate() {
             let path: CategoryPath = CategoryPath::with_path(idx as CategoryIndex);
-            let mut children = category.child_ids().filter_map(|child_full_id| match collection.all_categories.get_full(child_full_id) {
-                None => {
-                    log::warn!("child category {child_full_id} of {_name} not found");
-                    None
-                },
-                Some((child_index, _child_full_id, _child)) => {
-                    Some(child_index as CategoryIndex)
-                },
+            let mut children = category.child_ids().filter_map(|child_full_id| {
+                match collection.all_categories.get_full(child_full_id) {
+                    None => {
+                        log::warn!("child category {child_full_id} of {_name} not found");
+                        None
+                    },
+                    Some((child_index, _child_full_id, _child)) => Some(child_index as CategoryIndex),
+                }
             });
             let Some(mut child_index) = children.next() else {
                 // empty or leaf category, nothing else to do here
@@ -796,7 +864,9 @@ impl PackCategory {
                 if let Some(child) = cats.get_mut(child_index as usize) {
                     match child.parent() {
                         Some(p) if p != path.path => {
-                            log::warn!("category {_name} child#{child_index} already has different parent #{p}?");
+                            log::warn!(
+                                "category {_name} child#{child_index} already has different parent #{p}?"
+                            );
                         },
                         Some(..) => (),
                         None => {
@@ -838,15 +908,13 @@ pub enum UnloadedReason {
 impl UnloadedReason {
     pub fn can_reload(&self) -> bool {
         match self {
-            UnloadedReason::Gravestone | UnloadedReason::Disabled | UnloadedReason::Loading =>
-                false,
+            UnloadedReason::Gravestone | UnloadedReason::Disabled | UnloadedReason::Loading => false,
             _ => true,
         }
     }
     pub fn can_reactivate(&self, explicit: bool) -> bool {
         match self {
-            UnloadedReason::Pending =>
-                true,
+            UnloadedReason::Pending => true,
             _ if explicit => self.can_reload(),
             _ => false,
         }
@@ -872,9 +940,7 @@ impl PartialEq for UnloadedReason {
             | (Self::Loading, Self::Loading)
             | (Self::Disabled, Self::Disabled)
             | (Self::Gravestone, Self::Gravestone)
-            | (Self::UnknownFormat, Self::UnknownFormat)
-            =>
-                true,
+            | (Self::UnknownFormat, Self::UnknownFormat) => true,
             (Self::LoadingFailed(e), Self::LoadingFailed(rhs)) => Arc::ptr_eq(e, rhs),
             _ => false,
         }
@@ -884,7 +950,8 @@ impl Ord for UnloadedReason {
     fn cmp(&self, rhs: &Self) -> cmp::Ordering {
         let d = self.discriminant().cmp(&rhs.discriminant());
         match (d, self, rhs) {
-            (cmp::Ordering::Equal, Self::LoadingFailed(lhs), Self::LoadingFailed(rhs)) => Arc::as_ptr(lhs).cast::<()>().cmp(&Arc::as_ptr(rhs).cast::<()>()),
+            (cmp::Ordering::Equal, Self::LoadingFailed(lhs), Self::LoadingFailed(rhs)) =>
+                Arc::as_ptr(lhs).cast::<()>().cmp(&Arc::as_ptr(rhs).cast::<()>()),
             (cmp, ..) => cmp,
         }
     }
@@ -907,18 +974,12 @@ impl Hash for UnloadedReason {
 impl fmt::Display for UnloadedReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Disabled =>
-                f.write_str("disabled"),
-            Self::Gravestone =>
-                f.write_str("removed"),
-            Self::Pending =>
-                f.write_str("not yet loaded"),
-            Self::Loading =>
-                f.write_str("loading"),
-            Self::UnknownFormat =>
-                f.write_str("expected TacO zip or folder"),
-            Self::LoadingFailed(e) =>
-                write!(f, "{e:#}"),
+            Self::Disabled => f.write_str("disabled"),
+            Self::Gravestone => f.write_str("removed"),
+            Self::Pending => f.write_str("not yet loaded"),
+            Self::Loading => f.write_str("loading"),
+            Self::UnknownFormat => f.write_str("expected TacO zip or folder"),
+            Self::LoadingFailed(e) => write!(f, "{e:#}"),
         }
     }
 }

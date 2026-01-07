@@ -1,30 +1,45 @@
 use {
-    crate::controller::pathing::registry::{
-        PackBoxOf,
-        PackCategoryInfo,
-        PackRoot,
-        PackPath, PackIndex,
-        PackConfig,
-        LoadedMarkerPath, LoadedTrailPath, PackMapPath,
-        PackInfo, PackInfoSignature,
-        UnloadedReason,
-        PackActivateLoaded,
-        SharedLoaderBox,
+    crate::{
+        controller::pathing::{
+            registry::{
+                LoadedMarkerPath,
+                LoadedTrailPath,
+                PackActivateLoaded,
+                PackBoxOf,
+                PackCategoryInfo,
+                PackConfig,
+                PackIndex,
+                PackInfo,
+                PackInfoSignature,
+                PackMapPath,
+                PackPath,
+                PackRoot,
+                SharedLoaderBox,
+                UnloadedReason,
+            },
+            shared::{LoadedTrailGeometry, TrailGeometrySections},
+        },
+        exports::runtime::{self as rt, textures::TextureKey},
+        settings::sources::DataSourcePath,
     },
-    crate::controller::pathing::shared::{LoadedTrailGeometry, TrailGeometrySections},
-    crate::exports::runtime::{
-        self as rt,
-        textures::TextureKey,
-    },
-    crate::settings::sources::DataSourcePath,
     rustc_hash::FxHashMap,
-    std::{fmt, mem, sync::{Arc, RwLock}, path::Path, collections::{BTreeMap, btree_map}},
-    taimi_sync::watched::{watch, Watcher},
+    std::{
+        collections::{btree_map, BTreeMap},
+        fmt,
+        mem,
+        path::Path,
+        sync::{Arc, RwLock},
+    },
+    taimi_hoard::{
+        iters::IterExt as _,
+        loc::{LocationMut, Locator},
+    },
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
-    taimi_hoard::loc::{LocationMut, Locator},
-    taimi_hoard::iters::IterExt as _,
-    taimi_sync::arcs::ArcPtrCmp,
+    taimi_sync::{
+        arcs::ArcPtrCmp,
+        watched::{watch, Watcher},
+    },
 };
 
 pub type SharedLoaderPacksInfo = PackBoxOf<SharedPackLoad>;
@@ -36,12 +51,13 @@ pub struct SharedPacks {
 
 impl SharedPacks {
     pub fn new() -> Self {
-        Self {
-            packs: Default::default(),
-        }
+        Self { packs: Default::default() }
     }
 
-    pub(crate) fn update_packs_extend(&self, packs: &mut dyn Iterator<Item = SharedPackLoad>) -> impl Iterator<Item = PackPath> {
+    pub(crate) fn update_packs_extend(
+        &self,
+        packs: &mut dyn Iterator<Item = SharedPackLoad>,
+    ) -> impl Iterator<Item = PackPath> {
         #[cfg(todo = "unnecessary")]
         let mut appended: PackSet = Default::default();
         let invalid = PackIndex::MAX;
@@ -66,15 +82,16 @@ impl SharedPacks {
                 // *shrug* I guess an empty box allocation is better than cloning some arcs
                 ref mut data => Box::into_iter(mem::take(data)),
             };
-            let updated = prev
-                .chain(packs)
-                .collect::<Box<[_]>>();
+            let updated = prev.chain(packs).collect::<Box<[_]>>();
             shared.data = updated;
             !appended.is_empty()
         });
         appended.lazy_map(PackPath::with_path)
     }
-    pub(crate) fn update_packs_loaded(&self, loaded: &mut dyn Iterator<Item = (PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>)>) {
+    pub(crate) fn update_packs_loaded(
+        &self,
+        loaded: &mut dyn Iterator<Item = (PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>)>,
+    ) {
         self.packs.send_if_modified(|shared| {
             let mut changed = false;
             for (path, loaded) in loaded {
@@ -128,21 +145,16 @@ impl SharedPackInfo {
     }
 
     pub fn info(&self) -> Option<(PackPath, &Arc<PackInfo>, PackInfoSignature)> {
-        self.info.as_ref().map(|i|
-            (self.index, i, self.sig)
-        )
+        self.info.as_ref().map(|i| (self.index, i, self.sig))
     }
     pub fn category_info(&self) -> Option<(&Arc<PackCategoryInfo>, &Arc<PackInfo>)> {
-        self.info.as_ref().map(|i|
-            (&i.categories, i)
-        )
+        self.info.as_ref().map(|i| (&i.categories, i))
     }
     pub fn primary_root(&self) -> Option<&PackRoot> {
         self.info.as_ref().and_then(|i| i.primary_root())
     }
     pub fn unique_root(&self) -> Option<&PackRoot> {
-        let mut roots = self.info.as_ref()?.roots.iter()
-            .filter(|r| !r.hidden);
+        let mut roots = self.info.as_ref()?.roots.iter().filter(|r| !r.hidden);
         let root = roots.next()?;
         if roots.next().is_none() {
             // as long as no additional visible roots were found...
@@ -154,7 +166,9 @@ impl SharedPackInfo {
 
     /// check [self.info] manually if `None` matters
     pub fn has_map(&self, map_id: MapIndex) -> bool {
-        self.info.as_ref().map(|i| i.maps.contains(map_id))
+        self.info
+            .as_ref()
+            .map(|i| i.maps.contains(map_id))
             .unwrap_or(false)
     }
 
@@ -193,7 +207,8 @@ impl SharedPackInfo {
             log::error!("poisoned");
             return Arc::from(self.gen_key_for_subresource(resource))
         };
-        keys.entry(resource.clone()).or_insert_with(|| Arc::from(self.gen_key_for_subresource(resource)))
+        keys.entry(resource.clone())
+            .or_insert_with(|| Arc::from(self.gen_key_for_subresource(resource)))
             .clone()
     }
     pub fn gen_key_for_subresource(&self, resource: &AttrString) -> String {
@@ -203,7 +218,7 @@ impl SharedPackInfo {
         let resourceid = match resource.len() {
             0..=24 => resource,
             _toolong => {
-                use std::hash::{Hash, Hasher, DefaultHasher};
+                use std::hash::{DefaultHasher, Hash, Hasher};
                 // don't care sorry
                 let mut hasher = DefaultHasher::new();
                 resource.hash(&mut hasher);
@@ -214,8 +229,7 @@ impl SharedPackInfo {
         format!("{}_{resourceid}", packname.display())
     }
     pub fn drain_subresource_keys(&self) -> impl IntoIterator<Item = (AttrString, Arc<str>)> + 'static {
-        let mut keys = self.allocated_keys.write()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut keys = self.allocated_keys.write().unwrap_or_else(|e| e.into_inner());
         keys.drain().collect::<Vec<_>>()
     }
 }
@@ -231,7 +245,10 @@ impl fmt::Display for SharedPackInfo {
         } else if let Some(datasource) = &self.datasource {
             fmt::Display::fmt(&datasource.path, f)
         } else if !self.path.as_os_str().is_empty() {
-            let path = self.path.file_name().unwrap_or_else(|| rt::relative_path(&self.path).as_os_str());
+            let path = self
+                .path
+                .file_name()
+                .unwrap_or_else(|| rt::relative_path(&self.path).as_os_str());
             fmt::Display::fmt(&path.display(), f)
         } else {
             fmt::Display::fmt(&self.index, f)
@@ -338,7 +355,9 @@ impl SharedPackLoad {
         Arc::make_mut(&mut self.info).set_info(info)
     }
     pub fn ensure_index(&mut self, index: PackPath) {
-        if self.info.index == index { return }
+        if self.info.index == index {
+            return
+        }
         Arc::make_mut(&mut self.info).index = index;
     }
     pub fn set_loaded(&mut self, loaded: PackActivateLoaded) -> bool {
@@ -357,7 +376,10 @@ impl SharedPackLoad {
                 log::info!("TODO: reload pack config bleh");
             }
             self.config.send_if_modified(|shared| {
-                shared.info_sig = config.is_some().then_some(info_sig).unwrap_or(PackInfoSignature::EMPTY);
+                shared.info_sig = config
+                    .is_some()
+                    .then_some(info_sig)
+                    .unwrap_or(PackInfoSignature::EMPTY);
                 shared.config = config.unwrap_or_default();
                 true
             });
@@ -392,13 +414,11 @@ pub type SharedResourceRequestsTx<K, T> = watch::Sender<BTreeMap<K, Option<T>>>;
 #[derive(Clone)]
 pub struct SharedResourceRequests<K, T> {
     /// idk these things just seem like bad condvars but bleh
-    pub resources: Watcher<BTreeMap<K, Option<T>>>
+    pub resources: Watcher<BTreeMap<K, Option<T>>>,
 }
 impl<K, T> SharedResourceRequests<K, T> {
     pub fn empty() -> Self {
-        Self {
-            resources: Watcher::EMPTY,
-        }
+        Self { resources: Watcher::EMPTY }
     }
     pub fn new() -> Self {
         Self {
@@ -420,22 +440,21 @@ impl<K, T> SharedResourceRequests<K, T> {
         self.resources.is_watching()
     }
 }
-impl<K, T> SharedResourceRequests<K, T> where
+impl<K, T> SharedResourceRequests<K, T>
+where
     K: Ord,
 {
     /// `Err(T)` if `take` and already completed
     pub fn request(&self, id: K, take: bool) -> Result<(), T> {
         let mut res = Ok(());
-        self.resources.write_if(|resources| {
-            match Self::request_one(resources, id, take) {
-                Ok(newly_requested) =>
-                    newly_requested,
+        self.resources
+            .write_if(|resources| match Self::request_one(resources, id, take) {
+                Ok(newly_requested) => newly_requested,
                 Err(r) => {
                     res = Err(r);
                     false
                 },
-            }
-        });
+            });
         // would do this if it weren't a race condition...
         // self.resources.mark_unchanged();
         res
@@ -448,8 +467,7 @@ impl<K, T> SharedResourceRequests<K, T> where
             let mut notify = false;
             for id in ids {
                 match Self::request_one(resources, id, false) {
-                    Ok(true) =>
-                        notify = true,
+                    Ok(true) => notify = true,
                     #[cfg(debug_assertions)]
                     Err(..) => unreachable!(),
                     _ => (),
@@ -472,8 +490,8 @@ impl<K, T> SharedResourceRequests<K, T> where
                 match res {
                     Some(r) => Err(r),
                     None =>
-                        // don't need to tell other side whether we "took" it or not
-                        Ok(false)
+                    // don't need to tell other side whether we "took" it or not
+                        Ok(false),
                 }
             },
             btree_map::Entry::Vacant(e) => {
@@ -513,13 +531,16 @@ impl<K, T> SharedResourceRequests<K, T> where
         });
     }
 }
-impl<K, T> SharedResourceRequests<K, T> where
+impl<K, T> SharedResourceRequests<K, T>
+where
     K: Ord + Clone,
 {
     pub fn take_fulfilled<F: FnMut(&K) -> bool>(&self, mut filter: F, out: &mut Vec<(K, T)>) {
         self.resources.write_if(|resources| {
             resources.retain(|id, v| {
-                if v.is_some() && !filter(id) { return true }
+                if v.is_some() && !filter(id) {
+                    return true
+                }
                 match v.take() {
                     Some(v) => {
                         out.push((id.clone(), v));
@@ -541,10 +562,13 @@ impl<K, T> SharedResourceRequests<K, T> where
     }
     pub fn get_requests<F: FnMut(&K) -> bool>(&mut self, mut filter: F) -> Vec<K> {
         let resources = self.resources.read_update();
-        resources.iter().filter_map(|(id, v)| match v {
-            None if filter(id) => Some(id.clone()),
-            _ => None,
-        }).collect()
+        resources
+            .iter()
+            .filter_map(|(id, v)| match v {
+                None if filter(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
     }
     pub async fn recv_requests<F: FnMut(&K) -> bool>(&mut self, mut filter: F) -> Vec<K> {
         loop {

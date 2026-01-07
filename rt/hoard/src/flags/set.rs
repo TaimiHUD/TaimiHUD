@@ -1,13 +1,28 @@
 #[cfg(feature = "serde")]
-use serde::{ser, de};
-use crate::{
-    collections::TaimiSet,
-    iters::IterExt as _,
-    loc::{Locator, LocationGet, LocationRef, LocationMut},
-    flags::{bitslice, bitidx::BitIdx, BitAddr, BitOrder, BitsNative, BitsLsb, BitSlice, BitVec, BitView, bitptr, BitRef, BitStore},
+use serde::{de, ser};
+use {
+    crate::{
+        collections::TaimiSet,
+        flags::{
+            bitidx::BitIdx,
+            bitptr,
+            bitslice,
+            BitAddr,
+            BitOrder,
+            BitRef,
+            BitSlice,
+            BitStore,
+            BitVec,
+            BitView,
+            BitsLsb,
+            BitsNative,
+        },
+        iters::IterExt as _,
+        loc::{LocationGet, LocationMut, LocationRef, Locator},
+    },
+    core::{hash, marker::PhantomData, mem, ops},
+    num_traits::AsPrimitive,
 };
-use core::{ops, hash, marker::PhantomData, mem};
-use num_traits::AsPrimitive;
 pub type BitsOrder = BitsLsb;
 
 pub trait BitFlagForSet: Copy + Clone + Default {
@@ -41,8 +56,12 @@ impl BitFlagForSet for bool {
     type Repr = u8;
     const BIT_WIDTH: usize = 1;
 
-    fn as_bits(&self) -> &Self::Repr { todo!() }
-    fn as_bits_mut(&mut self) -> &mut Self::Repr { todo!() }
+    fn as_bits(&self) -> &Self::Repr {
+        todo!()
+    }
+    fn as_bits_mut(&mut self) -> &mut Self::Repr {
+        todo!()
+    }
     fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsLsb> {
         unsafe {
             let idx = BitIdx::new_unchecked(0);
@@ -77,10 +96,7 @@ pub struct BitSet<V: ?Sized = BitVec, T: BitStore = usize, O: BitOrder = BitsNat
 impl<V, T: BitStore, O: BitOrder> BitSet<V, T, O> {
     #[inline]
     pub const fn new(flags: V) -> Self {
-        Self {
-            flags,
-            _bits: PhantomData,
-        }
+        Self { flags, _bits: PhantomData }
     }
     #[inline]
     pub fn into_flags(self) -> V {
@@ -90,15 +106,11 @@ impl<V, T: BitStore, O: BitOrder> BitSet<V, T, O> {
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> {
     #[inline]
     pub const fn from_ref(flags: &V) -> &Self {
-        unsafe {
-            mem::transmute(flags)
-        }
+        unsafe { mem::transmute(flags) }
     }
     #[inline]
     pub fn from_mut(flags: &mut V) -> &mut Self {
-        unsafe {
-            mem::transmute(flags)
-        }
+        unsafe { mem::transmute(flags) }
     }
     #[inline]
     pub const fn flags_ref(&self) -> &V {
@@ -126,7 +138,11 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
         self.extend_to_size(min_size.as_(), fill)
     }
     #[inline]
-    pub fn extend_for<L: AsPrimitive<usize>>(&mut self, offset: L, fill: bool) -> BitRef<'_, bitptr::Mut, T, O> {
+    pub fn extend_for<L: AsPrimitive<usize>>(
+        &mut self,
+        offset: L,
+        fill: bool,
+    ) -> BitRef<'_, bitptr::Mut, T, O> {
         self.extend_for_offset(offset.as_(), fill)
     }
     #[inline]
@@ -145,9 +161,7 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
         if self.flags.len() <= offset {
             self.flags.resize(offset + 1, fill);
         }
-        unsafe {
-            self.flags.get_unchecked_mut(offset)
-        }
+        unsafe { self.flags.get_unchecked_mut(offset) }
     }
     pub fn insert_at_offset(&mut self, offset: usize) -> bool {
         let mut dest = self.extend_for_offset(offset, false);
@@ -167,7 +181,8 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
         }
     }
 }
-impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
+impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O>
+where
     V: AsRef<BitSlice<T, O>>,
 {
     #[inline]
@@ -184,7 +199,9 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     pub fn get_ref_at<L: AsPrimitive<usize>>(&self, offset: L) -> Option<BitRef<'_, bitptr::Const, T, O>> {
         let offset = offset.as_();
         #[cfg(todo = "unnecessary")]
-        let Some(offset) = Self::check_offset(offset) else { return None };
+        let Some(offset) = Self::check_offset(offset) else {
+            return None
+        };
         self.get_ref_at_offset(offset)
     }
 
@@ -198,23 +215,24 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     }
     #[inline]
     pub fn slice_ref_at_offset(&self, offset: usize) -> Option<&BitSlice<T, O>> {
-        self.get_ref_at_offset(offset).map(|p| unsafe {
-            &*bitptr::bitslice_from_raw_parts(p.into_bitptr(), 1)
-        })
+        self.get_ref_at_offset(offset)
+            .map(|p| unsafe { &*bitptr::bitslice_from_raw_parts(p.into_bitptr(), 1) })
     }
     #[inline]
     pub fn as_bitslice(&self) -> &BitSlice<T, O> {
         self.as_ref()
     }
 
-    pub fn iter_of<L>(&self) -> impl Iterator<Item = L> + '_ where
+    pub fn iter_of<L>(&self) -> impl Iterator<Item = L> + '_
+    where
         L: Copy + 'static,
         usize: AsPrimitive<L>,
     {
         self.as_bitslice().iter_ones().lazy_map(|i| i.as_())
     }
 }
-impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
+impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O>
+where
     V: AsMut<BitSlice<T, O>>,
 {
     #[inline]
@@ -222,13 +240,15 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
         self.remove_at_offset(offset.as_())
     }
     pub fn remove_at_offset(&mut self, offset: usize) -> Option<bool> {
-        self.get_mut_at_offset(offset).map(|mut b|
-            mem::replace(&mut *b, false)
-        )
+        self.get_mut_at_offset(offset)
+            .map(|mut b| mem::replace(&mut *b, false))
     }
 
     #[inline]
-    pub fn get_mut_at<L: AsPrimitive<usize>>(&mut self, offset: L) -> Option<BitRef<'_, bitptr::Mut, T, O>> {
+    pub fn get_mut_at<L: AsPrimitive<usize>>(
+        &mut self,
+        offset: L,
+    ) -> Option<BitRef<'_, bitptr::Mut, T, O>> {
         let offset = offset.as_();
         let Some(offset) = Self::check_offset(offset) else { return None };
         self.get_mut_at_offset(offset)
@@ -239,16 +259,16 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> where
     }
     #[inline]
     pub fn slice_mut_at_offset(&mut self, offset: usize) -> Option<&mut BitSlice<T, O>> {
-        self.get_mut_at(offset).map(|p| unsafe {
-            &mut *bitptr::bitslice_from_raw_parts_mut(p.into_bitptr(), 1)
-        })
+        self.get_mut_at(offset)
+            .map(|p| unsafe { &mut *bitptr::bitslice_from_raw_parts_mut(p.into_bitptr(), 1) })
     }
     #[inline]
     pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<T, O> {
         self.as_mut()
     }
 }
-impl<L, V: ?Sized, T: BitStore, O: BitOrder> TaimiSet<L> for BitSet<V, T, O> where
+impl<L, V: ?Sized, T: BitStore, O: BitOrder> TaimiSet<L> for BitSet<V, T, O>
+where
     V: AsRef<BitSlice<T, O>>,
     L: AsPrimitive<usize>,
 {
@@ -258,7 +278,8 @@ impl<L, V: ?Sized, T: BitStore, O: BitOrder> TaimiSet<L> for BitSet<V, T, O> whe
     }
 }
 /// TODO: consider whether `None` is meaningful (length) vs `Some(false)`
-impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationGet<N, L> for BitSet<V, T, O> where
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationGet<N, L> for BitSet<V, T, O>
+where
     V: AsRef<BitSlice<T, O>>,
     L: AsPrimitive<usize>,
 {
@@ -268,7 +289,8 @@ impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationGet<N, L> for BitSet<V, 
         Some(self.contains(loc.path))
     }
 }
-impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationRef<N, L> for BitSet<V, T, O> where
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationRef<N, L> for BitSet<V, T, O>
+where
     V: AsRef<BitSlice<T, O>>,
     L: AsPrimitive<usize>,
 {
@@ -278,7 +300,8 @@ impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationRef<N, L> for BitSet<V, 
         self.slice_ref_at_offset(loc.path.as_())
     }
 }
-impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationMut<N, L> for BitSet<V, T, O> where
+impl<N, L, V: ?Sized, T: BitStore, O: BitOrder> LocationMut<N, L> for BitSet<V, T, O>
+where
     V: AsRef<BitSlice<T, O>> + AsMut<BitSlice<T, O>>,
     L: AsPrimitive<usize>,
 {
@@ -327,7 +350,8 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> ops::DerefMut for BitSet<V, T, O> {
         &mut self.flags
     }
 }
-impl<V: ?Sized, T: BitStore, O: BitOrder, U: ?Sized> AsRef<U> for BitSet<V, T, O> where
+impl<V: ?Sized, T: BitStore, O: BitOrder, U: ?Sized> AsRef<U> for BitSet<V, T, O>
+where
     V: AsRef<U>,
 {
     #[inline]
@@ -335,7 +359,8 @@ impl<V: ?Sized, T: BitStore, O: BitOrder, U: ?Sized> AsRef<U> for BitSet<V, T, O
         self.flags.as_ref()
     }
 }
-impl<V: ?Sized, T: BitStore, O: BitOrder, U: ?Sized> AsMut<U> for BitSet<V, T, O> where
+impl<V: ?Sized, T: BitStore, O: BitOrder, U: ?Sized> AsMut<U> for BitSet<V, T, O>
+where
     V: AsMut<U>,
 {
     #[inline]
@@ -401,14 +426,14 @@ impl<F: BitFlagForSet> FlagSet<F> {
     }
 }
 
-impl<F: BitFlagForSet, V> FlagSet<F, V> where
+impl<F: BitFlagForSet, V> FlagSet<F, V>
+where
     V: AsRef<BitSlice<F::Repr, BitsOrder>>,
 {
     #[inline]
     pub fn get(&self, index: usize) -> Option<F> {
-        self.get_ref(index).map(|flags| unsafe {
-            F::from_bitslice_unchecked(flags)
-        })
+        self.get_ref(index)
+            .map(|flags| unsafe { F::from_bitslice_unchecked(flags) })
     }
     pub fn get_ref(&self, index: usize) -> Option<&BitSlice<F::Repr, BitsOrder>> {
         let range = F::range_for(index);
@@ -434,15 +459,18 @@ impl<F: BitFlagForSet, V> FlagSet<F, V> where
     }
 }
 
-impl<F: BitFlagForSet, V> FlagSet<F, V> where
+impl<F: BitFlagForSet, V> FlagSet<F, V>
+where
     V: AsMut<BitSlice<F::Repr, BitsOrder>>,
 {
     /// TODO: copy unchecked?
     pub fn set(&mut self, index: usize, value: F) -> Result<(), ()> {
-        self.get_mut(index).map(|flags| {
-            let value = value.as_bitslice();
-            flags.copy_from_bitslice(value)
-        }).ok_or(())
+        self.get_mut(index)
+            .map(|flags| {
+                let value = value.as_bitslice();
+                flags.copy_from_bitslice(value)
+            })
+            .ok_or(())
     }
     pub fn set_at<L: AsPrimitive<usize>>(&mut self, path: L, value: F) -> Result<(), ()> {
         self.set(path.as_(), value)
@@ -483,7 +511,8 @@ impl<F: BitFlagForSet> FromIterator<F> for FlagSet<F> {
         set
     }
 }
-impl<'a, N, L, F: BitFlagForSet, V> LocationGet<N, L> for FlagSet<F, V> where
+impl<'a, N, L, F: BitFlagForSet, V> LocationGet<N, L> for FlagSet<F, V>
+where
     V: AsRef<BitSlice<F::Repr, BitsOrder>>,
     L: AsPrimitive<usize>,
 {
@@ -493,7 +522,8 @@ impl<'a, N, L, F: BitFlagForSet, V> LocationGet<N, L> for FlagSet<F, V> where
         self.get(loc.path.as_())
     }
 }
-impl<'a, N, L, F: BitFlagForSet, V> LocationRef<N, L> for FlagSet<F, V> where
+impl<'a, N, L, F: BitFlagForSet, V> LocationRef<N, L> for FlagSet<F, V>
+where
     V: AsRef<BitSlice<F::Repr, BitsOrder>>,
     L: AsPrimitive<usize>,
 {
@@ -503,7 +533,8 @@ impl<'a, N, L, F: BitFlagForSet, V> LocationRef<N, L> for FlagSet<F, V> where
         self.get_ref(loc.path.as_())
     }
 }
-impl<'a, N, L, F: BitFlagForSet, V> LocationMut<N, L> for FlagSet<F, V> where
+impl<'a, N, L, F: BitFlagForSet, V> LocationMut<N, L> for FlagSet<F, V>
+where
     V: AsRef<BitSlice<F::Repr, BitsOrder>> + AsMut<BitSlice<F::Repr, BitsOrder>>,
     L: AsPrimitive<usize>,
 {
@@ -513,24 +544,34 @@ impl<'a, N, L, F: BitFlagForSet, V> LocationMut<N, L> for FlagSet<F, V> where
     }
 }
 fn bitslice_chunk_into_exact_unchecked<'a, F: BitFlagForSet>(bits: &'a BitSlice<F::Repr, BitsOrder>) -> F {
-    unsafe {
-        F::from_bitslice_unchecked(bits)
-    }
+    unsafe { F::from_bitslice_unchecked(bits) }
 }
-impl<'a, F: BitFlagForSet, V> IntoIterator for &'a FlagSet<F, V> where
+impl<'a, F: BitFlagForSet, V> IntoIterator for &'a FlagSet<F, V>
+where
     V: AsRef<BitSlice<F::Repr, BitsOrder>>,
 {
-    type IntoIter = crate::iters::LazyMapFn<bitslice::ChunksExact<'a, F::Repr, BitsOrder>, fn(&'a BitSlice<F::Repr, BitsOrder>) -> F>;
+    type IntoIter = crate::iters::LazyMapFn<
+        bitslice::ChunksExact<'a, F::Repr, BitsOrder>,
+        fn(&'a BitSlice<F::Repr, BitsOrder>) -> F,
+    >;
     type Item = F;
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
-        self.iter_chunks().lazy_map(bitslice_chunk_into_exact_unchecked::<F>)
+        self.iter_chunks()
+            .lazy_map(bitslice_chunk_into_exact_unchecked::<F>)
     }
 }
 
 #[cfg(todo)]
 mod flag_set_iter {
-    pub struct FlagSetIter<'a, F: BitFlagForSet, M = bitptr::Const, T = <F as BitFlagForSet>::Repr, O = BitsOrder> where
+    pub struct FlagSetIter<
+        'a,
+        F: BitFlagForSet,
+        M = bitptr::Const,
+        T = <F as BitFlagForSet>::Repr,
+        O = BitsOrder,
+    >
+    where
         F: BitFlagForSet,
         M: BitMutability,
         T: BitStore + 'a,
@@ -539,7 +580,8 @@ mod flag_set_iter {
         range: BitPtrRange<M, T, O>,
         bits: PhantomData<&'a [F]>,
     }
-    impl<'a, F, M, T, O> FlagSetIter<'a, F, M, T, O> where
+    impl<'a, F, M, T, O> FlagSetIter<'a, F, M, T, O>
+    where
         F: BitFlagForSet,
         M: BitMutability,
         T: BitStore + 'a,
@@ -547,10 +589,7 @@ mod flag_set_iter {
     {
         #[inline]
         pub const unsafe fn new_unchecked(range: BitPtrRange<M, T, O>) -> Self {
-            Self {
-                range,
-                bits: PhantomData,
-            }
+            Self { range, bits: PhantomData }
         }
         pub fn bit_ptr(&self) -> &BitRange<M, T, O> {
             &self.range
@@ -559,33 +598,37 @@ mod flag_set_iter {
             &mut self.range
         }
     }
-    impl<'a, F, M, T, O> Clone for FlagSetIter<'a, F, bitptr::Const, T, O> where
+    impl<'a, F, M, T, O> Clone for FlagSetIter<'a, F, bitptr::Const, T, O>
+    where
         F: BitFlagForSet,
         T: BitStore + 'a,
         O: BitOrder,
     {
         #[inline]
         fn clone(&self) -> Self {
-            unsafe {
-                Self::new_unchecked(self.range)
-            }
+            unsafe { Self::new_unchecked(self.range) }
         }
     }
-    impl<'a, F, M, T , O> Send for FlagSetIter<'a, F, M, T, O> where
+    impl<'a, F, M, T, O> Send for FlagSetIter<'a, F, M, T, O>
+    where
         F: BitFlagForSet + Send,
         M: BitMutability,
         T: BitStore + 'a,
         O: BitOrder,
         &'a mut BitSlice<T, O>: Send,
-    {}
-    impl<'a, F, M, T , O> Sync for FlagSetIter<'a, F, M, T, O> where
+    {
+    }
+    impl<'a, F, M, T, O> Sync for FlagSetIter<'a, F, M, T, O>
+    where
         F: BitFlagForSet + Sync,
         M: BitMutability,
         T: BitStore + 'a,
         O: BitOrder,
         BitSlice<T, O>: Sync,
-    {}
-    impl<'a, F, M, T , O> Iterator for FlagSetIter<'a, F, M, T, O> where
+    {
+    }
+    impl<'a, F, M, T, O> Iterator for FlagSetIter<'a, F, M, T, O>
+    where
         F: BitFlagForSet + Sync,
         M: BitMutability,
         T: BitStore + 'a,
@@ -593,16 +636,15 @@ mod flag_set_iter {
         BitSlice<T, O>: Sync,
     {
         type Item = &BitSlice<T, O>;
-        fn next(&mut self) -> Option<Self::Item> {
-        }
+        fn next(&mut self) -> Option<Self::Item> {}
 
-        fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        }
+        fn nth(&mut self, n: usize) -> Option<Self::Item> {}
     }
 }
 
 #[cfg(feature = "serde")]
-impl<F: BitFlagForSet, V> ser::Serialize for FlagSet<F, V> where
+impl<F: BitFlagForSet, V> ser::Serialize for FlagSet<F, V>
+where
     V: ser::Serialize,
 {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -610,7 +652,8 @@ impl<F: BitFlagForSet, V> ser::Serialize for FlagSet<F, V> where
     }
 }
 #[cfg(feature = "serde")]
-impl<'de, F: BitFlagForSet, V> de::Deserialize<'de> for FlagSet<F, V> where
+impl<'de, F: BitFlagForSet, V> de::Deserialize<'de> for FlagSet<F, V>
+where
     V: de::Deserialize<'de>,
 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

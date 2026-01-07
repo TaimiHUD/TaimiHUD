@@ -1,27 +1,32 @@
 use {
+    super::PackRenderState,
     crate::{
-        controller::pathing::shared::{SharedPackInfo, LoadedPoiRef},
+        controller::pathing::shared::{LoadedPoiRef, SharedPackInfo},
         exports::runtime::{
-            textures::{TextureSlot, TextureKey},
+            textures::{TextureKey, TextureSlot},
             Counter,
         },
         render::machine::RenderMachine,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            resources::{Model, ShaderPair, Vertex},
             pack::PackRenderData,
+            resources::{Model, ShaderPair, Vertex},
         },
         TEXTURES,
     },
-    taimi_meta::packs::id::MarkerId,
-    anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::mem, taimi_d3d::{
+    anyhow::Context,
+    bitvec::vec::BitVec,
+    glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles},
+    glamour::Vector2,
+    std::mem,
+    taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
             prelude::*,
         },
         state::PrimitiveTopology,
-    }, taimi_meta::ui::LocalContext,
-    super::PackRenderState,
+    },
+    taimi_meta::{packs::id::MarkerId, ui::LocalContext},
 };
 
 pub struct PoiCommonRenderData {
@@ -132,7 +137,12 @@ impl PoiCommonRenderData {
         let _ = self.map_ib.take();
     }
 
-    pub fn update(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[PackRenderData]) -> anyhow::Result<()> {
+    pub fn update(
+        &mut self,
+        device: &Dx11Device,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+    ) -> anyhow::Result<()> {
         if self.fallback_texture.is_none() {
             if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
                 self.fallback_texture = texture;
@@ -149,7 +159,12 @@ impl PoiCommonRenderData {
 
         Ok(())
     }
-    pub fn rebuild_ib(&mut self, device: &Dx11Device, machine: &RenderMachine, packs: &[PackRenderData]) -> anyhow::Result<()> {
+    pub fn rebuild_ib(
+        &mut self,
+        device: &Dx11Device,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+    ) -> anyhow::Result<()> {
         let ib_len = self.ib_len_for_packs(packs);
         if ib_len == 0 {
             // usually we'd reserve one for trails but this probably means 0 packs loaded?
@@ -160,8 +175,7 @@ impl PoiCommonRenderData {
         self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
 
         let (data_world, data_map) = (&data_world[..], &data_map[..]);
-        STATS_POI_INSTANCE_SIZE
-            .reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
+        STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
         let (poi_ib_world, poi_ib_map) = (
             BufferOf::new_with_data(device, Ok(data_world), ())?,
             BufferOf::new_with_data(device, Ok(data_map), ())?,
@@ -170,16 +184,30 @@ impl PoiCommonRenderData {
         self.map_ib = Some(poi_ib_map);
         Ok(())
     }
-    pub fn write_ib(&self, machine: &RenderMachine, packs: &[PackRenderData], ib_world: &mut [InstanceBufferData], ib_map: &mut [InstanceBufferData]) -> anyhow::Result<()> {
+    pub fn write_ib(
+        &self,
+        machine: &RenderMachine,
+        packs: &[PackRenderData],
+        ib_world: &mut [InstanceBufferData],
+        ib_map: &mut [InstanceBufferData],
+    ) -> anyhow::Result<()> {
         let ib_len = self.ib_len_for_packs(packs);
-        if (ib_world.len() > 1 && ib_world.len() != ib_len) || (ib_map.len() > 1 && ib_map.len() != ib_len) {
-            anyhow::bail!("expected {ib_len} POI instances, got {}(world) and {}(map) instead", ib_world.len(), ib_map.len());
+        if (ib_world.len() > 1 && ib_world.len() != ib_len) || (ib_map.len() > 1 && ib_map.len() != ib_len)
+        {
+            anyhow::bail!(
+                "expected {ib_len} POI instances, got {}(world) and {}(map) instead",
+                ib_world.len(),
+                ib_map.len()
+            );
         }
         let mut gaps: BitVec = BitVec::with_capacity(ib_len);
         gaps.resize(ib_len, false);
         for (_packi, pack) in packs.iter().enumerate() {
             let Some(map_info) = &pack.map_info else { continue };
-            for (i, (poi, lpoi)) in pack.render_poi_bookmarks().zip(pack.pois.values().zip(pack.map_state.loaded_pois(map_info))) {
+            for (i, (poi, lpoi)) in pack
+                .render_poi_bookmarks()
+                .zip(pack.pois.values().zip(pack.map_state.loaded_pois(map_info)))
+            {
                 let index = i as usize;
                 if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
@@ -209,14 +237,15 @@ impl PoiCommonRenderData {
         Ok(())
     }
     pub(super) fn ib_len_for_packs(&self, packs: &[PackRenderData]) -> usize {
-        packs.iter()
-            .map(|p| p.render_poi_bookmarks().end as usize).max()
+        packs
+            .iter()
+            .map(|p| p.render_poi_bookmarks().end as usize)
+            .max()
             .map(|l| l.max(1))
             .unwrap_or(0)
     }
     pub(super) fn ib_len(&self) -> usize {
-        let ib = self.world_ib.as_ref()
-            .or(self.map_ib.as_ref());
+        let ib = self.world_ib.as_ref().or(self.map_ib.as_ref());
         let Some(ib) = ib else { return 0 };
         let count = ib.count();
         if count == 0 {
@@ -269,18 +298,23 @@ pub struct PoiRender {
 }
 impl PoiRender {
     pub fn empty() -> Self {
-        Self {
-            icon_handle: None,
-            icon: None,
-        }
+        Self { icon_handle: None, icon: None }
     }
 
-    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, lpoi: Option<LoadedPoiRef<'_>>) {
+    pub fn update(
+        &mut self,
+        _device: &Dx11Device,
+        pack_info: &SharedPackInfo,
+        lpoi: Option<LoadedPoiRef<'_>>,
+    ) {
         let icon_name = lpoi.as_ref().and_then(|lpoi| lpoi.poi_attrs().icon_file.as_ref());
         pack_info.setup_texture(&mut self.icon_handle, &mut self.icon, icon_name);
     }
     pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState) -> bool {
-        if matches!(self.icon, None | Some(TextureSlot::Reserved | TextureSlot::Loading)) {
+        if matches!(
+            self.icon,
+            None | Some(TextureSlot::Reserved | TextureSlot::Loading)
+        ) {
             draw_state.drawn_incomplete.insert(id.clone());
         }
         false
@@ -293,7 +327,8 @@ impl PoiRender {
         let render = poi.render_attrs();
         let attrs = poi.poi_attrs();
         InstanceBufferData {
-            world: Mat4::from_translation(poi.lpoi().position.into()) * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
+            world: Mat4::from_translation(poi.lpoi().position.into())
+                * Mat4::from_scale(Vec3::splat(attrs.icon_size())),
             colour: render.tint(),
         }
     }
@@ -312,8 +347,15 @@ impl PoiRender {
         }
     }
 
-    pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
-        let texture = self.icon.as_ref()
+    pub fn bind_texture(
+        &self,
+        device_context: &Dx11Context,
+        common: &PoiCommonRenderData,
+        _ctx: LocalContext,
+    ) {
+        let texture = self
+            .icon
+            .as_ref()
             .and_then(TextureSlot::get)
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {

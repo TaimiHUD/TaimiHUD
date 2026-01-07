@@ -1,9 +1,6 @@
 use {
     super::PathingWindowState,
-    crate::{
-        render::machine::RenderMachine,
-        with_i18n,
-    },
+    crate::{render::machine::RenderMachine, with_i18n},
     glam::Vec2,
     nexus::imgui::{StyleVar, Ui},
     taimi_pack::category::CategoryFlags,
@@ -34,19 +31,20 @@ impl PathingWindowState {
             let _id_pack = ui.push_id(pack.state.ui_id());
             let pack_info = pack.state.info.info.as_ref();
             let cats = pack_info.map(|i| i.categories.as_ref());
-            let roots = cats.into_iter().flat_map(|cats| cats.root_paths()
-                .filter_map(|path| cats.info_of(path).map(|_| (path, cats.lookup_flags(path))))
-                .filter(|(_p, flags)| !flags.contains(CategoryFlags::HIDDEN))
-                .filter_map(|(path, flags)| {
-                    let filtered = match pack.categories.category_is_on_map(path) {
-                        true if !unfiltered => return None,
-                        #[cfg(todo = "unnecessary")]
-                        _ if filtered => None,
-                        f => Some(f),
-                    };
-                    Some((path, flags, filtered))
-                })
-            );
+            let roots = cats.into_iter().flat_map(|cats| {
+                cats.root_paths()
+                    .filter_map(|path| cats.info_of(path).map(|_| (path, cats.lookup_flags(path))))
+                    .filter(|(_p, flags)| !flags.contains(CategoryFlags::HIDDEN))
+                    .filter_map(|(path, flags)| {
+                        let filtered = match pack.categories.category_is_on_map(path) {
+                            true if !unfiltered => return None,
+                            #[cfg(todo = "unnecessary")]
+                            _ if filtered => None,
+                            f => Some(f),
+                        };
+                        Some((path, flags, filtered))
+                    })
+            });
             let multi_root = roots.clone().count() > 1;
             match was_multi_root {
                 Some(was) if multi_root || was => {

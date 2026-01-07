@@ -3,6 +3,7 @@ use {
     glamour::{Box2, Box3, Point2, Point3, Unit},
     mint::IntoMint,
 };
+
 pub use self::bounded::*;
 
 mod bounded;
@@ -33,7 +34,8 @@ impl ConstNan for f64 {
     };
 }
 
-pub fn to_nalg<O, T: mint::IntoMint>(value: T) -> O where
+pub fn to_nalg<O, T: mint::IntoMint>(value: T) -> O
+where
     T::MintType: Into<O>,
 {
     value.into().into()
@@ -50,33 +52,27 @@ pub const fn irrelevant_box3<U: Unit<Scalar = f32>>() -> Box3<U> {
     let max = Point3::new(IRRELEVANT_MAX, IRRELEVANT_MAX, IRRELEVANT_MAX);
     Box3::new(min, max)
 }
-pub fn box2aabb<U: Unit>(bounds: Box2<U>) -> aabb::Aabb<U::Scalar, 2> where
+pub fn box2aabb<U: Unit>(bounds: Box2<U>) -> aabb::Aabb<U::Scalar, 2>
+where
     U::Scalar: BHValue + nalgebra::SimdValue,
     Point2<U>: MintConv<MintNalg = nalgebra::Point2<U::Scalar>>,
 {
     let Box2 { min, max } = bounds;
-    aabb::Aabb::with_bounds(
-        min.into_nalg(),
-        max.into_nalg(),
-    )
+    aabb::Aabb::with_bounds(min.into_nalg(), max.into_nalg())
 }
-pub fn box3aabb<U: Unit>(bounds: Box3<U>) -> aabb::Aabb<U::Scalar, 3> where
+pub fn box3aabb<U: Unit>(bounds: Box3<U>) -> aabb::Aabb<U::Scalar, 3>
+where
     U::Scalar: BHValue + nalgebra::SimdValue,
     Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
 {
     let Box3 { min, max } = bounds;
-    aabb::Aabb::with_bounds(
-        min.into_nalg(),
-        max.into_nalg(),
-    )
+    aabb::Aabb::with_bounds(min.into_nalg(), max.into_nalg())
 }
 
 pub trait MintConv: Sized {
-    type Mint
-        // From<<Self::MintGlamour as IntoMint>::MintType> + From<<Self::MintNalg as IntoMint>::MintType>
-    ;
+    type Mint;
     type MintGlamour: IntoMint;
-    type MintNalg/*: IntoMint*/;
+    type MintNalg;
     fn from_glamour(v: Self::MintGlamour) -> Self;
     fn into_glamour(self) -> Self::MintGlamour;
     fn from_mint(v: Self::Mint) -> Self {
@@ -109,9 +105,7 @@ pub trait MintConv: Sized {
     }
     #[inline]
     fn into_mint(self) -> Self::Mint {
-        Self::mint_from_glamour(
-            self.into_glamour()
-        )
+        Self::mint_from_glamour(self.into_glamour())
     }
 }
 #[cfg(deleteme)]
@@ -121,7 +115,8 @@ pub trait FromMint: MintConv {
     //fn from_mint(v: <Self::MintGlamour as IntoMint>::MintType) -> Self;
 }
 #[cfg(deleteme)]
-impl<T: MintConv> FromMint for T where
+impl<T: MintConv> FromMint for T
+where
     <T::MintGlamour as IntoMint>::MintType: Into<T::MintGlamour>,
     <T::MintNalg as IntoMint>::MintType: Into<T::MintNalg>,
 {

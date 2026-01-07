@@ -17,9 +17,7 @@ pub fn map_poison_std<R, T, F: FnOnce(T) -> R>(e: StdPoisonError<T>, f: F) -> Po
         #[cfg(panic = "unwind")]
         e => PoisonError::new(f(e.into_inner())),
         #[cfg(not(panic = "unwind"))]
-        _ => unsafe {
-            core::hint::unreachable_unchecked()
-        },
+        _ => unsafe { core::hint::unreachable_unchecked() },
     }
 }
 pub fn map_poison<R, T, F: FnOnce(T) -> R>(e: PoisonError<T>, f: F) -> PoisonError<R> {

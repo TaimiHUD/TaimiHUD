@@ -19,9 +19,7 @@ pub unsafe trait Zfn<A>: Sized {
 /// ZST [Zfn] + [Fn]
 pub unsafe trait ZFn<A>: Zfn<A> {
     fn call(self, args: A) -> Self::Output {
-        unsafe {
-            self.call_unchecked(args)
-        }
+        unsafe { self.call_unchecked(args) }
     }
 }
 pub trait ZFn0: ZFn<()> {
@@ -60,7 +58,9 @@ unsafe impl<R> Zfn<()> for unsafe fn() -> R {
 unsafe impl<R, F: ZFn<(), Output = R> + Fn() -> R> ZFn<()> for F {}
 impl<R, F: ZFn<(), Output = R> + Fn() -> R> ZFn0 for F {
     type Fn = F;
-    unsafe fn materialize0() -> Self::Fn { Self::materialize() }
+    unsafe fn materialize0() -> Self::Fn {
+        Self::materialize()
+    }
 }
 unsafe impl<A0, R> Zfn<(A0,)> for fn(A0) -> R {
     type Output = R;
@@ -81,7 +81,9 @@ unsafe impl<A0, R, F: ZFn<(A0,), Output = R> + Fn(A0) -> R> ZFn<(A0,)> for F {}
 unsafe impl<A0, R> ZFn<(A0,)> for fn(A0) -> R {}
 impl<R, A0, F: ZFn<(A0,), Output = R> + Fn(A0) -> R> ZFn1<A0> for F {
     type Fn = F;
-    unsafe fn materialize1() -> Self::Fn { Self::materialize() }
+    unsafe fn materialize1() -> Self::Fn {
+        Self::materialize()
+    }
 }
 
 pub const unsafe fn zfn<Z: Zfn<A>, A>() -> Z {

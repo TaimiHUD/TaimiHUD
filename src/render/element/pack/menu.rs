@@ -1,9 +1,19 @@
 use {
-    crate::{
-        exports::runtime::imgui::{MouseButton, Selectable, Ui, MenuItem, StyleVar, MenuToken},
-        with_i18n
+    super::{
+        CategoryAction,
+        CategoryActionSlot,
+        DrawCategoryCollection,
+        DrawCategoryHeader,
+        DrawPackRoots,
+        PackAction,
+        PackActionSlot,
+        PackElementState,
+        UiAction,
     },
-    super::{DrawCategoryHeader, PackElementState, DrawCategoryCollection, PackActionSlot, PackAction, CategoryAction, CategoryActionSlot, UiAction, DrawPackRoots},
+    crate::{
+        exports::runtime::imgui::{MenuItem, MenuToken, MouseButton, Selectable, StyleVar, Ui},
+        with_i18n,
+    },
     glam::Vec2,
     glamour::Rect,
     taimi_meta::packs::{CategoryIndex, CategoryPath},
@@ -44,10 +54,13 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             if menu_open != self.last_menu_open {
                 let path = match menu_open {
                     Some(p) => p,
-                    None => self.last_menu_open.or(self.state.info.primary_root().map(|r| r.path()))
+                    None => self
+                        .last_menu_open
+                        .or(self.state.info.primary_root().map(|r| r.path()))
                         .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
                 };
-                let clobbered = CategoryAction::Open(Some(menu_open.is_some())).clobber(path, &mut self.act_cat);
+                let clobbered =
+                    CategoryAction::Open(Some(menu_open.is_some())).clobber(path, &mut self.act_cat);
                 CategoryAction::warn_clobbered(&self.act_cat, clobbered);
             }
         }
@@ -78,7 +91,10 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
         if self.last_menu_open.is_some() {
-            let path = self.state.info.primary_root()
+            let path = self
+                .state
+                .info
+                .primary_root()
                 .map(|r| r.path())
                 .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX));
             let clobbered = CategoryAction::Open(Some(false)).clobber(path, &mut self.act_cat);
@@ -88,7 +104,8 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
 
     pub fn prepare_menu_categories(&self) -> Option<DrawCategoryCollectionMenu<'a, 'u>> {
         self.categories.map(|state| {
-            let mut cats = DrawCategoryCollectionMenu::new(DrawCategoryCollection::new(self.ui, state, self.state));
+            let mut cats =
+                DrawCategoryCollectionMenu::new(DrawCategoryCollection::new(self.ui, state, self.state));
             if self.last_menu_open.is_some() {
                 cats.act_open.reserve(0x10);
             }
@@ -129,11 +146,7 @@ impl super::PackElement {
     }
 
     pub(super) fn draw_pack_context(&mut self, ui: &Ui) {
-        let mut draw = DrawPackContextMenu {
-            ui,
-            state: &self.state,
-            act: None,
-        };
+        let mut draw = DrawPackContextMenu { ui, state: &self.state, act: None };
         draw.draw_contents();
         self.act_post_draw_context(ui, None, draw.act);
     }
@@ -250,9 +263,9 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
         if ui.is_item_hovered() {
             ui.tooltip_text("hint: right-click to quickly toggle any category");
         }
-        toggled.then_some(UiAction::Primary).or_else(||
-            self.resolve_action_secondary()
-        )
+        toggled
+            .then_some(UiAction::Primary)
+            .or_else(|| self.resolve_action_secondary())
     }
 
     fn draw_end(&mut self, token: Option<MenuToken<'a>>) -> Option<UiAction> {
@@ -264,7 +277,9 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
         act
     }
     pub fn draw_decoration_with<R, F: FnOnce(&Self) -> R>(&mut self, f: F) -> Option<R> {
-        if self.drawn_bounds.is_empty() { return None }
+        if self.drawn_bounds.is_empty() {
+            return None
+        }
         let checkpoint = self.draw.ui.cursor_pos();
         let mut top_right = self.drawn_bounds.origin;
         top_right.x += self.drawn_bounds.size.width;
@@ -380,8 +395,14 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
         if res.is_some() {
             if self.draw.path_stack.len() > self.act_open.len() {
                 self.act_open.clone_from(&self.draw.path_stack);
-            } else if self.draw.path_stack.len() == self.act_open.len() && self.draw.path_stack.last() != self.act_open.last() {
-                log::debug!("DELETEME: category menu open already set? {:?} vs {:?}", self.act_open, self.draw.path_stack);
+            } else if self.draw.path_stack.len() == self.act_open.len()
+                && self.draw.path_stack.last() != self.act_open.last()
+            {
+                log::debug!(
+                    "DELETEME: category menu open already set? {:?} vs {:?}",
+                    self.act_open,
+                    self.draw.path_stack
+                );
             }
         }
         res
@@ -389,16 +410,11 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
     fn act_to_action(menu: &DrawCategoryMenu, act: Option<UiAction>) -> Option<CategoryAction> {
         let is_leaf = menu.is_leaf();
         match act {
-            Some(UiAction::Primary) if is_leaf && menu.is_copyable =>
-                Some(CategoryAction::Copy),
-            Some(UiAction::LEFT_CLICK) if menu.is_copyable =>
-                Some(CategoryAction::Copy),
-            Some(UiAction::Primary) if is_leaf =>
-                Some(CategoryAction::Enable(None)),
-            Some(UiAction::RIGHT_CLICK) =>
-                Some(CategoryAction::Enable(None)),
-            Some(UiAction::LEFT_CLICK) if !is_leaf =>
-                Some(CategoryAction::Enable(None)),
+            Some(UiAction::Primary) if is_leaf && menu.is_copyable => Some(CategoryAction::Copy),
+            Some(UiAction::LEFT_CLICK) if menu.is_copyable => Some(CategoryAction::Copy),
+            Some(UiAction::Primary) if is_leaf => Some(CategoryAction::Enable(None)),
+            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::Enable(None)),
+            Some(UiAction::LEFT_CLICK) if !is_leaf => Some(CategoryAction::Enable(None)),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
                 log::debug!("DELETEME: category menu action {act:?} unexpected");
@@ -416,8 +432,7 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
         };
         let path = self.draw.pop();
         let act = match (path, act) {
-            (Some(path), Some((menu, act))) =>
-             Self::act_to_action(&menu, act).map(|act| (act, menu, path)),
+            (Some(path), Some((menu, act))) => Self::act_to_action(&menu, act).map(|act| (act, menu, path)),
             _ => None,
         };
         if let Some((act, _menu, path)) = act {
@@ -480,9 +495,7 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
             true => with_i18n!("reload-pack", |msg| Selectable::new(msg).build(ui)),
             false => false,
         };
-        let action_refresh = with_i18n!("refresh-pack", |msg| Selectable::new(msg)
-            .build(ui)
-        );
+        let action_refresh = with_i18n!("refresh-pack", |msg| Selectable::new(msg).build(ui));
         if action_unload {
             Some(PackAction::REMOVE)
         } else if action_later {
@@ -490,7 +503,7 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
         } else if action_load {
             Some(match is_loaded {
                 true => PackAction::UNLOAD,
-                false => PackAction::ACTIVATE
+                false => PackAction::ACTIVATE,
             })
         } else if action_reload {
             Some(PackAction::RELOAD)
@@ -559,19 +572,15 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
             Some(CategoryAction::TOGGLE)
         } else if let Some(action_all) = action_all {
             Some(match action_all {
-                Some(enable) =>
-                    CategoryAction::EnableChildren(Some(enable)),
-                None =>
-                    CategoryAction::ResetChildren,
+                Some(enable) => CategoryAction::EnableChildren(Some(enable)),
+                None => CategoryAction::ResetChildren,
             })
         } else if let Some(parents_enable) = action_parents {
             Some(CategoryAction::EnableParents(parents_enable))
         } else if let Some(isolate) = action_isolate {
             Some(match isolate {
-                Some(state) =>
-                    CategoryAction::Isolate(state),
-                None =>
-                    CategoryAction::ResetSiblings,
+                Some(state) => CategoryAction::Isolate(state),
+                None => CategoryAction::ResetSiblings,
             })
         } else {
             None
@@ -579,12 +588,18 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
 
         let action_expand_all = if self.any_closed {
             with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
-        } else { false };
+        } else {
+            false
+        };
         let action_collapse_all = if self.any_open {
             with_i18n!("collapse-all", |msg| Selectable::new(msg).build(ui))
-        } else { false };
+        } else {
+            false
+        };
         #[cfg(todo)]
-        let action_hide = with_i18n(if self.hidden { "unhide" } else { "hide"}, |msg| Selectable::new(msg).build(ui));
+        let action_hide = with_i18n(if self.hidden { "unhide" } else { "hide" }, |msg| {
+            Selectable::new(msg).build(ui)
+        });
         let action_hide = false;
 
         if let Some(act) = act {

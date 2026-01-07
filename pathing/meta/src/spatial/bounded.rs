@@ -1,9 +1,18 @@
-use std::{cmp, mem, ops};
-use crate::coords::{LocalPoint2, LocalSpace};
-use glamour::{FloatScalar, Point3, Unit, Vector2, Vector3, Box2, Box3};
-use bvh::{aabb, ball, bounding_hierarchy::{BHShape, BHValue}, bvh::Bvh};
-use num_traits::Signed;
-use crate::spatial::{box2aabb, box3aabb, MintConv, ConstNan};
+use {
+    crate::{
+        coords::{LocalPoint2, LocalSpace},
+        spatial::{box2aabb, box3aabb, ConstNan, MintConv},
+    },
+    bvh::{
+        aabb,
+        ball,
+        bounding_hierarchy::{BHShape, BHValue},
+        bvh::Bvh,
+    },
+    glamour::{Box2, Box3, FloatScalar, Point3, Unit, Vector2, Vector3},
+    num_traits::Signed,
+    std::{cmp, mem, ops},
+};
 
 pub struct BvhEntities<T, P = usize, const D: usize = 3> {
     entities: Vec<T>,
@@ -18,9 +27,7 @@ impl<T, P, const D: usize> BvhEntities<T, P, D> {
         Self {
             entities: Vec::new(),
             group_ranges: Vec::new(),
-            bvh: Bvh {
-                nodes: Vec::new(),
-            },
+            bvh: Bvh { nodes: Vec::new() },
             dirty_ranges: false,
             dirty_from: 0,
         }
@@ -59,7 +66,8 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
         let entities = self.entities.drain(range.clone()).collect::<Box<[T]>>();
         if amt > 0 {
             // shift everything down...
-            let later_ranges = self.group_ranges
+            let later_ranges = self
+                .group_ranges
                 .iter_mut()
                 .filter(|(_p, r)| r.start >= range.end);
             for (_p, later) in later_ranges {
@@ -67,9 +75,7 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
                 later.end -= amt;
             }
             #[cfg(todo = "unnecessary")]
-            let later_ranges = self.group_ranges
-                .iter()
-                .filter(|(_p, r)| r.start >= new_end);
+            let later_ranges = self.group_ranges.iter().filter(|(_p, r)| r.start >= new_end);
             #[cfg(todo = "unnecessary")]
             for (_p, later) in later_ranges {
                 for i in later.clone() {
@@ -80,7 +86,8 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
         entities
     }
 
-    pub unsafe fn add_group_at<E>(&mut self, group_idx: usize, entities: E, append: bool) where
+    pub unsafe fn add_group_at<E>(&mut self, group_idx: usize, entities: E, append: bool)
+    where
         E: IntoIterator<Item = T>,
     {
         let mut start = self.entities.len();
@@ -106,13 +113,15 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
         };
         let prev_start = self.entities.len();
         range.start = start.min(prev_start);
-        self.entities.extend(prev_entities.into_iter().flatten().chain(entities));
+        self.entities
+            .extend(prev_entities.into_iter().flatten().chain(entities));
         range.end = self.entities.len();
         self.dirty_from = self.dirty_from.min(prev_start);
         self.dirty_ranges = true;
     }
 
-    pub unsafe fn append_to_group_at<E>(&mut self, group_idx: usize, entities: E) where
+    pub unsafe fn append_to_group_at<E>(&mut self, group_idx: usize, entities: E)
+    where
         E: IntoIterator<Item = T>,
     {
         let entities = entities.into_iter();
@@ -130,9 +139,7 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
             let offset = new_start - prev_range.start;
             for i in (prev_range.start..new_start).rev() {
                 let new_i = i + offset;
-                let truncated = unsafe {
-                    self.entities.get_unchecked_mut(..=new_i)
-                };
+                let truncated = unsafe { self.entities.get_unchecked_mut(..=new_i) };
                 let swap_end = true;
                 self.bvh.remove_shape(truncated, i, swap_end);
                 self.entities.swap(i, new_i);
@@ -153,13 +160,16 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
         }
 
         // canonicalize empty ranges to avoid weirdness when appending
-        let empty_groups = self.group_ranges.iter_mut()
+        let empty_groups = self
+            .group_ranges
+            .iter_mut()
             .filter(|(_p, r)| r.start > 0 && r.is_empty());
         for (_p, empty) in empty_groups {
             *empty = Self::EMPTY_RANGE;
         }
 
-        self.group_ranges.sort_unstable_by_key(|(_, r)| (!r.is_empty(), r.start));
+        self.group_ranges
+            .sort_unstable_by_key(|(_, r)| (!r.is_empty(), r.start));
 
         self.dirty_ranges = false;
     }
@@ -196,10 +206,12 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> {
         self.group_ranges.clear();
     }
 }
-impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> where
+impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D>
+where
     P: PartialEq,
 {
-    pub fn set_group<E>(&mut self, path: P, entities: E) where
+    pub fn set_group<E>(&mut self, path: P, entities: E)
+    where
         E: IntoIterator<Item = T>,
     {
         let group_idx = match self.group_index(&path) {
@@ -211,21 +223,18 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> where
                 i
             },
         };
-        unsafe {
-            self.add_group_at(group_idx, entities, false)
-        }
+        unsafe { self.add_group_at(group_idx, entities, false) }
     }
 
-    pub fn append_to_group<E>(&mut self, path: &P, entities: E) -> Result<(), E> where
+    pub fn append_to_group<E>(&mut self, path: &P, entities: E) -> Result<(), E>
+    where
         E: IntoIterator<Item = T>,
     {
         let group_idx = match self.group_index(&path) {
             Some(i) => i,
             None => return Err(entities),
         };
-        Ok(unsafe {
-            self.append_to_group_at(group_idx, entities)
-        })
+        Ok(unsafe { self.append_to_group_at(group_idx, entities) })
     }
 
     pub fn remove_group(&mut self, path: &P) -> Option<Box<[T]>> {
@@ -246,24 +255,23 @@ impl<T: BHShape<f32, D>, P, const D: usize> BvhEntities<T, P, D> where
     }
 
     pub fn group_index_of(&self, entity: &T) -> Option<(usize, &P, ops::Range<usize>)> {
-        let idx = unsafe {
-            (entity as *const T).offset_from_unsigned(self.entities.as_ptr())
-        };
+        let idx = unsafe { (entity as *const T).offset_from_unsigned(self.entities.as_ptr()) };
         match idx {
             idx => {
-                let group_idx = self.group_ranges.binary_search_by(|(_p, r)| match r.start.cmp(&idx) {
-                    cmp::Ordering::Greater => cmp::Ordering::Greater,
-                    cmp::Ordering::Less | cmp::Ordering::Equal if r.end < idx =>
-                        cmp::Ordering::Equal,
-                    _ => cmp::Ordering::Less,
-                }).ok();
-                group_idx.map(|idx| unsafe {
-                    self.group_ranges.get_unchecked(idx)
-                })
+                let group_idx = self
+                    .group_ranges
+                    .binary_search_by(|(_p, r)| match r.start.cmp(&idx) {
+                        cmp::Ordering::Greater => cmp::Ordering::Greater,
+                        cmp::Ordering::Less | cmp::Ordering::Equal if r.end < idx => cmp::Ordering::Equal,
+                        _ => cmp::Ordering::Less,
+                    })
+                    .ok();
+                group_idx.map(|idx| unsafe { self.group_ranges.get_unchecked(idx) })
             },
             #[cfg(todo)]
             idx => self.group_ranges.iter().find(|(_p, r)| r.contains(&idx)),
-        }.map(move |(p, r)| (idx, p, r.clone()))
+        }
+        .map(move |(p, r)| (idx, p, r.clone()))
     }
 }
 
@@ -276,17 +284,11 @@ pub struct BvhShape<T> {
 impl<T> BvhShape<T> {
     #[inline]
     pub const fn new(value: T) -> Self {
-        Self {
-            value,
-            bh_index: 0,
-        }
+        Self { value, bh_index: 0 }
     }
     #[inline]
     pub const fn new_removed(value: T) -> Self {
-        Self {
-            value,
-            bh_index: usize::MAX,
-        }
+        Self { value, bh_index: usize::MAX }
     }
 
     #[inline]
@@ -307,7 +309,8 @@ impl<T> BvhShape<T> {
         self.bh_index >= bvh.nodes.len()
     }
 }
-impl<T, U: BHValue, const D: usize> aabb::Bounded<U, D> for BvhShape<T> where
+impl<T, U: BHValue, const D: usize> aabb::Bounded<U, D> for BvhShape<T>
+where
     T: aabb::Bounded<U, D>,
 {
     #[inline]
@@ -315,13 +318,18 @@ impl<T, U: BHValue, const D: usize> aabb::Bounded<U, D> for BvhShape<T> where
         self.value.aabb()
     }
 }
-impl<T, U: BHValue, const D: usize> BHShape<U, D> for BvhShape<T> where
+impl<T, U: BHValue, const D: usize> BHShape<U, D> for BvhShape<T>
+where
     Self: aabb::Bounded<U, D>,
 {
     #[inline]
-    fn set_bh_node_index(&mut self, idx: usize) { self.bh_index = idx }
+    fn set_bh_node_index(&mut self, idx: usize) {
+        self.bh_index = idx
+    }
     #[inline]
-    fn bh_node_index(&self) -> usize { self.bh_index }
+    fn bh_node_index(&self) -> usize {
+        self.bh_index
+    }
 }
 impl<T> ops::Deref for BvhShape<T> {
     type Target = T;
@@ -348,14 +356,11 @@ pub struct TriggerBoundsInfo<U: Unit = LocalSpace> {
     pub position: Point3<U>,
     pub radius: U::Scalar,
 }
-impl<U: Unit> TriggerBoundsInfo<U> where
+impl<U: Unit> TriggerBoundsInfo<U>
+where
     U::Scalar: Signed,
 {
-    pub fn new(
-        position: Point3<U>,
-        radius: U::Scalar,
-        auto: bool,
-    ) -> Self {
+    pub fn new(position: Point3<U>, radius: U::Scalar, auto: bool) -> Self {
         Self {
             position,
             radius: match auto {
@@ -364,14 +369,8 @@ impl<U: Unit> TriggerBoundsInfo<U> where
             },
         }
     }
-    pub const fn with_parts(
-        position: Point3<U>,
-        radius: U::Scalar,
-    ) -> Self {
-        Self {
-            position,
-            radius,
-        }
+    pub const fn with_parts(position: Point3<U>, radius: U::Scalar) -> Self {
+        Self { position, radius }
     }
 
     pub fn radius(&self) -> U::Scalar {
@@ -389,35 +388,29 @@ impl<U: Unit> TriggerBoundsInfo<U> where
             self.radius = -self.radius;
         }
     }
-    pub fn to_sphere(&self) -> ball::Sphere<U::Scalar> where
+    pub fn to_sphere(&self) -> ball::Sphere<U::Scalar>
+    where
         U::Scalar: BHValue + nalgebra::SimdValue,
         Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
     {
-        ball::Ball::new(
-            self.position.into_nalg(),
-            self.radius(),
-        )
+        ball::Ball::new(self.position.into_nalg(), self.radius())
     }
 }
-impl<U: Unit> TriggerBoundsInfo<U> where
+impl<U: Unit> TriggerBoundsInfo<U>
+where
     U::Scalar: FloatScalar + Signed + ConstNan,
 {
-    pub const INVALID: Self = Self::with_parts(
-        Point3::INFINITY,
-        <U::Scalar as ConstNan>::NAN_NEG,
-    );
+    pub const INVALID: Self = Self::with_parts(Point3::INFINITY, <U::Scalar as ConstNan>::NAN_NEG);
 }
 impl TriggerBoundsInfo<LocalSpace> {
     pub fn position2(&self) -> LocalPoint2 {
         LocalSpace::to2(self.position)
     }
-    pub fn to_circle(&self) -> ball::Circle<<LocalSpace as Unit>::Scalar> where
+    pub fn to_circle(&self) -> ball::Circle<<LocalSpace as Unit>::Scalar>
+    where
         LocalPoint2: MintConv<MintNalg = nalgebra::Point2<<LocalSpace as Unit>::Scalar>>,
     {
-        ball::Ball::new(
-            self.position2().into_nalg(),
-            self.radius(),
-        )
+        ball::Ball::new(self.position2().into_nalg(), self.radius())
     }
 }
 
@@ -425,23 +418,18 @@ impl aabb::Bounded<<LocalSpace as Unit>::Scalar, 2> for TriggerBoundsInfo<LocalS
     fn aabb(&self) -> aabb::Aabb<<LocalSpace as Unit>::Scalar, 2> {
         let corner = Vector2::<LocalSpace>::splat(self.radius());
         let position = self.position2();
-        let bounds = Box2::new(
-            position - corner,
-            position + corner,
-        );
+        let bounds = Box2::new(position - corner, position + corner);
         box2aabb(bounds)
     }
 }
-impl<U: Unit> aabb::Bounded<U::Scalar, 3> for TriggerBoundsInfo<U> where
+impl<U: Unit> aabb::Bounded<U::Scalar, 3> for TriggerBoundsInfo<U>
+where
     U::Scalar: Signed + BHValue,
     Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
 {
     fn aabb(&self) -> aabb::Aabb<U::Scalar, 3> {
         let corner = Vector3::<U>::splat(self.radius());
-        let bounds = Box3::new(
-            self.position - corner,
-            self.position + corner,
-        );
+        let bounds = Box3::new(self.position - corner, self.position + corner);
         box3aabb(bounds)
     }
 }

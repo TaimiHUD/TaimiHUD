@@ -7,11 +7,7 @@ use {
         },
     },
     anyhow::Context,
-    std::{
-        fmt,
-        ptr,
-        time::Duration,
-    },
+    std::{fmt, ptr, time::Duration},
     tokio::{
         runtime::{Builder, Handle, Runtime},
         sync::oneshot,
@@ -83,12 +79,17 @@ impl Controller {
         flatten_result_with("render task lost", res)
     }
 
-    pub async fn try_run_blocking<R, C, F: FnOnce() -> anyhow::Result<R>>(context: C, f: F) -> anyhow::Result<R> where
+    pub async fn try_run_blocking<R, C, F: FnOnce() -> anyhow::Result<R>>(
+        context: C,
+        f: F,
+    ) -> anyhow::Result<R>
+    where
         R: Send + 'static,
         F: Send + 'static,
         C: fmt::Display,
     {
-        let res = tokio::task::spawn_blocking(f).await
+        let res = tokio::task::spawn_blocking(f)
+            .await
             .with_context(|| format!("panicked: {context}"));
         flatten_result_any(res)
     }
@@ -120,7 +121,11 @@ pub fn flatten_result_any<T>(res: anyhow::Result<anyhow::Result<T>>) -> anyhow::
 pub fn flatten_result<T, E: Into<anyhow::Error>>(res: Result<anyhow::Result<T>, E>) -> anyhow::Result<T> {
     flatten_result_any(res.map_err(E::into))
 }
-pub fn flatten_result_with<C, T, E: Into<anyhow::Error>>(context: C, res: Result<anyhow::Result<T>, E>) -> anyhow::Result<T> where
+pub fn flatten_result_with<C, T, E: Into<anyhow::Error>>(
+    context: C,
+    res: Result<anyhow::Result<T>, E>,
+) -> anyhow::Result<T>
+where
     C: fmt::Display,
     Result<anyhow::Result<T>, E>: anyhow::Context<anyhow::Result<T>, E>,
 {

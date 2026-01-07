@@ -5,7 +5,7 @@ use {
         pack::{taco_safe_name, taco_xml_to_guid},
     },
     anyhow::Context,
-    glam::{EulerRot, Vec3, Quat},
+    glam::{EulerRot, Quat, Vec3},
     glamour::Point3,
     std::fmt,
     uuid::Uuid,
@@ -145,12 +145,11 @@ impl Poi {
             .unwrap_or(keys::Occlude::DEFAULT.into())
     }
     pub fn rotate(&self) -> Option<Vec3> {
-        self.attributes
-            .get_poi()
-            .and_then(|poi| poi.rotate)
+        self.attributes.get_poi().and_then(|poi| poi.rotate)
     }
     pub fn rotation(&self) -> Option<Quat> {
-        self.rotate().map(|r| Quat::from_euler(EulerRot::XYZ, r.x, r.y, r.z))
+        self.rotate()
+            .map(|r| Quat::from_euler(EulerRot::XYZ, r.x, r.y, r.z))
     }
 }
 

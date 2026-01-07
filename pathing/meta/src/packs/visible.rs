@@ -1,11 +1,13 @@
 use {
-    crate::ui::{MapContext, LocalContext},
+    crate::ui::{LocalContext, MapContext},
+    bitflags::bitflags,
     core::ops,
     taimi_hoard::flags::{
-        set::{BitFlagForSet, FlagSet, BitsOrder},
-        BitSlice, BitVec, BitView,
+        set::{BitFlagForSet, BitsOrder, FlagSet},
+        BitSlice,
+        BitVec,
+        BitView,
     },
-    bitflags::bitflags,
 };
 
 bitflags! {
@@ -27,10 +29,16 @@ impl VisibilityFlags {
     pub const TOGGLE_COUNT: usize = 4;
 
     pub const DEFAULTS: Self = Self::from_bits_retain(
-        Self::DEFAULT_TOGGLE.bits() | Self::DEFAULT_SPACE.bits() | Self::DEFAULT_GLOBAL.bits() | Self::DEFAULT_MINIMAP.bits()
+        Self::DEFAULT_TOGGLE.bits()
+            | Self::DEFAULT_SPACE.bits()
+            | Self::DEFAULT_GLOBAL.bits()
+            | Self::DEFAULT_MINIMAP.bits(),
     );
     pub const TOGGLES: Self = Self::from_bits_retain(
-        Self::TOGGLE.bits() | Self::TOGGLE_SPACE.bits() | Self::TOGGLE_GLOBAL.bits() | Self::TOGGLE_MINIMAP.bits()
+        Self::TOGGLE.bits()
+            | Self::TOGGLE_SPACE.bits()
+            | Self::TOGGLE_GLOBAL.bits()
+            | Self::TOGGLE_MINIMAP.bits(),
     );
 
     pub const fn visible(visible: bool) -> Self {
@@ -165,23 +173,19 @@ impl BitFlagForSet for VisibilityFlags {
     const BIT_WIDTH: usize = 4;
 
     fn as_bits(&self) -> &Self::Repr {
-        unsafe {
-            &*(self as *const Self as *const u8)
-        }
+        unsafe { &*(self as *const Self as *const u8) }
     }
     fn as_bits_mut(&mut self) -> &mut Self::Repr {
-        unsafe {
-            &mut *(self as *mut Self as *mut u8)
-        }
+        unsafe { &mut *(self as *mut Self as *mut u8) }
     }
     fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsOrder> {
-        unsafe {
-            self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH)
-        }
+        unsafe { self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH) }
     }
     fn as_bitslice_mut(&mut self) -> &mut BitSlice<Self::Repr, BitsOrder> {
         unsafe {
-            self.as_bits_mut().view_bits_mut().get_unchecked_mut(..Self::BIT_WIDTH)
+            self.as_bits_mut()
+                .view_bits_mut()
+                .get_unchecked_mut(..Self::BIT_WIDTH)
         }
     }
 

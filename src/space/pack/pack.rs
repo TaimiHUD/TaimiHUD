@@ -1,19 +1,60 @@
 use {
-    super::{render, PoiCommonRenderData}, crate::{
+    super::{render, PoiCommonRenderData},
+    crate::{
         controller::pathing::{
-            registry::{LoadedPoiNs, LoadedPoiPath, LoadedTrailNs, LoadedTrailIndex, LoadedPoiIndex, LoadedTrailPath, PackIndex, PackRegistryNs, PackVecOf}, shared::{SharedGameplayMap, SharedLoaderPacksInfo, SharedMapPackLoaded, SharedMapPackState, SharedPackInfo}, space::{SpacePackCollection, SpacePackShared, TrailGeometryRequests, TextureLoadRequests},
+            registry::{
+                LoadedPoiIndex,
+                LoadedPoiNs,
+                LoadedPoiPath,
+                LoadedTrailIndex,
+                LoadedTrailNs,
+                LoadedTrailPath,
+                PackIndex,
+                PackRegistryNs,
+                PackVecOf,
+            },
+            shared::{
+                SharedGameplayMap,
+                SharedLoaderPacksInfo,
+                SharedMapPackLoaded,
+                SharedMapPackState,
+                SharedPackInfo,
+            },
+            space::{SpacePackCollection, SpacePackShared, TextureLoadRequests, TrailGeometryRequests},
         },
         exports::runtime as rt,
         render::machine::{RenderMachine, RenderPosition},
         space::{
-            dx11::RenderBackend, pack::{PoiRender, TrailRender}, DrawSpace
+            dx11::RenderBackend,
+            pack::{PoiRender, TrailRender},
+            DrawSpace,
         },
     },
-    taimi_meta::spatial::cull::MapFrustum,
-    taimi_meta::packs::MapIndex,
-    anyhow::Context, bvh::aabb, glamour::{Box3, Point3}, rustc_hash::FxHashSet, std::{collections::BTreeSet, ops, sync::Arc
+    anyhow::Context,
+    bvh::aabb,
+    glamour::{Box3, Point3},
+    rustc_hash::FxHashSet,
+    std::{collections::BTreeSet, ops, sync::Arc},
+    taimi_d3d::dx11::prelude::*,
+    taimi_hoard::{
+        loc::{indexed::IndexedList, LocationMut, LocationRef},
+        statistics::Counter,
+    },
+    taimi_meta::{
+        packs::{
+            id::{MarkerId, MarkerIndex, MarkerIndexVariant},
+            MapIndex,
+            PackMapPath,
+            PoiIndex,
+            TrailSectionPath,
         },
-        taimi_d3d::dx11::prelude::*, taimi_hoard::{loc::{indexed::IndexedList, LocationMut, LocationRef}, statistics::Counter}, taimi_meta::{packs::{id::{MarkerIndexVariant, MarkerId, MarkerIndex}, PackMapPath, PoiIndex, TrailSectionPath}, spatial::box3aabb, ui::{LocalContext, MapContext}}, taimi_sync::{arcs::ArcPtrCmp, watched::{watch, Watched}},
+        spatial::{box3aabb, cull::MapFrustum},
+        ui::{LocalContext, MapContext},
+    },
+    taimi_sync::{
+        arcs::ArcPtrCmp,
+        watched::{watch, Watched},
+    },
 };
 
 /// Internal rendering data.
@@ -118,9 +159,7 @@ impl PackRender {
     /// won't render if not in a map, or if too early in load and
     /// more setup may be pending
     pub fn prepare(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<bool> {
-        let Some(pathing) = &machine.pathing else {
-            anyhow::bail!("no shared data")
-        };
+        let Some(pathing) = &machine.pathing else { anyhow::bail!("no shared data") };
         let packs_rx = self.packs_rx.get_or_insert_with(|| {
             let mut rx = pathing.packs.packs.subscribe();
             rx.mark_changed();
@@ -163,8 +202,7 @@ impl PackRender {
             self.mark_buffers_dirty();
         }
         let map_id = match self.render_list.spacepacks.map_id {
-            map_id if map_id != machine.is_ingame() =>
-                None,
+            map_id if map_id != machine.is_ingame() => None,
             map_id => map_id,
         };
         let prev_map_id = self.draw_state.prev_map_id;
@@ -179,18 +217,19 @@ impl PackRender {
                 _ => None,
             };
             match packs_changed {
-                Some(packs_map) if packs_map.map_id != map_id =>
-                    None,
+                Some(packs_map) if packs_map.map_id != map_id => None,
                 packs_map => packs_map,
             }
         };
         if prev_map_id.is_none() && space_dirty && self.spacepacks.render_entities.entities.len() > 0 {
-            let (pois, trails) = self.spacepacks.loaded_packs.values()
-                .fold((0usize, 0usize), |(mut pois, mut trails), p| {
+            let (pois, trails) = self.spacepacks.loaded_packs.values().fold(
+                (0usize, 0usize),
+                |(mut pois, mut trails), p| {
                     pois += p.populated_pois.count_ones();
                     trails += p.populated_trails.count_ones();
                     (pois, trails)
-                });
+                },
+            );
             log::info!("Loaded {trails} trails and {pois} POIs");
             // TODO: this will not trigger properly as items slowly load in...
         }
@@ -220,28 +259,40 @@ impl PackRender {
                         if let Some(map) = map {
                             pack.map_state.clone_from(map);
 
-                            let empty_trails = pack.trails.iter()
-                                .filter(|(path, trail)| {
-                                    if !trail.is_empty() { return false }
-                                    if map_info.info.is_trail_info_loaded(*path) { return false }
-                                    if let Some(ltrail) = map.trails().lookup_ref(path) {
-                                        if !ltrail.visibility.is_visible() { return false }
+                            let empty_trails = pack.trails.iter().filter(|(path, trail)| {
+                                if !trail.is_empty() {
+                                    return false
+                                }
+                                if map_info.info.is_trail_info_loaded(*path) {
+                                    return false
+                                }
+                                if let Some(ltrail) = map.trails().lookup_ref(path) {
+                                    if !ltrail.visibility.is_visible() {
+                                        return false
                                     }
-                                    true
-                                });
+                                }
+                                true
+                            });
                             for (ltrail_path, _trail) in empty_trails {
                                 // schedule geometry load imminently
                                 let ltrail_path = packmap_path.rel(ltrail_path.path);
-                                self.draw_state.drawn_incomplete.insert(SpacePackShared::trail_geometry_id(&ltrail_path));
+                                self.draw_state
+                                    .drawn_incomplete
+                                    .insert(SpacePackShared::trail_geometry_id(&ltrail_path));
                             }
                         }
 
                         #[cfg(todo)]
-                        for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info)) {
+                        for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info))
+                        {
                             poi.update(device, &pack.info, Some(lpoi))
                         }
                         #[cfg(todo)]
-                        for (trail, ltrail) in pack.trails.values_mut().zip(pack.map_state.loaded_trails(map_info)) {
+                        for (trail, ltrail) in pack
+                            .trails
+                            .values_mut()
+                            .zip(pack.map_state.loaded_trails(map_info))
+                        {
                             trail.update(device, &pack.info, Some(ltrail))
                         }
                     }
@@ -249,7 +300,9 @@ impl PackRender {
             }
             drop(packs_map_changed);
             for (ltrail_path, trail_incoming) in self.trail_rx.try_recv_fulfilled() {
-                self.draw_state.drawn_incomplete.remove(&SpacePackShared::trail_geometry_id(&ltrail_path));
+                self.draw_state
+                    .drawn_incomplete
+                    .remove(&SpacePackShared::trail_geometry_id(&ltrail_path));
                 match self.render_list.spacepacks.map_id {
                     Some(mid) if mid != ltrail_path.root.path => {
                         log::info!("received outdated geometry for {ltrail_path}?");
@@ -269,7 +322,9 @@ impl PackRender {
                 let res = match trail_incoming {
                     geometry if geometry.is_empty() => None,
                     geometry => rt::log::error_ok(
-                        trail.setup_geometry(device, geometry).context("loading trail geometry")
+                        trail
+                            .setup_geometry(device, geometry)
+                            .context("loading trail geometry"),
                     ),
                 };
                 if res.is_none() {
@@ -344,8 +399,7 @@ impl PackRender {
                             let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
                             let info = &pack_data.info;
                             match pack_data.pois.lookup_mut(&lpath) {
-                                Some(poi) if poi.needs_texture_info() =>
-                                    None,
+                                Some(poi) if poi.needs_texture_info() => None,
                                 poi => poi.map(move |r| (info, r)),
                             }
                         });
@@ -363,8 +417,7 @@ impl PackRender {
                             let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
                             let info = &pack_data.info;
                             match pack_data.trails.lookup_mut(&lpath) {
-                                Some(trail) if trail.needs_texture_info() =>
-                                    None,
+                                Some(trail) if trail.needs_texture_info() => None,
                                 trail => trail.map(move |r| (info, r)),
                             }
                         });
@@ -395,7 +448,11 @@ impl PackRender {
         // TODO: also skip or dealloc when mapid none and stuff
         let mut ibs_dirty = self.poi_common.is_empty() && map_id.is_some();
         if !ibs_dirty {
-            if self.pack_data.values().any(|p| p.render_poi_bookmarks().len() != p.pois.len()) {
+            if self
+                .pack_data
+                .values()
+                .any(|p| p.render_poi_bookmarks().len() != p.pois.len())
+            {
                 self.allocate_poi_buffers(1);
                 ibs_dirty = true;
             }
@@ -408,7 +465,9 @@ impl PackRender {
         }
         if self.poi_common.is_empty() || ibs_dirty {
             let ib_empty = self.poi_common.is_empty();
-            log::debug!("PATHY IBS needs creation: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}");
+            log::debug!(
+                "PATHY IBS needs creation: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}"
+            );
             self.recreate_buffers(device, machine)?;
             let ib_empty = self.poi_common.is_empty();
             let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
@@ -469,11 +528,9 @@ impl PackRender {
         device_context: &Dx11Context,
     ) {
         let Some(spacepacks) = self.spacepacks.cached.as_ref() else { return };
-        let entities = self.render_list.iter_markers_visible(
-            self.pack_data.map_ref_as_slice(),
-            frustum,
-            camera,
-        );
+        let entities =
+            self.render_list
+                .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
         Self::draw_entities(
             &mut self.draw_state,
             &self.poi_common,
@@ -491,11 +548,9 @@ impl PackRender {
         backend: &RenderBackend,
         device_context: &Dx11Context,
     ) {
-        let entities = self.render_list.iter_markers_visible(
-            self.pack_data.map_ref_as_slice(),
-            frustum,
-            camera,
-        );
+        let entities =
+            self.render_list
+                .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
         Self::draw_entities(
             &mut self.draw_state,
             &self.poi_common,
@@ -526,10 +581,13 @@ impl PackRender {
                         let (t, s) = render_id.index_trail_section_unchecked();
                         LoadedTrailPath::with_path(t).rel(TrailSectionPath::with_path(s))
                     };
-                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail|
-                        pack_data.map_state.trails().lookup_ref(&path.root)
-                        .map(|ltrail| (trail, ltrail))
-                    );
+                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail| {
+                        pack_data
+                            .map_state
+                            .trails()
+                            .lookup_ref(&path.root)
+                            .map(|ltrail| (trail, ltrail))
+                    });
                     let Some((trail, ltrail)) = trail else {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
@@ -603,10 +661,13 @@ impl PackRender {
                         let (t, s) = render_id.index_trail_section_unchecked();
                         LoadedTrailPath::with_path(t).rel(TrailSectionPath::with_path(s))
                     };
-                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail|
-                        pack_data.map_state.trails().lookup_ref(&path.root)
-                        .map(|ltrail| (trail, ltrail))
-                    );
+                    let trail = pack_data.trails.lookup_ref(&path.root).and_then(|trail| {
+                        pack_data
+                            .map_state
+                            .trails()
+                            .lookup_ref(&path.root)
+                            .map(|ltrail| (trail, ltrail))
+                    });
                     let Some((trail, ltrail)) = trail else {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
@@ -654,7 +715,11 @@ impl PackRender {
                         poi_common.set_vertex(device_context, ctx);
                     }
                     poi.bind_texture(device_context, poi_common, ctx);
-                    poi.draw(device_context, pack_data.render_poi_bookmark + path.path as usize, ctx);
+                    poi.draw(
+                        device_context,
+                        pack_data.render_poi_bookmark + path.path as usize,
+                        ctx,
+                    );
                 },
                 _ => {
                     log::error!("Render ID {render_id} refers to invalid marker {marker_id}");
@@ -716,10 +781,7 @@ pub struct PackRenderList {
 }
 impl PackRenderList {
     /// adding some wiggle room around the map edges...
-    pub fn map_bounds_to_query(
-        _map: MapContext,
-        mut bounds: Box3<DrawSpace>,
-    ) -> aabb::Aabb<f32, 3> {
+    pub fn map_bounds_to_query(_map: MapContext, mut bounds: Box3<DrawSpace>) -> aabb::Aabb<f32, 3> {
         let buffer = bounds.size() * 0.15;
         bounds.min.x -= buffer.width;
         bounds.min.z -= buffer.depth;
@@ -736,8 +798,7 @@ impl PackRenderList {
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
         self.spacepacks.bvh_traverse(query).filter_map(move |(_idx, id)| {
             let pack_path = id.get_marker_pack_path();
-            pack_data.lookup_ref(&pack_path)
-                .map(|p| (p, id))
+            pack_data.lookup_ref(&pack_path).map(|p| (p, id))
         })
     }
     pub fn iter_markers_all<'a, 'e>(
@@ -754,8 +815,7 @@ impl PackRenderList {
                 x = true;
                 log::info!("PATHY: {pack_path} of {id} missing?");
             }
-            pack
-                .map(|p| (p, id))
+            pack.map(|p| (p, id))
         })
     }
     pub fn iter_markers_visible<'a, 'e, Q: aabb::IntersectsAabb<f32, 3>>(
@@ -764,11 +824,11 @@ impl PackRenderList {
         query: &'a Q,
         camera: RenderPosition,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
-        self.iter_entities_visible(query, camera).filter_map(|(_idx, id)| {
-            let pack_path = id.get_marker_pack_path();
-            pack_data.lookup_ref(&pack_path)
-                .map(|p| (p, id))
-        })
+        self.iter_entities_visible(query, camera)
+            .filter_map(|(_idx, id)| {
+                let pack_path = id.get_marker_pack_path();
+                pack_data.lookup_ref(&pack_path).map(|p| (p, id))
+            })
     }
     fn iter_entities_visible<'a, Q: aabb::IntersectsAabb<f32, 3>>(
         &'a mut self,
@@ -797,9 +857,7 @@ impl PackRenderList {
             draw_order_heap: &mut self.draw_order_heap,
         };
         let iter = ordered.map(move |idx| {
-            let mid = unsafe {
-                shapes.get_unchecked(idx)
-            };
+            let mid = unsafe { shapes.get_unchecked(idx) };
             (idx, &mid.value.id)
         });
         iter

@@ -153,7 +153,11 @@ impl TextureLoader {
         .await
     }
 
-    pub fn lookup_pair_with<R, F: FnOnce(Option<&TextureKey>, &TextureSlot) -> R>(&self, key: &str, f: F) -> Option<R> {
+    pub fn lookup_pair_with<R, F: FnOnce(Option<&TextureKey>, &TextureSlot) -> R>(
+        &self,
+        key: &str,
+        f: F,
+    ) -> Option<R> {
         let textures = match &self.textures {
             // write locks are held so infrequently that we shouldn't need to care
             // (and if we need to, switch to a lock-free map instead or just cache the slot)
@@ -182,21 +186,17 @@ impl TextureLoader {
         let textures = match self.textures.read() {
             Ok(t) => t,
             // poisoned, goodbye
-            Err(..) => return Some(TextureSlot::Unavailable)
+            Err(..) => return Some(TextureSlot::Unavailable),
         };
         textures.get(key).cloned()
     }
     #[cfg(feature = "texture-loader")]
     pub fn lookup_resource(&self, key: &str) -> Option<Option<Arc<Texture>>> {
-        self.lookup_with(key, |t| {
-            t.resource()
-        })
+        self.lookup_with(key, |t| t.resource())
     }
 
     pub fn lookup_imgui(&self, key: &str) -> Option<Option<ImguiTexture>> {
-        self.lookup_with(key, |t| {
-            t.imgui_texture()
-        })
+        self.lookup_with(key, |t| t.imgui_texture())
     }
 
     /// produces a texture slot unless newly reserved
@@ -233,8 +233,7 @@ impl TextureLoader {
             Ok(t) => t,
             Err(..) => return None,
         };
-        textures.get_key_value(key)
-            .map(|(canon, _)| canon.clone())
+        textures.get_key_value(key).map(|(canon, _)| canon.clone())
     }
     /// expect temporary failure due to lock contention
     pub fn try_canonicalize_key_mut(&self, key: &mut TextureKey) -> Result<bool, ()> {
@@ -247,7 +246,7 @@ impl TextureLoader {
             match textures.get_key_value(key) {
                 None => return Ok(false),
                 Some((canon, _)) if Arc::as_ptr(canon) as *const () == ptr =>
-                    // already canon
+                // already canon
                     return Ok(true),
                 Some((canon, _)) => canon.clone(),
             }
@@ -303,7 +302,11 @@ impl TextureLoader {
         .map(move |()| key)
     }
 
-    pub fn report_load<K: Into<TextureKey>, T: Into<TextureSlot>>(&self, key: K, texture: anyhow::Result<T>) {
+    pub fn report_load<K: Into<TextureKey>, T: Into<TextureSlot>>(
+        &self,
+        key: K,
+        texture: anyhow::Result<T>,
+    ) {
         let key = key.into();
         let slot = match texture {
             Ok(slot) => slot.into(),

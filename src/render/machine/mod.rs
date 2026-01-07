@@ -12,9 +12,9 @@ use {
 #[cfg(feature = "space")]
 use {
     crate::{
-        controller::pathing::shared::{SharedGameplayMap, PathingShared},
-        space::engine::Engine,
+        controller::pathing::shared::{PathingShared, SharedGameplayMap},
         render::element::pack::PackElements,
+        space::engine::Engine,
     },
     std::{ops::Range, sync::Arc},
     taimi_sync::watched::Watched,
@@ -332,8 +332,10 @@ impl RenderMachine {
     pub fn turn_render_pre(&mut self) {
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
-            Controller::with_sender(|s| if let Some(pathing) = &s.pathing {
-                self.pathing = Some(pathing.shared.clone());
+            Controller::with_sender(|s| {
+                if let Some(pathing) = &s.pathing {
+                    self.pathing = Some(pathing.shared.clone());
+                }
             });
         }
         #[cfg(feature = "paths")]

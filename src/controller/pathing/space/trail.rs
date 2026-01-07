@@ -1,10 +1,7 @@
 use {
-    crate::{
-        resources::Vertex,
-        space::TextureSpace,
-    },
+    crate::{resources::Vertex, space::TextureSpace},
     core::f32,
-    glamour::{Point2, Vector3, Vec3Swizzles},
+    glamour::{Point2, Vec3Swizzles, Vector3},
     taimi_pack::trail::TrailSection,
 };
 
@@ -35,13 +32,14 @@ impl TrailParams {
     }
 
     pub fn smoothing(&self) -> Option<f32> {
-        self.smoothing.unwrap_or_else(||
+        self.smoothing.unwrap_or_else(|| {
             (self.resolution() > Self::DEFAULT_RESOLUTION).then_some(Self::DEFAULT_SMOOTHING)
-        )
+        })
     }
 
     pub fn resolution(&self) -> f32 {
-        self.resolution.unwrap_or_else(|| Self::WIDTH_FACTOR / self.width())
+        self.resolution
+            .unwrap_or_else(|| Self::WIDTH_FACTOR / self.width())
     }
 
     pub fn y_offset_for(&self, idx: usize) -> f32 {
@@ -57,9 +55,7 @@ impl TrailParams {
         if self.y_offset == 0.0 {
             return 0.0
         }
-        let pack_signature = pack.trails.len()
-            + pack.pois.len()
-            + pack.categories.all_categories.len();
+        let pack_signature = pack.trails.len() + pack.pois.len() + pack.categories.all_categories.len();
         self.y_offset_for(pack_signature ^ (path.path.wrapping_mul(73)))
     }
 
@@ -166,7 +162,13 @@ impl Default for TrailTextureMap {
 
 impl TrailParams {
     /// Interpolate points to be no more than 1/resolution metres apart.
-    pub fn interpolate_section_vertices(&self, vertices: &mut Vec<Vertex>, section: &TrailSection, scale: f32, is_wall: bool) {
+    pub fn interpolate_section_vertices(
+        &self,
+        vertices: &mut Vec<Vertex>,
+        section: &TrailSection,
+        scale: f32,
+        is_wall: bool,
+    ) {
         let width = self.width();
         let resolution = self.resolution();
         let smoothing = self.smoothing();

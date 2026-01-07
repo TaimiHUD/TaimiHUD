@@ -1,15 +1,29 @@
-use std::{borrow::Borrow, fmt, iter, mem};
-use uuid::Uuid;
-use {
-    taimi_hoard::loc::{locator_ns, Locator, NamespacePivotFrom, NamespaceTryConvTo},
-    crate::packs::{
-        CategoryIndex, CategoryPath, MapIndex, PackIndex, PackMapPath, PackPath, PackRegistryNs, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionPath, SectionOfTrail, MapPath,
-        PackPoiNs, PackTrailNs,
-    },
-};
-use uuid::Uuid as Guid;
 #[cfg(todo)]
 use taimi_pack::attributes::keys::Guid;
+use {
+    crate::packs::{
+        CategoryIndex,
+        CategoryPath,
+        MapIndex,
+        MapPath,
+        PackIndex,
+        PackMapPath,
+        PackPath,
+        PackPoiNs,
+        PackRegistryNs,
+        PackTrailNs,
+        PoiIndex,
+        PoiPath,
+        SectionOfTrail,
+        TrailIndex,
+        TrailPath,
+        TrailSectionIndex,
+        TrailSectionPath,
+    },
+    std::{borrow::Borrow, fmt, iter, mem},
+    taimi_hoard::loc::{locator_ns, Locator, NamespacePivotFrom, NamespaceTryConvTo},
+    uuid::{Uuid, Uuid as Guid},
+};
 
 locator_ns! {
     pub struct PackMarkerNs;
@@ -118,8 +132,7 @@ impl MarkerIndex {
     }
     pub const fn try_index_from(index: u32) -> Option<u32> {
         match index {
-            index @ 0..=Self::INDEX_MAX =>
-                Some(index),
+            index @ 0..=Self::INDEX_MAX => Some(index),
             _ => None,
         }
     }
@@ -212,8 +225,7 @@ pub enum MarkerIndexVariant {
 impl MarkerIndexVariant {
     pub fn from_index(index: MarkerIndex) -> Self {
         match (index.namespace(), index.index()) {
-            (MarkerIndex::NS_POI, poi @ 0..=MarkerIndex::INDEX_MAX_POI) =>
-                Self::Poi(poi as PoiIndex),
+            (MarkerIndex::NS_POI, poi @ 0..=MarkerIndex::INDEX_MAX_POI) => Self::Poi(poi as PoiIndex),
             (MarkerIndex::NS_CAT, cat @ 0..=MarkerIndex::INDEX_MAX_CAT) =>
                 Self::Category(cat as CategoryIndex),
             (MarkerIndex::NS_TRAIL, trail @ 0..=MarkerIndex::INDEX_MAX_TRAIL) =>
@@ -222,10 +234,8 @@ impl MarkerIndexVariant {
                 let trail = (trail & !MarkerIndex::EXTRA_MASK_TRAIL) as TrailIndex;
                 Self::TrailSection(trail, index.trail_section_unchecked())
             },
-            (ns, MarkerIndex::INDEX_INVALID) =>
-                Self::Invalid(ns),
-            _ =>
-                Self::Unknown(index),
+            (ns, MarkerIndex::INDEX_INVALID) => Self::Invalid(ns),
+            _ => Self::Unknown(index),
         }
     }
 }
@@ -276,9 +286,8 @@ impl NamespacePivotFrom<TrailPath, TrailSectionPath> for PackMarkerNs {
 impl NamespaceTryConvTo<MarkerIndex, TrailPath> for PackMarkerNs {
     fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<TrailPath> {
         match path.path.variant() {
-            | MarkerIndexVariant::Trail(i)
-            | MarkerIndexVariant::TrailSection(i, _)
-                => Some(TrailPath::with_path(i)),
+            | MarkerIndexVariant::Trail(i) | MarkerIndexVariant::TrailSection(i, _) =>
+                Some(TrailPath::with_path(i)),
             _ => None,
         }
     }
@@ -286,8 +295,7 @@ impl NamespaceTryConvTo<MarkerIndex, TrailPath> for PackMarkerNs {
 impl NamespaceTryConvTo<MarkerIndex, TrailSectionPath> for PackMarkerNs {
     fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<TrailSectionPath> {
         match path.path.variant() {
-            MarkerIndexVariant::TrailSection(_, section)
-                => Some(TrailSectionPath::with_path(section)),
+            MarkerIndexVariant::TrailSection(_, section) => Some(TrailSectionPath::with_path(section)),
             _ => None,
         }
     }
@@ -295,19 +303,20 @@ impl NamespaceTryConvTo<MarkerIndex, TrailSectionPath> for PackMarkerNs {
 impl NamespaceTryConvTo<MarkerIndex, SectionOfTrail> for PackMarkerNs {
     fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<SectionOfTrail> {
         match path.path.variant() {
-            MarkerIndexVariant::TrailSection(i, section)
-                => Some(TrailPath::with_path(i).rel(TrailSectionPath::with_path(section))),
+            MarkerIndexVariant::TrailSection(i, section) =>
+                Some(TrailPath::with_path(i).rel(TrailSectionPath::with_path(section))),
             _ => None,
         }
     }
 }
 impl NamespaceTryConvTo<MarkerIndex, Locator<TrailPath, Option<TrailSectionPath>>> for PackMarkerNs {
-    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<Locator<TrailPath, Option<TrailSectionPath>>> {
+    fn try_conv_to(
+        path: Locator<Self, MarkerIndex>,
+    ) -> Option<Locator<TrailPath, Option<TrailSectionPath>>> {
         match path.path.variant() {
-            MarkerIndexVariant::Trail(i) =>
-                Some(TrailPath::with_path(i).rel(None)),
-            MarkerIndexVariant::TrailSection(i, section)
-                => Some(TrailPath::with_path(i).rel(Some(TrailSectionPath::with_path(section)))),
+            MarkerIndexVariant::Trail(i) => Some(TrailPath::with_path(i).rel(None)),
+            MarkerIndexVariant::TrailSection(i, section) =>
+                Some(TrailPath::with_path(i).rel(Some(TrailSectionPath::with_path(section)))),
             _ => None,
         }
     }
@@ -315,8 +324,7 @@ impl NamespaceTryConvTo<MarkerIndex, Locator<TrailPath, Option<TrailSectionPath>
 impl NamespaceTryConvTo<MarkerIndex, PoiPath> for PackMarkerNs {
     fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<PoiPath> {
         match path.path.variant() {
-            MarkerIndexVariant::Poi(i) =>
-                Some(PoiPath::with_path(i)),
+            MarkerIndexVariant::Poi(i) => Some(PoiPath::with_path(i)),
             _ => None,
         }
     }
@@ -324,8 +332,7 @@ impl NamespaceTryConvTo<MarkerIndex, PoiPath> for PackMarkerNs {
 impl NamespaceTryConvTo<MarkerIndex, CategoryPath> for PackMarkerNs {
     fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<CategoryPath> {
         match path.path.variant() {
-            MarkerIndexVariant::Category(i) =>
-                Some(CategoryPath::with_path(i)),
+            MarkerIndexVariant::Category(i) => Some(CategoryPath::with_path(i)),
             _ => None,
         }
     }
@@ -357,9 +364,7 @@ impl MarkerId {
         Self { uuid }
     }
     pub const fn from_uuid_ref(uuid: &Uuid) -> &Self {
-        unsafe {
-            mem::transmute(uuid)
-        }
+        unsafe { mem::transmute(uuid) }
     }
     #[cfg(todo)]
     pub const fn with_guid(guid: Guid) -> Self {}
@@ -370,7 +375,9 @@ impl MarkerId {
     ///
     /// See also: [Uuid::from_fields]
     pub fn with_uuidv8_fields(d1: u32, d2: u16, d3: u16, d4: &[u8; 8]) -> Self {
-        let bytes = uuid::Builder::from_fields(d1, d2, d3, d4).into_uuid().into_bytes();
+        let bytes = uuid::Builder::from_fields(d1, d2, d3, d4)
+            .into_uuid()
+            .into_bytes();
         let uuid = uuid::Builder::from_custom_bytes(bytes).into_uuid();
         Self::with_uuid(uuid)
     }
@@ -383,12 +390,7 @@ impl MarkerId {
             *out_ns01 = (ns0 << 4) | ns1;
             d4
         };
-        Self::with_uuidv8_fields(
-            index0,
-            index1,
-            index2,
-            &d4,
-        )
+        Self::with_uuidv8_fields(index0, index1, index2, &d4)
     }
     pub fn for_marker<N: MarkerId1, P: Into<MarkerIndex>>(marker: Locator<N, P>) -> Self {
         let path = marker.path.into();
@@ -411,20 +413,14 @@ impl MarkerId {
     }
     pub fn index0(&self) -> u32 {
         let bytes = self.uuid.as_bytes();
-        let index0 = unsafe {
-            &*(bytes as *const [u8; 16] as *const [u8; 4])
-        };
-        u32::from_ne_bytes(*index0)
-            .swap_bytes()
+        let index0 = unsafe { &*(bytes as *const [u8; 16] as *const [u8; 4]) };
+        u32::from_ne_bytes(*index0).swap_bytes()
     }
     pub fn index12(&self) -> (u16, u16) {
         let bytes = self.uuid.as_bytes();
         let (index1, index2) = unsafe {
             let bytes = bytes as *const [u8; 16] as *const [u8; 2];
-            (
-                &*bytes.add(2),
-                &*bytes.add(3),
-            )
+            (&*bytes.add(2), &*bytes.add(3))
         };
         let index1 = u16::from_ne_bytes(*index1).swap_bytes();
         let index2 = u16::from_ne_bytes(*index2).swap_bytes();
@@ -448,17 +444,13 @@ impl MarkerId {
     }
     pub fn index3(&self) -> u64 {
         let bytes = self.uuid.as_bytes();
-        let index3 = unsafe {
-            &*(bytes as *const [u8; 16] as *const [u8; 8]).add(1)
-        };
-        u64::from_ne_bytes(*index3)
-            .swap_bytes() >> 8
+        let index3 = unsafe { &*(bytes as *const [u8; 16] as *const [u8; 8]).add(1) };
+        u64::from_ne_bytes(*index3).swap_bytes() >> 8
     }
 
     pub fn marker_index(&self) -> Option<MarkerIndex> {
         match self.ns01() {
-            (Self::NS0_MARKER, _ns1) =>
-                Some(self.get_marker_index()),
+            (Self::NS0_MARKER, _ns1) => Some(self.get_marker_index()),
             _ => None,
         }
     }
@@ -500,26 +492,27 @@ impl MarkerId {
         MarkerPath::with_parts(self.get_marker_pack_path(), self.get_marker_index())
     }
 
-    fn new_uuidv3_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
+    fn new_uuidv3_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid
+    where
         'n: 'b,
     {
-        let bytes = iter::once(&ns.as_bytes()[..])
-            .chain(bytes);
+        let bytes = iter::once(&ns.as_bytes()[..]).chain(bytes);
         let hash = hash_bytes_md5(bytes);
         let uuid = uuid::Builder::from_md5_bytes(hash).into_uuid();
         uuid
     }
     #[cfg(feature = "sha1_smol")]
-    fn new_uuidv5_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
+    fn new_uuidv5_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid
+    where
         'n: 'b,
     {
-        let bytes = iter::once(&ns.as_bytes()[..])
-            .chain(bytes);
+        let bytes = iter::once(&ns.as_bytes()[..]).chain(bytes);
         let hash = hash_bytes_sha1(bytes);
         let uuid = uuid::Builder::from_sha1_bytes(hash).into_uuid();
         uuid
     }
-    fn new_uuid_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid where
+    fn new_uuid_namespace<'n, 'b, B: IntoIterator<Item = &'b [u8]>>(ns: &'n Uuid, bytes: B) -> Uuid
+    where
         'n: 'b,
     {
         match ns {
@@ -626,9 +619,15 @@ pub trait FromMarkerId1 {
     fn from_index12(index1: u16, index2: u16) -> Self;
 }
 impl MarkerId1 for PackMarkerNs {
-    fn ns1(&self) -> u8 { MarkerId::NS1_REGISTRY }
-    fn index1(&self) -> u16 { 0 }
-    fn index2(&self) -> u16 { 0 }
+    fn ns1(&self) -> u8 {
+        MarkerId::NS1_REGISTRY
+    }
+    fn index1(&self) -> u16 {
+        0
+    }
+    fn index2(&self) -> u16 {
+        0
+    }
 }
 impl FromMarkerId1 for PackMarkerNs {
     const NS1: u8 = MarkerId::NS1_REGISTRY;
@@ -639,9 +638,15 @@ impl FromMarkerId1 for PackMarkerNs {
     }
 }
 impl MarkerId1 for PackRegistryNs {
-    fn ns1(&self) -> u8 { MarkerId::NS1_REGISTRY }
-    fn index1(&self) -> u16 { 0 }
-    fn index2(&self) -> u16 { 0 }
+    fn ns1(&self) -> u8 {
+        MarkerId::NS1_REGISTRY
+    }
+    fn index1(&self) -> u16 {
+        0
+    }
+    fn index2(&self) -> u16 {
+        0
+    }
 }
 impl FromMarkerId1 for PackRegistryNs {
     const NS1: u8 = MarkerId::NS1_REGISTRY;
@@ -652,9 +657,15 @@ impl FromMarkerId1 for PackRegistryNs {
     }
 }
 impl MarkerId1 for PackPath {
-    fn ns1(&self) -> u8 { MarkerId::NS1_PACK }
-    fn index1(&self) -> u16 { 0 }
-    fn index2(&self) -> u16 { self.path as u16 }
+    fn ns1(&self) -> u8 {
+        MarkerId::NS1_PACK
+    }
+    fn index1(&self) -> u16 {
+        0
+    }
+    fn index2(&self) -> u16 {
+        self.path as u16
+    }
 }
 impl FromMarkerId1 for PackPath {
     const NS1: u8 = MarkerId::NS1_PACK;
@@ -664,9 +675,15 @@ impl FromMarkerId1 for PackPath {
     }
 }
 impl MarkerId1 for PackMapPath {
-    fn ns1(&self) -> u8 { MarkerId::NS1_PACK_MAP }
-    fn index1(&self) -> u16 { self.path.get() as u16 }
-    fn index2(&self) -> u16 { self.root.index2() }
+    fn ns1(&self) -> u8 {
+        MarkerId::NS1_PACK_MAP
+    }
+    fn index1(&self) -> u16 {
+        self.path.get() as u16
+    }
+    fn index2(&self) -> u16 {
+        self.root.index2()
+    }
 }
 impl FromMarkerId1 for PackMapPath {
     const NS1: u8 = MarkerId::NS1_PACK_MAP;
@@ -704,12 +721,9 @@ pub enum IdVariant {
 impl IdVariant {
     pub fn from_uuid(uuid: &Uuid) -> Self {
         match (uuid.get_variant(), uuid.get_version_num()) {
-            (uuid::Variant::NCS, 0) =>
-                Self::Empty,
-            (uuid::Variant::RFC4122, 4) =>
-                Self::Group,
-            (uuid::Variant::RFC4122, 5) =>
-                Self::PackRef,
+            (uuid::Variant::NCS, 0) => Self::Empty,
+            (uuid::Variant::RFC4122, 4) => Self::Group,
+            (uuid::Variant::RFC4122, 5) => Self::PackRef,
             (uuid::Variant::RFC4122, 8) => {
                 let id = MarkerId::from_uuid_ref(uuid);
                 let ns01 = id.ns01();
@@ -718,18 +732,21 @@ impl IdVariant {
                     MarkerId::NS1_PACK => id.marker_path().map(Self::MarkerRegistered),
                     MarkerId::NS1_PACK_MAP => id.marker_path().map(Self::MarkerLoaded),
                     _ => None,
-                }.unwrap_or(Self::Unknown)
+                }
+                .unwrap_or(Self::Unknown)
             },
             _ => Self::Unknown,
         }
     }
 }
 
-pub const NAMESPACE_PACK_CATEGORY: Uuid = match Uuid::try_parse_ascii(b"3102bb82-0ae3-4433-853a-dc53265bfb8a") {
-    Ok(uuid) => uuid,
-    Err(..) => unreachable!(),
-};
-pub const NAMESPACE_PACK_PARENT: Uuid = match Uuid::try_parse_ascii(b"5a4d8880-7dc2-4e91-b1b9-843f6ba34f1f") {
+pub const NAMESPACE_PACK_CATEGORY: Uuid =
+    match Uuid::try_parse_ascii(b"3102bb82-0ae3-4433-853a-dc53265bfb8a") {
+        Ok(uuid) => uuid,
+        Err(..) => unreachable!(),
+    };
+pub const NAMESPACE_PACK_PARENT: Uuid = match Uuid::try_parse_ascii(b"5a4d8880-7dc2-4e91-b1b9-843f6ba34f1f")
+{
     Ok(uuid) => uuid,
     Err(..) => unreachable!(),
 };
@@ -789,11 +806,20 @@ fn marker_id_paths() {
 
     let trail_section_path = MarkerPath::with_parts(map_path, MarkerIndex::with_trail_section(4001, 101));
     test_map_marker(trail_section_path);
-    assert!(matches!(trail_section_path.path.variant(), MarkerIndexVariant::TrailSection(4001, 101)));
-    test_map_marker(MarkerPath::with_parts(map_path, MarkerIndex::with_trail_section(4001, 0)));
+    assert!(matches!(
+        trail_section_path.path.variant(),
+        MarkerIndexVariant::TrailSection(4001, 101)
+    ));
+    test_map_marker(MarkerPath::with_parts(
+        map_path,
+        MarkerIndex::with_trail_section(4001, 0),
+    ));
     let trail_path = MarkerPath::with_parts(map_path, MarkerIndex::with_trail(4001));
     test_map_marker(trail_path);
-    assert!(matches!(trail_path.path.variant(), MarkerIndexVariant::Trail(4001)));
+    assert!(matches!(
+        trail_path.path.variant(),
+        MarkerIndexVariant::Trail(4001)
+    ));
     {
         let (empty_trail, empty_trail_section) = trail_path.path.index_trail_section_unchecked();
         assert_eq!(empty_trail, 4001);

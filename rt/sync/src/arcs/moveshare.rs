@@ -8,9 +8,11 @@
 //! Prefer [watched](crate::watched) over this unless you really want a single
 //! exclusive receiver (render thread for example)
 
-use std::sync::{Arc, Mutex, Weak};
-use core::{marker::PhantomData, mem, num::NonZero, ops};
-use crate::{PoisonError, drop_poison};
+use {
+    crate::{drop_poison, PoisonError},
+    core::{marker::PhantomData, mem, num::NonZero, ops},
+    std::sync::{Arc, Mutex, Weak},
+};
 
 pub struct MoveShareArc<T: ?Sized> {
     pub inner: MoveShareInner<T>,
@@ -38,7 +40,10 @@ impl<T: ?Sized> MoveShareArc<T> {
     pub fn write_inplace<R, F: FnOnce(&mut Arc<T>) -> R>(&self, f: F) -> Result<R, PoisonError<()>> {
         Self::inner_with(&self.inner, f)
     }
-    fn inner_with<R, F: FnOnce(&mut Arc<T>) -> R>(inner: &MoveShareInner<T>, f: F) -> Result<R, PoisonError<()>> {
+    fn inner_with<R, F: FnOnce(&mut Arc<T>) -> R>(
+        inner: &MoveShareInner<T>,
+        f: F,
+    ) -> Result<R, PoisonError<()>> {
         let mut inner = inner.lock().map_err(drop_poison)?;
         Ok(f(&mut inner))
     }
@@ -119,7 +124,8 @@ impl<T: Clone> MoveShare<T> {
 
     /// hopefully clones are cheap or this particular write is unlikely to
     /// require committing the change!
-    pub fn work_with<R, F: FnOnce(&mut T, &mut bool) -> R>(&mut self, f: F) -> Result<R, PoisonError<()>> where
+    pub fn work_with<R, F: FnOnce(&mut T, &mut bool) -> R>(&mut self, f: F) -> Result<R, PoisonError<()>>
+    where
         T: Clone,
     {
         let working = match &mut self.working {
@@ -137,7 +143,10 @@ impl<T: Clone> MoveShare<T> {
         }
         Ok(res)
     }
-    pub fn write_inplace<R, F: FnOnce(&mut Arc<T>, &mut bool) -> R>(&mut self, f: F) -> Result<R, PoisonError<()>> {
+    pub fn write_inplace<R, F: FnOnce(&mut Arc<T>, &mut bool) -> R>(
+        &mut self,
+        f: F,
+    ) -> Result<R, PoisonError<()>> {
         let mut commit = true;
         let res = self.inner.write_inplace(|i| f(i, &mut commit));
         if commit {
@@ -161,7 +170,10 @@ impl<T> ops::DerefMut for MoveShare<T> {
 }
 impl<T> Clone for MoveShare<T> {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), working: None }
+        Self {
+            inner: self.inner.clone(),
+            working: None,
+        }
     }
 }
 
@@ -189,7 +201,8 @@ impl<T: ?Sized> MoveShared<T> {
     /// please don't thanks
     #[doc(hidden)]
     pub fn subscribe_unchecked_unsized(share: &MoveShareArc<T>) -> Self {
-        let handle = share.write_inplace(|i| Arc::downgrade(i))
+        let handle = share
+            .write_inplace(|i| Arc::downgrade(i))
             .expect("MoveShared::subscribe");
         Self {
             inner: share.inner.clone(),
@@ -265,12 +278,14 @@ impl<T: ?Sized> MoveShared<T> {
         let is_outdated = match (&self.handle, &self.prev) {
             #[cfg(todo)]
             (h, None) if weak_is_null(h) =>
-                // requires Sized bound bleh
+            // requires Sized bound bleh
                 true,
             _ => {
                 let outdated_strong = match self.prev.as_ref() {
-                    Some(prev) if Arc::as_ptr(prev) as *const () as usize == Weak::as_ptr(&self.handle) as *const () as usize =>
-                        // if we hold a backup, 1 indicates the sender has updated since
+                    Some(prev)
+                        if Arc::as_ptr(prev) as *const () as usize
+                            == Weak::as_ptr(&self.handle) as *const () as usize =>
+                    // if we hold a backup, 1 indicates the sender has updated since
                         1,
                     _ => 0,
                 };
@@ -296,14 +311,10 @@ impl<T: ?Sized> MoveShared<T> {
             }
         }
         let v = match (&mut self.prev, upgrade) {
-            (prev, Some(upgrade)) => {
-                &*prev.insert(upgrade)
-            },
+            (prev, Some(upgrade)) => &*prev.insert(upgrade),
             #[cfg(debug_assertions)]
             (None, None) => unreachable!(),
-            (prev, None) => unsafe {
-                prev.as_ref().unwrap_unchecked()
-            },
+            (prev, None) => unsafe { prev.as_ref().unwrap_unchecked() },
         };
         match failed_upgrade {
             true => Err(v),
@@ -322,9 +333,7 @@ impl<T: ?Sized> MoveShared<T> {
             true => self.prev.take(),
             false => self.prev.clone(),
         };
-        MoveSharedRef::from_inner(unsafe {
-            v.unwrap_unchecked()
-        })
+        MoveSharedRef::from_inner(unsafe { v.unwrap_unchecked() })
     }
 }
 
@@ -336,28 +345,21 @@ pub type MoveShareInner<T> = Arc<Mutex<Arc<T>>>;
 pub struct MoveSharedRef<'s, T: ?Sized> {
     /// please don't steal or clone this thanks
     pub inner: Arc<T>,
-    pub _borrow: PhantomData<&'s MoveShared<T>>
+    pub _borrow: PhantomData<&'s MoveShared<T>>,
 }
 #[doc(hidden)]
 impl<T: ?Sized> MoveSharedRef<'_, T> {
     #[inline]
     pub const fn from_inner(inner: Arc<T>) -> Self {
-        Self {
-            inner,
-            _borrow: PhantomData,
-        }
+        Self { inner, _borrow: PhantomData }
     }
     #[inline]
     pub const fn from_ref(inner: &Arc<T>) -> &Self {
-        unsafe {
-            mem::transmute(inner)
-        }
+        unsafe { mem::transmute(inner) }
     }
     #[inline]
     pub const fn from_mut(inner: &mut Arc<T>) -> &mut Self {
-        unsafe {
-            mem::transmute(inner)
-        }
+        unsafe { mem::transmute(inner) }
     }
 }
 impl<T: ?Sized> ops::Deref for MoveSharedRef<'_, T> {

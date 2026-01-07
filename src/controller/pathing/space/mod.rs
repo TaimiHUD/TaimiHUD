@@ -1,34 +1,48 @@
 use {
-    crate::{controller::{
-        pathing::{
-            visible::{LoadedMapPack, LoadedTrailGeometry, LoadedTrail},
-            PathingController, PathingEvent,
-            registry::{LoadedTrailPath, LoadedMarkerPath, PackLoader, LoadedPoiPath, SharedLoaderBox},
-            shared::{SharedGameplayMap, PathingShared, SharedPackInfo, LoadReport, TrailGeometrySections},
-            visible::LoadedTrailSection,
+    crate::{
+        controller::{
+            pathing::{
+                registry::{LoadedMarkerPath, LoadedPoiPath, LoadedTrailPath, PackLoader, SharedLoaderBox},
+                shared::{
+                    LoadReport,
+                    PathingShared,
+                    SharedGameplayMap,
+                    SharedPackInfo,
+                    TrailGeometrySections,
+                },
+                visible::{LoadedMapPack, LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
+                PathingController,
+                PathingEvent,
+            },
+            Controller,
         },
-        Controller,
-    }, exports::runtime::{self as rt, textures::{TextureSlot, TextureKey}}, TEXTURES},
-    anyhow::Context,
-    futures::future::{Future, Either},
-    std::collections::BTreeSet,
-    std::sync::Arc,
-    taimi_meta::packs::{
-        id::{MarkerId, MarkerIndexVariant}, PackMapPath,
+        exports::runtime::{
+            self as rt,
+            textures::{TextureKey, TextureSlot},
+        },
+        TEXTURES,
     },
-    taimi_hoard::loc::{LocationRef, LocationMut, Locator},
-    taimi_sync::watched::watch,
+    anyhow::Context,
+    futures::future::{Either, Future},
+    std::{collections::BTreeSet, sync::Arc},
+    taimi_hoard::loc::{LocationMut, LocationRef, Locator},
+    taimi_meta::packs::{
+        id::{MarkerId, MarkerIndexVariant},
+        PackMapPath,
+    },
     taimi_pack::{
         attributes::AttrString,
-        trail::{TrlPath, TrailData},
         loader::PackLoaderContext,
+        trail::{TrailData, TrlPath},
     },
+    taimi_sync::watched::watch,
 };
+
 #[doc(inline)]
 pub use self::{
+    pack::{SpacePack, SpacePackCollection},
     poi::PoiScale,
     trail::{TrailParams, TrailScale, TrailTextureMap},
-    pack::{SpacePack, SpacePackCollection},
 };
 #[doc(no_inline)]
 pub use super::PackSpace as DrawSpace;
@@ -59,18 +73,28 @@ impl SpaceContext {
     pub fn mark_inputs_dirty(&mut self) {
         self.maps_rx.mark_changed();
     }
-    pub async fn recv_trail_requests(trail_geometry: &mut TrailGeometryRequests, inflight: &BTreeSet<MarkerId>) -> impl Iterator<Item = LoadedTrailPath<PackMapPath>> {
-        let reqs = trail_geometry.recv_requests(|path| {
-            let id = SpacePackShared::trail_geometry_id(path);
-            !inflight.contains(&id)
-        }).await;
+    pub async fn recv_trail_requests(
+        trail_geometry: &mut TrailGeometryRequests,
+        inflight: &BTreeSet<MarkerId>,
+    ) -> impl Iterator<Item = LoadedTrailPath<PackMapPath>> {
+        let reqs = trail_geometry
+            .recv_requests(|path| {
+                let id = SpacePackShared::trail_geometry_id(path);
+                !inflight.contains(&id)
+            })
+            .await;
         reqs.into_iter()
     }
-    pub async fn recv_texture_requests(texture_loads: &mut TextureLoadRequests, inflight: &BTreeSet<MarkerId>) -> impl Iterator<Item = LoadedMarkerPath<PackMapPath>> {
-        let reqs = texture_loads.recv_requests(|path| {
-            let id = MarkerId::for_marker(*path);
-            !inflight.contains(&id)
-        }).await;
+    pub async fn recv_texture_requests(
+        texture_loads: &mut TextureLoadRequests,
+        inflight: &BTreeSet<MarkerId>,
+    ) -> impl Iterator<Item = LoadedMarkerPath<PackMapPath>> {
+        let reqs = texture_loads
+            .recv_requests(|path| {
+                let id = MarkerId::for_marker(*path);
+                !inflight.contains(&id)
+            })
+            .await;
         reqs.into_iter()
     }
 
@@ -86,8 +110,7 @@ impl SpaceContext {
                 let lpath = path.root.rel(path.path.path);
                 let id = SpacePackShared::trail_geometry_id(&lpath);
                 self.inflight.remove(&id);
-                let geometry = rt::log::error_ok(geometry)
-                    .unwrap_or_else(LoadedTrailGeometry::empty);
+                let geometry = rt::log::error_ok(geometry).unwrap_or_else(LoadedTrailGeometry::empty);
                 self.trail_geometry.fill_request(lpath, geometry);
             },
         }
@@ -99,17 +122,26 @@ impl PathingController {
     pub(super) async fn report_load(&mut self, mut loaded: LoadReport) {
         match &mut loaded {
             LoadReport::TrailGeometry { path, section_info, .. } => {
-                let info = section_info.take()
-                    .and_then(|si| self.map_info.lookup_mut(&path.root)
+                let info = section_info.take().and_then(|si| {
+                    self.map_info
+                        .lookup_mut(&path.root)
                         .map(|map_info| (si, map_info))
-                    );
+                });
                 if let Some((section_info, map_info)) = info {
-                    let dirty = map_info.info.trail_info.lookup_ref(&path.path).and_then(|ti| ti.sections.as_ref())
-                        .map(|si| &si.data[..]) != Some(&section_info[..]);
+                    let dirty = map_info
+                        .info
+                        .trail_info
+                        .lookup_ref(&path.path)
+                        .and_then(|ti| ti.sections.as_ref())
+                        .map(|si| &si.data[..])
+                        != Some(&section_info[..]);
                     if dirty {
-                        Arc::make_mut(&mut map_info.info).update_trail_section_info(path.path, section_info);
+                        Arc::make_mut(&mut map_info.info)
+                            .update_trail_section_info(path.path, section_info);
                         // TODO: batch/delay these updates weh
-                        self.loader.shared.update_map_info(path.root, &map_info.info, true);
+                        self.loader
+                            .shared
+                            .update_map_info(path.root, &map_info.info, true);
                     }
                 }
             },
@@ -125,12 +157,11 @@ impl PathingController {
                     None => {
                         log::error!("PATHY: missing {lpath} on {}", map.map_id);
                     },
-                    Some(lpoi) => {
+                    Some(lpoi) =>
                         if lpoi.poi_attrs().icon_file.is_none() {
                             log::error!("PATHY: missing icon on {lpath}???");
                             log::error!("{:?}", lpoi.render_attrs());
-                        }
-                    }
+                        },
                 }
                 map.lpois().lookup_ref(&lpath)?.poi_attrs().icon_file.as_ref()
             },
@@ -154,7 +185,10 @@ impl PathingController {
             return
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
-            let texture = self.maps.lookup_ref(&path.root).map(|map| Self::texture_for_loaded_marker(map, path.unscope()).cloned());
+            let texture = self
+                .maps
+                .lookup_ref(&path.root)
+                .map(|map| Self::texture_for_loaded_marker(map, path.unscope()).cloned());
             (path, texture)
         });
         let Some((path, texture)) = path else {
@@ -173,16 +207,19 @@ impl PathingController {
             log::info!("duplicate load request for {id}");
             return
         }
-        let path = id.marker_path::<PackMapPath>().and_then(|path| match path.path.variant() {
-            MarkerIndexVariant::Trail(traili) | MarkerIndexVariant::TrailSection(traili, _) => {
-                let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
-                let trl = self.maps.lookup_ref(&path.root).and_then(|map|
-                    Self::trl_for_loaded_trail(map, lpath)
-                );
-                Some((path.root.rel(lpath), trl))
-            },
-            _ => None,
-        });
+        let path = id
+            .marker_path::<PackMapPath>()
+            .and_then(|path| match path.path.variant() {
+                MarkerIndexVariant::Trail(traili) | MarkerIndexVariant::TrailSection(traili, _) => {
+                    let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
+                    let trl = self
+                        .maps
+                        .lookup_ref(&path.root)
+                        .and_then(|map| Self::trl_for_loaded_trail(map, lpath));
+                    Some((path.root.rel(lpath), trl))
+                },
+                _ => None,
+            });
         let Some((path, trl)) = path else {
             log::error!("invalid trail load request for {id}");
             self.space.inflight.remove(&id);
@@ -192,81 +229,115 @@ impl PathingController {
         let _cancel = self.tasks.spawn(load);
     }
 
-    fn new_task_trail_load(manager: Arc<PackLoader>, path: Locator<PackMapPath, LoadedTrailPath>, trl: Option<TrlLoadContext>) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
+    fn new_task_trail_load(
+        manager: Arc<PackLoader>,
+        path: Locator<PackMapPath, LoadedTrailPath>,
+        trl: Option<TrlLoadContext>,
+    ) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
         Self::task_trail_load(manager, path, trl)
     }
-    async fn task_trail_load(manager: Arc<PackLoader>, path: Locator<PackMapPath, LoadedTrailPath>, trl: Option<TrlLoadContext>) -> anyhow::Result<PathingEvent> {
+    async fn task_trail_load(
+        manager: Arc<PackLoader>,
+        path: Locator<PackMapPath, LoadedTrailPath>,
+        trl: Option<TrlLoadContext>,
+    ) -> anyhow::Result<PathingEvent> {
         let loader = manager.pack_loader_for(path.root.root).await?;
         let geometry = async move {
             let trl = trl.context("TODO: late-load trl context")?;
             Self::trail_load_geometry(&manager, path, loader, trl).await
-        }.await;
+        }
+        .await;
         let (geometry, section_info) = match geometry {
             Ok((geometry, section_info)) => (Ok(geometry), Some(section_info)),
             Err(e) => (Err(e), None),
         };
-        let response = LoadReport::TrailGeometry {
-            path,
-            geometry,
-            section_info,
-        };
+        let response = LoadReport::TrailGeometry { path, geometry, section_info };
         Ok(PathingEvent::ReportResourceLoaded(response))
     }
-    async fn trail_load_geometry(manager: &PackLoader, path: Locator<PackMapPath, LoadedTrailPath>, loader: SharedLoaderBox, ctx: TrlLoadContext) -> anyhow::Result<(LoadedTrailGeometry, TrailGeometrySections)> {
+    async fn trail_load_geometry(
+        manager: &PackLoader,
+        path: Locator<PackMapPath, LoadedTrailPath>,
+        loader: SharedLoaderBox,
+        ctx: TrlLoadContext,
+    ) -> anyhow::Result<(LoadedTrailGeometry, TrailGeometrySections)> {
         let (trl_path, scale, is_wall) = ctx;
         let trl = Self::load_trail_data(loader, trl_path).await?;
         let y_sig = (path.root.root.path as usize) << 24 | path.path.path as usize;
         let params = manager.trail_params().await;
         let section_info = LoadedTrailSection::with_sections(&trl.sections).collect();
-        Self::load_trail_geometry(trl, (scale, is_wall), params, y_sig).await
+        Self::load_trail_geometry(trl, (scale, is_wall), params, y_sig)
+            .await
             .map(move |geo| (geo, section_info))
     }
     async fn load_trail_data(loader: SharedLoaderBox, path: TrlPath) -> anyhow::Result<TrailData> {
         let mut loader = loader.lock_owned().await;
-        Controller::try_run_blocking("reading trl", move || {
-            path.read_trl_data(&mut *loader)
-        }).await
+        Controller::try_run_blocking("reading trl", move || path.read_trl_data(&mut *loader)).await
     }
-    fn load_trail_geometry(trl: TrailData, (scale, is_wall): (f32, bool), params: TrailParams, y_sig: usize) -> impl Future<Output = anyhow::Result<LoadedTrailGeometry>> + Send + 'static {
+    fn load_trail_geometry(
+        trl: TrailData,
+        (scale, is_wall): (f32, bool),
+        params: TrailParams,
+        y_sig: usize,
+    ) -> impl Future<Output = anyhow::Result<LoadedTrailGeometry>> + Send + 'static {
         let y_offset = params.y_offset_for(y_sig);
         Controller::try_run_blocking("calculating vertices", move || {
-            Ok(LoadedTrail::vertices_with_data(&trl, &params, scale, is_wall, y_offset))
+            Ok(LoadedTrail::vertices_with_data(
+                &trl, &params, scale, is_wall, y_offset,
+            ))
         })
     }
 
-    fn new_task_texture_load(manager: Arc<PackLoader>, path: LoadedMarkerPath<PackMapPath>, texture: Option<AttrString>) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
+    fn new_task_texture_load(
+        manager: Arc<PackLoader>,
+        path: LoadedMarkerPath<PackMapPath>,
+        texture: Option<AttrString>,
+    ) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
         Self::task_texture_load(manager, path, texture)
     }
-    async fn task_texture_load(manager: Arc<PackLoader>, path: LoadedMarkerPath<PackMapPath>, texture: Option<AttrString>) -> anyhow::Result<PathingEvent> {
+    async fn task_texture_load(
+        manager: Arc<PackLoader>,
+        path: LoadedMarkerPath<PackMapPath>,
+        texture: Option<AttrString>,
+    ) -> anyhow::Result<PathingEvent> {
         let loader = manager.pack_loader_for(path.root.root).await?;
-        let info = manager.shared.packs.packs.borrow().lookup_ref(&path.root.root)
+        let info = manager
+            .shared
+            .packs
+            .packs
+            .borrow()
+            .lookup_ref(&path.root.root)
             .context("pack unrecognized")?
-            .info.clone();
-        let tex = texture
-            .with_context(|| format!("TODO: late-load texture path for {path}"))?;
+            .info
+            .clone();
+        let tex = texture.with_context(|| format!("TODO: late-load texture path for {path}"))?;
         let mut loader = loader.lock_owned().await;
         let texture = Controller::try_run_blocking("texture resource load", move || {
             let texture = Self::register_shared_texture(&info, &tex);
             let (key, _slot) = Self::get_or_load_shared_texture(&mut *loader, texture);
             Ok(key)
-        }).await;
+        })
+        .await;
         #[cfg(todo = "unnecessary")]
         if texture.is_err() {
             TEXTURES.report_failure(info.subresource_key(&tex));
         }
-        let response = LoadReport::Texture {
-            path,
-            texture,
-        };
+        let response = LoadReport::Texture { path, texture };
         Ok(PathingEvent::ReportResourceLoaded(response))
     }
 
-    pub(super) fn register_shared_texture(info: &SharedPackInfo, texture: &AttrString) -> SpaceTextureHandle {
+    pub(super) fn register_shared_texture(
+        info: &SharedPackInfo,
+        texture: &AttrString,
+    ) -> SpaceTextureHandle {
         let key = info.key_for_subresource(texture);
-        let tex = TEXTURES.lookup_pair_with(&key, |canon, tex| canon.map(|canon| {
-            let tex = (!tex.is_loading() && !tex.can_load()).then_some(tex.clone());
-            (canon.clone(), tex)
-        })).flatten();
+        let tex = TEXTURES
+            .lookup_pair_with(&key, |canon, tex| {
+                canon.map(|canon| {
+                    let tex = (!tex.is_loading() && !tex.can_load()).then_some(tex.clone());
+                    (canon.clone(), tex)
+                })
+            })
+            .flatten();
         let (key, tex) = match tex {
             Some((key, tex)) => (key, tex),
             None => (key.into(), None),
@@ -274,7 +345,10 @@ impl PathingController {
         let tex = tex.map(Ok).unwrap_or_else(|| Err(texture.clone()));
         (key, tex)
     }
-    pub(super) fn get_or_load_shared_texture(loader: &mut dyn PackLoaderContext, (mut key, tex): SpaceTextureHandle) -> (TextureKey, Option<TextureSlot>) {
+    pub(super) fn get_or_load_shared_texture(
+        loader: &mut dyn PackLoaderContext,
+        (mut key, tex): SpaceTextureHandle,
+    ) -> (TextureKey, Option<TextureSlot>) {
         let name = match tex {
             Ok(TextureSlot::Loading) => return (key, None),
             Ok(slot) => return (key, Some(slot)),
@@ -287,15 +361,21 @@ impl PathingController {
 
         let data = if let Some(path) = loader.asset_absolute_path(&name[..]) {
             Some(path)
-        } else { None };
+        } else {
+            None
+        };
         let data = match data {
             None => {
-                let res = loader.load_asset_dyn(&name[..]).and_then(|mut asset| {
+                let res = loader
+                    .load_asset_dyn(&name[..])
+                    .and_then(|mut asset| {
                         let mut bytes = Vec::new();
-                        asset.read_to_end(&mut bytes)
+                        asset
+                            .read_to_end(&mut bytes)
                             .map(move |_amt| bytes)
                             .map_err(Into::into)
-                }).with_context(|| format!("reading texture {}", name));
+                    })
+                    .with_context(|| format!("reading texture {}", name));
                 match res {
                     Ok(bytes) => Either::Left(bytes),
                     Err(e) => {
@@ -328,7 +408,8 @@ impl PathingController {
             let entities_dirty = true;
             let space_dirty = if entities_dirty {
                 let space_packs = Arc::make_mut(&mut self.space.packs);
-                let bvh_dirty = space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                let bvh_dirty =
+                    space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
                 match bvh_dirty {
                     Err(true) => {
                         space_packs.rebuild_bvh();

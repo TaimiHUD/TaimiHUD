@@ -1,13 +1,13 @@
-use {
-    crate::coords::LocalSpace as DrawSpace,
-    bvh::aabb::IntersectsAabb,
-    glamour::{Point3, Vector3, Vector4},
-    core::ops::Range,
-};
 #[cfg(feature = "spatial")]
 use glamour::vec4;
 #[cfg(not(feature = "spatial"))]
 use glamour::{vec4, Box3, Intersection};
+use {
+    crate::coords::LocalSpace as DrawSpace,
+    bvh::aabb::IntersectsAabb,
+    core::ops::Range,
+    glamour::{Point3, Vector3, Vector4},
+};
 
 #[derive(Copy, Clone)]
 pub struct MapFrustum {

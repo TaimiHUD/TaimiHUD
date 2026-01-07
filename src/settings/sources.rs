@@ -260,7 +260,8 @@ pub struct SourcesNs<'a> {
 }
 
 impl SourcesNs<'static> {
-    pub const SOURCES_TOML: Self = Self::with_name(Cow::Borrowed(new_path_const("addons/Taimi/sources.toml")));
+    pub const SOURCES_TOML: Self =
+        Self::with_name(Cow::Borrowed(new_path_const("addons/Taimi/sources.toml")));
 }
 
 impl<'a> SourcesNs<'a> {
@@ -288,9 +289,8 @@ impl SourcesToml {
 
 impl AsRef<SourcesNs<'static>> for SourcesToml {
     fn as_ref(&self) -> &SourcesNs<'static> {
-        static SOURCES_TOML: LazyLock<SourcesNs<'static>> = LazyLock::new(||
-            SourcesNs::with_name(Cow::Owned(SourcesFile::file_path()))
-        );
+        static SOURCES_TOML: LazyLock<SourcesNs<'static>> =
+            LazyLock::new(|| SourcesNs::with_name(Cow::Owned(SourcesFile::file_path())));
         &SOURCES_TOML
     }
 }

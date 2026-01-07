@@ -128,11 +128,14 @@ impl Trail {
     }
 
     pub fn trail_path(&self) -> anyhow::Result<&TrlPath> {
-        self.trail_path.as_ref()
+        self.trail_path
+            .as_ref()
             .with_context(|| format!("No 'trailData' specified for Trail '{self}'"))
     }
     pub fn parent_path(&self) -> Option<&AttrString> {
-        self.trail_path.as_ref().and_then(|path| path.parent_path.as_ref())
+        self.trail_path
+            .as_ref()
+            .and_then(|path| path.parent_path.as_ref())
     }
 
     pub fn texture_name(&self) -> Option<&str> {
@@ -179,10 +182,7 @@ pub struct TrlPath {
 }
 impl TrlPath {
     pub const fn new(path: AttrString) -> Self {
-        Self {
-            path,
-            parent_path: None,
-        }
+        Self { path, parent_path: None }
     }
     pub fn open_trl_data(
         &self,
@@ -196,8 +196,7 @@ impl TrlPath {
 
     pub fn read_trl_data(&self, ctx: &mut dyn PackLoaderContext) -> anyhow::Result<TrailData> {
         let mut asset = self.open_trl_data(ctx)?;
-        TrailData::read_from_trl(&mut asset)
-            .with_context(|| format!("Reading trail data from {self}"))
+        TrailData::read_from_trl(&mut asset).with_context(|| format!("Reading trail data from {self}"))
     }
 }
 impl fmt::Display for TrlPath {
@@ -388,5 +387,7 @@ impl TrailSection {
 }
 impl AsRef<TrailSection> for TrailSection {
     #[inline(always)]
-    fn as_ref(&self) -> &Self { self }
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }

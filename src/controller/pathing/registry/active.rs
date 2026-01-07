@@ -3,23 +3,18 @@ use {
         controller::{
             pathing::{
                 festivals::FestivalFixup,
-                registry::{
-                    PackInfo, PackInfoSignature,
-                    PackConfig,
-                    UnloadedReason,
-                },
-                PathingShared,
-                shared::{SharedPackConfig, SharedPackLoaded, SharedPackInfo},
+                registry::{PackConfig, PackInfo, PackInfoSignature, UnloadedReason},
+                shared::{SharedPackConfig, SharedPackInfo, SharedPackLoaded},
                 space::TrailParams,
+                PathingShared,
             },
             Controller,
         },
         exports::runtime as rt,
-        settings::{SettingsLock, PathingSettings},
+        settings::{PathingSettings, SettingsLock},
     },
-    futures::future::FutureExt,
-    taimi_hoard::loc::LocationRef,
     anyhow::{anyhow, Context},
+    futures::future::FutureExt,
     std::{
         collections::BTreeMap,
         fmt,
@@ -27,12 +22,14 @@ use {
         path::{Path, PathBuf},
         sync::{Arc, Weak},
     },
+    taimi_hoard::loc::LocationRef,
+    taimi_meta::packs::{PackIndex, PackPath, TrailIndex},
     taimi_pack::{
-        attributes::Festival, category::id::AsFullId, loader::{DirectoryLoader, PackLoaderContext, ZipLoader}, trail::TrailData, Pack
-    },
-    taimi_meta::packs::{
-        PackPath, PackIndex,
-        TrailIndex,
+        attributes::Festival,
+        category::id::AsFullId,
+        loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
+        trail::TrailData,
+        Pack,
     },
     taimi_sync::watched::watch,
     tokio::sync::Mutex,
@@ -56,8 +53,7 @@ impl LoadedPack {
             Ok(mut activate) => {
                 activate.config_sig_prev = match &self.config {
                     None => PackInfoSignature::EMPTY,
-                    Some(config) if config.borrow().is_empty() =>
-                        PackInfoSignature::INVALID,
+                    Some(config) if config.borrow().is_empty() => PackInfoSignature::INVALID,
                     Some(..) => activate.sig_prev,
                 };
                 Ok(Some(activate))
@@ -69,11 +65,18 @@ impl LoadedPack {
         }
     }
 
-    pub async fn activate_load(context: PackActivateContext, manager: &PackLoader) -> anyhow::Result<PackActivateLoaded> {
+    pub async fn activate_load(
+        context: PackActivateContext,
+        manager: &PackLoader,
+    ) -> anyhow::Result<PackActivateLoaded> {
         context.load(manager).await
     }
 
-    pub fn activate_finish(&mut self, pack: anyhow::Result<PackActivateLoaded>, manager: &PackLoader) -> anyhow::Result<()> {
+    pub fn activate_finish(
+        &mut self,
+        pack: anyhow::Result<PackActivateLoaded>,
+        manager: &PackLoader,
+    ) -> anyhow::Result<()> {
         match pack {
             Err(e) => {
                 let e = rt::log::anyhow_into_arc(e);
@@ -89,10 +92,16 @@ impl LoadedPack {
                     let update_config = self.config.is_none();
                     Self::try_update_config_inner(&mut self.config, config);
                     if update_config {
-                        manager.shared.packs.update_pack_config(self.info.index, self.config.as_ref());
+                        manager
+                            .shared
+                            .packs
+                            .update_pack_config(self.info.index, self.config.as_ref());
                     }
                 }
-                manager.shared.packs.update_pack_active(self.info.index, Some(active));
+                manager
+                    .shared
+                    .packs
+                    .update_pack_active(self.info.index, Some(active));
                 Ok(())
             },
         }
@@ -130,13 +139,20 @@ impl LoadedPack {
     #[cfg(todo)]
     pub async fn try_populate_config(&mut self, settings: &SettingsLock) -> bool {
         #[cfg(todo = "unnecessary")]
-        let Ok(info) = &self.info else { return false };
+        let Ok(info) = &self.info
+        else {
+            return false
+        };
         let Some(active) = &self.active else { return false };
         Self::populate_config(&mut self.config, active, settings);
         true
     }
     #[cfg(todo)]
-    pub async fn populate_config(out: &mut Option<watch::Sender<Arc<PackConfig>>>, active: &ActivePack, settings: &SettingsLock) {
+    pub async fn populate_config(
+        out: &mut Option<watch::Sender<Arc<PackConfig>>>,
+        active: &ActivePack,
+        settings: &SettingsLock,
+    ) {
         let mut config = PackConfig::default();
         {
             let settings = settings.write().await;
@@ -156,7 +172,8 @@ pub struct PackActivateContext {
 }
 impl PackActivateContext {
     /// fails if format cannot be guessed
-    pub fn new<P>(path: P, format: Option<PackFormat>, prev_info: Option<&PackInfo>) -> anyhow::Result<Self> where
+    pub fn new<P>(path: P, format: Option<PackFormat>, prev_info: Option<&PackInfo>) -> anyhow::Result<Self>
+    where
         P: AsRef<Path> + Into<PathBuf>,
     {
         let (format, sig_prev, context) = match prev_info {
@@ -167,7 +184,8 @@ impl PackActivateContext {
             ),
             None => {
                 let path = path.as_ref();
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .map(Path::new)
                     .unwrap_or_else(|| rt::relative_path(path));
                 (
@@ -179,29 +197,28 @@ impl PackActivateContext {
         };
 
         match format {
-            Some(format) => {
-                Ok(Self {
-                    path: path.into(),
-                    format,
-                    context,
-                    config_sig_prev: sig_prev.clone(),
-                    sig_prev,
-                })
-            },
-            None => {
-                Err(anyhow!("unknown pack format").context(context))
-            },
+            Some(format) => Ok(Self {
+                path: path.into(),
+                format,
+                context,
+                config_sig_prev: sig_prev.clone(),
+                sig_prev,
+            }),
+            None => Err(anyhow!("unknown pack format").context(context)),
         }
     }
 
     pub async fn load(self, manager: &PackLoader) -> anyhow::Result<PackActivateLoaded> {
-        let loader = self.format.loader_for_path(self.path).await
+        let loader = self
+            .format
+            .loader_for_path(self.path)
+            .await
             .map(|loader| Arc::new(Mutex::new(loader)));
         let pack = match loader {
-            Ok(loader) => manager.load_pack(loader.clone()).await
-                .map(|p| (loader, p)),
+            Ok(loader) => manager.load_pack(loader.clone()).await.map(|p| (loader, p)),
             Err(e) => Err(e),
-        }.context(self.context);
+        }
+        .context(self.context);
         let res = pack.map(|(l, pack)| {
             let info = PackInfo::from_pack(&pack, self.format);
             (l, Arc::new(pack), Arc::new(info))
@@ -220,12 +237,7 @@ impl PackActivateContext {
                     config.fill_settings(&pack, &settings.pathing(), &settings.disabled_paths);
                     config
                 });
-                Ok(PackActivateLoaded {
-                    pack,
-                    loader,
-                    info,
-                    config,
-                })
+                Ok(PackActivateLoaded { pack, loader, info, config })
             },
             Err(e) => Err(e),
         }
@@ -261,14 +273,17 @@ impl PackFormat {
         match self {
             Self::TacoZip => {
                 let context = "Loading TacO zip";
-                let loader = move || ZipLoader::new(&path)
-                    .with_context(|| {
-                        let path = path.file_name()
+                let loader = move || {
+                    ZipLoader::new(&path).with_context(|| {
+                        let path = path
+                            .file_name()
                             .map(Path::new)
                             .unwrap_or_else(|| rt::relative_path(&path));
                         format!("{context} {}", path.display())
-                    });
-                Controller::try_run_blocking(context, loader).await
+                    })
+                };
+                Controller::try_run_blocking(context, loader)
+                    .await
                     .map(|loader| Box::new(loader) as LoaderBox)
             },
             Self::TacoDir => Ok(Box::new(DirectoryLoader::new(path))),
@@ -279,10 +294,8 @@ impl PackFormat {
 impl fmt::Display for PackFormat {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::TacoZip =>
-                f.write_str("TacO zip archive"),
-            Self::TacoDir =>
-                f.write_str("TacO folder"),
+            Self::TacoZip => f.write_str("TacO zip archive"),
+            Self::TacoDir => f.write_str("TacO folder"),
         }
     }
 }
@@ -305,19 +318,28 @@ impl PackLoader {
     }
 
     pub fn pack_info(&self, path: PackPath) -> Option<Arc<SharedPackInfo>> {
-        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
-            i.info.clone()
-        )
+        self.shared
+            .packs
+            .packs
+            .borrow()
+            .lookup_ref(&path)
+            .map(|i| i.info.clone())
     }
     pub fn pack_loaded(&self, path: PackPath) -> Option<watch::Sender<SharedPackLoaded>> {
-        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
-            i.loaded.clone()
-        )
+        self.shared
+            .packs
+            .packs
+            .borrow()
+            .lookup_ref(&path)
+            .map(|i| i.loaded.clone())
     }
     pub fn pack_config(&self, path: PackPath) -> Option<watch::Sender<SharedPackConfig>> {
-        self.shared.packs.packs.borrow().lookup_ref(&path).map(|i|
-            i.config.clone()
-        )
+        self.shared
+            .packs
+            .packs
+            .borrow()
+            .lookup_ref(&path)
+            .map(|i| i.config.clone())
     }
     pub fn get_pack_loaded_data(&self, path: PackPath) -> Option<Arc<Pack>> {
         self.pack_loaded(path).and_then(|l| l.borrow().pack.clone())
@@ -332,10 +354,7 @@ impl PackLoader {
     pub async fn load_pack_data(loader: SharedLoaderBox) -> anyhow::Result<Pack> {
         let context = "loading TacO pack";
         let mut loader = loader.lock_owned().await;
-        Controller::try_run_blocking(context, move || {
-            Pack::load(&mut *loader)
-                .context(context)
-        }).await
+        Controller::try_run_blocking(context, move || Pack::load(&mut *loader).context(context)).await
     }
 
     fn fixup_pack(&self, pack: &mut Pack) {
@@ -354,7 +373,12 @@ impl PackLoader {
                 .iter()
                 .find_map(|(&prefix, &fest)| category.full_id.id_starts_with(prefix).then_some(fest));
             if let Some(festival) = festival {
-                let festivals = category.attributes_mut().filters_mut().festivals.insert(festival.into()).clone();
+                let festivals = category
+                    .attributes_mut()
+                    .filters_mut()
+                    .festivals
+                    .insert(festival.into())
+                    .clone();
                 fixed_festival_categories.insert(&category.full_id, festivals);
             } else {
                 log::info!("unrecognized festival category: `{}`", category.full_id);
@@ -362,9 +386,11 @@ impl PackLoader {
         }
         if !fixed_festival_categories.is_empty() {
             // TODO: this should be less necessary once a tree of attribute inherits exist...
-            let pois = pack.pois.iter_mut().filter_map(|poi| match fixed_festival_categories.get(poi.category.as_id()) {
-                Some(f) => Some((poi, f)),
-                None => None,
+            let pois = pack.pois.iter_mut().filter_map(|poi| {
+                match fixed_festival_categories.get(poi.category.as_id()) {
+                    Some(f) => Some((poi, f)),
+                    None => None,
+                }
             });
             for (poi, f) in pois {
                 let filters = poi.attributes.filters_mut();
@@ -372,9 +398,11 @@ impl PackLoader {
                     filters.festivals = Some(f.clone());
                 }
             }
-            let trails = pack.trails.iter_mut().filter_map(|trail| match fixed_festival_categories.get(trail.category.as_id()) {
-                Some(f) => Some((trail, f)),
-                None => None,
+            let trails = pack.trails.iter_mut().filter_map(|trail| {
+                match fixed_festival_categories.get(trail.category.as_id()) {
+                    Some(f) => Some((trail, f)),
+                    None => None,
+                }
             });
             for (trail, f) in trails {
                 let filters = trail.attributes.filters_mut();
@@ -388,9 +416,9 @@ impl PackLoader {
 
     pub fn get_trail_params(&self) -> impl Future<Output = TrailParams> + Send + 'static {
         let settings = self.settings.clone();
-        settings.read_owned().map(|settings|
-            Self::trail_params_for(&settings.pathing())
-        )
+        settings
+            .read_owned()
+            .map(|settings| Self::trail_params_for(&settings.pathing()))
     }
     pub async fn trail_params(&self) -> TrailParams {
         let settings = self.settings.read().await;
@@ -417,10 +445,7 @@ pub struct ActivePack {
 #[cfg(deleteme)]
 impl ActivePack {
     pub fn with_pack(pack: Arc<Pack>, loader: SharedLoaderBox) -> Self {
-        Self {
-            pack,
-            loader,
-        }
+        Self { pack, loader }
     }
 
     pub fn read_trail_data(&self, index: TrailIndex) -> anyhow::Result<TrailData> {
@@ -429,32 +454,36 @@ impl ActivePack {
         };
 
         let mut loader = self.loader.blocking_lock();
-        trail.read_trl_data(&mut *loader)
+        trail
+            .read_trl_data(&mut *loader)
             .with_context(|| format!("Reading trail {trail} vertices from {self}"))
     }
 
-    pub fn load_trail_data(&self, index: TrailIndex) -> impl Future<Output = anyhow::Result<TrailData>> + Send + 'static {
+    pub fn load_trail_data(
+        &self,
+        index: TrailIndex,
+    ) -> impl Future<Output = anyhow::Result<TrailData>> + Send + 'static {
         let pack = self.clone();
         Controller::try_run_blocking("reading trl", move || pack.read_trail_data(index))
     }
 
     pub fn iter_weak<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, &'a Weak<Self>)> {
-        active.into_iter().enumerate().map(|(i, a)| (
-            PackPath::with_path(i as PackIndex),
-            a,
-        ))
+        active
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| (PackPath::with_path(i as PackIndex), a))
     }
     pub fn iter_strong<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, Arc<Self>)> + 'a {
-        active.into_iter().enumerate().filter_map(|(i, a)| a.upgrade().map(|a| (
-            PackPath::with_path(i as PackIndex),
-            a,
-        )))
+        active
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, a)| a.upgrade().map(|a| (PackPath::with_path(i as PackIndex), a)))
     }
     pub fn enum_strong<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, bool)> + 'a {
-        active.into_iter().enumerate().map(|(i, a)| (
-            PackPath::with_path(i as PackIndex),
-            a.strong_count() > 0,
-        ))
+        active
+            .into_iter()
+            .enumerate()
+            .map(|(i, a)| (PackPath::with_path(i as PackIndex), a.strong_count() > 0))
     }
 }
 
@@ -467,9 +496,7 @@ impl fmt::Display for ActivePack {
 #[cfg(deleteme)]
 impl fmt::Debug for ActivePack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("ActivePack")
-            .field(&self.pack)
-            .finish()
+        f.debug_tuple("ActivePack").field(&self.pack).finish()
     }
 }
 #[cfg(deleteme)]

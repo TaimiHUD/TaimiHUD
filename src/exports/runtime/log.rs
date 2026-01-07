@@ -8,8 +8,8 @@ use {
     anyhow::Context,
     log::{Level, LevelFilter, Log, Metadata, Record},
     std::{
-        ffi::CStr,
         error::Error as StdError,
+        ffi::CStr,
         fmt,
         fs,
         io,
@@ -724,13 +724,15 @@ pub fn anyhow_into_arc(e: anyhow::Error) -> Arc<DynError> {
     error_into_arc(anyhow_into_box(e))
 }
 #[inline]
-pub fn error_into_box<E>(e: E) -> Box<DynError> where
-    E: Into<Box::<DynError>>,
+pub fn error_into_box<E>(e: E) -> Box<DynError>
+where
+    E: Into<Box<DynError>>,
 {
     e.into()
 }
-pub fn error_into_arc<E>(e: E) -> Arc<DynError> where
-    E: Into<Box::<DynError>>,
+pub fn error_into_arc<E>(e: E) -> Arc<DynError>
+where
+    E: Into<Box<DynError>>,
 {
     Arc::from(error_into_box(e))
 }

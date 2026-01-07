@@ -1,21 +1,42 @@
 use {
     crate::controller::pathing::{
         registry::{
-            LoadedCategoryIndex, LoadedCategoryPath, LoadedPoiIndex, LoadedPoiPath, LoadedTrailIndex, LoadedTrailNs, LoadedTrailPath, PackInfo, PackInfoSignature, PackMapPath, PackPath
+            LoadedCategoryIndex,
+            LoadedCategoryPath,
+            LoadedPoiIndex,
+            LoadedPoiPath,
+            LoadedTrailIndex,
+            LoadedTrailNs,
+            LoadedTrailPath,
+            PackInfo,
+            PackInfoSignature,
+            PackMapPath,
+            PackPath,
         },
-        space::{TrailParams, DrawSpace},
+        space::{DrawSpace, TrailParams},
         visible::LoadedTrailSection,
     },
-    std::iter,
-    bitvec::vec::BitVec, glamour::Box3,
-    std::{mem, sync::Arc},
-    taimi_hoard::{iters::IterExt as _, loc::{indexed::IndexedList, LocationRef}},
+    bitvec::vec::BitVec,
+    glamour::Box3,
+    std::{iter, mem, sync::Arc},
+    taimi_hoard::{
+        iters::IterExt as _,
+        loc::{indexed::IndexedList, LocationRef},
+    },
     taimi_meta::packs::{
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
-        CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath,
-        TrailIndex, TrailPath, TrailSectionIndex, TrailSectionNs, TrailSectionPath,
+        CategoryIndex,
+        CategoryPath,
+        MapIndex,
+        PoiIndex,
+        PoiPath,
+        TrailIndex,
+        TrailPath,
+        TrailSectionIndex,
+        TrailSectionNs,
+        TrailSectionPath,
     },
-    taimi_pack::{category::id::FullIdRef, pack::Pack, trail::TrailData}
+    taimi_pack::{category::id::FullIdRef, pack::Pack, trail::TrailData},
 };
 
 #[derive(Debug, Clone)]
@@ -71,7 +92,9 @@ impl MapPackInfo {
         let mut filter_mapid = |map_id: i32, mut category: &FullIdRef| -> bool {
             if map_id == id32 {
                 loop {
-                    if !insert_cat(category) { break }
+                    if !insert_cat(category) {
+                        break
+                    }
                     category = match category.parent() {
                         Some(parent) => parent,
                         None => break,
@@ -83,7 +106,10 @@ impl MapPackInfo {
             }
         };
         let mut pois = BitVec::new();
-        let mut active_pois = pack.pois.iter().enumerate()
+        let mut active_pois = pack
+            .pois
+            .iter()
+            .enumerate()
             .filter(|(_i, poi)| filter_mapid(poi.map_id, poi.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
@@ -98,7 +124,10 @@ impl MapPackInfo {
         // TODO: use some sort of space-efficient encoding like RLE for these masks
         // even just an initial offset or vec of bit group lengths (pos/neg for 0 vs 1) would help?
         let mut trails = BitVec::new();
-        let mut active_trails = pack.trails.iter().enumerate()
+        let mut active_trails = pack
+            .trails
+            .iter()
+            .enumerate()
             .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), trail.category.as_ref()))
             .map(|(i, _)| i)
             .rev();
@@ -124,8 +153,8 @@ impl MapPackInfo {
 
     pub fn is_empty(&self) -> bool {
         self.info_sig.is_empty()
-        || ((self.trails.is_empty() || self.trails[..].not_any())
-            && (self.pois.is_empty() || self.pois[..].not_any()))
+            || ((self.trails.is_empty() || self.trails[..].not_any())
+                && (self.pois.is_empty() || self.pois[..].not_any()))
     }
 
     /// None if \![Self::is_empty()]
@@ -137,11 +166,13 @@ impl MapPackInfo {
         self.pois.count_ones()
     }
     pub fn pois(&self) -> impl Iterator<Item = PoiPath> + '_ {
-        self.pois.iter_ones()
+        self.pois
+            .iter_ones()
             .lazy_map(|i| PoiPath::with_path(i as PoiIndex))
     }
     pub fn loaded_pois(&self) -> impl Iterator<Item = (LoadedPoiPath, PoiPath)> + '_ {
-        self.pois().enumerate()
+        self.pois()
+            .enumerate()
             .lazy_map(|(i, path)| (LoadedPoiPath::with_path(i as LoadedPoiIndex), path))
     }
     #[cfg(todo)]
@@ -153,21 +184,24 @@ impl MapPackInfo {
         iter::repeat(true).take(self.poi_count())
     }
     #[cfg(todo)]
-    pub(crate) fn poi_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a where
+    pub(crate) fn poi_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a
+    where
         I: IntoIterator + 'a,
     {
-        self.poi_guid_mask().zip(iter)
+        self.poi_guid_mask()
+            .zip(iter)
             .filter_map(|(mask, v)| mask.then_some(v))
     }
     pub fn poi_index(&self, path: PoiPath) -> Option<LoadedPoiPath> {
         match () {
             #[cfg(todo = "unnecessary")]
-            _ => self.pois().position(|t| t.path == path.path)
+            _ => self
+                .pois()
+                .position(|t| t.path == path.path)
                 .map(|i| LoadedPoiPath::with_path(i as LoadedPoiIndex)),
             _ => match self.pois.get(path.path as usize) {
                 None => None,
-                Some(b) if !*b =>
-                    None,
+                Some(b) if !*b => None,
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
                     let preceding = self.pois.get_unchecked(..index);
@@ -185,11 +219,13 @@ impl MapPackInfo {
         self.trails.count_ones()
     }
     pub fn trails(&self) -> impl Iterator<Item = TrailPath> + '_ {
-        self.trails.iter_ones()
+        self.trails
+            .iter_ones()
             .lazy_map(|i| TrailPath::with_path(i as TrailIndex))
     }
     pub fn loaded_trails(&self) -> impl Iterator<Item = (LoadedTrailPath, TrailPath)> + '_ {
-        self.trails().enumerate()
+        self.trails()
+            .enumerate()
             .lazy_map(|(i, path)| (LoadedTrailPath::with_path(i as LoadedTrailIndex), path))
     }
     #[cfg(todo)]
@@ -201,21 +237,24 @@ impl MapPackInfo {
         iter::repeat(true).take(self.trail_count())
     }
     #[cfg(todo)]
-    pub(crate) fn trail_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a where
+    pub(crate) fn trail_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a
+    where
         I: IntoIterator + 'a,
     {
-        self.trail_guid_mask().zip(iter)
+        self.trail_guid_mask()
+            .zip(iter)
             .filter_map(|(mask, v)| mask.then_some(v))
     }
     pub fn trail_index(&self, path: TrailPath) -> Option<LoadedTrailPath> {
         match () {
             #[cfg(todo = "unnecessary")]
-            _ => self.trails().position(|t| t.path == path.path)
+            _ => self
+                .trails()
+                .position(|t| t.path == path.path)
                 .map(|i| LoadedTrailPath::with_path(i as LoadedTrailIndex)),
             _ => match self.trails.get(path.path as usize) {
                 None => None,
-                Some(b) if !*b =>
-                    None,
+                Some(b) if !*b => None,
                 Some(_) => Some(unsafe {
                     let index = path.path as usize;
                     let preceding = self.trails.get_unchecked(..index);
@@ -240,9 +279,7 @@ impl MapPackInfo {
         self.categories.iter().max().copied()
     }
     pub fn category_max_count(&self) -> CategoryIndex {
-        self.category_max()
-            .map(|c| c + 1)
-            .unwrap_or(0)
+        self.category_max().map(|c| c + 1).unwrap_or(0)
     }
     pub fn categories(&self) -> impl Iterator<Item = CategoryPath> + '_ {
         self.categories.iter().lazy_map(|&i| CategoryPath::with_path(i))
@@ -253,9 +290,14 @@ impl MapPackInfo {
     pub fn category_index(&self, path: CategoryPath) -> Option<LoadedCategoryPath> {
         match () {
             #[cfg(todo = "unnecessary")]
-            _ => self.categories().position(|t| t.path == path.path)
+            _ => self
+                .categories()
+                .position(|t| t.path == path.path)
                 .map(|i| LoadedCategoryPath::with_path(i as CategoryIndex)),
-            _ => self.categories.binary_search(&path.path).ok()
+            _ => self
+                .categories
+                .binary_search(&path.path)
+                .ok()
                 .map(|i| LoadedCategoryPath::with_path(i as LoadedCategoryIndex)),
         }
     }
@@ -289,11 +331,19 @@ impl MapPackInfo {
     }
 
     pub fn is_trail_info_loaded(&self, path: LoadedTrailPath) -> bool {
-        self.trail_info.lookup_ref(&path).map(|info| info.is_loaded())
+        self.trail_info
+            .lookup_ref(&path)
+            .map(|info| info.is_loaded())
             .unwrap_or(false)
     }
-    pub(crate) fn update_trail_section_info(&mut self, path: LoadedTrailPath, sections: Arc<[LoadedTrailSection]>) {
-        let trail_info = self.trail_info.lookup_extend_with(path.path, MapTrailInfo::default);
+    pub(crate) fn update_trail_section_info(
+        &mut self,
+        path: LoadedTrailPath,
+        sections: Arc<[LoadedTrailSection]>,
+    ) {
+        let trail_info = self
+            .trail_info
+            .lookup_extend_with(path.path, MapTrailInfo::default);
         trail_info.sections = Some(IndexedList::new(sections));
     }
 }
@@ -310,7 +360,9 @@ impl MapTrailInfo {
 
     #[inline]
     pub fn sections(&self) -> &IndexedList<TrailSectionNs, TrailSectionIndex, [LoadedTrailSection]> {
-        self.sections.as_ref().map(IndexedList::map_ref_as_slice)
+        self.sections
+            .as_ref()
+            .map(IndexedList::map_ref_as_slice)
             .unwrap_or(IndexedList::empty_ref())
     }
 
@@ -331,9 +383,9 @@ impl MapTrailInfo {
     }
     pub fn y_offsets(&'_ self) -> impl Iterator<Item = (TrailSectionPath, f32)> {
         let mut y_offsets = self.get_y_offsets();
-        self.sections().paths().zip(iter::repeat(0.0).map(move |fallback|
-            y_offsets.next().unwrap_or(fallback)
-        ))
+        self.sections()
+            .paths()
+            .zip(iter::repeat(0.0).map(move |fallback| y_offsets.next().unwrap_or(fallback)))
     }
 
     pub fn section_bounds(&self) -> impl Iterator<Item = (TrailSectionPath, Box3<DrawSpace>)> + '_ {

@@ -1,10 +1,13 @@
 use {
-    taimi_hoard::loc::{locator_ns, Locator},
     crate::map::MapID,
     core::num::NonZero,
+    taimi_hoard::loc::{locator_ns, Locator},
 };
-pub use self::id::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant, MarkerIndexNamespace, IdVariant};
-pub use self::visible::{VisibilityFlags, VisibilityFlagSet};
+
+pub use self::{
+    id::{IdVariant, MarkerId, MarkerIndex, MarkerIndexNamespace, MarkerIndexVariant, MarkerPath},
+    visible::{VisibilityFlagSet, VisibilityFlags},
+};
 
 pub mod collections;
 pub mod id;

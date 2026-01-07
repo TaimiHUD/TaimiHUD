@@ -6,11 +6,14 @@ use {
     },
     anyhow::{anyhow, Context},
     bitflags::bitflags,
-    std::sync::Arc,
     core::{mem, ops},
+    std::sync::Arc,
     taimi_hoard::flags::{
         set::{BitFlagForSet, FlagSet},
-        BitSlice, BitsNative, BitVec, BitView,
+        BitSlice,
+        BitVec,
+        BitView,
+        BitsNative,
     },
 };
 
@@ -311,23 +314,19 @@ impl BitFlagForSet for CategoryFlags {
     const BIT_WIDTH: usize = CategoryFlag::INDEX_MAX as usize + 1;
 
     fn as_bits(&self) -> &Self::Repr {
-        unsafe {
-            &*(self as *const Self as *const u8)
-        }
+        unsafe { &*(self as *const Self as *const u8) }
     }
     fn as_bits_mut(&mut self) -> &mut Self::Repr {
-        unsafe {
-            &mut *(self as *mut Self as *mut u8)
-        }
+        unsafe { &mut *(self as *mut Self as *mut u8) }
     }
     fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsNative> {
-        unsafe {
-            self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH)
-        }
+        unsafe { self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH) }
     }
     fn as_bitslice_mut(&mut self) -> &mut BitSlice<Self::Repr, BitsNative> {
         unsafe {
-            self.as_bits_mut().view_bits_mut().get_unchecked_mut(..Self::BIT_WIDTH)
+            self.as_bits_mut()
+                .view_bits_mut()
+                .get_unchecked_mut(..Self::BIT_WIDTH)
         }
     }
 

@@ -216,10 +216,7 @@ impl InfoTabState {
 
     #[cfg(feature = "space")]
     pub fn space_info(&self, ui: &Ui) {
-        use {
-            crate::space::pack,
-            std::sync::atomic::Ordering,
-        };
+        use {crate::space::pack, std::sync::atomic::Ordering};
 
         #[cfg(todo)]
         engine_ref(|engine| {

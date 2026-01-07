@@ -1,20 +1,29 @@
 use {
-    super::PackRenderState, crate::{
+    super::PackRenderState,
+    crate::{
         controller::pathing::{
-            registry::LoadedTrailPath, shared::{LoadedTrailRef, SharedPackInfo}, visible::LoadedTrailGeometry,
-        }, exports::runtime::{
+            registry::LoadedTrailPath,
+            shared::{LoadedTrailRef, SharedPackInfo},
+            visible::LoadedTrailGeometry,
+        },
+        exports::runtime::{
             textures::{TextureKey, TextureSlot},
             Counter,
-        }, space::{
-            pack::PoiCommonRenderData,
-            resources::Model,
-        }
+        },
+        space::{pack::PoiCommonRenderData, resources::Model},
     },
+    anyhow::Context,
+    std::{mem, ops},
+    taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
     taimi_hoard::loc::Locator,
-    anyhow::Context, std::{mem, ops}, taimi_d3d::dx11::{
-        buffer::VertexBuffer,
-        prelude::*,
-    }, taimi_meta::{packs::{id::{MarkerId, MarkerIndex}, TrailSectionIndex, TrailSectionPath}, ui::LocalContext},
+    taimi_meta::{
+        packs::{
+            id::{MarkerId, MarkerIndex},
+            TrailSectionIndex,
+            TrailSectionPath,
+        },
+        ui::LocalContext,
+    },
 };
 
 /// World render data
@@ -43,7 +52,11 @@ impl TrailRender {
         let model = Model::from_vertices(geometry.vertices);
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
         #[cfg(feature = "statistics")]
-        let prev_size = self.section_vbuffer.as_ref().map(|v| v.size() as isize).unwrap_or(0);
+        let prev_size = self
+            .section_vbuffer
+            .as_ref()
+            .map(|v| v.size() as isize)
+            .unwrap_or(0);
         match section_vbuffer {
             Ok(vbuffer) => {
                 #[cfg(feature = "statistics")]
@@ -61,11 +74,23 @@ impl TrailRender {
         }
     }
 
-    pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, ltrail: Option<LoadedTrailRef<'_>>) {
-        let texture = ltrail.as_ref().and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
+    pub fn update(
+        &mut self,
+        _device: &Dx11Device,
+        pack_info: &SharedPackInfo,
+        ltrail: Option<LoadedTrailRef<'_>>,
+    ) {
+        let texture = ltrail
+            .as_ref()
+            .and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
         pack_info.setup_texture(&mut self.texture_handle, &mut self.texture, texture);
     }
-    pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState, path: Locator<LoadedTrailPath, TrailSectionPath>) -> bool {
+    pub fn report_incomplete(
+        &self,
+        id: &MarkerId,
+        draw_state: &mut PackRenderState,
+        path: Locator<LoadedTrailPath, TrailSectionPath>,
+    ) -> bool {
         let mut incomplete = false;
         if self.section_vbuffer.is_none() {
             if !self.is_empty() {
@@ -75,7 +100,9 @@ impl TrailRender {
             let id = match id {
                 id if path.path.path != 0 => {
                     // replace section index with 0 since we can't partially load trl data (yet?)
-                    let id = id.get_marker_pack_map_path().rel(MarkerIndex::with_trail_section(path.root.path, 0));
+                    let id = id
+                        .get_marker_pack_map_path()
+                        .rel(MarkerIndex::with_trail_section(path.root.path, 0));
                     MarkerId::for_marker(id)
                 },
                 id => id.clone(),
@@ -83,8 +110,13 @@ impl TrailRender {
             draw_state.drawn_incomplete.insert(id);
             incomplete = true;
         }
-        if matches!(self.texture, None | Some(TextureSlot::Reserved | TextureSlot::Loading)) {
-            let id = id.get_marker_pack_map_path().rel(MarkerIndex::with_trail(path.root.path));
+        if matches!(
+            self.texture,
+            None | Some(TextureSlot::Reserved | TextureSlot::Loading)
+        ) {
+            let id = id
+                .get_marker_pack_map_path()
+                .rel(MarkerIndex::with_trail(path.root.path));
             draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
         }
         incomplete
@@ -93,8 +125,15 @@ impl TrailRender {
         self.texture.is_none() && self.texture_handle.is_none()
     }
 
-    pub fn bind_texture(&self, device_context: &Dx11Context, common: &PoiCommonRenderData, _ctx: LocalContext) {
-        let texture = self.texture.as_ref()
+    pub fn bind_texture(
+        &self,
+        device_context: &Dx11Context,
+        common: &PoiCommonRenderData,
+        _ctx: LocalContext,
+    ) {
+        let texture = self
+            .texture
+            .as_ref()
             .and_then(TextureSlot::get)
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {
@@ -123,16 +162,8 @@ impl TrailRender {
         unsafe {
             //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {
-                LocalContext::World => device_context.Draw(
-                    end - start,
-                    start,
-                ),
-                LocalContext::Map(..) => device_context.DrawInstanced(
-                    end - start,
-                    1,
-                    start,
-                    0,
-                ),
+                LocalContext::World => device_context.Draw(end - start, start),
+                LocalContext::Map(..) => device_context.DrawInstanced(end - start, 1, start, 0),
             }
         }
     }
@@ -142,12 +173,14 @@ impl TrailRender {
         let end = *self.vbuffer_section_end.get(section)?;
         let start = match section {
             #[cfg(todo = "unnecessary")]
-            section => section.checked_sub(1).map(|prev| unsafe {
-                *self.vbuffer_section_end.get_unchecked(prev)
-            }).unwrap_or(0),
-            section =>
-                *self.vbuffer_section_end.get(section.wrapping_sub(1))
-                    .unwrap_or(&0),
+            section => section
+                .checked_sub(1)
+                .map(|prev| unsafe { *self.vbuffer_section_end.get_unchecked(prev) })
+                .unwrap_or(0),
+            section => *self
+                .vbuffer_section_end
+                .get(section.wrapping_sub(1))
+                .unwrap_or(&0),
         };
         Some(start..end)
     }

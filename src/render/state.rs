@@ -629,11 +629,13 @@ impl RenderState {
         {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
-            self.machine.pack_ui_state.pre_draw(match self.pathing_window.open {
-                _ if self.pathing_menu_open => PackVisibility::Visible,
-                true => PackVisibility::Visible,
-                false => PackVisibility::Closed,
-            });
+            self.machine
+                .pack_ui_state
+                .pre_draw(match self.pathing_window.open {
+                    _ if self.pathing_menu_open => PackVisibility::Visible,
+                    true => PackVisibility::Visible,
+                    false => PackVisibility::Closed,
+                });
             self.pathing_window.pre_draw(&mut self.machine);
             self.pathing_menu_open = false;
         }

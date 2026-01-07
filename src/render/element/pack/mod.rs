@@ -1,12 +1,18 @@
-use taimi_meta::packs::PackIndex;
-
 use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackCategoryFlags, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded},
-                PathingEvent,
+                registry::{PackCategoryFlags, PackInfoSignature, PackVecOf, UnloadedReason},
+                shared::{
+                    PathingShared,
+                    SharedLoaderPacksInfo,
+                    SharedPackConfig,
+                    SharedPackInfo,
+                    SharedPackLoad,
+                    SharedPackLoaded,
+                },
                 PathingController,
+                PathingEvent,
             },
             Controller,
         },
@@ -16,16 +22,38 @@ use {
         },
         render::RenderState,
     },
-    std::{fmt::Write, mem, sync::{Arc, Weak}},
-    taimi_hoard::{str_opt, str_opt_ref, loc::LocationMut}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, MarkerAttributes}, Pack},
-    taimi_sync::watched::{watch, Watched, Watcher},
-    taimi_sync::arcs::ArcPtrCmp,
+    std::{
+        fmt::Write,
+        mem,
+        sync::{Arc, Weak},
+    },
+    taimi_hoard::{loc::LocationMut, str_opt, str_opt_ref},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, PackIndex, PackPath},
+    taimi_pack::{
+        attributes::{self, AttrString, MarkerAttributes},
+        Pack,
+    },
+    taimi_sync::{
+        arcs::ArcPtrCmp,
+        watched::{watch, Watched, Watcher},
+    },
 };
+
 #[allow(unused_imports)]
 pub use self::{
-    categories::{DrawCategoryHeader, DrawCategoryTooltip, DrawPackUnloaded, CategoryInfo, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryCollectionState, CategoryAction, CategoryActionSlot},
-    menu::{DrawCategoryMenu, DrawCategoryCollectionMenu, DrawPackContextMenu, DrawCategoryContextMenu},
-    toggles::{DrawPackRoots, DrawCategoryToggle, DecorateCategoryHeader},
+    categories::{
+        CategoryAction,
+        CategoryActionSlot,
+        CategoryCollectionState,
+        CategoryInfo,
+        DrawCategoryCollection,
+        DrawCategoryCollectionTree,
+        DrawCategoryHeader,
+        DrawCategoryTooltip,
+        DrawPackUnloaded,
+    },
+    menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu},
+    toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
 };
 
 mod categories;
@@ -46,8 +74,10 @@ impl PackElements {
 
     pub fn pre_draw(&mut self, visibility: PackVisibility) {
         if self.shared.is_none() {
-            Controller::with_sender(|s| if let Some(pathing) = &s.pathing {
-                self.shared = Some(pathing.shared.clone());
+            Controller::with_sender(|s| {
+                if let Some(pathing) = &s.pathing {
+                    self.shared = Some(pathing.shared.clone());
+                }
             });
             if let Some(shared) = &self.shared {
                 self.packs_rx.restart_watching(&shared.packs.packs);
@@ -73,8 +103,7 @@ impl PackElements {
     }
     pub fn draw(&mut self, ui: &Ui) {
         let (mut menu_pack, menu_cat) = match self.context_menu {
-            Some((path, cat)) =>
-                (self.pack_state.lookup_mut(&path), cat),
+            Some((path, cat)) => (self.pack_state.lookup_mut(&path), cat),
             None => (None, None),
         };
         if let Some(_menu) = ui.begin_popup(DrawPackContextMenu::id()) {
@@ -99,8 +128,7 @@ impl PackElements {
         for pack in self.pack_state.values_mut() {
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
-                _ =>
-                    pack.context_menu = None,
+                _ => pack.context_menu = None,
             }
             pack.draw(ui);
             if let Some(cat_path) = pack.context_menu {
@@ -141,17 +169,22 @@ impl PackElement {
             self.state.populate_display_name();
         }
         let category_visibility = match visibility {
-            PackVisibility::Visible if !self.any_roots_open() =>
-                PackVisibility::Pending,
+            PackVisibility::Visible if !self.any_roots_open() => PackVisibility::Pending,
             v => v,
         };
-        self.categories.pre_draw(&self.state, &damage, category_visibility);
+        self.categories
+            .pre_draw(&self.state, &damage, category_visibility);
     }
 
     pub fn draw_pack_tooltip(&mut self, ui: &Ui, title_visible: bool, reason_visible: bool) {
         self.hovered = Some(None);
-        let title_template = self.state.display_name().unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
-        DrawCategoryTooltip::draw_tooltip(ui, title_template, || self.draw_pack_tooltip_contents(ui, title_visible, reason_visible));
+        let title_template = self
+            .state
+            .display_name()
+            .unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
+        DrawCategoryTooltip::draw_tooltip(ui, title_template, || {
+            self.draw_pack_tooltip_contents(ui, title_visible, reason_visible)
+        });
     }
     pub fn draw_pack_tooltip_contents(&self, ui: &Ui, title_visible: bool, reason_visible: bool) {
         let title = (!title_visible).then_some(self.state.display_name()).flatten();
@@ -168,9 +201,7 @@ impl PackElement {
             if !reason_visible {
                 DrawPackUnloaded::draw_reason_name(ui, Some(unloaded));
             }
-            DrawPackUnloaded::with_reason_details(Some(unloaded), |msg|
-                ui.text_wrapped(&msg)
-            );
+            DrawPackUnloaded::with_reason_details(Some(unloaded), |msg| ui.text_wrapped(&msg));
         }
     }
 }
@@ -199,7 +230,7 @@ impl PackElementState {
             loaded,
             damage: PackDamageReport {
                 info: Some(PackInfoSignature::EMPTY),
-                .. PackDamageReport::ALL
+                ..PackDamageReport::ALL
             },
             unloaded: None,
             pack: None,
@@ -261,10 +292,10 @@ impl PackElementState {
     }
     pub fn ui_id(&self) -> imgui::Id<'_> {
         let id_name =
-            str_opt_ref(&self.id_name)
-            .or_else(|| self.info.datasource.as_ref().map(|ds| &ds.path[..]));
+            str_opt_ref(&self.id_name).or_else(|| self.info.datasource.as_ref().map(|ds| &ds.path[..]));
         //let id_name = id_name.or(str_opt_ref(&self.display_name));
-        id_name.map(imgui::Id::Str)
+        id_name
+            .map(imgui::Id::Str)
             .unwrap_or(imgui::Id::Int(self.info.index.path as _))
     }
     pub fn pack_path(&self) -> PackPath {
@@ -282,10 +313,7 @@ pub struct PackTooltip {
     pub description: Option<AttrString>,
 }
 impl PackTooltip {
-    pub const EMPTY: Self = Self {
-        title: None,
-        description: None,
-    };
+    pub const EMPTY: Self = Self { title: None, description: None };
 
     pub fn new<S: Into<Box<str>>>(title: Option<S>, description: Option<S>) -> Self {
         Self {
@@ -317,10 +345,7 @@ pub struct PackTooltipRef<'a> {
     pub description: &'a str,
 }
 impl<'a> PackTooltipRef<'a> {
-    pub const EMPTY: Self = Self {
-        title: "",
-        description: "",
-    };
+    pub const EMPTY: Self = Self { title: "", description: "" };
 
     #[inline]
     pub const fn new(title: &'a str, description: &'a str) -> Self {
@@ -366,7 +391,10 @@ impl ToOwned for PackTooltipRef<'_> {
     type Owned = PackTooltip;
 
     fn to_owned(&self) -> Self::Owned {
-        PackTooltip::new(self.title().map(attributes::string_into), self.description().map(attributes::string_into))
+        PackTooltip::new(
+            self.title().map(attributes::string_into),
+            self.description().map(attributes::string_into),
+        )
     }
 }
 
@@ -420,8 +448,12 @@ impl UiAction {
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PackAction {
-    Unload { hard: bool },
-    Reload { hard: bool },
+    Unload {
+        hard: bool,
+    },
+    Reload {
+        hard: bool,
+    },
     Load(Option<bool>),
     Cat {
         action: CategoryAction,
@@ -443,22 +475,25 @@ impl PackAction {
 
     #[allow(non_snake_case)]
     pub const fn Root(action: CategoryAction) -> Self {
-        Self::Cat {
-            path: None,
-            action,
-        }
+        Self::Cat { path: None, action }
     }
-    pub fn clobber(self, path: PackPath, dest: &mut PackActionSlot) -> Result<Option<(PackPath, Self)>, Self> {
+    pub fn clobber(
+        self,
+        path: PackPath,
+        dest: &mut PackActionSlot,
+    ) -> Result<Option<(PackPath, Self)>, Self> {
         match &*dest {
-            Some((p, present)) if *p == path && *present == self =>
-                return Ok(None),
-            Some((_, present)) if *present > self =>
-                return Err(self),
+            Some((p, present)) if *p == path && *present == self => return Ok(None),
+            Some((_, present)) if *present > self => return Err(self),
             _ => (),
         }
         Ok(mem::replace(dest, Some((path, self))))
     }
-    pub fn try_clobber(self, path: PackPath, dest: &mut PackActionSlot) -> Result<Option<(PackPath, Self)>, Self> {
+    pub fn try_clobber(
+        self,
+        path: PackPath,
+        dest: &mut PackActionSlot,
+    ) -> Result<Option<(PackPath, Self)>, Self> {
         if let Some((dest_path, present)) = dest.take() {
             if let Some(couldnt_dismiss) = present.try_act(dest_path) {
                 *dest = Some((dest_path, couldnt_dismiss));
@@ -472,18 +507,12 @@ impl PackAction {
     }
     pub(crate) fn as_pathing_message(self, path: PackPath) -> Option<PathingEvent> {
         match self {
-            Self::Cat { path: Some(cat_path), action } =>
-                return action.as_pathing_message(cat_path, path),
-            Self::Cat { path: None, action } =>
-                action.as_pack_message(path),
-            Self::Reload { hard } =>
-                Some(PathingEvent::ReloadPack(path, hard)),
-            Self::Unload { hard } =>
-                Some(PathingEvent::UnloadPack(path, hard)),
-            Self::Load(Some(false)) =>
-                Some(PathingEvent::OffloadPack(path)),
-            Self::Load(Some(true)) =>
-                Some(PathingEvent::LoadPack(path)),
+            Self::Cat { path: Some(cat_path), action } => return action.as_pathing_message(cat_path, path),
+            Self::Cat { path: None, action } => action.as_pack_message(path),
+            Self::Reload { hard } => Some(PathingEvent::ReloadPack(path, hard)),
+            Self::Unload { hard } => Some(PathingEvent::UnloadPack(path, hard)),
+            Self::Load(Some(false)) => Some(PathingEvent::OffloadPack(path)),
+            Self::Load(Some(true)) => Some(PathingEvent::LoadPack(path)),
             Self::Load(None) => {
                 log::info!("TODO: toggle pack load?");
                 match () {
@@ -502,16 +531,18 @@ impl PackAction {
         }
         let msg = match self {
             Self::Cat { path: Some(cat_path), action } =>
-                return action.try_act(cat_path, path).map(|action|
-                    action.as_pack(cat_path)
-                ),
+                return action
+                    .try_act(cat_path, path)
+                    .map(|action| action.as_pack(cat_path)),
             #[cfg(todo)]
             Self::Copy => {
                 // technically doable via render sender or something if we can find attrs but ew
             },
             // not important enough to keep around...
-            Self::Cat { path: None, action: CategoryAction::HoverTooltip | CategoryAction::ContextMenu } =>
-                return None,
+            Self::Cat {
+                path: None,
+                action: CategoryAction::HoverTooltip | CategoryAction::ContextMenu,
+            } => return None,
             action => action.as_pathing_message(path),
         };
         match msg.map(PathingController::try_send) {
@@ -521,8 +552,7 @@ impl PackAction {
     }
     pub fn clobbered_action(res: Result<Option<(PackPath, Self)>, Self>) -> Option<Self> {
         match res {
-            Err(lost) | Ok(Some((_, lost))) =>
-                Some(lost),
+            Err(lost) | Ok(Some((_, lost))) => Some(lost),
             _ => None,
         }
     }
@@ -535,7 +565,12 @@ impl PackAction {
                 None => return,
                 Some(slot) => slot,
             };
-            if let Self::Cat { action: CategoryAction::HoverTooltip, .. } = clobbered { return }
+            if let Self::Cat {
+                action: CategoryAction::HoverTooltip, ..
+            } = clobbered
+            {
+                return
+            }
             log::debug!("clobbered action {clobbered:?} in favour of {slot:?}");
         }
     }
@@ -561,8 +596,7 @@ impl CategoryAction {
 
     pub(crate) fn as_pack_message(self, pack_path: PackPath) -> Option<PathingEvent> {
         match self {
-            Self::Enable(enable) =>
-                PackAction::Load(enable).as_pathing_message(pack_path),
+            Self::Enable(enable) => PackAction::Load(enable).as_pathing_message(pack_path),
             _ => None,
         }
     }

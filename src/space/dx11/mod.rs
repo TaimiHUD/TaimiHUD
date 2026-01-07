@@ -1,9 +1,6 @@
 use {
     crate::exports::runtime::textures::TextureSlot,
-    taimi_d3d::{
-        dx11::prelude::*,
-        D3dContextBindableSlot,
-    },
+    taimi_d3d::{dx11::prelude::*, D3dContextBindableSlot},
 };
 
 pub mod backend;

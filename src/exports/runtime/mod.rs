@@ -1,4 +1,5 @@
 use {
+    self::textures::TextureKey,
     crate::{
         exports,
         load_language,
@@ -7,7 +8,6 @@ use {
         settings::state::BootstrapState,
         Interruption,
     },
-    self::textures::TextureKey,
     ::log::info,
     anyhow::Context,
     rand::{rng, seq::SliceRandom},

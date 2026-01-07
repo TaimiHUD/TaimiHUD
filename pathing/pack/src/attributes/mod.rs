@@ -2,7 +2,7 @@ use {
     crate::{category::id::IdNameBox, pack::taco_xml_to_guid},
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
-    std::{borrow::Cow, fmt, str::FromStr, sync::Arc, num::NonZero},
+    std::{borrow::Cow, fmt, num::NonZero, str::FromStr, sync::Arc},
     uuid::Uuid,
     xml::name::Name,
 };
@@ -532,26 +532,21 @@ impl FilterAttributes {
         self.races.unwrap_or(Races::empty())
     }
     pub fn specializations(&self) -> &[keys::Specialization] {
-        let v = self.specializations.as_ref()
-            .map(|s| &s[..])
-            .unwrap_or(&[]);
+        let v = self.specializations.as_ref().map(|s| &s[..]).unwrap_or(&[]);
         keys::Specialization::slice_from_i32(v)
     }
     pub fn map_types(&self) -> &[MapType] {
-        self.map_types.as_ref()
-            .map(|s| &s[..])
-            .unwrap_or(&[])
+        self.map_types.as_ref().map(|s| &s[..]).unwrap_or(&[])
     }
     pub fn schedule(&self) -> Option<&str> {
         self.schedule.as_ref().map(|s| &s[..])
     }
     pub fn schedule_duration(&self) -> f32 {
-        self.schedule_duration.unwrap_or(keys::ScheduleDuration::DEFAULT.into())
+        self.schedule_duration
+            .unwrap_or(keys::ScheduleDuration::DEFAULT.into())
     }
     pub fn raids(&self) -> &[String] {
-        self.raids.as_ref()
-            .map(|v| &v[..])
-            .unwrap_or(&[])
+        self.raids.as_ref().map(|v| &v[..]).unwrap_or(&[])
     }
     pub fn achievement_id(&self) -> Option<NonZero<u32>> {
         self.achievement_id.and_then(|v| NonZero::new(v as u32))
@@ -560,7 +555,8 @@ impl FilterAttributes {
         self.achievement_bit.map(|v| v as u16)
     }
     pub fn invert_behavior(&self) -> bool {
-        self.invert_behavior.unwrap_or(keys::InvertBehaviour::DEFAULT.into())
+        self.invert_behavior
+            .unwrap_or(keys::InvertBehaviour::DEFAULT.into())
     }
 }
 
@@ -730,10 +726,12 @@ impl PoiAttributes {
         self.icon_size.unwrap_or(keys::IconSize::DEFAULT.into())
     }
     pub fn map_display_size(&self) -> f32 {
-        self.map_display_size.unwrap_or(keys::MapDisplaySize::DEFAULT.into())
+        self.map_display_size
+            .unwrap_or(keys::MapDisplaySize::DEFAULT.into())
     }
     pub fn scale_on_map_with_zoom(&self) -> bool {
-        self.scale_on_map_with_zoom.unwrap_or(keys::ScaleOnMapWithZoom::DEFAULT.into())
+        self.scale_on_map_with_zoom
+            .unwrap_or(keys::ScaleOnMapWithZoom::DEFAULT.into())
     }
     pub fn min_size(&self) -> f32 {
         self.min_size.unwrap_or(keys::MinSize::DEFAULT.into())

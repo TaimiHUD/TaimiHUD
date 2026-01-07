@@ -19,16 +19,11 @@ use {
     bevy_ecs::prelude::*,
     glam::Vec3,
     glamour::{Box2, Size2, TransformMap},
-    std::{
-        collections::HashMap,
-        mem,
-        num::NonZeroU32,
-        sync::Arc,
-    },
+    std::{collections::HashMap, mem, num::NonZeroU32, sync::Arc},
     taimi_d3d::dx11::prelude::*,
     taimi_meta::{
-        spatial::cull::MapFrustum,
         coords::ScreenSpace,
+        spatial::cull::MapFrustum,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
             MapContext,
@@ -652,7 +647,11 @@ impl Engine {
                     .set_map_cb(&device_context, perspective_slot);
 
                 let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
-                let entities = self.packs.render_list.iter_markers_map(self.packs.pack_data.map_ref_as_slice(), map_ctx, &map_query);
+                let entities = self.packs.render_list.iter_markers_map(
+                    self.packs.pack_data.map_ref_as_slice(),
+                    map_ctx,
+                    &map_query,
+                );
                 PackRender::draw_map_entities(
                     &mut self.packs.draw_state,
                     &self.packs.poi_common,

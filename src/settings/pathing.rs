@@ -1,15 +1,15 @@
 use {
-    crate::{
-        controller::Controller,
-        settings::Settings,
-    },
+    crate::{controller::Controller, settings::Settings},
     bitflags::bitflags,
     serde::{Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, sync::Arc, time},
     strum::{IntoStaticStr, VariantArray},
 };
 #[cfg(feature = "space")]
-use {taimi_meta::ui::MapContext, taimi_pack::attributes::{keys::Guid, Festival, Festivals}};
+use {
+    taimi_meta::ui::MapContext,
+    taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+};
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PathingSettings {
@@ -17,9 +17,15 @@ pub struct PathingSettings {
     pub space: SpaceSettings,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub festival_filter: Arc<BTreeMap<String, FestivalPreference>>,
-    #[serde(default = "TriggerKind::settings_default_auto", skip_serializing_if = "TriggerKind::settings_default_is_auto")]
+    #[serde(
+        default = "TriggerKind::settings_default_auto",
+        skip_serializing_if = "TriggerKind::settings_default_is_auto"
+    )]
     pub trigger_allow_auto: TriggerKind,
-    #[serde(default = "TriggerKind::settings_default_interact", skip_serializing_if = "TriggerKind::settings_default_is_interact")]
+    #[serde(
+        default = "TriggerKind::settings_default_interact",
+        skip_serializing_if = "TriggerKind::settings_default_is_interact"
+    )]
     pub trigger_allow_interact: TriggerKind,
 }
 
@@ -524,10 +530,8 @@ impl TriggerKind {
 impl fmt::Display for TriggerKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.flag_str() {
-            Some(name) =>
-                f.write_str(name),
-            None =>
-                write!(f, "{}", self.bits()),
+            Some(name) => f.write_str(name),
+            None => write!(f, "{}", self.bits()),
         }
     }
 }
@@ -542,29 +546,32 @@ impl<'de> serde::Deserialize<'de> for TriggerKind {
     }
 }
 impl TriggerKind {
-    pub const SETTINGS_GUI: Self = Self::from_bits_retain(
-        Self::all().bits() & !(Self::SHOW.bits() | Self::HIDE.bits())
-    );
-    pub const SETTINGS_TOGGLE_SHOWHIDE: Self = Self::from_bits_retain(
-        Self::SHOW.bits() | Self::HIDE.bits()
-    );
+    pub const SETTINGS_GUI: Self =
+        Self::from_bits_retain(Self::all().bits() & !(Self::SHOW.bits() | Self::HIDE.bits()));
+    pub const SETTINGS_TOGGLE_SHOWHIDE: Self =
+        Self::from_bits_retain(Self::SHOW.bits() | Self::HIDE.bits());
     pub const SETTINGS_DEFAULT_AUTO: Self = Self::from_bits_retain(
-        Self::BEHAVIOUR.bits() |
-            Self::INFO.bits() | Self::RESET.bits() |
-            Self::TOGGLE.bits() | Self::SHOW.bits() | Self::HIDE.bits() |
-            Self::BOUNCE.bits()
+        Self::BEHAVIOUR.bits()
+            | Self::INFO.bits()
+            | Self::RESET.bits()
+            | Self::TOGGLE.bits()
+            | Self::SHOW.bits()
+            | Self::HIDE.bits()
+            | Self::BOUNCE.bits(),
     );
-    pub const DISMISS: Self = Self::from_bits_retain(
-        Self::BEHAVIOUR.bits() | Self::BOUNCE.bits()
-    );
+    pub const DISMISS: Self = Self::from_bits_retain(Self::BEHAVIOUR.bits() | Self::BOUNCE.bits());
     pub const fn settings_default_auto() -> Self {
         Self::SETTINGS_DEFAULT_AUTO
     }
     pub const SETTINGS_DEFAULT_INTERACT: Self = Self::from_bits_retain(
-        Self::BEHAVIOUR.bits() |
-        Self::COPY.bits() | Self::INFO.bits() | Self::RESET.bits() |
-            Self::TOGGLE.bits() | Self::SHOW.bits() | Self::HIDE.bits() |
-            Self::BOUNCE.bits()
+        Self::BEHAVIOUR.bits()
+            | Self::COPY.bits()
+            | Self::INFO.bits()
+            | Self::RESET.bits()
+            | Self::TOGGLE.bits()
+            | Self::SHOW.bits()
+            | Self::HIDE.bits()
+            | Self::BOUNCE.bits(),
     );
     pub const fn settings_default_interact() -> Self {
         Self::SETTINGS_DEFAULT_INTERACT
@@ -587,14 +594,9 @@ pub struct PathingSave {
 impl PathingSave {
     pub fn is_empty(&self) -> bool {
         match self {
-            Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() =>
-                false,
-            Self { per_account, .. } if !Self::is_per_account_empty(per_account) =>
-                false,
-            Self {
-                hidden_guid_expiry: _,
-                per_account: _,
-            } => true,
+            Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() => false,
+            Self { per_account, .. } if !Self::is_per_account_empty(per_account) => false,
+            Self { hidden_guid_expiry: _, per_account: _ } => true,
         }
     }
     pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, u64> {
@@ -616,7 +618,8 @@ impl PathingSave {
         self.hidden_guid_expiry.get(guid)
     }
     pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
-        self.hidden_guid_expiry.get(guid)
+        self.hidden_guid_expiry
+            .get(guid)
             .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
     }
 
@@ -642,11 +645,10 @@ impl PathingAccountSave {
     pub fn is_empty(&self) -> bool {
         match self {
             #[cfg(todo)]
-            Self { achievements, .. } if !achievements.is_empty() =>
-                false,
+            Self { achievements, .. } if !achievements.is_empty() => false,
             Self {
                 #[cfg(todo)]
-                achievements: _,
+                    achievements: _,
             } => true,
         }
     }

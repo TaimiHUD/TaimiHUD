@@ -6,12 +6,15 @@ use {
     },
 };
 pub use {
-    taimi_meta::packs::VisibilityFlags,
     crate::controller::pathing::state::{
         LoadedCategory,
-        LoadedPoi, LoadedTrail, LoadedTrailSection, LoadedTrailGeometry,
         LoadedMapPack,
+        LoadedPoi,
+        LoadedTrail,
+        LoadedTrailGeometry,
+        LoadedTrailSection,
     },
+    taimi_meta::packs::VisibilityFlags,
 };
 
 pub trait VisibilityFlagsExt: Sized {

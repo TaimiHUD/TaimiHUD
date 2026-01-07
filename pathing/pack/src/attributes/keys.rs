@@ -296,75 +296,105 @@ impl CanFade {
     pub const DEFAULT: Self = Self(Bool::TRUE);
 }
 impl Default for CanFade {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl From<bool> for CanFade {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<CanFade> for bool {
     #[inline]
-    fn from(v: CanFade) -> Self { v.0.into() }
+    fn from(v: CanFade) -> Self {
+        v.0.into()
+    }
 }
 impl InGameVisibility {
     pub const DEFAULT: Self = Self(Bool::TRUE);
 }
 impl Default for InGameVisibility {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl From<bool> for InGameVisibility {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<InGameVisibility> for bool {
     #[inline]
-    fn from(v: InGameVisibility) -> Self { v.0.into() }
+    fn from(v: InGameVisibility) -> Self {
+        v.0.into()
+    }
 }
 impl MinimapVisibility {
     pub const DEFAULT: Self = Self(Bool::TRUE);
 }
 impl Default for MinimapVisibility {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl From<bool> for MinimapVisibility {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<MinimapVisibility> for bool {
     #[inline]
-    fn from(v: MinimapVisibility) -> Self { v.0.into() }
+    fn from(v: MinimapVisibility) -> Self {
+        v.0.into()
+    }
 }
 impl MapVisibility {
     pub const DEFAULT: Self = Self(Bool::TRUE);
 }
 impl Default for MapVisibility {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl From<bool> for MapVisibility {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<MapVisibility> for bool {
     #[inline]
-    fn from(v: MapVisibility) -> Self { v.0.into() }
+    fn from(v: MapVisibility) -> Self {
+        v.0.into()
+    }
 }
 impl FadeNear {
     pub const DEFAULT: Self = Self(-1.0);
 }
 impl Default for FadeNear {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl FadeFar {
     pub const DEFAULT: Self = Self(-1.0);
 }
 impl Default for FadeFar {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl Cull {
     pub const DEFAULT: Self = Self(CullDirection::None);
 }
 impl Default for Cull {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -391,7 +421,9 @@ impl AttrKey for Tint {
 }
 
 impl Default for Tint {
-    fn default() -> Self { Self(Colour::WHITE) }
+    fn default() -> Self {
+        Self(Colour::WHITE)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -573,11 +605,15 @@ impl Default for ScaleOnMapWithZoom {
 }
 impl From<bool> for ScaleOnMapWithZoom {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<ScaleOnMapWithZoom> for bool {
     #[inline]
-    fn from(v: ScaleOnMapWithZoom) -> Self { v.0.into() }
+    fn from(v: ScaleOnMapWithZoom) -> Self {
+        v.0.into()
+    }
 }
 impl MinSize {
     pub const DEFAULT: Self = Self(5.0);
@@ -600,11 +636,15 @@ impl Occlude {
 }
 impl From<bool> for Occlude {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<Occlude> for bool {
     #[inline]
-    fn from(v: Occlude) -> Self { v.0.into() }
+    fn from(v: Occlude) -> Self {
+        v.0.into()
+    }
 }
 
 impl HeightOffset {
@@ -645,15 +685,21 @@ impl FromStr for Rotate {
     }
 }
 impl Default for Rotate {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl From<Vec3> for Rotate {
     #[inline]
-    fn from(v: Vec3) -> Self { Self(v) }
+    fn from(v: Vec3) -> Self {
+        Self(v)
+    }
 }
 impl From<Rotate> for Vec3 {
     #[inline]
-    fn from(v: Rotate) -> Self { v.0 }
+    fn from(v: Rotate) -> Self {
+        v.0
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -793,11 +839,15 @@ impl InvertBehaviour {
 }
 impl From<bool> for InvertBehaviour {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<InvertBehaviour> for bool {
     #[inline]
-    fn from(v: InvertBehaviour) -> Self { v.0.into() }
+    fn from(v: InvertBehaviour) -> Self {
+        v.0.into()
+    }
 }
 
 // Trails
@@ -821,24 +871,32 @@ impl AnimSpeed {
     pub const DEFAULT: Self = Self(1.0);
 }
 impl Default for AnimSpeed {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl TrailScale {
     pub const DEFAULT: Self = Self(1.0);
 }
 impl Default for TrailScale {
-    fn default() -> Self { Self::DEFAULT }
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 impl IsWall {
     pub const DEFAULT: Self = Self(Bool::FALSE);
 }
 impl From<bool> for IsWall {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<IsWall> for bool {
     #[inline]
-    fn from(v: IsWall) -> Self { v.0.into() }
+    fn from(v: IsWall) -> Self {
+        v.0.into()
+    }
 }
 
 // Categories
@@ -865,33 +923,45 @@ impl Default for DefaultToggle {
 }
 impl From<bool> for DefaultToggle {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<DefaultToggle> for bool {
     #[inline]
-    fn from(v: DefaultToggle) -> Self { v.0.into() }
+    fn from(v: DefaultToggle) -> Self {
+        v.0.into()
+    }
 }
 impl IsHidden {
     pub const DEFAULT: Self = Self(Bool::FALSE);
 }
 impl From<bool> for IsHidden {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<IsHidden> for bool {
     #[inline]
-    fn from(v: IsHidden) -> Self { v.0.into() }
+    fn from(v: IsHidden) -> Self {
+        v.0.into()
+    }
 }
 impl IsSeparator {
     pub const DEFAULT: Self = Self(Bool::FALSE);
 }
 impl From<bool> for IsSeparator {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<IsSeparator> for bool {
     #[inline]
-    fn from(v: IsSeparator) -> Self { v.0.into() }
+    fn from(v: IsSeparator) -> Self {
+        v.0.into()
+    }
 }
 
 // Modifiers
@@ -971,11 +1041,15 @@ impl AutoTrigger {
 }
 impl From<bool> for AutoTrigger {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<AutoTrigger> for bool {
     #[inline]
-    fn from(v: AutoTrigger) -> Self { v.0.into() }
+    fn from(v: AutoTrigger) -> Self {
+        v.0.into()
+    }
 }
 impl TriggerRange {
     pub const DEFAULT: Self = Self(2.0);
@@ -999,33 +1073,45 @@ impl ToggleCategory {
 }
 impl From<bool> for ToggleCategory {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<ToggleCategory> for bool {
     #[inline]
-    fn from(v: ToggleCategory) -> Self { v.0.into() }
+    fn from(v: ToggleCategory) -> Self {
+        v.0.into()
+    }
 }
 impl ShowCategory {
     pub const DEFAULT: Self = Self(Bool::FALSE);
 }
 impl From<bool> for ShowCategory {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<ShowCategory> for bool {
     #[inline]
-    fn from(v: ShowCategory) -> Self { v.0.into() }
+    fn from(v: ShowCategory) -> Self {
+        v.0.into()
+    }
 }
 impl HideCategory {
     pub const DEFAULT: Self = Self(Bool::FALSE);
 }
 impl From<bool> for HideCategory {
     #[inline]
-    fn from(v: bool) -> Self { Self(v.into()) }
+    fn from(v: bool) -> Self {
+        Self(v.into())
+    }
 }
 impl From<HideCategory> for bool {
     #[inline]
-    fn from(v: HideCategory) -> Self { v.0.into() }
+    fn from(v: HideCategory) -> Self {
+        v.0.into()
+    }
 }
 
 impl BounceDelay {

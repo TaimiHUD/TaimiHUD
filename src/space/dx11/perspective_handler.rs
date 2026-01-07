@@ -1,8 +1,8 @@
 use {
     crate::{
+        controller::pathing::space::{PoiScale, TrailScale, TrailTextureMap},
         render::machine::{RenderMachine, RenderPosition},
         settings::pathing::SpaceSettings,
-        controller::pathing::space::{PoiScale, TrailScale, TrailTextureMap},
         space::ScreenSpace,
     },
     glam::{Mat4, Quat, Vec2, Vec3, Vec4},

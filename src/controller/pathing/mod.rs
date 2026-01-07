@@ -1,4 +1,11 @@
+#[doc(no_inline)]
+pub use taimi_meta::coords::LocalSpace as PackSpace;
 use {
+    self::{
+        registry::PackLoader,
+        space::{SpaceContext, SpacePackShared},
+        state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
+    },
     crate::{
         controller::{
             api::{AchievementState, RaidState},
@@ -16,46 +23,44 @@ use {
             },
         },
         settings::{Settings, SettingsLock},
-        space::{
-            engine::SpaceEvent,
-            Engine,
-        },
+        space::{engine::SpaceEvent, Engine},
         Interruption,
         InterruptionSignal,
     },
-    self::registry::PackLoader,
-    self::state::{LoadedMaps, LoadedMapInfo, LoadedPacks},
-    self::space::{SpaceContext, SpacePackShared},
     anyhow::Context,
-    futures::StreamExt,
-    std::sync::Arc,
-    std::collections::VecDeque,
-    std::pin::Pin,
-    std::future::Future,
-    strum_macros::Display,
-    taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
-    taimi_pack::attributes::Festivals,
-    tokio::{
-        task::JoinSet,
-        select,
+    futures::{
+        stream::{self, FusedStream},
+        StreamExt,
     },
+    std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc},
+    strum_macros::Display,
+    taimi_meta::{
+        packs::{
+            collections::{CategorySet, PackSet},
+            id::MarkerId,
+            CategoryPath,
+            PackPath,
+        },
+        ui::{
+            gameplay::{GameplayState, GameplayTransition},
+            MapContext,
+        },
+    },
+    taimi_pack::attributes::Festivals,
     taimi_sync::watched::watch,
-    taimi_meta::packs::{collections::{PackSet, CategorySet}, id::MarkerId, PackPath, CategoryPath},
+    tokio::{select, task::JoinSet},
 };
-use futures::stream::{self, FusedStream};
 
-#[allow(unused_imports)]
-pub use self::{
-    registry::{LoaderBox, UnloadedReason},
-    festivals::FestivalFixup,
-    shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
-    state::VisibilityFlagsExt,
-    config::PackConfig,
-};
 /// deleteme
 pub(crate) use self::state::visible;
-#[doc(no_inline)]
-pub use taimi_meta::coords::LocalSpace as PackSpace;
+#[allow(unused_imports)]
+pub use self::{
+    config::PackConfig,
+    festivals::FestivalFixup,
+    registry::{LoaderBox, UnloadedReason},
+    shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
+    state::VisibilityFlagsExt,
+};
 
 mod config;
 mod festivals;
@@ -63,14 +68,17 @@ pub mod info;
 pub mod registry;
 mod setup;
 pub mod shared;
-pub mod state;
 pub mod space;
+pub mod state;
 
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
 #[derive(Debug, Display)]
 pub(crate) enum PathingEvent {
-    VisibleToggle { context: Option<MapContext>, set: Option<bool> },
+    VisibleToggle {
+        context: Option<MapContext>,
+        set: Option<bool>,
+    },
     ReloadPack(PackPath, bool),
     LoadPack(PackPath),
     /// like Unload except will reactivate on its own when needed
@@ -109,7 +117,13 @@ pub(crate) struct PathingController {
     maps: LoadedMaps,
     space: SpaceContext,
     // watchers...
-    pack_configs: Box<dyn FusedStream<Item = (PackPath, watch::Receiver<shared::SharedPackConfig>)> + Send + Sync + Unpin + 'static>,
+    pack_configs: Box<
+        dyn FusedStream<Item = (PackPath, watch::Receiver<shared::SharedPackConfig>)>
+            + Send
+            + Sync
+            + Unpin
+            + 'static,
+    >,
     /// we only need to regen if a new pack slot is allocated
     pack_configs_sig: usize,
     packs_rx: watch::Receiver<shared::SharedLoaderPacksInfo>,
@@ -157,7 +171,7 @@ impl PathingController {
     pub async fn turn(&mut self) -> Option<Interruption> {
         if self.rx.command.is_closed() {
             return Some(
-                Interruption::try_drain_signals(&mut self.rx.command).unwrap_or(Interruption::Unspecified)
+                Interruption::try_drain_signals(&mut self.rx.command).unwrap_or(Interruption::Unspecified),
             )
         }
         let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
@@ -330,17 +344,14 @@ impl PathingController {
     }
 
     async fn handle_gameplay(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
-        if let GameplayTransition::Loaded { initial: true, .. } = trans {
-        }
+        if let GameplayTransition::Loaded { initial: true, .. } = trans {}
         match gameplay {
             GameplayState::Gameplay { map_id: Some(map_id) } => {
                 let (new_map, instantaneous) = match trans {
                     | GameplayTransition::Map { prev_map_id: Some(prev), .. }
                     | GameplayTransition::Loaded { prev_map_id: Some(prev), .. }
-                    if prev != map_id => (
-                        true,
-                        matches!(trans, GameplayTransition::Map { .. }),
-                    ),
+                        if prev != map_id =>
+                        (true, matches!(trans, GameplayTransition::Map { .. })),
                     _ => (false, false),
                 };
                 if new_map {
@@ -352,8 +363,7 @@ impl PathingController {
                 }
                 self.handle_map_enter(map_id)
             },
-            GameplayState::Intermission { initial: false, .. } =>
-                self.handle_map_suspend(false),
+            GameplayState::Intermission { initial: false, .. } => self.handle_map_suspend(false),
             _ => (),
         }
     }
@@ -445,8 +455,8 @@ impl PathingController {
             ReloadAll(remove) => self.reload_all(remove).await,
             #[cfg(deleteme)]
             UnloadAll => self.unload_all().await,
-            ReloadAll(..) | UnloadAll | ReloadPack(..) | LoadPack(..) | UnloadPack(..) | OffloadPack(..) =>
-                log::debug!("TODO: pathing load"),
+            ReloadAll(..) | UnloadAll | ReloadPack(..) | LoadPack(..) | UnloadPack(..)
+            | OffloadPack(..) => log::debug!("TODO: pathing load"),
             CategoryEnableSet(pack_path, cat, state) =>
                 Self::handle_toggle(&self.loader, pack_path.rel(cat.path), state).await,
             CategoryEnableCommit(pack_path, cats) => {

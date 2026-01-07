@@ -456,11 +456,12 @@ impl<T: Clone> Watched<T> {
     /// see also: [self.clone_write_if]
     pub fn write_if<F: FnOnce(&mut T) -> Option<bool>>(&mut self, f: F) -> Option<bool> {
         let changed = match self.watch.get_sender() {
-            None => if let Some(cached) = &mut self.cached {
-                f(cached)
-            } else {
-                Some(false)
-            },
+            None =>
+                if let Some(cached) = &mut self.cached {
+                    f(cached)
+                } else {
+                    Some(false)
+                },
             Some(sender) => {
                 let mut changed = Some(false);
                 sender.send_if_modified(|w| {
@@ -485,10 +486,12 @@ impl<T: Clone> Watched<T> {
     ///
     /// since this operates on [self.cached], changes may be clobbered or raced
     /// by concurrent senders
-    pub fn clone_write_if<F: FnOnce(&mut T) -> Option<bool>>(&mut self, keep_clone: bool, f: F) -> Option<bool> {
-        let changed = if let Some(cached) = self.try_read_mut() {
-            f(cached)
-        } else { Some(false) };
+    pub fn clone_write_if<F: FnOnce(&mut T) -> Option<bool>>(
+        &mut self,
+        keep_clone: bool,
+        f: F,
+    ) -> Option<bool> {
+        let changed = if let Some(cached) = self.try_read_mut() { f(cached) } else { Some(false) };
         match self.watch.get_sender() {
             None => (),
             Some(sender) => {

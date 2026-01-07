@@ -1,36 +1,28 @@
 #![cfg(todo)]
 //! bleh
 
-use std::{
-    cell::UnsafeCell,
-    pin::Pin,
-    sync::Arc,
-    ops,
-    slice::SliceIndex,
-    mem,
-    fmt,
-    iter,
-};
+use std::{cell::UnsafeCell, fmt, iter, mem, ops, pin::Pin, slice::SliceIndex, sync::Arc};
 
 /// ehhh bleh this is not okay though :<
-pub struct ArcIter<T: ?Sized + 'static> where
+pub struct ArcIter<T: ?Sized + 'static>
+where
     for<'a> &'a T: IntoIterator,
 {
     iter: UnsafeCell<<&'static T as IntoIterator>::IntoIter>,
     inner: Pin<Arc<T>>,
 }
-impl<T: ?Sized + 'static> ArcIter<T> where
+impl<T: ?Sized + 'static> ArcIter<T>
+where
     for<'a> &'a T: IntoIterator,
 {
-    pub fn new(inner: Arc<T>) -> Self where
+    pub fn new(inner: Arc<T>) -> Self
+    where
         T: Unpin,
     {
         Self::new_pinned(Pin::new(inner))
     }
     pub fn new_pinned(inner: Pin<Arc<T>>) -> Self {
-        let iter = UnsafeCell::new(unsafe {
-            IntoIterator::into_iter(&*(&*inner as *const T))
-        });
+        let iter = UnsafeCell::new(unsafe { IntoIterator::into_iter(&*(&*inner as *const T)) });
         Self { iter, inner }
     }
 
@@ -54,7 +46,8 @@ impl<T: ?Sized + 'static> ArcIter<T> where
         &mut *iter
     }
 }
-impl<T: ?Sized + 'static, I> fmt::Debug for ArcIter<T> where
+impl<T: ?Sized + 'static, I> fmt::Debug for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<IntoIter = I>,
     I: fmt::Debug,
 {
@@ -65,24 +58,22 @@ impl<T: ?Sized + 'static, I> fmt::Debug for ArcIter<T> where
             .finish()
     }
 }
-impl<T: ?Sized + 'static, I> Iterator for ArcIter<T> where
+impl<T: ?Sized + 'static, I> Iterator for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<Item = I>,
     I: 'static,
 {
     type Item = I;
     fn next(&mut self) -> Option<Self::Item> {
-        unsafe {
-            self.inner_iter_mut().next()
-        }
+        unsafe { self.inner_iter_mut().next() }
     }
 
     fn nth(&mut self, nth: usize) -> Option<Self::Item> {
-        unsafe {
-            self.inner_iter_mut().nth(nth)
-        }
+        unsafe { self.inner_iter_mut().nth(nth) }
     }
 }
-impl<T: ?Sized + 'static, I> Clone for ArcIter<T> where
+impl<T: ?Sized + 'static, I> Clone for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<IntoIter = I>,
     I: Clone,
 {
@@ -93,20 +84,26 @@ impl<T: ?Sized + 'static, I> Clone for ArcIter<T> where
         }
     }
 }
-unsafe impl<T: ?Sized + 'static, I> Send for ArcIter<T> where
+unsafe impl<T: ?Sized + 'static, I> Send for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<IntoIter = I>,
     Arc<T>: Send,
     I: Send,
-{}
-unsafe impl<T: ?Sized + 'static, I> Sync for ArcIter<T> where
+{
+}
+unsafe impl<T: ?Sized + 'static, I> Sync for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<IntoIter = I>,
     Arc<T>: Sync,
     I: Sync,
-{}
-impl<T: ?Sized + 'static, I> Unpin for ArcIter<T> where
+{
+}
+impl<T: ?Sized + 'static, I> Unpin for ArcIter<T>
+where
     for<'a> &'a T: IntoIterator<IntoIter = I>,
     I: Unpin,
-{}
+{
+}
 
 pub struct ArcSliceIter<T: ?Sized, I: ?Sized = ops::RangeFrom<usize>> {
     pub inner: Arc<T>,
@@ -116,13 +113,15 @@ impl<T: ?Sized, I> ArcSliceIter<T, I> {
     pub fn with_parts(inner: Arc<T>, idx: I) -> Self {
         Self { inner, idx }
     }
-    pub fn new(inner: Arc<T>) -> Self where
+    pub fn new(inner: Arc<T>) -> Self
+    where
         I: Default,
     {
         Self::with_parts(inner, I::default())
     }
 }
-impl<T: ?Sized, U> ArcSliceIter<T, ops::Range<usize>> where
+impl<T: ?Sized, U> ArcSliceIter<T, ops::Range<usize>>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
 {
     pub fn new_iter(inner: Arc<T>) -> Self {
@@ -143,24 +142,25 @@ impl<T: ?Sized> ArcSliceIter<T, ops::RangeInclusive<usize>> {
         Self::with_parts(inner, at..=at)
     }
 }
-impl<'a, T: ?Sized, U, I> ArcSliceIter<T, I> where
+impl<'a, T: ?Sized, U, I> ArcSliceIter<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
     U: 'a,
 {
     pub fn peek_ref(&'a self) -> Option<&'a <<I as Iterator>::Item as SliceIndex<[U]>>::Output> {
-        self.idx.clone().next().and_then(|idx|
-            self.inner[..].get(idx)
-        )
+        self.idx.clone().next().and_then(|idx| self.inner[..].get(idx))
     }
-    pub fn peek_arc(&self) -> Option<ArcSliceAt<T, I>> where
+    pub fn peek_arc(&self) -> Option<ArcSliceAt<T, I>>
+    where
         Self: Clone,
     {
         ArcSliceAt::with_inner(self.clone())
     }
 }
-impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I> where
+impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
@@ -176,7 +176,8 @@ impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I> where
         }
         next
     }
-    pub fn next_arc(&'a mut self) -> Option<ArcSliceAt<T, I>> where
+    pub fn next_arc(&'a mut self) -> Option<ArcSliceAt<T, I>>
+    where
         Self: Clone,
     {
         let next = ArcSliceAt::with_inner(self.clone());
@@ -185,18 +186,23 @@ impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I> where
         }
         next
     }
-    pub fn iter_arc(&'a self) -> impl Iterator<Item = ArcSliceAt<T, ops::RangeInclusive<usize>>> + 'static where
+    pub fn iter_arc(&'a self) -> impl Iterator<Item = ArcSliceAt<T, ops::RangeInclusive<usize>>> + 'static
+    where
         I: Iterator<Item = usize> + 'static,
     {
         self.clone().into_iter_arc()
     }
 }
-impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I> where
+impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
 {
-    pub fn into_iter_arc(mut self) -> impl Iterator<Item = ArcSliceAt<T, ops::RangeInclusive<usize>>> + 'static where
+    pub fn into_iter_arc(
+        mut self,
+    ) -> impl Iterator<Item = ArcSliceAt<T, ops::RangeInclusive<usize>>> + 'static
+    where
         I: Iterator<Item = usize> + 'static,
     {
         iter::from_fn(move || {
@@ -205,21 +211,21 @@ impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceIter<T, I> where
         })
     }
 }
-impl<'a, T: ?Sized, I: ?Sized> ArcSliceIter<T, I> where
+impl<'a, T: ?Sized, I: ?Sized> ArcSliceIter<T, I>
+where
     &'a T: IntoIterator + 'a,
 {
     fn iter_at(&'a self) -> <&'a T as IntoIterator>::IntoIter {
         IntoIterator::into_iter(&*self.inner)
     }
 }
-impl<'a, T: ?Sized, I> ArcSliceIter<T, I> where
+impl<'a, T: ?Sized, I> ArcSliceIter<T, I>
+where
     &'a T: IntoIterator + 'a,
     I: Clone + Iterator<Item = usize>,
 {
     pub fn peek_at(&'a self) -> Option<<&'a T as IntoIterator>::Item> {
-        self.idx.clone().next().and_then(|idx|
-            self.iter_at().nth(idx)
-        )
+        self.idx.clone().next().and_then(|idx| self.iter_at().nth(idx))
     }
     pub fn next_at(&'a mut self) -> Option<<&'a T as IntoIterator>::Item> {
         let prev = self.idx.clone();
@@ -232,7 +238,8 @@ impl<'a, T: ?Sized, I> ArcSliceIter<T, I> where
     }
 }
 #[cfg(todo)]
-impl<T: ?Sized, U> Iterator for ArcSliceIter<T, usize> where
+impl<T: ?Sized, U> Iterator for ArcSliceIter<T, usize>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     usize: SliceIndex<[U]>,
     <usize as SliceIndex<[U]>>::Output: Clone,
@@ -242,7 +249,8 @@ impl<T: ?Sized, U> Iterator for ArcSliceIter<T, usize> where
         self.next_ref().cloned()
     }
 }
-impl<T: ?Sized, I, II> Iterator for ArcSliceIter<T, I> where
+impl<T: ?Sized, I, II> Iterator for ArcSliceIter<T, I>
+where
     for<'a> &'a T: IntoIterator<Item = II>,
     I: Clone + Iterator<Item = usize>,
 {
@@ -263,7 +271,8 @@ impl<T: ?Sized, I, II> Iterator for ArcSliceIter<T, I> where
         }
     }
 }
-impl<T: ?Sized, I, II> ExactSizeIterator for ArcSliceIter<T, I> where
+impl<T: ?Sized, I, II> ExactSizeIterator for ArcSliceIter<T, I>
+where
     for<'a> &'a T: IntoIterator<IntoIter = II>,
     II: ExactSizeIterator,
     I: ExactSizeIterator,
@@ -273,7 +282,8 @@ impl<T: ?Sized, I, II> ExactSizeIterator for ArcSliceIter<T, I> where
         self.iter_at().len().min(self.idx.len())
     }
 }
-impl<T: ?Sized, I> DoubleEndedIterator for ArcSliceIter<T, I> where
+impl<T: ?Sized, I> DoubleEndedIterator for ArcSliceIter<T, I>
+where
     for<'a> &'a T: IntoIterator<Item = <Self as Iterator>::Item>,
     I: DoubleEndedIterator<Item = usize>,
     Self: Iterator,
@@ -332,49 +342,49 @@ impl<T: ?Sized, I> ArcSliceAt<T, I> {
         self.inner
     }
 }
-impl<T: ?Sized, I: ?Sized, U> ArcSliceAt<T, I> where
+impl<T: ?Sized, I: ?Sized, U> ArcSliceAt<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
 {
-    pub fn with_inner(inner: ArcSliceIter<T, I>) -> Option<Self> where
+    pub fn with_inner(inner: ArcSliceIter<T, I>) -> Option<Self>
+    where
         I: Sized,
     {
         let _ = inner.peek_ref().map(drop)?;
-        Some(unsafe {
-            Self::with_inner_unchecked(inner)
-        })
+        Some(unsafe { Self::with_inner_unchecked(inner) })
     }
     pub fn with_inner_ref(inner: &ArcSliceIter<T, I>) -> Option<&Self> {
         let _ = inner.peek_ref().map(drop)?;
-        Some(unsafe {
-            Self::with_inner_ref_unchecked(inner)
-        })
+        Some(unsafe { Self::with_inner_ref_unchecked(inner) })
     }
-    pub fn new(inner: Arc<T>, idx: I) -> Option<Self> where
+    pub fn new(inner: Arc<T>, idx: I) -> Option<Self>
+    where
         I: Sized,
     {
         Self::with_inner(ArcSliceIter::with_parts(inner, idx))
     }
 
-    pub fn get_nth(&self, nth: usize) -> Option<ArcSliceAt<T, <I as Iterator>::Item>> where
+    pub fn get_nth(&self, nth: usize) -> Option<ArcSliceAt<T, <I as Iterator>::Item>>
+    where
         I: Iterator,
         <I as Iterator>::Item: Clone + SliceIndex<[U]>,
     {
         let i = self.inner.idx.clone().nth(nth)?;
         let _ = self.inner.inner[..].get(i.clone()).map(drop)?;
-        Some(unsafe {
-            ArcSliceAt::new_unchecked(self.inner.inner.clone(), i)
-        })
+        Some(unsafe { ArcSliceAt::new_unchecked(self.inner.inner.clone(), i) })
     }
-    pub unsafe fn get_nth_unchecked(&self, nth: usize) -> ArcSliceAt<T, <I as Iterator>::Item> where
+    pub unsafe fn get_nth_unchecked(&self, nth: usize) -> ArcSliceAt<T, <I as Iterator>::Item>
+    where
         I: Iterator,
     {
         let i = self.inner.idx.clone().nth(nth).unwrap_unchecked();
         ArcSliceAt::new_unchecked(self.inner.inner.clone(), i)
     }
 }
-impl<T: ?Sized, U> ArcSliceAt<T, ops::RangeInclusive<usize>> where
+impl<T: ?Sized, U> ArcSliceAt<T, ops::RangeInclusive<usize>>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     <ops::RangeInclusive<usize> as Iterator>::Item: SliceIndex<[U]>,
 {
@@ -382,18 +392,18 @@ impl<T: ?Sized, U> ArcSliceAt<T, ops::RangeInclusive<usize>> where
         Self::new(inner, at..=at)
     }
 }
-impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceAt<T, I> where
+impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceAt<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
     U: 'a,
 {
     pub fn at_ref(&'a self) -> &'a <<I as Iterator>::Item as SliceIndex<[U]>>::Output {
-        unsafe {
-            self.inner.peek_ref().unwrap_unchecked()
-        }
+        unsafe { self.inner.peek_ref().unwrap_unchecked() }
     }
-    pub fn nth_ref(&'a self, nth: usize) -> Option<&'a <<I as Iterator>::Item as SliceIndex<[U]>>::Output> where
+    pub fn nth_ref(&'a self, nth: usize) -> Option<&'a <<I as Iterator>::Item as SliceIndex<[U]>>::Output>
+    where
         I: Iterator,
         <I as Iterator>::Item: SliceIndex<[U]>,
     {
@@ -401,7 +411,8 @@ impl<'a, T: ?Sized, I: ?Sized, U> ArcSliceAt<T, I> where
         self.inner.inner[..].get(i)
     }
 }
-impl<T: ?Sized, I, U> ops::Deref for ArcSliceAt<T, I> where
+impl<T: ?Sized, I, U> ops::Deref for ArcSliceAt<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
@@ -414,7 +425,8 @@ impl<T: ?Sized, I, U> ops::Deref for ArcSliceAt<T, I> where
         self.at_ref()
     }
 }
-impl<T: ?Sized, I, U> AsRef<<<I as Iterator>::Item as SliceIndex<[U]>>::Output> for ArcSliceAt<T, I> where
+impl<T: ?Sized, I, U> AsRef<<<I as Iterator>::Item as SliceIndex<[U]>>::Output> for ArcSliceAt<T, I>
+where
     T: ops::Index<ops::RangeFull, Output = [U]>,
     I: Clone + Iterator,
     <I as Iterator>::Item: SliceIndex<[U]>,
@@ -425,12 +437,11 @@ impl<T: ?Sized, I, U> AsRef<<<I as Iterator>::Item as SliceIndex<[U]>>::Output> 
         self.at_ref()
     }
 }
-impl<T: ?Sized, I> Clone for ArcSliceAt<T, I> where
+impl<T: ?Sized, I> Clone for ArcSliceAt<T, I>
+where
     ArcSliceIter<T, I>: Clone,
 {
     fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
+        Self { inner: self.inner.clone() }
     }
 }

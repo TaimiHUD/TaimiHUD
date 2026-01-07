@@ -1,5 +1,13 @@
-use core::{borrow::Borrow, cmp, hash::{Hash, Hasher}, mem, ops};
-use std::sync::Arc;
+use {
+    core::{
+        borrow::Borrow,
+        cmp,
+        hash::{Hash, Hasher},
+        mem,
+        ops,
+    },
+    std::sync::Arc,
+};
 
 /// XXX: not the same as [Arc::ptr_eq],
 /// may compare metadata!
@@ -10,19 +18,19 @@ use std::sync::Arc;
 pub struct ArcPtrCmp<T: ?Sized>(pub Arc<T>);
 impl<T: ?Sized> ArcPtrCmp<T> {
     pub const fn from_ref(inner: &Arc<T>) -> &Self {
-        unsafe {
-            mem::transmute(inner)
-        }
+        unsafe { mem::transmute(inner) }
     }
     pub fn from_mut(inner: &mut Arc<T>) -> &mut Self {
-        unsafe {
-            mem::transmute(inner)
-        }
+        unsafe { mem::transmute(inner) }
     }
-    pub fn into_inner_arc(self) -> Arc<T> { self.0 }
+    pub fn into_inner_arc(self) -> Arc<T> {
+        self.0
+    }
     /// skip clone op if unchanged
     pub fn clone_from_arc(&mut self, arc: &Arc<T>) -> bool {
-        if Self::eq(&*self, arc) { return false }
+        if Self::eq(&*self, arc) {
+            return false
+        }
         self.0 = arc.clone();
         true
     }
@@ -47,7 +55,8 @@ impl<T: ?Sized> ArcPtrCmp<T> {
     }
 }
 
-impl<T: ?Sized, R: ?Sized> PartialEq<R> for ArcPtrCmp<T> where
+impl<T: ?Sized, R: ?Sized> PartialEq<R> for ArcPtrCmp<T>
+where
     R: Borrow<T>,
 {
     #[inline]
@@ -59,7 +68,8 @@ impl<T: ?Sized, R: ?Sized> PartialEq<R> for ArcPtrCmp<T> where
 }
 impl<T: ?Sized> Eq for ArcPtrCmp<T> {}
 
-impl<T: ?Sized, R: ?Sized> PartialOrd<R> for ArcPtrCmp<T> where
+impl<T: ?Sized, R: ?Sized> PartialOrd<R> for ArcPtrCmp<T>
+where
     R: Borrow<T>,
 {
     #[inline]
@@ -102,22 +112,32 @@ impl<T: ?Sized> Clone for ArcPtrCmp<T> {
     }
 }
 
-impl<T: ?Sized, U: ?Sized> Borrow<U> for ArcPtrCmp<T> where
+impl<T: ?Sized, U: ?Sized> Borrow<U> for ArcPtrCmp<T>
+where
     Arc<T>: Borrow<U>,
 {
-    fn borrow(&self) -> &U { Borrow::borrow(&self.0) }
+    fn borrow(&self) -> &U {
+        Borrow::borrow(&self.0)
+    }
 }
-impl<T: ?Sized, U: ?Sized> AsRef<U> for ArcPtrCmp<T> where
+impl<T: ?Sized, U: ?Sized> AsRef<U> for ArcPtrCmp<T>
+where
     Arc<T>: AsRef<U>,
 {
-    fn as_ref(&self) -> &U { AsRef::as_ref(&self.0) }
+    fn as_ref(&self) -> &U {
+        AsRef::as_ref(&self.0)
+    }
 }
 impl<T: ?Sized> ops::Deref for ArcPtrCmp<T> {
     type Target = Arc<T>;
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 impl<T: ?Sized> ops::DerefMut for ArcPtrCmp<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 impl<T: ?Sized> From<Arc<T>> for ArcPtrCmp<T> {
     fn from(inner: Arc<T>) -> Self {

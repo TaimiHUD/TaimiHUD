@@ -62,8 +62,7 @@ impl PathingWindowState {
             }
         }
     }
-    pub fn pre_draw(&mut self, _machine: &mut RenderMachine) {
-    }
+    pub fn pre_draw(&mut self, _machine: &mut RenderMachine) {}
 
     pub fn draw(
         &mut self,
@@ -94,11 +93,7 @@ impl PathingWindowState {
             .opened(&mut open)
             .build(ui, || {
                 let pathing_dir = crate::ADDON_DIR.join("pathing");
-                RenderState::draw_open_path_button(
-                    ui,
-                    fl!("open-button", kind = "folder"),
-                    &pathing_dir,
-                );
+                RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
                 self.draw_content(ui, machine, engine)
             });
         self.open = open;
@@ -165,8 +160,7 @@ impl PathingWindowState {
         }
     }
     pub fn draw_categories_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let table_flags =
-            TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
+        let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
         let table_name = format!("pathing");
         let table_token = ui.begin_table_with_flags(&table_name, 1, table_flags);
         machine.pack_ui_state.draw(ui);
@@ -204,7 +198,10 @@ impl PathingWindowState {
             });
         }
         if search_dirty {
-            let packs = machine.pack_ui_state.pack_state.values()
+            let packs = machine
+                .pack_ui_state
+                .pack_state
+                .values()
                 .filter_map(|pack| pack.state.pack_data());
             self.search_state.commit(packs);
         }

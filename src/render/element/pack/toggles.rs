@@ -1,10 +1,25 @@
 use {
+    super::{
+        CategoryAction,
+        CategoryActionSlot,
+        CategoryCollectionState,
+        CategoryInfo,
+        DrawCategoryCollection,
+        DrawCategoryCollectionTree,
+        DrawCategoryHeader,
+        DrawCategoryTooltip,
+        DrawPackUnloaded,
+        PackAction,
+        PackActionSlot,
+        PackElement,
+        PackElementState,
+        UiAction,
+    },
     crate::{
         controller::pathing::registry::UnloadedReason,
         exports::runtime::imgui::{Condition, TreeNodeToken, Ui},
         with_i18n,
     },
-    super::{PackElement, DrawCategoryHeader, DrawPackUnloaded, UiAction, PackElementState, CategoryInfo, CategoryCollectionState, DrawCategoryTooltip, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryAction, CategoryActionSlot, PackAction, PackActionSlot},
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
 };
@@ -25,8 +40,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             _reason => None,
         };
         match categories {
-            Some(cats) =>
-                self.draw_loaded(cats),
+            Some(cats) => self.draw_loaded(cats),
             None => self.draw_unloaded(),
         }
     }
@@ -42,7 +56,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             pack_act = act;
             pack_toggle = header.draw_toggle_inline();
             token
-        } else { None };
+        } else {
+            None
+        };
         if let Some(cats) = cats {
             if pseudo_root.is_some() || token.is_some() {
                 for root in cats.root_paths() {
@@ -75,35 +91,24 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             None => None,
         };
         if let Some(pack_act) = pack_act {
-            let pack_act = PackAction::Cat {
-                path: pseudo_root,
-                action: pack_act,
-            };
+            let pack_act = PackAction::Cat { path: pseudo_root, action: pack_act };
             let clobbered = pack_act.clobber(self.state.pack_path(), &mut self.act_pack);
             PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
     }
     fn draw_unloaded(&mut self) {
         self.ui.table_next_column();
-        let act = DrawPackUnloaded {
-            ui: self.ui,
-            state: self.state,
-        }.draw();
+        let act = DrawPackUnloaded { ui: self.ui, state: self.state }.draw();
         let act_pack = match act {
-            Some(UiAction::RIGHT_CLICK) =>
-                Some(PackAction::Root(CategoryAction::ContextMenu)),
-            Some(UiAction::Hovered) =>
-                Some(PackAction::Root(CategoryAction::HoverTooltip)),
+            Some(UiAction::RIGHT_CLICK) => Some(PackAction::Root(CategoryAction::ContextMenu)),
+            Some(UiAction::Hovered) => Some(PackAction::Root(CategoryAction::HoverTooltip)),
             Some(UiAction::Primary) => match &self.state.unloaded {
-                Some(reason) if reason.can_reactivate(false) =>
-                    Some(PackAction::ACTIVATE),
+                Some(reason) if reason.can_reactivate(false) => Some(PackAction::ACTIVATE),
                 Some(UnloadedReason::Loading) => None,
-                Some(reason) if !reason.can_reload() =>
-                    Some(PackAction::REFRESH),
+                Some(reason) if !reason.can_reload() => Some(PackAction::REFRESH),
                 _ => Some(PackAction::RELOAD),
             },
-            Some(UiAction::LEFT_CLICK) =>
-                Some(PackAction::ACTIVATE),
+            Some(UiAction::LEFT_CLICK) => Some(PackAction::ACTIVATE),
             Some(act) => {
                 log::debug!("DELETEME: unloaded pack action {act:?} unexpected");
                 None
@@ -122,7 +127,12 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             open: false,
             open_cond: Condition::Once,
             toggle_state: !matches!(self.state.unloaded, Some(UnloadedReason::Disabled)),
-            is_leaf: self.state.info.info.as_ref().map(|i| i.categories.roots.is_empty()),
+            is_leaf: self
+                .state
+                .info
+                .info
+                .as_ref()
+                .map(|i| i.categories.roots.is_empty()),
             is_decorative: false,
             button_interact: None,
             allow_overlap: true,
@@ -130,9 +140,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
     }
 
     pub(super) fn prepare_categories(&self) -> Option<DrawCategoryCollectionTree<'a, 'u>> {
-        self.categories.map(|state|
+        self.categories.map(|state| {
             DrawCategoryCollectionTree::new(DrawCategoryCollection::new(self.ui, state, self.state))
-        )
+        })
     }
 }
 
@@ -183,7 +193,8 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
             ui: self.ui,
             info: self.info,
             was_hovered: matches!(header_action, Some(UiAction::Hovered)),
-        }.decorate();
+        }
+        .decorate();
         let act = match (act, header_action) {
             (Some(UiAction::Hovered), Some(UiAction::Hovered)) => None,
             _ => header_action,
@@ -192,10 +203,7 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
     }
     #[cfg(todo = "unnecessary")]
     fn act_toggle(&self, state: Option<bool>) {
-        PathingEvent::CategoryToggle(
-            self.pack_path, self.category_path,
-            state
-        ).try_send();
+        PathingEvent::CategoryToggle(self.pack_path, self.category_path, state).try_send();
     }
 
     pub(super) fn prepare_header(&self) -> DrawCategoryHeader<'a, 'u> {
@@ -204,7 +212,10 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
             open: self.open_state,
             toggle_state: self.toggle_state.is_visible(),
             open_cond: Condition::Always,
-            display_name: self.info.display_name().unwrap_or(taimi_hoard::lazyfmt::UNAVAILABLE),
+            display_name: self
+                .info
+                .display_name()
+                .unwrap_or(taimi_hoard::lazyfmt::UNAVAILABLE),
             is_leaf: match self.has_children {
                 false if self.is_lonely => None,
                 is_parent => Some(!is_parent),
@@ -215,7 +226,9 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
         }
     }
 
-    pub(super) fn has_toggle(&self) -> bool { !self.flags.contains(CategoryFlags::SEPARATOR) && !self.is_lonely }
+    pub(super) fn has_toggle(&self) -> bool {
+        !self.flags.contains(CategoryFlags::SEPARATOR) && !self.is_lonely
+    }
 }
 
 /// Draw buttons and tooltips and stuff on top
@@ -241,7 +254,8 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
                     include_copyable: true,
                     display_name_visible: true,
                     tooltip: self.info.tooltip.borrowed(),
-                }.draw();
+                }
+                .draw();
                 show_tip = false;
             }
         }
@@ -254,7 +268,8 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
                 include_copyable: false,
                 display_name_visible: true,
                 tooltip,
-            }.draw();
+            }
+            .draw();
         }
         act
     }
@@ -263,11 +278,16 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
 impl super::PackElements {
     /// TODO
     pub fn can_collapse(&self) -> bool {
-        self.pack_state.values().any(|p| p.categories.open_mask.flags.any())
+        self.pack_state
+            .values()
+            .any(|p| p.categories.open_mask.flags.any())
     }
     pub fn can_expand(&self) -> bool {
         self.pack_state.values().any(|p| {
-            let count = p.state.info.category_info()
+            let count = p
+                .state
+                .info
+                .category_info()
                 .map(|(cats, _)| cats.count())
                 .unwrap_or(0);
             p.categories.open_mask.len() != count || p.categories.open_mask.flags.not_any()

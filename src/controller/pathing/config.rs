@@ -1,32 +1,37 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{PackLoader, PackPath, PackMapPath, PackCategoryInfo},
-            shared::{SharedPackConfig, MapPackInfo},
+            registry::{PackCategoryInfo, PackLoader, PackMapPath, PackPath},
+            shared::{MapPackInfo, SharedPackConfig},
             state::{LoadedCategory, LoadedMapPack},
-            PathingController,
             ExternalFilterState,
+            PathingController,
+            VisibilityFlagsExt,
         },
         settings::PathingSettings,
-        space::{
-            engine::SpaceEvent, Engine
-        },
+        space::{engine::SpaceEvent, Engine},
     },
-    crate::controller::pathing::VisibilityFlagsExt,
-    taimi_sync::watched::watch,
+    std::{
+        collections::{BTreeMap, HashSet, VecDeque},
+        iter,
+        mem,
+        sync::Arc,
+    },
     taimi_hoard::loc::LocationRef,
-    taimi_meta::packs::{
-        collections::CategorySet,
-        CategoryPath, MapIndex, MarkerIndex, MarkerPath,
-        CategoryIndex,
-        VisibilityFlags,
+    taimi_meta::{
+        packs::{
+            collections::CategorySet,
+            CategoryIndex,
+            CategoryPath,
+            MapIndex,
+            MarkerIndex,
+            MarkerPath,
+            VisibilityFlags,
+        },
+        ui::MapContext,
     },
-    taimi_pack::attributes::FilterAttributes,
-    taimi_meta::ui::MapContext,
-    std::{iter, mem, sync::Arc, collections::{BTreeMap, HashSet, VecDeque}},
-    taimi_pack::{
-        category::id::AsFullId, Pack,
-    },
+    taimi_pack::{attributes::FilterAttributes, category::id::AsFullId, Pack},
+    taimi_sync::watched::watch,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -40,10 +45,17 @@ pub struct PackConfig {
 }
 
 impl PackConfig {
-    pub fn fill_settings(&mut self, pack: &Pack, pathing: &PathingSettings, disabled_paths: &HashSet<String>) {
+    pub fn fill_settings(
+        &mut self,
+        pack: &Pack,
+        pathing: &PathingSettings,
+        disabled_paths: &HashSet<String>,
+    ) {
         for id in disabled_paths {
             let id = &id[..];
-            let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else { continue };
+            let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else {
+                continue
+            };
             let path = CategoryPath::with_path(i as CategoryIndex);
             let settings_vis = VisibilityFlags::visible(false);
             let default_vis = VisibilityFlags::from_pack_category(&cat);
@@ -56,12 +68,18 @@ impl PackConfig {
         let disabled_compat = pathing.disabled_compat;
         let disabled_compat = true;
         if disabled_compat {
-            let disabled_cats = pack.categories.all_categories.iter().enumerate()
+            let disabled_cats = pack
+                .categories
+                .all_categories
+                .iter()
+                .enumerate()
                 .filter(|(_, (_, cat))| !cat.default_toggle());
             for (i, (full_id, _disabled_cat)) in disabled_cats {
                 let path = CategoryPath::with_path(i as CategoryIndex);
                 if !disabled_paths.contains(&full_id.id_to_str()[..]) {
-                    let mut vis = self.category_visibility.get(&path)
+                    let mut vis = self
+                        .category_visibility
+                        .get(&path)
                         .copied()
                         .unwrap_or(VisibilityFlags::empty());
                     vis.insert(VisibilityFlags::TOGGLE);
@@ -74,7 +92,8 @@ impl PackConfig {
 
     /// Indicates a configuration that deviates from the defaults (XOR)
     pub fn visibility_deviation_for(&self, path: CategoryPath) -> VisibilityFlags {
-        self.category_visibility.get(&path)
+        self.category_visibility
+            .get(&path)
             .copied()
             .unwrap_or(VisibilityFlags::empty())
     }
@@ -94,12 +113,11 @@ impl PackConfig {
             // empty pack? *shrug*
             return true
         }
-        categories.root_paths()
-            .any(|path| {
-                let default_toggle = !categories.disabled.contains(path);
-                let deviation = self.visibility_deviation_for(path).is_visible();
-                default_toggle ^ deviation
-            })
+        categories.root_paths().any(|path| {
+            let default_toggle = !categories.disabled.contains(path);
+            let deviation = self.visibility_deviation_for(path).is_visible();
+            default_toggle ^ deviation
+        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -108,7 +126,11 @@ impl PackConfig {
 }
 
 impl PathingController {
-    pub(super) async fn handle_config_change(&mut self, path: PackPath, config: &watch::Receiver<SharedPackConfig>) {
+    pub(super) async fn handle_config_change(
+        &mut self,
+        path: PackPath,
+        config: &watch::Receiver<SharedPackConfig>,
+    ) {
         self.trim_inactive_maps(false);
         let Some((_info, info)) = self.packs.lookup_info(path) else { return };
         let mut dirty = false;
@@ -126,11 +148,12 @@ impl PathingController {
             }
             let rx = &self.rx;
             let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
-            dirty |= Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&*external_filters));
+            dirty |=
+                Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&*external_filters));
         }
         if dirty {
             let maps = self.maps.iter_pack_with_info(&self.map_info, path);
-            self.loader.update_map_states(true, true, &mut {maps});
+            self.loader.update_map_states(true, true, &mut { maps });
         }
     }
     pub(super) fn reload_config_for(&mut self, path: PackPath) {
@@ -142,12 +165,14 @@ impl PathingController {
         log::info!("TODO: config reload {path}? did activate not do this?");
     }
 
-    pub(super) async fn handle_toggle(loader: &PackLoader, path: CategoryPath<PackPath>, state: Option<bool>) {
+    pub(super) async fn handle_toggle(
+        loader: &PackLoader,
+        path: CategoryPath<PackPath>,
+        state: Option<bool>,
+    ) {
         // TODO: rethink whether controller wants to use loader like this or not?
         let pack_info = loader.pack_info(path.root);
-        let categories = pack_info.as_ref().and_then(|pack_info|
-            pack_info.category_info()
-        );
+        let categories = pack_info.as_ref().and_then(|pack_info| pack_info.category_info());
         let config = loader.pack_config(path.root);
         let (Some((categories, _)), Some(config)) = (categories, config) else {
             log::error!("can't update {path}={state:?}, no config state?");
@@ -175,13 +200,12 @@ impl PathingController {
             Self::category_commit_vis_set(loader, path.root, changes).await;
         }
     }
-    pub(super) async fn category_commit_vis<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C) where
+    pub(super) async fn category_commit_vis<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C)
+    where
         C: IntoIterator<Item = CategoryPath>,
     {
         let pack_info = loader.pack_info(pack_path);
-        let categories = pack_info.as_ref().and_then(|pack_info|
-            pack_info.category_info()
-        );
+        let categories = pack_info.as_ref().and_then(|pack_info| pack_info.category_info());
         let config = loader.pack_config(pack_path);
         let (Some((categories, _)), Some(config)) = (categories, config) else {
             log::error!("cannot save category settings for unloaded {pack_path}");
@@ -190,17 +214,20 @@ impl PathingController {
         let changes = {
             // TODO: avoid collect but also avoid borrowing or copying config :<
             let config = config.borrow();
-            dirty_cats.into_iter()
-            .map(|path| {
-                let default = !categories.disabled.contains(path);
-                let vis = config.config.visibility_deviation_for(path);
-                let state = vis.is_visible() ^ default;
-                (path, state)
-            }).collect::<Vec<_>>()
+            dirty_cats
+                .into_iter()
+                .map(|path| {
+                    let default = !categories.disabled.contains(path);
+                    let vis = config.config.visibility_deviation_for(path);
+                    let state = vis.is_visible() ^ default;
+                    (path, state)
+                })
+                .collect::<Vec<_>>()
         };
         Self::category_commit_vis_set(loader, pack_path, changes).await
     }
-    pub(super) async fn category_commit_vis_set<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C) where
+    pub(super) async fn category_commit_vis_set<C>(loader: &PackLoader, pack_path: PackPath, dirty_cats: C)
+    where
         C: IntoIterator<Item = (CategoryPath, bool)>,
     {
         #[cfg(todo)]
@@ -210,9 +237,11 @@ impl PathingController {
         let Some(pack) = loader.get_pack_loaded_data(pack_path) else { return };
         let mut settings = None;
         for (path, vis_state) in dirty_cats {
-            let full_id =
-                    pack.categories.all_categories.get_index(path.path as usize)
-                    .map(|(_id, cat)| cat.full_id.clone());
+            let full_id = pack
+                .categories
+                .all_categories
+                .get_index(path.path as usize)
+                .map(|(_id, cat)| cat.full_id.clone());
             if let Some(full_id) = full_id {
                 let settings = match &mut settings {
                     Some(s) => s,
@@ -230,32 +259,39 @@ impl PathingController {
         map_info: &MapPackInfo,
         filter_state: Option<&ExternalFilterState>,
     ) -> bool {
-        let pois = map_info.pois().zip(
-            map_pack.pois.iter_mut()
-        );
-        let pois = pois
-            .map(|(poi_path, poi)| {
-                let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path));
-                (marker_path, poi.category_path(), &mut poi.visibility, poi.info.get_filter_attrs())
-            });
-        let trails = map_info.trails().zip(
-            map_pack.trails.iter_mut()
-        );
-        let trails = trails
-            .map(|(trail_path, trail)| {
-                let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path));
-                (marker_path, trail.category_path(), &mut trail.visibility, trail.info.get_filter_attrs())
-            });
+        let pois = map_info.pois().zip(map_pack.pois.iter_mut());
+        let pois = pois.map(|(poi_path, poi)| {
+            let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(poi_path));
+            (
+                marker_path,
+                poi.category_path(),
+                &mut poi.visibility,
+                poi.info.get_filter_attrs(),
+            )
+        });
+        let trails = map_info.trails().zip(map_pack.trails.iter_mut());
+        let trails = trails.map(|(trail_path, trail)| {
+            let marker_path = MarkerPath::with_parts(path, MarkerIndex::from(trail_path));
+            (
+                marker_path,
+                trail.category_path(),
+                &mut trail.visibility,
+                trail.info.get_filter_attrs(),
+            )
+        });
         let mut dirty = false;
         for (_marker_path, category_index, visibility, filters) in pois.chain(trails) {
             let prev = *visibility & VisibilityFlags::TOGGLES;
             *visibility = visibility.restore_default_toggles();
-            let cat_vis = map_info.category_index(category_index)
+            let cat_vis = map_info
+                .category_index(category_index)
                 .and_then(|i| map_pack.categories.get(i.path as usize))
                 .map(|cat| cat.visibility);
             if let Some(cat_vis) = cat_vis {
                 // TODO: if cat vis is override, set directly or something!
-                visibility.set_toggles((cat_vis & VisibilityFlags::TOGGLE) | (*visibility & !VisibilityFlags::TOGGLE));
+                visibility.set_toggles(
+                    (cat_vis & VisibilityFlags::TOGGLE) | (*visibility & !VisibilityFlags::TOGGLE),
+                );
                 visibility.set(VisibilityFlags::TOGGLE, cat_vis.contains(VisibilityFlags::TOGGLE));
             }
             match (filters, filter_state) {
@@ -277,7 +313,8 @@ impl PathingController {
             #[cfg(todo)]
             if visibility.is_visible() {
                 let marker_path: MarkerPath = MarkerPath::with_path(marker_path.path);
-                if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid)) {
+                if let Some(hidden) = guid.and_then(|guid| map_filters.group_filter_for(marker_path, guid))
+                {
                     if let filter::FILTER_HIDDEN = hidden.is_visible(filter_state) {
                         visibility.remove(VisibilityFlags::TOGGLE);
                     }
@@ -293,7 +330,8 @@ impl PathingController {
     pub(super) fn update_loaded_visibility_for(&mut self, pack_path: PackPath) -> bool {
         let map_id = self.gameplay_map();
         #[cfg(todo)]
-        let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
+        let hidden_guids =
+            SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         #[cfg(todo)]
         let filter_state = &self.filter_state;
         let mut dirty = false;
@@ -307,7 +345,8 @@ impl PathingController {
     pub(super) fn update_loaded_visibility(&mut self) -> bool {
         let map_id = self.gameplay_map();
         #[cfg(todo)]
-        let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
+        let hidden_guids =
+            SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         #[cfg(todo)]
         let filter_state = &self.filter_state;
         let mut external_filters = None;
@@ -315,7 +354,9 @@ impl PathingController {
         for (path, map_pack, map_info) in self.maps.iter_mut_with_info(&self.map_info, None) {
             let rx = &self.rx;
             let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
-            if Self::update_loaded_visibility_inner(path, map_pack, map_info, Some(&*external_filters)) && Some(path.path) == map_id {
+            if Self::update_loaded_visibility_inner(path, map_pack, map_info, Some(&*external_filters))
+                && Some(path.path) == map_id
+            {
                 dirty = true;
             }
         }
@@ -366,44 +407,54 @@ impl PathingController {
         false
     }
 
-    fn visibility_update(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, Box<[VisibilityFlags]>, Box<[VisibilityFlags]>)> + '_ {
-        self.maps.iter(Some(map_id))
-            .map(|(path, map_pack)| {
-                let pois: Box<[VisibilityFlags]> = map_pack.pois.iter().map(|poi| poi.visibility).collect();
-                let trails: Box<[VisibilityFlags]> = map_pack.trails.iter().map(|trail| trail.visibility).collect();
-                (path.root.clone(), pois, trails)
-            })
+    fn visibility_update(
+        &self,
+        map_id: MapIndex,
+    ) -> impl Iterator<Item = (PackPath, Box<[VisibilityFlags]>, Box<[VisibilityFlags]>)> + '_ {
+        self.maps.iter(Some(map_id)).map(|(path, map_pack)| {
+            let pois: Box<[VisibilityFlags]> = map_pack.pois.iter().map(|poi| poi.visibility).collect();
+            let trails: Box<[VisibilityFlags]> =
+                map_pack.trails.iter().map(|trail| trail.visibility).collect();
+            (path.root.clone(), pois, trails)
+        })
     }
 
     #[cfg(todo = "deleteme")]
     pub(super) async fn visibility_send(&mut self, map_id: MapIndex) {
         let update: Vec<_> = self.visibility_update(map_id).collect();
 
-        let res = Controller::try_run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
-            let Some(Ok(engine)) = &mut state.engine else {
-                log::debug!("no engine on other end of visibility_send?");
-                return Ok(())
-            };
-            for (path, pois, trails) in update {
-                let Some(pack) = engine.packs.loaded_packs.get_mut(path.path as usize) else {
-                    continue
+        let res =
+            Controller::try_run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
+                let Some(Ok(engine)) = &mut state.engine else {
+                    log::debug!("no engine on other end of visibility_send?");
+                    return Ok(())
                 };
-                for (active, visibility) in pack.active_pois.iter_mut().zip(pois) {
-                    active.visibility = visibility;
+                for (path, pois, trails) in update {
+                    let Some(pack) = engine.packs.loaded_packs.get_mut(path.path as usize) else {
+                        continue
+                    };
+                    for (active, visibility) in pack.active_pois.iter_mut().zip(pois) {
+                        active.visibility = visibility;
+                    }
+                    for (active, visibility) in pack.active_trails.iter_mut().zip(trails) {
+                        active.visibility = visibility;
+                    }
                 }
-                for (active, visibility) in pack.active_trails.iter_mut().zip(trails) {
-                    active.visibility = visibility;
-                }
-            }
-            Ok(())
-        }).await.context("updating render visibility");
+                Ok(())
+            })
+            .await
+            .context("updating render visibility");
         if let Err(e) = res {
             log::error!("{e:#}");
         }
     }
 
     /// resolves state from optional toggle instruction to absolute
-    pub(super) async fn set_visible_settings(&mut self, context: Option<MapContext>, set: Option<bool>) -> bool {
+    pub(super) async fn set_visible_settings(
+        &mut self,
+        context: Option<MapContext>,
+        set: Option<bool>,
+    ) -> bool {
         let mut settings = self.loader.settings.write().await;
         let pathing = settings.pathing_mut();
         let (is_visible, out) = match context {
@@ -432,28 +483,42 @@ impl LoadedMapPack {
     /// [self.categories] are dirty and require further processing unless `Ok(true)`
     ///
     /// TODO: starting damage mask via parameter and/or info sig instead
-    pub fn update_category_config(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig) -> Result<bool, CategorySet> {
+    pub fn update_category_config(
+        &mut self,
+        info: &MapPackInfo,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+    ) -> Result<bool, CategorySet> {
         let mut damage = match self.categories.len() {
             loaded if info.category_count() != loaded => {
-                self.categories = iter::repeat(LoadedCategory::INVALID).take(info.category_count()).collect();
+                self.categories = iter::repeat(LoadedCategory::INVALID)
+                    .take(info.category_count())
+                    .collect();
                 None
             },
             _ => Some(CategorySet::default()),
         };
 
-        let mut loaded: Result<&mut [LoadedCategory], &mut Arc<[LoadedCategory]>> = Err(&mut self.categories);
+        let mut loaded: Result<&mut [LoadedCategory], &mut Arc<[LoadedCategory]>> =
+            Err(&mut self.categories);
         for (i, path) in info.categories().enumerate() {
             let Some(prev) = match &mut loaded {
                 Ok(c) => &c[..],
                 Err(c) => &c[..],
-            }.get(i) else { continue };
+            }
+            .get(i) else {
+                continue
+            };
             let prev_defaults = prev.visibility & VisibilityFlags::DEFAULTS;
-            let defaults = categories.visibility.get_for(path)
+            let defaults = categories
+                .visibility
+                .get_for(path)
                 .unwrap_or(VisibilityFlags::TOGGLES);
             let deviation = config.visibility_deviation_for(path);
             let default_toggles = defaults ^ deviation;
             let defaults = default_toggles.toggles_to_default();
-            let is_override_clean = !config.visibility_overrides.contains(path) || prev.visibility & VisibilityFlags::TOGGLES == default_toggles;
+            let is_override_clean = !config.visibility_overrides.contains(path)
+                || prev.visibility & VisibilityFlags::TOGGLES == default_toggles;
             if damage.is_some() && defaults == prev_defaults && is_override_clean {
                 continue
             }
@@ -472,7 +537,8 @@ impl LoadedMapPack {
                     (_, Err(..)) => unreachable!(),
                     #[cfg(not(debug_assertions))]
                     (_, Err(..)) => continue,
-                }.get_unchecked_mut(i)
+                }
+                .get_unchecked_mut(i)
             };
             out.visibility.set_defaults(defaults);
 
@@ -487,8 +553,7 @@ impl LoadedMapPack {
                 // we only care about the root-most changes since they propagate down
                 let mut redundant_roots = Vec::new();
                 for damaged in damage.paths() {
-                    let is_redundant = categories.ancestors_of(damaged)
-                        .any(|p| damage.contains(p));
+                    let is_redundant = categories.ancestors_of(damaged).any(|p| damage.contains(p));
                     if is_redundant {
                         redundant_roots.push(damaged);
                     }
@@ -507,14 +572,23 @@ impl LoadedMapPack {
         }
     }
 
-    pub fn refresh_categories(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig, damage: Option<&CategorySet>) {
+    pub fn refresh_categories(
+        &mut self,
+        info: &MapPackInfo,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+        damage: Option<&CategorySet>,
+    ) {
         let default_roots = damage.is_none().then(|| categories.root_paths());
-        let roots = damage.into_iter()
+        let roots = damage
+            .into_iter()
             .flat_map(|damage| damage.paths())
             .chain(default_roots.into_iter().flatten());
 
         // roots should be independent subtrees, but just in case..
-        let mut children: VecDeque<_> = roots.map(|root_path| (root_path, config.visibility_overrides.contains(root_path), None)).collect();
+        let mut children: VecDeque<_> = roots
+            .map(|root_path| (root_path, config.visibility_overrides.contains(root_path), None))
+            .collect();
 
         let pack_default = VisibilityFlags::TOGGLES;
         let loaded = Arc::make_mut(&mut self.categories);
@@ -524,30 +598,43 @@ impl LoadedMapPack {
                 continue
             };
             let is_override = config.visibility_overrides.contains(path);
-            let default_vis = loaded.get(index.path as usize)
+            let default_vis = loaded
+                .get(index.path as usize)
                 .map(|cat| cat.visibility.default_toggles());
             let visibility = match is_override {
                 true => default_vis,
                 false => {
-                    let inherited = parent_vis.or_else(|| categories.parent_of(path)
-                        .map(|parent| info.category_index(parent).and_then(|i| loaded.get(i.path as usize))
-                            .map(|parent| parent.visibility & VisibilityFlags::TOGGLES)
-                            .or_else(|| categories.visibility.get_for(parent))
-                        ).unwrap_or(default_vis)
-                    );
+                    let inherited = parent_vis.or_else(|| {
+                        categories
+                            .parent_of(path)
+                            .map(|parent| {
+                                info.category_index(parent)
+                                    .and_then(|i| loaded.get(i.path as usize))
+                                    .map(|parent| parent.visibility & VisibilityFlags::TOGGLES)
+                                    .or_else(|| categories.visibility.get_for(parent))
+                            })
+                            .unwrap_or(default_vis)
+                    });
                     match parent_is_override {
-                        true => inherited/*.or(default_vis)*/,
-                        false => inherited.map(|inh|
-                            (inh & default_vis.unwrap_or(VisibilityFlags::TOGGLES) & VisibilityFlags::TOGGLE)
-                            | (default_vis.unwrap_or(VisibilityFlags::TOGGLES) & !VisibilityFlags::TOGGLE)
-                        ),
+                        true => inherited, /*.or(default_vis)*/,
+                        false => inherited.map(|inh| {
+                            (inh & default_vis.unwrap_or(VisibilityFlags::TOGGLES)
+                                & VisibilityFlags::TOGGLE)
+                                | (default_vis.unwrap_or(VisibilityFlags::TOGGLES)
+                                    & !VisibilityFlags::TOGGLE)
+                        }),
                     }
                 },
-            }.unwrap_or(pack_default);
+            }
+            .unwrap_or(pack_default);
             if let Some(loaded) = loaded.get_mut(index.path as usize) {
                 loaded.visibility.set_toggles(visibility);
             }
-            children.extend(categories.children_of(path).map(|c| (c, is_override, Some(visibility))));
+            children.extend(
+                categories
+                    .children_of(path)
+                    .map(|c| (c, is_override, Some(visibility))),
+            );
         }
     }
 }

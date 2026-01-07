@@ -1,16 +1,29 @@
-use taimi_hoard::loc::{indexed, Locator, LocationGet};
-use taimi_hoard::iters::{IterExt, LazyMapFn};
-use crate::{
-    packs::{
-        id::{MarkerIndex, MarkerIndexVariant},
-        CategoryPath, CategoryIndex, MapIndex, PackIndex, PackPath, PackRegistryNs, PoiPath, TrailPath,
+use {
+    crate::{
+        map::MapID,
+        packs::{
+            id::{MarkerIndex, MarkerIndexVariant},
+            CategoryIndex,
+            CategoryPath,
+            MapIndex,
+            PackIndex,
+            PackPath,
+            PackRegistryNs,
+            PoiPath,
+            TrailPath,
+        },
     },
-    map::MapID,
+    bitvec::vec::BitVec,
+    core::iter,
+    std::{
+        collections::{btree_set, BTreeSet},
+        mem,
+    },
+    taimi_hoard::{
+        iters::{IterExt, LazyMapFn},
+        loc::{indexed, LocationGet, Locator},
+    },
 };
-use std::mem;
-use std::collections::{btree_set, BTreeSet};
-use core::iter;
-use bitvec::vec::BitVec;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapSet(BTreeSet<MapID>);
@@ -162,21 +175,25 @@ pub struct MarkerSet {
     pub trails: BTreeSet<TrailPath>,
 }
 impl MarkerSet {
-    pub fn contains<I>(&self, marker: I) -> bool where
+    pub fn contains<I>(&self, marker: I) -> bool
+    where
         I: Into<MarkerIndex>,
     {
         match marker.into().variant() {
             MarkerIndexVariant::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.contains(&Locator::with_path(trail)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) =>
+                self.trails.contains(&Locator::with_path(trail)),
             _ => false,
         }
     }
-    pub fn insert<I>(&mut self, marker: I) -> bool where
+    pub fn insert<I>(&mut self, marker: I) -> bool
+    where
         I: Into<MarkerIndex>,
     {
         match marker.into().variant() {
             MarkerIndexVariant::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) => self.trails.insert(Locator::with_path(trail)),
+            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) =>
+                self.trails.insert(Locator::with_path(trail)),
             _ => false,
         }
     }
@@ -185,7 +202,9 @@ impl MarkerSet {
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackSet(BitVec);
 impl PackSet {
-    pub fn new() -> Self { Default::default() }
+    pub fn new() -> Self {
+        Default::default()
+    }
 
     pub fn insert_index<I: Into<PackIndex>>(&mut self, index: I) -> bool {
         let index = index.into() as usize;
@@ -199,7 +218,9 @@ impl PackSet {
     }
     pub fn remove_index<I: Into<PackIndex>>(&mut self, index: I) -> bool {
         let index = index.into() as usize;
-        self.0.get_mut(index).map(|mut b| mem::replace(&mut *b, false))
+        self.0
+            .get_mut(index)
+            .map(|mut b| mem::replace(&mut *b, false))
             .unwrap_or(false)
     }
     pub fn insert(&mut self, path: PackPath) -> bool {
@@ -230,12 +251,13 @@ impl PackSet {
 
     /// TODO: what's the wrapper for this called...
     pub fn iter(&self) -> impl Iterator<Item = PackPath> + '_ {
-        self.0.iter_ones().lazy_map(|idx| PackPath::with_path(idx as PackIndex))
+        self.0
+            .iter_ones()
+            .lazy_map(|idx| PackPath::with_path(idx as PackIndex))
     }
     /// TODO: still use iter_ones approach ugh
     #[cfg(todo)]
-    pub fn into_iter(self) -> impl Iterator<Item = PackPath> {
-    }
+    pub fn into_iter(self) -> impl Iterator<Item = PackPath> {}
 }
 fn filter_pack_item<N, P>((path, present): (Locator<N, P>, bool)) -> Option<Locator<N, P>> {
     present.then_some(path)
@@ -245,7 +267,10 @@ fn map_pack_index(index: usize) -> PackPath {
 }
 impl IntoIterator for PackSet {
     type Item = PackPath;
-    type IntoIter = iter::FilterMap<indexed::LocatorEnumerateAsRel<PackRegistryNs, PackIndex, bitvec::vec::IntoIter>, fn((PackPath, bool)) -> Option<PackPath>>;
+    type IntoIter = iter::FilterMap<
+        indexed::LocatorEnumerateAsRel<PackRegistryNs, PackIndex, bitvec::vec::IntoIter>,
+        fn((PackPath, bool)) -> Option<PackPath>,
+    >;
     fn into_iter(self) -> Self::IntoIter {
         indexed::LocatorRelIter0::enumerate(Default::default(), self.0.into_iter())
             .filter_map(filter_pack_item)
@@ -253,7 +278,8 @@ impl IntoIterator for PackSet {
 }
 impl<'a> IntoIterator for &'a PackSet {
     type Item = PackPath;
-    type IntoIter = LazyMapFn<bitvec::slice::IterOnes<'a, usize, bitvec::order::Lsb0>, fn(usize) -> PackPath>;
+    type IntoIter =
+        LazyMapFn<bitvec::slice::IterOnes<'a, usize, bitvec::order::Lsb0>, fn(usize) -> PackPath>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter_ones().lazy_map(map_pack_index)
     }

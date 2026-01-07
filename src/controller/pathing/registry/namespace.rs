@@ -1,13 +1,20 @@
+pub use taimi_meta::packs::{PackIndex, PackMapPath, PackPath, PackRegistryNs};
 use {
     taimi_hoard::loc::{
-        locator_ns,
         indexed::IndexedList,
-        Locator, LocationMut, LocationRef,
-        NamespacePivotTo, NamespacePivotFrom,
+        locator_ns,
+        LocationMut,
+        LocationRef,
+        Locator,
+        NamespacePivotFrom,
+        NamespacePivotTo,
     },
-    taimi_meta::packs::{self, id::{MarkerIndex, MarkerPath, PackMarkerNs}, TrailSectionPath},
+    taimi_meta::packs::{
+        self,
+        id::{MarkerIndex, MarkerPath, PackMarkerNs},
+        TrailSectionPath,
+    },
 };
-pub use taimi_meta::packs::{PackRegistryNs, PackPath, PackIndex, PackMapPath};
 
 pub type PackListWith<T> = IndexedList<PackRegistryNs, PackIndex, T>;
 pub type PackVecOf<T> = PackListWith<Vec<T>>;

@@ -1,27 +1,35 @@
-use std::collections::BTreeMap;
-use taimi_meta::packs::collections::PackSet;
-use std::sync::Arc;
-use std::{ops, iter};
-use taimi_hoard::loc::indexed::IndexedList;
-use taimi_hoard::loc::{LocationMut, LocationRef};
-use taimi_hoard::iters::all_zipped;
-use taimi_hoard::collections::lru::RecentlyUsed;
-use taimi_hoard::collections::TaimiSet;
-use taimi_sync::arcs::ArcPtrCmp;
-use taimi_meta::packs::{MapIndex, MapPath, PackIndex, PackMapPath, PackPath, PackRegistryNs};
-use crate::controller::pathing::{
-    shared::{EMPTY_RENDER_ATTRS, MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded},
-    registry::{PackInfoSignature, PackInfo},
-    UnloadedReason,
+use {
+    crate::controller::pathing::{
+        registry::{PackInfo, PackInfoSignature},
+        shared::{MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded, EMPTY_RENDER_ATTRS},
+        UnloadedReason,
+    },
+    std::{collections::BTreeMap, iter, ops, sync::Arc},
+    taimi_hoard::{
+        collections::{lru::RecentlyUsed, TaimiSet},
+        iters::all_zipped,
+        loc::{indexed::IndexedList, LocationMut, LocationRef},
+    },
+    taimi_meta::packs::{
+        collections::PackSet,
+        MapIndex,
+        MapPath,
+        PackIndex,
+        PackMapPath,
+        PackPath,
+        PackRegistryNs,
+        VisibilityFlags,
+    },
+    taimi_pack::attributes::RenderAttributes,
+    taimi_sync::arcs::ArcPtrCmp,
 };
-use taimi_meta::packs::VisibilityFlags;
-use taimi_pack::attributes::RenderAttributes;
+
 #[doc(inline)]
 pub use self::{
+    map::LoadedMapPack,
     poi::LoadedPoi,
     trail::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
     visible::VisibilityFlagsExt,
-    map::LoadedMapPack,
 };
 
 mod map;
@@ -93,8 +101,7 @@ impl LoadedMapInfo {
                 let info_sig = packs.lookup_ref(&path.root).map(|info| info.sig.get());
                 match info_sig {
                     Some(Some(sig)) if sig == map_info.info_sig => (),
-                    None | Some(None) | Some(Some(..)) =>
-                        return false,
+                    None | Some(None) | Some(Some(..)) => return false,
                 }
             }
             true
@@ -104,8 +111,7 @@ impl LoadedMapInfo {
     pub fn clear(&mut self, map_id: Option<MapIndex>) {
         match map_id {
             None => self.map_info.clear(),
-            Some(map_id) =>
-                self.map_info.retain(|path, _| path.path == map_id),
+            Some(map_id) => self.map_info.retain(|path, _| path.path == map_id),
         }
     }
 }
@@ -141,8 +147,7 @@ impl TaimiSet<PackMapPath> for LoadedMapInfo {
 impl TaimiSet<(PackMapPath, PackInfoSignature)> for LoadedMapInfo {
     fn set_contains(&self, (path, sig): &(PackMapPath, PackInfoSignature)) -> bool {
         match self.map_info.get(path) {
-            Some(map_info) if map_info.info_sig == *sig =>
-                true,
+            Some(map_info) if map_info.info_sig == *sig => true,
             _ => false,
         }
     }
@@ -155,7 +160,9 @@ pub struct LoadedMaps {
 }
 impl LoadedMaps {
     pub fn write(&mut self, path: PackMapPath) -> &mut LoadedMapPack {
-        self.maps.entry(path).or_insert_with(|| LoadedMapPack::empty(path.path))
+        self.maps
+            .entry(path)
+            .or_insert_with(|| LoadedMapPack::empty(path.path))
     }
 
     /// TODO: 4 may be more reasonable
@@ -179,8 +186,7 @@ impl LoadedMaps {
                 let info_sig = map_info.lookup_ref(path).map(|info| info.info_sig.get());
                 match info_sig {
                     Some(Some(sig)) if sig == map.info_sig => (),
-                    None | Some(None) | Some(Some(..)) =>
-                        return false,
+                    None | Some(None) | Some(Some(..)) => return false,
                 }
             }
             true
@@ -190,74 +196,108 @@ impl LoadedMaps {
         self.maps.clear();
     }
 
-    pub fn lookup_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, path: &'_ PackMapPath) -> Option<(&'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+    pub fn lookup_with_info<'a, 'i>(
+        &'a self,
+        map_info: &'i LoadedMapInfo,
+        path: &'_ PackMapPath,
+    ) -> Option<(&'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
         let map = self.lookup_ref(path)?;
-        map_info.lookup_ref(path).map(move |map_info|
-            (map, &map_info.info)
-        )
+        map_info
+            .lookup_ref(path)
+            .map(move |map_info| (map, &map_info.info))
     }
-    pub fn lookup_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, path: &'_ PackMapPath) -> Option<(&'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+    pub fn lookup_mut_with_info<'a, 'i>(
+        &'a mut self,
+        map_info: &'i LoadedMapInfo,
+        path: &'_ PackMapPath,
+    ) -> Option<(&'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
         let map = self.lookup_mut(path)?;
-        map_info.lookup_ref(path).map(move |map_info|
-            (map, &map_info.info)
-        )
+        map_info
+            .lookup_ref(path)
+            .map(move |map_info| (map, &map_info.info))
     }
-    pub fn iter_pack<'a>(&'a self, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
-        self.maps.iter().filter_map(move |(path, map)|
-            match pack_path {
-                p if path.root != p =>
-                    None,
+    pub fn iter_pack<'a>(
+        &'a self,
+        pack_path: PackPath,
+    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().filter_map(move |(path, map)| match pack_path {
+            p if path.root != p => None,
+            _ => Some((*path, map)),
+        })
+    }
+    pub fn iter_pack_mut<'a>(
+        &'a mut self,
+        pack_path: PackPath,
+    ) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
+        self.maps
+            .iter_mut()
+            .filter_map(move |(path, map)| match pack_path {
+                p if path.root != p => None,
                 _ => Some((*path, map)),
-            }
-        )
+            })
     }
-    pub fn iter_pack_mut<'a>(&'a mut self, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
-        self.maps.iter_mut().filter_map(move |(path, map)|
-            match pack_path {
-                p if path.root != p =>
-                    None,
-                _ => Some((*path, map)),
-            }
-        )
+    pub fn iter_pack_with_info<'a, 'i>(
+        &'a self,
+        map_info: &'i LoadedMapInfo,
+        pack_path: PackPath,
+    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_pack(pack_path).filter_map(|(path, map)| {
+            map_info
+                .lookup_ref(&path)
+                .map(move |map_info| (path, map, &map_info.info))
+        })
     }
-    pub fn iter_pack_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
-        self.iter_pack(pack_path).filter_map(|(path, map)|
-            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
-        )
-    }
-    pub fn iter_pack_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, pack_path: PackPath) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
-        self.iter_pack_mut(pack_path).filter_map(|(path, map)|
-            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
-        )
+    pub fn iter_pack_mut_with_info<'a, 'i>(
+        &'a mut self,
+        map_info: &'i LoadedMapInfo,
+        pack_path: PackPath,
+    ) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_pack_mut(pack_path).filter_map(|(path, map)| {
+            map_info
+                .lookup_ref(&path)
+                .map(move |map_info| (path, map, &map_info.info))
+        })
     }
 
-    pub fn iter<'a>(&'a self, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
-        self.maps.iter().filter_map(move |(path, map)|
-            match map_id {
-                Some(map_id) if map_id != path.path =>
-                    None,
-                _ => Some((*path, map)),
-            }
-        )
+    pub fn iter<'a>(
+        &'a self,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().filter_map(move |(path, map)| match map_id {
+            Some(map_id) if map_id != path.path => None,
+            _ => Some((*path, map)),
+        })
     }
-    pub fn iter_mut<'a>(&'a mut self, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
-        self.maps.iter_mut().filter_map(move |(path, map)|
-            match map_id {
-                Some(map_id) if map_id != path.path =>
-                    None,
-                _ => Some((*path, map)),
-            }
-        )
+    pub fn iter_mut<'a>(
+        &'a mut self,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack)> {
+        self.maps.iter_mut().filter_map(move |(path, map)| match map_id {
+            Some(map_id) if map_id != path.path => None,
+            _ => Some((*path, map)),
+        })
     }
-    pub fn iter_with_info<'a, 'i>(&'a self, map_info: &'i LoadedMapInfo, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
-        self.iter(map_id).filter_map(|(path, map)|
-            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
-        )
+    pub fn iter_with_info<'a, 'i>(
+        &'a self,
+        map_info: &'i LoadedMapInfo,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter(map_id).filter_map(|(path, map)| {
+            map_info
+                .lookup_ref(&path)
+                .map(move |map_info| (path, map, &map_info.info))
+        })
     }
-    pub fn iter_mut_with_info<'a, 'i>(&'a mut self, map_info: &'i LoadedMapInfo, map_id: Option<MapIndex>) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
-        self.iter_mut(map_id).filter_map(|(path, map)|
-            map_info.lookup_ref(&path).map(move |map_info| (path, map, &map_info.info))
-        )
+    pub fn iter_mut_with_info<'a, 'i>(
+        &'a mut self,
+        map_info: &'i LoadedMapInfo,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (PackMapPath, &'a mut LoadedMapPack, &'i Arc<MapPackInfo>)> {
+        self.iter_mut(map_id).filter_map(|(path, map)| {
+            map_info
+                .lookup_ref(&path)
+                .map(move |map_info| (path, map, &map_info.info))
+        })
     }
 }
 impl LocationRef<PackPath, MapIndex> for LoadedMaps {
@@ -307,8 +347,7 @@ impl LoadedPackInfo {
         self.unloaded.is_none()
     }
     pub fn can_reload(&self) -> bool {
-        self.unloaded.as_ref().map(|r| r.can_reload())
-            .unwrap_or(false)
+        self.unloaded.as_ref().map(|r| r.can_reload()).unwrap_or(false)
     }
 
     pub fn update_with(&mut self, info: &SharedPackLoad) -> bool {
@@ -355,18 +394,18 @@ impl LoadedPacks {
 
     pub fn lookup_info(&self, path: PackPath) -> Option<(&LoadedPackInfo, &Arc<PackInfo>)> {
         self.lookup_ref(&path)
-            .and_then(|info| info.info.info.as_ref().map(|i|
-                (info, i)
-            ))
+            .and_then(|info| info.info.info.as_ref().map(|i| (info, i)))
     }
 
     pub fn need_load(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
-        self.packs.iter()
+        self.packs
+            .iter()
             .filter(|(_p, pack)| matches!(pack.unloaded, Some(UnloadedReason::Pending)))
     }
     pub fn on_map(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
         let map_path: MapPath = MapPath::with_path(map_id);
-        self.packs.iter()
+        self.packs
+            .iter()
             .filter(move |(_p, pack)| pack.set_contains(&map_path))
     }
 
@@ -374,8 +413,7 @@ impl LoadedPacks {
     pub fn age_tick(&mut self, map_info: Option<&LoadedMapInfo>) {
         for (path, pack) in self.packs.iter_mut() {
             let used = match map_info {
-                Some(map_info) if map_info.set_contains(&path) =>
-                    true,
+                Some(map_info) if map_info.set_contains(&path) => true,
                 _ => false,
             };
             pack.used.mark_if(used);
@@ -400,7 +438,8 @@ impl LoadedPacks {
         self.packs.len()
     }
     #[inline]
-    pub fn sigs_match<S>(&self, sigs: S) -> bool where
+    pub fn sigs_match<S>(&self, sigs: S) -> bool
+    where
         S: IntoIterator<Item = PackInfoSignature>,
     {
         self.sigs_match_dyn(&mut sigs.into_iter())
@@ -409,12 +448,17 @@ impl LoadedPacks {
         all_zipped(|l, r| l == r.info.sig, sigs, self.packs.values())
     }
     #[inline]
-    pub fn sigs_dirty<S>(&self, sigs: S) -> PackSet where
+    pub fn sigs_dirty<S>(&self, sigs: S) -> PackSet
+    where
         S: IntoIterator<Item = PackInfoSignature>,
     {
         self.sigs_dirty_dyn(&mut sigs.into_iter()).collect()
     }
-    pub fn sigs_dirty_dyn<'a, 's>(&'a self, sigs: &'s mut dyn Iterator<Item = PackInfoSignature>) -> impl Iterator<Item = PackPath> + 'a + 's where
+    pub fn sigs_dirty_dyn<'a, 's>(
+        &'a self,
+        sigs: &'s mut dyn Iterator<Item = PackInfoSignature>,
+    ) -> impl Iterator<Item = PackPath> + 'a + 's
+    where
         's: 'a,
         'a: 's,
     {
@@ -424,8 +468,7 @@ impl LoadedPacks {
             while let Some(sig) = sigs.next() {
                 match packs.next() {
                     Some((_, pack)) if pack.info.sig == sig => (),
-                    Some((path, _)) =>
-                        return Some(path),
+                    Some((path, _)) => return Some(path),
                     None => {
                         // strange...
                         return None
@@ -455,8 +498,7 @@ impl LocationMut<PackRegistryNs, PackIndex> for LoadedPacks {
 impl TaimiSet<(PackPath, PackInfoSignature)> for LoadedPacks {
     fn set_contains(&self, (path, sig): &(PackPath, PackInfoSignature)) -> bool {
         match self.packs.lookup_ref(path) {
-            Some(pack) if pack.sig == *sig =>
-                true,
+            Some(pack) if pack.sig == *sig => true,
             _ => false,
         }
     }
@@ -464,7 +506,8 @@ impl TaimiSet<(PackPath, PackInfoSignature)> for LoadedPacks {
 impl TaimiSet<PackMapPath> for LoadedPacks {
     fn set_contains(&self, path: &PackMapPath) -> bool {
         let map_path: MapPath = path.unscope();
-        self.lookup_ref(&path.root).map(|p| p.set_contains(&map_path))
+        self.lookup_ref(&path.root)
+            .map(|p| p.set_contains(&map_path))
             .unwrap_or(false)
     }
 }
@@ -481,11 +524,11 @@ pub struct LoadedCategory {
 }
 
 impl LoadedCategory {
-    pub const INVALID: Self = Self {
-        visibility: VisibilityFlags::empty(),
-    };
+    pub const INVALID: Self = Self { visibility: VisibilityFlags::empty() };
 }
 
-fn get_overrides_mut<'a>(overrides: &'a mut Option<Box<RenderAttributes>>) -> &'a mut Box<RenderAttributes> {
+fn get_overrides_mut<'a>(
+    overrides: &'a mut Option<Box<RenderAttributes>>,
+) -> &'a mut Box<RenderAttributes> {
     overrides.get_or_insert_with(|| Box::new((**EMPTY_RENDER_ATTRS).clone()))
 }

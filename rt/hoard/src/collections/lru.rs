@@ -5,9 +5,7 @@ pub struct RecentlyUsed {
 }
 
 impl RecentlyUsed {
-    pub const DEFAULT: Self = Self {
-        generation: 0,
-    };
+    pub const DEFAULT: Self = Self { generation: 0 };
 
     pub fn mark_used(&mut self) {
         self.generation = 0;

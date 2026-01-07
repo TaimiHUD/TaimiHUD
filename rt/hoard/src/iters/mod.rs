@@ -1,7 +1,4 @@
-pub use self::{
-    macros::impl_iter_wrap,
-    mapfn::LazyMapFn,
-};
+pub use self::{macros::impl_iter_wrap, mapfn::LazyMapFn};
 
 mod macros;
 mod mapfn;
@@ -16,7 +13,8 @@ pub trait IterExt: Sized + Iterator {
 impl<I: Sized + Iterator> IterExt for I {}
 
 /// `F` must return true for all zipped pairs, and iter lengths must match
-pub fn all_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool where
+pub fn all_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool
+where
     F: FnMut(IL::Item, IR::Item) -> bool,
     IL: IntoIterator,
     IR: IntoIterator,
@@ -24,10 +22,8 @@ pub fn all_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool where
     let mut lhs = lhs.into_iter();
     let mut rhs = rhs.into_iter();
     match (lhs.size_hint(), rhs.size_hint()) {
-        ((_, Some(lhs)), (_, Some(rhs))) if lhs != rhs =>
-            return false,
-        ((min, None), (_, Some(max))) | ((_, Some(max)), (min, None)) if min > max =>
-            return false,
+        ((_, Some(lhs)), (_, Some(rhs))) if lhs != rhs => return false,
+        ((min, None), (_, Some(max))) | ((_, Some(max)), (min, None)) if min > max => return false,
         _ => (),
     }
     while let Some(lhs) = lhs.next() {
@@ -42,7 +38,8 @@ pub fn all_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool where
     }
     rhs.next().is_none()
 }
-pub fn any_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool where
+pub fn any_zipped<F, IL, IR>(mut f: F, lhs: IL, rhs: IR) -> bool
+where
     F: FnMut(IL::Item, IR::Item) -> bool,
     IL: IntoIterator,
     IR: IntoIterator,

@@ -14,7 +14,8 @@ impl<I, F> LazyMapFn<I, F> {
         Self { map, iter }
     }
 
-    pub fn new_default(map: F) -> Self where
+    pub fn new_default(map: F) -> Self
+    where
         I: Default,
     {
         Self::new(map, I::default())
@@ -30,7 +31,8 @@ impl<I, F> LazyMapFn<I, F> {
     }
 }
 impl<I: Iterator, F> LazyMapFn<I, F> {
-    pub fn map<T, R, M: FnMut(R) -> T>(self, mut f: M) -> LazyMapFn<I, impl FnMut(I::Item) -> T> where
+    pub fn map<T, R, M: FnMut(R) -> T>(self, mut f: M) -> LazyMapFn<I, impl FnMut(I::Item) -> T>
+    where
         F: FnMut(I::Item) -> R,
     {
         let Self { mut map, iter } = self;
@@ -43,7 +45,8 @@ impl<I: Iterator, F> LazyMapFn<I, F> {
         self.map_iter(|i| i.skip(amt))
     }
 }
-impl<I: Iterator, F, R> LazyMapFn<I, F> where
+impl<I: Iterator, F, R> LazyMapFn<I, F>
+where
     F: FnMut(I::Item) -> R,
 {
     /// `into_strict`?
@@ -52,7 +55,8 @@ impl<I: Iterator, F, R> LazyMapFn<I, F> where
         iter.map(map)
     }
 }
-impl<I: Iterator, F, R> Iterator for LazyMapFn<I, F> where
+impl<I: Iterator, F, R> Iterator for LazyMapFn<I, F>
+where
     F: FnMut(I::Item) -> R,
 {
     type Item = R;
@@ -83,7 +87,8 @@ impl<I: Iterator, F, R> Iterator for LazyMapFn<I, F> where
         self.iter.count()
     }
 }
-impl<I: ExactSizeIterator, F> ExactSizeIterator for LazyMapFn<I, F> where
+impl<I: ExactSizeIterator, F> ExactSizeIterator for LazyMapFn<I, F>
+where
     Self: Iterator,
 {
     #[inline]
@@ -91,10 +96,9 @@ impl<I: ExactSizeIterator, F> ExactSizeIterator for LazyMapFn<I, F> where
         self.iter.len()
     }
 }
-impl<I: iter::FusedIterator, F> iter::FusedIterator for LazyMapFn<I, F> where
-    Self: Iterator,
-{}
-impl<I: DoubleEndedIterator, F, R> DoubleEndedIterator for LazyMapFn<I, F> where
+impl<I: iter::FusedIterator, F> iter::FusedIterator for LazyMapFn<I, F> where Self: Iterator {}
+impl<I: DoubleEndedIterator, F, R> DoubleEndedIterator for LazyMapFn<I, F>
+where
     F: FnMut(I::Item) -> R,
 {
     #[inline]
