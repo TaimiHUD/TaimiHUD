@@ -8,9 +8,10 @@ use {
         }, exports::runtime::imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar, IdStackToken},
         render::RenderState, with_i18n
     },
-    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport, DrawCategoryToggle, DrawPackRoots},
+    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport, DrawCategoryToggle, DrawPackRoots, PackAction, PackActionSlot},
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
     taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+    taimi_meta::packs::collections::CategorySet,
 };
 
 #[derive(Debug)]
@@ -340,53 +341,12 @@ impl super::PackElement {
         ).unwrap_or(false)
     }
 
-    pub(super) fn act_post_draw(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: Option<CategoryAction>, am_toggle: bool) {
+    pub(super) fn act_post_draw(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: PackActionSlot, am_toggle: bool) {
         #[cfg(todo = "unnecessary")]
         let was_hovered = self.hovered.is_some();
         let mut hovered = None;
-        if let Some((path, act)) = act_cat {
-            if let Some(msg) = act.as_pathing_message(path, self.state.pack_path()) {
-                msg.try_send();
-            } else {
-                match act {
-                    CategoryAction::HoverTooltip => {
-                        hovered = Some(Some(path));
-                        //log::error!("DELETEME TODO: cat hover")
-                    },
-                    CategoryAction::ContextMenu =>
-                        log::error!("DELETEME TODO: cat menu"),
-                    CategoryAction::Copy =>
-                        log::error!("DELETEME TODO: cat copy"),
-                    CategoryAction::Open(new_state) =>
-                        self.categories.update_open(path, new_state),
-                    CategoryAction::Enable(..) | CategoryAction::Isolate(..) => {
-                        #[cfg(debug_assertions)]
-                        unreachable!();
-                    },
-                }
-            }
-        }
-        if let Some(mut act) = act_pack {
-            if let CategoryAction::Enable(enable @ None) = &mut act {
-                let pack_enabled = self.state.unloaded.is_none() && self.state.info.info.is_some();
-                *enable = Some(!pack_enabled);
-            }
-            if let Some(msg) = act.as_pack_message(self.state.pack_path()) {
-                msg.try_send();
-            } else {
-                match act {
-                    CategoryAction::HoverTooltip => {
-                        hovered = Some(None);
-                    },
-                    CategoryAction::Enable(..) => {
-                        #[cfg(debug_assertions)]
-                        unreachable!();
-                    },
-                    act =>
-                        log::error!("DELETEME TODO: {} {act:?}", self.state.info),
-                }
-            }
-        }
+        let mut context_menu = None;
+        self.perform_acts(ui, act_cat, act_pack, &mut hovered, &mut context_menu);
         match hovered {
             Some(Some(path)) => {
                 self.draw_category_tooltip(ui, path, true, !am_toggle);
@@ -396,6 +356,146 @@ impl super::PackElement {
             },
             None => (),
         };
+        if let Some(context_menu) = context_menu {
+            ui.open_popup(match context_menu {
+                Some(..) => super::DrawCategoryContextMenu::id(),
+                None => super::DrawPackContextMenu::id(),
+            });
+            self.context_menu = Some(context_menu);
+        }
+    }
+    pub(super) fn act_post_draw_context(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: PackActionSlot) {
+        let (mut _h, mut _c) = (None, None);
+        self.perform_acts(ui, act_cat, act_pack, &mut _h, &mut _c);
+    }
+    fn perform_acts(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: PackActionSlot, hovered: &mut Option<Option<CategoryPath>>, context_menu: &mut Option<Option<CategoryPath>>) {
+        if let Some((path, act)) = act_cat {
+            if let Some(msg) = act.as_pathing_message(path, self.state.pack_path()) {
+                msg.try_send();
+            } else {
+                match act {
+                    CategoryAction::HoverTooltip => {
+                        *hovered = Some(Some(path));
+                    },
+                    CategoryAction::ContextMenu => {
+                        *context_menu = Some(Some(path));
+                    },
+                    CategoryAction::Copy =>
+                        log::error!("DELETEME TODO: cat copy"),
+                    CategoryAction::Open(new_state) =>
+                        self.categories.update_open(path, new_state),
+                    CategoryAction::OpenChildren(new_state) => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            let cat_is_open = self.categories.open_mask.contains(path);
+                            let new_state = new_state.unwrap_or(!cat_is_open);
+                            for child in cats.descendents_of(path).chain(iter::once(path)) {
+                                self.categories.update_open(child, Some(new_state));
+                            }
+                        }
+                    },
+                    CategoryAction::EnableChildren(new_state) => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            let paths = cats.descendents_of(path).chain(iter::once(path));
+                            let children_enable = new_state.unwrap_or_else(||
+                                self.state.category_get_visibility(path).is_visible()
+                            );
+                            self.act_cat_enables(Some(children_enable), paths)
+                        }
+                    },
+                    CategoryAction::EnableParents(parents_enable) => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            let paths = cats.parents_of(path).chain(iter::once(path));
+                            self.act_cat_enables(Some(parents_enable), paths)
+                        }
+                    },
+                    CategoryAction::Isolate(new_state) => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            let siblings_enable = match new_state {
+                                None => {
+                                    let is_enabled = |path| self.state.category_get_visibility(path).is_visible();
+                                    let cat_is_enabled = is_enabled(path);;
+                                    if cats.all_siblings_of(path).map(|sib| is_enabled(sib)).all(|se| se == !cat_is_enabled) {
+                                        None
+                                    } else {
+                                        Some(!cat_is_enabled)
+                                    }
+                                },
+                                Some(s) => Some(s),
+                            };
+                            let paths = cats.all_siblings_of(path);
+                            self.act_cat_enables(siblings_enable, paths)
+                        }
+                    },
+                    CategoryAction::ResetSiblings => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            self.act_cat_reset(cats.all_siblings_of(path));
+                        }
+                    },
+                    CategoryAction::ResetChildren => {
+                        if let Some((cats, ..)) = self.state.info.category_info() {
+                            let paths = cats.descendents_of(path).chain(iter::once(path));
+                            self.act_cat_reset(paths);
+                        }
+                    },
+                    CategoryAction::Enable(..) => {
+                        #[cfg(debug_assertions)]
+                        unreachable!();
+                    },
+                }
+            }
+        }
+        if let Some((_path, act)) = act_pack {
+            if let Some(msg) = act.as_pathing_message(self.state.pack_path()) {
+                msg.try_send();
+            } else {
+                match act {
+                    PackAction::Cat { action: CategoryAction::HoverTooltip, path: _ } => {
+                        *hovered = Some(None);
+                    },
+                    PackAction::Cat { action: CategoryAction::ContextMenu, path: _ } => {
+                        *context_menu = Some(None);
+                    },
+                    act =>
+                        log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+                }
+            }
+        }
+    }
+    pub(super) fn act_cat_enables<P: IntoIterator<Item = CategoryPath>>(&self, enable: Option<bool>, paths: P) {
+        self.act_cat_enables_dyn(Some(enable), &mut paths.into_iter())
+    }
+    pub(super) fn act_cat_reset<P: IntoIterator<Item = CategoryPath>>(&self, paths: P) {
+        self.act_cat_enables_dyn(None, &mut paths.into_iter())
+    }
+    fn act_cat_enables_dyn(&self, enable: Option<Option<bool>>, paths: &mut dyn Iterator<Item = CategoryPath>) {
+        let mut dirty: CategorySet = Default::default();
+        let cat_info = self.state.info.category_info();
+        let Some(sender) = self.state.config.watch.get_sender() else { return };
+        sender.send_if_modified(|config| {
+            for path in paths {
+                let dev = config.config.visibility_deviation_for(path);
+                let new_dev = match enable {
+                    None => {
+                        VisibilityFlags::empty()
+                    },
+                    Some(None) => {
+                        dev ^ VisibilityFlags::TOGGLE
+                    },
+                    Some(Some(enable)) => {
+                        let default = cat_info.map(|(i, ..)| !i.disabled.contains(path)).unwrap_or(true);
+                        let mut dev = dev;
+                        dev.set(VisibilityFlags::TOGGLE, enable ^ default);
+                        dev
+                    },
+                };
+                if dev != new_dev {
+                    config.config.set_visibility_deviation(path, new_dev);
+                    dirty.insert(path);
+                }
+            }
+            !dirty.is_empty()
+        });
+        PathingEvent::CategoryEnableCommit(self.state.pack_path(), dirty).try_send();
     }
 
     pub fn draw_category_tooltip(&mut self, ui: &Ui, path: CategoryPath, display_name_visible: bool, include_copyable: bool) -> bool {
@@ -660,7 +760,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
             _ if prev_toggle != toggle.toggle_state.is_visible() =>
                 Some(CategoryAction::Enable(Some(toggle.toggle_state.is_visible()))),
             Some(UiAction::Primary) =>
-                Some(CategoryAction::Open(res.is_some())),
+                Some(CategoryAction::Open(Some(res.is_some()))),
             Some(UiAction::LEFT_CLICK) if toggle.is_copyable =>
                 Some(CategoryAction::Copy),
             Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
@@ -836,8 +936,17 @@ impl CategoryCollectionState {
         true
     }
 
-    pub fn update_open(&mut self, path: CategoryPath, open: bool) {
-        self.open_mask.insert_at_if(path, open);
+    pub fn update_open(&mut self, path: CategoryPath, open: Option<bool>) {
+        let open = match open {
+            open @ Some(..) => open,
+            None => match self.open_mask.remove_at(path) {
+                Some(true) => None,
+                _ => Some(true),
+            },
+        };
+        if let Some(open) = open {
+            self.open_mask.insert_at_if(path, open);
+        }
     }
 }
 
@@ -901,10 +1010,16 @@ pub enum CategoryAction {
     HoverTooltip,
     /// right-clicked
     ContextMenu,
-    Open(bool),
+    Open(Option<bool>),
+    OpenChildren(Option<bool>),
     Copy,
     Enable(Option<bool>),
+    EnableParents(bool),
+    EnableChildren(Option<bool>),
+    /// EnableSiblings
     Isolate(Option<bool>),
+    ResetChildren,
+    ResetSiblings,
 }
 impl CategoryAction {
     pub const ISOLATE: Self = Self::Isolate(None);
@@ -938,23 +1053,15 @@ impl CategoryAction {
         match self {
             Self::Enable(enable) =>
                 Some(PathingEvent::CategoryEnableSet(pack_path, path, enable)),
-            #[cfg(todo)]
-            Self::Isolate(isolate) => (),
+            Self::EnableChildren(..) | Self::EnableParents(..) => None,
+            Self::ResetChildren | Self::ResetSiblings => None,
+            Self::Isolate(..) => None,
             #[cfg(todo)]
             Self::Copy => {
                 // technically doable via render sender or something if we can find attrs but ew
             },
             // anything else requires context or state we don't have access to
             _unactionable => None,
-        }
-    }
-    pub(crate) fn as_pack_message(self, pack_path: PackPath) -> Option<PathingEvent> {
-        match self {
-            Self::Enable(Some(true)) =>
-                Some(PathingEvent::ReloadPack(pack_path, false)),
-            Self::Enable(Some(false)) =>
-                Some(PathingEvent::UnloadPack(pack_path, false)),
-            _ => None,
         }
     }
     pub fn try_act(self, path: CategoryPath, pack_path: PackPath) -> Option<Self> {

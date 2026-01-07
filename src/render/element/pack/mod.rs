@@ -1,8 +1,11 @@
+use taimi_meta::packs::PackIndex;
+
 use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent
+                registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent,
+                PathingController,
             },
             Controller,
         },
@@ -13,12 +16,12 @@ use {
         render::RenderState, with_i18n
     },
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
-    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet, LocationMut}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
     taimi_sync::arcs::ArcPtrCmp,
 };
 pub use self::{
     categories::{DrawCategoryHeader, DrawCategoryTooltip, DrawPackUnloaded, CategoryInfo, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryCollectionState, CategoryAction, CategoryActionSlot},
-    menu::{DrawCategoryMenu, DrawCategoryCollectionMenu},
+    menu::{DrawCategoryMenu, DrawCategoryCollectionMenu, DrawPackContextMenu, DrawCategoryContextMenu},
     toggles::{DrawPackRoots, DrawCategoryToggle, DecorateCategoryHeader},
 };
 
@@ -31,6 +34,7 @@ pub struct PackElements {
     pub shared: Option<Arc<PathingShared>>,
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
     pub pack_state: PackVecOf<PackElement>,
+    pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
 impl PackElements {
     pub fn new() -> Self {
@@ -65,8 +69,40 @@ impl PackElements {
         }
     }
     pub fn draw(&mut self, ui: &Ui) {
+        let (mut menu_pack, menu_cat) = match self.context_menu {
+            Some((path, cat)) =>
+                (self.pack_state.lookup_mut(&path), cat),
+            None => (None, None),
+        };
+        if let Some(_menu) = ui.begin_popup(DrawPackContextMenu::id()) {
+            if let (Some(pack), None) = (menu_pack.as_mut(), menu_cat) {
+                pack.draw_pack_context(ui);
+            } else {
+                ui.close_current_popup();
+            }
+        } else if let Some((_, None)) = self.context_menu {
+            self.context_menu = None;
+        }
+        if let Some(_menu) = ui.begin_popup(DrawCategoryContextMenu::id()) {
+            if let (Some(pack), Some(cat_path)) = (menu_pack.as_mut(), menu_cat) {
+                pack.draw_category_context(ui, cat_path);
+            } else {
+                ui.close_current_popup();
+            }
+        } else if let Some((_, Some(..))) = self.context_menu {
+            self.context_menu = None;
+        }
+
         for pack in self.pack_state.values_mut() {
+            match self.context_menu {
+                Some((path, _)) if path == pack.state.pack_path() => (),
+                _ =>
+                    pack.context_menu = None,
+            }
             pack.draw(ui);
+            if let Some(cat_path) = pack.context_menu {
+                self.context_menu = Some((pack.state.pack_path(), cat_path));
+            }
         }
     }
 
@@ -80,6 +116,8 @@ pub struct PackElement {
     pub categories: CategoryCollectionState,
     /// displaying the tooltip for a category (or pack pseudo-root)
     pub hovered: Option<Option<CategoryPath>>,
+    /// displaying context menu
+    pub context_menu: Option<Option<CategoryPath>>,
 }
 impl PackElement {
     pub fn new(pack: &SharedPackLoad) -> Self {
@@ -87,6 +125,7 @@ impl PackElement {
             state: PackElementState::new(pack),
             categories: CategoryCollectionState::default(),
             hovered: None,
+            context_menu: None,
         }
     }
 
@@ -581,6 +620,155 @@ impl UiAction {
     pub const RIGHT_CLICK: Self = Self::Clicked(MouseButton::Right);
     #[cfg(todo = "unused")]
     pub const MIDDLE_CLICK: Self = Self::Clicked(MouseButton::Middle);
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PackAction {
+    Unload { hard: bool },
+    Reload { hard: bool },
+    Load(Option<bool>),
+    Cat {
+        action: CategoryAction,
+        /// None to operate on pack and/or root
+        path: Option<CategoryPath>,
+    },
+}
+impl PackAction {
+    pub const ACTIVATE: Self = Self::Load(Some(true));
+    pub const OFFLOAD: Self = Self::Load(Some(false));
+    pub const UNLOAD: Self = Self::Unload { hard: false };
+    pub const REMOVE: Self = Self::Unload { hard: true };
+    pub const RELOAD: Self = Self::Reload { hard: false };
+    pub const REFRESH: Self = Self::Reload { hard: true };
+    #[cfg(todo)]
+    pub const TOGGLE_LOADED: Self = Self::Load(None);
+    pub const ENABLE: Self = Self::Root(CategoryAction::ENABLE);
+    pub const DISABLE: Self = Self::Root(CategoryAction::DISABLE);
+
+    #[allow(non_snake_case)]
+    pub const fn Root(action: CategoryAction) -> Self {
+        Self::Cat {
+            path: None,
+            action,
+        }
+    }
+    pub fn clobber(self, path: PackPath, dest: &mut PackActionSlot) -> Result<Option<(PackPath, Self)>, Self> {
+        match &*dest {
+            Some((p, present)) if *p == path && *present == self =>
+                return Ok(None),
+            Some((_, present)) if *present > self =>
+                return Err(self),
+            _ => (),
+        }
+        Ok(mem::replace(dest, Some((path, self))))
+    }
+    pub fn try_clobber(self, path: PackPath, dest: &mut PackActionSlot) -> Result<Option<(PackPath, Self)>, Self> {
+        if let Some((dest_path, present)) = dest.take() {
+            if let Some(couldnt_dismiss) = present.try_act(dest_path) {
+                *dest = Some((dest_path, couldnt_dismiss));
+                if self.try_act(path).is_none() {
+                    // but we were able to dismiss self, good enough!
+                    return Ok(None)
+                }
+            }
+        }
+        self.clobber(path, dest)
+    }
+    pub(crate) fn as_pathing_message(self, path: PackPath) -> Option<PathingEvent> {
+        match self {
+            Self::Cat { path: Some(cat_path), action } =>
+                return action.as_pathing_message(cat_path, path),
+            Self::Cat { path: None, action } =>
+                action.as_pack_message(path),
+            Self::Reload { hard } =>
+                Some(PathingEvent::ReloadPack(path, hard)),
+            Self::Unload { hard } =>
+                Some(PathingEvent::UnloadPack(path, hard)),
+            Self::Load(Some(false)) =>
+                Some(PathingEvent::OffloadPack(path)),
+            Self::Load(Some(true)) =>
+                Some(PathingEvent::LoadPack(path)),
+            Self::Load(None) => {
+                log::info!("TODO: toggle pack load?");
+                match () {
+                    #[cfg(todo)]
+                    _ => Some(PathingEvent::TogglePack(path)),
+                    _ => None,
+                }
+            },
+            // anything else requires context or state we don't have access to
+            _unactionable => None,
+        }
+    }
+    pub fn try_act(self, path: PackPath) -> Option<Self> {
+        if path.path == PackIndex::MAX {
+            return Some(self)
+        }
+        let msg = match self {
+            Self::Cat { path: Some(cat_path), action } =>
+                return action.try_act(cat_path, path).map(|action|
+                    action.as_pack(cat_path)
+                ),
+            #[cfg(todo)]
+            Self::Copy => {
+                // technically doable via render sender or something if we can find attrs but ew
+            },
+            // not important enough to keep around...
+            Self::Cat { path: None, action: CategoryAction::HoverTooltip | CategoryAction::ContextMenu } =>
+                return None,
+            action => action.as_pathing_message(path),
+        };
+        match msg.map(PathingController::try_send) {
+            Some(true) => None,
+            _ => Some(self),
+        }
+    }
+    pub fn clobbered_action(res: Result<Option<(PackPath, Self)>, Self>) -> Option<Self> {
+        match res {
+            Err(lost) | Ok(Some((_, lost))) =>
+                Some(lost),
+            _ => None,
+        }
+    }
+    pub(super) fn warn_clobbered(slot: &PackActionSlot, res: Result<Option<(PackPath, Self)>, Self>) {
+        if let Some(clobbered) = Self::clobbered_action(res) {
+            let slot = match slot {
+                #[cfg(debug_assertions)]
+                None => unreachable!("clobbered {clobbered:?} by nothing? weird..."),
+                #[cfg(not(debug_assertions))]
+                None => return,
+                Some(slot) => slot,
+            };
+            if let Self::Cat { action: CategoryAction::HoverTooltip, .. } = clobbered { return }
+            log::debug!("clobbered action {clobbered:?} in favour of {slot:?}");
+        }
+    }
+}
+impl From<CategoryAction> for PackAction {
+    #[inline]
+    fn from(action: CategoryAction) -> Self {
+        Self::Root(action)
+    }
+}
+pub type PackActionSlot = Option<(PackPath, PackAction)>;
+impl CategoryAction {
+    pub const fn as_pack(self, path: CategoryPath) -> PackAction {
+        let path = match path.path {
+            CategoryIndex::MAX => None,
+            _ => Some(path),
+        };
+        PackAction::Cat { path, action: self }
+    }
+    pub const fn as_pack_root(self, path: CategoryPath) -> PackAction {
+        PackAction::Cat { path: Some(path), action: self }
+    }
+
+    pub(crate) fn as_pack_message(self, pack_path: PackPath) -> Option<PathingEvent> {
+        match self {
+            Self::Enable(enable) =>
+                PackAction::Load(enable).as_pathing_message(pack_path),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(todo)]

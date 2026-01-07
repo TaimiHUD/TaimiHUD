@@ -67,12 +67,18 @@ pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
     ReloadPack(PackPath, bool),
+    LoadPack(PackPath),
+    /// like Unload except will reactivate on its own when needed
+    OffloadPack(PackPath),
+    /// explicit request to keep pack and its resources unloaded
+    /// (and optionally remove from registry)
     UnloadPack(PackPath, bool),
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
     #[cfg(deleteme)]
     RequestDisabledPaths,
+    #[cfg(deleteme)]
     PathingStateUpdate(CategoryId, bool),
     /// toggle or set category state
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
@@ -338,6 +344,7 @@ impl PathingController {
         let ((), ()) = tokio::join!(preload, get_settings);
     }
 
+    #[cfg(deleteme)]
     async fn pathing_state_update(&mut self, path: CategoryId, state: bool) {
         let mut settings_lock = Settings::async_write()
             .await
@@ -665,7 +672,7 @@ impl PathingController {
             ReloadAll(remove) => self.reload_all(remove).await,
             #[cfg(deleteme)]
             UnloadAll => self.unload_all().await,
-            ReloadAll(..) | UnloadAll | ReloadPack(..) | UnloadPack(..) =>
+            ReloadAll(..) | UnloadAll | ReloadPack(..) | LoadPack(..) | UnloadPack(..) | OffloadPack(..) =>
                 log::debug!("TODO: pathing load"),
             CategoryEnableSet(pack_path, cat, state) =>
                 Self::handle_toggle(&self.loader, pack_path.rel(cat.path), state).await,
@@ -675,6 +682,7 @@ impl PathingController {
             },
             #[cfg(deleteme)]
             RequestDisabledPaths => self.provide_disabled_paths().await,
+            #[cfg(deleteme)]
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),

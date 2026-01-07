@@ -741,6 +741,16 @@ impl PackCategoryInfo {
             Some(current)
         })
     }
+    pub fn all_siblings_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
+        let parent = self.parent_of(path);
+        let root_fallback = match parent {
+            Some(..) => None,
+            None => Some(self.root_paths()),
+        };
+        parent.into_iter().flat_map(move |parent| self.children_of(parent))
+            .chain(root_fallback.into_iter().flatten())
+            .filter(move |p| *p != path)
+    }
 
     pub fn parent_of(&self, path: CategoryPath) -> Option<CategoryPath> {
         self.info_of(path).and_then(|c| c.parent())

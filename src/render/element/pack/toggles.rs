@@ -10,7 +10,7 @@ use {
             imgui::{self, Condition, MouseButton, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar},
         }, with_i18n,
     },
-    super::{DrawCategoryHeader, DrawPackUnloaded, UiAction, PackElementState, CategoryInfo, CategoryCollectionState, DrawCategoryTooltip, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryAction, CategoryActionSlot},
+    super::{DrawCategoryHeader, DrawPackUnloaded, UiAction, PackElementState, CategoryInfo, CategoryCollectionState, DrawCategoryTooltip, DrawCategoryCollection, DrawCategoryCollectionTree, CategoryAction, CategoryActionSlot, PackAction, PackActionSlot},
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath},
     taimi_pack::category::CategoryFlags,
@@ -21,7 +21,7 @@ pub struct DrawPackRoots<'a, 'ui> {
     pub state: &'a PackElementState,
     pub categories: Option<&'a CategoryCollectionState>,
     pub act_cat: CategoryActionSlot,
-    pub act_pack: Option<CategoryAction>,
+    pub act_pack: PackActionSlot,
     pub last_menu_open: Option<CategoryPath>,
 }
 impl<'a, 'u> DrawPackRoots<'a, 'u> {
@@ -40,10 +40,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
 
     fn draw_loaded(&mut self, mut categories: DrawCategoryCollectionTree<'a, 'u>) {
         let cats = self.state.info.info.as_ref().map(|i| &i.categories);
-        let pseudo_root = cats.and_then(|cats| match &cats.roots[..] {
-            &[root] => Some(root),
-            _ => None,
-        });
+        let pseudo_root = self.state.info.unique_root().map(|r| r.path());
         let (mut pack_act, mut pack_toggle) = (None, None);
         self.ui.table_next_column();
         let token = if pseudo_root.is_none() {
@@ -68,7 +65,10 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
         }
         drop(token);
         if let Some(act) = pack_toggle {
-            self.act_pack = Some(CategoryAction::Enable(Some(act)));
+            self.act_pack = Some((self.state.pack_path(), PackAction::Cat {
+                path: pseudo_root,
+                action: CategoryAction::Enable(Some(act)),
+            }));
         }
         let pack_act = match pack_act {
             #[cfg(todo)]
@@ -81,17 +81,13 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             },
             None => None,
         };
-        match (&mut self.act_pack, pack_act) {
-            (Some(prev), Some(act)) if *prev >= act => {
-                log::debug!("DELETEME: clobbering pack action {act:?} with {prev:?}");
-            },
-            (prev, Some(act)) => {
-                if let Some(prev) = &*prev {
-                    log::debug!("DELETEME: clobbering pack action {prev:?} with {act:?}");
-                }
-                *prev = Some(act);
-            }
-            (_, None) => (),
+        if let Some(pack_act) = pack_act {
+            let pack_act = PackAction::Cat {
+                path: pseudo_root,
+                action: pack_act,
+            };
+            let clobbered = pack_act.clobber(self.state.pack_path(), &mut self.act_pack);
+            PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
     }
     fn draw_unloaded(&mut self) {

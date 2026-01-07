@@ -10,7 +10,7 @@ use {
             imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, MenuItem, StyleVar, MenuToken},
         }, render::RenderState, with_i18n
     },
-    super::{DrawCategoryHeader, DrawCategoryCollection, CategoryAction, CategoryActionSlot, UiAction, DrawPackRoots},
+    super::{DrawCategoryHeader, PackElementState, DrawCategoryCollection, PackActionSlot, PackAction, CategoryAction, CategoryActionSlot, UiAction, DrawPackRoots},
     glam::Vec2,
     glamour::Rect,
     std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
@@ -55,7 +55,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                     None => self.last_menu_open.or(self.state.info.primary_root().map(|r| r.path()))
                         .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
                 };
-                let clobbered = CategoryAction::Open(menu_open.is_some()).clobber(path, &mut self.act_cat);
+                let clobbered = CategoryAction::Open(Some(menu_open.is_some())).clobber(path, &mut self.act_cat);
                 CategoryAction::warn_clobbered(&self.act_cat, clobbered);
             }
         }
@@ -77,14 +77,19 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             },
             None => None,
         };
-        if act.is_some() {
-            self.act_pack = act;
+        if let Some(action) = act {
+            let act = PackAction::Cat {
+                path: self.state.info.unique_root().map(|r| r.path()),
+                action,
+            };
+            let clobbered = act.clobber(self.state.pack_path(), &mut self.act_pack);
+            PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
         if self.last_menu_open.is_some() {
             let path = self.state.info.primary_root()
                 .map(|r| r.path())
                 .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX));
-            let clobbered = CategoryAction::Open(false).clobber(path, &mut self.act_cat);
+            let clobbered = CategoryAction::Open(Some(false)).clobber(path, &mut self.act_cat);
             CategoryAction::warn_clobbered(&self.act_cat, clobbered);
         }
     }
@@ -104,7 +109,7 @@ impl super::PackElement {
         let mut roots = self.prepare_draw(ui);
         roots.draw_menu();
         let DrawPackRoots { mut act_cat, act_pack, .. } = roots;
-        if let Some((path, CategoryAction::Open(opened))) = act_cat {
+        if let Some((path, CategoryAction::Open(Some(opened)))) = act_cat {
             log::debug!("DELETEME: menu open({opened}) for {path}");
             let cats = self.state.info.category_info();
             let open_menu = &mut self.categories.open_menu;
@@ -129,6 +134,39 @@ impl super::PackElement {
             act_cat = None;
         }
         self.act_post_draw(ui, act_cat, act_pack, false);
+    }
+
+    pub(super) fn draw_pack_context(&mut self, ui: &Ui) {
+        let mut draw = DrawPackContextMenu {
+            ui,
+            state: &self.state,
+            act: None,
+        };
+        draw.draw_contents();
+        self.act_post_draw_context(ui, None, draw.act);
+    }
+    pub(super) fn draw_category_context(&mut self, ui: &Ui, category_path: CategoryPath) {
+        let (mut any_open, mut any_closed) = (false, false);
+        if let Some((cats, ..)) = self.state.info.category_info() {
+            let children = cats.descendents_of(category_path);
+            for cat in children {
+                if self.categories.open_mask.contains(cat) {
+                    any_open = true;
+                } else {
+                    any_closed = true;
+                }
+            }
+        }
+        let mut draw = DrawCategoryContextMenu {
+            ui,
+            state: &self.state,
+            act: None,
+            category_path,
+            any_open,
+            any_closed,
+        };
+        draw.draw_contents();
+        self.act_post_draw_context(ui, draw.act, None);
     }
 }
 
@@ -397,5 +435,274 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
         path
+    }
+}
+
+pub struct DrawPackContextMenu<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub state: &'a PackElementState,
+    pub act: PackActionSlot,
+}
+impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
+    pub fn draw(&mut self) {
+        let token = self.ui.begin_popup(Self::id());
+        if let Some(..) = &token {
+            self.draw_contents();
+        }
+        drop(token);
+    }
+    pub fn draw_contents(&mut self) {
+        let s = match self.state.unloaded.as_ref() {
+            None if self.state.pack.is_some() => Some(()),
+            _reason => None,
+        };
+        let act = match s {
+            Some(()) => self.draw_contents_loaded(),
+            None => self.draw_contents_unloaded(),
+        };
+        if let Some(act) = act {
+            let clobbered = act.clobber(self.state.pack_path(), &mut self.act);
+            PackAction::warn_clobbered(&self.act, clobbered);
+        }
+    }
+    pub fn draw_contents_unloaded(&mut self) -> Option<PackAction> {
+        let ui = self.ui;
+        let action_remove = with_i18n!("remove", |label| Selectable::new(&label).build(ui));
+        let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(ui));
+        if action_reload {
+            Some(PackAction::ACTIVATE)
+        } else if action_remove {
+            Some(PackAction::REMOVE)
+        } else {
+            None
+        }
+    }
+    pub fn draw_contents_loaded(&mut self) -> Option<PackAction> {
+        let ui = self.ui;
+        //with_i18n!("pack", |header| ui.text(&header));
+        let is_loaded = self.state.pack.is_some();
+        let action_later = match is_loaded {
+            true => with_i18n!("offload-pack", |msg| Selectable::new(msg).build(ui)),
+            false => false,
+        };
+        let action_load = match is_loaded {
+            true => with_i18n!("deactivate-pack", |msg| Selectable::new(msg).build(ui)),
+            false => with_i18n!("activate-pack", |msg| Selectable::new(msg).build(ui)),
+        };
+        let action_unload = match is_loaded {
+            true => with_i18n!("unload-pack", |msg| Selectable::new(msg).build(ui)),
+            false => false,
+        };
+        let action_reload = match is_loaded {
+            true => with_i18n!("reload-pack", |msg| Selectable::new(msg).build(ui)),
+            false => false,
+        };
+        let action_refresh = with_i18n!("refresh-pack", |msg| Selectable::new(msg)
+            .build(ui)
+        );
+        if action_unload {
+            Some(PackAction::REMOVE)
+        } else if action_later {
+            Some(PackAction::OFFLOAD)
+        } else if action_load {
+            Some(match is_loaded {
+                true => PackAction::UNLOAD,
+                false => PackAction::ACTIVATE
+            })
+        } else if action_reload {
+            Some(PackAction::RELOAD)
+        } else if action_refresh {
+            Some(PackAction::REFRESH)
+        } else {
+            None
+        }
+    }
+    pub fn id() -> &'static str {
+        "pack-context"
+    }
+}
+
+pub struct DrawCategoryContextMenu<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub state: &'a PackElementState,
+    pub act: CategoryActionSlot,
+    pub category_path: CategoryPath,
+    pub any_open: bool,
+    pub any_closed: bool,
+}
+impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
+    #[cfg(deleteme)]
+    pub fn draw(&mut self) {
+        let token = self.ui.begin_popup(Self::id());
+        if let Some(..) = &token {
+            self.draw_contents();
+        }
+        drop(token);
+    }
+    pub fn draw_contents(&mut self) {
+        let act = self.draw_menu();
+        if let Some(act) = act {
+            let clobbered = act.clobber(self.category_path, &mut self.act);
+            CategoryAction::warn_clobbered(&self.act, clobbered);
+        }
+    }
+    fn draw_menu(&mut self) -> Option<CategoryAction> {
+        let ui = self.ui;
+        let action_toggle = with_i18n!("toggle", |msg| Selectable::new(msg).build(ui));
+        let action_enable_all = with_i18n!("enable-all", |msg| Selectable::new(msg).build(ui));
+        let action_disable_all = with_i18n!("disable-all", |msg| Selectable::new(msg).build(ui));
+        let action_reset_all = with_i18n!("reset-all", |msg| Selectable::new(msg).build(ui));
+        ui.separator();
+        let action_isolate = with_i18n!("isolate", |msg| Selectable::new(msg).build(ui));
+        let action_unisolate = with_i18n!("unisolate", |msg| Selectable::new(msg).build(ui));
+        ui.separator();
+        let action_enable_to = with_i18n!("enable-to", |msg| Selectable::new(msg).build(ui));
+        let action_disable_to = with_i18n!("disable-to", |msg| Selectable::new(msg).build(ui));
+        let action_all = if action_enable_all {
+            Some(Some(true))
+        } else if action_disable_all {
+            Some(Some(false))
+        } else if action_reset_all {
+            Some(None)
+        } else {
+            None
+        };
+        let action_parents = if action_enable_to {
+            Some(true)
+        } else if action_disable_to {
+            Some(false)
+        } else {
+            None
+        };
+        let action_isolate = if action_isolate {
+            Some(Some(None))
+        } else if action_unisolate {
+            Some(None)
+        } else {
+            None
+        };
+        let act = if action_toggle {
+            Some(CategoryAction::TOGGLE)
+        } else if let Some(action_all) = action_all {
+            Some(match action_all {
+                Some(enable) =>
+                    CategoryAction::EnableChildren(Some(enable)),
+                None =>
+                    CategoryAction::ResetChildren,
+            })
+        } else if let Some(parents_enable) = action_parents {
+            Some(CategoryAction::EnableParents(parents_enable))
+        } else if let Some(isolate) = action_isolate {
+            Some(match isolate {
+                Some(state) =>
+                    CategoryAction::Isolate(state),
+                None =>
+                    CategoryAction::ResetSiblings,
+            })
+        } else {
+            None
+        };
+
+        let action_expand_all = if self.any_closed {
+            with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        let action_collapse_all = if self.any_open {
+            with_i18n!("collapse-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        #[cfg(todo)]
+        let action_hide = with_i18n(if self.hidden { "unhide" } else { "hide"}, |msg| Selectable::new(msg).build(ui));
+        let action_hide = false;
+
+        if let Some(act) = act {
+            Some(act)
+        } else if action_hide {
+            Some(CategoryAction::Open(None))
+        } else if action_expand_all {
+            log::debug!("TODO: cat:expand");
+            Some(CategoryAction::OpenChildren(Some(true)))
+        } else if action_collapse_all {
+            Some(CategoryAction::OpenChildren(Some(false)))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(deleteme)]
+    pub fn do_action(&mut self) {
+        if action_toggle {
+            #[cfg(todo = "deleteme")]
+            PathingEvent::CategorySetToggle(path, None).try_send();
+            self.act_categories_select(&info, path.root, iter::once(path.unscope()), None);
+        } else if let Some(action_all) = action_all {
+            let categories = &info.categories;
+            let cat_path = path.unscope();
+            let paths = categories.descendents_of(cat_path)
+                .chain(iter::once(cat_path));
+            match action_all {
+                Some(enable) =>
+                    self.act_categories_select(&info, path.root, paths, Some(enable)),
+                None =>
+                    self.act_categories_reset(&info, path.root, paths),
+            }
+        } else if let Some(parents_enable) = action_parents {
+            let categories = &info.categories;
+            let cat_path = path.unscope();
+            let paths = categories.parents_of(cat_path)
+                .chain(iter::once(cat_path));
+            self.act_categories_select(&info, path.root, paths, Some(parents_enable));
+        } else if let Some(isolate) = action_isolate {
+            let categories = &info.categories;
+            let cat_path = path.unscope();
+            let cat_info = categories.info_of(cat_path)
+                .map(|cat| {
+                    let oldest = cat.parent()
+                        .map(CategoryPath::with_path)
+                        .and_then(|parent| categories.firstborn_of(parent));
+                    (cat, oldest)
+                });
+            let oldest = cat_info.and_then(|(cat, oldest)|
+                oldest.or(cat.sibling()
+                    .map(CategoryPath::with_path)
+                )
+            );
+            let paths = oldest.into_iter()
+                .flat_map(|oldest| categories.younger_siblings_of(oldest)
+                    .chain(iter::once(oldest))
+                    .filter(|&s| s != cat_path)
+                );
+            match isolate {
+                Some(state) =>
+                    self.act_categories_isolate(&info, path.root, paths, state.ok_or(cat_path)),
+                None =>
+                    self.act_categories_reset(&info, path.root, paths),
+            }
+        ui.separator();
+        }
+
+        // TODO
+        let any_collapsed = true;
+        let action_expand_all = if any_collapsed {
+            with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        let action_collapse_all = if open {
+            with_i18n!("collapse-all", |msg| Selectable::new(msg).build(ui))
+        } else { false };
+        // TODO
+        let hidden = false;
+        let action_hide = with_i18n(if hidden { "unhide" } else { "hide"}, |msg| Selectable::new(msg).build(ui));
+
+        if action_hide {
+            log::debug!("TODO: cat:{}", if hidden { "unhide" } else { "hide" });
+        } else if action_expand_all {
+            log::debug!("TODO: cat:expand");
+        } else if action_collapse_all {
+            log::debug!("TODO: cat:collapse");
+        }
+
+        ui.separator();
+        // TODO: category stats
+    }
+    pub fn id() -> &'static str {
+        "cat-context"
     }
 }
