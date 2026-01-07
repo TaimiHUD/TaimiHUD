@@ -2,7 +2,7 @@ use {
     super::PathingShared,
     crate::controller::pathing::{
         registry::{PackBoxOf, PackMapPath, PoiMapPath, TrailMapPath, PackPath, LoadedPoiPath, LoadedPoiIndex, LoadedTrailPath, LoadedTrailIndex, LoadedPoiNs, LoadedTrailNs, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath},
-        visible::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail, LoadedTrailGeometryInfo, VisibilityFlags},
+        visible::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail, VisibilityFlags},
         shared::{MapPackInfo, LoadedPoiInfo, LoadedTrailInfo},
         space::DrawSpace,
     },
@@ -17,7 +17,7 @@ use {
         },
     },
     taimi_meta::packs::{
-        id::{IdVariant, MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1, PackMarkerNs},
+        id::{MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1, PackMarkerNs},
         MapIndex, CategoryIndex, CategoryPath, PoiPath, PoiIndex, TrailPath, TrailIndex,
     },
     taimi_sync::arcs::ArcPtrCmp,
@@ -683,33 +683,52 @@ impl LoadedPoiShared {
 #[derive(Debug, Clone, Default)]
 pub struct LoadedTrailShared {
     pub visibility: VisibilityFlags,
-    /// TODO: deleteme aaaa
-    pub section_info: Arc<LoadedTrailGeometryInfo>,
+    #[cfg(todo)]
+    pub section_count: TrailSectionIndex,
 }
 impl LoadedTrailShared {
     pub fn with_loaded(ltrail: &LoadedTrail) -> Self {
         Self {
             visibility: ltrail.visibility,
-            section_info: ltrail.section_info.clone(),
+            #[cfg(todo)]
+            section_count: 0,
         }
     }
     pub fn update_from_loaded(&mut self, ltrail: &LoadedTrail) -> bool {
-        let mut dirty = self.visibility != ltrail.visibility;
+        let dirty = self.visibility != ltrail.visibility;
         self.visibility = ltrail.visibility;
-        dirty |= ArcPtrCmp::from_mut(&mut self.section_info).clone_from_arc(&ltrail.section_info);
+        //self.section_count = ltrail.sections.len();
         dirty
     }
 
+    #[cfg(todo)]
+    pub fn section_len(&self) -> usize {
+        self.section_count as usize
+    }
+
     pub(crate) fn sig(&self) -> [u32; 2] {
-        let mut sig = Self::sig_sections(&self.section_info);
+        let mut sig = match () {
+            #[cfg(todo)]
+            _ => [self.section_count, 0u32],
+            #[cfg(todo)]
+            _ => Self::sig_sections(&self.section_info),
+            _ => [0u32; 2],
+        };
         sig[0] ^= self.visibility.bits() as u32;
         sig
     }
     pub(crate) fn sig_loaded(ltrail: &LoadedTrail) -> [u32; 2] {
-        let mut sig = Self::sig_sections(&ltrail.section_info);
+        let mut sig = match () {
+            #[cfg(todo)]
+            _ => [ltrail.sections.len() as u32, 0u32],
+            #[cfg(todo)]
+            _ => Self::sig_sections(&ltrail.section_info),
+            _ => [0u32; 2],
+        };
         sig[0] ^= ltrail.visibility.bits() as u32;
         sig
     }
+    #[cfg(todo)]
     pub fn sig_sections(sections: &LoadedTrailGeometryInfo) -> [u32; 2] {
         let s = sections as *const _ as usize;
         [s as u32, (s >> 32) as u32]

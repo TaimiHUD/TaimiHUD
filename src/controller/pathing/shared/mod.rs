@@ -12,11 +12,14 @@ use {
     taimi_sync::watched::{Watched, watch},
     tokio::sync::mpsc,
 };
-pub use self::{
-    loader::{SharedPacks, SharedLoaderPacksInfo, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx},
-    maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
-    info::{MapPackInfo, MapTrailInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
-    space::{SpacePackShared, TrailGeometryRequests, TrailGeometryRequestsTx, TextureLoadRequests, TextureLoadRequestsTx},
+pub use {
+    self::{
+        loader::{SharedPacks, SharedLoaderPacksInfo, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx, LoadReport},
+        maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
+        info::{MapPackInfo, MapTrailInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
+        space::{SpacePackShared, TrailGeometryRequests, TrailGeometryRequestsTx, TextureLoadRequests, TextureLoadRequestsTx, TrailGeometrySections},
+    },
+    crate::controller::pathing::state::{LoadedTrailSection, LoadedTrailGeometry},
 };
 pub(crate) use self::info::EMPTY_RENDER_ATTRS;
 #[cfg(todo)]

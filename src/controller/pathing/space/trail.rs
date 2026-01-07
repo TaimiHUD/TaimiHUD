@@ -1,7 +1,11 @@
 use {
-    crate::space::TextureSpace,
+    crate::{
+        resources::Vertex,
+        space::TextureSpace,
+    },
     core::f32,
-    glamour::Point2,
+    glamour::{Point2, Vector3, Vec3Swizzles},
+    taimi_pack::trail::TrailSection,
 };
 
 #[derive(Debug, Clone)]
@@ -9,7 +13,7 @@ pub struct TrailParams {
     pub resolution: Option<f32>,
     pub width: f32,
     pub y_offset: f32,
-    pub smoothing: Option<f32>,
+    pub smoothing: Option<Option<f32>>,
 }
 
 impl TrailParams {
@@ -31,11 +35,13 @@ impl TrailParams {
     }
 
     pub fn smoothing(&self) -> Option<f32> {
-        (self.resolution() > Self::DEFAULT_RESOLUTION).then_some(Self::DEFAULT_SMOOTHING)
+        self.smoothing.unwrap_or_else(||
+            (self.resolution() > Self::DEFAULT_RESOLUTION).then_some(Self::DEFAULT_SMOOTHING)
+        )
     }
 
     pub fn resolution(&self) -> f32 {
-        self.resolution.unwrap_or(Self::WIDTH_FACTOR / self.width())
+        self.resolution.unwrap_or_else(|| Self::WIDTH_FACTOR / self.width())
     }
 
     pub fn y_offset_for(&self, idx: usize) -> f32 {
@@ -58,6 +64,15 @@ impl TrailParams {
     }
 
     pub const Y_OFFSET_SECTION_GAP: f32 = f32::EPSILON * 40.0;
+
+    pub fn bake(&self) -> Self {
+        Self {
+            resolution: Some(self.resolution()),
+            smoothing: Some(self.smoothing()),
+            width: self.width(),
+            y_offset: self.y_offset,
+        }
+    }
 }
 
 impl Default for TrailParams {
@@ -146,5 +161,106 @@ impl TrailTextureMap {
 impl Default for TrailTextureMap {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+impl TrailParams {
+    /// Interpolate points to be no more than 1/resolution metres apart.
+    pub fn interpolate_section_vertices(&self, vertices: &mut Vec<Vertex>, section: &TrailSection, scale: f32, is_wall: bool) {
+        let width = self.width();
+        let resolution = self.resolution();
+        let smoothing = self.smoothing();
+        let mut points = Vec::with_capacity(section.points.len());
+        let mut prev_point = None;
+        for mut point in section.points.iter().copied() {
+            point.y += self.y_offset;
+
+            if let Some(prev_point) = prev_point.replace(point) {
+                let dist = prev_point.distance(point);
+                let segments = (dist * resolution) as i32;
+                for i in 0..segments {
+                    let s = (i + 1) as f32 / (segments + 1) as f32;
+                    let position = match smoothing {
+                        None => s,
+                        // bias resolution near corners
+                        Some(smoothing) => s.powi(if smoothing > 6.0 { 3 } else { 2 }),
+                    };
+                    let int_point = prev_point.lerp(point, position);
+                    points.push(int_point);
+                }
+            }
+            points.push(point);
+        }
+
+        if let Some(smoothing) = smoothing {
+            let mut points = &mut points[..];
+            while let &mut [prev, mid, ..] = points {
+                let next = points.get(2).copied().unwrap_or(mid);
+                let target = prev.slerp(next, 0.5);
+                let smooth = mid.xz().lerp(target.xz(), smoothing / 10.0);
+                points[1] = smooth.extend(mid.y * 0.925 + target.y * 0.075).xzy();
+                points = &mut points[1..];
+            }
+        }
+
+        let mut cur_point = points[0];
+        let mut last_offset = Vector3::ZERO;
+        let mut flip_over = 1.0f32;
+        let normal_offset = width * scale / 2.0;
+        let mut mod_distance = Vector3::ZERO;
+
+        let mut distance = 0.0f32;
+        for &next_point in points.iter().skip(1) {
+            let path_direction = next_point - cur_point;
+            let offset = path_direction.cross(Vector3::Y);
+            let offset = if is_wall { path_direction.cross(offset) } else { offset };
+            let offset = offset.normalize();
+
+            if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
+                flip_over *= -1.0;
+            }
+
+            mod_distance = offset * normal_offset * flip_over;
+            let normal_scale_dir = mod_distance.to_raw().normalize_or(
+                glam::vec3(1.0, 0.0, 1.0)
+                    .normalize()
+                    .copysign(mod_distance.to_raw()),
+            );
+
+            vertices.push(Vertex {
+                position: (cur_point - mod_distance).into(),
+                colour: glam::Vec3::ONE,
+                normal: -normal_scale_dir,
+                texture: glam::vec2(1.0, distance / width - 1.0),
+            });
+            vertices.push(Vertex {
+                position: (cur_point + mod_distance).into(),
+                colour: glam::Vec3::ONE,
+                normal: normal_scale_dir,
+                texture: glam::vec2(0.0, distance / width - 1.0),
+            });
+
+            distance += path_direction.length();
+            last_offset = offset;
+            cur_point = next_point;
+        }
+
+        let normal_scale_dir = mod_distance.to_raw().normalize_or(
+            glam::vec3(1.0, 0.0, 1.0)
+                .normalize()
+                .copysign(mod_distance.to_raw()),
+        );
+        vertices.push(Vertex {
+            position: (cur_point - mod_distance).into(),
+            colour: glam::Vec3::ONE,
+            normal: -normal_scale_dir,
+            texture: glam::vec2(1.0, distance / width - 1.0),
+        });
+        vertices.push(Vertex {
+            position: (cur_point + mod_distance).into(),
+            colour: glam::Vec3::ONE,
+            normal: normal_scale_dir,
+            texture: glam::vec2(0.0, distance / width - 1.0),
+        });
     }
 }

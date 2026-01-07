@@ -9,17 +9,26 @@ use taimi_hoard::collections::TaimiSet;
 use taimi_sync::arcs::ArcPtrCmp;
 use taimi_meta::packs::{MapIndex, MapPath, PackIndex, PackMapPath, PackPath, PackRegistryNs};
 use crate::controller::pathing::{
-    visible::LoadedMapPack,
-    shared::{MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded},
+    shared::{EMPTY_RENDER_ATTRS, MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded},
     registry::{PackInfoSignature, PackInfo},
     UnloadedReason,
 };
-pub use {
-    taimi_meta::packs::{VisibilityFlags, VisibilityFlagSet},
-    self::visible::VisibilityFlagsExt,
+use taimi_meta::packs::VisibilityFlags;
+use taimi_pack::attributes::RenderAttributes;
+#[doc(inline)]
+pub use self::{
+    poi::LoadedPoi,
+    trail::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
+    visible::VisibilityFlagsExt,
+    map::LoadedMapPack,
 };
-pub mod visible;
 
+mod map;
+mod poi;
+mod trail;
+pub(crate) mod visible;
+
+/// [MapPackInfo] plus some metadata
 pub struct LoadedMapInfoStorage {
     pub used: RecentlyUsed,
     pub info: Arc<MapPackInfo>,
@@ -50,6 +59,7 @@ impl Default for LoadedMapInfoStorage {
         Self::new(MapPackInfo::empty())
     }
 }
+/// a collection of [LoadedMapInfoStorage]
 #[derive(Default)]
 pub struct LoadedMapInfo {
     pub map_info: BTreeMap<PackMapPath, LoadedMapInfoStorage>,
@@ -137,6 +147,7 @@ impl TaimiSet<(PackMapPath, PackInfoSignature)> for LoadedMapInfo {
     }
 }
 
+/// a collection of [LoadedMapPack]
 #[derive(Default)]
 pub struct LoadedMaps {
     pub maps: BTreeMap<PackMapPath, LoadedMapPack>,
@@ -273,6 +284,7 @@ impl TaimiSet<PackMapPath> for LoadedMaps {
     }
 }
 
+/// [SharedPackInfo] plus some state tracking metadata
 #[derive(Debug, Clone)]
 pub struct LoadedPackInfo {
     pub used: RecentlyUsed,
@@ -330,6 +342,7 @@ impl TaimiSet<MapPath> for LoadedPackInfo {
         self.info.has_map(path.path)
     }
 }
+/// a collection of [LoadedPackInfo]
 #[derive(Default)]
 pub struct LoadedPacks {
     pub packs: IndexedList<PackRegistryNs, PackIndex, Vec<LoadedPackInfo>>,
@@ -470,4 +483,20 @@ impl TaimiSet<MapPath> for LoadedPacks {
     fn set_contains(&self, path: &MapPath) -> bool {
         self.on_map(path.path).next().is_some()
     }
+}
+
+/// a component of a [LoadedMapPack]
+#[derive(Debug, Clone, Default)]
+pub struct LoadedCategory {
+    pub visibility: VisibilityFlags,
+}
+
+impl LoadedCategory {
+    pub const INVALID: Self = Self {
+        visibility: VisibilityFlags::empty(),
+    };
+}
+
+fn get_overrides_mut<'a>(overrides: &'a mut Option<Box<RenderAttributes>>) -> &'a mut Box<RenderAttributes> {
+    overrides.get_or_insert_with(|| Box::new((**EMPTY_RENDER_ATTRS).clone()))
 }

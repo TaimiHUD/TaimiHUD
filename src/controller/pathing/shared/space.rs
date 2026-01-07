@@ -1,22 +1,17 @@
 use crate::controller::pathing::registry::{LoadedMarkerPath, LoadedTrailPath};
 use taimi_sync::watched::watch;
-use std::{fmt, sync::Arc, collections::BTreeSet};
+use std::{fmt, sync::Arc};
 use taimi_meta::packs::{id::{MarkerId, MarkerIndex}, PackMapPath};
 use {
     crate::{
         controller::pathing::{
             space::SpacePackCollection,
-            state::visible::LoadedTrailGeometry,
-            shared::{SharedResourceRequests, SharedResourceRequestsTx, SharedPackInfo},
+            shared::{SharedResourceRequests, SharedResourceRequestsTx, SharedPackInfo, LoadedTrailSection, LoadedTrailGeometry},
         },
         exports::runtime::textures::{TextureKey, TextureSlot},
         TEXTURES,
     },
-    anyhow::Context,
-    futures::future::Either,
-    std::collections::{btree_map, BTreeMap},
-    taimi_meta::packs::{PoiPath, TrailPath},
-    taimi_pack::{attributes::{AttrString, RenderAttributes}, Poi as PackPoi},
+    taimi_pack::{attributes::AttrString},
 };
 
 #[derive(Clone)]
@@ -78,3 +73,4 @@ pub type TrailGeometryRequests = SharedResourceRequests<LoadedTrailPath<PackMapP
 pub type TrailGeometryRequestsTx = SharedResourceRequestsTx<LoadedTrailPath<PackMapPath>, LoadedTrailGeometry>;
 pub type TextureLoadRequests = SharedResourceRequests<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;
 pub type TextureLoadRequestsTx = SharedResourceRequestsTx<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;
+pub type TrailGeometrySections = Arc<[LoadedTrailSection]>;

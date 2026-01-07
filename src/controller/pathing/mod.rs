@@ -15,8 +15,7 @@ use {
                 CONTROLS,
             },
         },
-        render::machine::RenderTaskPriority,
-        settings::{Settings, SettingsLock, SourceKind},
+        settings::{Settings, SettingsLock},
         space::{
             engine::SpaceEvent,
             Engine,
@@ -27,18 +26,16 @@ use {
     self::registry::PackLoader,
     self::state::{LoadedMaps, LoadedMapInfo, LoadedPacks},
     self::space::{SpaceContext, SpacePackShared},
-    anyhow::{anyhow, Context},
-    futures::{FutureExt, StreamExt},
-    std::{path::PathBuf, sync::Arc},
-    std::collections::{VecDeque, BTreeSet},
+    anyhow::Context,
+    futures::StreamExt,
+    std::sync::Arc,
+    std::collections::VecDeque,
     strum_macros::Display,
     taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
-    taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
+    taimi_pack::attributes::Festivals,
     tokio::{
-        fs::create_dir_all,
         task::JoinSet,
         select,
-        time::{sleep, Duration},
     },
     taimi_sync::watched::watch,
     taimi_meta::packs::{collections::{PackSet, CategorySet}, id::MarkerId, PackPath, CategoryPath},
@@ -49,9 +46,11 @@ pub use self::{
     registry::{LoaderBox, UnloadedReason},
     festivals::FestivalFixup,
     shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
-    state::{visible, VisibilityFlagsExt},
+    state::VisibilityFlagsExt,
     config::PackConfig,
 };
+/// deleteme
+pub(crate) use self::state::visible;
 #[doc(no_inline)]
 pub use taimi_meta::coords::LocalSpace as PackSpace;
 
@@ -79,17 +78,13 @@ pub(crate) enum PathingEvent {
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
-    #[cfg(deleteme)]
-    RequestDisabledPaths,
-    #[cfg(deleteme)]
-    PathingStateUpdate(CategoryId, bool),
     /// toggle or set category state
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
     /// act upon a batch of changes to [shared::SharedPackLoad::config]
     CategoryEnableCommit(PackPath, CategorySet),
     ToggleKatRender,
     ApiBypass(Option<bool>),
-    ReportResourceLoaded(space::LoadReport),
+    ReportResourceLoaded(shared::LoadReport),
     #[cfg(deleteme)]
     ReportPackLoaded(PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>),
     FanOut(Vec<PathingEvent>),
@@ -238,57 +233,7 @@ impl PathingController {
                 }
             },
             Ok(_) = self.space.maps_rx.changed() => {
-                log::info!("PATHY: gameplay maps rx");
-                let (space_dirty, is_empty) = if let Some(map_id) = gameplay_prev.gameplay_map() {
-                    #[cfg(todo)]
-                    let entities_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);
-                    let entities_dirty = true;
-                    let space_dirty = if entities_dirty {
-                        let space_packs = Arc::make_mut(&mut self.space.packs);
-                        let bvh_dirty = space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
-                        log::info!("PATHY: space entities = {}", space_packs.render_entities.entities.len());
-                        match bvh_dirty {
-                            Err(true) => {
-                                space_packs.rebuild_bvh();
-                                true
-                            },
-                            Err(false) => true,
-                            Ok(()) => false,
-                        }
-                    } else {
-                        //self.space.packs.needs_bvh_rebuild()
-                        false
-                    };
-                    let is_empty = self.space.packs.is_empty();
-                    (space_dirty, is_empty)
-                } else {
-                    let changed = match self.space.packs.map_id {
-                        None => false,
-                        #[cfg(todo)]
-                        Some(..) => {
-                            self.space.packs = Arc::new(space::SpacePackCollection::new());
-                            //Arc::make_mut(&mut self.space.packs).clear();
-                            true
-                        },
-                        Some(..) => true,
-                    };
-                    (changed, true)
-                };
-                if space_dirty || is_empty {
-                    log::info!("PATHY: space dirty");
-                    let new_copy = (!is_empty).then(|| self.space.packs.clone());
-                    self.loader.shared.space.collection.send_if_modified(|shared| {
-                        if let Some(new_copy) = new_copy {
-                            *shared = new_copy;
-                            true
-                        } else if !shared.is_empty() {
-                            Arc::make_mut(shared).clear();
-                            true
-                        } else {
-                            false
-                        }
-                    });
-                }
+                self.space_pack_updates().await;
             },
             _ = self.rx.festivals.changed() => {
                 self.external_filters_updated().await;
@@ -345,16 +290,6 @@ impl PathingController {
         };
         let preload = self.preload_all();
         let ((), ()) = tokio::join!(preload, get_settings);
-    }
-
-    #[cfg(deleteme)]
-    async fn pathing_state_update(&mut self, path: CategoryId, state: bool) {
-        let mut settings_lock = Settings::async_write()
-            .await
-            .expect("Settings unitialized, impossible");
-        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path.into(), state)
-            .await;
-        drop(settings_lock);
     }
 
     async fn toggle_katrender(&self) {
@@ -418,218 +353,49 @@ impl PathingController {
             _ => (),
         }
     }
-}
 
-/// moving back to registry loader Soon
-#[cfg(todo = "deleteme")]
-impl PathingController {
-    pub(crate) async fn reload_all(&self, remove: bool) {
-        if !remove {
-            log::debug!("TODO: pack refresh rather than reload");
-        }
-        self.unload_all().await;
-        let res = Self::load_all_inner(self.settings.clone())
-            .await
-            .context("Reloading all paths");
-        if let Err(e) = res {
-            log::error!("{e:#}");
-        }
-    }
-
+    #[cfg(todo = "deleteme")]
     async fn load_all_inner(settings: SettingsLock) -> anyhow::Result<()> {
         let _ = create_dir_all(SourceKind::Pathing.get_user_dir());
 
         let mut path_loads = tokio::task::JoinSet::new();
 
-        log::info!("Pre-loading all paths...");
-        let dir = Settings::read_source_dir(settings, SourceKind::Pathing).await;
-        futures::pin_mut!(dir);
-        while let Some(entry) = dir.next().await {
-            let (path, _source) = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    log::error!("Failed to list pathing files: {e}");
-                    continue
-                },
-            };
-            // TODO: name could be source? what do we actually use that for, and is it meant to be user-facing or a unique id?
-            let name = path
-                .file_name()
-                .unwrap_or(path.as_ref())
-                .to_string_lossy()
-                .into_owned();
-            let context = format!("Loading pathing pack {name}");
-            log::debug!("{context}...");
-            let is_taco = path
-                .extension()
-                .map(|e| e.eq_ignore_ascii_case("taco") || e.eq_ignore_ascii_case("zip"));
-            let is_taco = path.is_file() || is_taco.unwrap_or(false);
-            let loader = move || {
-                match is_taco {
-                    true => Self::pathing_load_taco(path),
-                    false => Self::pathing_load_dir(path),
-                }
-                .context(context)
-            };
-            let loader = async move {
-                let res = tokio::task::spawn_blocking(loader)
-                    .await
-                    .context("Path load panicked");
-                match res {
-                    Ok(Ok((pack, loader))) => {
-                        Self::pathing_load_pack(pack, loader, name).await;
-                        Ok(())
-                    },
-                    Err(e) | Ok(Err(e)) => {
-                        let e = rt::log::anyhow_into_arc(e);
-                        Self::pathing_notify_pack_error(
-                            name,
-                            UnloadedReason::LoadingFailed(e.clone()),
-                        )
-                        .await;
-                        Err(e.into())
-                    },
-                }
-            };
-            path_loads.spawn(loader);
-        }
-
-        tokio::spawn(async move {
-            let mut disabled_paths_dirty = false;
-            loop {
-                let pack_load = path_loads.join_next();
-                let res = if disabled_paths_dirty {
-                    // throttle repeated state event if packs load quickly enough...
-                    let timeout = sleep(Duration::from_millis(174)).fuse();
-                    tokio::pin!(timeout);
-                    tokio::pin!(pack_load);
-                    loop {
-                        select! {
-                            res = &mut pack_load => break res,
-                            _ = &mut timeout => {
-                                // this will take a while, so emit the pending update
-                                Self::try_send(PathingEvent::RequestDisabledPaths);
-                                disabled_paths_dirty = false;
-                            },
-                        }
+        let mut disabled_paths_dirty = false;
+        loop {
+            let pack_load = path_loads.join_next();
+            let res = if disabled_paths_dirty {
+                // throttle repeated state event if packs load quickly enough...
+                let timeout = sleep(Duration::from_millis(174)).fuse();
+                tokio::pin!(timeout);
+                tokio::pin!(pack_load);
+                loop {
+                    select! {
+                        res = &mut pack_load => break res,
+                        _ = &mut timeout => {
+                            // this will take a while, so emit the pending update
+                            Self::try_send(PathingEvent::RequestDisabledPaths);
+                            disabled_paths_dirty = false;
+                        },
                     }
-                } else {
-                    pack_load.await
                 }
-                .map(|r| r.context("Path load panicked"));
-                match res {
-                    None => break,
-                    Some(Err(e) | Ok(Err(e))) => log::error!("{e:#}"),
-                    Some(Ok(Ok(()))) => disabled_paths_dirty = true,
-                }
+            } else {
+                pack_load.await
             }
-
-            // TODO: sender+await, or ideally just make this unnecessary
-
-            if disabled_paths_dirty {
-                Self::try_send(PathingEvent::RequestDisabledPaths);
+            .map(|r| r.context("Path load panicked"));
+            match res {
+                None => break,
+                Some(Err(e) | Ok(Err(e))) => log::error!("{e:#}"),
+                Some(Ok(Ok(()))) => disabled_paths_dirty = true,
             }
-        });
-
-        Ok(())
-    }
-
-    fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
-        use taimi_pack::loader::ZipLoader;
-        let mut loader = ZipLoader::new(&path)?;
-        let pack = Pack::load(&mut loader)?;
-        Ok((pack, Box::new(loader)))
-    }
-
-    fn pathing_load_dir(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
-        use taimi_pack::loader::DirectoryLoader;
-        let mut loader = DirectoryLoader::new(path);
-        let pack = Pack::load(&mut loader)?;
-        Ok((pack, Box::new(loader)))
-    }
-
-    async fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
-        let context = format!("Loading pack {name} onto engine");
-        if pack.name.is_empty() {
-            pack.name = name;
         }
-        let res = Controller::run_render(RenderTaskPriority::High, move |state| {
-            let engine = match &mut state.engine {
-                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                None => return Ok(()),
-            }?;
-            engine.packs.fixup_pack(&mut pack);
-            let pack = Arc::new(pack);
-            let pack_idx = engine.packs.add_pack(pack, loader);
-            engine.packs.load_pack(&engine.render_backend.device, pack_idx)
-        })
-        .await;
-        let res = res
-            .map(|res| res.context(context))
-            .context("Submitting pack to engine");
-        if let Err(e) | Ok(Err(e)) = res {
-            log::error!("{e:#}");
-        }
-    }
-    async fn pathing_notify_pack_error(name: String, reason: UnloadedReason) {
-        let _ = Controller::run_render(RenderTaskPriority::Normal, move |state| {
-            let engine = match &mut state.engine {
-                Some(Ok(e)) => e,
-                _ => return,
-            };
-            engine.packs.load_failed(name, reason);
-        })
-        .await;
-    }
 
-    async fn unload_all(&self) {
-        log::info!("Unloading all paths...");
-        if let Err(e) = Self::unload_all_inner().await {
-            log::error!("{e:#}");
+        // TODO: sender+await, or ideally just make this unnecessary
+
+        if disabled_paths_dirty {
+            Self::try_send(PathingEvent::RequestDisabledPaths);
         }
     }
 
-    async fn unload_all_inner() -> anyhow::Result<()> {
-        let context = "Unloading packs from engine";
-        let res = Controller::run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
-            let engine = match &mut state.engine {
-                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                None => return Ok(()),
-            }?;
-            engine.packs.clear();
-            Ok(())
-        })
-        .await;
-        match res.map(|res| res.context(context)).context(context) {
-            Err(e) => Err(e),
-            Ok(res) => res,
-        }
-    }
-
-    async fn provide_disabled_paths(&self) {
-        let disabled_paths = {
-            let settings_lock = self.settings.read().await;
-            settings_lock.disabled_paths.clone()
-        };
-
-        let context = "Providing disabled paths to engine";
-        let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
-            let engine = match &mut state.engine {
-                Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
-                None => return Ok(()),
-            }?;
-            engine.disable_paths(&disabled_paths);
-            Ok(())
-        })
-        .await;
-        let res = res.map(|res| res.context(context)).context(context);
-        if let Err(e) | Ok(Err(e)) = res {
-            log::error!("{e:#}");
-        }
-    }
-}
-
-impl PathingController {
     async fn handle_message(&mut self, event: PathingEvent) -> Option<Interruption> {
         match event {
             PathingEvent::Nop => None,
@@ -683,10 +449,6 @@ impl PathingController {
                 let changed = cats.into_iter().map(CategoryPath::with_path);
                 Self::category_commit_vis(&self.loader, pack_path, changed).await
             },
-            #[cfg(deleteme)]
-            RequestDisabledPaths => self.provide_disabled_paths().await,
-            #[cfg(deleteme)]
-            PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,
@@ -755,6 +517,7 @@ impl PathingController {
         log::trace!("TODO: player interaction");
     }
 
+    #[cfg(todo = "unused")]
     pub fn external_filter_state() -> Option<ExternalFilterState> {
         Controller::with_sender(|s| {
             let bypass = s

@@ -5,19 +5,24 @@ use {
         PackRoot,
         PackPath, PackIndex,
         PackConfig,
+        LoadedMarkerPath, LoadedTrailPath, PackMapPath,
         PackInfo, PackInfoSignature,
         UnloadedReason,
         PackActivateLoaded,
         SharedLoaderBox,
     },
-    crate::exports::runtime as rt,
+    crate::controller::pathing::shared::{LoadedTrailGeometry, TrailGeometrySections},
+    crate::exports::runtime::{
+        self as rt,
+        textures::TextureKey,
+    },
     crate::settings::sources::DataSourcePath,
     rustc_hash::FxHashMap,
     std::{fmt, mem, sync::{Arc, Weak, RwLock}, path::Path, collections::{BTreeMap, btree_map}},
     taimi_sync::{arcs::weak_is_null, watched::{watch, Watcher}},
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
-    taimi_hoard::loc::LocationMut,
+    taimi_hoard::loc::{LocationMut, Locator},
     taimi_sync::arcs::ArcPtrCmp,
 };
 
@@ -685,4 +690,16 @@ impl<K, T> Default for SharedResourceRequests<K, T> {
     fn default() -> Self {
         Self::empty()
     }
+}
+#[derive(Debug)]
+pub enum LoadReport {
+    TrailGeometry {
+        path: Locator<PackMapPath, LoadedTrailPath>,
+        geometry: anyhow::Result<LoadedTrailGeometry>,
+        section_info: Option<TrailGeometrySections>,
+    },
+    Texture {
+        path: LoadedMarkerPath<PackMapPath>,
+        texture: anyhow::Result<TextureKey>,
+    },
 }

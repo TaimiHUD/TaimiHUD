@@ -3,7 +3,7 @@ use {
         controller::pathing::{
             registry::{PackLoader, PackPath, PackMapPath, PackCategoryInfo},
             shared::{SharedPackConfig, MapPackInfo},
-            visible::LoadedMapPack,
+            state::{LoadedCategory, LoadedMapPack},
             PathingController,
             ExternalFilterState,
         },
@@ -12,6 +12,7 @@ use {
             engine::SpaceEvent, Engine
         },
     },
+    crate::controller::pathing::VisibilityFlagsExt,
     taimi_sync::watched::watch,
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{
@@ -21,10 +22,8 @@ use {
         VisibilityFlags,
     },
     taimi_pack::attributes::FilterAttributes,
-    std::iter,
     taimi_meta::ui::MapContext,
-    crate::controller::pathing::VisibilityFlagsExt,
-    std::collections::{BTreeMap, HashSet},
+    std::{iter, mem, sync::Arc, collections::{BTreeMap, HashSet, VecDeque}},
     taimi_pack::{
         category::id::AsFullId, Pack,
     },
@@ -445,5 +444,131 @@ impl PathingController {
 
         Engine::try_send(SpaceEvent::SettingsDirty);
         set
+    }
+}
+
+impl LoadedMapPack {
+    /// Only updates default flags
+    ///
+    /// [self.categories] are dirty and require further processing unless `Ok(true)`
+    ///
+    /// TODO: starting damage mask via parameter and/or info sig instead
+    pub fn update_category_config(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig) -> Result<bool, CategorySet> {
+        let mut damage = match self.categories.len() {
+            loaded if info.category_count() != loaded => {
+                self.categories = iter::repeat(LoadedCategory::INVALID).take(info.category_count()).collect();
+                None
+            },
+            _ => Some(CategorySet::default()),
+        };
+
+        let mut loaded: Result<&mut [LoadedCategory], &mut Arc<[LoadedCategory]>> = Err(&mut self.categories);
+        for (i, path) in info.categories().enumerate() {
+            let Some(prev) = match &mut loaded {
+                Ok(c) => &c[..],
+                Err(c) => &c[..],
+            }.get(i) else { continue };
+            let prev_defaults = prev.visibility & VisibilityFlags::DEFAULTS;
+            let defaults = categories.visibility.get_for(path)
+                .unwrap_or(VisibilityFlags::TOGGLES);
+            let deviation = config.visibility_deviation_for(path);
+            let default_toggles = defaults ^ deviation;
+            let defaults = default_toggles.toggles_to_default();
+            let is_override_clean = !config.visibility_overrides.contains(path) || prev.visibility & VisibilityFlags::TOGGLES == default_toggles;
+            if damage.is_some() && defaults == prev_defaults && is_override_clean {
+                continue
+            }
+
+            let out = unsafe {
+                match (mem::replace(&mut loaded, Ok(&mut [])), &mut loaded) {
+                    (Ok(loaded), Ok(out)) => {
+                        *out = loaded;
+                        out
+                    },
+                    (Err(loaded), Ok(out)) => {
+                        *out = Arc::make_mut(loaded);
+                        out
+                    },
+                    #[cfg(debug_assertions)]
+                    (_, Err(..)) => unreachable!(),
+                    #[cfg(not(debug_assertions))]
+                    (_, Err(..)) => continue,
+                }.get_unchecked_mut(i)
+            };
+            out.visibility.set_defaults(defaults);
+
+            if let Some(damage) = &mut damage {
+                damage.insert(path);
+            }
+        }
+
+        match damage {
+            Some(mut damage) => {
+                // not necessarily likely that multiple changes occur at once, but...
+                // we only care about the root-most changes since they propagate down
+                let mut redundant_roots = Vec::new();
+                for damaged in damage.paths() {
+                    let is_redundant = categories.parents_of(damaged)
+                        .any(|p| damage.contains(p));
+                    if is_redundant {
+                        redundant_roots.push(damaged);
+                    }
+                }
+                for redundant in redundant_roots {
+                    damage.remove(redundant);
+                }
+
+                if !damage.is_empty() {
+                    Err(damage)
+                } else {
+                    Ok(true)
+                }
+            },
+            None => Ok(false),
+        }
+    }
+
+    pub fn refresh_categories(&mut self, info: &MapPackInfo, categories: &PackCategoryInfo, config: &PackConfig, damage: Option<&CategorySet>) {
+        let default_roots = damage.is_none().then(|| categories.root_paths());
+        let roots = damage.into_iter()
+            .flat_map(|damage| damage.paths())
+            .chain(default_roots.into_iter().flatten());
+
+        // roots should be independent subtrees, but just in case..
+        let mut children: VecDeque<_> = roots.map(|root_path| (root_path, config.visibility_overrides.contains(root_path), None)).collect();
+
+        let pack_default = VisibilityFlags::TOGGLES;
+        let loaded = Arc::make_mut(&mut self.categories);
+        while let Some((path, parent_is_override, parent_vis)) = children.pop_front() {
+            let Some(index) = info.category_index(path) else {
+                // rest of tree should be irrelevant
+                continue
+            };
+            let is_override = config.visibility_overrides.contains(path);
+            let default_vis = loaded.get(index.path as usize)
+                .map(|cat| cat.visibility.default_toggles());
+            let visibility = match is_override {
+                true => default_vis,
+                false => {
+                    let inherited = parent_vis.or_else(|| categories.parent_of(path)
+                        .map(|parent| info.category_index(parent).and_then(|i| loaded.get(i.path as usize))
+                            .map(|parent| parent.visibility & VisibilityFlags::TOGGLES)
+                            .or_else(|| categories.visibility.get_for(parent))
+                        ).unwrap_or(default_vis)
+                    );
+                    match parent_is_override {
+                        true => inherited/*.or(default_vis)*/,
+                        false => inherited.map(|inh|
+                            (inh & default_vis.unwrap_or(VisibilityFlags::TOGGLES) & VisibilityFlags::TOGGLE)
+                            | (default_vis.unwrap_or(VisibilityFlags::TOGGLES) & !VisibilityFlags::TOGGLE)
+                        ),
+                    }
+                },
+            }.unwrap_or(pack_default);
+            if let Some(loaded) = loaded.get_mut(index.path as usize) {
+                loaded.visibility.set_toggles(visibility);
+            }
+            children.extend(categories.children_of(path).map(|c| (c, is_override, Some(visibility))));
+        }
     }
 }

@@ -4,7 +4,7 @@ use {
             visible::{LoadedMapPack, LoadedTrailGeometry, LoadedTrail},
             PathingController, PathingEvent,
             registry::{LoadedTrailPath, LoadedMarkerPath, PackLoader, LoadedPoiPath, SharedLoaderBox},
-            shared::{SharedGameplayMap, PathingShared, SharedPackInfo},
+            shared::{SharedGameplayMap, PathingShared, SharedPackInfo, LoadReport, TrailGeometrySections},
             visible::LoadedTrailSection,
         },
         Controller,
@@ -37,20 +37,6 @@ pub use crate::controller::pathing::shared::{SpacePackShared, TextureLoadRequest
 mod pack;
 mod poi;
 mod trail;
-
-type LoadedTrailSections = Arc<[LoadedTrailSection]>;
-#[derive(Debug)]
-pub enum LoadReport {
-    TrailGeometry {
-        path: Locator<PackMapPath, LoadedTrailPath>,
-        geometry: anyhow::Result<LoadedTrailGeometry>,
-        section_info: Option<LoadedTrailSections>,
-    },
-    Texture {
-        path: LoadedMarkerPath<PackMapPath>,
-        texture: anyhow::Result<TextureKey>,
-    },
-}
 
 pub struct SpaceContext {
     pub packs: Arc<SpacePackCollection>,
@@ -226,7 +212,7 @@ impl PathingController {
         };
         Ok(PathingEvent::ReportResourceLoaded(response))
     }
-    async fn trail_load_geometry(manager: &PackLoader, path: Locator<PackMapPath, LoadedTrailPath>, loader: SharedLoaderBox, ctx: TrlLoadContext) -> anyhow::Result<(LoadedTrailGeometry, LoadedTrailSections)> {
+    async fn trail_load_geometry(manager: &PackLoader, path: Locator<PackMapPath, LoadedTrailPath>, loader: SharedLoaderBox, ctx: TrlLoadContext) -> anyhow::Result<(LoadedTrailGeometry, TrailGeometrySections)> {
         let (trl_path, scale, is_wall) = ctx;
         let trl = Self::load_trail_data(loader, trl_path).await?;
         let y_sig = (path.root.root.path as usize) << 24 | path.path.path as usize;
@@ -331,6 +317,59 @@ impl PathingController {
             },
         }
         (key, None)
+    }
+
+    /// map changed in a way that may be relevant to [SpacePackCollection] state
+    pub async fn space_pack_updates(&mut self) {
+        let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
+        let (space_dirty, is_empty) = if let Some(map_id) = map_id {
+            #[cfg(todo)]
+            let entities_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);
+            let entities_dirty = true;
+            let space_dirty = if entities_dirty {
+                let space_packs = Arc::make_mut(&mut self.space.packs);
+                let bvh_dirty = space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                match bvh_dirty {
+                    Err(true) => {
+                        space_packs.rebuild_bvh();
+                        true
+                    },
+                    Err(false) => true,
+                    Ok(()) => false,
+                }
+            } else {
+                //self.space.packs.needs_bvh_rebuild()
+                false
+            };
+            let is_empty = self.space.packs.is_empty();
+            (space_dirty, is_empty)
+        } else {
+            let changed = match self.space.packs.map_id {
+                None => false,
+                #[cfg(todo)]
+                Some(..) => {
+                    self.space.packs = Arc::new(space::SpacePackCollection::new());
+                    //Arc::make_mut(&mut self.space.packs).clear();
+                    true
+                },
+                Some(..) => true,
+            };
+            (changed, true)
+        };
+        if space_dirty || is_empty {
+            let new_copy = (!is_empty).then(|| self.space.packs.clone());
+            self.loader.shared.space.collection.send_if_modified(|shared| {
+                if let Some(new_copy) = new_copy {
+                    *shared = new_copy;
+                    true
+                } else if !shared.is_empty() {
+                    Arc::make_mut(shared).clear();
+                    true
+                } else {
+                    false
+                }
+            });
+        }
     }
 }
 type SpaceTextureHandle = (TextureKey, Result<TextureSlot, AttrString>);
