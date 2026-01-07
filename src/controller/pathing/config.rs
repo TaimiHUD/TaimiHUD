@@ -1,15 +1,12 @@
 use {
     crate::{
-        controller::{
-            pathing::{
-                registry::{PackLoader, PackPath, PackMapPath, PackConfig},
-                shared::{SharedPackConfig, MapPackInfo},
-                visible::{LoadedMapPack, VisibilityFlags},
-                PathingController, PathingEvent,
-                ExternalFilterState,
-            }, Controller
+        controller::pathing::{
+            registry::{PackLoader, PackPath, PackMapPath, PackCategoryInfo},
+            shared::{SharedPackConfig, MapPackInfo},
+            visible::LoadedMapPack,
+            PathingController,
+            ExternalFilterState,
         },
-        render::machine::RenderTaskPriority,
         settings::PathingSettings,
         space::{
             engine::SpaceEvent, Engine
@@ -18,13 +15,98 @@ use {
     taimi_sync::watched::watch,
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::{
+        collections::CategorySet,
         CategoryPath, MapIndex, MarkerIndex, MarkerPath,
+        CategoryIndex,
+        VisibilityFlags,
     },
     taimi_pack::attributes::FilterAttributes,
-    anyhow::Context,
-    std::{iter, sync::Arc},
+    std::iter,
     taimi_meta::ui::MapContext,
+    crate::controller::pathing::VisibilityFlagsExt,
+    std::collections::{BTreeMap, HashSet},
+    taimi_pack::{
+        category::id::AsFullId, Pack,
+    },
 };
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackConfig {
+    /// xor with defaults
+    pub category_visibility: BTreeMap<CategoryPath, VisibilityFlags>,
+    #[cfg(todo = "unnecessary")]
+    pub category_visibility: VisibilityFlagSet,
+    /// force specific subtrees to a set state
+    pub visibility_overrides: CategorySet,
+}
+
+impl PackConfig {
+    pub fn fill_settings(&mut self, pack: &Pack, pathing: &PathingSettings, disabled_paths: &HashSet<String>) {
+        for id in disabled_paths {
+            let id = &id[..];
+            let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else { continue };
+            let path = CategoryPath::with_path(i as CategoryIndex);
+            let settings_vis = VisibilityFlags::visible(false);
+            let default_vis = VisibilityFlags::from_pack_category(&cat);
+            let deviation = settings_vis ^ (default_vis & VisibilityFlags::TOGGLE);
+            if !deviation.is_empty() {
+                self.category_visibility.insert(path, deviation);
+            }
+        }
+        #[cfg(todo)]
+        let disabled_compat = pathing.disabled_compat;
+        let disabled_compat = true;
+        if disabled_compat {
+            let disabled_cats = pack.categories.all_categories.iter().enumerate()
+                .filter(|(_, (_, cat))| !cat.default_toggle());
+            for (i, (full_id, _disabled_cat)) in disabled_cats {
+                let path = CategoryPath::with_path(i as CategoryIndex);
+                if !disabled_paths.contains(&full_id.id_to_str()[..]) {
+                    let mut vis = self.category_visibility.get(&path)
+                        .copied()
+                        .unwrap_or(VisibilityFlags::empty());
+                    vis.insert(VisibilityFlags::TOGGLE);
+                    self.category_visibility.insert(path, vis);
+                }
+            }
+        }
+        // TODO: new per-flag settings and override list
+    }
+
+    /// Indicates a configuration that deviates from the defaults (XOR)
+    pub fn visibility_deviation_for(&self, path: CategoryPath) -> VisibilityFlags {
+        self.category_visibility.get(&path)
+            .copied()
+            .unwrap_or(VisibilityFlags::empty())
+    }
+
+    pub fn set_visibility_deviation(&mut self, path: CategoryPath, value: VisibilityFlags) {
+        //self.category_visibility.extend_for(path, false);
+        if value.is_empty() {
+            self.category_visibility.remove(&path);
+        } else {
+            self.category_visibility.insert(path, value);
+        }
+    }
+
+    /// if false, indicates the pack is disabled (all roots are disabled)
+    pub fn any_enabled(&self, categories: &PackCategoryInfo) -> bool {
+        if categories.roots.is_empty() {
+            // empty pack? *shrug*
+            return true
+        }
+        categories.root_paths()
+            .any(|path| {
+                let default_toggle = !categories.disabled.contains(path);
+                let deviation = self.visibility_deviation_for(path).is_visible();
+                default_toggle ^ deviation
+            })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.category_visibility.is_empty() && self.visibility_overrides.is_empty()
+    }
+}
 
 impl PathingController {
     pub(super) async fn handle_config_change(&mut self, path: PackPath, config: &watch::Receiver<SharedPackConfig>) {

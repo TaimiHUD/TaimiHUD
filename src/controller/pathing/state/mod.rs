@@ -14,7 +14,10 @@ use crate::controller::pathing::{
     registry::{PackInfoSignature, PackInfo},
     UnloadedReason,
 };
-pub use self::visible::{VisibilityFlags, VisibilityFlagSet};
+pub use {
+    taimi_meta::packs::{VisibilityFlags, VisibilityFlagSet},
+    self::visible::VisibilityFlagsExt,
+};
 pub mod visible;
 
 pub struct LoadedMapInfoStorage {

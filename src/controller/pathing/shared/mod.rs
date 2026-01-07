@@ -2,20 +2,21 @@ use {
     crate::{
         controller::{
             api::{AchievementState, FestivalState, RaidState},
-            pathing::{registry::PackLoader, space::SpacePackShared, PathingEvent, ExternalFilterState},
+            pathing::{registry::PackLoader, PathingEvent, ExternalFilterState},
         },
         render::machine::MumbleIdentityUpdate,
         settings::SettingsLock,
     },
-    std::{collections::btree_map, sync::Arc},
+    std::sync::Arc,
     taimi_meta::ui::GameplayState,
     taimi_sync::watched::{Watched, watch},
     tokio::sync::mpsc,
 };
 pub use self::{
-    loader::{SharedPacks, SharedLoaderPackData, SharedLoaderPacksInfo, SharedLoaderPackInfo, SharedLoaderPackConfig, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx},
+    loader::{SharedPacks, SharedLoaderPacksInfo, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx},
     maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
     info::{MapPackInfo, MapTrailInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
+    space::{SpacePackShared, TrailGeometryRequests, TrailGeometryRequestsTx, TextureLoadRequests, TextureLoadRequestsTx},
 };
 pub(crate) use self::info::EMPTY_RENDER_ATTRS;
 #[cfg(todo)]
@@ -24,6 +25,7 @@ pub use self::maps::SharedMaps;
 mod info;
 mod loader;
 mod maps;
+mod space;
 
 #[derive(Debug, Clone)]
 pub struct PathingSender {

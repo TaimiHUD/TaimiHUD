@@ -49,13 +49,16 @@ pub use self::{
     registry::{LoaderBox, UnloadedReason},
     festivals::FestivalFixup,
     shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
-    state::visible,
+    state::{visible, VisibilityFlagsExt},
+    config::PackConfig,
 };
+#[doc(no_inline)]
 pub use taimi_meta::coords::LocalSpace as PackSpace;
 
 mod config;
 mod festivals;
 pub mod registry;
+#[doc(hidden)]
 mod setup;
 pub mod shared;
 mod state;

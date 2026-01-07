@@ -122,7 +122,7 @@ impl MapPackInfo {
             && (self.pois.is_empty() || self.pois[..].not_any()))
     }
 
-    /// None if ![self.is_empty()]
+    /// None if \![Self::is_empty()]
     pub fn get(self) -> Option<Self> {
         (!self.is_empty()).then_some(self)
     }

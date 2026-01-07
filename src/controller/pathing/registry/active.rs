@@ -6,7 +6,7 @@ use {
                 registry::{
                     PackInfo, PackInfoSignature,
                     PackConfig,
-                    LoadedPack, UnloadedReason,
+                    UnloadedReason,
                 },
                 PathingShared,
                 shared::{SharedPackConfig, SharedPackLoaded, SharedPackInfo},
@@ -38,6 +38,7 @@ use {
     tokio::sync::Mutex,
 };
 
+#[cfg(deleteme)]
 impl LoadedPack {
     pub fn activate_start(&mut self) -> anyhow::Result<Option<PackActivateContext>> {
         if self.active.is_some() {
@@ -406,12 +407,14 @@ impl PackLoader {
     }
 }
 
+#[cfg(deleteme)]
 #[derive(Clone)]
 pub struct ActivePack {
     pub pack: Arc<Pack>,
     pub loader: SharedLoaderBox,
 }
 
+#[cfg(deleteme)]
 impl ActivePack {
     pub fn with_pack(pack: Arc<Pack>, loader: SharedLoaderBox) -> Self {
         Self {
@@ -455,11 +458,13 @@ impl ActivePack {
     }
 }
 
+#[cfg(deleteme)]
 impl fmt::Display for ActivePack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&self.pack.name, f)
     }
 }
+#[cfg(deleteme)]
 impl fmt::Debug for ActivePack {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("ActivePack")
@@ -467,11 +472,13 @@ impl fmt::Debug for ActivePack {
             .finish()
     }
 }
+#[cfg(deleteme)]
 impl AsRef<ActivePack> for ActivePack {
     fn as_ref(&self) -> &ActivePack {
         self
     }
 }
+#[cfg(deleteme)]
 impl AsRef<Pack> for ActivePack {
     fn as_ref(&self) -> &Pack {
         &self.pack

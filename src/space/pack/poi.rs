@@ -1,10 +1,6 @@
 use {
     crate::{
-        controller::pathing::{
-            space::SpaceLoader,
-            visible::LoadedPoi,
-            shared::{SharedPackInfo, LoadedPoiRef},
-        },
+        controller::pathing::shared::{SharedPackInfo, LoadedPoiRef},
         exports::runtime::{
             textures::{TextureSlot, TextureKey},
             Counter,
@@ -282,24 +278,9 @@ impl PoiRender {
         }
     }
 
-    #[cfg(deleteme)]
-    pub fn setup_texture(
-        &mut self,
-        loader: &mut SpaceLoader<'_>,
-        icon_name: &AttrString,
-    ) {
-        if let Some(handle) = &mut self.icon_handle {
-            loader.setup_texture(handle, &mut self.icon)
-        } else {
-            let handle = loader.register_texture(icon_name);
-            let (handle, icon) = loader.get_or_load_texture(handle);
-            self.icon_handle = Some(handle);
-            self.icon = icon;
-        }
-    }
     pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, lpoi: Option<LoadedPoiRef<'_>>) {
         let icon_name = lpoi.as_ref().and_then(|lpoi| lpoi.poi_attrs().icon_file.as_ref());
-        SpaceLoader::setup_texture(&mut self.icon_handle, &mut self.icon, pack_info, icon_name);
+        pack_info.setup_texture(&mut self.icon_handle, &mut self.icon, icon_name);
     }
     pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState) -> bool {
         if matches!(self.icon, None | Some(TextureSlot::Reserved | TextureSlot::Loading)) {

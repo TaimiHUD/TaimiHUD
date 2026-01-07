@@ -4,9 +4,12 @@ use {
     core::num::NonZero,
 };
 pub use self::id::{MarkerId, MarkerPath, MarkerIndex, MarkerIndexVariant, MarkerIndexNamespace, IdVariant};
+pub use self::visible::{VisibilityFlags, VisibilityFlagSet};
 
 pub mod collections;
 pub mod id;
+#[doc(hidden)]
+mod visible;
 
 locator_ns! {
     pub struct PackCategoryNs;

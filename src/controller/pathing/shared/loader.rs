@@ -3,10 +3,8 @@ use {
         PackBoxOf,
         PackCategoryInfo,
         PackRoot,
-        ActivePack,
         PackPath, PackIndex,
         PackConfig,
-        LoadedPackInfo,
         PackInfo, PackInfoSignature,
         UnloadedReason,
         PackActivateLoaded,
@@ -15,7 +13,7 @@ use {
     crate::exports::runtime as rt,
     crate::settings::sources::DataSourcePath,
     rustc_hash::FxHashMap,
-    std::{iter, fmt, mem, sync::{Arc, Weak, RwLock}, path::Path, collections::{BTreeMap, BTreeSet, btree_map}},
+    std::{fmt, mem, sync::{Arc, Weak, RwLock}, path::Path, collections::{BTreeMap, btree_map}},
     taimi_sync::{arcs::weak_is_null, watched::{watch, Watcher}},
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
@@ -24,8 +22,11 @@ use {
 };
 
 pub type SharedLoaderPacksInfo = PackBoxOf<SharedPackLoad>;
+#[cfg(deleteme)]
 pub type SharedLoaderPackInfo = Box<[LoadedPackInfo]>;
+#[cfg(deleteme)]
 pub type SharedLoaderPackData = Box<[Weak<ActivePack>]>;
+#[cfg(deleteme)]
 pub type SharedLoaderPackConfig = Box<[Option<watch::Sender<Arc<PackConfig>>>]>;
 /// TODO: maybe split this up into sender and receiver halves...
 /// or just rework LoadedPack into something more sane to share
@@ -79,6 +80,7 @@ impl SharedPacks {
         Self::try_shared_pack_active(packs, path)
     }
 
+    #[cfg(deleteme)]
     pub(crate) fn update_pack_info(&self, path: PackPath, pack: &LoadedPackInfo) {
         log::error!("TODO: PackLoader::update_pack_info");
     }
@@ -110,6 +112,7 @@ impl SharedPacks {
         });
     }
 
+    #[cfg(deleteme)]
     pub(crate) fn update_pack_config(&self, path: PackPath, config: Option<&watch::Sender<Arc<PackConfig>>>) {
         log::error!("TODO: PackLoader::update_pack_config");
     }
@@ -134,6 +137,7 @@ impl SharedPacks {
         });
     }
 
+    #[cfg(deleteme)]
     pub(crate) fn update_pack_active(&self, path: PackPath, pack: Option<&Arc<ActivePack>>) {
         log::error!("TODO: PackLoader::update_pack_active");
     }

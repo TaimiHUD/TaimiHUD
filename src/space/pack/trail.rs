@@ -1,7 +1,7 @@
 use {
     super::PackRenderState, crate::{
         controller::pathing::{
-            registry::LoadedTrailPath, shared::{LoadedTrailRef, LoadedTrailShared, SharedPackInfo}, space::SpaceLoader, visible::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection}
+            registry::LoadedTrailPath, shared::{LoadedTrailRef, LoadedTrailShared, SharedPackInfo}, visible::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection}
         }, exports::runtime::{
             textures::{TextureKey, TextureSlot},
             Counter,
@@ -35,21 +35,6 @@ impl TrailRender {
         }
     }
 
-    #[cfg(deleteme)]
-    pub fn setup_texture(
-        &mut self,
-        loader: &mut SpaceLoader<'_>,
-        texture_name: &AttrString,
-    ) {
-        if let Some(handle) = &mut self.texture_handle {
-            loader.setup_texture(handle, &mut self.texture)
-        } else {
-            let handle = loader.register_texture(texture_name);
-            let (handle, texture) = loader.get_or_load_texture(handle);
-            self.texture_handle = Some(handle);
-            self.texture = texture;
-        }
-    }
     pub fn setup_geometry(
         &mut self,
         device: &Dx11Device,
@@ -78,7 +63,7 @@ impl TrailRender {
 
     pub fn update(&mut self, _device: &Dx11Device, pack_info: &SharedPackInfo, ltrail: Option<LoadedTrailRef<'_>>) {
         let texture = ltrail.as_ref().and_then(|ltrail| ltrail.trail_attrs().texture.as_ref());
-        SpaceLoader::setup_texture(&mut self.texture_handle, &mut self.texture, pack_info, texture);
+        pack_info.setup_texture(&mut self.texture_handle, &mut self.texture, texture);
     }
     pub fn report_incomplete(&self, id: &MarkerId, draw_state: &mut PackRenderState, path: Locator<LoadedTrailPath, TrailSectionPath>) -> bool {
         let mut incomplete = false;

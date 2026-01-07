@@ -4,18 +4,19 @@ use taimi_pack::attributes::keys;
 use {
     crate::{
         exports::runtime as rt,
-        settings::{sources::DataSourcePath, PathingSettings},
-        controller::pathing::state::{VisibilityFlagSet, VisibilityFlags},
+        settings::sources::DataSourcePath,
+        controller::pathing::VisibilityFlagsExt,
     },
     rustc_hash::FxHasher,
     anyhow::anyhow,
     bitvec::vec::BitVec,
-    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::{BTreeMap, BTreeSet, HashSet}, error::Error as StdError, fmt, hash::{Hash, Hasher}, iter, path::{Path, PathBuf}, ptr, sync::Arc},
+    futures::{future::{self, Either}, stream::{self, FusedStream, Stream, StreamExt}, FutureExt}, std::{cmp, collections::BTreeSet, error::Error as StdError, fmt, hash::{Hash, Hasher}, iter, path::{Path, PathBuf}, ptr, sync::Arc},
     taimi_meta::{
         packs::{
             collections::{CategorySet, MapSet},
             CategoryPath, CategoryIndex, MapIndex,
             PackCategoryNs,
+            VisibilityFlagSet, VisibilityFlags,
         },
         map::MapID,
     },
@@ -37,206 +38,16 @@ use {
         loc::{indexed::IndexedList, LocationMut},
     },
 };
+#[doc(inline)]
 pub use self::{
-    active::{ActivePack, PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, LoaderBox, SharedLoaderBox},
+    active::{PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, LoaderBox, SharedLoaderBox},
     namespace::*,
 };
+pub use crate::controller::pathing::PackConfig;
 
 mod active;
 mod namespace;
 
-#[derive(Debug, Default)]
-pub struct PackRegistry {
-    pub packs: Vec<LoadedPack>,
-}
-
-impl PackRegistry {
-    pub const fn new() -> Self {
-        Self {
-            packs: Vec::new(),
-        }
-    }
-
-    pub fn all_paths(&self) -> impl Iterator<Item = PackPath> + Clone {
-        let len = self.packs.len();
-        (0..len).into_iter().map(|path| PackPath::with_path(path as PackIndex))
-    }
-
-    pub fn all_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack)> {
-        self.packs.iter().enumerate()
-            .map(|(path, pack)| (PackPath::with_path(path as PackIndex), pack))
-    }
-    pub fn all_packs_mut<'a>(&'a mut self) -> impl Iterator<Item = (PackPath, &'a mut LoadedPack)> {
-        self.packs.iter_mut().enumerate()
-            .map(|(path, pack)| (PackPath::with_path(path as PackIndex), pack))
-    }
-    #[cfg(todo = "unused")]
-    pub fn loaded_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, &'a Arc<PackInfo>)> {
-        self.all_packs().filter_map(|(path, pack)| match &pack.info.info {
-            Ok(info) => Some((path, pack, info)),
-            Err(..) => None,
-        })
-    }
-    pub fn active_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, &'a Arc<ActivePack>)> {
-        self.all_packs().filter_map(|(path, pack)| match &pack.active {
-            Some(active) => Some((path, pack, active)),
-            None => None,
-        })
-    }
-    #[cfg(todo = "unused")]
-    pub fn unloaded_packs<'a>(&'a self) -> impl Iterator<Item = (PackPath, &'a LoadedPack, Result<&'a Arc<PackInfo>, &'a UnloadedReason>)> {
-        self.all_packs().filter_map(|(path, pack)| match &pack.info.info {
-            Err(reason) => Some((path, pack, Err(reason))),
-            Ok(info) if pack.active.is_none() => Some((path, pack, Ok(info))),
-            Ok(..) => None,
-        })
-    }
-
-    pub fn packs_for_map(&self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &LoadedPack)> {
-        self.all_packs()
-            .filter(move |(_, pack)| pack.any_enabled_for_map(map_id))
-    }
-    pub fn packs_for_map_mut(&mut self, map_id: MapIndex) -> impl Iterator<Item = (PackPath, &mut LoadedPack)> {
-        self.all_packs_mut()
-            .filter(move |(_, pack)| pack.any_enabled_for_map(map_id))
-    }
-
-    pub const CONCURRENT_LOAD_LIMIT: usize = 8;
-    pub async fn load_packs_for_map<'a, 'm>(registry: &'a RwLock<Self>, manager: &'m PackLoader, map_id: MapIndex) -> impl Stream<Item = (PackPath, RwLockMappedWriteGuard<'a, LoadedPack>)> + 'm where
-        'a: 'm,
-    {
-        let map_packs = {
-            let registry = registry.read().await;
-            let pack_paths =registry.all_paths();
-            let map_packs: BitVec = registry.all_packs()
-                .map(|(_path, pack)| pack.any_enabled_for_map(map_id))
-                .collect();
-            pack_paths
-                .zip(map_packs.into_iter())
-                .filter_map(|(path, enabled)| enabled.then_some(path))
-        };
-        stream::iter(map_packs)
-            .map(move |path| async move {
-                let pack = Self::load_pack(registry, manager, path).await;
-                (path, pack)
-            }).buffer_unordered(Self::CONCURRENT_LOAD_LIMIT)
-            .filter_map(move |(path, pack)| future::ready(match pack {
-                Err(e) => {
-                    log::error!("{e:#}");
-                    None
-                },
-                Ok(pack) if !pack.any_enabled_for_map(map_id) =>
-                    None,
-                Ok(pack) if pack.info.info.is_err() =>
-                    None,
-                Ok(pack) => Some((path, pack)),
-            }))
-    }
-
-    pub async fn load_pack<'a, 'm>(registry: &'a RwLock<Self>, manager: &'m PackLoader, path: PackPath) -> anyhow::Result<RwLockMappedWriteGuard<'a, LoadedPack>> {
-        let pack = {
-            let pack = RwLockWriteGuard::try_map(
-                registry.write().await,
-                |r| r.lookup_mut(&path),
-            );
-            let pack = match pack {
-                Ok(pack) => Some(pack),
-                Err(_reg) => None,
-            };
-
-            let start = match pack {
-                Some(mut pack) => match pack.activate_start().transpose() {
-                    None => Either::Left(Some(pack)),
-                    Some(start) => Either::Right(start),
-                },
-                pack => Either::Left(pack),
-            };
-            match start {
-                Either::Left(pack) => Either::Left(future::ready(Ok(pack))),
-                Either::Right(start) => Either::Right(async move {
-                    let start = start?;
-
-                    let res = LoadedPack::activate_load(start, manager).await;
-
-                    let pack = RwLockWriteGuard::try_map(
-                        registry.write().await,
-                        |r| r.lookup_mut(&path),
-                    ).ok();
-                    match pack {
-                        Some(mut pack) => pack.activate_finish(res, manager)
-                            .map(move |()| Some(pack)),
-                        // shouldn't happen but...
-                        None => match res {
-                            Err(e) => Err(e),
-                            Ok(..) => Ok(None),
-                        },
-                    }
-                }),
-            }
-        };
-        match pack.await.transpose() {
-            None => Err(anyhow!("pack {path} does not exist")),
-            Some(res) => res,
-        }
-    }
-
-    #[cfg(todo)]
-    pub fn preload<P>(&mut self, path: P, datasource: Option<DataSourcePath>, manager: &PackLoader) -> PackPath where
-        P : AsRef<Path> + Into<PathBuf>,
-    {
-        if let Some((i, pack)) = self.packs.iter_mut().enumerate().find(|(_, p)| p.info.path.as_ref() == path.as_ref()) {
-            // ?
-            pack.info.datasource = datasource;
-            let path = PackPath::with_path(i as PackIndex);
-            manager.shared.packs.update_pack_info(path, &pack.info);
-            return path
-        }
-
-        let i = self.packs.len();
-        let index = PackPath::with_path(i as PackIndex);
-        self.packs.push(LoadedPack::new_unloaded(index, path.into(), datasource));
-        if let Some(pack) = self.packs.last() {
-            // dumb if :<
-            manager.shared.packs.update_pack_info(pack.info.index, &pack.info);
-        }
-        index
-    }
-
-    #[cfg(deleteme)]
-    pub fn watch_config_changes(&self) -> impl FusedStream<Item = (PackPath, watch::Receiver<Arc<PackConfig>>)> + Unpin + Send + 'static {
-        async fn changed_static<T>(mut watch: watch::Receiver<T>) -> Result<watch::Receiver<T>, watch::error::RecvError> {
-            watch.changed().await
-                .map(move |()| watch)
-        }
-
-        fn watch_config_change(path: PackPath, mut config: watch::Receiver<Arc<PackConfig>>) -> impl Stream<Item = (PackPath, watch::Receiver<Arc<PackConfig>>)> + Unpin + Send + 'static {
-            use std::task::Poll;
-
-            config.mark_changed();
-            let mut storage = Some(ReusableBoxFuture::new(changed_static(config)));
-            stream::poll_fn(move |cx| {
-                let Some(changed) = &mut storage else { return Poll::Pending };
-                let res = futures::ready!(changed.poll_unpin(cx));
-                match res {
-                    Ok(watch) => {
-                        changed.set(changed_static(watch.clone()));
-                        Poll::Ready(Some((path, watch)))
-                    },
-                    Err(..) => {
-                        let _ = storage.take();
-                        Poll::Ready(None)
-                    },
-                }
-            })
-        }
-
-        self.all_packs()
-            .filter_map(|(path, pack)| pack.config.as_ref().map(|config|
-                (path, config.subscribe())
-            )).map(|(path, config)| watch_config_change(path, config))
-            .collect::<stream::SelectAll<_>>()
-    }
-}
 impl super::PathingShared {
     /// TODO: move this out of here ew
     pub fn watch_config_changes(&self) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)> + Unpin + Send + Sync + 'static {
@@ -276,123 +87,6 @@ impl super::PathingShared {
     }
 }
 
-#[derive(Debug)]
-pub struct LoadedPack {
-    pub info: LoadedPackInfo,
-    pub active: Option<Arc<ActivePack>>,
-    pub config: Option<watch::Sender<Arc<PackConfig>>>,
-}
-
-impl LoadedPack {
-    pub fn new_unloaded(index: PackPath, path: PathBuf, datasource: Option<DataSourcePath>) -> Self {
-        Self {
-            info: LoadedPackInfo {
-                index,
-                path: path.into(),
-                datasource,
-                info: Err(UnloadedReason::Pending),
-            },
-            active: None,
-            config: None,
-        }
-    }
-
-    /// Free up memory related to this pack when not in use
-    pub fn deactivate(&mut self, manager: &PackLoader) {
-        let _ = self.active.take();
-        manager.shared.packs.update_pack_active(self.info.index, None);
-    }
-
-    /// leave a gravestone marker so our index is never used again
-    #[cfg(todo)]
-    pub fn mark_dead(&mut self, manager: &PackLoader) {
-        let _ = self.config.take();
-        self.info = LoadedPackInfo::gravestone(self.info.index);
-        manager.shared.packs.update_pack_info(self.info.index, &self.info);
-        self.deactivate(manager);
-    }
-
-    pub fn mark_reload(&mut self, manager: &PackLoader) {
-        if let Err(reason) = &mut self.info.info {
-            if !reason.can_reload() {
-                return
-            }
-            *reason = UnloadedReason::Pending;
-            manager.shared.packs.update_pack_info(self.info.index, &self.info);
-        }
-        self.deactivate(manager);
-    }
-
-    pub fn mark_loading(&mut self, manager: &PackLoader) {
-        if let Err(reason) = &mut self.info.info {
-            *reason = UnloadedReason::Loading;
-            manager.shared.packs.update_pack_info(self.info.index, &self.info);
-        }
-        self.deactivate(manager);
-    }
-
-    pub fn with_config<R, F: FnOnce(&PackConfig) -> R>(&self, f: F) -> R {
-        match &self.config {
-            Some(c) => f(&c.borrow()),
-            None => f(&PackConfig::default()),
-        }
-    }
-    pub fn get_info(&self) -> Option<(Arc<PackInfo>, Arc<PackConfig>)> {
-        let config = self.config.as_ref().map(|c| c.borrow().clone());
-        self.info.info.as_ref().ok().cloned()
-            .map(|i| (i, config.unwrap_or_default()))
-    }
-
-    /// Early check for whether a pack is disabled and can be skipped during load
-    pub fn any_enabled(&self) -> bool {
-        let info = match &self.info.info {
-            Ok(info) => info,
-            // generally assume so if info is missing at this point
-            Err(reason) =>
-                return reason.can_reload(),
-        };
-        let config = self.config.as_ref().map(|c| c.borrow());
-        let Some(config) = config else { return true };
-        config.any_enabled(&info.categories)
-    }
-    pub fn any_enabled_for_map(&self, map_id: MapIndex) -> bool {
-        let on_map = match &self.info.info {
-            Ok(info) => info.maps.contains(map_id),
-            Err(UnloadedReason::Pending) => {
-                // don't know yet, this shouldn't happen often...
-                log::debug!("unsure whether {self} is on map {map_id}");
-                true
-            },
-            Err(..) => false,
-        };
-        on_map && self.any_enabled()
-    }
-
-    pub async fn pack_info(&mut self, manager: &'_ PackLoader) -> Option<&Arc<PackInfo>> {
-        let try_load = matches!(&self.info.info, Err(UnloadedReason::Pending));
-        if try_load {
-            let res = self.activate(manager).await;
-            let _ = rt::log::error_ok(res);
-        }
-        self.info.info.as_ref().ok()
-    }
-}
-
-impl fmt::Display for LoadedPack {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Ok(info) = &self.info.info {
-            fmt::Display::fmt(info, f)
-        } else if let Some(datasource) = &self.info.datasource {
-            fmt::Display::fmt(&datasource.path, f)
-        } else {
-            let name = self.info.path.file_name()
-                .map(Path::new)
-                .unwrap_or_else(|| rt::relative_path(&self.info.path));
-            fmt::Display::fmt(&name.display(), f)
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackInfo {
     pub format: PackFormat,
@@ -402,10 +96,6 @@ pub struct PackInfo {
 }
 
 impl PackInfo {
-    #[cfg(todo)]
-    pub async fn read_from_loader(loader: LoaderBox) -> anyhow::Result<Self> {
-    }
-
     /// TODO: deprecate this soon
     pub fn from_pack(pack: &Pack, format: PackFormat) -> Self {
         let roots = pack.categories.root_categories
@@ -514,25 +204,6 @@ impl PackInfoSignature {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LoadedPackInfo {
-    pub index: PackPath,
-    pub path: Arc<Path>,
-    pub info: Result<Arc<PackInfo>, UnloadedReason>,
-    pub datasource: Option<DataSourcePath>,
-}
-
-impl LoadedPackInfo {
-    pub fn gravestone(index: PackPath) -> Self {
-        Self {
-            index,
-            path: Path::new("").into(),
-            info: Err(UnloadedReason::Gravestone),
-            datasource: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackCategoryInfo {
     pub all: Box<[PackCategory]>,
     pub roots: Box<[CategoryIndex]>,
@@ -541,7 +212,7 @@ pub struct PackCategoryInfo {
     pub separators: CategorySet,
     /// [keys::IsHidden]
     pub hidden: CategorySet,
-    /// ![keys::DefaultToggle]
+    /// \![keys::DefaultToggle]
     pub disabled: CategorySet,
     /// [keys::CopyValue] is valid on [self.separators]
     pub copyable: CategorySet,
@@ -976,6 +647,7 @@ impl<'a> DescendentIter<'a> {
         let _ = self.skip_to_sibling();
         let mut count = 0;
         while !self.stack.is_empty() {
+            count += 1;
             if !self.skip_to_direct_parent() {
                 break
             }
@@ -1150,84 +822,6 @@ impl PackCategory {
 impl Default for PackCategory {
     fn default() -> Self {
         Self::EMPTY
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackConfig {
-    /// xor with defaults
-    pub category_visibility: BTreeMap<CategoryPath, VisibilityFlags>,
-    #[cfg(todo = "unnecessary")]
-    pub category_visibility: VisibilityFlagSet,
-    /// force specific subtrees to a set state
-    pub visibility_overrides: CategorySet,
-}
-
-impl PackConfig {
-    pub fn fill_settings(&mut self, pack: &Pack, pathing: &PathingSettings, disabled_paths: &HashSet<String>) {
-        for id in disabled_paths {
-            let id = &id[..];
-            let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else { continue };
-            let path = CategoryPath::with_path(i as CategoryIndex);
-            let settings_vis = VisibilityFlags::visible(false);
-            let default_vis = VisibilityFlags::from_pack_category(&cat);
-            let deviation = settings_vis ^ (default_vis & VisibilityFlags::TOGGLE);
-            if !deviation.is_empty() {
-                self.category_visibility.insert(path, deviation);
-            }
-        }
-        #[cfg(todo)]
-        let disabled_compat = pathing.disabled_compat;
-        let disabled_compat = true;
-        if disabled_compat {
-            let disabled_cats = pack.categories.all_categories.iter().enumerate()
-                .filter(|(_, (_, cat))| !cat.default_toggle());
-            for (i, (full_id, _disabled_cat)) in disabled_cats {
-                let path = CategoryPath::with_path(i as CategoryIndex);
-                if !disabled_paths.contains(&full_id.id_to_str()[..]) {
-                    let mut vis = self.category_visibility.get(&path)
-                        .copied()
-                        .unwrap_or(VisibilityFlags::empty());
-                    vis.insert(VisibilityFlags::TOGGLE);
-                    self.category_visibility.insert(path, vis);
-                }
-            }
-        }
-        // TODO: new per-flag settings and override list
-    }
-
-    /// Indicates a configuration that deviates from the defaults (XOR)
-    pub fn visibility_deviation_for(&self, path: CategoryPath) -> VisibilityFlags {
-        self.category_visibility.get(&path)
-            .copied()
-            .unwrap_or(VisibilityFlags::empty())
-    }
-
-    pub fn set_visibility_deviation(&mut self, path: CategoryPath, value: VisibilityFlags) {
-        //self.category_visibility.extend_for(path, false);
-        if value.is_empty() {
-            self.category_visibility.remove(&path);
-        } else {
-            self.category_visibility.insert(path, value);
-        }
-    }
-
-    /// if false, indicates the pack is disabled (all roots are disabled)
-    pub fn any_enabled(&self, categories: &PackCategoryInfo) -> bool {
-        if categories.roots.is_empty() {
-            // empty pack? *shrug*
-            return true
-        }
-        categories.root_paths()
-            .any(|path| {
-                let default_toggle = !categories.disabled.contains(path);
-                let deviation = self.visibility_deviation_for(path).is_visible();
-                default_toggle ^ deviation
-            })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.category_visibility.is_empty() && self.visibility_overrides.is_empty()
     }
 }
 
