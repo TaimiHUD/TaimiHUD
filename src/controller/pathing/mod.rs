@@ -56,6 +56,7 @@ pub use taimi_meta::coords::LocalSpace as PackSpace;
 
 mod config;
 mod festivals;
+pub mod info;
 pub mod registry;
 #[doc(hidden)]
 mod setup;

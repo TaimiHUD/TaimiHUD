@@ -23,20 +23,6 @@ use {
     taimi_sync::arcs::ArcPtrCmp,
     taimi_pack::attributes::{RenderAttributes, PoiAttributes, TrailAttributes},
 };
-#[cfg(todo)]
-use {
-    taimi_pack::attributes::keys::Guid,
-    taimi_meta::packs::{
-        PoiPath,
-        PackIndex,
-        PoiPath,
-    },
-    crate::controller::pathing::{
-        state::hidden::MarkerState,
-        interactive::{InteractivePoi, InteractionEvent},
-    },
-    std::collections::{btree_map, BTreeMap, BTreeSet},
-};
 type MarkerState = ();
 
 #[cfg(todo)]
@@ -282,106 +268,6 @@ impl SharedGameplayMap {
             }),
             _ => None,
         }
-    }
-}
-
-#[cfg(todo)]
-impl super::PathingSender {
-    /// deleteme?
-    #[cfg(todo)]
-    pub fn map_info_with<R, F: FnOnce(PackMapPath, &SharedMapPackLoaded) -> R>(path: PackPath, f: F) -> Option<R> {
-        Controller::with_sender(|s| {
-            let map_id = s.gameplay.as_ref().and_then(|g| g.borrow().gameplay_map());
-            map_id.and_then(|map_id| {
-                let path = path.rel(map_id);
-                s.pack_info.as_ref().and_then(|pack_info|
-                    pack_info.borrow().map_info.get(&path)
-                        .map(|info| f(path, info))
-                )
-            })
-        }).flatten()
-    }
-
-    #[cfg(deleteme)]
-    pub(crate) fn update_pack(&mut self, path: PackPath, pack: &LoadedPack) {
-        if let Some(..) = pack.active {
-            self.pack_loaded.insert(path.clone());
-        } else {
-            self.pack_loaded.remove(&path);
-        }
-
-        match self.pack_info.get(&path) {
-            Some(shared_info) => {
-                let shared_info = shared_info.as_ref().map(Arc::as_ptr)
-                    .map_err(|r| &r.reason);
-                let pack_info = pack.info.info.as_ref().map(Arc::as_ptr);
-                if pack_info == shared_info {
-                    return
-                }
-            },
-            None => (),
-        }
-
-        let info = match pack.info.info.clone() {
-            Ok(info) => Ok(info),
-            Err(reason) => Err(UnloadedPack {
-                path: pack.info.path.to_path_buf(),
-                reason,
-            }),
-        };
-        self.pack_info.insert(path, info);
-    }
-    #[cfg(deleteme)]
-    #[deprecated]
-    pub(crate) fn update_pack(&mut self, path: PackPath, pack: &LoadedPack) {
-    }
-
-    #[cfg(deleteme)]
-    pub fn is_loaded(&self, path: &PackPath) -> bool {
-        self.pack_loaded.contains(path)
-    }
-    #[cfg(deleteme)]
-    #[deprecated]
-    pub fn is_loaded(&self, path: &PackPath) -> bool {
-        let Some(loader) = &self.shared_loader else { return false };
-        SharedPacks::pack_at(&loader.shared.data.borrow(), *path)
-            .map(|data| !weak_is_null(data))
-            .unwrap_or(false)
-    }
-
-    #[cfg(todo = "unused")]
-    pub fn unloaded_pack_info(&self) -> impl Iterator<Item = (PackPath, &UnloadedPack)> + '_ {
-        self.pack_info.iter().filter_map(|(&path, info)|
-            info.as_ref().err().map(|e| (path, e))
-        )
-    }
-    #[cfg(deleteme)]
-    pub fn pack_info(&self) -> impl Iterator<Item = (PackPath, &Arc<PackInfo>)> + '_ {
-        self.pack_info.iter().filter_map(|(&path, info)|
-            info.as_ref().ok().map(|e| (path, e))
-        )
-    }
-    #[cfg(deleteme)]
-    #[deprecated]
-    pub fn pack_info(&self) -> impl Iterator<Item = (PackPath, Arc<PackInfo>)> + '_ {
-        let mut info = self.shared_loader.as_ref()
-            .map(|loader| loader.shared.info.borrow());
-        let mut i = 0usize;
-        iter::from_fn(move || {
-            if info.as_ref().map(|info| info.len() > i).unwrap_or(true) {
-                let _ = info.take();
-                return None
-            }
-            let pack_info = info.as_ref().and_then(|info|
-                info.get(i)
-            ).and_then(|info|
-                info.info.as_ref().ok()
-            );
-            i += 1;
-            Some(pack_info.map(|info|
-                (PackPath::with_path(i as PackIndex), info.clone())
-            ))
-        }).filter_map(|i| i)
     }
 }
 

@@ -5,8 +5,8 @@ use {
         CategoryIndex, CategoryPath,
     },
     taimi_pack::{
-        attributes::{self, AttrString, RenderAttributes, FilterAttributes, MarkerAttributes},
-        trail::{Trail, TrlPath},
+        attributes::{RenderAttributes, FilterAttributes, MarkerAttributes},
+        trail::TrlPath,
     },
     futures::future::Either,
 };

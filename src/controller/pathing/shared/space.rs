@@ -1,17 +1,17 @@
-use crate::controller::pathing::registry::{LoadedMarkerPath, LoadedTrailPath};
-use taimi_sync::watched::watch;
-use std::{fmt, sync::Arc};
-use taimi_meta::packs::{id::{MarkerId, MarkerIndex}, PackMapPath};
 use {
     crate::{
         controller::pathing::{
             space::SpacePackCollection,
             shared::{SharedResourceRequests, SharedResourceRequestsTx, SharedPackInfo, LoadedTrailSection, LoadedTrailGeometry},
+            registry::{LoadedMarkerPath, LoadedTrailPath},
         },
         exports::runtime::textures::{TextureKey, TextureSlot},
         TEXTURES,
     },
-    taimi_pack::{attributes::AttrString},
+    std::{fmt, sync::Arc},
+    taimi_pack::attributes::AttrString,
+    taimi_sync::watched::watch,
+    taimi_meta::packs::{id::{MarkerId, MarkerIndex}, PackMapPath},
 };
 
 #[derive(Clone)]

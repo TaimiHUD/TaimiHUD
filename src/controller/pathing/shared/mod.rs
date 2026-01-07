@@ -16,16 +16,19 @@ pub use {
     self::{
         loader::{SharedPacks, SharedLoaderPacksInfo, SharedPackInfo, SharedPackConfig, SharedPackLoaded, SharedPackLoad, SharedResourceRequests, SharedResourceRequestsTx, LoadReport},
         maps::{SharedGameplayMap, SharedMapPackLoaded, SharedMapPackState, SharedMarkerRef, SharedPoiRef, LoadedPoiRef, SharedTrailRef, LoadedTrailRef, LoadedTrailShared, LoadedMarkerRef},
-        info::{MapPackInfo, MapTrailInfo, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
         space::{SpacePackShared, TrailGeometryRequests, TrailGeometryRequestsTx, TextureLoadRequests, TextureLoadRequestsTx, TrailGeometrySections},
     },
     crate::controller::pathing::state::{LoadedTrailSection, LoadedTrailGeometry},
 };
-pub(crate) use self::info::EMPTY_RENDER_ATTRS;
+/// TODO: deleteme
+#[doc(no_inline)]
+pub(crate) use super::info::{
+    MapPackInfo, LoadedPoiInfo, LoadedTrailInfo,
+    EMPTY_RENDER_ATTRS,
+};
 #[cfg(todo)]
 pub use self::maps::SharedMaps;
 
-mod info;
 mod loader;
 mod maps;
 mod space;
@@ -163,21 +166,6 @@ impl PathingShared {
             }
             notify
         });
-        #[cfg(deleteme)]
-        {
-            self.packs.info.send_if_modified(|info| {
-                *info = Default::default();
-                notify
-            });
-            self.packs.config.send_if_modified(|config| {
-                *config = Default::default();
-                notify
-            });
-            self.packs.data.send_if_modified(|data| {
-                *data = Default::default();
-                notify
-            });
-        }
     }
 }
 
