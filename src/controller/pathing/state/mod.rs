@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::{ops, iter};
 use taimi_hoard::loc::indexed::IndexedList;
 use taimi_hoard::loc::{LocationMut, LocationRef};
+use taimi_hoard::iters::all_zipped;
 use taimi_hoard::collections::lru::RecentlyUsed;
 use taimi_hoard::collections::TaimiSet;
 use taimi_sync::arcs::ArcPtrCmp;
@@ -405,19 +406,7 @@ impl LoadedPacks {
         self.sigs_match_dyn(&mut sigs.into_iter())
     }
     pub fn sigs_match_dyn(&self, sigs: &mut dyn Iterator<Item = PackInfoSignature>) -> bool {
-        if let (_, Some(count)) = sigs.size_hint() {
-            if count != self.packs.len() {
-                return false
-            }
-        }
-        let mut packs = self.packs.values();
-        while let Some(sig) = sigs.next() {
-            match packs.next() {
-                Some(pack) if pack.info.sig == sig => (),
-                _ => return false,
-            }
-        }
-        packs.next().is_none()
+        all_zipped(|l, r| l == r.info.sig, sigs, self.packs.values())
     }
     #[inline]
     pub fn sigs_dirty<S>(&self, sigs: S) -> PackSet where

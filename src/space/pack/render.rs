@@ -1,7 +1,9 @@
-use std::collections::BinaryHeap;
-use crate::controller::pathing::space::DrawSpace;
-use glamour::{Point3, Vector3};
-use taimi_hoard::cmp::CmpIgnore;
+use {
+    crate::controller::pathing::space::DrawSpace,
+    std::collections::BinaryHeap,
+    glamour::{Point3, Vector3},
+    taimi_hoard::cmp::CmpIgnore,
+};
 
 /// BvhIter expected to produce positions, which should be [Point3::INFINITY]
 /// for items that can ignore the distance priority queue

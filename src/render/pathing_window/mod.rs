@@ -1,9 +1,6 @@
 use {
     crate::{
-        controller::pathing::{
-            PathingController, PathingEvent,
-            UnloadedReason,
-        },
+        controller::pathing::PathingEvent,
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
         settings::{
@@ -15,7 +12,7 @@ use {
         Controller,
         ControllerEvent,
     },
-    nexus::imgui::{ChildWindow, Condition, TableFlags, TreeNode, TreeNodeFlags, Ui, Window, WindowFlags},
+    nexus::imgui::{ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags},
     std::collections::HashSet,
     taimi_pack::category::CategoryId,
     taimi_sync::watched::Watched,
@@ -65,7 +62,7 @@ impl PathingWindowState {
             }
         }
     }
-    pub fn pre_draw(&mut self, machine: &mut RenderMachine) {
+    pub fn pre_draw(&mut self, _machine: &mut RenderMachine) {
     }
 
     pub fn draw(
@@ -112,7 +109,7 @@ impl PathingWindowState {
         machine: &mut RenderMachine,
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
-        let rendered_err = if let Some(Ok(engine)) = engine {
+        let rendered_err = if let Some(Ok(_engine)) = engine {
             self.draw_categories_header(ui, machine);
             if self.filter_open {
                 self.draw_filter_content(ui, machine);
@@ -210,27 +207,6 @@ impl PathingWindowState {
             let packs = machine.pack_ui_state.pack_state.values()
                 .filter_map(|pack| pack.state.pack_data());
             self.search_state.commit(packs);
-        }
-    }
-    #[cfg(todo)]
-    pub fn draw(
-        &mut self,
-        ui: &Ui,
-        machine: &mut RenderMachine,
-        engine: Option<&mut anyhow::Result<Engine>>,
-    ) {
-        if open {
-            Window::new(fl!("pathing-window"))
-                .size([300.0, 200.0], Condition::FirstUseEver)
-                .opened(&mut open)
-                .build(ui, || {
-                    let pathing_dir = crate::ADDON_DIR.join("pathing");
-                    RenderState::draw_open_path_button(
-                        ui,
-                        fl!("open-button", kind = "folder"),
-                        &pathing_dir,
-                    );
-                });
         }
     }
 }

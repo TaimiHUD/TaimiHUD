@@ -196,7 +196,7 @@ impl PathingController {
         Self::task_trail_load(manager, path, trl)
     }
     async fn task_trail_load(manager: Arc<PackLoader>, path: Locator<PackMapPath, LoadedTrailPath>, trl: Option<TrlLoadContext>) -> anyhow::Result<PathingEvent> {
-        let loader = Self::pack_loader_for(&manager, path.root.root).await?;
+        let loader = manager.pack_loader_for(path.root.root).await?;
         let geometry = async move {
             let trl = trl.context("TODO: late-load trl context")?;
             Self::trail_load_geometry(&manager, path, loader, trl).await
@@ -238,7 +238,7 @@ impl PathingController {
         Self::task_texture_load(manager, path, texture)
     }
     async fn task_texture_load(manager: Arc<PackLoader>, path: LoadedMarkerPath<PackMapPath>, texture: Option<AttrString>) -> anyhow::Result<PathingEvent> {
-        let loader = Self::pack_loader_for(&manager, path.root.root).await?;
+        let loader = manager.pack_loader_for(path.root.root).await?;
         let info = manager.shared.packs.packs.borrow().lookup_ref(&path.root.root)
             .context("pack unrecognized")?
             .info.clone();
@@ -321,7 +321,7 @@ impl PathingController {
 
     /// map changed in a way that may be relevant to [SpacePackCollection] state
     pub async fn space_pack_updates(&mut self) {
-        let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
+        let map_id = self.gameplay_map();
         let (space_dirty, is_empty) = if let Some(map_id) = map_id {
             #[cfg(todo)]
             let entities_dirty = self.space.packs.needs_rebuild(map_id, &self.packs);

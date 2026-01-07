@@ -88,6 +88,25 @@ impl LoadedMarkerInfo {
         self.get_filter_attrs().map(|f| &**f)
             .unwrap_or_else(|| &EMPTY_FILTER_ATTRS)
     }
+
+    pub(super) fn sig_ptr(ptr: *const ()) -> [u32; 2] {
+        let ptr = ptr as usize;
+        let p1 = ptr as u64 >> 32;
+        [ptr as u32, p1 as u32]
+    }
+    fn sig_attrs(attrs: &Either<Arc<RenderAttributes>, Arc<MarkerAttributes>>) -> [u32; 2] {
+        Self::sig_ptr(match attrs {
+            Either::Left(a) => Arc::as_ptr(a) as *const (),
+            Either::Right(a) => Arc::as_ptr(a) as *const (),
+        })
+    }
+    pub(crate) fn sig(&self) -> [u32; 2] {
+        let mut sig = Self::sig_attrs(&self.attrs);
+        if let [ref mut s0, ..] = sig {
+            *s0 ^= self.category_path.path as u32;
+        }
+        sig
+    }
 }
 impl Default for LoadedMarkerInfo {
     fn default() -> Self { Self::empty() }

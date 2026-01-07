@@ -1,17 +1,20 @@
 use {
     crate::{
-        controller::{
-            pathing::{
-                registry::{PackCategory, PackRoot, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent, PathingController,
-                VisibilityFlagsExt as _,
-            },
-            Controller,
-        }, exports::runtime::imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar, IdStackToken},
+        controller::pathing::{
+            registry::{PackCategory, PackRoot, PackCategoryInfo, PackInfoSignature, UnloadedReason},
+            VisibilityFlagsExt as _,
+            PathingController, PathingEvent,
+        },
+        exports::runtime::{
+            self as rt,
+            imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, StyleVar, IdStackToken},
+        },
         render::RenderState, with_i18n
     },
-    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport, DrawCategoryToggle, DrawPackRoots, PackAction, PackActionSlot},
-    std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
-    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+    super::{PackElementState, PackTooltip, PackTooltipRef, UiAction, PackVisibility, PackDamageReport, DrawCategoryToggle, PackAction, PackActionSlot},
+    taimi_meta::packs::VisibilityFlags,
+    std::{collections::BTreeMap, iter, mem, sync::Arc},
+    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::InteractionAttributes, category::{Category, CategoryFlags, CategoryId}},
     taimi_meta::packs::collections::CategorySet,
 };
 
@@ -119,21 +122,11 @@ pub struct DrawPackUnloaded<'a, 'ui> {
     pub state: &'a PackElementState,
 }
 impl DrawPackUnloaded<'_, '_> {
-    pub fn draw(&mut self) {
+    pub fn draw(&mut self) -> Option<UiAction> {
         if let Some(UnloadedReason::Gravestone) = &self.state.unloaded {
-            return
+            return None
         }
-        self.ui.popup("pack-context-unloaded", || {
-            self.menu_unloaded();
-        });
-        let action = self.header_unloaded();
-        match action {
-            Some(UiAction::RIGHT_CLICK) =>
-                self.ui.open_popup("pack-context-unloaded"),
-            Some(UiAction::Primary) =>
-                PathingEvent::ReloadPack(self.state.pack_path(), false).try_send(),
-            _ => (),
-        }
+        self.header_unloaded()
     }
 
     fn header_unloaded(&self) -> Option<UiAction> {
@@ -155,7 +148,8 @@ impl DrawPackUnloaded<'_, '_> {
             .leaf(is_button)
             .push(ui);
         let hovered = ui.is_item_hovered();
-        let pressed = is_button && ui.is_item_clicked();
+        let clicked = ui.is_item_clicked();
+        let pressed = is_button && clicked;
         let open_context = ui.is_item_clicked_with_button(MouseButton::Right);
 
         ui.same_line();
@@ -180,11 +174,13 @@ impl DrawPackUnloaded<'_, '_> {
             pressed
         };
         if open_context {
-            Some(UiAction::Clicked(MouseButton::Right))
+            Some(UiAction::RIGHT_CLICK)
         } else if res {
             Some(UiAction::Primary)
         } else if hovered {
             Some(UiAction::Hovered)
+        } else if clicked {
+            Some(UiAction::LEFT_CLICK)
         } else {
             None
         }
@@ -215,16 +211,6 @@ impl DrawPackUnloaded<'_, '_> {
             Some(UnloadedReason::UnknownFormat) =>
                 Some(with_i18n!("pack-format-notice", |msg| f(&msg))),
             _ => None,
-        }
-    }
-
-    fn menu_unloaded(&self) {
-        let action_remove = with_i18n!("remove", |label| Selectable::new(&label).build(self.ui));
-        let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(self.ui));
-        if action_reload {
-            PathingEvent::ReloadPack(self.state.pack_path(), true).try_send();
-        } else if action_remove {
-            PathingEvent::UnloadPack(self.state.pack_path(), true).try_send();
         }
     }
 }
@@ -371,94 +357,102 @@ impl super::PackElement {
     }
     fn perform_acts(&mut self, ui: &Ui, act_cat: CategoryActionSlot, act_pack: PackActionSlot, hovered: &mut Option<Option<CategoryPath>>, context_menu: &mut Option<Option<CategoryPath>>) {
         if let Some((path, act)) = act_cat {
-            if let Some(msg) = act.as_pathing_message(path, self.state.pack_path()) {
+            let msg = act.as_pathing_message(path, self.state.pack_path());
+            match act {
+                _ if msg.is_some() => (),
+                CategoryAction::HoverTooltip => {
+                    *hovered = Some(Some(path));
+                },
+                CategoryAction::ContextMenu => {
+                    *context_menu = Some(Some(path));
+                },
+                CategoryAction::Copy => {
+                    let copyable = self.categories.categories.get(&path).and_then(|c| c.copyable());
+                    if let Some((copy_value, copy_msg)) = copyable {
+                        Self::copy_copyable(ui, copy_value, copy_msg);
+                    } else {
+                        log::warn!("BUG: lost copy data for {path}");
+                    }
+                },
+                CategoryAction::Open(new_state) =>
+                    self.categories.update_open(path, new_state),
+                CategoryAction::OpenChildren(new_state) => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let cat_is_open = self.categories.open_mask.contains(path);
+                        let new_state = new_state.unwrap_or(!cat_is_open);
+                        for child in cats.descendents_of(path).chain(iter::once(path)) {
+                            self.categories.update_open(child, Some(new_state));
+                        }
+                    }
+                },
+                CategoryAction::EnableChildren(new_state) => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let paths = cats.descendents_of(path).chain(iter::once(path));
+                        let children_enable = new_state.unwrap_or_else(||
+                            self.state.category_get_visibility(path).is_visible()
+                        );
+                        self.act_cat_enables(Some(children_enable), paths)
+                    }
+                },
+                CategoryAction::EnableParents(parents_enable) => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let paths = cats.ancestors_of(path).chain(iter::once(path));
+                        self.act_cat_enables(Some(parents_enable), paths)
+                    }
+                },
+                CategoryAction::Isolate(new_state) => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let siblings_enable = match new_state {
+                            None => {
+                                let is_enabled = |path| self.state.category_get_visibility(path).is_visible();
+                                let cat_is_enabled = is_enabled(path);
+                                if cats.all_siblings_of(path).map(|sib| is_enabled(sib)).all(|se| se == !cat_is_enabled) {
+                                    None
+                                } else {
+                                    Some(!cat_is_enabled)
+                                }
+                            },
+                            Some(s) => Some(s),
+                        };
+                        let paths = cats.all_siblings_of(path);
+                        self.act_cat_enables(siblings_enable, paths)
+                    }
+                },
+                CategoryAction::ResetSiblings => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        self.act_cat_reset(cats.all_siblings_of(path));
+                    }
+                },
+                CategoryAction::ResetChildren => {
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let paths = cats.descendents_of(path).chain(iter::once(path));
+                        self.act_cat_reset(paths);
+                    }
+                },
+                CategoryAction::Enable(..) => {
+                    #[cfg(debug_assertions)]
+                    unreachable!();
+                },
+            }
+            if let Some(msg) = msg {
                 msg.try_send();
-            } else {
-                match act {
-                    CategoryAction::HoverTooltip => {
-                        *hovered = Some(Some(path));
-                    },
-                    CategoryAction::ContextMenu => {
-                        *context_menu = Some(Some(path));
-                    },
-                    CategoryAction::Copy =>
-                        log::error!("DELETEME TODO: cat copy"),
-                    CategoryAction::Open(new_state) =>
-                        self.categories.update_open(path, new_state),
-                    CategoryAction::OpenChildren(new_state) => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            let cat_is_open = self.categories.open_mask.contains(path);
-                            let new_state = new_state.unwrap_or(!cat_is_open);
-                            for child in cats.descendents_of(path).chain(iter::once(path)) {
-                                self.categories.update_open(child, Some(new_state));
-                            }
-                        }
-                    },
-                    CategoryAction::EnableChildren(new_state) => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            let paths = cats.descendents_of(path).chain(iter::once(path));
-                            let children_enable = new_state.unwrap_or_else(||
-                                self.state.category_get_visibility(path).is_visible()
-                            );
-                            self.act_cat_enables(Some(children_enable), paths)
-                        }
-                    },
-                    CategoryAction::EnableParents(parents_enable) => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            let paths = cats.parents_of(path).chain(iter::once(path));
-                            self.act_cat_enables(Some(parents_enable), paths)
-                        }
-                    },
-                    CategoryAction::Isolate(new_state) => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            let siblings_enable = match new_state {
-                                None => {
-                                    let is_enabled = |path| self.state.category_get_visibility(path).is_visible();
-                                    let cat_is_enabled = is_enabled(path);;
-                                    if cats.all_siblings_of(path).map(|sib| is_enabled(sib)).all(|se| se == !cat_is_enabled) {
-                                        None
-                                    } else {
-                                        Some(!cat_is_enabled)
-                                    }
-                                },
-                                Some(s) => Some(s),
-                            };
-                            let paths = cats.all_siblings_of(path);
-                            self.act_cat_enables(siblings_enable, paths)
-                        }
-                    },
-                    CategoryAction::ResetSiblings => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            self.act_cat_reset(cats.all_siblings_of(path));
-                        }
-                    },
-                    CategoryAction::ResetChildren => {
-                        if let Some((cats, ..)) = self.state.info.category_info() {
-                            let paths = cats.descendents_of(path).chain(iter::once(path));
-                            self.act_cat_reset(paths);
-                        }
-                    },
-                    CategoryAction::Enable(..) => {
-                        #[cfg(debug_assertions)]
-                        unreachable!();
-                    },
-                }
             }
         }
         if let Some((_path, act)) = act_pack {
-            if let Some(msg) = act.as_pathing_message(self.state.pack_path()) {
+            let msg = act.as_pathing_message(self.state.pack_path());
+            match act {
+                _ if msg.is_some() => (),
+                PackAction::Cat { action: CategoryAction::HoverTooltip, path: _ } => {
+                    *hovered = Some(None);
+                },
+                PackAction::Cat { action: CategoryAction::ContextMenu, path: _ } => {
+                    *context_menu = Some(None);
+                },
+                act =>
+                    log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+            }
+            if let Some(msg) = msg {
                 msg.try_send();
-            } else {
-                match act {
-                    PackAction::Cat { action: CategoryAction::HoverTooltip, path: _ } => {
-                        *hovered = Some(None);
-                    },
-                    PackAction::Cat { action: CategoryAction::ContextMenu, path: _ } => {
-                        *context_menu = Some(None);
-                    },
-                    act =>
-                        log::error!("DELETEME TODO: {} {act:?}", self.state.info),
-                }
             }
         }
     }
@@ -497,6 +491,13 @@ impl super::PackElement {
             !dirty.is_empty()
         });
         PathingEvent::CategoryEnableCommit(self.state.pack_path(), dirty).try_send();
+    }
+
+    pub(super) fn copy_copyable(ui: &Ui, copy_value: &str, copy_message: Option<&str>) {
+        ui.set_clipboard_text(copy_value);
+        if let Some(copy_message) = copy_message {
+            let _ = rt::send_alert(ui, copy_message);
+        }
     }
 
     pub fn draw_category_tooltip(&mut self, ui: &Ui, path: CategoryPath, display_name_visible: bool, include_copyable: bool) -> bool {

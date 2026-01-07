@@ -13,7 +13,7 @@ use {
         },
         TEXTURES,
     },
-    taimi_meta::packs::id::{MarkerId, MarkerIndex},
+    taimi_meta::packs::id::MarkerId,
     anyhow::Context, bitvec::vec::BitVec, glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles}, glamour::Vector2, std::mem, taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
@@ -21,7 +21,6 @@ use {
         },
         state::PrimitiveTopology,
     }, taimi_meta::ui::LocalContext,
-    taimi_pack::attributes::AttrString,
     super::PackRenderState,
 };
 
@@ -267,8 +266,6 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 pub struct PoiRender {
     pub icon_handle: Option<TextureKey>,
     pub icon: Option<TextureSlot>,
-    #[cfg(todo)]
-    pub render_bookmark: u32,
 }
 impl PoiRender {
     pub fn empty() -> Self {
@@ -353,33 +350,3 @@ impl PoiRender {
 }
 
 pub static STATS_POI_INSTANCE_SIZE: Counter = Counter::DEFAULT;
-
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-#[repr(transparent)]
-pub struct PoiScale {
-    pub expansion: f32,
-}
-
-impl PoiScale {
-    /// No expansion, standard sizing
-    pub const DEFAULT: Self = Self::new(0.0);
-
-    pub const fn new(expansion: f32) -> Self {
-        Self { expansion }
-    }
-
-    /// Convert from settings
-    pub const fn with_scale(poi_scale: f32) -> Self {
-        Self::new(poi_scale - 1.0)
-    }
-
-    pub const fn scale(&self) -> f32 {
-        self.expansion + 1.0
-    }
-}
-
-impl Default for PoiScale {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}

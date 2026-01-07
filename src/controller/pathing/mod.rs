@@ -30,6 +30,8 @@ use {
     futures::StreamExt,
     std::sync::Arc,
     std::collections::VecDeque,
+    std::pin::Pin,
+    std::future::Future,
     strum_macros::Display,
     taimi_meta::ui::{MapContext, gameplay::{GameplayState, GameplayTransition}},
     taimi_pack::attributes::Festivals,
@@ -42,6 +44,7 @@ use {
 };
 use futures::stream::{self, FusedStream};
 
+#[allow(unused_imports)]
 pub use self::{
     registry::{LoaderBox, UnloadedReason},
     festivals::FestivalFixup,
@@ -58,10 +61,9 @@ mod config;
 mod festivals;
 pub mod info;
 pub mod registry;
-#[doc(hidden)]
 mod setup;
 pub mod shared;
-mod state;
+pub mod state;
 pub mod space;
 
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
@@ -92,6 +94,7 @@ pub(crate) enum PathingEvent {
     Exit(Interruption),
     Nop,
 }
+pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
 
 pub(crate) struct PathingController {
     loader: Arc<PackLoader>,

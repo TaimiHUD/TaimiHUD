@@ -3,7 +3,8 @@ use {
     crate::controller::pathing::{
         registry::{PackBoxOf, PackMapPath, PoiMapPath, TrailMapPath, PackPath, LoadedPoiPath, LoadedPoiIndex, LoadedTrailPath, LoadedTrailIndex, LoadedPoiNs, LoadedTrailNs, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath},
         visible::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail, VisibilityFlags},
-        shared::{MapPackInfo, LoadedPoiInfo, LoadedTrailInfo},
+        shared::MapPackInfo,
+        info::{LoadedPoiInfo, LoadedTrailInfo, LoadedMarkerInfo},
         space::DrawSpace,
     },
     glamour::Point3,
@@ -15,6 +16,7 @@ use {
             Locator,
             LocationRef, LocationMut,
         },
+        iters::all_zipped,
     },
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant, MarkerIndex, MarkerPath, FromMarkerId1, PackMarkerNs},
@@ -318,15 +320,23 @@ impl SharedMapPackLoaded {
     pub fn update_with_info(&mut self, info: &Arc<MapPackInfo>) -> bool {
         ArcPtrCmp::from_mut(&mut self.info).clone_from_arc(info)
     }
-    /// TODO: only if dirty
     pub fn update_with(&mut self, map_pack: &LoadedMapPack) -> bool {
+        let mut dirty = false;
         #[cfg(todo)] {
             self.interactive_pois = map_pack.interactive_pois.clone();
             self.poi_guids = map_pack.poi_guids.clone();
         }
-        self.pois = map_pack.pois.iter().map(|poi| poi.info().clone()).collect();
-        self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
-        true
+        if !all_zipped(|l, r| l.info().sig() == r.sig(), map_pack.pois.iter(), self.pois.data.iter()) {
+            // XXX: could try to do partial update?
+            self.pois = map_pack.pois.iter().map(|poi| poi.info().clone()).collect();
+            dirty = true;
+        }
+        if !all_zipped(|l, r| l.info().sig() == r.sig(), map_pack.trails.iter(), self.trails.data.iter()) {
+            // XXX: could try to do partial update?
+            self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
+            dirty = true;
+        }
+        dirty
     }
 
     #[cfg(todo)]
@@ -626,6 +636,29 @@ impl LoadedTrailShared {
             s0.map(|v| v as u32).unwrap_or(u32::MAX),
             s1,
         ]
+    }
+}
+impl LoadedPoiInfo {
+    pub(crate) fn sig(&self) -> [u32; 2] {
+        let Self { marker_info } = self;
+        marker_info.sig()
+    }
+}
+impl LoadedTrailInfo {
+    pub(crate) fn sig(&self) -> [u32; 2] {
+        let Self { marker_info, trl } = self;
+        let mut sig = marker_info.sig();
+        if let [ref mut s0, ref mut s1] = sig {
+            *s0 ^= self.category_path.path as u32;
+            if let Some(trl) = trl {
+                #[cfg(todo)]
+                if let Some(parent) = &trl.parent_path {}
+                let [p0, p1] = LoadedMarkerInfo::sig_ptr(Arc::as_ptr(&trl.path) as *const ());
+                *s0 ^= p0;
+                *s1 ^= p1;
+            }
+        }
+        sig
     }
 }
 

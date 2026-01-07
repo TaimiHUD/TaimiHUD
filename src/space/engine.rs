@@ -12,7 +12,6 @@ use {
         space::{
             dx11::RenderBackend,
             pack::{PackRender, PackRenderList},
-            render_list::MapFrustum,
         },
         timer::{PhaseState, TimerFile, TimerMarker},
     },
@@ -28,6 +27,7 @@ use {
     },
     taimi_d3d::dx11::prelude::*,
     taimi_meta::{
+        spatial::cull::MapFrustum,
         coords::ScreenSpace,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
@@ -905,11 +905,9 @@ impl Engine {
 
     pub fn gameplay_map_exit(
         &mut self,
-        device_context: &Dx11Context,
-        prev_map_id: NonZeroU32,
+        _device_context: &Dx11Context,
+        _prev_map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
-        #[cfg(todo)]
-        let res = self.packs.unload_map(device_context, prev_map_id.get());
         let res = Ok(());
 
         res
@@ -917,13 +915,9 @@ impl Engine {
 
     pub fn gameplay_map_enter(
         &mut self,
-        device_context: &Dx11Context,
-        map_id: NonZeroU32,
+        _device_context: &Dx11Context,
+        _map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
-        #[cfg(deleteme)]
-        let res = self
-            .packs
-            .load_map(&self.render_backend.device, device_context, map_id.get());
         let res = Ok(());
 
         self.goggles_enter(true);

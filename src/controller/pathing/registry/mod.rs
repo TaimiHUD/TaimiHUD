@@ -336,7 +336,7 @@ impl PackCategoryInfo {
                 // rough count of categories under a root...
                 let amt = (self.all.len() - self.lonely.len()) / self.roots.len();
                 let depth = match info.parent() {
-                    Some(p) => self.parents_of(p).count(),
+                    Some(p) => self.ancestors_of(p).count(),
                     None => 0,
                 } + 1;
                 let stride = self.younger_siblings_of(path).count();
@@ -394,8 +394,7 @@ impl PackCategoryInfo {
         DescendentIter::with_root(self, path)
     }
 
-    /// TODO: rename to ancestors_of
-    pub fn parents_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
+    pub fn ancestors_of(&self, path: CategoryPath) -> impl Iterator<Item = CategoryPath> + '_ {
         let mut next = self.parent_of(path);
         iter::from_fn(move || {
             let current = next.take()?;
@@ -532,7 +531,7 @@ impl<'a> DescendentIter<'a> {
                 // rough count of categories under a root...
                 let amt = (self.all.len() - self.lonely.len()) / self.roots.len();
                 let depth = match info.parent() {
-                    Some(p) => self.parents_of(p).count(),
+                    Some(p) => self.ancestors_of(p).count(),
                     None => 0,
                 } + 1;
                 let stride = self.younger_siblings_of(path).count();
@@ -844,8 +843,16 @@ impl UnloadedReason {
             _ => true,
         }
     }
+    pub fn can_reactivate(&self, explicit: bool) -> bool {
+        match self {
+            UnloadedReason::Pending =>
+                true,
+            _ if explicit => self.can_reload(),
+            _ => false,
+        }
+    }
 
-    fn discriminant(&self) -> u8 {
+    pub(crate) fn discriminant(&self) -> u8 {
         match self {
             Self::Pending => 1,
             Self::Loading => 2,

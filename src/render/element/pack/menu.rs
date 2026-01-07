@@ -1,20 +1,12 @@
 use {
     crate::{
-        controller::{
-            pathing::{
-                registry::{PackCategory, PackCategoryFlags, PackCategoryInfo, PackInfoSignature, PackVecOf, UnloadedReason}, shared::{PathingShared, SharedLoaderPacksInfo, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, visible::VisibilityFlags, PathingEvent
-            },
-            Controller,
-        }, exports::runtime::{
-            self as rt,
-            imgui::{self, Condition, MouseButton, Selectable, TreeNode, TreeNodeFlags, TreeNodeToken, Ui, MenuItem, StyleVar, MenuToken},
-        }, render::RenderState, with_i18n
+        exports::runtime::imgui::{MouseButton, Selectable, Ui, MenuItem, StyleVar, MenuToken},
+        with_i18n
     },
     super::{DrawCategoryHeader, PackElementState, DrawCategoryCollection, PackActionSlot, PackAction, CategoryAction, CategoryActionSlot, UiAction, DrawPackRoots},
     glam::Vec2,
     glamour::Rect,
-    std::{collections::BTreeMap, fmt::{self, Write}, iter, mem, sync::{Arc, Weak}},
-    taimi_hoard::{flags::BitSet, str_opt, str_opt_ref, loc::{LocationRef, LocationGet}}, taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath}, taimi_pack::{attributes::{self, AttrString, InteractionAttributes, MarkerAttributes}, category::{Category, CategoryFlags, CategoryId}, Pack}, taimi_sync::watched::{watch, Watched, Watcher},
+    taimi_meta::packs::{CategoryIndex, CategoryPath},
 };
 
 impl<'a, 'u> super::DrawCategoryToggle<'a, 'u> {
@@ -63,7 +55,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
     pub fn draw_menu_unloaded(&mut self) {
         let mut menu = DrawCategoryMenu::new(self.prepare_header(), true);
         let (act, token) = menu.draw_start();
-        if let Some(token) = &token {
+        if let Some(..) = &token {
             self.ui.text("uhhhh wasn't I a leaf?");
         }
         menu.draw_end(token);
@@ -117,7 +109,7 @@ impl super::PackElement {
                 if let Some((cats, ..)) = cats {
                     open_menu.clear();
                     open_menu.push(path);
-                    open_menu.extend(cats.parents_of(path));
+                    open_menu.extend(cats.ancestors_of(path));
                     open_menu.reverse();
                 } else if !open_menu.contains(&path) {
                     open_menu.push(path);
@@ -159,7 +151,6 @@ impl super::PackElement {
         }
         let mut draw = DrawCategoryContextMenu {
             ui,
-            state: &self.state,
             act: None,
             category_path,
             any_open,
@@ -256,7 +247,6 @@ impl<'a, 'u> DrawCategoryMenu<'a, 'u> {
                 _ => item.build(ui),
             }
         });
-        #[cfg(deleteme)]
         if ui.is_item_hovered() {
             ui.tooltip_text("hint: right-click to quickly toggle any category");
         }
@@ -430,7 +420,7 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
              Self::act_to_action(&menu, act).map(|act| (act, menu, path)),
             _ => None,
         };
-        if let Some((act, menu, path)) = act {
+        if let Some((act, _menu, path)) = act {
             let clobbered = act.clobber(path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
@@ -444,13 +434,6 @@ pub struct DrawPackContextMenu<'a, 'ui> {
     pub act: PackActionSlot,
 }
 impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
-    pub fn draw(&mut self) {
-        let token = self.ui.begin_popup(Self::id());
-        if let Some(..) = &token {
-            self.draw_contents();
-        }
-        drop(token);
-    }
     pub fn draw_contents(&mut self) {
         let s = match self.state.unloaded.as_ref() {
             None if self.state.pack.is_some() => Some(()),
@@ -524,21 +507,12 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
 
 pub struct DrawCategoryContextMenu<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
-    pub state: &'a PackElementState,
     pub act: CategoryActionSlot,
     pub category_path: CategoryPath,
     pub any_open: bool,
     pub any_closed: bool,
 }
 impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
-    #[cfg(deleteme)]
-    pub fn draw(&mut self) {
-        let token = self.ui.begin_popup(Self::id());
-        if let Some(..) = &token {
-            self.draw_contents();
-        }
-        drop(token);
-    }
     pub fn draw_contents(&mut self) {
         let act = self.draw_menu();
         if let Some(act) = act {
@@ -627,81 +601,6 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
         }
     }
 
-    #[cfg(deleteme)]
-    pub fn do_action(&mut self) {
-        if action_toggle {
-            #[cfg(todo = "deleteme")]
-            PathingEvent::CategorySetToggle(path, None).try_send();
-            self.act_categories_select(&info, path.root, iter::once(path.unscope()), None);
-        } else if let Some(action_all) = action_all {
-            let categories = &info.categories;
-            let cat_path = path.unscope();
-            let paths = categories.descendents_of(cat_path)
-                .chain(iter::once(cat_path));
-            match action_all {
-                Some(enable) =>
-                    self.act_categories_select(&info, path.root, paths, Some(enable)),
-                None =>
-                    self.act_categories_reset(&info, path.root, paths),
-            }
-        } else if let Some(parents_enable) = action_parents {
-            let categories = &info.categories;
-            let cat_path = path.unscope();
-            let paths = categories.parents_of(cat_path)
-                .chain(iter::once(cat_path));
-            self.act_categories_select(&info, path.root, paths, Some(parents_enable));
-        } else if let Some(isolate) = action_isolate {
-            let categories = &info.categories;
-            let cat_path = path.unscope();
-            let cat_info = categories.info_of(cat_path)
-                .map(|cat| {
-                    let oldest = cat.parent()
-                        .map(CategoryPath::with_path)
-                        .and_then(|parent| categories.firstborn_of(parent));
-                    (cat, oldest)
-                });
-            let oldest = cat_info.and_then(|(cat, oldest)|
-                oldest.or(cat.sibling()
-                    .map(CategoryPath::with_path)
-                )
-            );
-            let paths = oldest.into_iter()
-                .flat_map(|oldest| categories.younger_siblings_of(oldest)
-                    .chain(iter::once(oldest))
-                    .filter(|&s| s != cat_path)
-                );
-            match isolate {
-                Some(state) =>
-                    self.act_categories_isolate(&info, path.root, paths, state.ok_or(cat_path)),
-                None =>
-                    self.act_categories_reset(&info, path.root, paths),
-            }
-        ui.separator();
-        }
-
-        // TODO
-        let any_collapsed = true;
-        let action_expand_all = if any_collapsed {
-            with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
-        } else { false };
-        let action_collapse_all = if open {
-            with_i18n!("collapse-all", |msg| Selectable::new(msg).build(ui))
-        } else { false };
-        // TODO
-        let hidden = false;
-        let action_hide = with_i18n(if hidden { "unhide" } else { "hide"}, |msg| Selectable::new(msg).build(ui));
-
-        if action_hide {
-            log::debug!("TODO: cat:{}", if hidden { "unhide" } else { "hide" });
-        } else if action_expand_all {
-            log::debug!("TODO: cat:expand");
-        } else if action_collapse_all {
-            log::debug!("TODO: cat:collapse");
-        }
-
-        ui.separator();
-        // TODO: category stats
-    }
     pub fn id() -> &'static str {
         "cat-context"
     }

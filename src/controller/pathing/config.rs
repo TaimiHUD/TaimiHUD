@@ -129,18 +129,8 @@ impl PathingController {
             dirty |= Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&*external_filters));
         }
         if dirty {
-            // TODO: shouldn't a signal or common fn do this?
-            self.loader.shared.gameplay.send_if_modified(|shared_map| {
-                let Some(map_id) = shared_map.map_id else { return false };
-                let map_path = path.rel(map_id);
-                let Some((map, map_info)) = self.maps.lookup_with_info(&self.map_info, &map_path) else { return false };
-                let Some(shared_state) = shared_map.get_state_mut(map_path) else {
-                    return false
-                };
-                let _dirty = shared_state.update_static(&map);
-                shared_state.write_with_loaded(&map);
-                true
-            });
+            let maps = self.maps.iter_pack_with_info(&self.map_info, path);
+            self.loader.update_map_states(true, true, &mut {maps});
         }
     }
     pub(super) fn reload_config_for(&mut self, path: PackPath) {
@@ -301,7 +291,7 @@ impl PathingController {
     }
     #[cfg(todo = "unused")]
     pub(super) fn update_loaded_visibility_for(&mut self, pack_path: PackPath) -> bool {
-        let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
+        let map_id = self.gameplay_map();
         #[cfg(todo)]
         let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         #[cfg(todo)]
@@ -315,7 +305,7 @@ impl PathingController {
         dirty
     }
     pub(super) fn update_loaded_visibility(&mut self) -> bool {
-        let map_id = self.rx.gameplay.cached.as_ref().and_then(|g| g.gameplay_map());
+        let map_id = self.gameplay_map();
         #[cfg(todo)]
         let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         #[cfg(todo)]
@@ -330,18 +320,7 @@ impl PathingController {
             }
         }
         if dirty {
-            // TODO: shouldn't a signal or common fn do this?
-            self.loader.shared.gameplay.send_if_modified(|shared_map| {
-                let mut dirty = false;
-                for (path, map, map_info) in self.maps.iter_with_info(&self.map_info, None) {
-                    let Some(shared_state) = shared_map.get_state_mut(path) else {
-                        continue
-                    };
-                    dirty |= shared_state.update_static(&map);
-                    dirty |= shared_state.update_with_loaded(&map);
-                }
-                dirty
-            });
+            self.mark_map_state_dirty(map_id, true);
         }
         dirty
     }
@@ -508,7 +487,7 @@ impl LoadedMapPack {
                 // we only care about the root-most changes since they propagate down
                 let mut redundant_roots = Vec::new();
                 for damaged in damage.paths() {
-                    let is_redundant = categories.parents_of(damaged)
+                    let is_redundant = categories.ancestors_of(damaged)
                         .any(|p| damage.contains(p));
                     if is_redundant {
                         redundant_roots.push(damaged);

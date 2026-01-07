@@ -4,7 +4,6 @@ pub mod engine;
 pub mod goggles;
 pub mod object;
 pub mod pack;
-pub mod render_list;
 #[deprecated = "crate::resources"]
 pub(crate) use crate::resources;
 

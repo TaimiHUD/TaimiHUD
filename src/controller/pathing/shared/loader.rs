@@ -23,12 +23,12 @@ use {
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
     taimi_hoard::loc::{LocationMut, Locator},
+    taimi_hoard::iters::IterExt as _,
     taimi_sync::arcs::ArcPtrCmp,
 };
 
 pub type SharedLoaderPacksInfo = PackBoxOf<SharedPackLoad>;
 /// TODO: maybe split this up into sender and receiver halves...
-/// or just rework LoadedPack into something more sane to share
 #[derive(Debug)]
 pub struct SharedPacks {
     pub packs: watch::Sender<SharedLoaderPacksInfo>,
@@ -41,19 +41,23 @@ impl SharedPacks {
         }
     }
 
-    pub(crate) fn update_packs_extend(&self, packs: &mut dyn Iterator<Item = SharedPackLoad>) {
+    pub(crate) fn update_packs_extend(&self, packs: &mut dyn Iterator<Item = SharedPackLoad>) -> impl Iterator<Item = PackPath> {
+        #[cfg(todo = "unnecessary")]
+        let mut appended: PackSet = Default::default();
+        let invalid = PackIndex::MAX;
+        let mut appended = invalid..invalid;
         let (_min, max) = packs.size_hint();
         if max == Some(0) {
             // empty iterator, don't bother
-            return
+            return appended.lazy_map(PackPath::with_path)
         }
         self.packs.send_if_modified(|shared| {
-            let mut next_path = shared.end_path();
-            let mut any_appended = false;
+            appended.start = shared.end_path().path;
+            appended.end = appended.start;
+            let next_path = &mut appended.end;
             let packs = packs.map(|mut pack| {
-                pack.ensure_index(next_path);
-                next_path.path += 1;
-                any_appended = true;
+                pack.ensure_index(PackPath::with_path(*next_path));
+                *next_path += 1;
                 pack
             });
             let prev = match shared.data {
@@ -66,8 +70,9 @@ impl SharedPacks {
                 .chain(packs)
                 .collect::<Box<[_]>>();
             shared.data = updated;
-            any_appended
+            !appended.is_empty()
         });
+        appended.lazy_map(PackPath::with_path)
     }
     pub(crate) fn update_packs_loaded(&self, loaded: &mut dyn Iterator<Item = (PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>)>) {
         self.packs.send_if_modified(|shared| {

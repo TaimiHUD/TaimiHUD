@@ -1,20 +1,20 @@
 use {
     super::PackRenderState, crate::{
         controller::pathing::{
-            registry::LoadedTrailPath, shared::{LoadedTrailRef, LoadedTrailShared, SharedPackInfo}, visible::{LoadedTrail, LoadedTrailGeometry, LoadedTrailSection}
+            registry::LoadedTrailPath, shared::{LoadedTrailRef, SharedPackInfo}, visible::LoadedTrailGeometry,
         }, exports::runtime::{
             textures::{TextureKey, TextureSlot},
             Counter,
-        }, resources::Texture, space::{
+        }, space::{
             pack::PoiCommonRenderData,
             resources::Model,
         }
     },
     taimi_hoard::loc::Locator,
-    anyhow::Context, std::{mem, ops, sync::Arc}, taimi_d3d::dx11::{
+    anyhow::Context, std::{mem, ops}, taimi_d3d::dx11::{
         buffer::VertexBuffer,
         prelude::*,
-    }, taimi_hoard::lazyfmt, taimi_meta::{packs::{id::{MarkerId, MarkerIndex}, TrailSectionIndex, TrailSectionPath}, ui::LocalContext}, taimi_pack::attributes::AttrString
+    }, taimi_meta::{packs::{id::{MarkerId, MarkerIndex}, TrailSectionIndex, TrailSectionPath}, ui::LocalContext},
 };
 
 /// World render data
