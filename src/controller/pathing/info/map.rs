@@ -4,12 +4,18 @@ use {
             LoadedCategoryIndex, LoadedCategoryPath, LoadedPoiIndex, LoadedPoiPath, LoadedTrailIndex, LoadedTrailNs, LoadedTrailPath, PackInfo, PackInfoSignature, PackMapPath, PackPath
         },
         space::{TrailParams, DrawSpace},
-        visible::{LoadedTrailGeometry, LoadedTrailSection},
+        visible::LoadedTrailSection,
     },
     std::iter,
-    bitvec::vec::BitVec, glamour::Box3, std::{mem, ops, sync::{Arc, LazyLock}}, taimi_hoard::{iters::IterExt as _, loc::{indexed::IndexedList, LocationRef}}, taimi_meta::packs::{
-        id::{MarkerIndex, MarkerIndexVariant, MarkerPath}, CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath, TrailIndex, TrailPath, TrailSectionIndex, TrailSectionNs, TrailSectionPath
-    }, taimi_pack::{attributes::RenderAttributes, category::id::FullIdRef, pack::Pack, trail::TrailData}
+    bitvec::vec::BitVec, glamour::Box3,
+    std::{mem, sync::Arc},
+    taimi_hoard::{iters::IterExt as _, loc::{indexed::IndexedList, LocationRef}},
+    taimi_meta::packs::{
+        id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
+        CategoryIndex, CategoryPath, MapIndex, PoiIndex, PoiPath,
+        TrailIndex, TrailPath, TrailSectionIndex, TrailSectionNs, TrailSectionPath,
+    },
+    taimi_pack::{category::id::FullIdRef, pack::Pack, trail::TrailData}
 };
 
 #[derive(Debug, Clone)]

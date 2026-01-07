@@ -1,12 +1,10 @@
-use super::registry::SharedLoaderBox;
-
 use {
     crate::{
         controller::pathing::{
             PathingController, PathingEvent,
             visible::LoadedMapPack,
             shared::{SharedPacks, SharedPackInfo, SharedPackLoad, MapPackInfo, SharedPackLoaded},
-            registry::{PackLoader, PackActivateContext, UnloadedReason, PackInfo},
+            registry::{PackLoader, PackActivateContext, UnloadedReason, PackInfo, SharedLoaderBox},
         },
         exports::runtime as rt,
         settings::{Settings, SourceKind},
