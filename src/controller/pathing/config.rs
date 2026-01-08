@@ -616,7 +616,7 @@ impl LoadedMapPack {
                             .unwrap_or(default_vis)
                     });
                     match parent_is_override {
-                        true => inherited, /*.or(default_vis)*/,
+                        true => inherited, /*.or(default_vis)*/
                         false => inherited.map(|inh| {
                             (inh & default_vis.unwrap_or(VisibilityFlags::TOGGLES)
                                 & VisibilityFlags::TOGGLE)
