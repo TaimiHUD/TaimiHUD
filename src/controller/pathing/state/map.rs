@@ -1,7 +1,7 @@
 use {
     crate::controller::pathing::{
         registry::{LoadedPoiIndex, LoadedPoiNs, LoadedTrailIndex, LoadedTrailNs, PackInfoSignature},
-        shared::MapPackInfo,
+        info::MapPackInfo,
         state::{LoadedCategory, LoadedPoi, LoadedTrail},
     },
     std::sync::Arc,

@@ -2,7 +2,7 @@ use {
     super::get_overrides_mut,
     crate::{
         controller::pathing::{
-            shared::LoadedTrailInfo,
+            info::LoadedTrailInfo,
             space::{DrawSpace, TrailParams},
             state::VisibilityFlagsExt as _,
             PackSpace,

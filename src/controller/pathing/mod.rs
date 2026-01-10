@@ -52,8 +52,6 @@ use {
     tokio::{select, task::JoinSet},
 };
 
-/// deleteme
-pub(crate) use self::state::visible;
 #[allow(unused_imports)]
 pub use self::{
     config::PackConfig,
@@ -97,8 +95,6 @@ pub(crate) enum PathingEvent {
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(shared::LoadReport),
-    #[cfg(deleteme)]
-    ReportPackLoaded(PackPath, Result<PackActivateLoaded, Option<UnloadedReason>>),
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
     Nop,
@@ -377,48 +373,6 @@ impl PathingController {
         }
     }
 
-    #[cfg(todo = "deleteme")]
-    async fn load_all_inner(settings: SettingsLock) -> anyhow::Result<()> {
-        let _ = create_dir_all(SourceKind::Pathing.get_user_dir());
-
-        let mut path_loads = tokio::task::JoinSet::new();
-
-        let mut disabled_paths_dirty = false;
-        loop {
-            let pack_load = path_loads.join_next();
-            let res = if disabled_paths_dirty {
-                // throttle repeated state event if packs load quickly enough...
-                let timeout = sleep(Duration::from_millis(174)).fuse();
-                tokio::pin!(timeout);
-                tokio::pin!(pack_load);
-                loop {
-                    select! {
-                        res = &mut pack_load => break res,
-                        _ = &mut timeout => {
-                            // this will take a while, so emit the pending update
-                            Self::try_send(PathingEvent::RequestDisabledPaths);
-                            disabled_paths_dirty = false;
-                        },
-                    }
-                }
-            } else {
-                pack_load.await
-            }
-            .map(|r| r.context("Path load panicked"));
-            match res {
-                None => break,
-                Some(Err(e) | Ok(Err(e))) => log::error!("{e:#}"),
-                Some(Ok(Ok(()))) => disabled_paths_dirty = true,
-            }
-        }
-
-        // TODO: sender+await, or ideally just make this unnecessary
-
-        if disabled_paths_dirty {
-            Self::try_send(PathingEvent::RequestDisabledPaths);
-        }
-    }
-
     async fn handle_message(&mut self, event: PathingEvent) -> Option<Interruption> {
         match event {
             PathingEvent::Nop => None,
@@ -475,8 +429,6 @@ impl PathingController {
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,
-            #[cfg(deleteme)]
-            ReportPackLoaded(path, loaded) => self.handle_pack_loaded(path, loaded).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
             Nop => (),
             #[cfg(debug_assertions)]

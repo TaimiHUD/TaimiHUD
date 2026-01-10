@@ -4,7 +4,7 @@ use {
         controller::pathing::{
             registry::LoadedTrailPath,
             shared::{LoadedTrailRef, SharedPackInfo},
-            visible::LoadedTrailGeometry,
+            state::LoadedTrailGeometry,
         },
         exports::runtime::{
             textures::{TextureKey, TextureSlot},

@@ -643,15 +643,6 @@ impl SpacePackCollection {
             self.render_entities.trim_trailing(Some(&self.bvh));
         }
 
-        #[cfg(deleteme)]
-        {
-            let TODO = ();
-            let wasted = unallocated.len() + removed.count_ones() + hidden.len();
-            if wasted > 0 {
-                log::debug!("DELETEME: spacepack wasting {wasted} nodes");
-            }
-        }
-
         if full_rebuild || self.render_entities.entities.is_empty() != self.bvh.nodes.is_empty() {
             Err(true)
         } else {

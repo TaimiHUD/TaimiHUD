@@ -1,7 +1,7 @@
 use {
     super::get_overrides_mut,
     crate::controller::pathing::{
-        shared::LoadedPoiInfo,
+        info::LoadedPoiInfo,
         space::DrawSpace,
         state::VisibilityFlagsExt as _,
         PackSpace,

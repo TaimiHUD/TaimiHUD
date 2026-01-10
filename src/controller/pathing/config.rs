@@ -2,7 +2,8 @@ use {
     crate::{
         controller::pathing::{
             registry::{PackCategoryInfo, PackLoader, PackMapPath, PackPath},
-            shared::{MapPackInfo, SharedPackConfig},
+            shared::SharedPackConfig,
+            info::MapPackInfo,
             state::{LoadedCategory, LoadedMapPack},
             ExternalFilterState,
             PathingController,
@@ -417,36 +418,6 @@ impl PathingController {
                 map_pack.trails.iter().map(|trail| trail.visibility).collect();
             (path.root.clone(), pois, trails)
         })
-    }
-
-    #[cfg(todo = "deleteme")]
-    pub(super) async fn visibility_send(&mut self, map_id: MapIndex) {
-        let update: Vec<_> = self.visibility_update(map_id).collect();
-
-        let res =
-            Controller::try_run_render(RenderTaskPriority::High, move |state| -> anyhow::Result<()> {
-                let Some(Ok(engine)) = &mut state.engine else {
-                    log::debug!("no engine on other end of visibility_send?");
-                    return Ok(())
-                };
-                for (path, pois, trails) in update {
-                    let Some(pack) = engine.packs.loaded_packs.get_mut(path.path as usize) else {
-                        continue
-                    };
-                    for (active, visibility) in pack.active_pois.iter_mut().zip(pois) {
-                        active.visibility = visibility;
-                    }
-                    for (active, visibility) in pack.active_trails.iter_mut().zip(trails) {
-                        active.visibility = visibility;
-                    }
-                }
-                Ok(())
-            })
-            .await
-            .context("updating render visibility");
-        if let Err(e) = res {
-            log::error!("{e:#}");
-        }
     }
 
     /// resolves state from optional toggle instruction to absolute

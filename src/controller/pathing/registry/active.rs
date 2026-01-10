@@ -3,7 +3,7 @@ use {
         controller::{
             pathing::{
                 festivals::FestivalFixup,
-                registry::{PackConfig, PackInfo, PackInfoSignature, UnloadedReason},
+                registry::{PackConfig, PackInfo, PackInfoSignature},
                 shared::{SharedPackConfig, SharedPackInfo, SharedPackLoaded},
                 space::TrailParams,
                 PathingShared,
@@ -14,159 +14,30 @@ use {
         settings::{PathingSettings, SettingsLock},
     },
     anyhow::{anyhow, Context},
-    futures::future::FutureExt,
     std::{
         collections::BTreeMap,
         fmt,
-        future::Future,
         path::{Path, PathBuf},
-        sync::{Arc, Weak},
+        sync::Arc,
     },
     taimi_hoard::loc::LocationRef,
-    taimi_meta::packs::{PackIndex, PackPath, TrailIndex},
+    taimi_meta::packs::PackPath,
     taimi_pack::{
         attributes::Festival,
         category::id::AsFullId,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
-        trail::TrailData,
         Pack,
     },
     taimi_sync::watched::watch,
     tokio::sync::Mutex,
 };
 
-#[cfg(deleteme)]
-impl LoadedPack {
-    pub fn activate_start(&mut self) -> anyhow::Result<Option<PackActivateContext>> {
-        if self.active.is_some() {
-            return Ok(None)
-        }
-
-        let prev_info = match &self.info.info {
-            Ok(info) => Some(&**info),
-            Err(UnloadedReason::Pending) => None,
-            Err(_reason) => return Ok(None),
-        };
-        let activate = PackActivateContext::new(&*self.info.path, None, prev_info);
-
-        match activate {
-            Ok(mut activate) => {
-                activate.config_sig_prev = match &self.config {
-                    None => PackInfoSignature::EMPTY,
-                    Some(config) if config.borrow().is_empty() => PackInfoSignature::INVALID,
-                    Some(..) => activate.sig_prev,
-                };
-                Ok(Some(activate))
-            },
-            Err(e) => {
-                self.info.info = Err(UnloadedReason::UnknownFormat);
-                Err(e)
-            },
-        }
-    }
-
-    pub async fn activate_load(
-        context: PackActivateContext,
-        manager: &PackLoader,
-    ) -> anyhow::Result<PackActivateLoaded> {
-        context.load(manager).await
-    }
-
-    pub fn activate_finish(
-        &mut self,
-        pack: anyhow::Result<PackActivateLoaded>,
-        manager: &PackLoader,
-    ) -> anyhow::Result<()> {
-        match pack {
-            Err(e) => {
-                let e = rt::log::anyhow_into_arc(e);
-                self.info.info = Err(UnloadedReason::LoadingFailed(e.clone()));
-                manager.shared.packs.update_pack_info(self.info.index, &self.info);
-                Err(e.into())
-            },
-            Ok(PackActivateLoaded { pack, loader, info, config }) => {
-                self.info.info = Ok(info);
-                let pack = Arc::new(ActivePack::with_pack(pack, loader));
-                let active = self.active.insert(pack);
-                if let Some(config) = config {
-                    let update_config = self.config.is_none();
-                    Self::try_update_config_inner(&mut self.config, config);
-                    if update_config {
-                        manager
-                            .shared
-                            .packs
-                            .update_pack_config(self.info.index, self.config.as_ref());
-                    }
-                }
-                manager
-                    .shared
-                    .packs
-                    .update_pack_active(self.info.index, Some(active));
-                Ok(())
-            },
-        }
-    }
-
-    pub async fn activate(&mut self, manager: &PackLoader) -> anyhow::Result<Option<()>> {
-        let activate = match self.activate_start()? {
-            None => return Ok(None),
-            Some(activate) => activate,
-        };
-        let res = Self::activate_load(activate, manager).await;
-        self.activate_finish(res, manager).map(Some)
-    }
-
-    #[cfg(todo = "unused")]
-    pub fn try_update_config(&mut self, config: PackConfig) {
-        Self::try_update_config_inner(&mut self.config, config)
-    }
-    fn try_update_config_inner(out: &mut Option<watch::Sender<Arc<PackConfig>>>, config: PackConfig) {
-        match out {
-            out @ None => {
-                let _ = out.insert(watch::Sender::new(Arc::new(config)));
-            },
-            Some(out) => {
-                out.send_if_modified(|out| {
-                    if **out == config {
-                        return false
-                    }
-                    *Arc::make_mut(out) = config;
-                    true
-                });
-            },
-        }
-    }
-    #[cfg(todo)]
-    pub async fn try_populate_config(&mut self, settings: &SettingsLock) -> bool {
-        #[cfg(todo = "unnecessary")]
-        let Ok(info) = &self.info
-        else {
-            return false
-        };
-        let Some(active) = &self.active else { return false };
-        Self::populate_config(&mut self.config, active, settings);
-        true
-    }
-    #[cfg(todo)]
-    pub async fn populate_config(
-        out: &mut Option<watch::Sender<Arc<PackConfig>>>,
-        active: &ActivePack,
-        settings: &SettingsLock,
-    ) {
-        let mut config = PackConfig::default();
-        {
-            let settings = settings.write().await;
-            config.fill_settings(&active.pack, &settings.pathing(), &settings.disabled_paths);
-        }
-        Self::try_update_config_inner(out, config)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PackActivateContext {
     pub format: PackFormat,
     pub path: PathBuf,
     pub context: String,
+    #[allow(dead_code)]
     pub sig_prev: PackInfoSignature,
     pub config_sig_prev: PackInfoSignature,
 }
@@ -414,6 +285,7 @@ impl PackLoader {
         pack.categories.trim_attributes();
     }
 
+    #[cfg(todo = "unused")]
     pub fn get_trail_params(&self) -> impl Future<Output = TrailParams> + Send + 'static {
         let settings = self.settings.clone();
         settings
@@ -432,83 +304,6 @@ impl PackLoader {
             width: space.trail_width(),
             smoothing: TrailParams::DEFAULT.smoothing,
         }
-    }
-}
-
-#[cfg(deleteme)]
-#[derive(Clone)]
-pub struct ActivePack {
-    pub pack: Arc<Pack>,
-    pub loader: SharedLoaderBox,
-}
-
-#[cfg(deleteme)]
-impl ActivePack {
-    pub fn with_pack(pack: Arc<Pack>, loader: SharedLoaderBox) -> Self {
-        Self { pack, loader }
-    }
-
-    pub fn read_trail_data(&self, index: TrailIndex) -> anyhow::Result<TrailData> {
-        let Some(trail) = self.pack.trails.get(index as usize) else {
-            anyhow::bail!("Trail #{index} not found in {self}")
-        };
-
-        let mut loader = self.loader.blocking_lock();
-        trail
-            .read_trl_data(&mut *loader)
-            .with_context(|| format!("Reading trail {trail} vertices from {self}"))
-    }
-
-    pub fn load_trail_data(
-        &self,
-        index: TrailIndex,
-    ) -> impl Future<Output = anyhow::Result<TrailData>> + Send + 'static {
-        let pack = self.clone();
-        Controller::try_run_blocking("reading trl", move || pack.read_trail_data(index))
-    }
-
-    pub fn iter_weak<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, &'a Weak<Self>)> {
-        active
-            .into_iter()
-            .enumerate()
-            .map(|(i, a)| (PackPath::with_path(i as PackIndex), a))
-    }
-    pub fn iter_strong<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, Arc<Self>)> + 'a {
-        active
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, a)| a.upgrade().map(|a| (PackPath::with_path(i as PackIndex), a)))
-    }
-    pub fn enum_strong<'a>(active: &'a [Weak<Self>]) -> impl Iterator<Item = (PackPath, bool)> + 'a {
-        active
-            .into_iter()
-            .enumerate()
-            .map(|(i, a)| (PackPath::with_path(i as PackIndex), a.strong_count() > 0))
-    }
-}
-
-#[cfg(deleteme)]
-impl fmt::Display for ActivePack {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&self.pack.name, f)
-    }
-}
-#[cfg(deleteme)]
-impl fmt::Debug for ActivePack {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("ActivePack").field(&self.pack).finish()
-    }
-}
-#[cfg(deleteme)]
-impl AsRef<ActivePack> for ActivePack {
-    fn as_ref(&self) -> &ActivePack {
-        self
-    }
-}
-#[cfg(deleteme)]
-impl AsRef<Pack> for ActivePack {
-    fn as_ref(&self) -> &Pack {
-        &self.pack
     }
 }
 

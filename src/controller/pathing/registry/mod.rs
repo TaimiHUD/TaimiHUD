@@ -2,7 +2,7 @@
 use taimi_pack::attributes::keys;
 use {
     crate::{
-        controller::pathing::VisibilityFlagsExt,
+        controller::pathing::{VisibilityFlagsExt, PackConfig},
         exports::runtime as rt,
         settings::sources::DataSourcePath,
     },
@@ -61,7 +61,6 @@ pub use self::{
     active::{LoaderBox, PackActivateContext, PackActivateLoaded, PackFormat, PackLoader, SharedLoaderBox},
     namespace::*,
 };
-pub use crate::controller::pathing::PackConfig;
 
 mod active;
 mod namespace;

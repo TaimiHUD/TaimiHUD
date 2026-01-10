@@ -2,9 +2,9 @@ use {
     crate::{
         controller::pathing::{
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
-            shared::{MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
-            state::{LoadedMapInfoStorage, LoadedPackInfo},
-            visible::LoadedMapPack,
+            shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
+            state::{LoadedPackInfo, LoadedMapInfoStorage, LoadedMapPack},
+            info::{MapPackInfo},
             PathingController,
             PathingEvent,
             PathingReceiver,
@@ -32,13 +32,6 @@ use {
 };
 
 impl PathingController {
-    #[cfg(deleteme)]
-    pub(super) async fn handle_pack_loaded(
-        &mut self,
-        path: PackPath,
-        loaded: Result<PackActivateLoaded, Option<UnloadedReason>>,
-    ) {
-    }
     pub(super) fn process_pack_activate(&mut self, path: PackPath) {
         match self.packs.lookup_ref(&path).map(|p| p.unloaded.as_ref()) {
             Some(Some(reason)) if reason.can_reactivate(false) => (),

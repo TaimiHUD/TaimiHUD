@@ -1,7 +1,7 @@
 use {
     super::PathingShared,
     crate::controller::pathing::{
-        info::{LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo},
+        info::{LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo, MapPackInfo},
         registry::{
             LoadedCategoryIndex,
             LoadedCategoryNs,
@@ -18,9 +18,8 @@ use {
             PoiMapPath,
             TrailMapPath,
         },
-        shared::MapPackInfo,
         space::DrawSpace,
-        visible::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail, VisibilityFlags},
+        state::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail},
     },
     glamour::Point3,
     std::{cmp, ops, sync::Arc},
@@ -38,6 +37,7 @@ use {
         PoiPath,
         TrailIndex,
         TrailPath,
+        VisibilityFlags,
     },
     taimi_pack::attributes::{PoiAttributes, RenderAttributes, TrailAttributes},
     taimi_sync::arcs::ArcPtrCmp,

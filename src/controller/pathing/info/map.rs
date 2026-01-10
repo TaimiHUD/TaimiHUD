@@ -14,7 +14,7 @@ use {
             PackPath,
         },
         space::{DrawSpace, TrailParams},
-        visible::LoadedTrailSection,
+        state::LoadedTrailSection,
     },
     bitvec::vec::BitVec,
     glamour::Box3,

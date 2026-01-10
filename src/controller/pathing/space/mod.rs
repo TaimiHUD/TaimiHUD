@@ -10,7 +10,7 @@ use {
                     SharedPackInfo,
                     TrailGeometrySections,
                 },
-                visible::{LoadedMapPack, LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
+                state::{LoadedMapPack, LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
                 PathingController,
                 PathingEvent,
             },

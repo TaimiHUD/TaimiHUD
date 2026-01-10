@@ -49,12 +49,6 @@ use {
     tokio::sync::mpsc,
 };
 
-#[cfg(todo)]
-pub use self::maps::SharedMaps;
-/// TODO: deleteme
-#[doc(no_inline)]
-pub(crate) use super::info::{LoadedPoiInfo, LoadedTrailInfo, MapPackInfo, EMPTY_RENDER_ATTRS};
-
 mod loader;
 mod maps;
 mod space;
