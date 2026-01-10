@@ -6,8 +6,10 @@ use {
         with_i18n,
     },
     regex::{Regex, RegexBuilder},
-    std::collections::HashSet,
+    std::collections::{BTreeMap, HashSet},
     taimi_pack::Pack,
+    taimi_hoard::flags::BitSet,
+    taimi_meta::packs::{CategoryPath, PackPath, PackIndex},
 };
 
 #[derive(Clone)]
@@ -15,6 +17,8 @@ pub struct PathingSearchState {
     pub buffer: String,
     matcher: Option<Regex>,
     search_candidates: HashSet<String>,
+    /// TODO: BTreeSet<CategoryPath> instead?
+    pub candidate_mask: BTreeMap<PackPath, BitSet>,
     pub flags: PathingSearchFlags,
 }
 
@@ -26,6 +30,7 @@ impl PathingSearchState {
     }
     pub fn clear_matches(&mut self) {
         self.search_candidates.clear();
+        self.candidate_mask.clear();
     }
 
     pub fn commit<'p, P, I>(&mut self, packs: I)
@@ -33,7 +38,7 @@ impl PathingSearchState {
         I: IntoIterator<Item = P>,
         P: AsRef<Pack>,
     {
-        self.search_candidates.clear();
+        self.clear_matches();
         if self.buffer.is_empty() {
             return
         }
@@ -49,19 +54,27 @@ impl PathingSearchState {
             matcher.ok()
         };
 
-        for pack in packs {
+        for (i, pack) in packs.into_iter().enumerate() {
             let pack = pack.as_ref();
+            let path: PackPath = PackPath::with_path(i as PackIndex);
+            if let Some(mask) = self.candidate_mask.get_mut(&path) {
+                mask.clear();
+            }
 
-            for (full_id, category) in pack.categories.all_categories.iter() {
+            for (idx, (full_id, category)) in pack.categories.all_categories.iter().enumerate() {
                 if self.matches_name(&category.display_name[..])
                     || self.matches_name(category.id().as_str())
                 {
+                    let mask = self.candidate_mask.entry(path).or_default();
+                    if mask.is_empty() {
+                        mask.reserve_exact(pack.categories.all_categories.len());
+                    }
                     self.search_candidates.insert(full_id.into());
-                    let full_id = full_id.as_str();
-                    let separators = full_id.rmatch_indices(".");
-                    for (idx, _eu) in separators {
-                        if let Some(sub_id) = full_id.get(..idx) {
-                            self.search_candidates.insert(sub_id.into());
+                    mask.set(idx, true);
+                    for sub_id in full_id.as_id().ancestors() {
+                        self.search_candidates.insert(sub_id.into());
+                        if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
+                            mask.set(parent_idx, true);
                         }
                     }
                 }
@@ -84,6 +97,12 @@ impl PathingSearchState {
             true => true,
         }
     }
+
+    pub fn matches_category(&self, path: CategoryPath<PackPath>) -> bool {
+        let cat_path: CategoryPath = path.unscope();
+        self.candidate_mask.get(&path.root).map(|mask| mask.contains(cat_path))
+            .unwrap_or(false)
+    }
 }
 
 impl Default for PathingSearchState {
@@ -92,6 +111,7 @@ impl Default for PathingSearchState {
             buffer: Default::default(),
             matcher: Default::default(),
             search_candidates: Default::default(),
+            candidate_mask: Default::default(),
             flags: PathingSearchFlags::DEFAULT,
         }
     }

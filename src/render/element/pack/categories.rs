@@ -24,7 +24,6 @@ use {
                 Condition,
                 IdStackToken,
                 MouseButton,
-                Selectable,
                 StyleVar,
                 TreeNode,
                 TreeNodeFlags,
@@ -490,6 +489,13 @@ impl super::PackElement {
         if let Some((_path, act)) = act_pack {
             let msg = act.as_pathing_message(self.state.pack_path());
             match act {
+                PackAction::OFFLOAD => {
+                    let roots = self.state.info.info.as_ref().map(|i| i.roots.iter())
+                        .into_iter().flatten();
+                    for root in roots {
+                        self.categories.open_mask.remove_at(root.path());
+                    }
+                },
                 _ if msg.is_some() => (),
                 PackAction::Cat {
                     action: CategoryAction::HoverTooltip,
@@ -603,7 +609,9 @@ impl super::PackElement {
 
 impl PackElementState {
     pub fn category_flags(&self, path: CategoryPath) -> CategoryFlags {
+        #[cfg(todo)]
         let category_flags = self.category_flags.as_ref().and_then(|f| f.lookup_get(&path));
+        let category_flags = None;
         if let Some(category_flags) = category_flags {
             category_flags
         } else if let Some(info) = &self.info.info {
@@ -965,23 +973,29 @@ impl CategoryCollectionState {
             let cats = &info.categories;
             match visibility {
                 PackVisibility::Visible => {
-                    let Some(pack_data) = pack.pack_data() else { return };
                     let visible_cats = info
                         .categories
                         .root_paths()
                         .flat_map(|root| self.all_visible_children(cats, root).chain(iter::once(root)));
-                    let missing_info: BitSet = visible_cats
+                    let mut missing_info = visible_cats
                         .filter(|path| !self.categories.contains_key(path))
-                        .collect();
-                    for path in missing_info.iter_of::<CategoryPath>() {
-                        let Some((_id, category)) =
-                            pack_data.categories.all_categories.get_index(path.path as usize)
-                        else {
-                            log::error!("missing {path} from {}", pack.info);
-                            continue
-                        };
-                        self.categories
-                            .insert(path, CategoryInfo::from_pack_category(category));
+                        .peekable();
+                    let pack_data = match missing_info.peek() {
+                        None => None,
+                        _ => pack.activate_pack_data().ok().flatten(),
+                    };
+                    if let Some(pack_data) = pack_data {
+                        let missing_info: BitSet = missing_info.collect();
+                        for path in missing_info.iter_of::<CategoryPath>() {
+                            let Some((_id, category)) =
+                                pack_data.categories.all_categories.get_index(path.path as usize)
+                            else {
+                                log::error!("missing {path} from {}", pack.info);
+                                continue
+                            };
+                            self.categories
+                                .insert(path, CategoryInfo::from_pack_category(category));
+                        }
                     }
                 },
                 PackVisibility::Pending => {

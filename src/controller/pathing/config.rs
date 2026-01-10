@@ -132,7 +132,7 @@ impl PathingController {
         config: &watch::Receiver<SharedPackConfig>,
     ) {
         self.trim_inactive_maps(false);
-        let Some((_info, info)) = self.packs.lookup_info(path) else { return };
+        let Some((info, _info)) = self.packs.lookup_info(path) else { return };
         let mut dirty = false;
         let mut external_filters = None;
         for (map_path, map, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, path) {

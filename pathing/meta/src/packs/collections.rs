@@ -235,7 +235,7 @@ impl PackSet {
         let index = index.into() as usize;
         self.0.get(index).map(|b| *b).unwrap_or(false)
     }
-    pub fn contains(&mut self, path: PackPath) -> bool {
+    pub fn contains(&self, path: PackPath) -> bool {
         self.contains_index(path.path)
     }
 
@@ -330,5 +330,13 @@ impl Extend<Option<PackIndex>> for PackSet {
                 self.insert_index(index);
             }
         }
+    }
+}
+impl From<PackPath> for PackSet {
+    fn from(path: PackPath) -> Self {
+        let mut packs = Self::default();
+        packs.0.reserve_exact(path.path as usize + 1);
+        packs.insert_index(path.path);
+        packs
     }
 }

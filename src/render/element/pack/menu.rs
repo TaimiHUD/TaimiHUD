@@ -465,7 +465,7 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
     }
     pub fn draw_contents_unloaded(&mut self) -> Option<PackAction> {
         let ui = self.ui;
-        let action_remove = with_i18n!("remove", |label| Selectable::new(&label).build(ui));
+        let action_remove = with_i18n!("remove-pack", |label| Selectable::new(&label).build(ui));
         let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(ui));
         if action_reload {
             Some(PackAction::ACTIVATE)

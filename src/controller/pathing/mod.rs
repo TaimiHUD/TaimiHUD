@@ -48,6 +48,7 @@ use {
     },
     taimi_pack::attributes::Festivals,
     taimi_sync::watched::watch,
+    taimi_hoard::loc::LocationRef,
     tokio::{select, task::JoinSet},
 };
 
@@ -88,7 +89,7 @@ pub(crate) enum PathingEvent {
     UnloadPack(PackPath, bool),
     ReloadAll(bool),
     LoadAll,
-    UnloadAll,
+    UnloadAll(bool),
     /// toggle or set category state
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
     /// act upon a batch of changes to [shared::SharedPackLoad::config]
@@ -216,7 +217,12 @@ impl PathingController {
                 let map_id = gameplay_prev.gameplay_map();
                 for path in &packs_dirty {
                     if let Some(map_path) = map_id.map(|map| path.rel(map)) {
-                        self.prepare_for_pack_map(map_path, true);
+                        if let Some(pack) = self.packs.lookup_ref(&map_path.root) {
+                            if !pack.info.has_map(map_path.path) {
+                                continue
+                            }
+                        }
+                        let _ = self.prepare_for_pack_map(map_path, true);
                     }
                 }
                 for path in &configs_dirty {
@@ -245,9 +251,12 @@ impl PathingController {
             },
             texture_reqs = SpaceContext::recv_texture_requests(&mut self.space.texture_loads, &self.space.inflight) => {
                 for path in texture_reqs {
-                    log::debug!("processing tex req {path}");
                     let id = MarkerId::for_marker(path);
-                    self.request_texture_load(id);
+                    if self.request_texture_load(id) {
+                        log::debug!("processing tex req {path}");
+                    } else {
+                        log::trace!("reserving tex req {path}");
+                    }
                 }
             },
             Ok(_) = self.space.maps_rx.changed() => {
@@ -451,12 +460,18 @@ impl PathingController {
         use PathingEvent::*;
         match event {
             LoadAll => self.load_all().await,
-            #[cfg(deleteme)]
-            ReloadAll(remove) => self.reload_all(remove).await,
-            #[cfg(deleteme)]
-            UnloadAll => self.unload_all().await,
-            ReloadAll(..) | UnloadAll | ReloadPack(..) | LoadPack(..) | UnloadPack(..)
-            | OffloadPack(..) => log::debug!("TODO: pathing load"),
+            LoadPack(path) =>
+                self.process_pack_activate(path),
+            OffloadPack(path) =>
+                self.process_pack_deactivate(path),
+            UnloadPack(path, remove) =>
+                self.process_pack_unload(path, remove),
+            ReloadAll(remove) =>
+                self.process_pack_reload_all(remove).await,
+            UnloadAll(remove) =>
+                self.process_pack_unload_all(remove),
+            ReloadPack(path, remove) =>
+                self.process_pack_reload(path, remove),
             CategoryEnableSet(pack_path, cat, state) =>
                 Self::handle_toggle(&self.loader, pack_path.rel(cat.path), state).await,
             CategoryEnableCommit(pack_path, cats) => {

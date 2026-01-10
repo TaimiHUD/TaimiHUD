@@ -3,7 +3,7 @@ pub use nexus::texture::Texture as NexusTexture;
 #[cfg(feature = "texture-loader")]
 use {
     anyhow::{anyhow, Context},
-    std::{io, thread},
+    std::{io, sync::Weak, thread},
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
 use {
@@ -379,7 +379,7 @@ impl TextureLoader {
                     #[cfg(feature = "texture-loader")]
                     TextureSlot::Loaded(..) => true,
                     // as long as Nexus is holding on to a reference of these for us later,
-                    // this will never deallocate (and we do want decrement the SRV refcounts anyway)
+                    // this will never deallocate (unclear if decrementing the SRV refcounts is atomic?)
                     #[cfg(feature = "extension-nexus")]
                     TextureSlot::Nexus(..) if false => true,
                     _ => false,
@@ -394,6 +394,19 @@ impl TextureLoader {
                 drop(textures);
             },
         }
+    }
+    pub fn unload_textures_matching<F: FnMut(&TextureKey, &mut TextureSlot) -> bool>(&self, immediate: bool, mut f: F) {
+        let mut textures = self.textures.write().unwrap_or_else(|e| e.into_inner());
+        textures.retain(|key, slot| {
+            let remove = f(key, slot);
+            match remove {
+                true if !immediate => {
+                    slot.deactivate(false);
+                    true
+                },
+                remove => !remove,
+            }
+        });
     }
 
     pub fn quit(&self) {
@@ -486,6 +499,8 @@ pub enum TextureSlot {
     Loading,
     Reserved,
     Unavailable,
+    #[cfg(feature = "texture-loader")]
+    Inactive(Weak<Texture>),
     /// TODO: Arc is unnecessary but it's more compatible with Texture::load so...
     #[cfg(feature = "texture-loader")]
     Loaded(Arc<Texture>),
@@ -511,6 +526,10 @@ impl TextureSlot {
         let id = id.unwrap_or(TextureId::new(0));
 
         Some(match self {
+            #[cfg(todo)]
+            #[cfg(feature = "texture-loader")]
+            Self::Inactive(t) => match Weak::upgrade(t) {
+            },
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) => ImguiTexture {
                 id,
@@ -527,6 +546,8 @@ impl TextureSlot {
 
     pub fn resource(&self) -> Option<Arc<Texture>> {
         match self {
+            #[cfg(feature = "texture-loader")]
+            Self::Inactive(t) => Weak::upgrade(t),
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) => Some(t.clone()),
             #[cfg(feature = "extension-nexus")]
@@ -552,6 +573,9 @@ impl TextureSlot {
     }
     pub fn get(&self) -> Option<&Self> {
         match self {
+            #[cfg(todo)]
+            #[cfg(feature = "texture-loader")]
+            TextureSlot::Inactive(..) => Some(self),
             #[cfg(feature = "texture-loader")]
             TextureSlot::Loaded(..) => Some(self),
             #[cfg(feature = "extension-nexus")]
@@ -559,6 +583,46 @@ impl TextureSlot {
             _ => None,
         }
     }
+
+    pub fn deactivate(&mut self, prune: bool) -> bool {
+        let prev = match self {
+            Self::Loading | Self::Reserved | Self::Unavailable => return false,
+            Self::Inactive(t) => {
+                #[cfg(todo = "unnecessary")]
+                if t.strong_count() > 0 {
+                    *t = Weak::new();
+                }
+                return true
+            },
+            Self::Nexus(..) => None,
+            Self::Loaded(t) => Some(Arc::downgrade(&*t)),
+        }.unwrap_or(Weak::new());
+        let prev = self.insert_inactive(prev);
+        if prev.strong_count() == 0 {
+            *prev = Weak::new();
+        }
+        true
+    }
+    pub fn insert_inactive(&mut self, prev: Weak<Texture>) -> &mut Weak<Texture> {
+        *self = Self::Inactive(prev);
+        match self {
+            Self::Inactive(prev) => prev,
+            _ => unsafe {
+                core::hint::unreachable_unchecked()
+            },
+        }
+    }
+    pub fn insert_loaded(&mut self, texture: Arc<Texture>) -> &mut Arc<Texture> {
+        *self = Self::Loaded(texture);
+        match self {
+            Self::Loaded(texture) => texture,
+            _ => unsafe {
+                core::hint::unreachable_unchecked()
+            },
+        }
+    }
+    #[cfg(todo)]
+    pub fn prune(&mut self) {}
 }
 
 #[cfg(feature = "extension-nexus")]
@@ -577,6 +641,12 @@ impl From<Texture> for TextureSlot {
 impl From<Arc<Texture>> for TextureSlot {
     fn from(texture: Arc<Texture>) -> Self {
         Self::Loaded(texture)
+    }
+}
+#[cfg(feature = "texture-loader")]
+impl From<Weak<Texture>> for TextureSlot {
+    fn from(texture: Weak<Texture>) -> Self {
+        Self::Inactive(texture)
     }
 }
 

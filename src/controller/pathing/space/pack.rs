@@ -463,19 +463,15 @@ impl SpacePackCollection {
         packs: &LoadedPacks,
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
-    ) -> (
-        BitSet,
-        BTreeSet<usize>,
-        BTreeMap<MarkerId, usize>,
-        BTreeMap<MarkerId, usize>,
-    ) {
+    ) -> EntityUpdateReport {
+        let mut report = EntityUpdateReport::new(map_id);
         self.loaded_packs
             .data
             .resize_with(packs.packs.len(), SpacePack::default);
-        if self.map_id != Some(map_id) {
+        if self.map_id != report.map_id {
             self.clear();
             self.prepare_entity_population(map_id, packs, map_info, maps);
-            return Default::default()
+            return report
         }
 
         for ((_path, pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
@@ -484,97 +480,11 @@ impl SpacePackCollection {
             }
             pack_data.clear();
         }
-        // TODO: fields on self would probably be slightly less dumb...
-        let mut dirty = BTreeMap::new();
-        let mut hidden = BTreeMap::new();
-        let mut unallocated = BTreeSet::new();
-        let removed =
-            self.render_entities
-                .retain(self.loaded_packs.map_mut_as_slice(), |i, e, extra, pack_data| {
-                    if e.is_invalid() {
-                        unallocated.insert(i);
-                        return true
-                    }
-                    let Some((map_path, pack_data)) = pack_data else { return true };
-                    if map_path.root.path == MapIndex::MAX {
-                        log::debug!("TODO: mapless marker?");
-                        return true
-                    }
-                    if map_path.root.path != map_id {
-                        return false
-                    }
-                    if pack_data.info_sig.is_empty() {
-                        return false
-                    }
-
-                    let Some((map, map_info)) = maps.lookup_with_info(map_info, &map_path.root) else {
-                        log::debug!("TODO: {map_path} info missing for {}", e.id);
-                        return false
-                    };
-                    let (vis, bounds) =
-                        match map_path.path.namespace() {
-                            MarkerIndex::NS_POI => {
-                                let lpath: LoadedPoiPath =
-                                    LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
-                                let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
-                                let bounds = lpoi.bounds();
-                                let bounds =
-                                    if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
-                                        || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
-                                    {
-                                        log::warn!("DELETEME: {map_path} poi bounds changed from {:?} to {bounds:?}", e.bounds);
-                                        Some(bounds)
-                                    } else {
-                                        None
-                                    };
-                                (lpoi.visibility, bounds)
-                            },
-                            MarkerIndex::NS_TRAIL => {
-                                let lpath: LoadedTrailPath =
-                                    LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
-                                let seci = map_path.path.trail_index_unchecked();
-                                let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
-                                let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
-                                let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else {
-                                    return false
-                                };
-                                let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else {
-                                    return false
-                                };
-                                let bounds = &lsection.bounds;
-                                let bounds =
-                                    if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
-                                        || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
-                                    {
-                                        log::warn!("DELETEME: {map_path} trail bounds changed from {:?} to {bounds:?}", e.bounds);
-                                        Some(*bounds)
-                                    } else {
-                                        None
-                                    };
-                                (ltrail.visibility, bounds)
-                            },
-                            _ => return true,
-                        };
-                    let activated = !e.is_bh_removed_from(&self.bvh);
-                    if !vis.is_visible() {
-                        if activated {
-                            hidden.insert(e.id.clone(), i);
-                        }
-                    } else if !activated {
-                        dirty.insert(e.id.clone(), i);
-                    }
-                    if let Some(bounds) = bounds {
-                        e.bounds = box3aabb(bounds);
-                        if activated {
-                            dirty.insert(e.id.clone(), i);
-                        } else if let Some(extra) = extra {
-                            *extra = SpaceEntityExtra::invalid();
-                        }
-                    }
-                    true
-                });
+        let pd = self.loaded_packs.map_mut_as_slice();
+        let cx = (maps, map_info, &self.bvh);
+        report.retain_entities(&mut self.render_entities, pd, cx);
         self.prepare_entity_population(map_id, packs, map_info, maps);
-        (removed, unallocated, dirty, hidden)
+        report
     }
     fn prepare_entity_population(
         &mut self,
@@ -604,7 +514,7 @@ impl SpacePackCollection {
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
     ) -> Result<(), bool> {
-        let (removed, mut unallocated, mut dirty, hidden) =
+        let EntityUpdateReport { removed, mut unallocated, mut dirty, hidden, .. } =
             self.prepare_entity_update(map_id, packs, map_info, maps);
         self.map_id = Some(map_id);
 
@@ -645,7 +555,9 @@ impl SpacePackCollection {
                     true => None,
                 })
                 .flat_map(move |((ltrail_path, _ltrail), trail_info)| {
-                    trail_info.section_bounds().map(move |(section_path, bounds)| {
+                    trail_info.section_bounds()
+                        .filter(move |(_, section, _)| section.is_visible())
+                        .map(move |(section_path, _, bounds)| {
                         let ts_path: LoadedTrailSectionPath =
                             LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
                         let marker_path: MarkerPath = ts_path.pivot_to();
@@ -819,5 +731,121 @@ impl SpacePackCollection {
 impl Default for SpacePackCollection {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct EntityUpdateReport {
+    removed: BitSet,
+    unallocated: BTreeSet<usize>,
+    /// boundschanged || (visible && !activated)
+    dirty: BTreeMap<MarkerId, usize>,
+    /// activated && !visible
+    hidden: BTreeMap<MarkerId, usize>,
+    map_id: Option<MapIndex>,
+}
+type EntityRetainContext<'a> = (&'a LoadedMaps, &'a LoadedMapInfo, &'a Bvh<f32, 3>);
+impl EntityUpdateReport {
+    fn new(map_id: MapIndex) -> Self {
+        Self {
+            map_id: Some(map_id),
+            .. Self::default()
+        }
+    }
+    fn retain_entities(&mut self, entities: &mut SpaceEntities, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, cx: EntityRetainContext<'_>) {
+        let removed = entities
+            .retain(pack_data, |i, e, x, pd|
+                self.retain_entity(i, e, x, pd, cx)
+            );
+        if !self.removed.is_empty() {
+            log::debug!("EntityUpdateReport wasn't fresh for retain?");
+        }
+        self.removed = removed;
+    }
+    fn retain_entity(&mut self, i: usize, e: &mut BvhShape<SpaceEntity>, extra: Option<&mut SpaceEntityExtra>, pack_data: Option<(MarkerPath<PackMapPath>, &mut SpacePack)>, (maps, map_info, bvh): EntityRetainContext<'_>) -> bool {
+        if e.is_invalid() {
+            self.unallocated.insert(i);
+            return true
+        }
+        let Some((map_path, pack_data)) = pack_data else { return true };
+        if map_path.root.path == MapIndex::MAX {
+            log::debug!("TODO: mapless marker?");
+            return true
+        }
+        match self.map_id {
+            Some(map_id) if map_path.root.path != map_id =>
+                return false,
+            _ => (),
+        }
+        if pack_data.info_sig.is_empty() {
+            return false
+        }
+
+        let Some((map, map_info)) = maps.lookup_with_info(map_info, &map_path.root) else {
+            log::debug!("TODO: {map_path} info missing for {}", e.id);
+            return false
+        };
+        let (vis, bounds) =
+            match map_path.path.namespace() {
+                MarkerIndex::NS_POI => {
+                    let lpath: LoadedPoiPath =
+                        LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
+                    let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
+                    let bounds = lpoi.bounds();
+                    let bounds =
+                        if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
+                            || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
+                        {
+                            Some(bounds)
+                        } else {
+                            None
+                        };
+                    (lpoi.visibility, bounds)
+                },
+                MarkerIndex::NS_TRAIL => {
+                    let lpath: LoadedTrailPath =
+                        LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
+                    let seci = map_path.path.trail_index_unchecked();
+                    let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
+                    let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
+                    let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else {
+                        return false
+                    };
+                    let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else {
+                        return false
+                    };
+                    if !lsection.is_visible() {
+                        return false
+                    }
+                    let bounds = &lsection.bounds;
+                    let bounds =
+                        if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
+                            || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
+                        {
+                            Some(*bounds)
+                        } else {
+                            None
+                        };
+                    (ltrail.visibility, bounds)
+                },
+                _ => return true,
+            };
+        let activated = !e.is_bh_removed_from(bvh);
+        if !vis.is_visible() {
+            if activated {
+                self.hidden.insert(e.id.clone(), i);
+            }
+        } else if !activated {
+            self.dirty.insert(e.id.clone(), i);
+        }
+        if let Some(bounds) = bounds {
+            e.bounds = box3aabb(bounds);
+            if activated {
+                self.dirty.insert(e.id.clone(), i);
+            } else if let Some(extra) = extra {
+                *extra = SpaceEntityExtra::invalid();
+            }
+        }
+        true
     }
 }

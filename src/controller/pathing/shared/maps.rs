@@ -1230,8 +1230,12 @@ impl PathingShared {
             .send_if_modified(|shared_map| shared_map.map_id == Some(map_id))
     }
     pub fn update_map_id(&self, map_id: Option<MapIndex>, notify: bool) -> bool {
-        self.gameplay
-            .send_if_modified(|shared_map| shared_map.prepare_for_map(map_id) && notify)
+        let mut dirty = false;
+        self.gameplay.send_if_modified(|shared_map| {
+            dirty = shared_map.prepare_for_map(map_id);
+            dirty && notify
+        });
+        dirty
     }
 
     pub fn clear_maps_for_packs<P>(&self, packs: P, notify: bool) -> bool

@@ -151,7 +151,7 @@ impl TrailRender {
         };
         if start >= end {
             // ignore empty sections
-            log::debug!("TODO: filter out empty sections earlier (prior to binding state)!");
+            log::debug!("BUG? filter empty sections prior to scene or binding");
             return
         }
         if let Some(section_vbuffer) = &self.section_vbuffer {

@@ -14,7 +14,7 @@ use {
     taimi_hoard::iters::IterExt,
     taimi_meta::{
         packs::{CategoryIndex, CategoryPath, TrailPath, VisibilityFlags},
-        spatial::irrelevant_box3,
+        spatial::{irrelevant_box3, IRRELEVANT_MIN},
     },
     taimi_pack::{
         attributes::{RenderAttributes, TrailAttributes},
@@ -220,6 +220,15 @@ impl LoadedTrailSection {
         let min = section.bounds.min.cast();
         let max = section.bounds.max.cast();
         Box3::new(min, max)
+    }
+
+    pub fn is_visible(&self) -> bool {
+        match self {
+            // XXX: empty may be a stub indicating geometry unloaded in future...
+            #[cfg(todo)]
+            Self { point_count, .. } => *point_count > 0,
+            Self { bounds, .. } => bounds.min.x.to_bits() != IRRELEVANT_MIN.to_bits()
+        }
     }
 }
 

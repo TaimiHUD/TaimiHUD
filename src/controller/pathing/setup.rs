@@ -4,16 +4,18 @@ use {
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
             shared::{MapPackInfo, SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
             visible::LoadedMapPack,
+            state::{LoadedPackInfo, LoadedMapInfoStorage},
             PathingController,
             PathingEvent,
+            PathingReceiver,
         },
         exports::runtime as rt,
         settings::{Settings, SourceKind},
     },
     anyhow::{anyhow, Context},
     futures::stream::{self, Stream, StreamExt},
-    std::{collections::BTreeSet, future::Future, iter, path::Path, sync::Arc},
-    taimi_hoard::loc::{LocationRef, Locator},
+    std::{collections::{BTreeSet, BTreeMap}, future::Future, iter, path::Path, sync::Arc},
+    taimi_hoard::loc::{LocationRef, LocationMut, Locator},
     taimi_meta::packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
     taimi_pack::Pack,
     taimi_sync::watched::watch,
@@ -30,6 +32,105 @@ impl PathingController {
         path: PackPath,
         loaded: Result<PackActivateLoaded, Option<UnloadedReason>>,
     ) {
+    }
+    pub(super) fn process_pack_activate(&mut self, path: PackPath) {
+        match self.packs.lookup_ref(&path).map(|p| p.unloaded.as_ref()) {
+            Some(Some(reason)) if reason.can_reactivate(false) => (),
+            Some(None) if Self::pack_data_if_loaded(&self.loader, path).is_none() => (),
+            Some(None) => {
+                log::info!("ignoring duplicate activate request for {path}");
+                return
+            },
+            Some(Some(reason)) => {
+                log::info!("refusing to activate {path}, requires reload due to {reason}");
+                return
+            },
+            None => {
+                log::warn!("activate requested for missing {path}");
+                return
+            },
+        }
+        self.request_pack_loads(path.into());
+    }
+    pub(super) fn process_pack_reload(&mut self, path: PackPath, remove: bool) {
+        if remove {
+            // TODO: actually remove then request load via file+datasource path?
+            self.pack_unload(Some(UnloadedReason::Pending), &mut iter::once(path));
+        }
+        self.request_pack_loads(path.into());
+    }
+    pub(super) fn process_pack_deactivate(&mut self, path: PackPath) {
+        self.pack_unload(None, &mut iter::once(path));
+    }
+    pub(super) fn process_pack_unload(&mut self, path: PackPath, remove: bool) {
+        let reason = match remove {
+            true => UnloadedReason::Gravestone,
+            false => UnloadedReason::Disabled,
+        };
+        self.pack_unload(Some(reason), &mut iter::once(path));
+    }
+    pub(super) async fn process_pack_reload_all(&mut self, remove: bool) {
+        let reason = match remove {
+            true => UnloadedReason::Disabled,
+            false => UnloadedReason::Pending,
+        };
+        let pack_disabled_by_setting = |_path| false;
+        let all_packs: PackSet = self.packs.packs.iter_mut().filter_map(|(path, pack)| match &pack.unloaded {
+            Some(UnloadedReason::Disabled) if pack_disabled_by_setting(path) => None,
+            Some(UnloadedReason::Gravestone) => None,
+            _ => Some(path),
+        }).collect();
+        if remove {
+            self.loader.shared.packs.packs.send_if_modified(|packs| {
+                for (path, pack) in packs.iter_mut() {
+                    if !all_packs.contains(path) { continue }
+                    pack.unload_info();
+                }
+                false
+            });
+        }
+        self.pack_unload(Some(reason), &mut all_packs.iter());
+        self.request_pack_loads(all_packs);
+    }
+    pub(super) fn process_pack_unload_all(&mut self, remove: bool) {
+        let all_packs: PackSet = self.packs.packs.iter().filter_map(|(path, pack)| match &pack.unloaded {
+            None | Some(UnloadedReason::Loading) | Some(UnloadedReason::Pending) => Some(path),
+            Some(..) => None,
+        }).collect();
+        let reason = match remove {
+            true => UnloadedReason::Gravestone,
+            false => UnloadedReason::Disabled,
+        };
+        self.pack_unload(Some(reason), &mut all_packs.iter());
+    }
+    /// TODO: take a cloneable/rewindable iter or just a packset will be fine...
+    fn pack_unload(&mut self, reason: Option<UnloadedReason>, paths: &mut dyn Iterator<Item = PackPath>) {
+        let paths = paths.collect::<PackSet>();
+        let packs = &mut self.packs;
+        let map_info = &mut self.map_info;
+        let loader = &self.loader;
+        let reason = &reason;
+        let updates = paths.iter().map(move |path| {
+            if let Some(pack) = packs.lookup_mut(&path) {
+                // TODO: check if sane to do so?
+                pack.unloaded = reason.clone();
+            }
+            match reason {
+                None | Some(UnloadedReason::Pending) | Some(UnloadedReason::Loading) => (),
+                Some(..) => {
+                    map_info.map_info.retain(|p, _| p.root != path);
+                },
+            }
+            (path, Err(reason.clone()))
+        });
+        self.loader
+            .shared
+            .packs
+            .update_packs_loaded(&mut {updates});
+        for path in &paths {
+            self.cleanup_pack_subresources(path, reason.as_ref());
+        }
+        self.maps.prune(Some(&self.map_info));
     }
 
     pub(super) fn preload_all(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -195,50 +296,97 @@ impl PathingController {
         let map_packs = self
             .packs
             .on_map(map_id)
-            .filter_map(|(path, pack)| {
-                if pack.is_loaded() {
-                    Some(path)
-                } else {
-                    if pack.can_reload() {
-                        need_load.insert(path);
-                    }
-                    None
-                }
-            })
+            .map(|(p, _)| p)
             .collect::<PackSet>();
         self.map_info.prune(Some(&self.packs));
         self.maps.prune(Some(&self.map_info));
-        self.loader.shared.update_map_id(Some(map_id), false);
-        let mut shared_map_dirty = false;
+        let mut shared_map_dirty = self.loader.shared.update_map_id(Some(map_id), false);
         for path in &map_packs {
             let map_path = path.rel(map_id);
-            shared_map_dirty |= self.prepare_for_pack_map(map_path, false);
+            shared_map_dirty |= match self.prepare_for_pack_map(map_path, false) {
+                Ok(dirty) => dirty,
+                Err(()) => match self.packs.lookup_ref(&path) {
+                    Some(LoadedPackInfo { unloaded: Some(reason), .. }) if !reason.can_reactivate(false) =>
+                        continue,
+                    Some(LoadedPackInfo { unloaded: None | Some(..), .. }) => {
+                        need_load.insert(path);
+                        continue
+                    },
+                    None => continue,
+                },
+            };
         }
-        if
-        /*shared_map_dirty*/
-        true {
+        if shared_map_dirty {
             self.loader.shared.update_map_notify(map_id);
         }
         self.packs.age_tick(Some(&self.map_info));
         self.request_pack_loads(need_load);
     }
-    pub(super) fn prepare_for_pack_map(&mut self, map_path: PackMapPath, notify: bool) -> bool {
-        let Some((data, pack_info, info)) = Self::pack_data_if_loaded(&self.loader, map_path.root) else {
-            return false
-        };
-        let info_sig = info.sig;
-        let map_info = self.map_info.write(map_path);
-        if map_info.info_sig != info_sig {
-            map_info.set_info(MapPackInfo::with_pack(map_path.path, &data, &pack_info));
+    pub(super) fn prepare_for_pack_map(&mut self, map_path: PackMapPath, notify: bool) -> Result<bool, ()> {
+        let pack_data = Self::pack_data_if_loaded(&self.loader, map_path.root);
+        let info = if let Some((data, pack_info, info)) = &pack_data {
+            if self.map_info.lookup_ref(&map_path).is_none() {
+                // just in case, maybe we should check?
+                let any_pois = data.pois.iter().any(|poi| poi.map_id == map_path.path.get() as i32);
+                let any_trails = data.trails.iter().any(|trail| trail.map_id == Some(map_path.path.get() as i32));
+                if !any_pois && !any_trails {
+                    return Ok(false)
+                }
+            }
+            let map_info = self.map_info.write(map_path);
+            let map = self.maps.write(map_path);
+            Some(((&**pack_info, &**info), map, map_info, Some(&**data)))
+        } else if let Some((pack_info, info)) = self.packs.lookup_info(map_path.root) {
+            if let Some((map, map_info)) = self.maps.lookup_mut_with_info_mut(&mut self.map_info, &map_path) {
+                Some(((&**pack_info, &*info.info), map, map_info, None))
+            } else {
+                None
+            }
+        } else { None };
+        let (dirty, map, map_info) = if let Some((info, map, map_info, data)) = info {
+            Self::prepare_map_for_pack(&self.rx, map_path, info, data, map, map_info)
+                .map(move |dirty| (dirty, map, map_info))
+        } else {
+            Err(())
+        }?;
+
+        let map_dirty = self.loader
+            .shared
+            .update_map(map_path, &map_info.info, &*map, notify);
+        Ok(dirty | map_dirty)
+    }
+    fn init_map_for_pack(
+        map_path: PackMapPath,
+        (pack_info, info): (&PackInfo, &SharedPackInfo),
+        data: Option<&Pack>,
+        map: &mut LoadedMapPack,
+        map_info: &mut LoadedMapInfoStorage,
+    ) -> Result<bool, ()> {
+        if let Some(data) = data {
+            Ok(Self::init_map_for_pack_data(map_path, (pack_info, info), data, map, map_info))
+        } else if map_info.info_sig.is_empty() || map.info_sig.is_empty() {
+            return Err(())
+        } else {
+            Ok(false)
         }
-        let map = self.maps.write(map_path);
-        if map.info_sig != info_sig {
-            *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
+    }
+    fn prepare_map_for_pack(
+        rx: &PathingReceiver,
+        map_path: PackMapPath,
+        (pack_info, info): (&PackInfo, &SharedPackInfo),
+        data: Option<&Pack>,
+        map: &mut LoadedMapPack,
+        map_info: &mut LoadedMapInfoStorage,
+    ) -> Result<bool, ()> {
+        let mut dirty = Self::init_map_for_pack(map_path, (pack_info, info), data, map, map_info)?;
+        #[cfg(todo)]
+        if !dirty {
+            // what if config is dirty though? :<
+            return Ok(false)
         }
         let vis_dirty = {
             // TODO: if config is going to trigger update immediately after, this may be unnecessary?
-            let config = self
-                .loader
+            let config = rx
                 .shared
                 .packs
                 .packs
@@ -248,7 +396,7 @@ impl PathingController {
                 .map(|p| p.config.clone());
             let config = config.as_ref().map(|c| c.borrow());
             if let Some(config) = config {
-                if config.info_sig == info_sig {
+                if config.info_sig == info.sig {
                     let damage =
                         map.update_category_config(&*map_info, &pack_info.categories, &config.config);
                     if let Ok(true) = &damage {
@@ -270,17 +418,33 @@ impl PathingController {
             }
         };
         if vis_dirty {
-            Self::update_loaded_visibility_inner(
+            dirty |= Self::update_loaded_visibility_inner(
                 map_path,
                 map,
                 &*map_info,
-                Some(&self.rx.get_filter_state()),
+                Some(&rx.get_filter_state()),
             );
         }
 
-        self.loader
-            .shared
-            .update_map(map_path, &map_info.info, &*map, notify)
+        Ok(dirty)
+    }
+    fn init_map_for_pack_data(
+        map_path: PackMapPath,
+        (pack_info, info): (&PackInfo, &SharedPackInfo),
+        data: &Pack,
+        map: &mut LoadedMapPack,
+        map_info: &mut LoadedMapInfoStorage,
+    ) -> bool {
+        let mut dirty = false;
+        if map_info.info_sig != info.sig {
+            map_info.set_info(MapPackInfo::with_pack(map_path.path, &data, &pack_info));
+            dirty = true;
+        }
+        if map.info_sig != info.sig {
+            *map = LoadedMapPack::from_pack(map_path.path, &*map_info, &data);
+            dirty = true;
+        }
+        dirty
     }
 
     fn pack_data_if_loaded(
@@ -304,6 +468,9 @@ impl PathingController {
         }
         for path in &packs {
             self.packs.mark_used(path);
+            if let Some(pack) = self.packs.lookup_mut(&path) {
+                let _ = pack.unloaded.get_or_insert_with(|| UnloadedReason::Loading);
+            }
         }
         let loads = Self::new_task_pack_loads(self.loader.clone(), packs);
         let _cancel = self.tasks.spawn(loads);
@@ -349,11 +516,17 @@ impl PathingController {
         // TODO: parallel loading and batch shared updates
         for (i, activate) in pending_packs {
             let res = match activate {
-                Ok(activate) => activate
-                    .load(&manager)
-                    .await
-                    .inspect_err(|e| log::error!("{e:#}"))
-                    .map_err(|e| UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e))),
+                Ok(activate) => {
+                    manager
+                        .shared
+                        .packs
+                        .update_packs_loaded(&mut iter::once((i, Err(Some(UnloadedReason::Loading)))));
+                    activate
+                        .load(&manager)
+                        .await
+                        .inspect_err(|e| log::error!("{e:#}"))
+                        .map_err(|e| UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e)))
+                    },
                 Err(e) => Err(e),
             };
             match res {
@@ -400,8 +573,34 @@ impl PathingController {
     pub(super) fn post_prepare_map(&mut self, ctx: &mut PathingEventContext, path: PackMapPath) {
         self.mark_hidden_dirty(ctx, Some(path));
     }
+    /// TODO: find associated in-flight loaders to cancel?
+    pub(super) fn cleanup_pack_subresources(&self, path: PackPath, reason: Option<&UnloadedReason>) {
+        self.loader.cleanup_pack_subresources(path, reason)
+    }
 }
 impl PackLoader {
+    pub(super) fn cleanup_pack_subresources(&self, path: PackPath, reason: Option<&UnloadedReason>) {
+        let keys = {
+            let packs = self.shared.packs.packs.borrow();
+            packs.lookup_ref(&path).map(|pack| pack.info.drain_subresource_keys())
+        };
+        let Some(keys) = keys else {
+            log::warn!("can't cleanup missing {path}");
+            return
+        };
+        let mut keys = keys.into_iter().peekable();
+        if keys.peek().is_none() {
+            return
+        }
+        let keys = keys.map(|(name, key)| (key, name))
+            .collect::<BTreeMap<_, _>>();
+        let cleanup = match reason {
+            Some(reason) if !reason.can_reactivate(false) => true,
+            _ => false,
+        };
+        crate::TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.contains_key(key));
+    }
+
     pub(super) fn update_map_states(
         &self,
         notify: bool,

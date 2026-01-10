@@ -724,6 +724,12 @@ pub fn anyhow_into_arc(e: anyhow::Error) -> Arc<DynError> {
     error_into_arc(anyhow_into_box(e))
 }
 #[inline]
+#[track_caller]
+/// TODO
+pub fn anyhow_clone(e: &anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!("{e:#}")
+}
+#[inline]
 pub fn error_into_box<E>(e: E) -> Box<DynError>
 where
     E: Into<Box<DynError>>,

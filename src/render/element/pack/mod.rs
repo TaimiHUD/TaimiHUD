@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackCategoryFlags, PackInfoSignature, PackVecOf, UnloadedReason},
+                registry::{PackInfoSignature, PackVecOf, UnloadedReason},
                 shared::{
                     PathingShared,
                     SharedLoaderPacksInfo,
@@ -215,7 +215,9 @@ pub struct PackElementState {
     pub unloaded: Option<UnloadedReason>,
     pub pack: Option<Weak<Pack>>,
 
-    /// TODO: deleteme (info.categories is relied on too heavily atm)
+    /// info.categories is relied on too heavily atm for this to be useful
+    category_flags: Option<()>,
+    #[cfg(todo)]
     pub category_flags: Option<PackCategoryFlags>,
     pub display_name: String,
     pub id_name: String,
@@ -304,6 +306,31 @@ impl PackElementState {
 
     pub fn pack_data(&self) -> Option<Arc<Pack>> {
         self.pack.as_ref().and_then(Weak::upgrade)
+    }
+
+    pub fn activate_pack_data(&self) -> Result<Option<Arc<Pack>>, ()> {
+        if let Some(pack_data) = self.pack_data() {
+            return Ok(Some(pack_data))
+        }
+        let can_reactivate = match self.unloaded.as_ref() {
+            Some(u) => u.can_reactivate(false),
+            None => match self.loaded.borrow().pack.clone() {
+                Some(pack) => return Ok(Some(pack)),
+                None => true,
+            },
+        };
+        match can_reactivate {
+            true => {
+                self.request_activate_data();
+                Ok(None)
+            },
+            false => Err(())
+        }
+    }
+    fn request_activate_data(&self) -> bool {
+        PathingController::try_send(
+            PathingEvent::LoadPack(self.pack_path())
+        )
     }
 }
 

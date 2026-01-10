@@ -95,8 +95,20 @@ impl SharedPacks {
         self.packs.send_if_modified(|shared| {
             let mut changed = false;
             for (path, loaded) in loaded {
-                if let Err(Some(reason)) = &loaded {
-                    log::error!("failed to load {path}: {reason}");
+                match &loaded {
+                    Err(None) => {
+                        log::debug!("marked {path}: deactivated");
+                    },
+                    Err(Some(reason @ (UnloadedReason::Pending | UnloadedReason::Loading))) => {
+                        log::debug!("marked {path}: {reason}");
+                    },
+                    Ok(..) => {
+                        log::debug!("marked {path}: loaded");
+                    },
+                    Err(Some(reason)) => {
+                        log::error!("failed to load {path}: {reason}");
+                    },
+                    _ => (),
                 }
                 let Some(pack) = shared.lookup_mut(&path) else {
                     log::warn!("nonexistent pack update for {path}?");
@@ -287,8 +299,11 @@ impl SharedPackLoaded {
     pub fn unload(&mut self, reason: Option<UnloadedReason>) {
         self.unloaded = reason;
         self.pack = None;
-        if self.unloaded.is_some() {
-            self.loader = None;
+        match self.unloaded {
+            Some(UnloadedReason::Loading | UnloadedReason::Pending) | None => (),
+            Some(..) => {
+                self.loader = None;
+            },
         }
     }
 }
@@ -595,5 +610,6 @@ pub enum LoadReport {
     Texture {
         path: LoadedMarkerPath<PackMapPath>,
         texture: anyhow::Result<TextureKey>,
+        resource: Option<AttrString>,
     },
 }

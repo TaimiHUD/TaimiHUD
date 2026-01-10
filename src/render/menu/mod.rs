@@ -207,8 +207,12 @@ impl RenderState {
                 if with_i18n!("reload-packs", |msg| Selectable::new(&msg).build(ui)) {
                     PathingEvent::ReloadAll(true).try_send();
                 }
-                if with_i18n!("unload-packs", |msg| Selectable::new(&msg).build(ui)) {
-                    PathingEvent::UnloadAll.try_send();
+                if with_i18n!("deactivate-packs", |msg| Selectable::new(&msg).build(ui)) {
+                    PathingEvent::UnloadAll(false).try_send();
+                }
+                #[cfg(todo = "unnecessary")]
+                if with_i18n!("remove-packs", |msg| Selectable::new(&msg).build(ui)) {
+                    PathingEvent::UnloadAll(true).try_send();
                 }
             }
             if with_i18n!("toggle", |msg| Selectable::new(&msg).build(ui)) {

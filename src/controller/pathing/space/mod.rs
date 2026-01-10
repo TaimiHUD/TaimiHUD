@@ -24,11 +24,11 @@ use {
     },
     anyhow::Context,
     futures::future::{Either, Future},
-    std::{collections::BTreeSet, sync::Arc},
+    std::{collections::{btree_map, BTreeSet, BTreeMap}, sync::{Arc, Mutex}},
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},
-        PackMapPath,
+        PackMapPath, PackPath,
     },
     taimi_pack::{
         attributes::AttrString,
@@ -36,6 +36,7 @@ use {
         trail::{TrailData, TrlPath},
     },
     taimi_sync::watched::watch,
+    tokio::task::AbortHandle,
 };
 
 #[doc(inline)]
@@ -58,6 +59,7 @@ pub struct SpaceContext {
     pub trail_geometry: TrailGeometryRequests,
     pub texture_loads: TextureLoadRequests,
     pub inflight: BTreeSet<MarkerId>,
+    inflight_resources: InflightResources,
 }
 impl SpaceContext {
     pub fn subscribe_to(shared: &PathingShared) -> Self {
@@ -68,6 +70,7 @@ impl SpaceContext {
             inflight: BTreeSet::new(),
             packs: space.collection.borrow().clone(),
             maps_rx: shared.gameplay.subscribe(),
+            inflight_resources: Default::default(),
         }
     }
     pub fn mark_inputs_dirty(&mut self) {
@@ -100,7 +103,7 @@ impl SpaceContext {
 
     pub(crate) fn report_load(&mut self, loaded: LoadReport) {
         match loaded {
-            LoadReport::Texture { path, texture } => {
+            LoadReport::Texture { path, texture, resource: _ } => {
                 let id = MarkerId::for_marker(path);
                 self.inflight.remove(&id);
                 let texture = rt::log::error_ok(texture);
@@ -179,10 +182,10 @@ impl PathingController {
             Some((trl.clone(), attrs.scale(), attrs.is_wall()))
         })
     }
-    pub(super) fn request_texture_load(&mut self, id: MarkerId) {
+    pub(super) fn request_texture_load(&mut self, id: MarkerId) -> bool {
         if !self.space.inflight.insert(id.clone()) {
-            log::info!("duplicate load request for {id}");
-            return
+            log::debug!("duplicate load request for {id}");
+            return false
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
             let texture = self
@@ -194,13 +197,31 @@ impl PathingController {
         let Some((path, texture)) = path else {
             log::error!("invalid texture load request for {id}");
             self.space.inflight.remove(&id);
-            return
+            return false
         };
         if texture.is_none() {
             log::error!("maps missing {path} but tex requested???");
         }
-        let load = Self::new_task_texture_load(self.loader.clone(), path, texture.flatten());
-        let _cancel = self.tasks.spawn(load);
+        let texture = texture.flatten();
+        let resources = self.space.inflight_resources.clone();
+        let acq_loader = {
+        let r = texture.as_ref().map(|texture| (texture, resources.lock()));
+                if let Some((tex, Ok(mut resources))) = r {
+                InflightResource::acquire_loader(&mut resources, id, (path.root.root, RequestKind::Texture), tex)
+            } else {
+                true
+            }
+        };
+        if acq_loader {
+            let load = Self::new_task_texture_load(self.loader.clone(), resources, path, id, texture.clone());
+            let resources = texture.map(|t| (t, self.space.inflight_resources.lock()));
+            let cancel = self.tasks.spawn(load);
+            if let Some((texture, Ok(mut resources))) = resources {
+                let resource = resources.entry((path.root.root, RequestKind::Texture, texture)).or_default();
+                let _ = resource.loader.get_or_insert(cancel);
+            }
+        }
+        acq_loader
     }
     pub(super) fn request_trail_load(&mut self, id: MarkerId) {
         if !self.space.inflight.insert(id.clone()) {
@@ -289,10 +310,38 @@ impl PathingController {
 
     fn new_task_texture_load(
         manager: Arc<PackLoader>,
+        resources: InflightResources,
         path: LoadedMarkerPath<PackMapPath>,
+        id: MarkerId,
         texture: Option<AttrString>,
     ) -> impl Future<Output = anyhow::Result<PathingEvent>> + Send + 'static {
-        Self::task_texture_load(manager, path, texture)
+        async move {
+            let pack_path = path.root.root;
+            let res = Self::task_texture_load(manager, path, texture).await;
+            match res {
+                Ok(PathingEvent::ReportResourceLoaded(LoadReport::Texture { path, texture, resource: Some(tex) })) => {
+                    let mut r = resources.lock().ok();
+                    let resource = r.as_mut().and_then(|r| r.remove(&(pack_path, RequestKind::Texture, tex.clone())))
+                        .map(|r| (r.inflight.len() != 1 || !r.inflight.contains(&id)).then_some(r))
+                        .flatten();
+                    let res = if let Some(resource) = resource {
+                        let res = resource.inflight.iter().filter_map(|id| id.marker_path::<PackMapPath>())
+                            .map(|path| {
+                                let texture = match &texture {
+                                    Ok(t) => Ok(t.clone()),
+                                    Err(e) => Err(rt::log::anyhow_clone(e)),
+                                };
+                                LoadReport::Texture { path, texture, resource: Some(tex.clone()) }
+                            }).map(PathingEvent::ReportResourceLoaded);
+                        PathingEvent::FanOut(res.collect())
+                    } else {
+                        PathingEvent::ReportResourceLoaded(LoadReport::Texture { path, texture, resource: Some(tex) })
+                    };
+                    Ok(res)
+                },
+                res => res,
+            }
+        }
     }
     async fn task_texture_load(
         manager: Arc<PackLoader>,
@@ -309,19 +358,29 @@ impl PathingController {
             .context("pack unrecognized")?
             .info
             .clone();
-        let tex = texture.with_context(|| format!("TODO: late-load texture path for {path}"))?;
+        let tex = match texture {
+            Some(tex) => tex,
+            None => {
+                // we could check now but there are currently no meaningful scenarios where a loaded marker
+                // would be missing its attrs at request time, so...
+                // XXX: if we do late-load eventually, make sure to 
+                anyhow::bail!("TODO: late-load texture path for {path}")
+            },
+        };
         let mut loader = loader.lock_owned().await;
-        let texture = Controller::try_run_blocking("texture resource load", move || {
-            let texture = Self::register_shared_texture(&info, &tex);
-            let (key, _slot) = Self::get_or_load_shared_texture(&mut *loader, texture);
-            Ok(key)
-        })
-        .await;
+        let texture = Controller::try_run_blocking("texture resource load", {
+            let tex = tex.clone();
+             move || {
+                let texture = Self::register_shared_texture(&info, &tex);
+                let (key, _slot) = Self::get_or_load_shared_texture(&mut *loader, texture);
+                Ok(key)
+             }
+        }).await;
         #[cfg(todo = "unnecessary")]
         if texture.is_err() {
             TEXTURES.report_failure(info.subresource_key(&tex));
         }
-        let response = LoadReport::Texture { path, texture };
+        let response = LoadReport::Texture { path, texture, resource: Some(tex) };
         Ok(PathingEvent::ReportResourceLoaded(response))
     }
 
@@ -454,3 +513,31 @@ impl PathingController {
     }
 }
 type SpaceTextureHandle = (TextureKey, Result<TextureSlot, AttrString>);
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum RequestKind {
+    TrlData,
+    Texture,
+}
+type InflightResourcesMap = BTreeMap<(PackPath, RequestKind, AttrString), InflightResource>;
+type InflightResources = Arc<Mutex<InflightResourcesMap>>;
+#[derive(Debug, Default)]
+struct InflightResource {
+    loader: Option<AbortHandle>,
+    inflight: BTreeSet<MarkerId>,
+}
+impl InflightResource {
+    fn acquire_loader(resources: &mut InflightResourcesMap, id: MarkerId, (path, kind): (PackPath, RequestKind), key: &AttrString) -> bool {
+        #[cfg(todo = "unnecessary")]
+        if loader.is_none() { return true }
+        #[cfg(todo)]
+        if let Some(resource) = resources.get_mut(&(path, kind, key)) {
+            resource.inflight.insert(id);
+            return false
+        }
+        let resource = resources.entry((path, kind, key.clone()));
+        let acq = matches!(resource, btree_map::Entry::Vacant(..));
+        let resource = resource.or_default();
+        resource.inflight.insert(id);
+        acq
+    }
+}

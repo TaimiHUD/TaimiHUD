@@ -155,8 +155,11 @@ impl PathingWindowState {
             PathingEvent::ReloadAll(true).try_send();
         }
         ui.same_line();
-        if with_i18n!("unload-packs", |msg| ui.button(msg)) {
-            PathingEvent::UnloadAll.try_send();
+        if with_i18n!("deactivate-packs", |msg| ui.button(msg)) {
+            PathingEvent::UnloadAll(false).try_send();
+        }
+        if with_i18n!("remove-packs", |msg| ui.button(msg)) {
+            PathingEvent::UnloadAll(true).try_send();
         }
     }
     pub fn draw_categories_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {

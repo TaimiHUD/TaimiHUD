@@ -164,6 +164,15 @@ impl LoadedMaps {
             .entry(path)
             .or_insert_with(|| LoadedMapPack::empty(path.path))
     }
+    pub fn write_with_info<'a, 'i>(
+        &'a mut self,
+        map_info: &'i mut LoadedMapInfo,
+        path: PackMapPath,
+    ) -> (&'a mut LoadedMapPack, &'i mut LoadedMapInfoStorage) {
+        let map = self.write(path);
+        let info = map_info.write(path);
+        (map, info)
+    }
 
     /// TODO: 4 may be more reasonable
     const USED_THRESHOLD: u32 = 5;
@@ -215,6 +224,16 @@ impl LoadedMaps {
         map_info
             .lookup_ref(path)
             .map(move |map_info| (map, &map_info.info))
+    }
+    pub fn lookup_mut_with_info_mut<'a, 'i>(
+        &'a mut self,
+        map_info: &'i mut LoadedMapInfo,
+        path: &'_ PackMapPath,
+    ) -> Option<(&'a mut LoadedMapPack, &'i mut LoadedMapInfoStorage)> {
+        let map = self.lookup_mut(path)?;
+        map_info
+            .lookup_mut(path)
+            .map(move |map_info| (map, map_info))
     }
     pub fn iter_pack<'a>(
         &'a self,
@@ -392,9 +411,9 @@ impl LoadedPacks {
         self.packs.lookup_extend_with(path.path, LoadedPackInfo::default)
     }
 
-    pub fn lookup_info(&self, path: PackPath) -> Option<(&LoadedPackInfo, &Arc<PackInfo>)> {
+    pub fn lookup_info(&self, path: PackPath) -> Option<(&Arc<PackInfo>, &LoadedPackInfo)> {
         self.lookup_ref(&path)
-            .and_then(|info| info.info.info.as_ref().map(|i| (info, i)))
+            .and_then(|info| info.info.info.as_ref().map(|i| (i, info)))
     }
 
     pub fn need_load(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
