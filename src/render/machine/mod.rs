@@ -105,6 +105,7 @@ pub struct RenderMachine {
     pub display_size: Size2<ScreenSpace>,
     #[cfg(feature = "paths")]
     pub pathing: Option<Arc<PathingShared>>,
+    /// TODO: what this for anymore?
     #[cfg(feature = "paths")]
     pub pack_map: Watched<SharedGameplayMap>,
     #[cfg(feature = "paths")]
