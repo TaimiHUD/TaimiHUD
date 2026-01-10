@@ -34,6 +34,7 @@ use {
     },
     std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc},
     strum_macros::Display,
+    taimi_hoard::loc::LocationRef,
     taimi_meta::{
         packs::{
             collections::{CategorySet, PackSet},
@@ -48,7 +49,6 @@ use {
     },
     taimi_pack::attributes::Festivals,
     taimi_sync::watched::watch,
-    taimi_hoard::loc::LocationRef,
     tokio::{select, task::JoinSet},
 };
 
@@ -460,18 +460,12 @@ impl PathingController {
         use PathingEvent::*;
         match event {
             LoadAll => self.load_all().await,
-            LoadPack(path) =>
-                self.process_pack_activate(path),
-            OffloadPack(path) =>
-                self.process_pack_deactivate(path),
-            UnloadPack(path, remove) =>
-                self.process_pack_unload(path, remove),
-            ReloadAll(remove) =>
-                self.process_pack_reload_all(remove).await,
-            UnloadAll(remove) =>
-                self.process_pack_unload_all(remove),
-            ReloadPack(path, remove) =>
-                self.process_pack_reload(path, remove),
+            LoadPack(path) => self.process_pack_activate(path),
+            OffloadPack(path) => self.process_pack_deactivate(path),
+            UnloadPack(path, remove) => self.process_pack_unload(path, remove),
+            ReloadAll(remove) => self.process_pack_reload_all(remove).await,
+            UnloadAll(remove) => self.process_pack_unload_all(remove),
+            ReloadPack(path, remove) => self.process_pack_reload(path, remove),
             CategoryEnableSet(pack_path, cat, state) =>
                 Self::handle_toggle(&self.loader, pack_path.rel(cat.path), state).await,
             CategoryEnableCommit(pack_path, cats) => {

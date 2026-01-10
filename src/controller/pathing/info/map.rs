@@ -388,7 +388,9 @@ impl MapTrailInfo {
             .zip(iter::repeat(0.0).map(move |fallback| y_offsets.next().unwrap_or(fallback)))
     }
 
-    pub fn section_bounds(&self) -> impl Iterator<Item = (TrailSectionPath, &LoadedTrailSection, Box3<DrawSpace>)> {
+    pub fn section_bounds(
+        &self,
+    ) -> impl Iterator<Item = (TrailSectionPath, &LoadedTrailSection, Box3<DrawSpace>)> {
         let mut y_offsets = self.get_y_offsets();
         self.sections().iter().map(move |(path, section)| {
             let mut bounds = section.bounds;

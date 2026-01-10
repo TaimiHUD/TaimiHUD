@@ -324,13 +324,11 @@ impl PackElementState {
                 self.request_activate_data();
                 Ok(None)
             },
-            false => Err(())
+            false => Err(()),
         }
     }
     fn request_activate_data(&self) -> bool {
-        PathingController::try_send(
-            PathingEvent::LoadPack(self.pack_path())
-        )
+        PathingController::try_send(PathingEvent::LoadPack(self.pack_path()))
     }
 }
 

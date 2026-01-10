@@ -177,7 +177,8 @@ impl DrawPackUnloaded<'_, '_> {
         if hovered {
             match reason {
                 #[cfg(todo = "unnecessary")]
-                Some(UnloadedReason::Pending) => with_i18n!("render-notice-gameplay", |msg| ui.tooltip_text(msg)),
+                Some(UnloadedReason::Pending) =>
+                    with_i18n!("render-notice-gameplay", |message| ui.tooltip_text(message)),
                 reason => {
                     Self::with_reason_details(reason, |details| ui.tooltip_text(details));
                 },
@@ -490,8 +491,14 @@ impl super::PackElement {
             let msg = act.as_pathing_message(self.state.pack_path());
             match act {
                 PackAction::OFFLOAD => {
-                    let roots = self.state.info.info.as_ref().map(|i| i.roots.iter())
-                        .into_iter().flatten();
+                    let roots = self
+                        .state
+                        .info
+                        .info
+                        .as_ref()
+                        .map(|i| i.roots.iter())
+                        .into_iter()
+                        .flatten();
                     for root in roots {
                         self.categories.open_mask.remove_at(root.path());
                     }

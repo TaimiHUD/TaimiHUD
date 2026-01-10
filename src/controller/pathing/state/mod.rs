@@ -231,9 +231,7 @@ impl LoadedMaps {
         path: &'_ PackMapPath,
     ) -> Option<(&'a mut LoadedMapPack, &'i mut LoadedMapInfoStorage)> {
         let map = self.lookup_mut(path)?;
-        map_info
-            .lookup_mut(path)
-            .map(move |map_info| (map, map_info))
+        map_info.lookup_mut(path).map(move |map_info| (map, map_info))
     }
     pub fn iter_pack<'a>(
         &'a self,

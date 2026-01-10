@@ -227,7 +227,7 @@ impl LoadedTrailSection {
             // XXX: empty may be a stub indicating geometry unloaded in future...
             #[cfg(todo)]
             Self { point_count, .. } => *point_count > 0,
-            Self { bounds, .. } => bounds.min.x.to_bits() != IRRELEVANT_MIN.to_bits()
+            Self { bounds, .. } => bounds.min.x.to_bits() != IRRELEVANT_MIN.to_bits(),
         }
     }
 }

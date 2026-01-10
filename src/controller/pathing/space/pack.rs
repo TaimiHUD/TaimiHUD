@@ -514,8 +514,13 @@ impl SpacePackCollection {
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
     ) -> Result<(), bool> {
-        let EntityUpdateReport { removed, mut unallocated, mut dirty, hidden, .. } =
-            self.prepare_entity_update(map_id, packs, map_info, maps);
+        let EntityUpdateReport {
+            removed,
+            mut unallocated,
+            mut dirty,
+            hidden,
+            ..
+        } = self.prepare_entity_update(map_id, packs, map_info, maps);
         self.map_id = Some(map_id);
 
         let prev_entities_end = self.render_entities.entities.len();
@@ -555,16 +560,17 @@ impl SpacePackCollection {
                     true => None,
                 })
                 .flat_map(move |((ltrail_path, _ltrail), trail_info)| {
-                    trail_info.section_bounds()
+                    trail_info
+                        .section_bounds()
                         .filter(move |(_, section, _)| section.is_visible())
                         .map(move |(section_path, _, bounds)| {
-                        let ts_path: LoadedTrailSectionPath =
-                            LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
-                        let marker_path: MarkerPath = ts_path.pivot_to();
-                        let mpath = path.rel(marker_path.path);
-                        let mid = MarkerId::for_marker(mpath);
-                        (mid, bounds)
-                    })
+                            let ts_path: LoadedTrailSectionPath =
+                                LoadedTrailSectionPath::with_path(ltrail_path.rel(section_path));
+                            let marker_path: MarkerPath = ts_path.pivot_to();
+                            let mpath = path.rel(marker_path.path);
+                            let mid = MarkerId::for_marker(mpath);
+                            (mid, bounds)
+                        })
                 });
             for (mid, bounds) in pois.chain(trails) {
                 let entity = SpaceEntity::new(mid, bounds);
@@ -749,20 +755,29 @@ impl EntityUpdateReport {
     fn new(map_id: MapIndex) -> Self {
         Self {
             map_id: Some(map_id),
-            .. Self::default()
+            ..Self::default()
         }
     }
-    fn retain_entities(&mut self, entities: &mut SpaceEntities, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>, cx: EntityRetainContext<'_>) {
-        let removed = entities
-            .retain(pack_data, |i, e, x, pd|
-                self.retain_entity(i, e, x, pd, cx)
-            );
+    fn retain_entities(
+        &mut self,
+        entities: &mut SpaceEntities,
+        pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>,
+        cx: EntityRetainContext<'_>,
+    ) {
+        let removed = entities.retain(pack_data, |i, e, x, pd| self.retain_entity(i, e, x, pd, cx));
         if !self.removed.is_empty() {
             log::debug!("EntityUpdateReport wasn't fresh for retain?");
         }
         self.removed = removed;
     }
-    fn retain_entity(&mut self, i: usize, e: &mut BvhShape<SpaceEntity>, extra: Option<&mut SpaceEntityExtra>, pack_data: Option<(MarkerPath<PackMapPath>, &mut SpacePack)>, (maps, map_info, bvh): EntityRetainContext<'_>) -> bool {
+    fn retain_entity(
+        &mut self,
+        i: usize,
+        e: &mut BvhShape<SpaceEntity>,
+        extra: Option<&mut SpaceEntityExtra>,
+        pack_data: Option<(MarkerPath<PackMapPath>, &mut SpacePack)>,
+        (maps, map_info, bvh): EntityRetainContext<'_>,
+    ) -> bool {
         if e.is_invalid() {
             self.unallocated.insert(i);
             return true
@@ -773,8 +788,7 @@ impl EntityUpdateReport {
             return true
         }
         match self.map_id {
-            Some(map_id) if map_path.root.path != map_id =>
-                return false,
+            Some(map_id) if map_path.root.path != map_id => return false,
             _ => (),
         }
         if pack_data.info_sig.is_empty() {
@@ -785,51 +799,45 @@ impl EntityUpdateReport {
             log::debug!("TODO: {map_path} info missing for {}", e.id);
             return false
         };
-        let (vis, bounds) =
-            match map_path.path.namespace() {
-                MarkerIndex::NS_POI => {
-                    let lpath: LoadedPoiPath =
-                        LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
-                    let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
-                    let bounds = lpoi.bounds();
-                    let bounds =
-                        if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
-                            || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
-                        {
-                            Some(bounds)
-                        } else {
-                            None
-                        };
-                    (lpoi.visibility, bounds)
-                },
-                MarkerIndex::NS_TRAIL => {
-                    let lpath: LoadedTrailPath =
-                        LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
-                    let seci = map_path.path.trail_index_unchecked();
-                    let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
-                    let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
-                    let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else {
-                        return false
-                    };
-                    let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else {
-                        return false
-                    };
-                    if !lsection.is_visible() {
-                        return false
-                    }
-                    let bounds = &lsection.bounds;
-                    let bounds =
-                        if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
-                            || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
-                        {
-                            Some(*bounds)
-                        } else {
-                            None
-                        };
-                    (ltrail.visibility, bounds)
-                },
-                _ => return true,
-            };
+        let (vis, bounds) = match map_path.path.namespace() {
+            MarkerIndex::NS_POI => {
+                let lpath: LoadedPoiPath = LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
+                let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
+                let bounds = lpoi.bounds();
+                let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
+                    || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
+                {
+                    Some(bounds)
+                } else {
+                    None
+                };
+                (lpoi.visibility, bounds)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let lpath: LoadedTrailPath =
+                    LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
+                let seci = map_path.path.trail_index_unchecked();
+                let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
+                let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
+                let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else { return false };
+                let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else {
+                    return false
+                };
+                if !lsection.is_visible() {
+                    return false
+                }
+                let bounds = &lsection.bounds;
+                let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
+                    || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
+                {
+                    Some(*bounds)
+                } else {
+                    None
+                };
+                (ltrail.visibility, bounds)
+            },
+            _ => return true,
+        };
         let activated = !e.is_bh_removed_from(bvh);
         if !vis.is_visible() {
             if activated {

@@ -395,7 +395,11 @@ impl TextureLoader {
             },
         }
     }
-    pub fn unload_textures_matching<F: FnMut(&TextureKey, &mut TextureSlot) -> bool>(&self, immediate: bool, mut f: F) {
+    pub fn unload_textures_matching<F: FnMut(&TextureKey, &mut TextureSlot) -> bool>(
+        &self,
+        immediate: bool,
+        mut f: F,
+    ) {
         let mut textures = self.textures.write().unwrap_or_else(|e| e.into_inner());
         textures.retain(|key, slot| {
             let remove = f(key, slot);
@@ -528,8 +532,7 @@ impl TextureSlot {
         Some(match self {
             #[cfg(todo)]
             #[cfg(feature = "texture-loader")]
-            Self::Inactive(t) => match Weak::upgrade(t) {
-            },
+            Self::Inactive(t) => match Weak::upgrade(t) {},
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) => ImguiTexture {
                 id,
@@ -596,7 +599,8 @@ impl TextureSlot {
             },
             Self::Nexus(..) => None,
             Self::Loaded(t) => Some(Arc::downgrade(&*t)),
-        }.unwrap_or(Weak::new());
+        }
+        .unwrap_or(Weak::new());
         let prev = self.insert_inactive(prev);
         if prev.strong_count() == 0 {
             *prev = Weak::new();
@@ -607,18 +611,14 @@ impl TextureSlot {
         *self = Self::Inactive(prev);
         match self {
             Self::Inactive(prev) => prev,
-            _ => unsafe {
-                core::hint::unreachable_unchecked()
-            },
+            _ => unsafe { core::hint::unreachable_unchecked() },
         }
     }
     pub fn insert_loaded(&mut self, texture: Arc<Texture>) -> &mut Arc<Texture> {
         *self = Self::Loaded(texture);
         match self {
             Self::Loaded(texture) => texture,
-            _ => unsafe {
-                core::hint::unreachable_unchecked()
-            },
+            _ => unsafe { core::hint::unreachable_unchecked() },
         }
     }
     #[cfg(todo)]

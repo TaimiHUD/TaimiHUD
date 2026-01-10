@@ -7,9 +7,9 @@ use {
     },
     regex::{Regex, RegexBuilder},
     std::collections::{BTreeMap, HashSet},
-    taimi_pack::Pack,
     taimi_hoard::flags::BitSet,
-    taimi_meta::packs::{CategoryPath, PackPath, PackIndex},
+    taimi_meta::packs::{CategoryPath, PackIndex, PackPath},
+    taimi_pack::Pack,
 };
 
 #[derive(Clone)]
@@ -100,7 +100,9 @@ impl PathingSearchState {
 
     pub fn matches_category(&self, path: CategoryPath<PackPath>) -> bool {
         let cat_path: CategoryPath = path.unscope();
-        self.candidate_mask.get(&path.root).map(|mask| mask.contains(cat_path))
+        self.candidate_mask
+            .get(&path.root)
+            .map(|mask| mask.contains(cat_path))
             .unwrap_or(false)
     }
 }
