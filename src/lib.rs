@@ -1161,10 +1161,24 @@ pub(crate) fn with_join_error<R, F: FnOnce(&dyn std::fmt::Display) -> R>(
     }
 }
 
+#[track_caller]
 fn panic_hook(info: &panic::PanicHookInfo) {
+    use std::backtrace::{Backtrace, BacktraceStatus};
+
     log_any_error(rt::NAME, info.payload());
+    let backtrace = match built_info::IS_TAGGED_RELEASE {
+        true => Backtrace::capture(),
+        false => Backtrace::force_capture(),
+    };
     if let Some(location) = info.location() {
         log::error!("Panic occurred in {} at {location}", rt::CRATE_NAME);
+    }
+    if backtrace.status() != BacktraceStatus::Disabled {
+        if built_info::IS_TAGGED_RELEASE_OR_RC || built_info::CI_PLATFORM.is_some() {
+            log::error!("{backtrace}");
+        } else {
+            log::error!("{backtrace:#}");
+        }
     }
 }
 
