@@ -339,6 +339,9 @@ isolate = Isolate
 unisolate = Reset adjacent
 hide = Hide
 unhide = Unhide
+pack-category = Category
+pack-root = Main { pack-category }
+pack-root-submenu = Pack Control
 
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing (Experimental)
@@ -365,6 +368,7 @@ pathing-config-textured-worldmap = Textured trails
 pathing-config-map-open = Fwoom
 pathing-config-camera-source = Camera Data Source
 pathing-config-advanced = { config-advanced }
+pathing-config-load-simultaneous = Simultaneous Load Limit
 pathing-config-trail-notice = Trail generation settings may require a map change or reload to take effect, and may not work as you might expect.
 pathing-config-trail-y-offset = Vertical Offset
 pathing-config-trail-resolution = Trail Resolution

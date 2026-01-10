@@ -66,15 +66,15 @@ impl PathingSearchState {
                     || self.matches_name(category.id().as_str())
                 {
                     let mask = self.candidate_mask.entry(path).or_default();
-                    if mask.is_empty() {
+                    if mask.as_bitslice().is_empty() {
                         mask.reserve_exact(pack.categories.all_categories.len());
                     }
                     self.search_candidates.insert(full_id.into());
-                    mask.set(idx, true);
+                    mask.insert_at(idx);
                     for sub_id in full_id.as_id().ancestors() {
                         self.search_candidates.insert(sub_id.into());
                         if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
-                            mask.set(parent_idx, true);
+                            mask.insert_at(parent_idx);
                         }
                     }
                 }

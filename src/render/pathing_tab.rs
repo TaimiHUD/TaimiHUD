@@ -130,21 +130,15 @@ impl PathingConfig {
                 }
                 None
             },
-            None if machine.gameplay.is_initial() => {
-                ui.text_wrapped(&fl!("render-notice-gameplay"));
-                None
-            },
             None => {
-                match Engine::is_available() {
-                    false => {
-                        ui.text_wrapped("Load in to the game to get started");
-                        None
-                    },
-                    true => {
-                        // shouldn't happen?
-                        None
-                    },
+                if machine.gameplay.is_initial() {
+                    with_i18n!("render-notice-gameplay-initial", |msg| ui.text_wrapped(&msg));
+                } else if !Engine::is_available() {
+                    with_i18n!("render-notice-gameplay", |msg| ui.text_wrapped(&msg));
+                } else {
+                    // shouldn't happen?
                 }
+                None
             },
             Some(e) => {
                 if !Engine::is_available() {
@@ -215,10 +209,24 @@ impl PathingConfig {
         }
     }
 
-    fn slider_setting(ui: &Ui, label: &str, mut value: f32, (min, max): (f32, f32)) -> Option<Option<f32>> {
-        let changed = Slider::new(label, min, max).build(ui, &mut value);
-        // TODO: right-click to reset or something?
-        match changed {
+    fn slider_setting(ui: &Ui, label: &str, value: f32, range: (f32, f32)) -> Option<Option<f32>> {
+        Self::slider_setting_inner(ui, label, value, range, None)
+    }
+    fn slider_setting_int(ui: &Ui, label: &str, value: i32, (min, max): (i32, i32)) -> Option<Option<i32>> {
+        let range = (min as f32, max as f32);
+        match Self::slider_setting_inner(ui, label, value as f32, range, Some("%.0f")) {
+            Some(Some(new)) => Some(Some(new as i32)),
+            Some(None) => Some(None),
+            None => None,
+        }
+    }
+    fn slider_setting_inner(ui: &Ui, label: &str, mut value: f32, (min, max): (f32, f32), fmt: Option<&str>) -> Option<Option<f32>> {
+        let changed = Slider::new(label, min, max);
+        let changed = match fmt {
+            Some(fmt) => changed.display_format(fmt),
+            None => changed,
+        };
+        match changed.build(ui, &mut value) {
             true => Some(Some(value)),
             false => {
                 if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
@@ -298,6 +306,7 @@ impl PathingConfig {
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
     fn draw_pathing_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) -> Option<()> {
         let (
+            load_simultaneous,
             camera_source,
             mut visible_space,
             player_overlap_threshold,
@@ -314,6 +323,7 @@ impl PathingConfig {
             (edge_scale,),
         ) = Self::get_pathing(|s| {
             (
+                s.load_simultaneous(),
                 s.space.camera_source(),
                 s.space.visible_space(),
                 s.space.player_overlap_threshold(),
@@ -477,6 +487,15 @@ impl PathingConfig {
             .build(ui, || self.draw_festival_opts(ui));
 
         let advanced = || {
+            if let Some(value) = Self::slider_setting_int(
+                ui,
+                &fl!("pathing-config-load-simultaneous"),
+                load_simultaneous as i32,
+                (1, 99),
+            ) {
+                let value = value.map(|v| v.max(1) as usize);
+                Self::set_pathing(|s| s.load_simultaneous = value);
+            }
             ui.text_wrapped(&fl!("pathing-config-trail-notice"));
             if let Some(value) = Self::slider_opt_setting(
                 ui,

@@ -18,7 +18,7 @@ use {
         collections::BTreeMap,
         fmt,
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, RwLock},
     },
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::PackPath,
@@ -29,7 +29,7 @@ use {
         Pack,
     },
     taimi_sync::watched::watch,
-    tokio::sync::Mutex,
+    tokio::sync::{Mutex, Semaphore},
 };
 
 #[derive(Debug, Clone)]
@@ -175,17 +175,66 @@ impl fmt::Display for PackFormat {
 pub struct PackLoader {
     pub settings: SettingsLock,
     pub festival_categories: BTreeMap<&'static str, Festival>,
+    pub load_throttle: RwLock<Arc<Semaphore>>,
 
     pub shared: Arc<PathingShared>,
 }
 
 impl PackLoader {
-    pub fn new(shared: Arc<PathingShared>, settings: SettingsLock) -> Self {
+    pub fn new(shared: Arc<PathingShared>, settings: SettingsLock, load_throttle: Option<usize>) -> Self {
+        let load_throttle = load_throttle.unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
         Self {
             settings,
             shared,
             festival_categories: FestivalFixup::festival_categories(),
+            load_throttle: RwLock::new(Arc::new(Semaphore::new(load_throttle))),
         }
+    }
+
+    pub fn load_throttle(&self) -> Arc<Semaphore> {
+        self.load_throttle.read().unwrap_or_else(|e| {
+            #[cfg(todo)]
+            {
+                // if we care to be nice, trigger change to clear poison...
+                sender.load_throttle.send_if_changed(|_| true);
+            }
+            e.into_inner()
+        }).clone()
+    }
+    pub fn adjust_load_throttle_by(&self, change: isize, new_limit: usize) -> Result<(), ()> {
+        let succ = self.load_throttle.read().ok().map(|load_throttle| {
+            if change > 0 {
+                load_throttle.add_permits(change as usize);
+                true
+            } else if change < 0 {
+                let removed = (-change) as usize;
+                let actual = load_throttle.forget_permits(removed);
+                let succ = actual == removed;
+                if !succ {
+                    // give current loads back some to play with
+                    // (just to be nice, we're here because we didn't manage to take them after all)
+                    load_throttle.add_permits(1);
+                }
+                succ
+            } else {
+                true
+            }
+        }).unwrap_or_else(|| {
+            self.load_throttle.clear_poison();
+            false
+        });
+        if succ { return Ok(()) }
+
+        // just make a new one because loads are in progress while adjusting...
+        log::debug!("refreshing loader throttle due to outstanding permits");
+        // then discard it for any future loads
+        if let Ok(mut load_throttle) = self.load_throttle.write() {
+            *load_throttle = Arc::new(Semaphore::new(new_limit));
+        } else {
+            // we cleared poison above, what else do you want?
+            // leak/forget the previous Arc?
+        }
+        Err(())
     }
 
     pub fn pack_info(&self, path: PackPath) -> Option<Arc<SharedPackInfo>> {

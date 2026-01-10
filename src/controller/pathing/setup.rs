@@ -4,7 +4,7 @@ use {
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
             shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
             state::{LoadedPackInfo, LoadedMapInfoStorage, LoadedMapPack},
-            info::{MapPackInfo},
+            info::MapPackInfo,
             PathingController,
             PathingEvent,
             PathingReceiver,
@@ -13,6 +13,7 @@ use {
         settings::{Settings, SourceKind},
     },
     anyhow::{anyhow, Context},
+    rustc_hash::FxHashMap,
     futures::stream::{self, Stream, StreamExt},
     std::{
         collections::{BTreeMap, BTreeSet},
@@ -27,6 +28,8 @@ use {
     taimi_sync::watched::watch,
     tokio::{
         fs::create_dir_all,
+        sync::Semaphore,
+        task::JoinSet,
         time::{timeout, Duration},
     },
 };
@@ -119,7 +122,6 @@ impl PathingController {
         let paths = paths.collect::<PackSet>();
         let packs = &mut self.packs;
         let map_info = &mut self.map_info;
-        let loader = &self.loader;
         let reason = &reason;
         let updates = paths.iter().map(move |path| {
             if let Some(pack) = packs.lookup_mut(&path) {
@@ -493,7 +495,8 @@ impl PathingController {
                 let _ = pack.unloaded.get_or_insert_with(|| UnloadedReason::Loading);
             }
         }
-        let loads = Self::new_task_pack_loads(self.loader.clone(), packs);
+        let manager = self.loader.clone();
+        let loads = Self::new_task_pack_loads(manager, packs);
         let _cancel = self.tasks.spawn(loads);
     }
     fn new_task_pack_loads(
@@ -520,6 +523,10 @@ impl PathingController {
         manager: Arc<PackLoader>,
         pending: &mut (dyn Iterator<Item = (PackPath, Option<(Arc<Path>, Option<Arc<PackInfo>>)>)> + Send),
     ) -> anyhow::Result<PathingEvent> {
+        let amt = match pending.size_hint() {
+            (_, Some(amt)) => amt,
+            (min, None) => min,
+        };
         let pending_packs = pending.filter_map(|(i, info)| {
             info.map(move |(path, prev_info)| {
                 let prev_info = prev_info.as_ref().map(|i| &**i);
@@ -533,37 +540,88 @@ impl PathingController {
                 (i, res)
             })
         });
-        let mut failed = Vec::new();
-        // TODO: parallel loading and batch shared updates
+        let mut loads = JoinSet::new();
+        let mut pending_updates = Vec::with_capacity(amt);
+        // TODO: use tokio::sync::SetOnce or something to delay load instead
+        let mut pending_loads = Vec::with_capacity(amt);
         for (i, activate) in pending_packs {
-            let res = match activate {
+            match activate {
                 Ok(activate) => {
-                    manager
-                        .shared
-                        .packs
-                        .update_packs_loaded(&mut iter::once((i, Err(Some(UnloadedReason::Loading)))));
-                    activate
-                        .load(&manager)
-                        .await
-                        .inspect_err(|e| log::error!("{e:#}"))
-                        .map_err(|e| UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e)))
+                    pending_updates.push((i, Err(Some(UnloadedReason::Loading))));
+                    let manager = manager.clone();
+                    let load = async move {
+                        let _permit = manager.load_throttle().acquire_owned().await;
+                        let res = activate
+                            .load(&manager)
+                            .await;
+                        (i, res)
+                    };
+                    pending_loads.push((i, load));
                 },
-                Err(e) => Err(e),
-            };
-            match res {
-                Ok(loaded) => {
-                    manager
-                        .shared
-                        .packs
-                        .update_packs_loaded(&mut iter::once((i, Ok(loaded))));
-                },
-                Err(e) => failed.push((i, e)),
+                Err(e) =>
+                    pending_updates.push((i, Err(Some(e)))),
             }
         }
-        manager
-            .shared
-            .packs
-            .update_packs_loaded(&mut failed.into_iter().map(|(i, e)| (i, Err(Some(e)))));
+        if !pending_updates.is_empty() {
+            // ensure we publish the in-progress Loading status prior to actual loads
+            manager
+                .shared
+                .packs
+                .update_packs_loaded(&mut pending_updates.drain(..));
+        }
+        let load_ids = pending_loads.into_iter().map(|(i, load)|
+            (loads.spawn(load).id(), i)
+        ).collect::<FxHashMap<_, _>>();
+        loop {
+            let impatient = !pending_updates.is_empty() && !loads.is_empty();
+            let res = match impatient {
+                // I'm told it's cancel-safe...
+                true => timeout(Duration::from_millis(174), loads.join_next()).await,
+                false => Ok(loads.join_next().await),
+            };
+            if matches!(res, Ok(None) | Err(..)) && !pending_updates.is_empty() {
+                // broadcast pending updates if subsequent loads will take a while...
+                // or if this was the final result and we're about to break out
+                manager
+                    .shared
+                    .packs
+                    .update_packs_loaded(&mut pending_updates.drain(..));
+            }
+            let res = match res {
+                Ok(Some(res)) => res,
+                Ok(None) => break,
+                Err(..) => continue,
+            };
+            let update = match res {
+                Ok((i, Ok(res))) => (i, Ok(res)),
+                Ok((i, Err(e))) => {
+                    log::error!("{e:#}");
+                    let reason = UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e));
+                    (i, Err(Some(reason)))
+                },
+                Err(e) => {
+                    let id = e.id();
+                    let i = load_ids.get(&id).cloned();
+                    let e = crate::with_join_error("pack load", e, |msg| {
+                        log::error!("{msg}");
+                        anyhow!("{msg}")
+                    });
+                    let Some(i) = i else {
+                        log::debug!("BUG? unrecognized load task {id}");
+                        continue
+                    };
+                    let reason = match e {
+                        Some(e) => Some(
+                            UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e))
+                        ),
+                        // load task was cancelled otherwise
+                        None => None,
+                    };
+                    (i, Err(reason))
+                },
+            };
+            pending_updates.push(update);
+        }
         Ok(PathingEvent::Nop)
     }
 

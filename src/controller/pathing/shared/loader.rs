@@ -99,7 +99,7 @@ impl SharedPacks {
                     Err(None) => {
                         log::debug!("marked {path}: deactivated");
                     },
-                    Err(Some(reason @ (UnloadedReason::Pending | UnloadedReason::Loading))) => {
+                    Err(Some(reason @ (UnloadedReason::Pending | UnloadedReason::Loading | UnloadedReason::Disabled | UnloadedReason::Gravestone))) => {
                         log::debug!("marked {path}: {reason}");
                     },
                     Ok(..) => {
@@ -108,7 +108,6 @@ impl SharedPacks {
                     Err(Some(reason)) => {
                         log::error!("failed to load {path}: {reason}");
                     },
-                    _ => (),
                 }
                 let Some(pack) = shared.lookup_mut(&path) else {
                     log::warn!("nonexistent pack update for {path}?");
@@ -293,7 +292,10 @@ impl SharedPackLoaded {
         self.pack.as_ref().ok_or(self.unloaded.as_ref())
     }
     pub fn kill(&mut self) {
-        *self = Default::default();
+        *self = Self {
+            unloaded: Some(UnloadedReason::Gravestone),
+            .. Default::default()
+        };
     }
     /// TODO: don't let inane reasons clobber errors
     pub fn unload(&mut self, reason: Option<UnloadedReason>) {

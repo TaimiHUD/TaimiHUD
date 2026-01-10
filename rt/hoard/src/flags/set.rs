@@ -186,6 +186,11 @@ where
     V: AsRef<BitSlice<T, O>>,
 {
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.as_bitslice().not_any()
+    }
+
+    #[inline]
     pub fn contains<L: AsPrimitive<usize>>(&self, offset: L) -> bool {
         matches!(self.get_at(offset), Some(true))
     }
@@ -337,6 +342,7 @@ impl<V: Default, T: BitStore, O: BitOrder> Default for BitSet<V, T, O> {
         Self::new(V::default())
     }
 }
+/// TODO: this may be more confusing and trouble than it's worth?
 impl<V: ?Sized, T: BitStore, O: BitOrder> ops::Deref for BitSet<V, T, O> {
     type Target = V;
     #[inline]
@@ -344,6 +350,7 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> ops::Deref for BitSet<V, T, O> {
         &self.flags
     }
 }
+/// TODO: this may be more confusing and trouble than it's worth?
 impl<V: ?Sized, T: BitStore, O: BitOrder> ops::DerefMut for BitSet<V, T, O> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {

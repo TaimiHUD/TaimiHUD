@@ -27,9 +27,14 @@ pub struct PathingSettings {
         skip_serializing_if = "TriggerKind::settings_default_is_interact"
     )]
     pub trigger_allow_interact: TriggerKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load_simultaneous: Option<usize>,
 }
 
 impl PathingSettings {
+    #[cfg(feature = "paths")]
+    pub const DEFAULT_LOAD_SIMULTANEOUS: usize = 4;
+
     #[cfg(feature = "space")]
     pub async fn pathing_state_update(settings: &mut Settings, path: String, state: bool) {
         if settings.disabled_paths.contains(&path) && state {
@@ -79,6 +84,15 @@ impl PathingSettings {
     pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {
         Arc::make_mut(&mut self.festival_filter)
     }
+
+    #[cfg(feature = "paths")]
+    pub fn load_simultaneous(&self) -> usize {
+        self.load_simultaneous.unwrap_or(Self::DEFAULT_LOAD_SIMULTANEOUS)
+    }
+    #[cfg(feature = "paths")]
+    pub fn set_load_simultaneous(&mut self, v: usize) {
+        self.load_simultaneous = Some(v);
+    }
 }
 impl Default for PathingSettings {
     fn default() -> Self {
@@ -87,6 +101,7 @@ impl Default for PathingSettings {
             festival_filter: Default::default(),
             trigger_allow_auto: TriggerKind::SETTINGS_DEFAULT_AUTO,
             trigger_allow_interact: TriggerKind::SETTINGS_DEFAULT_INTERACT,
+            load_simultaneous: None,
         }
     }
 }

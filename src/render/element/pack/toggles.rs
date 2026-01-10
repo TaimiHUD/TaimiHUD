@@ -17,7 +17,7 @@ use {
     },
     crate::{
         controller::pathing::registry::UnloadedReason,
-        exports::runtime::imgui::{Condition, TreeNodeToken, Ui},
+        exports::runtime::imgui::{self, Condition, TreeNodeToken, Ui},
         with_i18n,
     },
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
@@ -64,7 +64,24 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                 for root in cats.root_paths() {
                     categories.draw_root(root, pseudo_root.is_some());
                     self.ui.table_next_column();
-                    if let Some((path, act_cat)) = categories.act.take() {
+                    let act_cat = match categories.act.take() {
+                        Some((path, action @ (CategoryAction::HoverTooltip | CategoryAction::ContextMenu))) if Some(path) == pseudo_root => {
+                            let pack_act = PackAction::Cat { path: Some(path), action };
+                            let clobbered = pack_act.clobber(self.state.pack_path(), &mut self.act_pack);
+                            match clobbered {
+                                Ok(Some((_, PackAction::Cat { path: Some(p), action }))) | Err(PackAction::Cat { path: Some(p), action }) => match action {
+                                    CategoryAction::HoverTooltip => None,
+                                    action => Some((p, action))
+                                },
+                                clobbered => {
+                                    PackAction::warn_clobbered(&self.act_pack, clobbered);
+                                    None
+                                },
+                            }
+                        },
+                        act => act,
+                    };
+                    if let Some((path, act_cat)) = act_cat {
                         let clobbered = act_cat.clobber(path, &mut self.act_cat);
                         CategoryAction::warn_clobbered(&self.act_cat, clobbered);
                     }
@@ -82,7 +99,8 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
         let pack_act = match pack_act {
             #[cfg(todo)]
             Some(UiAction::LEFT_CLICK) => Some(CategoryAction::Enable(None)),
-            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
+            Some(UiAction::RIGHT_CLICK) =>
+                Some(CategoryAction::ContextMenu),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
                 log::debug!("DELETEME: pack action {act:?} unexpected");
@@ -161,6 +179,7 @@ pub struct DrawCategoryToggle<'a, 'ui> {
     pub pseudo_root: bool,
 }
 impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
+    /// TODO: return CategoryAction .-.
     pub fn draw(&mut self) -> (Option<UiAction>, Option<TreeNodeToken<'u>>) {
         let mut header = self.prepare_header();
         let has_toggle = self.has_toggle();
@@ -195,9 +214,18 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
             was_hovered: matches!(header_action, Some(UiAction::Hovered)),
         }
         .decorate();
-        let act = match (act, header_action) {
-            (Some(UiAction::Hovered), Some(UiAction::Hovered)) => None,
-            _ => header_action,
+        let act = match act {
+            Some(UiAction::Hovered) => Some(UiAction::Hovered),
+            _act => {
+                if let Some(act) = _act {
+                    log::debug!("DELETEME: cat decoration action {act:?} unexpected");
+                }
+                None
+            },
+        };
+        let act = match header_action {
+            None | Some(UiAction::Hovered) => act,
+            Some(act) => Some(act),
         };
         (act, header_token)
     }
@@ -247,7 +275,10 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
             if with_i18n!("copy", |label| self.ui.small_button(&label)) {
                 PackElement::copy_copyable(self.ui, copy_value, copy_message);
             } else if self.ui.is_item_hovered() {
-                act = Some(UiAction::Hovered);
+                #[cfg(todo)] {
+                    // TODO: give downstream enough context to do this properly
+                    act = Some(UiAction::Hovered);
+                }
                 DrawCategoryTooltip {
                     ui: self.ui,
                     info: self.info,
@@ -262,14 +293,17 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
         let tooltip = show_tip.then_some(self.info.tooltip());
         if let Some(Some(tooltip)) = tooltip {
             act = Some(UiAction::Hovered);
-            DrawCategoryTooltip {
-                ui: self.ui,
-                info: self.info,
-                include_copyable: false,
-                display_name_visible: true,
-                tooltip,
+            #[cfg(deleteme)]
+            {
+                DrawCategoryTooltip {
+                    ui: self.ui,
+                    info: self.info,
+                    include_copyable: false,
+                    display_name_visible: true,
+                    tooltip,
+                }
+                .draw();
             }
-            .draw();
         }
         act
     }

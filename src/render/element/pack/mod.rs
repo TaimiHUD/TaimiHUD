@@ -102,6 +102,24 @@ impl PackElements {
         }
     }
     pub fn draw(&mut self, ui: &Ui) {
+        for pack in self.pack_state.values_mut() {
+            match self.context_menu {
+                Some((path, _)) if path == pack.state.pack_path() => (),
+                _ => pack.context_menu = None,
+            }
+            if matches!(pack.state.unloaded, Some(UnloadedReason::Gravestone)) {
+                continue
+            }
+            pack.draw(ui);
+            if let Some(cat_path) = pack.context_menu {
+                let new_menu = (pack.state.pack_path(), cat_path);
+                if self.context_menu != Some(new_menu) {
+                    log::trace!("opening menu for {} {cat_path:?}", pack.state.pack_path());
+                }
+                self.context_menu = Some((pack.state.pack_path(), cat_path));
+            }
+        }
+
         let (mut menu_pack, menu_cat) = match self.context_menu {
             Some((path, cat)) => (self.pack_state.lookup_mut(&path), cat),
             None => (None, None),
@@ -123,17 +141,6 @@ impl PackElements {
             }
         } else if let Some((_, Some(..))) = self.context_menu {
             self.context_menu = None;
-        }
-
-        for pack in self.pack_state.values_mut() {
-            match self.context_menu {
-                Some((path, _)) if path == pack.state.pack_path() => (),
-                _ => pack.context_menu = None,
-            }
-            pack.draw(ui);
-            if let Some(cat_path) = pack.context_menu {
-                self.context_menu = Some((pack.state.pack_path(), cat_path));
-            }
         }
     }
 
@@ -178,9 +185,7 @@ impl PackElement {
 
     pub fn draw_pack_tooltip(&mut self, ui: &Ui, title_visible: bool, reason_visible: bool) {
         self.hovered = Some(None);
-        let title_template = self
-            .state
-            .display_name()
+        let title_template = self.state.title_template()
             .unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
         DrawCategoryTooltip::draw_tooltip(ui, title_template, || {
             self.draw_pack_tooltip_contents(ui, title_visible, reason_visible)
@@ -291,6 +296,16 @@ impl PackElementState {
 
     pub fn display_name(&self) -> Option<&str> {
         str_opt_ref(&self.display_name)
+    }
+    pub(super) fn title_template(&self) -> Option<&str> {
+        let display_name = self.display_name();
+        let file_name = self.info.path.file_name().and_then(|n| n.to_str());
+        let datasource_name = self.info.datasource.as_ref().map(|ds| &ds.path[..]);
+        DrawCategoryTooltip::longest_title([
+            display_name,
+            file_name,
+            datasource_name,
+        ])
     }
     pub fn ui_id(&self) -> imgui::Id<'_> {
         let id_name =

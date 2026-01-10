@@ -256,6 +256,14 @@ impl<T: Default> Watcher<T> {
     pub fn write_if<F: FnOnce(&mut T) -> bool>(&self, f: F) -> bool {
         self.sender().send_if_modified(f)
     }
+    pub fn write(&self, v: T) {
+        self.write_with(|out| {
+            *out = v;
+        });
+    }
+    pub fn replace(&self, v: T) -> T {
+        self.sender().send_replace(v)
+    }
 
     pub fn receiver_mut(&mut self) -> &mut watch::Receiver<T> {
         if self.watch.get().is_none() {

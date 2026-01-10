@@ -22,7 +22,7 @@ use {
                 CONTROLS,
             },
         },
-        settings::{Settings, SettingsLock},
+        settings::{pathing::PathingSettings, Settings, SettingsLock},
         space::{engine::SpaceEvent, Engine},
         Interruption,
         InterruptionSignal,
@@ -49,7 +49,7 @@ use {
     },
     taimi_pack::attributes::Festivals,
     taimi_sync::watched::watch,
-    tokio::{select, task::JoinSet},
+    tokio::{select, sync::Semaphore, task::JoinSet},
 };
 
 #[allow(unused_imports)]
@@ -172,6 +172,7 @@ impl PathingController {
             )
         }
         let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
+        let load_throttle_prev = self.rx.load_throttle.cached.clone().unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {
@@ -223,6 +224,17 @@ impl PathingController {
                 }
                 for path in &configs_dirty {
                     self.reload_config_for(path);
+                }
+            },
+            load_throttle = self.rx.load_throttle.when_changed() => {
+                let new_amt = (*load_throttle).max(1).min(Semaphore::MAX_PERMITS / 2);
+                let change = new_amt as isize - load_throttle_prev as isize;
+                if change != 0 {
+                    log::trace!("adjusting load throttle by {change} to {new_amt}");
+                }
+                match self.loader.adjust_load_throttle_by(change, new_amt) {
+                    Ok(()) => (),
+                    Err(()) => log::debug!("refreshed loader throttle due to outstanding permits"),
                 }
             },
             gameplay = self.rx.gameplay.when_changed() => {
@@ -302,13 +314,18 @@ impl PathingController {
     async fn setup(&mut self) {
         let get_settings = {
             let enables = self.rx.enables.clone();
+            let load_throttle = self.rx.load_throttle.watch.sender();
             let settings = self.settings.clone();
             async move {
                 let mut enable_flags = enables.borrow().clone();
                 let settings = settings.read().await;
+                let load_simultaneous = settings.pathing.as_ref().and_then(|p| p.load_simultaneous);
                 enable_flags.set(PathingEnables::KATRENDER, settings.enable_katrender);
                 drop(settings);
                 enables.send_replace(enable_flags);
+                if let Some(load_simultaneous) = load_simultaneous {
+                    load_throttle.send_replace(load_simultaneous);
+                }
             }
         };
         let preload = self.preload_all();

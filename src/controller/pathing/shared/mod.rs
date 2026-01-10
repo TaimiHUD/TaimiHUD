@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 pub use {
     self::{
         loader::{
@@ -41,7 +42,7 @@ use {
             pathing::{registry::PackLoader, ExternalFilterState, PathingEvent},
         },
         render::machine::MumbleIdentityUpdate,
-        settings::SettingsLock,
+        settings::{pathing::PathingSettings, SettingsLock},
     },
     std::sync::Arc,
     taimi_meta::ui::GameplayState,
@@ -58,6 +59,7 @@ pub struct PathingSender {
     pub shared: Arc<PathingShared>,
     pub command: mpsc::Sender<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
+    pub load_throttle: watch::Sender<usize>,
     #[cfg(todo)]
     pub interactions: broadcast::Sender<InteractionEvent>,
 }
@@ -76,6 +78,7 @@ impl PathingSender {
             shared: Arc::new(PathingShared::new()),
             command,
             enables: watch::Sender::new(PathingEnables::empty()),
+            load_throttle: watch::Sender::new(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS),
             #[cfg(todo)]
             interactions: interactions.clone(),
         };
@@ -88,6 +91,11 @@ impl PathingSender {
             gameplay: Watched::subscribe_to(gameplay),
             mumble_identity: mumble_identity.subscribe(),
             enables: sender.enables.clone(),
+            load_throttle: {
+                let mut load_throttle = Watched::subscribe_to(&sender.load_throttle);
+                let _ = load_throttle.try_read_mut();
+                load_throttle
+            },
             #[cfg(todo)]
             interactions_rx: interactions.subscribe(),
             #[cfg(todo)]
@@ -104,6 +112,7 @@ pub struct PathingReceiver {
     pub shared: Arc<PathingShared>,
     pub command: mpsc::Receiver<PathingEvent>,
     pub enables: watch::Sender<PathingEnables>,
+    pub load_throttle: Watched<usize>,
     pub festivals: watch::Receiver<FestivalState>,
     /// TODO: cfg(feature = "api")
     pub achievements: watch::Receiver<Arc<AchievementState>>,
@@ -118,7 +127,8 @@ pub struct PathingReceiver {
 }
 impl PathingReceiver {
     pub(crate) fn make_loader(&self, settings: SettingsLock) -> Arc<PackLoader> {
-        let loader = PackLoader::new(self.shared.clone(), settings);
+        let load_throttle = self.load_throttle.cached.clone();
+        let loader = PackLoader::new(self.shared.clone(), settings, load_throttle);
         Arc::new(loader)
     }
 

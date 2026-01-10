@@ -146,13 +146,39 @@ impl super::PackElement {
     }
 
     pub(super) fn draw_pack_context(&mut self, ui: &Ui) {
+        let draw_cat = if let Some(root) = self.state.info.unique_root().map(|r| r.path()) {
+            with_i18n!("pack-root", |label| ui.text_disabled(label));
+            let mut draw_cat = self.prepare_category_context_contents(ui, root, Some((true, true)));
+            draw_cat.draw_contents_category();
+            ui.separator();
+            with_i18n!("pack-root-submenu", |label| ui.text_disabled(label));
+            Some(draw_cat)
+        } else { None };
         let mut draw = DrawPackContextMenu { ui, state: &self.state, act: None };
         draw.draw_contents();
-        self.act_post_draw_context(ui, None, draw.act);
+        let act_cat = match draw_cat {
+            Some(mut draw_cat) => {
+                ui.separator();
+                draw_cat.draw_contents_adjacent();
+                draw_cat.act
+            },
+            None => None,
+        };
+        self.act_post_draw_context(ui, act_cat, draw.act);
     }
     pub(super) fn draw_category_context(&mut self, ui: &Ui, category_path: CategoryPath) {
+        let mut draw = self.prepare_category_context_contents(ui, category_path, None);
+        draw.draw_contents();
+        self.act_post_draw_context(ui, draw.act, None);
+    }
+    pub(super) fn prepare_category_context_contents<'a, 'u>(&self, ui: &'a Ui<'u>, category_path: CategoryPath, root_cat: Option<(bool, bool)>) -> DrawCategoryContextMenu<'a, 'u> {
+        let (mut is_root, pack_visible) = match root_cat {
+            None => (None, false),
+            Some((is_root, pack_visible)) => (Some(is_root), pack_visible),
+        };
         let (mut any_open, mut any_closed) = (false, false);
         if let Some((cats, ..)) = self.state.info.category_info() {
+            let _ = is_root.get_or_insert_with(|| cats.is_root(category_path));
             let children = cats.descendents_of(category_path);
             for cat in children {
                 if self.categories.open_mask.contains(cat) {
@@ -162,15 +188,15 @@ impl super::PackElement {
                 }
             }
         }
-        let mut draw = DrawCategoryContextMenu {
+        DrawCategoryContextMenu {
             ui,
             act: None,
             category_path,
+            is_root: is_root.unwrap_or(false),
+            pack_visible,
             any_open,
             any_closed,
-        };
-        draw.draw_contents();
-        self.act_post_draw_context(ui, draw.act, None);
+        }
     }
 }
 
@@ -466,9 +492,13 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
     pub fn draw_contents_unloaded(&mut self) -> Option<PackAction> {
         let ui = self.ui;
         let action_remove = with_i18n!("remove-pack", |label| Selectable::new(&label).build(ui));
-        let action_reload = with_i18n!("reload-pack", |label| Selectable::new(&label).build(ui));
+        let action_reload = with_i18n!("activate-pack", |label| Selectable::new(&label).build(ui));
         if action_reload {
-            Some(PackAction::ACTIVATE)
+            Some(match &self.state.unloaded {
+                Some(reason) if !reason.can_reactivate(false) =>
+                    PackAction::RELOAD,
+                _ => PackAction::ACTIVATE,
+            })
         } else if action_remove {
             Some(PackAction::REMOVE)
         } else {
@@ -522,29 +552,43 @@ pub struct DrawCategoryContextMenu<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub act: CategoryActionSlot,
     pub category_path: CategoryPath,
+    pub is_root: bool,
+    pub pack_visible: bool,
     pub any_open: bool,
     pub any_closed: bool,
 }
 impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
     pub fn draw_contents(&mut self) {
-        let act = self.draw_menu();
+        self.draw_contents_category();
+        self.ui.separator();
+        self.draw_contents_adjacent();
+    }
+    pub fn draw_contents_category(&mut self) {
+        let act = self.draw_menu_category();
+        self.set_act(act);
+    }
+    pub fn draw_contents_adjacent(&mut self) {
+        let act = self.draw_menu_adjacent();
+        self.set_act(act);
+    }
+    fn set_act(&mut self, act: Option<CategoryAction>) {
         if let Some(act) = act {
             let clobbered = act.clobber(self.category_path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
     }
-    fn draw_menu(&mut self) -> Option<CategoryAction> {
+    fn draw_menu_category(&mut self) -> Option<CategoryAction> {
         let ui = self.ui;
         let action_toggle = with_i18n!("toggle", |msg| Selectable::new(msg).build(ui));
         let action_enable_all = with_i18n!("enable-all", |msg| Selectable::new(msg).build(ui));
         let action_disable_all = with_i18n!("disable-all", |msg| Selectable::new(msg).build(ui));
         let action_reset_all = with_i18n!("reset-all", |msg| Selectable::new(msg).build(ui));
-        ui.separator();
-        let action_isolate = with_i18n!("isolate", |msg| Selectable::new(msg).build(ui));
-        let action_unisolate = with_i18n!("unisolate", |msg| Selectable::new(msg).build(ui));
-        ui.separator();
-        let action_enable_to = with_i18n!("enable-to", |msg| Selectable::new(msg).build(ui));
-        let action_disable_to = with_i18n!("disable-to", |msg| Selectable::new(msg).build(ui));
+        let (action_enable_to, action_disable_to) = if !self.is_root {
+            ui.separator();
+            let enable_to = with_i18n!("enable-to", |msg| Selectable::new(msg).build(ui));
+            let disable_to = with_i18n!("disable-to", |msg| Selectable::new(msg).build(ui));
+            (enable_to, disable_to)
+        } else { (false, false) };
         let action_all = if action_enable_all {
             Some(Some(true))
         } else if action_disable_all {
@@ -561,13 +605,6 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
         } else {
             None
         };
-        let action_isolate = if action_isolate {
-            Some(Some(None))
-        } else if action_unisolate {
-            Some(None)
-        } else {
-            None
-        };
         let act = if action_toggle {
             Some(CategoryAction::TOGGLE)
         } else if let Some(action_all) = action_all {
@@ -577,15 +614,13 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
             })
         } else if let Some(parents_enable) = action_parents {
             Some(CategoryAction::EnableParents(parents_enable))
-        } else if let Some(isolate) = action_isolate {
-            Some(match isolate {
-                Some(state) => CategoryAction::Isolate(state),
-                None => CategoryAction::ResetSiblings,
-            })
         } else {
             None
         };
 
+        if self.any_closed || self.any_open {
+            ui.separator();
+        }
         let action_expand_all = if self.any_closed {
             with_i18n!("expand-all", |msg| Selectable::new(msg).build(ui))
         } else {
@@ -607,10 +642,29 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
         } else if action_hide {
             Some(CategoryAction::Open(None))
         } else if action_expand_all {
-            log::debug!("TODO: cat:expand");
             Some(CategoryAction::OpenChildren(Some(true)))
         } else if action_collapse_all {
             Some(CategoryAction::OpenChildren(Some(false)))
+        } else {
+            None
+        }
+    }
+    fn draw_menu_adjacent(&mut self) -> Option<CategoryAction> {
+        let ui = self.ui;
+        let action_isolate = with_i18n!("isolate", |msg| Selectable::new(msg).build(ui));
+        let action_unisolate = with_i18n!("unisolate", |msg| Selectable::new(msg).build(ui));
+        let action_isolate = if action_isolate {
+            Some(Some(None))
+        } else if action_unisolate {
+            Some(None)
+        } else {
+            None
+        };
+        if let Some(isolate) = action_isolate {
+            Some(match isolate {
+                Some(state) => CategoryAction::Isolate(state),
+                None => CategoryAction::ResetSiblings,
+            })
         } else {
             None
         }
