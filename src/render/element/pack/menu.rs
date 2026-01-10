@@ -153,7 +153,9 @@ impl super::PackElement {
             ui.separator();
             with_i18n!("pack-root-submenu", |label| ui.text_disabled(label));
             Some(draw_cat)
-        } else { None };
+        } else {
+            None
+        };
         let mut draw = DrawPackContextMenu { ui, state: &self.state, act: None };
         draw.draw_contents();
         let act_cat = match draw_cat {
@@ -171,7 +173,12 @@ impl super::PackElement {
         draw.draw_contents();
         self.act_post_draw_context(ui, draw.act, None);
     }
-    pub(super) fn prepare_category_context_contents<'a, 'u>(&self, ui: &'a Ui<'u>, category_path: CategoryPath, root_cat: Option<(bool, bool)>) -> DrawCategoryContextMenu<'a, 'u> {
+    pub(super) fn prepare_category_context_contents<'a, 'u>(
+        &self,
+        ui: &'a Ui<'u>,
+        category_path: CategoryPath,
+        root_cat: Option<(bool, bool)>,
+    ) -> DrawCategoryContextMenu<'a, 'u> {
         let (mut is_root, pack_visible) = match root_cat {
             None => (None, false),
             Some((is_root, pack_visible)) => (Some(is_root), pack_visible),
@@ -495,8 +502,7 @@ impl<'a, 'u> DrawPackContextMenu<'a, 'u> {
         let action_reload = with_i18n!("activate-pack", |label| Selectable::new(&label).build(ui));
         if action_reload {
             Some(match &self.state.unloaded {
-                Some(reason) if !reason.can_reactivate(false) =>
-                    PackAction::RELOAD,
+                Some(reason) if !reason.can_reactivate(false) => PackAction::RELOAD,
                 _ => PackAction::ACTIVATE,
             })
         } else if action_remove {
@@ -588,7 +594,9 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
             let enable_to = with_i18n!("enable-to", |msg| Selectable::new(msg).build(ui));
             let disable_to = with_i18n!("disable-to", |msg| Selectable::new(msg).build(ui));
             (enable_to, disable_to)
-        } else { (false, false) };
+        } else {
+            (false, false)
+        };
         let action_all = if action_enable_all {
             Some(Some(true))
         } else if action_disable_all {

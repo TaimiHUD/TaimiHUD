@@ -1,9 +1,9 @@
 use {
     crate::{
         controller::pathing::{
+            info::MapPackInfo,
             registry::{PackCategoryInfo, PackLoader, PackMapPath, PackPath},
             shared::SharedPackConfig,
-            info::MapPackInfo,
             state::{LoadedCategory, LoadedMapPack},
             ExternalFilterState,
             PathingController,

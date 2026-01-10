@@ -1,10 +1,10 @@
 use {
     crate::{
         controller::pathing::{
+            info::MapPackInfo,
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
             shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
-            state::{LoadedPackInfo, LoadedMapInfoStorage, LoadedMapPack},
-            info::MapPackInfo,
+            state::{LoadedMapInfoStorage, LoadedMapPack, LoadedPackInfo},
             PathingController,
             PathingEvent,
             PathingReceiver,
@@ -13,8 +13,8 @@ use {
         settings::{Settings, SourceKind},
     },
     anyhow::{anyhow, Context},
-    rustc_hash::FxHashMap,
     futures::stream::{self, Stream, StreamExt},
+    rustc_hash::FxHashMap,
     std::{
         collections::{BTreeMap, BTreeSet},
         future::Future,
@@ -551,15 +551,12 @@ impl PathingController {
                     let manager = manager.clone();
                     let load = async move {
                         let _permit = manager.load_throttle().acquire_owned().await;
-                        let res = activate
-                            .load(&manager)
-                            .await;
+                        let res = activate.load(&manager).await;
                         (i, res)
                     };
                     pending_loads.push((i, load));
                 },
-                Err(e) =>
-                    pending_updates.push((i, Err(Some(e)))),
+                Err(e) => pending_updates.push((i, Err(Some(e)))),
             }
         }
         if !pending_updates.is_empty() {
@@ -569,9 +566,10 @@ impl PathingController {
                 .packs
                 .update_packs_loaded(&mut pending_updates.drain(..));
         }
-        let load_ids = pending_loads.into_iter().map(|(i, load)|
-            (loads.spawn(load).id(), i)
-        ).collect::<FxHashMap<_, _>>();
+        let load_ids = pending_loads
+            .into_iter()
+            .map(|(i, load)| (loads.spawn(load).id(), i))
+            .collect::<FxHashMap<_, _>>();
         loop {
             let impatient = !pending_updates.is_empty() && !loads.is_empty();
             let res = match impatient {
@@ -611,9 +609,7 @@ impl PathingController {
                         continue
                     };
                     let reason = match e {
-                        Some(e) => Some(
-                            UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e))
-                        ),
+                        Some(e) => Some(UnloadedReason::LoadingFailed(rt::log::anyhow_into_arc(e))),
                         // load task was cancelled otherwise
                         None => None,
                     };

@@ -192,38 +192,48 @@ impl PackLoader {
     }
 
     pub fn load_throttle(&self) -> Arc<Semaphore> {
-        self.load_throttle.read().unwrap_or_else(|e| {
-            #[cfg(todo)]
-            {
-                // if we care to be nice, trigger change to clear poison...
-                sender.load_throttle.send_if_changed(|_| true);
-            }
-            e.into_inner()
-        }).clone()
+        self.load_throttle
+            .read()
+            .unwrap_or_else(|e| {
+                #[cfg(todo)]
+                {
+                    // if we care to be nice, trigger change to clear poison...
+                    sender.load_throttle.send_if_changed(|_| true);
+                }
+                e.into_inner()
+            })
+            .clone()
     }
     pub fn adjust_load_throttle_by(&self, change: isize, new_limit: usize) -> Result<(), ()> {
-        let succ = self.load_throttle.read().ok().map(|load_throttle| {
-            if change > 0 {
-                load_throttle.add_permits(change as usize);
-                true
-            } else if change < 0 {
-                let removed = (-change) as usize;
-                let actual = load_throttle.forget_permits(removed);
-                let succ = actual == removed;
-                if !succ {
-                    // give current loads back some to play with
-                    // (just to be nice, we're here because we didn't manage to take them after all)
-                    load_throttle.add_permits(1);
+        let succ = self
+            .load_throttle
+            .read()
+            .ok()
+            .map(|load_throttle| {
+                if change > 0 {
+                    load_throttle.add_permits(change as usize);
+                    true
+                } else if change < 0 {
+                    let removed = (-change) as usize;
+                    let actual = load_throttle.forget_permits(removed);
+                    let succ = actual == removed;
+                    if !succ {
+                        // give current loads back some to play with
+                        // (just to be nice, we're here because we didn't manage to take them after all)
+                        load_throttle.add_permits(1);
+                    }
+                    succ
+                } else {
+                    true
                 }
-                succ
-            } else {
-                true
-            }
-        }).unwrap_or_else(|| {
-            self.load_throttle.clear_poison();
-            false
-        });
-        if succ { return Ok(()) }
+            })
+            .unwrap_or_else(|| {
+                self.load_throttle.clear_poison();
+                false
+            });
+        if succ {
+            return Ok(())
+        }
 
         // just make a new one because loads are in progress while adjusting...
         log::debug!("refreshing loader throttle due to outstanding permits");

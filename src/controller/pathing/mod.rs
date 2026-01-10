@@ -172,7 +172,12 @@ impl PathingController {
             )
         }
         let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
-        let load_throttle_prev = self.rx.load_throttle.cached.clone().unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
+        let load_throttle_prev = self
+            .rx
+            .load_throttle
+            .cached
+            .clone()
+            .unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {

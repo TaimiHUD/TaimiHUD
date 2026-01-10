@@ -1,8 +1,8 @@
 use {
     crate::controller::pathing::{
+        info::{MapPackInfo, EMPTY_RENDER_ATTRS},
         registry::{PackInfo, PackInfoSignature},
         shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded},
-        info::{MapPackInfo, EMPTY_RENDER_ATTRS},
         UnloadedReason,
     },
     std::{collections::BTreeMap, iter, ops, sync::Arc},

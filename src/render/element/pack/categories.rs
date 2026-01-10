@@ -38,12 +38,7 @@ use {
         with_i18n,
     },
     std::{collections::BTreeMap, iter, mem, sync::Arc},
-    taimi_hoard::{
-        flags::BitSet,
-        loc::LocationRef,
-        str_opt,
-        str_opt_ref,
-    },
+    taimi_hoard::{flags::BitSet, loc::LocationRef, str_opt, str_opt_ref},
     taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::{
         attributes::InteractionAttributes,
@@ -109,8 +104,7 @@ impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
         let action = match (self.open_cond, self.open, &tree_token) {
             (Condition::Always, open, token) if framed && open != token.is_some() =>
                 Some(UiAction::Primary),
-            _ if self.ui.is_item_clicked_with_button(MouseButton::Right) =>
-                Some(UiAction::RIGHT_CLICK),
+            _ if self.ui.is_item_clicked_with_button(MouseButton::Right) => Some(UiAction::RIGHT_CLICK),
             #[cfg(todo)]
             _ if !framed && self.ui.is_item_clicked() => Some(UiAction::Primary),
             _ if !framed && self.ui.is_item_clicked() => Some(UiAction::LEFT_CLICK),
@@ -214,12 +208,15 @@ impl DrawPackUnloaded<'_, '_> {
         reason: Option<&UnloadedReason>,
         f: F,
     ) -> Option<R> {
-        let is_initial = || Controller::with_sender(|s| s.gameplay.as_ref()
-            .map(|g| g.borrow().is_initial())
-        ).flatten().unwrap_or(false);
+        let is_initial = || {
+            Controller::with_sender(|s| s.gameplay.as_ref().map(|g| g.borrow().is_initial()))
+                .flatten()
+                .unwrap_or(false)
+        };
         match reason {
             Some(UnloadedReason::LoadingFailed(e)) => Some(f(&format!("{e:#}"))),
-            Some(UnloadedReason::Pending) if is_initial() => Some(with_i18n!("render-notice-gameplay-initial", |msg| f(&msg))),
+            Some(UnloadedReason::Pending) if is_initial() =>
+                Some(with_i18n!("render-notice-gameplay-initial", |msg| f(&msg))),
             Some(UnloadedReason::Pending) => Some(with_i18n!("render-notice-gameplay", |msg| f(&msg))),
             Some(UnloadedReason::UnknownFormat) => Some(with_i18n!("pack-format-notice", |msg| f(&msg))),
             _ => None,
@@ -240,7 +237,8 @@ impl<'a> DrawCategoryTooltip<'a, '_> {
         if self.is_empty() {
             return
         }
-        let title_template = self.title_template()
+        let title_template = self
+            .title_template()
             .unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
         Self::draw_tooltip(self.ui, title_template, move || self.draw_contents());
     }
@@ -270,9 +268,7 @@ impl<'a> DrawCategoryTooltip<'a, '_> {
         }
     }
     pub(super) fn title_template(&self) -> Option<&'a str> {
-        let display_name = self.info
-            .display_name()
-            .and_then(str_opt);
+        let display_name = self.info.display_name().and_then(str_opt);
         display_name
     }
     pub(super) fn longest_title<'t, I: IntoIterator<Item = Option<&'t str>>>(titles: I) -> Option<&'t str> {
@@ -412,9 +408,9 @@ impl super::PackElement {
         context_menu: &mut Option<Option<CategoryPath>>,
     ) {
         let act_root_cat = match &act_cat {
-            Some((path, CategoryAction::ResetSiblings | CategoryAction::Isolate(..))) if
-                self.state.info.unique_root().map(|r| r.path()) == Some(*path)
-            => true,
+            Some((path, CategoryAction::ResetSiblings | CategoryAction::Isolate(..)))
+                if self.state.info.unique_root().map(|r| r.path()) == Some(*path) =>
+                true,
             _ => false,
         };
         if act_root_cat {
@@ -622,10 +618,9 @@ impl super::PackElement {
             return false
         }
         if is_root {
-            let title_template = DrawCategoryTooltip::longest_title([
-                draw.title_template(),
-                self.state.title_template(),
-            ]).unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
+            let title_template =
+                DrawCategoryTooltip::longest_title([draw.title_template(), self.state.title_template()])
+                    .unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
             DrawCategoryTooltip::draw_tooltip(ui, title_template, || {
                 self.draw_pack_tooltip_contents(ui, display_name_visible, !include_copyable);
                 draw.draw_contents();
@@ -890,8 +885,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                 Some(CategoryAction::Enable(Some(toggle.toggle_state.is_visible()))),
             Some(UiAction::Primary) => Some(CategoryAction::Open(Some(res.is_some()))),
             Some(UiAction::LEFT_CLICK) if toggle.is_copyable => Some(CategoryAction::Copy),
-            Some(UiAction::RIGHT_CLICK) =>
-                Some(CategoryAction::ContextMenu),
+            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
                 log::debug!("DELETEME: category action {act:?} unexpected");

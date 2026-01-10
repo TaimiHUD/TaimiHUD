@@ -185,7 +185,9 @@ impl PackElement {
 
     pub fn draw_pack_tooltip(&mut self, ui: &Ui, title_visible: bool, reason_visible: bool) {
         self.hovered = Some(None);
-        let title_template = self.state.title_template()
+        let title_template = self
+            .state
+            .title_template()
             .unwrap_or(DrawCategoryTooltip::NAME_TEMPLATE);
         DrawCategoryTooltip::draw_tooltip(ui, title_template, || {
             self.draw_pack_tooltip_contents(ui, title_visible, reason_visible)
@@ -301,11 +303,7 @@ impl PackElementState {
         let display_name = self.display_name();
         let file_name = self.info.path.file_name().and_then(|n| n.to_str());
         let datasource_name = self.info.datasource.as_ref().map(|ds| &ds.path[..]);
-        DrawCategoryTooltip::longest_title([
-            display_name,
-            file_name,
-            datasource_name,
-        ])
+        DrawCategoryTooltip::longest_title([display_name, file_name, datasource_name])
     }
     pub fn ui_id(&self) -> imgui::Id<'_> {
         let id_name =

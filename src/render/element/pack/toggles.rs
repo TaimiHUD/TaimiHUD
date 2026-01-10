@@ -65,13 +65,17 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                     categories.draw_root(root, pseudo_root.is_some());
                     self.ui.table_next_column();
                     let act_cat = match categories.act.take() {
-                        Some((path, action @ (CategoryAction::HoverTooltip | CategoryAction::ContextMenu))) if Some(path) == pseudo_root => {
+                        Some((
+                            path,
+                            action @ (CategoryAction::HoverTooltip | CategoryAction::ContextMenu),
+                        )) if Some(path) == pseudo_root => {
                             let pack_act = PackAction::Cat { path: Some(path), action };
                             let clobbered = pack_act.clobber(self.state.pack_path(), &mut self.act_pack);
                             match clobbered {
-                                Ok(Some((_, PackAction::Cat { path: Some(p), action }))) | Err(PackAction::Cat { path: Some(p), action }) => match action {
+                                Ok(Some((_, PackAction::Cat { path: Some(p), action })))
+                                | Err(PackAction::Cat { path: Some(p), action }) => match action {
                                     CategoryAction::HoverTooltip => None,
-                                    action => Some((p, action))
+                                    action => Some((p, action)),
                                 },
                                 clobbered => {
                                     PackAction::warn_clobbered(&self.act_pack, clobbered);
@@ -99,8 +103,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
         let pack_act = match pack_act {
             #[cfg(todo)]
             Some(UiAction::LEFT_CLICK) => Some(CategoryAction::Enable(None)),
-            Some(UiAction::RIGHT_CLICK) =>
-                Some(CategoryAction::ContextMenu),
+            Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
                 log::debug!("DELETEME: pack action {act:?} unexpected");
@@ -275,7 +278,8 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
             if with_i18n!("copy", |label| self.ui.small_button(&label)) {
                 PackElement::copy_copyable(self.ui, copy_value, copy_message);
             } else if self.ui.is_item_hovered() {
-                #[cfg(todo)] {
+                #[cfg(todo)]
+                {
                     // TODO: give downstream enough context to do this properly
                     act = Some(UiAction::Hovered);
                 }

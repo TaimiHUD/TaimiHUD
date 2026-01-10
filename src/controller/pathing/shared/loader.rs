@@ -99,7 +99,12 @@ impl SharedPacks {
                     Err(None) => {
                         log::debug!("marked {path}: deactivated");
                     },
-                    Err(Some(reason @ (UnloadedReason::Pending | UnloadedReason::Loading | UnloadedReason::Disabled | UnloadedReason::Gravestone))) => {
+                    Err(Some(
+                        reason @ (UnloadedReason::Pending
+                        | UnloadedReason::Loading
+                        | UnloadedReason::Disabled
+                        | UnloadedReason::Gravestone),
+                    )) => {
                         log::debug!("marked {path}: {reason}");
                     },
                     Ok(..) => {
@@ -294,7 +299,7 @@ impl SharedPackLoaded {
     pub fn kill(&mut self) {
         *self = Self {
             unloaded: Some(UnloadedReason::Gravestone),
-            .. Default::default()
+            ..Default::default()
         };
     }
     /// TODO: don't let inane reasons clobber errors

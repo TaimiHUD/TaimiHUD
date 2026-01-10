@@ -2,7 +2,7 @@
 use taimi_pack::attributes::keys;
 use {
     crate::{
-        controller::pathing::{VisibilityFlagsExt, PackConfig},
+        controller::pathing::{PackConfig, VisibilityFlagsExt},
         exports::runtime as rt,
         settings::sources::DataSourcePath,
     },

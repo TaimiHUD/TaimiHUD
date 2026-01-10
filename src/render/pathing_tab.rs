@@ -220,7 +220,13 @@ impl PathingConfig {
             None => None,
         }
     }
-    fn slider_setting_inner(ui: &Ui, label: &str, mut value: f32, (min, max): (f32, f32), fmt: Option<&str>) -> Option<Option<f32>> {
+    fn slider_setting_inner(
+        ui: &Ui,
+        label: &str,
+        mut value: f32,
+        (min, max): (f32, f32),
+        fmt: Option<&str>,
+    ) -> Option<Option<f32>> {
         let changed = Slider::new(label, min, max);
         let changed = match fmt {
             Some(fmt) => changed.display_format(fmt),
