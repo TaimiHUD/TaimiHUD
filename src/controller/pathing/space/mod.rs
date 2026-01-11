@@ -5,6 +5,7 @@ use {
                 registry::{LoadedMarkerPath, LoadedPoiPath, LoadedTrailPath, PackLoader, SharedLoaderBox},
                 shared::{
                     LoadReport,
+                    LocDisplay,
                     PathingShared,
                     SharedGameplayMap,
                     SharedPackInfo,
@@ -22,7 +23,7 @@ use {
         },
         TEXTURES,
     },
-    anyhow::Context,
+    anyhow::{anyhow, Context},
     futures::future::{Either, Future},
     std::{
         collections::{btree_map, BTreeMap, BTreeSet},
@@ -176,7 +177,7 @@ impl PathingController {
             _ => None,
         };
         if !crate::built_info::IS_TAGGED_VERSION && tex.is_none() {
-            let path = crate::controller::pathing::shared::LocDisplay::from_ref(&path);
+            let path = LocDisplay::from_ref(&path);
             log::debug!("WHY? no texture found on {path}");
         }
         tex
@@ -277,7 +278,11 @@ impl PathingController {
     ) -> anyhow::Result<PathingEvent> {
         let loader = manager.pack_loader_for(path.root.root).await?;
         let geometry = async move {
-            let trl = trl.context("TODO: late-load trl context")?;
+            let trl = trl.with_context(|| {
+                // TODO? late-load trl path from attrs
+                let lpath = LocDisplay::from_ref(&path);
+                anyhow!("missing trail path for {lpath}")
+            })?;
             Self::trail_load_geometry(&manager, path, loader, trl).await
         }
         .await;
@@ -395,7 +400,16 @@ impl PathingController {
                 // we could check now but there are currently no meaningful scenarios where a loaded marker
                 // would be missing its attrs at request time, so...
                 // XXX: if we do late-load eventually, make sure to
-                anyhow::bail!("TODO: late-load texture path for {path}")
+                let texture = match () {
+                    #[cfg(todo)]
+                    _ => anyhow::bail!("TODO? late-load texture path for {path}"),
+                    _ => {
+                        let lpath = LocDisplay::from_ref(&path);
+                        Err(anyhow!("missing texture attribute for {lpath}"))
+                    },
+                };
+                let response = LoadReport::Texture { path, texture, resource: None };
+                return Ok(PathingEvent::ReportResourceLoaded(response))
             },
         };
         let mut loader = loader.lock_owned().await;
