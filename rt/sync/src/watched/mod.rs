@@ -372,15 +372,25 @@ impl<T: Clone> Watched<T> {
         }
     }
     pub fn try_read_update(&mut self) -> Option<&mut T> {
-        match self.watch.try_read_update().map(|w| w.clone()) {
-            Some(v) => Some(self.cached.insert(v)),
-            None => None,
+        match (self.watch.try_read_update(), &mut self.cached) {
+            (Some(v), Some(cached)) => {
+                cached.clone_from(&v);
+                Some(cached)
+            },
+            (Some(v), cached @ None) =>
+                Some(cached.insert(v.clone())),
+            (None, _) => None,
         }
     }
     pub fn try_read_if_changed(&mut self) -> Option<&mut T> {
-        match self.watch.try_read_if_changed().map(|w| w.clone()) {
-            Some(v) => Some(self.cached.insert(v)),
-            None => None,
+        match (self.watch.try_read_if_changed(), &mut self.cached) {
+            (Some(v), Some(cached)) => {
+                cached.clone_from(&v);
+                Some(cached)
+            },
+            (Some(v), cached @ None) =>
+                Some(cached.insert(v.clone())),
+            (None, _) => None,
         }
     }
 
@@ -541,14 +551,12 @@ impl<T: Clone + Default> Watched<T> {
     pub fn read_ref(&mut self) -> &T {
         &*self.read_mut()
     }
-    /// TODO: remove underscore once existing users migrate to read_mut
     pub fn get_mut(&mut self) -> &mut T {
-        match &mut self.cached {
-            Some(cached) => cached,
-            cached @ None => {
-                let latest = self.watch.try_read().map(|v| v.clone());
-                cached.insert(latest.unwrap_or_default())
-            },
+        if self.cached.is_none() {
+            return self.read_mut()
+        }
+        unsafe {
+            self.cached.as_mut().unwrap_unchecked()
         }
     }
     #[cfg(todo = "unnecessary")]
@@ -564,9 +572,14 @@ impl<T: Clone + Default> Watched<T> {
     pub fn read_mut(&mut self) -> &mut T {
         match self.watch.has_changed() {
             false if self.cached.is_some() => unsafe { self.cached.as_mut().unwrap_unchecked() },
-            _ => {
-                let latest = self.watch.try_read_update().map(|v| v.clone());
-                self.cached.insert(latest.unwrap_or_default())
+            _ => match (self.watch.try_read_update(), &mut self.cached) {
+                (Some(v), Some(cached)) => {
+                    cached.clone_from(&v);
+                    cached
+                },
+                (Some(v), cached @ None) =>
+                    cached.insert(v.clone()),
+                (None, cached) => cached.get_or_insert_default(),
             },
         }
     }

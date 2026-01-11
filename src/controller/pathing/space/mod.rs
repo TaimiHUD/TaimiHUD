@@ -156,28 +156,27 @@ impl PathingController {
         }
         self.space.report_load(loaded);
     }
-    fn texture_for_loaded_marker(map: &LoadedMapPack, path: LoadedMarkerPath) -> Option<&AttrString> {
-        match path.path.variant() {
+    fn texture_for_loaded_marker(map: &LoadedMapPack, path: Locator<PackPath, LoadedMarkerPath>) -> Option<&AttrString> {
+        let tex = match path.path.path.variant() {
             MarkerIndexVariant::Poi(poii) => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
-                match map.lpois().lookup_ref(&lpath) {
-                    None => {
-                        log::error!("PATHY: missing {lpath} on {}", map.map_id);
-                    },
-                    Some(lpoi) =>
-                        if lpoi.poi_attrs().icon_file.is_none() {
-                            log::error!("PATHY: missing icon on {lpath}???");
-                            log::error!("{:?}", lpoi.render_attrs());
-                        },
+                let lpoi = map.lpois().lookup_ref(&lpath);
+                if lpoi.is_none() {
+                    log::debug!("BUG? tex req for missing {lpath} on {}", path.root);
                 }
-                map.lpois().lookup_ref(&lpath)?.poi_attrs().icon_file.as_ref()
+                lpoi?.poi_attrs().icon_file.as_ref()
             },
             MarkerIndexVariant::Trail(traili) | MarkerIndexVariant::TrailSection(traili, _) => {
                 let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
                 map.ltrails().lookup_ref(&lpath)?.trail_attrs().texture.as_ref()
             },
             _ => None,
+        };
+        if !crate::built_info::IS_TAGGED_VERSION && tex.is_none() {
+            let path = crate::controller::pathing::shared::LocDisplay::from_ref(&path);
+            log::debug!("WHY? no texture found on {path}");
         }
+        tex
     }
     fn trl_for_loaded_trail(map: &LoadedMapPack, path: LoadedTrailPath) -> Option<TrlLoadContext> {
         map.ltrails().lookup_ref(&path).and_then(|ltrail| {
@@ -195,7 +194,7 @@ impl PathingController {
             let texture = self
                 .maps
                 .lookup_ref(&path.root)
-                .map(|map| Self::texture_for_loaded_marker(map, path.unscope()).cloned());
+                .map(|map| Self::texture_for_loaded_marker(map, path.root.root.rel(path.unscope())).cloned());
             (path, texture)
         });
         let Some((path, texture)) = path else {

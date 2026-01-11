@@ -105,9 +105,6 @@ pub struct RenderMachine {
     pub display_size: Size2<ScreenSpace>,
     #[cfg(feature = "paths")]
     pub pathing: Option<Arc<PathingShared>>,
-    /// TODO: what this for anymore?
-    #[cfg(feature = "paths")]
-    pub pack_map: Watched<SharedGameplayMap>,
     #[cfg(feature = "paths")]
     pub pack_ui_state: PackElements,
 }
@@ -171,8 +168,6 @@ impl RenderMachine {
             display_size: Size2::ZERO,
             #[cfg(feature = "paths")]
             pathing: None,
-            #[cfg(feature = "paths")]
-            pack_map: Watched::EMPTY,
             #[cfg(feature = "paths")]
             pack_ui_state: PackElements::default(),
         }
@@ -340,6 +335,7 @@ impl RenderMachine {
             });
         }
         #[cfg(feature = "paths")]
+        #[cfg(todo)]
         if let Some(pathing) = &self.pathing {
             if !self.pack_map.is_watching() {
                 self.pack_map.restart_watching(&pathing.gameplay);

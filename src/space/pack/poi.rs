@@ -360,8 +360,6 @@ impl PoiRender {
             .or_else(|| common.fallback_texture.as_ref());
         if let Some(texture) = texture {
             texture.set(device_context, 0);
-        } else {
-            log::warn!("PATHY: fallback missing??");
         }
     }
 

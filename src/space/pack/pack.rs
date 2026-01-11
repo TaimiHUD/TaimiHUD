@@ -180,10 +180,8 @@ impl PackRender {
             self.texture_rx.subscribe_to(&pathing.space.texture_loads);
         }
         if packs_rx.has_changed().unwrap_or(false) {
-            log::debug!("PATHY: packs changed");
             let packs = packs_rx.borrow_and_update();
             if self.pack_data.len() < packs.len() {
-                log::debug!("PATHY: space packs resized to {}", packs.len());
                 self.pack_data.data.resize_with(packs.len(), PackRenderData::new);
             }
             for (pack, dest) in packs.values().zip(self.pack_data.values_mut()) {
@@ -235,11 +233,10 @@ impl PackRender {
         }
         if let Some(map_id) = map_id {
             if let Some(packs_map) = &packs_map_changed {
-                log::debug!("PATHY: gameplay maps rx @ {map_id}");
+                log::trace!("gameplay maps rx @ {map_id}");
                 if let Some(maps) = packs_map.get_ref(map_id) {
                     for (pack_path, pack) in self.pack_data.iter_mut() {
                         let Some((packmap_path, map_info)) = maps.get_info_for(pack_path) else {
-                            log::debug!("PATHY: nothing for {pack_path}@{map_id:?}?");
                             pack.clear();
                             continue
                         };
@@ -806,15 +803,10 @@ impl PackRenderList {
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
         let shapes = &self.spacepacks.render_entities.entities[..];
-        let mut x = false;
         shapes.iter().filter_map(move |shape| {
             let id = &shape.value.id;
             let pack_path = id.get_marker_pack_path();
             let pack = pack_data.lookup_ref(&pack_path);
-            if x == false && pack.is_none() {
-                x = true;
-                log::info!("PATHY: {pack_path} of {id} missing?");
-            }
             pack.map(|p| (p, id))
         })
     }

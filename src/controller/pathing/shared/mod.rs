@@ -1,6 +1,7 @@
 #[allow(unused_imports)]
 pub use {
     self::{
+        display::LocDisplay,
         loader::{
             LoadReport,
             SharedLoaderPacksInfo,
@@ -50,6 +51,7 @@ use {
     tokio::sync::mpsc,
 };
 
+mod display;
 mod loader;
 mod maps;
 mod space;
