@@ -252,7 +252,7 @@ impl PathingController {
             },
             trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
                 for trail in trail_reqs {
-                    log::debug!("processing trail req {trail}");
+                    log::trace!("processing trail req {trail}");
                     let id = SpacePackShared::trail_geometry_id(&trail);
                     self.request_trail_load(id);
                 }
@@ -261,7 +261,7 @@ impl PathingController {
                 for path in texture_reqs {
                     let id = MarkerId::for_marker(path);
                     if self.request_texture_load(id) {
-                        log::debug!("processing tex req {path}");
+                        log::trace!("processing tex req {path}");
                     } else {
                         log::trace!("reserving tex req {path}");
                     }
