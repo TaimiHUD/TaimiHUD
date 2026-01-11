@@ -32,7 +32,7 @@ use {
         stream::{self, FusedStream},
         StreamExt,
     },
-    std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc},
+    std::{collections::VecDeque, mem, future::Future, pin::Pin, sync::Arc},
     strum_macros::Display,
     taimi_hoard::loc::LocationRef,
     taimi_meta::{
@@ -48,8 +48,9 @@ use {
         },
     },
     taimi_pack::attributes::Festivals,
-    taimi_sync::watched::watch,
+    taimi_sync::watched,
     tokio::{select, sync::Semaphore, task::JoinSet},
+    futures::future::Either,
 };
 
 #[allow(unused_imports)]
@@ -114,16 +115,10 @@ pub(crate) struct PathingController {
     maps: LoadedMaps,
     space: SpaceContext,
     // watchers...
-    pack_configs: Box<
-        dyn FusedStream<Item = (PackPath, watch::Receiver<shared::SharedPackConfig>)>
-            + Send
-            + Sync
-            + Unpin
-            + 'static,
-    >,
+    pack_configs: watched::WatchStreamBox<PackPath, shared::SharedPackConfig>,
     /// we only need to regen if a new pack slot is allocated
-    pack_configs_sig: usize,
-    packs_rx: watch::Receiver<shared::SharedLoaderPacksInfo>,
+    pack_configs_sig: PackPath,
+    packs_rx: watched::Rx<shared::SharedLoaderPacksInfo>,
 }
 
 impl PathingController {
@@ -147,7 +142,7 @@ impl PathingController {
             map_info: Default::default(),
             maps: Default::default(),
             pack_configs: Box::new(stream::pending()),
-            pack_configs_sig: 0,
+            pack_configs_sig: PackPath::default(),
         }
     }
 
@@ -204,7 +199,7 @@ impl PathingController {
                             packs_dirty.insert(path);
                         }
                     }
-                    let pack_count = packs.len();
+                    let pack_count = packs.end_path();
                     // XXX: avoid two locks please?
                     let config_sigs = packs.values().map(|p| p.config.borrow().info_sig);
                     let info_sigs = packs.values().map(|p| p.info.sig);
@@ -213,8 +208,8 @@ impl PathingController {
                 };
                 if self.pack_configs_sig < pack_count {
                     // we only need to resubscribe when length changes...
-                    self.pack_configs_sig = pack_count;
-                    self.pack_configs = Box::new(self.loader.shared.watch_config_changes());
+                    let additions = mem::replace(&mut self.pack_configs_sig, pack_count);
+                    self.pack_configs = self.loader.shared.watch_config_changes(Either::Right(additions..));
                 }
                 let map_id = gameplay_prev.gameplay_map();
                 for path in &packs_dirty {

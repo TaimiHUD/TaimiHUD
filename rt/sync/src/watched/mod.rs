@@ -1,10 +1,15 @@
-pub use tokio::sync::watch::{self, Receiver as Rx, Ref, Sender as Tx};
+pub use {
+    self::stream::WatchStreamBox,
+    tokio::sync::watch::{self, Receiver as Rx, Ref, Sender as Tx, error::RecvError as RxError},
+};
 use {
     crate::arcs::default_static_of,
     futures_util::future,
     std::{borrow::Cow, mem, ops, pin::Pin, ptr, sync::OnceLock},
     tokio::time,
 };
+
+pub mod stream;
 
 #[derive(Debug)]
 pub struct Watcher<T> {

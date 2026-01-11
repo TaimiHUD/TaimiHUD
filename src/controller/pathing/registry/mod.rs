@@ -65,65 +65,6 @@ pub use self::{
 mod active;
 mod namespace;
 
-impl super::PathingShared {
-    /// TODO: move this out of here ew
-    pub fn watch_config_changes(
-        &self,
-    ) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
-           + Unpin
-           + Send
-           + Sync
-           + 'static {
-        Self::watch_config_changes_on(&self.packs.packs.borrow())
-    }
-    pub fn watch_config_changes_on(
-        packs: &super::shared::SharedLoaderPacksInfo,
-    ) -> impl FusedStream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
-           + Unpin
-           + Send
-           + Sync
-           + 'static {
-        async fn changed_static<T>(
-            mut watch: watch::Receiver<T>,
-        ) -> Result<watch::Receiver<T>, watch::error::RecvError> {
-            watch.changed().await.map(move |()| watch)
-        }
-
-        fn watch_config_change(
-            path: PackPath,
-            mut config: watch::Receiver<super::shared::SharedPackConfig>,
-        ) -> impl Stream<Item = (PackPath, watch::Receiver<super::shared::SharedPackConfig>)>
-               + Unpin
-               + Send
-               + Sync
-               + 'static {
-            use std::task::Poll;
-
-            config.mark_changed();
-            let mut storage = Some(ReusableBoxFuture::new(changed_static(config)));
-            stream::poll_fn(move |cx| {
-                let Some(changed) = &mut storage else { return Poll::Pending };
-                let res = futures::ready!(changed.poll_unpin(cx));
-                match res {
-                    Ok(watch) => {
-                        changed.set(changed_static(watch.clone()));
-                        Poll::Ready(Some((path, watch)))
-                    },
-                    Err(..) => {
-                        let _ = storage.take();
-                        Poll::Ready(None)
-                    },
-                }
-            })
-        }
-
-        packs
-            .iter()
-            .map(|(path, pack)| watch_config_change(path, pack.config.subscribe()))
-            .collect::<stream::SelectAll<_>>()
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackInfo {
     pub format: PackFormat,

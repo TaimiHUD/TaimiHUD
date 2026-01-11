@@ -40,15 +40,16 @@ use {
     crate::{
         controller::{
             api::{AchievementState, FestivalState, RaidState},
-            pathing::{registry::PackLoader, ExternalFilterState, PathingEvent},
+            pathing::{registry::{PackLoader, PackPath}, ExternalFilterState, PathingEvent},
         },
         render::machine::MumbleIdentityUpdate,
         settings::{pathing::PathingSettings, SettingsLock},
     },
-    std::sync::Arc,
+    std::{ops, sync::Arc},
     taimi_meta::ui::GameplayState,
-    taimi_sync::watched::{watch, Watched},
+    taimi_sync::watched::{self, Watched},
     tokio::sync::mpsc,
+    futures::future::Either,
 };
 
 mod display;
@@ -60,18 +61,18 @@ mod space;
 pub struct PathingSender {
     pub shared: Arc<PathingShared>,
     pub command: mpsc::Sender<PathingEvent>,
-    pub enables: watch::Sender<PathingEnables>,
-    pub load_throttle: watch::Sender<usize>,
+    pub enables: watched::Tx<PathingEnables>,
+    pub load_throttle: watched::Tx<usize>,
     #[cfg(todo)]
     pub interactions: broadcast::Sender<InteractionEvent>,
 }
 impl PathingSender {
     pub fn new(
-        gameplay: &watch::Sender<GameplayState>,
-        mumble_identity: &watch::Sender<Option<MumbleIdentityUpdate>>,
-        festivals: &watch::Sender<FestivalState>,
-        achievements: &watch::Sender<Arc<AchievementState>>,
-        raids: &watch::Sender<Arc<RaidState>>,
+        gameplay: &watched::Tx<GameplayState>,
+        mumble_identity: &watched::Tx<Option<MumbleIdentityUpdate>>,
+        festivals: &watched::Tx<FestivalState>,
+        achievements: &watched::Tx<Arc<AchievementState>>,
+        raids: &watched::Tx<Arc<RaidState>>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(48);
         #[cfg(todo)]
@@ -79,8 +80,8 @@ impl PathingSender {
         let sender = Self {
             shared: Arc::new(PathingShared::new()),
             command,
-            enables: watch::Sender::new(PathingEnables::empty()),
-            load_throttle: watch::Sender::new(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS),
+            enables: watched::Tx::new(PathingEnables::empty()),
+            load_throttle: watched::Tx::new(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS),
             #[cfg(todo)]
             interactions: interactions.clone(),
         };
@@ -113,15 +114,15 @@ impl PathingSender {
 pub struct PathingReceiver {
     pub shared: Arc<PathingShared>,
     pub command: mpsc::Receiver<PathingEvent>,
-    pub enables: watch::Sender<PathingEnables>,
+    pub enables: watched::Tx<PathingEnables>,
     pub load_throttle: Watched<usize>,
-    pub festivals: watch::Receiver<FestivalState>,
+    pub festivals: watched::Rx<FestivalState>,
     /// TODO: cfg(feature = "api")
-    pub achievements: watch::Receiver<Arc<AchievementState>>,
+    pub achievements: watched::Rx<Arc<AchievementState>>,
     /// TODO: cfg(feature = "api")
-    pub raids: watch::Receiver<Arc<RaidState>>,
+    pub raids: watched::Rx<Arc<RaidState>>,
     pub gameplay: Watched<GameplayState>,
-    pub mumble_identity: watch::Receiver<Option<MumbleIdentityUpdate>>,
+    pub mumble_identity: watched::Rx<Option<MumbleIdentityUpdate>>,
     #[cfg(todo)]
     pub interactions: broadcast::Sender<InteractionEvent>,
     #[cfg(todo)]
@@ -152,9 +153,9 @@ impl PathingReceiver {
 pub struct PathingShared {
     pub packs: SharedPacks,
     #[cfg(todo)]
-    pub maps: watch::Sender<SharedMaps>,
+    pub maps: watched::Tx<SharedMaps>,
     /// current map
-    pub gameplay: watch::Sender<SharedGameplayMap>,
+    pub gameplay: watched::Tx<SharedGameplayMap>,
     /// rendering
     pub space: SpacePackShared,
 }
@@ -163,8 +164,8 @@ impl PathingShared {
         Self {
             packs: SharedPacks::new(),
             #[cfg(todo)]
-            maps: watch::Sender::new(Default::default()),
-            gameplay: watch::Sender::new(SharedGameplayMap::default()),
+            maps: watched::Tx::new(Default::default()),
+            gameplay: watched::Tx::new(SharedGameplayMap::default()),
             space: SpacePackShared::new(),
         }
     }
@@ -198,6 +199,29 @@ impl PathingShared {
             }
             notify
         });
+    }
+
+    pub fn watch_config_changes(
+        &self,
+        mark_changed: Either<bool, ops::RangeFrom<PackPath>>,
+    ) -> watched::WatchStreamBox<PackPath, SharedPackConfig> {
+        let packs = self.packs.packs.borrow();
+        let configs = packs
+            .iter().map(|(path, load)| (path, &load.config));
+        match mark_changed {
+            Either::Left(mark_changed) =>
+                watched::stream::stream_watch_changes_of(configs, mark_changed),
+            Either::Right(mark_changed) => {
+                let recv = configs.map(|(path, tx)| {
+                    let mut rx = tx.subscribe();
+                    if mark_changed.contains(&path) {
+                        rx.mark_changed();
+                    }
+                    (path, rx)
+                });
+                Box::new(watched::stream::stream_watch_changes(recv))
+            },
+        }
     }
 }
 
