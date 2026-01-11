@@ -29,10 +29,11 @@ use {
     },
     anyhow::Context,
     futures::{
+        future::Either,
         stream::{self, FusedStream},
         StreamExt,
     },
-    std::{collections::VecDeque, mem, future::Future, pin::Pin, sync::Arc},
+    std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc},
     strum_macros::Display,
     taimi_hoard::loc::LocationRef,
     taimi_meta::{
@@ -50,7 +51,6 @@ use {
     taimi_pack::attributes::Festivals,
     taimi_sync::watched,
     tokio::{select, sync::Semaphore, task::JoinSet},
-    futures::future::Either,
 };
 
 #[allow(unused_imports)]

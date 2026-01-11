@@ -1,26 +1,22 @@
-use super::{Rx, Tx, RxError};
-use std::task::Poll;
-use futures_core::stream::{FusedStream, Stream};
-use futures_util::{stream, ready, future::FutureExt};
-use tokio_util::sync::ReusableBoxFuture;
+use {
+    super::{Rx, RxError, Tx},
+    futures_core::stream::{FusedStream, Stream},
+    futures_util::{future::FutureExt, ready, stream},
+    std::task::Poll,
+    tokio_util::sync::ReusableBoxFuture,
+};
 
 pub type StaticStreamBox<T> = Box<dyn FusedStream<Item = T> + Unpin + Send + Sync + 'static>;
 pub type WatchStreamBox<K, T> = StaticStreamBox<(K, Rx<T>)>;
 
-async fn changed_static<T: 'static>(
-    mut watch: Rx<T>,
-) -> Result<Rx<T>, RxError> {
+async fn changed_static<T: 'static>(mut watch: Rx<T>) -> Result<Rx<T>, RxError> {
     watch.changed().await.map(move |()| watch)
 }
 
 fn watch_next_change<'a, K: 'a, T: 'static>(
     key: K,
     rx: Rx<T>,
-) -> impl Stream<Item = (K, Rx<T>)>
-    + Unpin
-    + Send
-    + Sync
-    + 'a
+) -> impl Stream<Item = (K, Rx<T>)> + Unpin + Send + Sync + 'a
 where
     T: Sync + Send,
     K: Sync + Send,
@@ -43,33 +39,25 @@ where
     })
 }
 
-pub fn stream_watch_changes_of<'t, K, T, I>(
-    senders: I,
-    mark_changed: bool,
-) -> WatchStreamBox<K, T>
+pub fn stream_watch_changes_of<'t, K, T, I>(senders: I, mark_changed: bool) -> WatchStreamBox<K, T>
 where
     I: IntoIterator<Item = (K, &'t Tx<T>)>,
     K: Sync + Send + 'static,
     T: Sync + Send + 'static,
 {
-    let stream = stream_watch_changes(senders.into_iter()
-        .map(|(key, tx)| {
-            let mut rx = tx.subscribe();
-            if mark_changed {
-                rx.mark_changed();
-            }
-            (key, rx)
-        }));
+    let stream = stream_watch_changes(senders.into_iter().map(|(key, tx)| {
+        let mut rx = tx.subscribe();
+        if mark_changed {
+            rx.mark_changed();
+        }
+        (key, rx)
+    }));
     Box::new(stream)
 }
 
 pub fn stream_watch_changes<'k, 'i, K, T, I>(
     senders: I,
-) -> impl FusedStream<Item = (K, Rx<T>)>
-+ Unpin
-+ Send
-+ Sync
-+ 'k
+) -> impl FusedStream<Item = (K, Rx<T>)> + Unpin + Send + Sync + 'k
 where
     I: IntoIterator<Item = (K, Rx<T>)> + 'i,
     K: Sync + Send + 'k,
@@ -77,8 +65,6 @@ where
 {
     senders
         .into_iter()
-        .map(|(key, rx)| {
-            watch_next_change(key, rx)
-        })
+        .map(|(key, rx)| watch_next_change(key, rx))
         .collect::<stream::SelectAll<_>>()
 }

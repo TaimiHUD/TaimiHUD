@@ -40,16 +40,20 @@ use {
     crate::{
         controller::{
             api::{AchievementState, FestivalState, RaidState},
-            pathing::{registry::{PackLoader, PackPath}, ExternalFilterState, PathingEvent},
+            pathing::{
+                registry::{PackLoader, PackPath},
+                ExternalFilterState,
+                PathingEvent,
+            },
         },
         render::machine::MumbleIdentityUpdate,
         settings::{pathing::PathingSettings, SettingsLock},
     },
+    futures::future::Either,
     std::{ops, sync::Arc},
     taimi_meta::ui::GameplayState,
     taimi_sync::watched::{self, Watched},
     tokio::sync::mpsc,
-    futures::future::Either,
 };
 
 mod display;
@@ -206,11 +210,9 @@ impl PathingShared {
         mark_changed: Either<bool, ops::RangeFrom<PackPath>>,
     ) -> watched::WatchStreamBox<PackPath, SharedPackConfig> {
         let packs = self.packs.packs.borrow();
-        let configs = packs
-            .iter().map(|(path, load)| (path, &load.config));
+        let configs = packs.iter().map(|(path, load)| (path, &load.config));
         match mark_changed {
-            Either::Left(mark_changed) =>
-                watched::stream::stream_watch_changes_of(configs, mark_changed),
+            Either::Left(mark_changed) => watched::stream::stream_watch_changes_of(configs, mark_changed),
             Either::Right(mark_changed) => {
                 let recv = configs.map(|(path, tx)| {
                     let mut rx = tx.subscribe();

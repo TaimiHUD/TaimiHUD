@@ -156,7 +156,10 @@ impl PathingController {
         }
         self.space.report_load(loaded);
     }
-    fn texture_for_loaded_marker(map: &LoadedMapPack, path: Locator<PackPath, LoadedMarkerPath>) -> Option<&AttrString> {
+    fn texture_for_loaded_marker(
+        map: &LoadedMapPack,
+        path: Locator<PackPath, LoadedMarkerPath>,
+    ) -> Option<&AttrString> {
         let tex = match path.path.path.variant() {
             MarkerIndexVariant::Poi(poii) => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
@@ -191,10 +194,9 @@ impl PathingController {
             return false
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
-            let texture = self
-                .maps
-                .lookup_ref(&path.root)
-                .map(|map| Self::texture_for_loaded_marker(map, path.root.root.rel(path.unscope())).cloned());
+            let texture = self.maps.lookup_ref(&path.root).map(|map| {
+                Self::texture_for_loaded_marker(map, path.root.root.rel(path.unscope())).cloned()
+            });
             (path, texture)
         });
         let Some((path, texture)) = path else {

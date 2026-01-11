@@ -1,6 +1,6 @@
 pub use {
     self::stream::WatchStreamBox,
-    tokio::sync::watch::{self, Receiver as Rx, Ref, Sender as Tx, error::RecvError as RxError},
+    tokio::sync::watch::{self, error::RecvError as RxError, Receiver as Rx, Ref, Sender as Tx},
 };
 use {
     crate::arcs::default_static_of,
@@ -382,8 +382,7 @@ impl<T: Clone> Watched<T> {
                 cached.clone_from(&v);
                 Some(cached)
             },
-            (Some(v), cached @ None) =>
-                Some(cached.insert(v.clone())),
+            (Some(v), cached @ None) => Some(cached.insert(v.clone())),
             (None, _) => None,
         }
     }
@@ -393,8 +392,7 @@ impl<T: Clone> Watched<T> {
                 cached.clone_from(&v);
                 Some(cached)
             },
-            (Some(v), cached @ None) =>
-                Some(cached.insert(v.clone())),
+            (Some(v), cached @ None) => Some(cached.insert(v.clone())),
             (None, _) => None,
         }
     }
@@ -560,9 +558,7 @@ impl<T: Clone + Default> Watched<T> {
         if self.cached.is_none() {
             return self.read_mut()
         }
-        unsafe {
-            self.cached.as_mut().unwrap_unchecked()
-        }
+        unsafe { self.cached.as_mut().unwrap_unchecked() }
     }
     #[cfg(todo = "unnecessary")]
     pub fn borrow_mut(&mut self) -> &mut T {
@@ -582,8 +578,7 @@ impl<T: Clone + Default> Watched<T> {
                     cached.clone_from(&v);
                     cached
                 },
-                (Some(v), cached @ None) =>
-                    cached.insert(v.clone()),
+                (Some(v), cached @ None) => cached.insert(v.clone()),
                 (None, cached) => cached.get_or_insert_default(),
             },
         }

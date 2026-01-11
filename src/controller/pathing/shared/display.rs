@@ -1,30 +1,31 @@
 use {
-    crate::{
-        controller::pathing::{
+    crate::controller::{
+        pathing::{
             registry::{
-                LoadedMarkerPath,
-                LoadedTrailPath,
                 LoadedCategoryIndex,
                 LoadedCategoryPath,
+                LoadedMarkerPath,
                 LoadedPoiPath,
+                LoadedTrailPath,
                 PackIndex,
                 PackMapPath,
                 PackPath,
             },
-            shared::{SharedMapPackLoaded, SharedMapPackState, SharedPackLoad, SharedPackInfo},
+            shared::{SharedMapPackLoaded, SharedMapPackState, SharedPackInfo, SharedPackLoad},
         },
-        controller::Controller,
+        Controller,
     },
-    std::{
-        fmt,
-        mem,
-        sync::Arc,
-    },
+    std::{fmt, mem, sync::Arc},
     taimi_hoard::loc::{LocationRef, Locator},
     taimi_meta::packs::{
-        id::{MarkerId, MarkerPath, MarkerIndexVariant},
-        MapIndex, MapPath, CategoryPath, CategoryIndex,
-        TrailPath, TrailSectionPath, PoiPath,
+        id::{MarkerId, MarkerIndexVariant, MarkerPath},
+        CategoryIndex,
+        CategoryPath,
+        MapIndex,
+        MapPath,
+        PoiPath,
+        TrailPath,
+        TrailSectionPath,
     },
     taimi_pack::Pack,
 };
@@ -35,15 +36,11 @@ pub struct LocDisplay<L>(pub L);
 impl<L> LocDisplay<L> {
     #[inline]
     pub const fn from_ref(l: &L) -> &Self {
-        unsafe {
-            mem::transmute(l)
-        }
+        unsafe { mem::transmute(l) }
     }
     #[inline]
     pub fn from_mut(l: &mut L) -> &mut Self {
-        unsafe {
-            mem::transmute(l)
-        }
+        unsafe { mem::transmute(l) }
     }
     pub fn rel<P>(self, path: P) -> Locator<Self, P> {
         Locator::with_parts(self, path)
@@ -60,7 +57,8 @@ impl<N, L> LocDisplay<Locator<N, L>> {
         LocDisplay::from_ref(&self.0.path)
     }
 }
-impl<L> fmt::Display for LocDisplay<&'_ L> where
+impl<L> fmt::Display for LocDisplay<&'_ L>
+where
     LocDisplay<L>: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -71,37 +69,34 @@ fn with_shared_pack<R, F: FnOnce(&SharedPackLoad) -> R>(path: PackPath, f: F) ->
     if path.path == PackIndex::MAX {
         return None
     }
-    let shared = Controller::with_sender(|s| s.pathing.as_ref()
-        .map(|p| p.shared.clone())
-    ).flatten()?;
+    let shared = Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.shared.clone())).flatten()?;
     let packs = shared.packs.packs.borrow();
     let pack = packs.lookup_ref(&path)?;
     Some(f(pack))
 }
-fn with_shared_pack_data<R, F: FnOnce(&SharedPackLoad, Option<Arc<Pack>>) -> R>(path: PackPath, f: F) -> Option<R> {
+fn with_shared_pack_data<R, F: FnOnce(&SharedPackLoad, Option<Arc<Pack>>) -> R>(
+    path: PackPath,
+    f: F,
+) -> Option<R> {
     if path.path == PackIndex::MAX {
         return None
     }
-    let shared = Controller::with_sender(|s| s.pathing.as_ref()
-        .map(|p| p.shared.clone())
-    ).flatten()?;
-    let loaded = shared.packs.packs.borrow()
-        .lookup_ref(&path)?.loaded.clone();
+    let shared = Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.shared.clone())).flatten()?;
+    let loaded = shared.packs.packs.borrow().lookup_ref(&path)?.loaded.clone();
     let loaded = loaded.borrow().pack.clone();
     let packs = shared.packs.packs.borrow();
-    let pack = unsafe {
-        packs.get_unchecked(path.path as usize)
-    };
+    let pack = unsafe { packs.get_unchecked(path.path as usize) };
     Some(f(pack, loaded))
 }
 #[cfg(todo = "unused")]
-fn with_shared_map<R, F: FnOnce(&SharedMapPackLoaded, Option<&SharedMapPackState>) -> R>(path: PackMapPath, f: F) -> Option<R> {
+fn with_shared_map<R, F: FnOnce(&SharedMapPackLoaded, Option<&SharedMapPackState>) -> R>(
+    path: PackMapPath,
+    f: F,
+) -> Option<R> {
     if path.root.path == PackIndex::MAX || path.path == MapIndex::MAX {
         return None
     }
-    let shared = Controller::with_sender(|s| s.pathing.as_ref()
-        .map(|p| p.shared.clone())
-    ).flatten()?;
+    let shared = Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.shared.clone())).flatten()?;
     let gameplay = shared.gameplay.borrow();
     let (map_path, map_info) = gameplay.get_info_for(path.root)?;
     if map_path.path != path.path {
@@ -111,13 +106,17 @@ fn with_shared_map<R, F: FnOnce(&SharedMapPackLoaded, Option<&SharedMapPackState
     let map = gameplay.get_state(path);
     Some(f(map_info, map))
 }
-fn with_shared_pack_map<R, F: FnOnce(&SharedPackInfo, Option<&Pack>, &SharedMapPackLoaded, Option<&SharedMapPackState>) -> R>(path: PackMapPath, f: F) -> Option<R> {
+fn with_shared_pack_map<
+    R,
+    F: FnOnce(&SharedPackInfo, Option<&Pack>, &SharedMapPackLoaded, Option<&SharedMapPackState>) -> R,
+>(
+    path: PackMapPath,
+    f: F,
+) -> Option<R> {
     if path.root.path == PackIndex::MAX || path.path == MapIndex::MAX {
         return None
     }
-    let shared = Controller::with_sender(|s| s.pathing.as_ref()
-        .map(|p| p.shared.clone())
-    ).flatten()?;
+    let shared = Controller::with_sender(|s| s.pathing.as_ref().map(|p| p.shared.clone())).flatten()?;
     let (info, loaded) = {
         let packs = shared.packs.packs.borrow();
         let pack = packs.lookup_ref(&path.root)?;
@@ -164,7 +163,7 @@ impl fmt::Display for LocDisplay<PackPath> {
                 fmt::Display::fmt(&LocDisplay((Some(&*load.info), self.0)), f)
             })
         }
-                .unwrap_or_else(|| fmt::Display::fmt(&LocDisplay((None::<&SharedPackInfo>, self.0)), f))
+        .unwrap_or_else(|| fmt::Display::fmt(&LocDisplay((None::<&SharedPackInfo>, self.0)), f))
     }
 }
 impl fmt::Display for LocDisplay<(Option<&'_ SharedPackInfo>, PackMapPath)> {
@@ -179,8 +178,7 @@ impl fmt::Display for LocDisplay<PackMapPath> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // TODO: lookup if gameplay map info exists on map or not
         let map: MapPath = Locator::with_path(self.0.path);
-        let path = self.root_ref()
-            .rel_ref(LocDisplay(map));
+        let path = self.root_ref().rel_ref(LocDisplay(map));
         fmt::Display::fmt(&path, f)
     }
 }
@@ -230,9 +228,7 @@ impl fmt::Display for LocDisplay<(Option<&'_ SharedPackInfo>, Option<&'_ Pack>, 
                 return fmt::Display::fmt(&root.id, f)
             }
         }
-        let cat = data.and_then(|data|
-            data.categories.all_categories.get_index(path.path as usize)
-        );
+        let cat = data.and_then(|data| data.categories.all_categories.get_index(path.path as usize));
         if let Some((_id, cat)) = cat {
             fmt::Display::fmt(&cat.full_id, f)
         } else {
@@ -246,7 +242,13 @@ impl fmt::Display for LocDisplay<CategoryPath<PackPath>> {
         fmt::Display::fmt(&LocDisplay(Locator::with_parts(self.0.root, path)), f)
     }
 }
-impl fmt::Display for LocDisplay<(Option<&'_ SharedPackInfo>, Option<&'_ Pack>, Locator<PackPath, CategoryPath>)> {
+impl fmt::Display
+    for LocDisplay<(
+        Option<&'_ SharedPackInfo>,
+        Option<&'_ Pack>,
+        Locator<PackPath, CategoryPath>,
+    )>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let &Self((info, data, path)) = self;
         let root = LocDisplay((info, path.root));
@@ -259,16 +261,26 @@ impl fmt::Display for LocDisplay<Locator<PackPath, CategoryPath>> {
         if self.0.path.path == CategoryIndex::MAX {
             None
         } else {
-            with_shared_pack_data(self.0.root, |load, data|
-                fmt::Display::fmt(&LocDisplay((Some(&*load.info), data.as_ref().map(|pd| &**pd), self.0)), f)
-            )
+            with_shared_pack_data(self.0.root, |load, data| {
+                fmt::Display::fmt(
+                    &LocDisplay((Some(&*load.info), data.as_ref().map(|pd| &**pd), self.0)),
+                    f,
+                )
+            })
         }
-                .unwrap_or_else(|| {
-                    fmt::Display::fmt(&LocDisplay((None::<&SharedPackInfo>, None::<&Pack>, self.0)), f)
-                })
+        .unwrap_or_else(|| {
+            fmt::Display::fmt(&LocDisplay((None::<&SharedPackInfo>, None::<&Pack>, self.0)), f)
+        })
     }
 }
-impl fmt::Display for LocDisplay<(Option<&'_ SharedPackInfo>, Option<&'_ Pack>, Option<&'_ SharedMapPackLoaded>, Locator<PackMapPath, LoadedCategoryPath>)> {
+impl fmt::Display
+    for LocDisplay<(
+        Option<&'_ SharedPackInfo>,
+        Option<&'_ Pack>,
+        Option<&'_ SharedMapPackLoaded>,
+        Locator<PackMapPath, LoadedCategoryPath>,
+    )>
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let &Self((info, pack, map_info, path)) = self;
         let root = LocDisplay((info, path.root));
@@ -292,8 +304,17 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedCategoryPath>> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         with_shared_pack_map(self.0.root, |info, pack, map_info, _map| {
             fmt::Display::fmt(&LocDisplay((Some(info), pack, Some(map_info), self.0)), f)
-        }).unwrap_or_else(|| {
-            fmt::Display::fmt(&LocDisplay((None::<&SharedPackInfo>, None::<&Pack>, None::<&SharedMapPackLoaded>, self.0)), f)
+        })
+        .unwrap_or_else(|| {
+            fmt::Display::fmt(
+                &LocDisplay((
+                    None::<&SharedPackInfo>,
+                    None::<&Pack>,
+                    None::<&SharedMapPackLoaded>,
+                    self.0,
+                )),
+                f,
+            )
         })
     }
 }
@@ -308,7 +329,8 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedPoiPath>> {
             } else {
                 fmt::Display::fmt(&root.rel_ref(lpath), f)
             }
-        }).unwrap_or_else(|| {
+        })
+        .unwrap_or_else(|| {
             let root = LocDisplay((None::<&SharedPackInfo>, self.0.root));
             fmt::Display::fmt(&root.rel_ref(lpath), f)
         })
@@ -329,7 +351,8 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedTrailPath>> {
             } else {
                 fmt::Display::fmt(&root.rel_ref(lpath), f)
             }
-        }).unwrap_or_else(|| {
+        })
+        .unwrap_or_else(|| {
             let root = LocDisplay((None::<&SharedPackInfo>, self.0.root));
             fmt::Display::fmt(&root.rel_ref(lpath), f)
         })
@@ -361,8 +384,7 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedMarkerPath>> {
                 let section: TrailSectionPath = TrailSectionPath::with_path(sectioni);
                 fmt::Display::fmt(&LocDisplay(self.0.root.rel(ltrail)).rel(section), f)
             },
-            _ =>
-                fmt::Display::fmt(&self.root_ref().rel_ref(self.0.path), f),
+            _ => fmt::Display::fmt(&self.root_ref().rel_ref(self.0.path), f),
         }
     }
 }
@@ -371,11 +393,16 @@ impl fmt::Display for LocDisplay<Locator<PackPath, PoiPath>> {
         let lpath = &self.0.path;
         with_shared_pack_data(self.0.root, |load, pack| {
             let root = LocDisplay((Some(&*load.info), self.0.root));
-            let poi = pack.as_ref().and_then(|pack| pack.pois.get(self.0.path.path as usize)
-                .map(|poi| (pack, poi))
-            ).map(|(pack, poi)|
-                (pack, poi, pack.categories.all_categories.get_full(poi.category.as_id()))
-            );
+            let poi = pack
+                .as_ref()
+                .and_then(|pack| pack.pois.get(self.0.path.path as usize).map(|poi| (pack, poi)))
+                .map(|(pack, poi)| {
+                    (
+                        pack,
+                        poi,
+                        pack.categories.all_categories.get_full(poi.category.as_id()),
+                    )
+                });
             match poi {
                 #[cfg(todo = "unnecessary")]
                 Some((pack, poi, Some((cati, _id, cat)))) => {
@@ -383,12 +410,12 @@ impl fmt::Display for LocDisplay<Locator<PackPath, PoiPath>> {
                     let cat = LocDisplay((Some(&load), cat_path));
                     fmt::Display::fmt(&Locator::with_parts(root, cat).rel(lpath), f)
                 },
-                Some((_pack, _poi, Some((_cati, _id, cat)))) => {
-                    fmt::Display::fmt(&Locator::with_parts(root, cat.full_id.as_str()).rel(lpath), f)
-                },
-                _ => fmt::Display::fmt(&root.rel_ref(&self.0.path), f)
+                Some((_pack, _poi, Some((_cati, _id, cat)))) =>
+                    fmt::Display::fmt(&Locator::with_parts(root, cat.full_id.as_str()).rel(lpath), f),
+                _ => fmt::Display::fmt(&root.rel_ref(&self.0.path), f),
             }
-        }).unwrap_or_else(|| {
+        })
+        .unwrap_or_else(|| {
             let root = LocDisplay((None::<&SharedPackInfo>, self.0.root));
             fmt::Display::fmt(&root.rel_ref(lpath), f)
         })
@@ -399,11 +426,21 @@ impl fmt::Display for LocDisplay<Locator<PackPath, TrailPath>> {
         let lpath = &self.0.path;
         with_shared_pack_data(self.0.root, |load, pack| {
             let root = LocDisplay((Some(&*load.info), self.0.root));
-            let trail = pack.as_ref().and_then(|pack| pack.trails.get(self.0.path.path as usize)
-                .map(|trail| (pack, trail))
-            ).map(|(pack, trail)|
-                (pack, trail, trail.trail_path().ok(), pack.categories.all_categories.get_full(trail.category.as_id()))
-            );
+            let trail = pack
+                .as_ref()
+                .and_then(|pack| {
+                    pack.trails
+                        .get(self.0.path.path as usize)
+                        .map(|trail| (pack, trail))
+                })
+                .map(|(pack, trail)| {
+                    (
+                        pack,
+                        trail,
+                        trail.trail_path().ok(),
+                        pack.categories.all_categories.get_full(trail.category.as_id()),
+                    )
+                });
             match trail {
                 #[cfg(todo = "unnecessary")]
                 Some((pack, trail, Some((cati, _id, cat)))) => {
@@ -412,16 +449,16 @@ impl fmt::Display for LocDisplay<Locator<PackPath, TrailPath>> {
                     fmt::Display::fmt(&Locator::with_parts(root, cat).rel(lpath), f)
                 },
                 Some((_pack, _trail, trl, Some((_cati, _id, cat)))) => {
-                    let path = Locator::with_parts(root, cat.full_id.as_str())
-                        .rel(lpath);
+                    let path = Locator::with_parts(root, cat.full_id.as_str()).rel(lpath);
                     match trl {
                         Some(trl) => fmt::Display::fmt(&path.rel(&trl.path[..]), f),
                         None => fmt::Display::fmt(&path.rel(&path), f),
                     }
                 },
-                _ => fmt::Display::fmt(&root.rel_ref(&self.0.path), f)
+                _ => fmt::Display::fmt(&root.rel_ref(&self.0.path), f),
             }
-        }).unwrap_or_else(|| {
+        })
+        .unwrap_or_else(|| {
             let root = LocDisplay((None::<&SharedPackInfo>, self.0.root));
             fmt::Display::fmt(&root.rel_ref(lpath), f)
         })
@@ -453,8 +490,7 @@ impl fmt::Display for LocDisplay<Locator<PackPath, MarkerPath>> {
                 let section: TrailSectionPath = TrailSectionPath::with_path(sectioni);
                 fmt::Display::fmt(&LocDisplay(self.0.root.rel(trail)).rel(section), f)
             },
-            _ =>
-                fmt::Display::fmt(&self.root_ref().rel_ref(self.0.path), f),
+            _ => fmt::Display::fmt(&self.root_ref().rel_ref(self.0.path), f),
         }
     }
 }

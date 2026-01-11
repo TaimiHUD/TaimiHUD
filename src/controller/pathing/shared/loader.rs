@@ -32,7 +32,7 @@ use {
     },
     taimi_hoard::{
         iters::IterExt as _,
-        loc::{LocationRef, LocationMut, Locator},
+        loc::{LocationMut, LocationRef, Locator},
     },
     taimi_meta::packs::MapIndex,
     taimi_pack::{attributes::AttrString, Pack},
