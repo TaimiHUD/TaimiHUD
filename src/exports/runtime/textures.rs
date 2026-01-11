@@ -351,11 +351,11 @@ impl TextureLoader {
 
         while let Some(request) = receiver.blocking_recv() {
             match &request {
-                TextureRequest::LoadBytes { key, bytes } => log::debug!(
+                TextureRequest::LoadBytes { key, bytes } => log::trace!(
                     "texture loader request received: load {} bytes for {key}",
                     bytes.len()
                 ),
-                request => log::debug!("texture loader request received: {request:?}"),
+                request => log::trace!("texture loader request received: {request:?}"),
             }
 
             if receiver.is_closed() || sender.is_closed() {
@@ -372,7 +372,7 @@ impl TextureLoader {
             };
 
             let res = request.process_decode();
-            log::debug!("texture loader decode result: {:?}", res.as_ref().map(drop));
+            log::trace!("texture loader decode result: {:?}", res.as_ref().map(drop));
 
             let sent = sender
                 .blocking_send(res.unwrap_or_else(|error| TextureResponse::DecodeFailed { key, error }));
