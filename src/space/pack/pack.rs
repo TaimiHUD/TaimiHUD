@@ -193,12 +193,13 @@ impl PackRender {
         let mut space_dirty = false;
         if let Some(spacepacks) = self.spacepacks.try_read_if_changed() {
             ArcPtrCmp::from_mut(&mut self.render_list.spacepacks).clone_from_arc(&*spacepacks);
-            log::debug!("TODO: IB dirty check bleh");
+            // TODO: actual dirty check bleh
             space_dirty = true;
         }
         if space_dirty {
             self.mark_buffers_dirty();
         }
+        let mut ibs_dirty = self.poi_common.is_empty();
         let map_id = match self.render_list.spacepacks.map_id {
             map_id if map_id != machine.is_ingame() => None,
             map_id => map_id,
@@ -292,6 +293,22 @@ impl PackRender {
                         {
                             trail.update(device, &pack.info, Some(ltrail))
                         }
+                    }
+                }
+                if !ibs_dirty {
+                    if self
+                        .pack_data
+                        .values()
+                        .any(|p| p.render_poi_bookmarks().len() != p.pois.len())
+                    {
+                        ibs_dirty = true;
+                    }
+                }
+                if !ibs_dirty {
+                    let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
+                    let ib_len = self.poi_common.ib_len();
+                    if !ibs_dirty {
+                        ibs_dirty |= ib_pack_len != ib_len;
                     }
                 }
             }
@@ -441,35 +458,11 @@ impl PackRender {
             drop(packs_map_changed);
         }
         self.draw_state.clear_active();
-        // TODO: rewrite this ib stuff because len depends on both poi info being uptodate *and* knowing if any packs have non-empty trails (while poi buffer empty)...
-        // TODO: also skip or dealloc when mapid none and stuff
-        let mut ibs_dirty = self.poi_common.is_empty() && map_id.is_some();
-        if !ibs_dirty {
-            if self
-                .pack_data
-                .values()
-                .any(|p| p.render_poi_bookmarks().len() != p.pois.len())
-            {
-                self.allocate_poi_buffers(1);
-                ibs_dirty = true;
+        if map_id.is_some() {
+            self.poi_common.update_fallback(device, machine);
+            if ibs_dirty {
+                self.recreate_buffers(device, machine)?;
             }
-        }
-        self.poi_common.update(device, machine, &self.pack_data)?;
-        let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
-        let ib_len = self.poi_common.ib_len();
-        if !ibs_dirty {
-            ibs_dirty |= ib_pack_len != ib_len;
-        }
-        if self.poi_common.is_empty() || ibs_dirty {
-            let ib_empty = self.poi_common.is_empty();
-            log::debug!(
-                "PATHY IBS needs creation: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}"
-            );
-            self.recreate_buffers(device, machine)?;
-            let ib_empty = self.poi_common.is_empty();
-            let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
-            let ib_len = self.poi_common.ib_len();
-            log::debug!("PATHY IBS: iblen={ib_len}(empty? {ib_empty}) vs packs.iblen={ib_pack_len}");
         }
 
         Ok(map_id.is_some())

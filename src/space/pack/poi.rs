@@ -137,6 +137,14 @@ impl PoiCommonRenderData {
         let _ = self.map_ib.take();
     }
 
+    pub fn update_fallback(&mut self, device: &Dx11Device, _machine: &RenderMachine) {
+        if self.fallback_texture.is_none() {
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
+                self.fallback_texture = texture;
+            }
+        }
+    }
+    #[cfg(todo)]
     pub fn update(
         &mut self,
         device: &Dx11Device,
@@ -149,10 +157,15 @@ impl PoiCommonRenderData {
             }
         }
 
-        let ib_len = self.ib_len_for_packs(packs);
-        let ib_dirty = !self.is_empty() && self.ib_len() != ib_len;
-        if !ib_dirty {
-            return Ok(())
+        #[cfg(todo)]
+        {
+            // scratch this because len depends on both poi info being uptodate
+            // *and* knowing if any packs have non-empty trails if pois=0
+            let ib_len = self.ib_len_for_packs(packs);
+            let ib_dirty = !self.is_empty() && self.ib_len() != ib_len;
+            if !ib_dirty {
+                return Ok(())
+            }
         }
 
         self.rebuild_ib(device, machine, packs)?;
@@ -200,8 +213,13 @@ impl PoiCommonRenderData {
                 ib_map.len()
             );
         }
-        let mut gaps: BitVec = BitVec::with_capacity(ib_len);
-        gaps.resize(ib_len, false);
+        #[cfg(todo = "unnecessary")]
+        let mut gaps: BitVec = {
+            // currently we always start with a fresh pre-filled vec...
+            let mut gaps = BitVec::with_capacity(ib_len);
+            gaps.resize(ib_len, false);
+            gaps
+        };
         for (_packi, pack) in packs.iter().enumerate() {
             let Some(map_info) = &pack.map_info else { continue };
             for (i, (poi, lpoi)) in pack
@@ -209,9 +227,10 @@ impl PoiCommonRenderData {
                 .zip(pack.pois.values().zip(pack.map_state.loaded_pois(map_info)))
             {
                 let index = i as usize;
+                #[cfg(todo = "unnecessary")]
                 if let Some(mut b) = gaps.get_mut(index) {
                     if *b {
-                        log::error!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
+                        log::debug!("POI instance {i} of pack#{_packi} duplicated, ignoring???");
                         continue
                     }
                     *b = true;
@@ -224,6 +243,7 @@ impl PoiCommonRenderData {
                 }
             }
         }
+        #[cfg(todo = "unnecessary")]
         for gap in gaps.iter_zeros() {
             // fill identity at start for trail drawing
             if let Some(world) = ib_world.get_mut(gap) {
