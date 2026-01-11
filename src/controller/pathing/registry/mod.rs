@@ -116,9 +116,15 @@ impl PackInfo {
     }
 
     pub fn primary_root(&self) -> Option<&PackRoot> {
-        self.roots
-            .iter()
-            .max_by_key(|root| (!root.separator, !root.hidden, root.child_count, &root.id))
+        self.roots.iter().max_by_key(|root| {
+            (
+                !root.flags.is_separator(),
+                !root.flags.is_hidden(),
+                !root.flags.is_disabled(),
+                root.child_count,
+                &root.id,
+            )
+        })
     }
 }
 
@@ -695,8 +701,7 @@ impl Iterator for DescendentIter<'_> {
 pub struct PackRoot {
     pub index: CategoryIndex,
     pub id: CategoryId,
-    pub hidden: bool,
-    pub separator: bool,
+    pub flags: CategoryFlags,
     pub display_name: Arc<str>,
     pub child_count: usize,
 }
@@ -715,8 +720,7 @@ impl PackRoot {
             index: path.path,
             id: category.full_id.clone(),
             display_name: category.display_name.clone(),
-            hidden: category.is_hidden(),
-            separator: category.is_separator(),
+            flags: category.flags,
             child_count: match collection {
                 Some(c) => c
                     .all_categories

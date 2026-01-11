@@ -170,7 +170,7 @@ impl SharedPackInfo {
         self.info.as_ref().and_then(|i| i.primary_root())
     }
     pub fn unique_root(&self) -> Option<&PackRoot> {
-        let mut roots = self.info.as_ref()?.roots.iter().filter(|r| !r.hidden);
+        let mut roots = self.info.as_ref()?.roots.iter().filter(|r| !r.flags.is_hidden());
         let root = roots.next()?;
         if roots.next().is_none() {
             // as long as no additional visible roots were found...

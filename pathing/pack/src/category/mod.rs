@@ -191,13 +191,13 @@ impl Category {
     }
 
     pub fn is_separator(&self) -> bool {
-        self.flags.contains(CategoryFlags::SEPARATOR)
+        self.flags.is_separator()
     }
     pub fn is_hidden(&self) -> bool {
-        self.flags.contains(CategoryFlags::HIDDEN)
+        self.flags.is_hidden()
     }
     pub fn default_toggle(&self) -> bool {
-        !self.flags.contains(CategoryFlags::DISABLED)
+        !self.flags.is_disabled()
     }
 
     /// Once all child markers have inherited attributes from a category,
@@ -290,6 +290,22 @@ impl CategoryFlags {
     }
     pub fn flags(self) -> impl Iterator<Item = CategoryFlag> {
         self.into_iter().filter_map(|flag| flag.next_flag())
+    }
+    pub const fn is(&self, flag: CategoryFlag) -> bool {
+        self.bits() & flag.bit().bits() != 0
+    }
+
+    #[inline]
+    pub fn is_separator(&self) -> bool {
+        self.intersects(CategoryFlags::SEPARATOR)
+    }
+    #[inline]
+    pub fn is_hidden(&self) -> bool {
+        self.intersects(CategoryFlags::HIDDEN)
+    }
+    #[inline]
+    pub fn is_disabled(&self) -> bool {
+        self.intersects(CategoryFlags::DISABLED)
     }
 }
 impl From<CategoryFlag> for CategoryFlags {
