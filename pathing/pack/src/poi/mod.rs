@@ -54,19 +54,16 @@ impl Poi {
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
                 match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                    #[cfg(todo = "silence warnings")]
                     Ok(false) => Ok(log::debug!("unrecognized POI attribute `{}`", attr.name)),
                     res => res.map(drop),
                 }
             } else {
                 match attributes.try_add(attr.name.borrow(), attr.value) {
-                    #[cfg(todo = "silence warnings")]
                     Ok(false) => Ok(log::info!("unrecognized POI attribute `{}`", attr.name)),
                     res => res.map(drop),
                 }
             }
             .with_context(|| format!("POI attribute '{}'", attr.name));
-            #[cfg(todo = "silence warnings")]
             if let Err(e) = res {
                 log::warn!("{e:#}");
             }
