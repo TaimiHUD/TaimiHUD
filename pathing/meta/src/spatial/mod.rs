@@ -108,32 +108,6 @@ pub trait MintConv: Sized {
         Self::mint_from_glamour(self.into_glamour())
     }
 }
-#[cfg(deleteme)]
-pub trait FromMint: MintConv {
-    fn raw_from_nalg(v: Self::MintNalg) -> Self::MintGlamour;
-    fn from_nalg(v: Self::MintNalg) -> Self;
-    //fn from_mint(v: <Self::MintGlamour as IntoMint>::MintType) -> Self;
-}
-#[cfg(deleteme)]
-impl<T: MintConv> FromMint for T
-where
-    <T::MintGlamour as IntoMint>::MintType: Into<T::MintGlamour>,
-    <T::MintNalg as IntoMint>::MintType: Into<T::MintNalg>,
-{
-    #[inline]
-    fn raw_from_nalg(v: Self::MintNalg) -> Self::MintGlamour {
-        Self::mint_from_nalg(v).into()
-    }
-    #[inline]
-    fn from_nalg(v: Self::MintNalg) -> Self {
-        Self::from_mint(Self::mint_from_nalg(v))
-    }
-    #[cfg(deleteme)]
-    #[inline]
-    fn from_mint(v: <Self::MintGlamour as IntoMint>::MintType) -> Self {
-        Self::from_glamour(v.into())
-    }
-}
 macro_rules! impl_mint_conv {
     (
         mint::$mint:ident for glamour::$glam:ident<$glamunit:tt>, nalgebra::$nalg:ident {
