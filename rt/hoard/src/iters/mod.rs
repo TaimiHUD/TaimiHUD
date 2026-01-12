@@ -9,6 +9,13 @@ pub trait IterExt: Sized + Iterator {
     fn lazy_map<R, F: FnMut(Self::Item) -> R>(self, map: F) -> LazyMapFn<Self, F> {
         LazyMapFn::new(map, self)
     }
+    #[inline]
+    fn lazy_clone<'a, I: 'a>(self) -> LazyMapFn<Self, impl Fn(&'a I) -> I> where
+        Self: Iterator<Item = &'a I>,
+        I: Clone,
+    {
+        self.lazy_map(I::clone)
+    }
 }
 impl<I: Sized + Iterator> IterExt for I {}
 
