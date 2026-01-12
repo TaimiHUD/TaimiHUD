@@ -154,9 +154,17 @@ impl PackInfoSignature {
 
     /// [Self::hashpart_info] with [Self::hasher()]
     pub fn from_info(info: &PackInfo) -> Self {
+        Self::hash_with(|state| Self::hashpart_info(state, info))
+    }
+
+    #[inline]
+    pub fn hash_with<F: FnOnce(&mut PackInfoHasher)>(f: F) -> Self {
         let mut hasher = Self::hasher();
-        Self::hashpart_info(&mut hasher, info);
-        Self { hash: hasher.finish() as u32 }
+        f(&mut hasher);
+        Self { hash: Self::hasher_finish_u32(&hasher) }
+    }
+    pub fn hash_with_dyn<F: FnOnce(&mut dyn Hasher)>(f: F) -> Self {
+        Self::hash_with(|h| f(h))
     }
 
     /// basic checks for pack changes
@@ -170,9 +178,37 @@ impl PackInfoSignature {
     }
 
     /// [FxHasher] with [Self::HASHER_SEED]
-    pub fn hasher() -> impl Hasher + Clone + 'static {
+    pub fn hasher() -> PackInfoHasher {
         FxHasher::with_seed(Self::HASHER_SEED)
     }
+
+    /// fix output of [FxHasher::finish]
+    ///
+    /// by default rotates to orient entropy in a way that improves common hashmap implementations,
+    /// which is sub-optimal when we know the bucket size in advance (fixed to 32bits here)
+    pub fn hasher_finish_u32(hasher: &FxHasher) -> u32 {
+        match hasher.finish() {
+            #[cfg(target_pointer_width = "32")]
+            hash => {
+                // hash is a usize so upper bits are 0 anyway on 32bit systems
+                hash as u32
+            },
+            #[cfg(not(target_pointer_width = "32"))]
+            hash => hash.rotate_left(Self::REMAINING_ROTATION) as u32,
+        }
+    }
+    /// for [Self::hasher_finish_u32]
+    ///
+    /// see https://github.com/rust-lang/rustc-hash/blob/1a998d5b89b04ba730d4cd249f811e8b48aa7d8c/src/lib.rs#L177-L180
+    #[allow(unreachable_patterns, dead_code)]
+    const FX_ROTATE: u32 = match () {
+        #[cfg(target_pointer_width = "32")]
+        _ => 15,
+        _ => 26,
+    };
+    /// after having been [rotated](usize::rotate_left) by [Self::FX_ROTATE],
+    /// we just want the most significant bits back
+    const REMAINING_ROTATION: u32 = 32 - Self::FX_ROTATE;
 
     #[inline]
     pub const fn is_empty(&self) -> bool {
@@ -187,6 +223,9 @@ impl PackInfoSignature {
         }
     }
 }
+type PackInfoHasher = FxHasher;
+#[cfg(todo)]
+type PackInfoHasher = impl Hasher + Clone + 'static;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackCategoryInfo {

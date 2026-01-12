@@ -19,7 +19,7 @@ use {
             TrailMapPath,
         },
         space::DrawSpace,
-        state::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail},
+        state::{hidden::MarkerState, LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail},
     },
     glamour::Point3,
     std::{cmp, ops, sync::Arc},
@@ -39,10 +39,9 @@ use {
         TrailPath,
         VisibilityFlags,
     },
-    taimi_pack::attributes::{PoiAttributes, RenderAttributes, TrailAttributes},
+    taimi_pack::attributes::{keys::Guid, PoiAttributes, RenderAttributes, TrailAttributes},
     taimi_sync::arcs::ArcPtrCmp,
 };
-type MarkerState = ();
 
 #[cfg(todo)]
 #[derive(Debug, Clone, Default)]
@@ -341,7 +340,6 @@ pub struct SharedMapPackLoaded {
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailInfo]>>,
     #[cfg(todo)]
     pub interactive_pois: Arc<[InteractivePoi]>,
-    #[cfg(todo)]
     pub poi_guids: Arc<[Guid]>,
 }
 impl SharedMapPackLoaded {
@@ -351,7 +349,6 @@ impl SharedMapPackLoaded {
             path,
             #[cfg(todo)]
             interactive_pois: Default::default(),
-            #[cfg(todo)]
             poi_guids: Default::default(),
             info,
             pois: Default::default(),
@@ -370,7 +367,6 @@ impl SharedMapPackLoaded {
             path,
             #[cfg(todo)]
             interactive_pois: map_pack.interactive_pois.clone(),
-            #[cfg(todo)]
             poi_guids: map_pack.poi_guids.clone(),
             info,
             pois: map_pack.pois.iter().map(|poi| poi.info().clone()).collect(),
@@ -385,8 +381,8 @@ impl SharedMapPackLoaded {
         #[cfg(todo)]
         {
             self.interactive_pois = map_pack.interactive_pois.clone();
-            self.poi_guids = map_pack.poi_guids.clone();
         }
+        dirty |= ArcPtrCmp::from_mut(&mut self.poi_guids).clone_from_arc(&map_pack.poi_guids);
         if !all_zipped(
             |l, r| l.info().sig() == r.sig(),
             map_pack.pois.iter(),
@@ -408,7 +404,6 @@ impl SharedMapPackLoaded {
         dirty
     }
 
-    #[cfg(todo)]
     pub fn poi_guids<'a>(&'a self) -> impl Iterator<Item = (PoiPath, Option<&'a Guid>)> + 'a {
         let mut poi_guids = self.poi_guids.iter();
         self.info
@@ -438,7 +433,6 @@ pub struct SharedMapPackState {
     pub interactive_pois_nearby: Arc<BitVec>,
     #[cfg(todo)]
     pub interactive_poi_pois: Arc<[LoadedPoi]>,
-    #[cfg(todo)]
     pub hidden_markers: Arc<[MarkerId]>,
 }
 
@@ -456,7 +450,6 @@ impl SharedMapPackState {
             interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
             #[cfg(todo)]
             interactive_poi_pois: Self::interactive_pois_from(map_pack),
-            #[cfg(todo)]
             hidden_markers: Default::default(),
         }
     }
@@ -473,7 +466,6 @@ impl SharedMapPackState {
             interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
             #[cfg(todo)]
             interactive_poi_pois: Self::interactive_pois_from(map_pack),
-            #[cfg(todo)]
             hidden_markers: Self::hidden_markers_from(path, state, map_pack),
         }
     }
@@ -562,7 +554,6 @@ impl SharedMapPackState {
         }
         dirty
     }
-    #[cfg(todo)]
     pub fn update_with_hidden(
         &mut self,
         path: PackMapPath,
@@ -601,7 +592,6 @@ impl SharedMapPackState {
             })
             .collect()
     }
-    #[cfg(todo)]
     fn hidden_markers_from(
         map_path: PackMapPath,
         state: &MarkerState,
@@ -622,7 +612,7 @@ impl SharedMapPackState {
                     .map(|path| path.root == map_path)
                     .unwrap_or(false) =>
                     true,
-                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id.as_ref())),
+                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id)),
             })
             .cloned()
             .collect()

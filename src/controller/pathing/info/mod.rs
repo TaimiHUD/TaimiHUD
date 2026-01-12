@@ -7,7 +7,7 @@ use {
     },
     taimi_meta::packs::{CategoryIndex, CategoryPath},
     taimi_pack::{
-        attributes::{FilterAttributes, MarkerAttributes, RenderAttributes},
+        attributes::{FilterAttributes, InteractionAttributes, MarkerAttributes, RenderAttributes},
         trail::TrlPath,
     },
 };
@@ -28,11 +28,15 @@ impl LoadedMarkerInfo {
             attrs: Either::Left(EMPTY_RENDER_ATTRS.clone()),
         }
     }
-    pub(crate) fn with_marker_attrs(category_path: CategoryPath, attrs: &MarkerAttributes) -> Self {
+    pub(crate) fn with_marker_attrs(
+        category_path: CategoryPath,
+        attrs: &MarkerAttributes,
+        keep_attrs: bool,
+    ) -> Self {
         Self {
             category_path,
-            attrs: match &attrs.filters {
-                Some(filters) if PathingController::can_filter(filters) => {
+            attrs: match keep_attrs {
+                true => {
                     let mut attrs = attrs.clone();
                     let _ = attrs.render.get_or_insert_with(|| EMPTY_RENDER_ATTRS.clone());
                     Either::Right(Arc::new(attrs))
@@ -90,6 +94,17 @@ impl LoadedMarkerInfo {
             .map(|f| &**f)
             .unwrap_or_else(|| &EMPTY_FILTER_ATTRS)
     }
+    pub fn get_interaction_attrs(&self) -> Option<&Arc<InteractionAttributes>> {
+        match &self.attrs {
+            Either::Right(a) => a.interaction.as_ref(),
+            Either::Left(..) => None,
+        }
+    }
+    pub fn interaction_attrs(&self) -> &InteractionAttributes {
+        self.get_interaction_attrs()
+            .map(|f| &**f)
+            .unwrap_or_else(|| &EMPTY_INTERACTION_ATTRS)
+    }
 
     pub(super) fn sig_ptr(ptr: *const ()) -> [u32; 2] {
         let ptr = ptr as usize;
@@ -129,7 +144,8 @@ impl LoadedTrailInfo {
         }
     }
     pub(crate) fn with_marker_attrs(category_path: CategoryPath, attrs: &MarkerAttributes) -> Self {
-        let mut marker_info = LoadedMarkerInfo::with_marker_attrs(category_path, attrs);
+        let wants_attrs = PathingController::trail_wants_attrs(attrs);
+        let mut marker_info = LoadedMarkerInfo::with_marker_attrs(category_path, attrs, wants_attrs);
         if marker_info.attrs().trail.is_none() {
             log::debug!("trail had incomplete render attrs?");
             let _ = Arc::make_mut(marker_info.attrs_mut())
@@ -162,7 +178,8 @@ impl LoadedPoiInfo {
         Self { marker_info: LoadedMarkerInfo::empty() }
     }
     pub(crate) fn with_marker_attrs(category_path: CategoryPath, attrs: &MarkerAttributes) -> Self {
-        let mut marker_info = LoadedMarkerInfo::with_marker_attrs(category_path, attrs);
+        let wants_attrs = PathingController::poi_wants_attrs(attrs);
+        let mut marker_info = LoadedMarkerInfo::with_marker_attrs(category_path, attrs, wants_attrs);
         if marker_info.attrs().poi.is_none() {
             log::debug!("poi had incomplete render attrs?");
             let _ = Arc::make_mut(marker_info.attrs_mut()).poi.get_or_insert_default();
@@ -193,3 +210,5 @@ pub(crate) static EMPTY_RENDER_ATTRS: LazyLock<Arc<RenderAttributes>> = LazyLock
 });
 pub(crate) static EMPTY_FILTER_ATTRS: LazyLock<FilterAttributes> =
     LazyLock::new(|| FilterAttributes::default());
+pub(crate) static EMPTY_INTERACTION_ATTRS: LazyLock<InteractionAttributes> =
+    LazyLock::new(|| InteractionAttributes::default());
