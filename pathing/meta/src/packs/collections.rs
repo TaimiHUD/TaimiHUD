@@ -2,15 +2,18 @@ use {
     crate::{
         map::MapID,
         packs::{
-            id::{MarkerIndex, MarkerIndexVariant},
+            id::{MarkerIndex, MarkerPath, PackMarkerNs},
             CategoryIndex,
             CategoryPath,
             MapIndex,
             PackIndex,
             PackPath,
             PackRegistryNs,
-            PoiPath,
+            PoiPath, PoiIndex,
+            TrailIndex,
             TrailPath,
+            PackPoiNs,
+            PackTrailNs,
         },
     },
     bitvec::vec::BitVec,
@@ -20,9 +23,11 @@ use {
         mem,
     },
     taimi_hoard::{
+        collections::TaimiSet,
         iters::{IterExt, LazyMapFn},
-        loc::{indexed, LocationGet, Locator},
+        loc::{indexed, LocationGet, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     },
+    num_traits::AsPrimitive,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -82,21 +87,22 @@ impl CategorySet {
     pub fn empty() -> Self {
         Self::default()
     }
-    pub fn insert_index<C: Into<CategoryIndex>>(&mut self, index: C) -> bool {
-        self.0.insert(index.into())
+    #[inline]
+    pub fn insert_index<C: AsPrimitive<CategoryIndex>>(&mut self, index: C) -> bool {
+        self.0.insert(index.as_())
     }
     /// false indicates the value was already present
     pub fn insert<N>(&mut self, path: CategoryPath<N>) -> bool {
         self.insert_index(path.path)
     }
-    pub fn remove_index<C: Into<CategoryIndex>>(&mut self, index: C) -> bool {
-        self.0.remove(&index.into())
+    pub fn remove_index<C: AsPrimitive<CategoryIndex>>(&mut self, index: C) -> bool {
+        self.0.remove(&index.as_())
     }
     pub fn remove<N>(&mut self, path: CategoryPath<N>) -> bool {
         self.remove_index(path.path)
     }
-    pub fn contains_index<C: Into<CategoryIndex>>(&self, index: C) -> bool {
-        self.0.contains(&index.into())
+    pub fn contains_index<C: AsPrimitive<CategoryIndex>>(&self, index: C) -> bool {
+        self.0.contains(&index.as_())
     }
     pub fn contains<N>(&self, path: CategoryPath<N>) -> bool {
         self.contains_index(path.path)
@@ -169,36 +175,189 @@ impl<N> LocationGet<N, CategoryIndex> for CategorySet {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct MarkerSet {
-    pub pois: BTreeSet<PoiPath>,
-    pub trails: BTreeSet<TrailPath>,
+#[derive(Debug, Clone)]
+pub struct MarkerSet<PN = PackPoiNs, TN = PackTrailNs> {
+    pub pois: BTreeSet<PoiPath<PN>>,
+    pub trails: BTreeSet<TrailPath<TN>>,
 }
-impl MarkerSet {
-    pub fn contains<I>(&self, marker: I) -> bool
-    where
-        I: Into<MarkerIndex>,
+impl<PN, TN> MarkerSet<PN, TN> where
+    PN: Ord + Default,
+    TN: Ord + Default,
+{
+    /// TODO: doesn't check ns :<
+    #[inline]
+    pub fn contains_marker_unchecked<N, I>(&self, path: Locator<N, I>) -> bool where
+        PackMarkerNs: NamespacePivotFrom<N, I, NsPivotFromPath = MarkerIndex>,
     {
-        match marker.into().variant() {
-            MarkerIndexVariant::Poi(poi) => self.pois.contains(&Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) =>
-                self.trails.contains(&Locator::with_path(trail)),
+        let path = PackMarkerNs::loc_pivot_from(path);
+        self.contains_index(path.path)
+    }
+    pub fn contains_index<I>(&self, marker: I) -> bool where
+        I: Into<MarkerIndex>,
+        PN: Default,
+        TN: Default,
+    {
+        let marker = marker.into();
+        match marker.namespace() {
+            MarkerIndex::NS_POI => {
+                let path: PoiPath<PN> = Locator::with_path(marker.index_poi_unchecked());
+                self.contains_poi(&path)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let path: TrailPath<TN> = Locator::with_path(marker.trail_index_unchecked());
+                self.contains_trail(&path)
+            },
             _ => false,
         }
     }
-    pub fn insert<I>(&mut self, marker: I) -> bool
-    where
+    pub fn insert_index<I>(&mut self, marker: I) -> bool where
         I: Into<MarkerIndex>,
     {
-        match marker.into().variant() {
-            MarkerIndexVariant::Poi(poi) => self.pois.insert(Locator::with_path(poi)),
-            MarkerIndexVariant::Trail(trail) | MarkerIndexVariant::TrailSection(trail, ..) =>
-                self.trails.insert(Locator::with_path(trail)),
+        let marker = marker.into();
+        match marker.namespace() {
+            MarkerIndex::NS_POI => {
+                let path: PoiPath<PN> = Locator::with_path(marker.index_poi_unchecked());
+                self.insert_poi(path)
+            },
+            MarkerIndex::NS_TRAIL => {
+                let path: TrailPath<TN> = Locator::with_path(marker.trail_index_unchecked());
+                self.insert_trail(path)
+            },
             _ => false,
+        }
+    }
+}
+impl<PN, TN> MarkerSet<PN, TN> where
+    PN: Ord,
+    TN: Ord,
+{
+    #[inline]
+    pub fn contains_path<N, I>(&self, path: Locator<N, I>) -> bool where
+        N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
+        N: NamespaceTryConvTo<I, TrailPath<TN>>,
+        I: Clone,
+    {
+        if let Some(poi) = <N as NamespaceTryConvTo<I, PoiPath<PN>>>::try_conv_to(path.clone()) {
+            self.pois.contains(&poi)
+        } else if let Some(trail) = <N as NamespaceTryConvTo<I, TrailPath<TN>>>::try_conv_to(path) {
+            self.trails.contains(&trail)
+        } else {
+            false
+        }
+    }
+    #[inline]
+    pub fn insert_path<N, I>(&mut self, path: Locator<N, I>) -> bool where
+        N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
+        N: NamespaceTryConvTo<I, TrailPath<TN>>,
+        I: Clone,
+    {
+        if let Some(poi) = <N as NamespaceTryConvTo<I, PoiPath<PN>>>::try_conv_to(path.clone()) {
+            self.pois.insert(poi)
+        } else if let Some(trail) = <N as NamespaceTryConvTo<I, TrailPath<TN>>>::try_conv_to(path) {
+            self.trails.insert(trail)
+        } else {
+            false
+        }
+    }
+}
+impl<PN, TN> MarkerSet<PN, TN> where
+    PN: Ord,
+{
+    #[inline]
+    pub fn contains_poi(&self, path: &PoiPath<PN>) -> bool {
+        self.pois.contains(path)
+    }
+    #[inline]
+    pub fn insert_poi(&mut self, path: PoiPath<PN>) -> bool {
+        self.pois.insert(path)
+    }
+}
+impl<PN, TN> MarkerSet<PN, TN> where
+    TN: Ord,
+{
+    #[inline]
+    pub fn contains_trail(&self, path: &TrailPath<TN>) -> bool {
+        self.trails.contains(path)
+    }
+    #[inline]
+    pub fn insert_trail(&mut self, path: TrailPath<TN>) -> bool {
+        self.trails.insert(path)
+    }
+}
+impl<PN, TN, N, I> TaimiSet<Locator<N, I>> for MarkerSet<PN, TN> where
+    PN: Ord,
+    TN: Ord,
+    N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
+    N: NamespaceTryConvTo<I, TrailPath<TN>>,
+    I: Clone,
+{
+    #[inline]
+    fn set_contains(&self, path: &Locator<N, I>) -> bool {
+        self.contains_path(path.clone())
+    }
+}
+
+impl<PN, TN> MarkerSet<PN, TN> {
+    #[inline]
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn iter_index<N>(&self) -> impl DoubleEndedIterator<Item = MarkerIndex> + '_ {
+        let pois = self.pois.iter().lazy_map(|poi| MarkerIndex::with_poi(poi.path));
+        let trails = self.trails.iter().lazy_map(|trail| MarkerIndex::with_trail(trail.path));
+        pois.chain(trails)
+    }
+
+    pub fn iter_paths<'a, N>(&'a self) -> impl DoubleEndedIterator<Item = Locator<N, <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath>> + 'a where
+        N: NamespacePivotFrom<PN, PoiIndex> + 'a,
+        N: NamespacePivotFrom<TN, TrailIndex, NsPivotFromPath = <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath>,
+        PN: Clone,
+        TN: Clone,
+    {
+        let pois = self.pois.iter().lazy_clone().lazy_map(N::loc_pivot_from);
+        let trails = self.trails.iter().lazy_clone().lazy_map(N::loc_pivot_from);
+        pois.chain(trails)
+    }
+}
+impl MarkerSet {
+    #[inline]
+    pub fn iter_markers(&self) -> impl DoubleEndedIterator<Item = MarkerPath> + '_ {
+        self.iter_paths::<PackMarkerNs>()
+    }
+}
+impl<PN, TN> Default for MarkerSet<PN, TN> {
+    fn default() -> Self {
+        Self {
+            pois: Default::default(),
+            trails: Default::default(),
+        }
+    }
+}
+impl<PN, TN, M> FromIterator<M> for MarkerSet<PN, TN> where
+    Self: Extend<M>,
+{
+    fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
+        let mut set = Self::default();
+        set.extend(iter);
+        set
+    }
+}
+impl<PN, TN, N, P> Extend<Locator<N, P>> for MarkerSet<PN, TN> where
+    N: NamespaceTryConvTo<P, PoiPath<PN>> + Clone,
+    N: NamespaceTryConvTo<P, TrailPath<TN>>,
+    P: Clone,
+    PN: Ord,
+    TN: Ord,
+{
+    fn extend<I: IntoIterator<Item = Locator<N, P>>>(&mut self, iter: I) {
+        for path in iter {
+            self.insert_path(path);
         }
     }
 }
 
+/// TODO: this is what BitSet is for
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackSet(BitVec);
 impl PackSet {
@@ -206,8 +365,8 @@ impl PackSet {
         Default::default()
     }
 
-    pub fn insert_index<I: Into<PackIndex>>(&mut self, index: I) -> bool {
-        let index = index.into() as usize;
+    pub fn insert_index<I: AsPrimitive<usize>>(&mut self, index: I) -> bool {
+        let index = index.as_() as usize;
         if let Some(mut b) = self.0.get_mut(index) {
             return mem::replace(&mut *b, true)
         }
@@ -216,8 +375,8 @@ impl PackSet {
         self.0.push(true);
         false
     }
-    pub fn remove_index<I: Into<PackIndex>>(&mut self, index: I) -> bool {
-        let index = index.into() as usize;
+    pub fn remove_index<I: AsPrimitive<usize>>(&mut self, index: I) -> bool {
+        let index = index.as_() as usize;
         self.0
             .get_mut(index)
             .map(|mut b| mem::replace(&mut *b, false))
@@ -231,8 +390,8 @@ impl PackSet {
     }
 
     #[inline]
-    pub fn contains_index<I: Into<PackIndex>>(&self, index: I) -> bool {
-        let index = index.into() as usize;
+    pub fn contains_index<I: AsPrimitive<usize>>(&self, index: I) -> bool {
+        let index = index.as_() as usize;
         self.0.get(index).map(|b| *b).unwrap_or(false)
     }
     pub fn contains(&self, path: PackPath) -> bool {
