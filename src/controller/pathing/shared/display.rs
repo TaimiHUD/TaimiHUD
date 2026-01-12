@@ -16,7 +16,10 @@ use {
         Controller,
     },
     std::{fmt, mem, sync::Arc},
-    taimi_hoard::loc::{LocationRef, Locator},
+    taimi_hoard::{
+        lazyfmt::{fmt_or, MaybeFmt},
+        loc::{LocationRef, Locator},
+    },
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant, MarkerPath},
         CategoryIndex,
@@ -170,7 +173,7 @@ impl fmt::Display for LocDisplay<(Option<&'_ SharedPackInfo>, PackMapPath)> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let &Self((info, path)) = self;
         let map: MapPath = Locator::with_path(path.path);
-        let root = LocDisplay((info, path));
+        let root = LocDisplay((info, path.root));
         fmt::Display::fmt(&Locator::with_parts(root, map), f)
     }
 }
@@ -325,7 +328,15 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedPoiPath>> {
             let root = LocDisplay((Some(info), self.0.root));
             if let Some(lpoi) = map_info.pois().lookup_ref(&self.0.path) {
                 let cat = LocDisplay((Some(info), pack, lpoi.category_path));
-                fmt::Display::fmt(&Locator::with_parts(root, cat).rel(lpath), f)
+                let root = Locator::with_parts(root, cat);
+                let poi_path = map_info.poi_path(self.0.path).map(Locator::into_path);
+                let lpath = lpath.map_path(|lpoii| {
+                    fmt_or(
+                        poi_path.map(move |poii| MaybeFmt::new(move |f| write!(f, "{lpoii}={poii}"))),
+                        lpoii,
+                    )
+                });
+                fmt::Display::fmt(&root.rel(lpath), f)
             } else {
                 fmt::Display::fmt(&root.rel_ref(lpath), f)
             }
@@ -343,6 +354,14 @@ impl fmt::Display for LocDisplay<Locator<PackMapPath, LoadedTrailPath>> {
             let root = LocDisplay((Some(info), self.0.root));
             if let Some(ltrail) = map_info.trails().lookup_ref(&self.0.path) {
                 let cat = LocDisplay((Some(info), pack, ltrail.category_path));
+                let trail_path = map_info.trail_path(self.0.path).map(Locator::into_path);
+                let lpath = lpath.map_path(|ltraili| {
+                    fmt_or(
+                        trail_path
+                            .map(move |traili| MaybeFmt::new(move |f| write!(f, "{ltraili}={traili}"))),
+                        ltraili,
+                    )
+                });
                 let lpath = Locator::with_parts(root, cat).rel(lpath);
                 match &ltrail.trl {
                     Some(trl) => fmt::Display::fmt(&lpath.rel(&trl.path[..]), f),

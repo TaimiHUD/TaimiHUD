@@ -350,7 +350,11 @@ impl PackRender {
                 // texture loader should be notified, so no need to do anything really?
                 let id = MarkerId::for_marker(marker_path);
                 if texture.is_none() {
-                    log::warn!("request for tex {marker_path} failed?");
+                    log::debug!("request for tex {marker_path} failed");
+                }
+                if marker_path.root.path != map_id {
+                    log::info!("received outdated tex for {marker_path}");
+                    continue
                 }
                 self.draw_state.drawn_incomplete.remove(&id);
                 let Some(pack_data) = self.pack_data.lookup_mut(&marker_path.root.root) else {

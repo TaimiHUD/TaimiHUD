@@ -625,7 +625,6 @@ impl SpacePackCollection {
             }
             self.signal_bvh_rebuild();
         } else {
-            log::debug!("DELETEME: attempting partial rebuild");
             #[cfg(todo)]
             let deactivations = dirty.values().copied().chain(removed.iter_ones());
             let mut removed = removed;

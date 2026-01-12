@@ -111,14 +111,14 @@ impl SpaceContext {
             LoadReport::Texture { path, texture, resource: _ } => {
                 let id = MarkerId::for_marker(path);
                 self.inflight.remove(&id);
-                let texture = rt::log::error_ok(texture);
+                let texture = rt::log::warn_ok(texture);
                 self.texture_loads.fill_request(path, texture);
             },
             LoadReport::TrailGeometry { path, geometry, section_info: _ } => {
                 let lpath = path.root.rel(path.path.path);
                 let id = SpacePackShared::trail_geometry_id(&lpath);
                 self.inflight.remove(&id);
-                let geometry = rt::log::error_ok(geometry).unwrap_or_else(LoadedTrailGeometry::empty);
+                let geometry = rt::log::warn_ok(geometry).unwrap_or_else(LoadedTrailGeometry::empty);
                 self.trail_geometry.fill_request(lpath, geometry);
             },
         }
@@ -159,9 +159,10 @@ impl PathingController {
     }
     fn texture_for_loaded_marker(
         map: &LoadedMapPack,
-        path: Locator<PackPath, LoadedMarkerPath>,
+        path: LoadedMarkerPath,
+        pack_path: PackPath,
     ) -> Option<&AttrString> {
-        let tex = match path.path.path.variant() {
+        let tex = match path.path.variant() {
             MarkerIndexVariant::Poi(poii) => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
                 let lpoi = map.lpois().lookup_ref(&lpath);
@@ -177,7 +178,7 @@ impl PathingController {
             _ => None,
         };
         if !crate::built_info::IS_TAGGED_VERSION && tex.is_none() {
-            let path = LocDisplay::from_ref(&path);
+            let path = LocDisplay(pack_path.rel(map.map_id).rel(path));
             log::debug!("WHY? no texture found on {path}");
         }
         tex
@@ -195,9 +196,10 @@ impl PathingController {
             return false
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
-            let texture = self.maps.lookup_ref(&path.root).map(|map| {
-                Self::texture_for_loaded_marker(map, path.root.root.rel(path.unscope())).cloned()
-            });
+            let texture = self
+                .maps
+                .lookup_ref(&path.root)
+                .map(|map| Self::texture_for_loaded_marker(map, path.unscope(), path.root.root).cloned());
             (path, texture)
         });
         let Some((path, texture)) = path else {
