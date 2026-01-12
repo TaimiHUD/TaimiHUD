@@ -2,12 +2,17 @@ use {
     crate::controller::pathing::{
         registry::{
             LoadedCategoryIndex,
+            LoadedCategoryNs,
             LoadedCategoryPath,
+            LoadedMarkerPath,
             LoadedPoiIndex,
+            LoadedPoiNs,
             LoadedPoiPath,
             LoadedTrailIndex,
             LoadedTrailNs,
             LoadedTrailPath,
+            LoadedTrailSectionNs,
+            LoadedTrailSectionPath,
             PackInfo,
             PackInfoSignature,
             PackMapPath,
@@ -21,7 +26,7 @@ use {
     std::{iter, mem, sync::Arc},
     taimi_hoard::{
         iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationRef},
+        loc::{indexed::IndexedList, LocationRef, NamespacePivotTo},
     },
     taimi_meta::packs::{
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
@@ -179,11 +184,9 @@ impl MapPackInfo {
     pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
         self.poi_guid_mask.iter()
     }
-    #[cfg(todo)]
     pub(crate) fn poi_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
         iter::repeat(true).take(self.poi_count())
     }
-    #[cfg(todo)]
     pub(crate) fn poi_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a
     where
         I: IntoIterator + 'a,
@@ -232,11 +235,9 @@ impl MapPackInfo {
     pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
         self.trail_guid_mask.iter()
     }
-    #[cfg(todo)]
     pub(crate) fn trail_guid_mask(&self) -> impl Iterator<Item = bool> + '_ {
         iter::repeat(true).take(self.trail_count())
     }
-    #[cfg(todo)]
     pub(crate) fn trail_guid_filter<'a, I>(&'a self, iter: I) -> impl Iterator<Item = I::Item> + 'a
     where
         I: IntoIterator + 'a,
@@ -302,31 +303,68 @@ impl MapPackInfo {
         }
     }
 
+    pub fn marker_index(&self, path: MarkerPath) -> Option<LoadedMarkerPath> {
+        match path.path.variant() {
+            MarkerIndexVariant::Category(index) => self
+                .category_index(LoadedCategoryPath::with_path(index))
+                .map(LoadedCategoryNs::loc_pivot_to),
+            MarkerIndexVariant::Poi(index) => self
+                .poi_index(LoadedPoiPath::with_path(index))
+                .map(LoadedPoiNs::loc_pivot_to),
+            MarkerIndexVariant::Trail(index) => self
+                .trail_index(LoadedTrailPath::with_path(index))
+                .map(LoadedTrailNs::loc_pivot_to),
+            MarkerIndexVariant::TrailSection(index, section) =>
+                self.trail_index(LoadedTrailPath::with_path(index)).map(|path| {
+                    LoadedTrailSectionNs::loc_pivot_to({
+                        let section: TrailSectionPath = TrailSectionPath::with_path(section);
+                        LoadedTrailSectionPath::with_path(path.rel(section))
+                    })
+                }),
+            MarkerIndexVariant::Invalid(..) | MarkerIndexVariant::Unknown(..) => {
+                log::warn!("asked to index unrecognized marker path {path}");
+                None
+            },
+        }
+    }
     pub fn path_from_loaded(&self, loaded: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
-        let pack_path = loaded.root.root;
-        Some(match loaded.path.variant() {
+        self.marker_path(loaded.unscope()).map(|p| {
+            let pack_path = loaded.root.root;
+            pack_path.rel(p.path)
+        })
+    }
+    /// TODO: use NamespaceTryConv or whatever?
+    pub fn marker_path(&self, path: LoadedMarkerPath) -> Option<MarkerPath> {
+        Some(match path.path.variant() {
+            MarkerIndexVariant::Category(index) => {
+                let p = self.category_path(LoadedCategoryPath::with_path(index))?;
+                #[cfg(todo = "unnecessary")]
+                let index = MarkerIndex::with_category(p.path);
+                MarkerPath::with_path(MarkerIndex::from(p))
+            },
             MarkerIndexVariant::Poi(index) => {
                 let p = self.poi_path(LoadedPoiPath::with_path(index))?;
                 #[cfg(todo = "unnecessary")]
                 let index = MarkerIndex::with_poi(p.path);
-                let index = p.into();
-                MarkerPath::with_parts(pack_path, index)
+                MarkerPath::with_path(MarkerIndex::from(p))
             },
             MarkerIndexVariant::Trail(index) => {
                 let p = self.trail_path(LoadedTrailPath::with_path(index))?;
                 #[cfg(todo = "unnecessary")]
                 let index = MarkerIndex::with_trail(p.path);
-                let index = p.into();
-                MarkerPath::with_parts(pack_path, index)
+                MarkerPath::with_path(MarkerIndex::from(p))
             },
             MarkerIndexVariant::TrailSection(index, section) => {
                 let p = self.trail_path(LoadedTrailPath::with_path(index))?;
                 let index = MarkerIndex::with_trail_section(p.path, section);
                 #[cfg(todo)]
                 let index = p.into();
-                MarkerPath::with_parts(pack_path, index)
+                MarkerPath::with_path(index)
             },
-            _ => return None,
+            MarkerIndexVariant::Invalid(..) | MarkerIndexVariant::Unknown(..) => {
+                log::warn!("asked for path of unrecognized marker index {path}");
+                return None
+            },
         })
     }
 

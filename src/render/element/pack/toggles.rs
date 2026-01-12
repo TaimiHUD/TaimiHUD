@@ -57,6 +57,9 @@ where
             let (act, token) = header.draw();
             pack_act = act;
             pack_toggle = header.draw_toggle_inline();
+            if token.is_some() {
+                self.ui.indent();
+            }
             token
         } else {
             None
@@ -107,6 +110,9 @@ where
                 }
                 categories.pop_all();
             }
+        }
+        if token.is_some() {
+            self.ui.unindent();
         }
         drop(token);
         if let Some(act) = pack_toggle {
@@ -288,6 +294,31 @@ where
         !self.flags.contains(CategoryFlags::SEPARATOR) && !self.is_lonely
     }
 }
+impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
+    pub fn draw_toggle_inline(&mut self) -> Option<bool> {
+        self.ui.same_line();
+        self.ui.dummy([4.0, 0.0]);
+        self.ui.same_line();
+        self.draw_toggle_checkbox()
+    }
+    pub fn draw_toggle_prefix(&mut self) -> (Option<bool>, UiTokenDyn<'ui>) {
+        self.ui.unindent();
+        let checkbox_gap = self.ui.push_style_item_spacing(ImVec2::ZERO);
+        #[cfg(todo = "unnecessary")]
+        let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
+        let act = self.draw_toggle_checkbox();
+        self.ui.same_line();
+        (act, checkbox_gap)
+    }
+    pub fn end_toggle_prefix(&mut self) {
+        self.ui.indent();
+    }
+    pub fn draw_toggle_checkbox(&mut self) -> Option<bool> {
+        self.ui
+            .checkbox("", &mut self.toggle_state)
+            .then(move || self.toggle_state)
+    }
+}
 
 /// Draw buttons and tooltips and stuff on top
 #[derive(Debug)]
@@ -358,7 +389,7 @@ impl super::PackElements {
                 .category_info()
                 .map(|(cats, _)| cats.count())
                 .unwrap_or(0);
-            p.categories.open_mask.count() != count || p.categories.open_mask.flags.not_any()
+            p.categories.open_mask.end_len() != count || p.categories.open_mask.flags.not_any()
         })
     }
     pub fn act_expand_all(&mut self) {

@@ -11,7 +11,14 @@ use {
                     SharedPackInfo,
                     TrailGeometrySections,
                 },
-                state::{LoadedMapPack, LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
+                state::{
+                    LoadedMapInfo,
+                    LoadedMapPack,
+                    LoadedMaps,
+                    LoadedTrail,
+                    LoadedTrailGeometry,
+                    LoadedTrailSection,
+                },
                 PathingController,
                 PathingEvent,
             },
@@ -33,6 +40,7 @@ use {
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},
+        MapIndex,
         PackMapPath,
         PackPath,
     },
@@ -49,6 +57,7 @@ use {
 };
 
 #[doc(inline)]
+#[allow(unused_imports)]
 pub use self::{
     pack::{SpacePack, SpacePackCollection},
     poi::PoiScale,
@@ -125,6 +134,42 @@ impl SpaceContext {
                 let geometry = rt::log::warn_ok(geometry).unwrap_or_else(LoadedTrailGeometry::empty);
                 self.trail_geometry.fill_request(lpath, geometry);
             },
+        }
+    }
+
+    pub(super) fn collect_garbage(
+        &mut self,
+        (map_info, maps): (&LoadedMapInfo, &LoadedMaps),
+        map_id: Option<MapIndex>,
+        _aggressive: bool,
+    ) {
+        let packs_map_id = self.packs.map_id;
+        let map_dirty = packs_map_id != map_id;
+
+        let mut dirty = map_dirty;
+        if map_dirty {
+            Arc::make_mut(&mut self.packs).clear();
+        } else if let Some(map_id) = map_id {
+            let expired = match self.packs.expired_entities_dirty(map_id, map_info, maps) {
+                Ok(expired) if expired.is_empty() => None,
+                Ok(e) => Some(Some(e)),
+                Err(()) => Some(None),
+            };
+            if let Some(expired) = expired {
+                dirty = true;
+                let packs = Arc::make_mut(&mut self.packs);
+                match expired {
+                    Some(expired) => {
+                        // XXX: may not be necessary if rx is dirty immediately after anyway...
+                        packs.invalidate_entities(&mut expired.into_iter())
+                    },
+                    None => packs.clear(),
+                }
+            }
+        }
+        if dirty {
+            // XXX: may not be necessary if changes are published immediately after anyway...
+            self.maps_rx.mark_changed();
         }
     }
 }

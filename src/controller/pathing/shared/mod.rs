@@ -2,6 +2,7 @@
 pub use {
     self::{
         display::LocDisplay,
+        interact::{InteractReceiver, InteractSender, InteractShared},
         loader::{
             LoadReport,
             SharedLoaderPacksInfo,
@@ -34,7 +35,10 @@ pub use {
             TrailGeometrySections,
         },
     },
-    crate::controller::pathing::state::{LoadedTrailGeometry, LoadedTrailSection},
+    crate::{
+        controller::pathing::state::{LoadedTrailGeometry, LoadedTrailSection},
+        settings::pathing::HiddenGuids,
+    },
 };
 use {
     crate::{
@@ -57,6 +61,7 @@ use {
 };
 
 mod display;
+pub mod interact;
 mod loader;
 mod maps;
 mod space;
@@ -67,8 +72,9 @@ pub struct PathingSender {
     pub command: mpsc::Sender<PathingEvent>,
     pub enables: watched::Tx<PathingEnables>,
     pub load_throttle: watched::Tx<usize>,
-    #[cfg(todo)]
-    pub interactions: broadcast::Sender<InteractionEvent>,
+    /// already exposed via [PathingShared]
+    #[cfg(todo = "unnecessary")]
+    pub interactions: InteractSender,
 }
 impl PathingSender {
     pub fn new(
@@ -79,15 +85,11 @@ impl PathingSender {
         raids: &watched::Tx<Arc<RaidState>>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(48);
-        #[cfg(todo)]
-        let interactions = broadcast::Sender::new(Self::INTERACTIONS_BUFFER_LEN);
         let sender = Self {
             shared: Arc::new(PathingShared::new()),
             command,
             enables: watched::Tx::new(PathingEnables::empty()),
             load_throttle: watched::Tx::new(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS),
-            #[cfg(todo)]
-            interactions: interactions.clone(),
         };
         let rx = PathingReceiver {
             shared: sender.shared.clone(),
@@ -103,16 +105,11 @@ impl PathingSender {
                 let _ = load_throttle.try_read_mut();
                 load_throttle
             },
-            #[cfg(todo)]
-            interactions_rx: interactions.subscribe(),
-            #[cfg(todo)]
-            interactions,
+            interact: InteractReceiver::new(&sender.shared.interact),
         };
 
         (sender, rx)
     }
-    #[cfg(todo)]
-    const INTERACTIONS_BUFFER_LEN: usize = 48;
 }
 
 pub struct PathingReceiver {
@@ -127,10 +124,7 @@ pub struct PathingReceiver {
     pub raids: watched::Rx<Arc<RaidState>>,
     pub gameplay: Watched<GameplayState>,
     pub mumble_identity: watched::Rx<Option<MumbleIdentityUpdate>>,
-    #[cfg(todo)]
-    pub interactions: broadcast::Sender<InteractionEvent>,
-    #[cfg(todo)]
-    pub interactions_rx: broadcast::Receiver<InteractionEvent>,
+    pub interact: InteractReceiver,
 }
 impl PathingReceiver {
     pub(crate) fn make_loader(&self, settings: SettingsLock) -> Arc<PackLoader> {
@@ -162,6 +156,7 @@ pub struct PathingShared {
     pub gameplay: watched::Tx<SharedGameplayMap>,
     /// rendering
     pub space: SpacePackShared,
+    pub interact: InteractShared,
 }
 impl PathingShared {
     pub fn new() -> Self {
@@ -171,6 +166,7 @@ impl PathingShared {
             maps: watched::Tx::new(Default::default()),
             gameplay: watched::Tx::new(SharedGameplayMap::default()),
             space: SpacePackShared::new(),
+            interact: InteractShared::new(),
         }
     }
 

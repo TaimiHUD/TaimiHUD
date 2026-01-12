@@ -1,7 +1,10 @@
 pub use taimi_api_client::model::achievements::AchievementId;
 use {
     bitvec::array::BitArray,
-    std::collections::{BTreeMap, BTreeSet},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        hash::{Hash, Hasher},
+    },
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,7 +37,7 @@ impl AchievementState {
     }
 }
 type AchievementBitsRaw = BitArray<[u64; 2]>;
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct AchievementBits {
     pub bits: AchievementBitsRaw,
@@ -48,6 +51,9 @@ impl AchievementBits {
     }
     pub fn bit_complete(&self, bit: u8) -> bool {
         self.bits.get(bit as usize).map(|b| *b).unwrap_or(false)
+    }
+    pub fn count(&self) -> u8 {
+        self.bits.count_ones() as _
     }
 }
 impl FromIterator<u8> for AchievementBits {
@@ -67,6 +73,12 @@ impl Extend<u8> for AchievementBits {
                 log::error!("achievement bit {i} out of range")
             }
         }
+    }
+}
+/// ignores positions and just hashes [Self::count]
+impl Hash for AchievementBits {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.count().hash(state)
     }
 }
 #[cfg(todo = "unused")]

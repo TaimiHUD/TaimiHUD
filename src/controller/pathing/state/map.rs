@@ -1,20 +1,22 @@
 use {
     crate::controller::pathing::{
         info::MapPackInfo,
-        registry::{LoadedPoiIndex, LoadedPoiNs, LoadedTrailIndex, LoadedTrailNs, PackInfoSignature},
+        registry::{
+            LoadedMarkerPath,
+            LoadedPoiIndex,
+            LoadedPoiNs,
+            LoadedPoiPath,
+            LoadedTrailIndex,
+            LoadedTrailNs,
+            LoadedTrailPath,
+            PackInfoSignature,
+        },
         state::{LoadedCategory, LoadedPoi, LoadedTrail},
     },
     std::sync::Arc,
-    taimi_hoard::{collections::lru::RecentlyUsed, loc::indexed::IndexedList},
-    taimi_meta::packs::{CategoryPath, MapIndex, PoiPath, TrailPath},
-    taimi_pack::Pack,
-};
-
-#[cfg(todo)]
-use crate::controller::pathing::{
-    filter::MapFilters,
-    state::interactive::InteractivePoi,
-    taimi_pack::attributes::keys::Guid,
+    taimi_hoard::{collections::lru::RecentlyUsed, iters::IterExt as _, loc::indexed::IndexedList},
+    taimi_meta::packs::{id::MarkerPath, CategoryPath, MapIndex, PoiPath, TrailPath},
+    taimi_pack::{attributes::keys::Guid, Pack},
 };
 
 #[derive(Debug, Clone)]
@@ -23,14 +25,8 @@ pub struct LoadedMapPack {
     pub info_sig: PackInfoSignature,
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
-    #[cfg(todo)]
     pub poi_guids: Arc<[Guid]>,
-    #[cfg(todo)]
-    pub interactive_pois: Arc<[InteractivePoi]>,
-    #[cfg(todo)]
-    pub interactive_pois_nearby: BitVec,
     pub trails: Box<[LoadedTrail]>,
-    #[cfg(todo)]
     pub trail_guids: Box<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
     #[cfg(todo)]
@@ -43,25 +39,16 @@ impl LoadedMapPack {
             map_id,
             info_sig: PackInfoSignature::EMPTY,
             used: RecentlyUsed::DEFAULT,
-            #[cfg(todo)]
-            interactive_pois: Default::default(),
-            #[cfg(todo)]
-            interactive_pois_nearby: Default::default(),
             pois: Default::default(),
-            #[cfg(todo)]
             poi_guids: Default::default(),
             trails: Default::default(),
-            #[cfg(todo)]
             trail_guids: Default::default(),
             categories: Default::default(),
-            #[cfg(todo)]
-            filters: Default::default(),
         }
     }
 
     pub fn from_pack(map_id: MapIndex, info: &MapPackInfo, pack: &Pack) -> Self {
         let pois = info.pois().map(|path| LoadedPoi::from_pack(path, pack)).collect();
-        #[cfg(todo)]
         let poi_guids = info
             .poi_guid_filter(info.pois())
             .map(|path| {
@@ -71,18 +58,10 @@ impl LoadedMapPack {
                     .unwrap_or_default()
             })
             .collect();
-        #[cfg(todo)]
-        let interactive_pois = info
-            .pois()
-            .enumerate()
-            .map(|(i, path)| InteractivePoi::from_pack(i as PoiIndex, path, pack))
-            .filter(|ipoi| !ipoi.is_empty())
-            .collect();
         let trails = info
             .trails()
             .map(|path| LoadedTrail::from_pack(path, pack))
             .collect();
-        #[cfg(todo)]
         let trail_guids = info
             .trail_guid_filter(info.trails())
             .map(|path| {
@@ -92,33 +71,19 @@ impl LoadedMapPack {
                     .unwrap_or_default()
             })
             .collect();
-        #[cfg(todo)]
-        let filters = MapFilters::from_pack(info, active);
 
         let loaded = Self {
             map_id,
             info_sig: info.info_sig.clone(),
-            #[cfg(todo)]
-            interactive_pois_nearby: BitVec::new(),
-            #[cfg(todo)]
-            interactive_pois,
             pois,
-            #[cfg(todo)]
             poi_guids,
             trails,
-            #[cfg(todo)]
             trail_guids,
             #[cfg(todo)]
-            filters,
+            filters: MapFilters::from_pack(info, active),
             categories: Default::default(),
             used: RecentlyUsed::DEFAULT,
         };
-        #[cfg(todo)]
-        {
-            loaded
-                .interactive_pois_nearby
-                .reserve_exact(loaded.interactive_pois.len());
-        }
 
         loaded
     }
@@ -147,15 +112,29 @@ impl LoadedMapPack {
     {
         info.pois().zip(self.pois.iter_mut())
     }
-    #[cfg(todo)]
-    pub fn poi_guids<'a, 'i>(
-        &'a self,
+    pub fn enum_pois_mut<'a, 'i>(
+        &'a mut self,
         info: &'i MapPackInfo,
-    ) -> impl Iterator<Item = (PoiPath, &'a Guid)> + 'i
+    ) -> impl Iterator<Item = (LoadedPoiPath, PoiPath, &'a mut LoadedPoi)> + 'i
     where
         'a: 'i,
     {
-        info.poi_guid_filter(info.pois()).zip(self.poi_guids.iter())
+        self.lpois_mut()
+            .iter_mut()
+            .zip(info.pois())
+            .lazy_map(|((lp, l), p)| (lp, p, l))
+    }
+    pub fn poi_guids<'a, 'i>(
+        &'a self,
+        info: &'i MapPackInfo,
+    ) -> impl Iterator<Item = (PoiPath, LoadedPoiPath, &'a Guid)> + 'i
+    where
+        'a: 'i,
+    {
+        let pois = info.pois().zip(self.lpois().paths());
+        info.poi_guid_filter(pois)
+            .zip(self.poi_guids.iter())
+            .lazy_map(|((p, lp), g)| (p, lp, g))
     }
     pub fn poi_at<'a>(&'a self, path: PoiPath<&'_ MapPackInfo>) -> Option<&'a LoadedPoi> {
         let info = path.root;
@@ -192,15 +171,48 @@ impl LoadedMapPack {
     {
         info.trails().zip(self.trails.iter_mut())
     }
-    #[cfg(todo)]
-    pub fn trail_guids<'a, 'i>(
-        &'a self,
+    pub fn enum_trails_mut<'a, 'i>(
+        &'a mut self,
         info: &'i MapPackInfo,
-    ) -> impl Iterator<Item = (TrailPath, &'a Guid)> + 'i
+    ) -> impl Iterator<Item = (LoadedTrailPath, TrailPath, &'a mut LoadedTrail)> + 'i
     where
         'a: 'i,
     {
-        info.trail_guid_filter(info.trails()).zip(&self.trail_guids)
+        self.ltrails_mut()
+            .iter_mut()
+            .zip(info.trails())
+            .lazy_map(|((lp, l), p)| (lp, p, l))
+    }
+    pub fn trail_guids<'a, 'i>(
+        &'a self,
+        info: &'i MapPackInfo,
+    ) -> impl Iterator<Item = (TrailPath, LoadedTrailPath, &'a Guid)> + 'i
+    where
+        'a: 'i,
+    {
+        let trails = info.trails().zip(self.ltrails().paths());
+        info.trail_guid_filter(trails)
+            .zip(&self.trail_guids)
+            .lazy_map(|((p, lp), g)| (p, lp, g))
+    }
+    pub fn marker_guids<'a, 'i>(
+        &'a self,
+        info: &'i MapPackInfo,
+    ) -> impl Iterator<Item = (MarkerPath, LoadedMarkerPath, &'a Guid)> + 'i
+    where
+        'a: 'i,
+    {
+        let pois = self.poi_guids(info).lazy_map(|(p, lp, g)| {
+            let mp: MarkerPath = p.pivot_from();
+            let mlp: LoadedMarkerPath = lp.pivot_to();
+            (mp, mlp, g)
+        });
+        let trails = self.trail_guids(info).lazy_map(|(p, lp, g)| {
+            let mp: MarkerPath = p.pivot_from();
+            let mlp: LoadedMarkerPath = lp.pivot_to();
+            (mp, mlp, g)
+        });
+        pois.chain(trails)
     }
     pub fn trail_at<'a>(&'a self, path: TrailPath<&'_ MapPackInfo>) -> Option<&'a LoadedTrail> {
         let info = path.root;

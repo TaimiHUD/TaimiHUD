@@ -112,6 +112,11 @@ markers-edit = [
 
 paths = [
   "space",
+  # this mostly works but so few packs care to use it...
+  #"paths-schedule",
+]
+paths-schedule = [
+  "dep:croner",
 ]
 paths-lua = [
   "scripts-lua",
@@ -312,7 +317,7 @@ nalgebra = { workspace = true, optional = true }
 semver = { version = "1", optional = true }
 uuid = { version = "1", features = ["v3", "v4", "serde"] }
 regex = "1"
-croner = "3"
+croner = { version = "3", optional = true }
 bitvec = { workspace = true }
 
 arcffi = { path = "rt/ffi", package = "taimi_ffi", default-features = false, features = ["serde"] }

@@ -9,6 +9,7 @@ okay = OK
 delete = Delete
 copy = Copy
 copy-arg = Copy { $arg }
+copied = Copied to clipboard
 save = Save
 quit = Quit
 delete-item = { delete } "{ $item }"?
@@ -389,6 +390,23 @@ pack-category = Category
 pack-root = Main { pack-category }
 pack-root-submenu = Pack Control
 
+pois-nearby = Nearby
+pois-map = On-map
+pois-hidden = Hidden
+# idk how to do a select case is our fluent too old?
+#dismiss-behaviour-1 = leave
+dismiss-behaviour-1 = temporarily
+dismiss-behaviour-2 = until tomorrow
+dismiss-behaviour-3 = permanently
+dismiss-behaviour-4 = with delay
+dismiss-behaviour-5 = map
+dismiss-behaviour-6 = for instance
+dismiss-behaviour-7 = for character
+dismiss-behaviour-101 = this week
+trigger-trigger = Activate
+#trigger-untrigger = Restore
+trigger-untrigger = Unhide
+
 pathing-config = Pathing Options
 pathing-config-enable = {space} Pathing
 pathing-config-minimap = Minimap Options
@@ -421,7 +439,10 @@ pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
 pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
-pathing-config-filters = Filters
+pathing-config-filters = Dynamic Content
+pathing-config-interactions = Interactions
+pathing-config-autotrigger = Auto-trigger
+pathing-config-autotrigger-notice = Additionally allow the following to automatically trigger when in range
 pathing-config-api-bypass = API bypass
 pathing-config-api-bypass-notice = Temporarily show completed achievements when replaying content with your friends
 pathing-config-festivals = {festival}s
@@ -445,6 +466,18 @@ render-notice-gameplay-initial = Select a character to get started
 render-notice-error = Error! See log in Nexus or Taimi addon folder for more details
 packs-empty = No files loaded
 packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "{ reload-packs }" button should pick them up!
+
+## Interaction
+
+trigger-copy = Copy
+trigger-info = Info popup
+trigger-reset = POI reset
+trigger-toggle = Toggle category
+trigger-show = Show category
+trigger-hide = Hide category
+trigger-script = Scripts
+trigger-behaviour = Dismiss
+trigger-bounce = Animations
 
 ## Festivals
 
