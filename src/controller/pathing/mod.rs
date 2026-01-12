@@ -67,6 +67,7 @@ use crate::controller::script;
 mod config;
 mod festivals;
 pub mod info;
+mod interact;
 pub mod registry;
 mod setup;
 pub mod shared;

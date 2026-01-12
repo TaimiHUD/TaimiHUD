@@ -55,6 +55,7 @@ pub use self::{
 
 mod categories;
 mod menu;
+mod interact;
 mod toggles;
 
 #[derive(Debug, Default)]
