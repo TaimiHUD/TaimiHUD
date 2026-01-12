@@ -6,6 +6,7 @@ use {
         CategoryPath,
         MapIndex,
         MapPath,
+        PackCategoryNs,
         PackIndex,
         PackMapPath,
         PackPath,
@@ -267,20 +268,47 @@ impl From<MarkerIndex> for MarkerIndexVariant {
 
 impl NamespacePivotFrom<PackPoiNs, PoiIndex> for PackMarkerNs {
     type NsPivotFromPath = MarkerIndex;
+    #[inline]
     fn loc_pivot_from(path: PoiPath) -> Locator<Self, Self::NsPivotFromPath> {
         Locator::with_path(MarkerIndex::with_poi(path.path))
     }
 }
 impl NamespacePivotFrom<PackTrailNs, TrailIndex> for PackMarkerNs {
     type NsPivotFromPath = MarkerIndex;
+    #[inline]
     fn loc_pivot_from(path: TrailPath) -> Locator<Self, Self::NsPivotFromPath> {
         Locator::with_path(MarkerIndex::with_trail(path.path))
     }
 }
 impl NamespacePivotFrom<TrailPath, TrailSectionPath> for PackMarkerNs {
     type NsPivotFromPath = MarkerIndex;
+    #[inline]
     fn loc_pivot_from(path: SectionOfTrail) -> Locator<Self, Self::NsPivotFromPath> {
         Locator::with_path(MarkerIndex::with_trail_section(path.root.path, path.path.path))
+    }
+}
+impl NamespaceTryConvTo<MarkerIndex, MarkerPath> for PackMarkerNs {
+    #[inline]
+    fn try_conv_to(path: Locator<Self, MarkerIndex>) -> Option<MarkerPath> {
+        Some(path)
+    }
+}
+impl NamespaceTryConvTo<CategoryIndex, MarkerPath> for PackCategoryNs {
+    #[inline]
+    fn try_conv_to(path: Locator<Self, CategoryIndex>) -> Option<MarkerPath> {
+        Some(MarkerPath::with_path(MarkerIndex::from(path)))
+    }
+}
+impl NamespaceTryConvTo<PoiIndex, MarkerPath> for PackPoiNs {
+    #[inline]
+    fn try_conv_to(path: Locator<Self, PoiIndex>) -> Option<MarkerPath> {
+        Some(MarkerPath::with_path(MarkerIndex::from(path)))
+    }
+}
+impl NamespaceTryConvTo<TrailIndex, MarkerPath> for PackTrailNs {
+    #[inline]
+    fn try_conv_to(path: Locator<Self, TrailIndex>) -> Option<MarkerPath> {
+        Some(MarkerPath::with_path(MarkerIndex::from(path)))
     }
 }
 impl NamespaceTryConvTo<MarkerIndex, TrailPath> for PackMarkerNs {
