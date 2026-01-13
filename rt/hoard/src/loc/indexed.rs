@@ -255,7 +255,7 @@ where
     usize: AsPrimitive<P>,
 {
     #[inline(always)]
-    pub fn paths<'a, 'n>(&'a self) -> impl Iterator<Item = Locator<N, P>> + 'n
+    pub fn paths<'a, 'n>(&'a self) -> impl ExactSizeIterator<Item = Locator<N, P>> + DoubleEndedIterator + 'n
     where
         &'a T: IntoIterator,
         <&'a T as IntoIterator>::IntoIter: ExactSizeIterator,

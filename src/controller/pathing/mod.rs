@@ -9,6 +9,7 @@ use {
     crate::{
         controller::{
             api::{AchievementState, RaidState},
+            runtime::WallInstant,
             Controller,
         },
         exports::runtime::{
@@ -29,17 +30,17 @@ use {
     },
     anyhow::Context,
     futures::{
-        future::Either,
-        stream::{self, FusedStream},
+        future::{self, Either},
+        stream,
         StreamExt,
     },
-    std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc},
+    std::{collections::{BTreeMap, VecDeque}, future::Future, mem, pin::Pin, sync::Arc},
     strum_macros::Display,
     taimi_hoard::loc::LocationRef,
     taimi_meta::{
         packs::{
             collections::{CategorySet, PackSet},
-            id::MarkerId,
+            id::{MarkerId, MarkerPath},
             CategoryPath,
             PackPath,
         },
@@ -50,7 +51,8 @@ use {
     },
     taimi_pack::attributes::Festivals,
     taimi_sync::watched,
-    tokio::{select, sync::Semaphore, task::JoinSet},
+    tokio::{select, sync::Semaphore, task::{AbortHandle, JoinSet}},
+    tokio_util::sync::ReusableBoxFuture,
 };
 
 #[allow(unused_imports)]
@@ -64,6 +66,7 @@ pub use self::{
 
 mod config;
 mod festivals;
+mod filter;
 pub mod info;
 mod interact;
 pub mod registry;
@@ -94,6 +97,10 @@ pub(crate) enum PathingEvent {
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
     /// act upon a batch of changes to [shared::SharedPackLoad::config]
     CategoryEnableCommit(PackPath, CategorySet),
+    /// taco guid reset
+    ResetMarkerIds(Vec<MarkerId>),
+    /// same as id
+    ResetMarkerPath(MarkerPath<PackPath>),
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(shared::LoadReport),
@@ -115,6 +122,11 @@ pub(crate) struct PathingController {
     map_info: LoadedMapInfo,
     maps: LoadedMaps,
     space: SpaceContext,
+    filter_state: state::filter::FilterState,
+    /// TODO: replace this with a watcher or something
+    filter_state_signal: bool,
+    filter_expiry: BTreeMap<MarkerId, AbortHandle>,
+    filter_next_schedule: ReusableBoxFuture<'static, ()>,
     // watchers...
     pack_configs: watched::WatchStreamBox<PackPath, shared::SharedPackConfig>,
     /// we only need to regen if a new pack slot is allocated
@@ -144,6 +156,13 @@ impl PathingController {
             maps: Default::default(),
             pack_configs: Box::new(stream::pending()),
             pack_configs_sig: PackPath::default(),
+            filter_state: Default::default(),
+            filter_state_signal: false,
+            filter_expiry: Default::default(),
+            filter_next_schedule: ReusableBoxFuture::new(future::pending()),
+            // would rather avoid touching these APIs until main async loop, extra allocation is acceptable
+            #[cfg(todo = "unnecessary")]
+            filter_next_schedule: ReusableBoxFuture::new(WallInstant::big_sleep()),
         }
     }
 
@@ -251,6 +270,37 @@ impl PathingController {
                 },
                 Err(e) => crate::log_join_error("pathing", e),
             },
+            _ = &mut self.filter_next_schedule => {
+                // self.update_filter_state_schedule(ctx);
+                self.filter_next_schedule.set(WallInstant::soon(Self::SCHEDULE_TIMEOUT).to_future());
+                self.filter_state_signal = true;
+            },
+            _ = self.rx.festivals.changed() => {
+                let new = self.rx.festivals.borrow_and_update().get();
+                if new != self.filter_state.festival {
+                    self.filter_state.festival = new;
+                    self.filter_state_signal = true;
+                }
+            },
+            _ = self.rx.achievements.changed() => {
+                let new = self.rx.achievements.borrow_and_update();
+                self.filter_state_signal |= self.filter_state.achievements.update_with(&*new);
+            },
+            _ = self.rx.raids.changed() => {
+                let new = self.rx.raids.borrow_and_update();
+                self.filter_state_signal |= self.filter_state.raids.update_with(&*new);
+            },
+            Ok(..) = self.rx.mumble_identity.changed() => {
+                if let Some(identity) = &*self.rx.mumble_identity.borrow_and_update() {
+                    let dirty = self.filter_state.character.update_from_mumblelink(identity);
+                    self.filter_state_signal |= dirty;
+                }
+            },
+            _ = future::ready(()), if self.filter_state_signal && gameplay_prev.gameplay_map().is_some() => {
+                self.filter_state_signal = false;
+                self.update_filter_state();
+                self.update_loaded_visibility(!Self::ALLOW_INCOMPLETE_VIS_UPDATE);
+            },
             trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
                 for trail in trail_reqs {
                     log::trace!("processing trail req {trail}");
@@ -270,15 +320,6 @@ impl PathingController {
             },
             Ok(_) = self.space.maps_rx.changed() => {
                 self.space_pack_updates().await;
-            },
-            _ = self.rx.festivals.changed() => {
-                self.external_filters_updated().await;
-            },
-            _ = self.rx.achievements.changed() => {
-                self.external_filters_updated().await;
-            },
-            _ = self.rx.raids.changed() => {
-                self.external_filters_updated().await;
             },
             controls = self.controls.wait() => match controls {
                 Err(e) => log::error!("Control bindings error! {e:#}"),
@@ -350,11 +391,6 @@ impl PathingController {
             Some(set) => en.set(PathingEnables::API_BYPASS, set),
             None => en.toggle(PathingEnables::API_BYPASS),
         });
-    }
-
-    /// TODO: this sanely
-    async fn external_filters_updated(&mut self) {
-        self.update_loaded_visibility();
     }
 
     async fn load_all(&mut self) {
@@ -444,6 +480,10 @@ impl PathingController {
                 let changed = cats.into_iter().map(CategoryPath::with_path);
                 Self::category_commit_vis(&self.loader, pack_path, changed).await
             },
+            ResetMarkerIds(ids) =>
+                self.process_filter_clear_ids(ids),
+            ResetMarkerPath(path) =>
+                self.process_filter_clear_path(path),
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,

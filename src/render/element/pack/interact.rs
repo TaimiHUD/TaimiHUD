@@ -1,8 +1,8 @@
-use std::iter;
+#![cfg(todo)]
 
+use std::iter;
 use glamour::Point3;
 use taimi_pack::attributes::keys::{self, Guid};
-
 use {
     super::PathingWindowState,
     crate::{

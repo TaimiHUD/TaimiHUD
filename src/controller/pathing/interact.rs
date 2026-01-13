@@ -12,10 +12,8 @@ use {
         settings::pathing::TriggerKind,
     },
     std::{cmp, collections::BinaryHeap, num::NonZero, sync::Arc, time::{Duration, UNIX_EPOCH}},
-    taimi_meta::{
-        packs::{MapIndex, MarkerId, MarkerIndex, PoiIndex},
-        loc::Locator,
-    },
+    taimi_meta::packs::{MapIndex, MarkerId, MarkerIndex, PoiIndex},
+    taimi_hoard::loc::Locator,
 };
 
 #[cfg(todo)]

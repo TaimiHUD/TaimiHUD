@@ -1,13 +1,16 @@
 use {
     crate::{
         exports::runtime::{self as rt, bindings::GameBinds},
-        settings::state::save_state_backup,
+        settings::{
+            pathing::PathingSave,
+            state::save_state_backup,
+        },
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
-    std::{fs, io, path::Path, sync::LazyLock},
+    std::{borrow::Cow, fs, io, path::Path, sync::LazyLock},
+    tokio::time,
     taimi_sync::watched,
-    tokio::{sync::watch, time},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -17,6 +20,8 @@ pub struct SaveState {
     /// TODO: put this in an api struct...
     #[serde(default, skip_serializing_if = "taimi_hoard::is_false_ref")]
     pub api_auto_update: bool,
+    #[serde(default, skip_serializing_if = "PathingSave::is_empty_opt")]
+    pub pathing_state: Option<PathingSave>,
     // TODO: move dpi scaling toggle here maybe?
 }
 
@@ -24,15 +29,16 @@ impl SaveState {
     pub const EMPTY: Self = Self {
         game_binds: GameBinds::new(),
         api_auto_update: false,
+        pathing_state: None,
     };
 
     pub fn new() -> Self {
         Self::EMPTY
     }
 
-    pub fn get() -> &'static watch::Sender<Self> {
-        static LOCK: LazyLock<watch::Sender<SaveState>> =
-            LazyLock::new(|| watch::Sender::new(SaveState::initial_load()));
+    pub fn get() -> &'static watched::Tx<Self> {
+        static LOCK: LazyLock<watched::Tx<SaveState>> =
+            LazyLock::new(|| watched::Tx::new(SaveState::initial_load()));
         &LOCK
     }
 
@@ -54,8 +60,9 @@ impl SaveState {
     pub fn is_empty(&self) -> bool {
         match self {
             Self { game_binds, .. } if !game_binds.is_empty() => false,
-            Self { game_binds: _, api_auto_update: false } => true,
-            _ => false,
+            Self { pathing_state: Some(pathing), .. } if !pathing.is_empty() => false,
+            Self { game_binds: _, pathing_state: _, api_auto_update: false } => true,
+            _ => false
         }
     }
 
@@ -94,9 +101,9 @@ impl SaveState {
         Some(Box::pin(time::sleep(Self::SAVE_THROTTLE_TIMEOUT)))
     }
     pub async fn watch_dirty(
-        receiver: &mut watch::Receiver<Self>,
+        receiver: &mut watched::Rx<Self>,
         throttle: &mut watched::WatchThrottleDelay,
-    ) -> Result<(), watch::error::RecvError> {
+    ) -> Result<(), watched::RxError> {
         if let Some(throttle) = throttle {
             throttle.await;
         }
@@ -111,8 +118,21 @@ impl SaveState {
     pub fn write_with<F: FnOnce(&mut Self)>(f: F) {
         Self::get().send_modify(f)
     }
+    pub fn try_write_with<F: FnOnce(&mut Self) -> bool>(f: F) -> bool {
+        Self::get().send_if_modified(f)
+    }
 
     pub fn game_binds_mut(&mut self) -> &mut GameBinds {
         &mut self.game_binds
+    }
+
+    pub fn pathing(&self) -> Cow<'_, PathingSave> {
+        match &self.pathing_state {
+            Some(pathing) => Cow::Borrowed(pathing),
+            None => Default::default(),
+        }
+    }
+    pub fn pathing_mut(&mut self) -> &mut PathingSave {
+        self.pathing_state.get_or_insert_default()
     }
 }

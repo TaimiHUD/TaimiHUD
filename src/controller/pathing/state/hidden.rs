@@ -1,9 +1,9 @@
 use std::num::NonZero;
 use std::sync::Arc;
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant, SystemTime};
 use crate::controller::pathing::state::filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter};
 use taimi_meta::packs::{MapIndex, MarkerId};
+use taimi_hoard::time::Timestamp;
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct MarkerState {
@@ -28,7 +28,7 @@ impl MarkerState {
             })
     }
 
-    pub fn next_expiry(&self) -> Option<Instant> {
+    pub fn next_expiry(&self) -> Option<Timestamp> {
         self.hidden.values().filter_map(|hidden| match hidden.reset {
             AutoReset::Expiry { expiry } => Some(expiry),
             _ => None
@@ -39,27 +39,38 @@ impl MarkerState {
         let id = id.into();
         self.hidden.entry(id).or_insert(HiddenMarker::global(AutoReset::Never))
     }
-    pub fn expire_at(&mut self, id: impl Into<MarkerId>, expiry: impl Into<Instant>) -> &mut HiddenMarker {
+    pub fn expire_at(&mut self, id: impl Into<MarkerId>, expiry: impl Into<Timestamp>) -> (&mut HiddenMarker, bool) {
+        let ts = expiry.into();
         let entry = self.marker_mut(id);
-        entry.reset = AutoReset::expire_at_mono(expiry.into());
-        entry
+        let changed = match &mut entry.reset {
+            AutoReset::Expiry { expiry } if *expiry == ts =>
+                false,
+            reset => {
+                *reset = AutoReset::expire_at_timestamp(ts);
+                true
+            },
+        };
+        (entry, changed)
     }
     pub fn reset(&mut self, id: impl AsRef<MarkerId>) -> bool {
         self.hidden.remove(id.as_ref()).is_some()
     }
 
+    #[cfg(deleteme)]
     pub fn expire_at_timestamp(&mut self, id: impl Into<MarkerId>, expiry_timestamp: u64, now: &SystemTime, now_mono: &Instant) {
         let id = id.into();
         let entry = self.hidden.entry(id).or_insert(HiddenMarker::global(AutoReset::Never));
         entry.reset = AutoReset::expiry_with_timestamp(expiry_timestamp, now, now_mono);
     }
 
-    pub fn reset_expired(&mut self, now_mono: &std::time::Instant) {
+    pub fn reset_expired(&mut self, now: &Timestamp) -> bool {
+        let prev_len = self.hidden.len();
         self.hidden.retain(|_, hidden| match &hidden.reset {
-            AutoReset::Expiry { expiry } if expiry <= now_mono =>
+            AutoReset::Expiry { expiry } if expiry <= now =>
                 false,
             _ => true,
-        })
+        });
+        prev_len != self.hidden.len()
     }
     pub fn reset_map_leave(&mut self) {
         self.hidden.retain(|_, hidden| match &hidden.reset {
@@ -118,14 +129,15 @@ pub enum AutoReset {
     /// Upon leaving the trigger range
     Distance,
     Expiry {
-        expiry: Instant,
+        expiry: Timestamp,
     },
     MapChange,
 }
 impl AutoReset {
-    pub const fn expire_at_mono(expiry: Instant) -> Self {
+    pub const fn expire_at_timestamp(expiry: Timestamp) -> Self {
         Self::Expiry { expiry }
     }
+    #[cfg(deleteme)]
     pub fn expiry_with_timestamp(expiry_timestamp: u64, now: &SystemTime, now_mono: &Instant) -> Self {
         #[cfg(todo = "unnecessary")]
         let Some(expiry) = SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(expiry_timestamp)) else {

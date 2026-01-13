@@ -24,13 +24,16 @@ pub enum Mount {
 impl Mount {
     pub const REPR_MIN: u8 = Self::None as u8;
     pub const REPR_MAX: u8 = Self::SiegeTurtle as u8;
-    pub const INDEX_MAX: u8 = Self::REPR_MAX - 1;
+    pub const INDEX_MAX: u8 = Self::REPR_MAX;
 
     pub const fn repr(self) -> u8 {
         self as u8
     }
     pub const fn index(self) -> u8 {
-        self.repr() - 1
+        self.repr()
+    }
+    pub const fn from_repr(repr: u8) -> Option<Self> {
+        Self::from_index(repr)
     }
     pub const fn from_index(index: u8) -> Option<Self> {
         match index {
@@ -105,6 +108,7 @@ impl FromStr for Mount {
 bitflags! {
     #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Mounts: u16 {
+        const NONE = 1 << Mount::None.index();
         const JACKAL = 1 << Mount::Jackal.index();
         const GRIFFON = 1 << Mount::Griffon.index();
         const SPRINGER = 1 << Mount::Springer.index();
@@ -121,7 +125,6 @@ bitflags! {
 impl Mounts {
     pub const fn for_mount(mount: Mount) -> Self {
         match mount {
-            Mount::None => Self::empty(),
             mount => Self::from_bits_retain(1u16 << mount.index()),
         }
     }

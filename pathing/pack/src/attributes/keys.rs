@@ -1,11 +1,12 @@
 use {
-    super::TacoBehavior,
+    super::{AttrList, TacoBehavior},
     crate::attributes::{AttrString, BounceBehavior, CullDirection},
     base64::Engine as _,
     glam::{Vec3, Vec4},
     std::{
-        borrow::Cow,
+        borrow::{Borrow, Cow},
         convert::Infallible,
+        num::NonZero,
         fmt,
         io,
         mem,
@@ -172,7 +173,7 @@ impl<T: FromStr> FromStr for Opt<T> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct List<T>(pub Vec<T>);
+pub struct List<T>(pub Box<[T]>);
 impl<T> List<T> {
     pub fn iter(&self) -> slice::Iter<'_, T> {
         self.0.iter()
@@ -187,7 +188,7 @@ where
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut err = None;
-        let list: Vec<T> = value
+        let list: Box<[T]> = value
             .split(',')
             .map(|f| f.trim_ascii())
             .filter_map(|f| match f.parse() {
@@ -212,6 +213,7 @@ impl<T> FromIterator<T> for List<T> {
         Self(iter.into_iter().collect())
     }
 }
+#[cfg(todo)]
 impl<T> Extend<T> for List<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         self.0.extend(iter)
@@ -219,9 +221,9 @@ impl<T> Extend<T> for List<T> {
 }
 impl<T> IntoIterator for List<T> {
     type Item = T;
-    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+    type IntoIter = <Box<[T]> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        IntoIterator::into_iter(self.0)
     }
 }
 
@@ -454,15 +456,94 @@ impl FromStr for Specialization {
         value.parse().map(Self)
     }
 }
+impl Specializations {
+    /// TODO: u32 though...
+    #[inline]
+    pub fn from_attrlist(v: &AttrList<i32>) -> &Self {
+        let list: &Box<[i32]> = &**v;
+        unsafe {
+            mem::transmute(list)
+        }
+    }
+}
+impl MapTypes {
+    #[inline]
+    pub fn from_attrlist(v: &AttrList<super::MapType>) -> &Self {
+        let list: &Box<[super::MapType]> = &**v;
+        unsafe {
+            mem::transmute(list)
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Raid(pub String);
+impl Raid {
+    #[inline]
+    pub fn from_ref(v: &String) -> &Self {
+        unsafe {
+            mem::transmute(v)
+        }
+    }
+}
 impl FromStr for Raid {
     type Err = Infallible;
 
+    #[inline]
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(Self(value.into()))
+    }
+}
+impl From<String> for Raid {
+    #[inline]
+    fn from(raid: String) -> Self {
+        Self(raid)
+    }
+}
+impl From<&'_ String> for Raid {
+    #[inline]
+    fn from(raid: &String) -> Self {
+        Self(raid.clone())
+    }
+}
+impl From<&'_ str> for Raid {
+    #[inline]
+    fn from(raid: &str) -> Self {
+        Self(raid.into())
+    }
+}
+impl From<Raid> for String {
+    #[inline]
+    fn from(raid: Raid) -> Self {
+        raid.0
+    }
+}
+impl Borrow<Raid> for String {
+    #[inline]
+    fn borrow(&self) -> &Raid {
+        Raid::from_ref(self)
+    }
+}
+impl Borrow<String> for Raid {
+    #[inline]
+    fn borrow(&self) -> &String {
+        &self.0
+    }
+}
+impl Borrow<str> for Raid {
+    #[inline]
+    fn borrow(&self) -> &str {
+        &self.0[..]
+    }
+}
+impl Raids {
+    #[inline]
+    pub fn from_attrlist(v: &AttrList<String>) -> &Self {
+        let list: &Box<[String]> = &**v;
+        unsafe {
+            mem::transmute(list)
+        }
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1143,9 +1224,21 @@ impl From<i32> for AchievementId {
         Self(id as _)
     }
 }
+impl From<NonZero<u32>> for AchievementId {
+    #[inline]
+    fn from(id: NonZero<u32>) -> Self {
+        Self(id.get())
+    }
+}
 impl From<i32> for AchievementBit {
     #[inline]
     fn from(id: i32) -> Self {
+        Self(id as _)
+    }
+}
+impl From<u16> for AchievementBit {
+    #[inline]
+    fn from(id: u16) -> Self {
         Self(id as _)
     }
 }

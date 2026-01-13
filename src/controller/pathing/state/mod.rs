@@ -8,11 +8,12 @@ use {
     std::{collections::BTreeMap, iter, ops, sync::Arc},
     taimi_hoard::{
         collections::{lru::RecentlyUsed, TaimiSet},
-        iters::all_zipped,
+        iters::{IterExt as _, all_zipped},
         loc::{indexed::IndexedList, LocationMut, LocationRef},
     },
     taimi_meta::packs::{
         collections::PackSet,
+        id::MarkerPath,
         MapIndex,
         MapPath,
         PackIndex,
@@ -117,6 +118,43 @@ impl LoadedMapInfo {
             None => self.map_info.clear(),
             Some(map_id) => self.map_info.retain(|path, _| path.path == map_id),
         }
+    }
+
+    /// prefer [Self::iter_all] if map_id is known to be None
+    pub fn iter(&self, map_id: Option<MapIndex>) -> impl Iterator<Item = (&PackMapPath, &LoadedMapInfoStorage)> + '_ {
+        self.map_info.iter().filter(move |(p, _i)|
+            map_id.map(|id| p.path == id).unwrap_or(true)
+        )
+    }
+    pub fn iter_all(&self) -> impl Iterator<Item = (PackMapPath, &Arc<MapPackInfo>)> + '_ {
+        self.map_info.iter().lazy_map(|(p, map_info)| (*p, &map_info.info))
+    }
+
+    pub fn find_marker_path(&self, lpath: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
+        let root = lpath.root.root;
+        self.lookup_ref(&lpath.root).and_then(move |map_info| {
+            map_info.marker_path(lpath.unscope()).map(|i| i.pivot(root))
+        })
+    }
+    pub fn find_loaded_marker(&self, path: MarkerPath<PackPath>, map_id: MapIndex) -> Option<MarkerPath<PackMapPath>> {
+        #[cfg(todo = "unnecessary")]
+        return self.find_loaded_markers(path).find(|m| m.root.path == map_id);
+        let root = path.root.rel(map_id);
+        let index: MarkerPath = MarkerPath::with_path(path.path);
+        self.lookup_ref(&root).and_then(|map_info| {
+            map_info.marker_index(index).map(|li| li.pivot(root))
+        })
+    }
+    pub fn find_loaded_markers(&self, path: MarkerPath<PackPath>) -> impl Iterator<Item = MarkerPath<PackMapPath>> + '_ {
+        let root = path.root;
+        let index: MarkerPath = MarkerPath::with_path(path.path);
+        self.map_info.iter()
+            .filter(move |(p, _)| p.root == root)
+            .filter_map(move |(p, map_info)| {
+                let root = root.rel(p.path);
+                map_info.marker_index(index)
+                    .map(|li| li.pivot(root))
+            })
     }
 }
 impl LocationRef<PackPath, MapIndex> for LoadedMapInfo {
@@ -280,6 +318,7 @@ impl LoadedMaps {
         })
     }
 
+    /// prefer [Self::iter_all] if map is known to be None
     pub fn iter<'a>(
         &'a self,
         map_id: Option<MapIndex>,
@@ -288,6 +327,15 @@ impl LoadedMaps {
             Some(map_id) if map_id != path.path => None,
             _ => Some((*path, map)),
         })
+    }
+    /// TODO: a real iter type might deprecate need for this over [Self::iter],
+    /// since it could just impl size_hint/nth conditionally
+    pub fn iter_all<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().lazy_map(move |(path, map)|
+            (*path, map)
+        )
     }
     pub fn iter_mut<'a>(
         &'a mut self,

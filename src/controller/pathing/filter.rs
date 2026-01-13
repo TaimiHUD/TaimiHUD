@@ -1,42 +1,34 @@
 use {
     crate::{
-        controller::{api::{ApiAccountInfo, ApiController, ApiMessage}, pathing::{
-            festivals::FestivalFixup, filter::{AchievementState, RaidState}, registry::{MarkerId, MarkerIndex, PackMapPath, PoiPath}, setup::PathingTaskBox, state::hidden::{AutoReset, HideContext}, FestivalState, PathingController, PathingEvent, PathingEventContext
-        }},
-        exports::runtime as rt, settings::{pathing::{PathingAchievementApi, PathingAchievementSave}, state::SaveState, PathingSettings},
-    }, anyhow::Context, bitvec::array::BitArray, futures::future::Either, std::{future::Future, path::{Path, PathBuf}, time::SystemTime}, taimi_pack::attributes::keys::{self, Guid}, tokio::{fs, io::AsyncReadExt, time::{Duration, Instant}}
+        controller::pathing::{
+            registry::{PackMapPath, PackPath},
+            state::hidden::{AutoReset, HideContext},
+            PathingController, PathingEvent,
+        },
+        controller::runtime::WallInstant,
+        exports::runtime as rt,
+        settings::state::SaveState,
+    },
+    taimi_meta::packs::{
+        collections::PackSet,
+        id::{MarkerId, MarkerPath, MarkerIndex, IdVariant},
+        PoiPath,
+    },
+    taimi_hoard::time::Timestamp,
+    taimi_hoard::loc::{Locator, LocationRef},
+    futures::future::Either,
+    std::iter,
+    std::collections::BTreeMap,
+    std::time::Duration,
+    taimi_pack::attributes::keys::Guid,
+    tokio::task::AbortHandle,
 };
 
 impl PathingController {
-    pub(super) fn handle_guid_reset<'g, G>(&mut self, ctx: &mut PathingEventContext, guids: G) where
-        G: IntoIterator<Item = &'g Guid> + Clone,
-    {
-        SaveState::try_write_with(|save| {
-            let mut dirty = false;
-            for guid in guids.clone() {
-                if save.pathing().hidden_guid_expiry_get(&guid).is_some() {
-                    save.pathing_mut().hidden_guid_expire(&guid);
-                    dirty = true;
-                }
-            }
-            dirty
-        });
-        for guid in guids {
-            if self.filter_state.hidden.reset(&guid.0) {
-                self.mark_hidden_dirty(ctx, None);
-                ctx.filter_state_signal = true;
-            }
-            if ctx.unexpire(&guid.0) {
-                ctx.filter_state_signal = true;
-            }
-        }
-    }
-    pub(super) async fn handle_dismiss(&mut self, ctx: &mut PathingEventContext, path: PoiPath<PackMapPath>, delay: Option<Duration>, expiry: Option<SystemTime>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
+    pub(super) async fn handle_dismiss(&mut self, path: PoiPath<PackMapPath>, expiry: Option<Either<Timestamp, Duration>>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
         let guid = {
-            self.map_pack_info.get(&path.root)
-                .and_then(|info| self.map_packs.get(&path.root)
-                    .map(|map| (map, info))
-                ).and_then(|(map, info)| map.poi_guids(info)
+            self.maps.lookup_with_info(&self.map_info, &path.root)
+                .and_then(|(map, info)| map.poi_guids(info)
                     .find(|(p, ..)| p.path == path.path)
                     .map(|(_, guid)| guid.clone())
                 )
@@ -60,16 +52,11 @@ impl PathingController {
                 }
             },
         };
-        let hidden = if let Some(expiry) = expiry {
-            ctx.expire_at(id.clone(), expiry, delay);
-            let expiry_now = std::time::Instant::now();
-            let expiry_std = expiry_now + if let Some(delay) = delay {
-                delay
-            } else {
-                log::warn!("TODO: expiry to instant");
-                Duration::from_secs(2)
-            };
-            self.filter_state.hidden.expire_at(id.clone(), expiry_std)
+        let expiry = expiry.map(WallInstant::from_moment);
+        let hidden = if let Some(expiry) = expiry.clone() {
+            let ts = expiry.timestamp;
+            self.expire_at(id.clone(), expiry);
+            self.filter_state.hidden.expire_at(id.clone(), ts).0
         } else {
             self.filter_state.hidden.marker_mut(id.clone())
         };
@@ -86,34 +73,29 @@ impl PathingController {
         if has_context {
             hidden.contexts.extend(hide_contexts);
         }
-        let expiry = match (expiry, delay, reset) {
+        let expiry = match (expiry, reset) {
             // TODO: this is a mess
-            (_, _, Some(AutoReset::Distance | AutoReset::MapChange)) =>
-                Some(None),
-            (None, None, _) if has_context =>
-                Some(None),
-            (Some(e), ..) => Some(Some(e)),
-            (None, Some(delay), _) =>
-                SystemTime::now().checked_add(delay).map(Some),
-            (None, None, _) =>
-                SystemTime::now().checked_add(Duration::MAX).map(Some),
-        }.unwrap_or_else(|| {
-            log::error!("when is the future?");
-            Some(SystemTime::now() + Duration::from_secs(3600 * 24 * 365 * 2))
-        });
+            (_, Some(AutoReset::Distance | AutoReset::MapChange)) =>
+                None,
+            (None, _) if has_context =>
+                None,
+            (Some(e), ..) => Some(e),
+            (None, _) =>
+                Some(WallInstant::far_future()),
+        };
         if let (Some(expiry), Some(guid)) = (expiry, guid) {
             SaveState::write_with(|save| {
-                save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry)
+                save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry.timestamp)
             });
         }
-        ctx.filter_state_signal = true;
-        self.mark_hidden_dirty(ctx, Some(path.root));
+        self.filter_state_signal = true;
+        self.update_shared_hidden(Some(&mut iter::once(path.root)));
     }
 
-    pub fn update_filter_state(&mut self, ctx: &mut PathingEventContext) {
+    pub fn update_filter_state(&mut self) {
         #[cfg(todo = "unnecessary")]
         {
-            self.filter_state.festival = ctx.festivals.read().clone();
+            self.filter_state.festival = self.festivals.read().clone();
             self.filter_state.achievements.update_from_save();
         }
         if let Ok(ml) = rt::mumble_link_ptr() {
@@ -121,240 +103,183 @@ impl PathingController {
             self.filter_state.avatar.update_from_mumblelink_context(&ml);
             // TODO: self.filter_state.character.update_from_mumblelink(ml);
         }
-        self.update_filter_state_schedule(ctx);
+        self.update_filter_state_schedule();
     }
-    pub fn update_filter_state_schedule(&mut self, ctx: &mut PathingEventContext) {
+    pub fn update_filter_state_schedule(&mut self) {
         #[cfg(feature = "paths-schedule")]
         let next_scheduled = {
             self.filter_state.schedule.update_time();
             let mut next_scheduled = None;
             if let Some(now) = &self.filter_state.schedule.now {
-                if let Some(map_id) = ctx.gameplay_map() {
+                if let Some(map_id) = self.gameplay_map() {
                     let next_update = self.map_packs.iter_mut()
                         .filter(|(path, _)| path.path == map_id)
                         .filter_map(|(_, map)| {
                             map.filters.next_schedule_event(&now)
                         })
                         .min();
-                    next_scheduled = next_update.and_then(|next|
-                        next.signed_duration_since(now).to_std().ok()
-                    );
+                    next_scheduled = match next_update {
+                        #[cfg(todo = "unnecessary")]
+                        Some(n) => n.signed_duration_since(now).to_std().ok(),
+                        Some(n) => Some(n),
+                        None => None,
+                    };
                 }
             }
         };
-        let next_expire = self.filter_state.hidden.next_expiry()
+        let next_expire = self.filter_state.hidden.next_expiry();
+        #[cfg(todo = "unnecessary")]
+        let next_expire = next_expire
             .and_then(|expiry| expiry.checked_duration_since(std::time::Instant::now()));
         let next = [
             #[cfg(feature = "paths-schedule")]
             next_schedule,
             next_expire,
         ].into_iter().flatten().min();
-        let next = next.or(if ctx.next_schedule.is_elapsed() {
-            Some(PathingEventContext::SCHEDULE_TIMEOUT)
-        } else {
-            None
-        });
+        let next = match next {
+            Some(next) => Some(WallInstant::from(next)),
+            None => Some(WallInstant::soon(Self::SCHEDULE_TIMEOUT)),
+            #[cfg(todo = "unnecessary")]
+            _ => None,
+        };
         if let Some(next) = next {
-            ctx.next_schedule.as_mut().reset(Instant::now() + next);
+            self.filter_next_schedule.set(next.to_future());
         }
     }
 
-    pub fn mark_hidden_dirty(&self, ctx: &mut PathingEventContext, path: Option<PackMapPath>) {
-        let state = &self.filter_state.hidden;
-        let map_packs = &self.map_packs;
-        let Some(map_id) = path.map(|p| p.path).or(ctx.gameplay_map()) else {
-            return
+    #[doc(alias = "mark_hidden_dirty")]
+    pub fn update_shared_hidden(&self, dirty_packs: Option<&mut dyn Iterator<Item = PackMapPath>>) {
+        let mut all_packs;
+        let dirty_packs = match dirty_packs {
+            Some(p) => p,
+            None => {
+                let Some(map_id) = self.gameplay_map() else { return };
+                all_packs = self.packs.packs.paths().map(move |p| p.rel(map_id));
+                &mut all_packs
+            },
         };
-        ctx.shared.gameplay.send_if_modified(|shared_map| {
+        let maps = &self.maps;
+        let state = &self.filter_state.hidden;
+        if let (_, Some(0)) = dirty_packs.size_hint() { return }
+        self.loader.shared.gameplay.send_if_modified(|shared_map| {
             let mut updated = false;
-            let Some(shared_map) = shared_map.get_mut(map_id) else { return updated };
-            let shared_state = path
-                .map(|path| shared_map.get_state_mut(path)
-                    .map(|state| (path, state))
-                );
-            match shared_state {
-                None => for (path, shared_map, _shared_info) in &mut shared_map.iter_state_mut() {
-                    if let Some(map_pack) = map_packs.get(&path) {
-                        updated |= shared_map.update_with_hidden(path, state, map_pack);
-                    }
-                },
-                Some(Some((path, shared_map))) =>
-                    if let Some(map_pack) = map_packs.get(&path) {
-                        updated = shared_map.update_with_hidden(path, state, map_pack);
-                    },
-                Some(None) => (),
+            for path in dirty_packs {
+                let Some(shared_state) = shared_map.get_state_mut(path) else { continue };
+                if let Some(map) = maps.lookup_ref(&path) {
+                    updated |= shared_state.update_with_hidden(path, state, map);
+                }
             }
             updated
         });
     }
 
-    pub(super) fn get_festival_state(pathing: &PathingSettings) -> FestivalState {
-        let (on, off) = pathing.festival_preferences();
-        FestivalState {
-            active: FestivalFixup::current_festivals(),
-            on,
-            off,
+    #[inline]
+    pub(super) fn unexpire_at(filter_expiry: &mut BTreeMap<MarkerId, AbortHandle>, item: &MarkerId) -> bool {
+        if let Some(handle) = filter_expiry.remove(item) {
+            handle.abort();
+            true
+        } else {
+            false
         }
     }
+    pub(super) fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
+        Self::unexpire_at(&mut self.filter_expiry, item.as_ref())
+    }
+    pub(super) fn expire_at(&mut self, item: MarkerId, expiry: WallInstant) {
+        let handle = self.tasks.spawn(async move {
+            let _ = expiry.to_future().await;
+            Ok(PathingEvent::ResetMarkerIds(vec![item]))
+        });
+        // TODO: there's probably an entry replace api for this...
+        self.unexpire(&item);
+        self.filter_expiry.insert(item, handle);
+    }
+    pub(super) const SCHEDULE_TIMEOUT: Duration = Duration::from_secs(Timestamp::HOUR.as_secs() * 12);
+}
 
-    /// TODO: this
-    /// (assuming false as long as any data exists for now)
-    pub fn api_info_outdated(&mut self, endpoint: ApiAccountInfo) -> bool {
-        match endpoint {
-            #[cfg(todo)]
-            ApiAccountInfo::RaidClears => last_updated < start_of_week || recently_left_raid_map,
-            #[cfg(todo)]
-            ApiAccountInfo::Achievements => last_updated < settings.achievement_update_period_id || recently_left_story_map,
-            _ => false,
+/// [PathingEvent::ResetMarkerIds] and [PathingEvent::ResetMarkerPath]
+impl PathingController {
+    pub(super) fn process_filter_clear_ids(&mut self, ids: Vec<MarkerId>) {
+        self.filter_clear_save_ids(&mut ids.iter());
+        self.filter_clear_update_ids(&mut ids.into_iter());
+    }
+    pub(super) fn process_filter_clear_path(&mut self, path: MarkerPath<PackPath>) {
+        let id = MarkerId::for_marker(path);
+        self.filter_clear_update_ids(&mut iter::once(id));
+    }
+    fn filter_clear_save_ids(&mut self, ids: &mut dyn Iterator<Item = &'_ MarkerId>) -> bool {
+        let guids = ids.filter_map(|id| match id.variant() {
+            IdVariant::MarkerRegistered(..) | IdVariant::MarkerLoaded(..) => None,
+            #[cfg(todo = "unnecessary")]
+            IdVaraint::MarkerUnscoped(..) => None,
+            _ => Some(Guid::from_uuid_ref(&id.uuid)),
+        });
+        self.filter_clear_save_guids(&mut {guids})
+    }
+    pub(super) fn filter_clear_update_ids(&mut self, ids: &mut dyn Iterator<Item = MarkerId>) {
+        let map_info = &self.map_info;
+        let ids = ids.flat_map(|id| {
+            let variant = id.variant();
+            let path = match variant {
+                IdVariant::MarkerRegistered(path) => Some(path.root.rel(None)),
+                IdVariant::MarkerLoaded(path) => Some(path.root.map_path(Some)),
+                #[cfg(todo)]
+                IdVariant::Group => {
+                    // we could try to find it out but idk what index to check or when,
+                    // plus it's possible for a GUID to span multiple packs!
+                    lookup_guid()
+                },
+                _ => None,
+            };
+            let loaded = if let IdVariant::MarkerRegistered(path) = variant {
+                Some(map_info.find_loaded_markers(path).map(MarkerId::for_marker))
+            } else { None };
+            let unloaded = if let IdVariant::MarkerLoaded(lpath) = variant {
+                map_info.find_marker_path(lpath).map(MarkerId::for_marker)
+            } else { None };
+            iter::once(id)
+                .chain(loaded.into_iter().flatten())
+                .chain(unloaded)
+                .map(move |id| (path, id))
+        });
+        let map_id = self.gameplay_map();
+        let (mut hidden_dirty_packs, mut hidden_dirty_unk) = (PackSet::default(), false);
+        for (path, id) in ids {
+            let hidden_dirty = self.filter_state.hidden.reset(id);
+            match path {
+                _ if !hidden_dirty => (),
+                Some(Locator { path: Some(pack_map), .. }) if Some(pack_map) != map_id => (),
+                Some(path) => {
+                    hidden_dirty_packs.insert(path.root);
+                },
+                None => hidden_dirty_unk = true,
+            }
+            let id_dirty = hidden_dirty | Self::unexpire_at(&mut self.filter_expiry, &id);
+            if id_dirty {
+                self.filter_state_signal = true;
+            }
+        }
+        if hidden_dirty_unk || !hidden_dirty_packs.is_empty() {
+            // unknown means we cleared a GUID without checking which packs were affected,
+            // so refresh all just to be safe
+            let mut dirty_packs = match (hidden_dirty_unk, map_id) {
+                (false, Some(map_id)) => Some(hidden_dirty_packs.iter().map(move |p| p.rel(map_id))),
+                _ => None,
+            };
+            self.update_shared_hidden(dirty_packs.as_mut().map(|p| &mut *p as &mut dyn Iterator<Item = PackMapPath>));
         }
     }
-    /// list of paths to load or populate with given api token
-    pub(super) fn api_setup_get(&mut self, _ctx: &mut PathingEventContext) -> impl Future<Output = Vec<(ApiAccountInfo, Either<PathBuf, Option<String>>)>> + 'static {
-        let (account_name, token_id) = match ApiController::current_account_token() {
-            Ok(token) if token.id().is_none() => (
-                Some(token.account_name),
-                None,
-            ),
-            Ok(token) => (
-                Some(token.account_name),
-                Some(token.id),
-            ),
-            Err(account_name) => (
-                account_name,
-                None,
-            ),
-        };
-
-        let mut outdated: BitArray<[u32; 1]> = Default::default();
-        for (&endpoint, mut outdated) in Self::API_ENDPOINTS.iter().zip(outdated.iter_mut()) {
-            *outdated = self.api_info_outdated(endpoint);
-        }
-        async move {
-            let mut res = Vec::with_capacity(Self::API_ENDPOINTS.len());
-            if let Some(acc) = &account_name {
-                let mut account_path = ApiController::account_path(&acc);
-                for (&endpoint, outdated) in Self::API_ENDPOINTS.into_iter().zip(outdated) {
-                    rt::path_join_append(&mut account_path, endpoint.filename());
-                    let missing = fs::try_exists(&account_path).await.ok() == Some(false);
-                    if !missing {
-                        res.push((endpoint, Either::Right(token_id.clone())));
-                    }
-                    if missing || (token_id.is_some() && outdated) {
-                        res.push((endpoint, Either::Left(account_path.clone())));
-                    };
-                    account_path.pop();
+    fn filter_clear_save_guids(&mut self, guids: &mut dyn Iterator<Item = &'_ Guid>) -> bool {
+        if let (_, Some(0)) = guids.size_hint() { return false }
+        SaveState::try_write_with(|save| {
+            let mut dirty = false;
+            for guid in guids {
+                if dirty || save.pathing().hidden_guid_expiry_get(&guid).is_some() {
+                    save.pathing_mut().hidden_guid_expire(&guid);
+                    dirty = true;
                 }
             }
-            res
-        }
-    }
-    pub(super) async fn api_reload(&mut self, ctx: &mut PathingEventContext) {
-        if crate::ACCOUNT_NAME_CELL.get().is_none() {
-            // TODO: remove this once we actually register for an event that populates it...
-            // and remove the hacky call to this from initial gameplay load
-            log::debug!("TODO: still unsure of account name...");
-            return
-        }
-        let api_setup = self.api_setup_get(ctx).await;
-        let reloads = api_setup.into_iter()
-            .filter_map(|(endpoint, missing)| match missing {
-                Either::Left(load_path) => Some((endpoint, load_path)),
-                Either::Right(..) => None,
-            });
-        for (endpoint, load_path) in reloads {
-            ctx.tasks.spawn(Self::api_load_info_from(endpoint, load_path));
-        }
-    }
-    pub(super) fn api_info_reload(&mut self, ctx: &mut PathingEventContext, endpoint: Option<ApiAccountInfo>) {
-        let account = ApiController::current_account_token();
-        let account_name = match &account {
-            Ok(token) => token.account_name(),
-            Err(name) => name.as_ref().map(|n| &n[..]),
-        };
-        let Some(account_name) = account_name else {
-            log::warn!("can't refresh due to unknown account name");
-            return
-        };
-        let endpoints = match endpoint {
-            Some(..) => &[],
-            None => Self::API_ENDPOINTS,
-        }.iter().chain(endpoint.iter());
-        for &endpoint in endpoints {
-            let path = ApiController::account_info_path(account_name, endpoint);
-            ctx.tasks.spawn(Self::api_load_info_from(endpoint, path));
-        }
-    }
-
-    pub(super) fn api_info_refresh(&mut self, _ctx: &mut PathingEventContext, endpoint: Option<ApiAccountInfo>) {
-        let account = ApiController::current_account_token();
-        let token_id = account.as_ref().ok()
-            .map(|acc| acc.id())
-            .flatten()
-            .map(ToOwned::to_owned);
-        let endpoints = match endpoint {
-            Some(..) => &[],
-            None => Self::API_ENDPOINTS,
-        }.iter().chain(endpoint.iter());
-        for &endpoint in endpoints {
-            ApiMessage::RefreshAccount {
-                endpoint,
-                token_id: token_id.clone(),
-            }.try_send();
-        }
-    }
-
-    pub(super) fn api_setup_get_each((endpoint, missing): (ApiAccountInfo, Either<PathBuf, Option<String>>)) -> Option<PathingTaskBox> {
-        match missing {
-            Either::Left(load_path) =>
-                return Some(Box::pin(Self::api_load_info_from(endpoint, load_path))),
-            Either::Right(Some(token_id)) => {
-                ApiMessage::RefreshAccount {
-                    endpoint,
-                    token_id: Some(token_id),
-                }.try_send();
-            },
-            Either::Right(None) => (),
-        }
-        None
-    }
-    pub(super) async fn api_load_info_from(endpoint: ApiAccountInfo, path: PathBuf) -> Option<PathingEvent> {
-        let res = match endpoint {
-            ApiAccountInfo::RaidClears => {
-                Self::api_load_info_from_raids(path).await
-                    .map(PathingEvent::AccountInfoRaidClears)
-            },
-            ApiAccountInfo::Achievements => {
-                Self::api_load_info_from_achievements(path).await
-                    .map(PathingEvent::AccountInfoAchievements)
-            },
-        }.with_context(|| format!("parsing account {endpoint}"));
-
-        rt::log::warn_ok(res)
-    }
-    async fn api_load_info_from_achievements(path: PathBuf) -> anyhow::Result<AchievementState> {
-        let achievements = Self::deserialize_path::<PathingAchievementApi>(&path).await
-            .map(PathingAchievementSave::from)?;
-        Ok(AchievementState::new(achievements))
-    }
-    async fn api_load_info_from_raids(path: PathBuf) -> anyhow::Result<RaidState> {
-        let clears = Self::deserialize_path::<Vec<keys::Raid>>(&path).await?;
-        Ok(RaidState::new(clears))
-    }
-    async fn deserialize_path<T: serde::de::DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
-        let mut f = fs::File::open(path).await?;
-        let mut data = Vec::with_capacity(match () {
-            #[cfg(windows)]
-            () => {
-                use std::os::windows::fs::MetadataExt;
-                f.metadata().await.ok().and_then(|meta|
-                    meta.file_size().try_into().ok()
-                )
-            },
-            #[cfg(not(windows))]
-                _ => None::<usize>,
-        }.unwrap_or(0x1000));
-        f.read_to_end(&mut data).await?;
-        serde_json::from_slice::<T>(&data)
-            .map_err(anyhow::Error::from)
+            dirty
+        })
     }
 }

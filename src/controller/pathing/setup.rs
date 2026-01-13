@@ -4,7 +4,7 @@ use {
             info::MapPackInfo,
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
             shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
-            state::{LoadedMapInfoStorage, LoadedMapPack, LoadedPackInfo},
+            state::{filter::FilterState, LoadedMapInfoStorage, LoadedMapPack, LoadedPackInfo},
             PathingController,
             PathingEvent,
             PathingReceiver,
@@ -360,7 +360,7 @@ impl PathingController {
             None
         };
         let (dirty, map, map_info) = if let Some((info, map, map_info, data)) = info {
-            Self::prepare_map_for_pack(&self.rx, map_path, info, data, map, map_info)
+            Self::prepare_map_for_pack(&self.rx, &self.filter_state, map_path, info, data, map, map_info)
                 .map(move |dirty| (dirty, map, map_info))
         } else {
             Err(())
@@ -395,6 +395,7 @@ impl PathingController {
     }
     fn prepare_map_for_pack(
         rx: &PathingReceiver,
+        filter_state: &FilterState,
         map_path: PackMapPath,
         (pack_info, info): (&PackInfo, &SharedPackInfo),
         data: Option<&Pack>,
@@ -423,7 +424,7 @@ impl PathingController {
                     let damage =
                         map.update_category_config(&*map_info, &pack_info.categories, &config.config);
                     if let Ok(true) = &damage {
-                        false
+                        Self::ALLOW_INCOMPLETE_VIS_UPDATE
                     } else {
                         map.refresh_categories(
                             &*map_info,
@@ -445,7 +446,7 @@ impl PathingController {
                 map_path,
                 map,
                 &*map_info,
-                Some(&rx.get_filter_state()),
+                Some(filter_state),
             );
         }
 
