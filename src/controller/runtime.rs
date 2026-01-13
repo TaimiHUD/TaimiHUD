@@ -5,14 +5,18 @@ use {
             machine::{RenderMachine, RenderTask, RenderTaskPriority},
             RenderState,
         },
+        exports::runtime as rt,
     },
     anyhow::Context,
-    std::{fmt, ptr, time::Duration},
+    futures::future::Either,
+    std::{fmt, ptr, sync::LazyLock, time::{Duration, SystemTime, Instant as StdInstant}},
     tokio::{
         runtime::{Builder, Handle, Runtime},
         sync::oneshot,
         task::LocalSet,
+        time::{self, Instant},
     },
+    taimi_hoard::time::Timestamp,
 };
 
 impl Controller {
@@ -172,4 +176,242 @@ impl Drop for RemoteContext {
             },
         }
     }
+}
+
+/// an Instant calibrated against wall clock time
+#[derive(Copy, Clone)]
+pub struct WallInstant {
+    pub instant: Instant,
+    pub timestamp: Timestamp,
+}
+impl WallInstant {
+    /// construct via [Self::calibrated]
+    pub fn from_system_time(time: &SystemTime) -> Self {
+        Self::from_timestamp(Timestamp::from_system_time(time))
+    }
+    /// construct via [Self::calibrated]
+    pub fn from_instant(instant: StdInstant) -> Self {
+        Self::from_tokio_instant(instant)
+    }
+    /// construct via [Self::calibrated]
+    pub fn from_tokio_instant<I: Into<Instant>>(instant: I) -> Self {
+        let instant = instant.into();
+        let timestamp = Self::timestamp_at_tokio_instant(&instant);
+        Self::with_parts(instant, timestamp)
+    }
+    /// construct via [Self::calibrated]
+    pub fn from_timestamp(timestamp: Timestamp) -> Self {
+        Self::with_parts(Self::instant_at_timestamp(timestamp).into(), timestamp)
+    }
+    pub fn now() -> Self {
+        #[cfg(todo = "unnecessary")]
+        {
+            // going backwards seems a bit awkward, so try to avoid
+            let _ = Self::calibrated();
+        }
+        Self::from_tokio_instant(Instant::now())
+    }
+    /// [Self::now] and a bit
+    pub fn soon(wait: Duration) -> Self {
+        Self::now().add(wait)
+    }
+    pub fn from_moment<T: Into<Self>, U: Into<Self>>(moment: Either<T, U>) -> Self {
+        match moment {
+            Either::Left(l) => l.into(),
+            Either::Right(r) => r.into(),
+        }
+    }
+    pub fn now_timestamp_mono() -> Timestamp {
+        Self::timestamp_at_instant(&StdInstant::now())
+    }
+    pub fn now_timestamp_system() -> Timestamp {
+        Timestamp::from_system_time(&SystemTime::now())
+    }
+
+    const FAR_ENOUGH_FUTURE: Duration = Duration::from_secs(Self::FAR_ISH_FUTURE.as_secs() * 32);
+    /// a couple months is enough for a single session at least!
+    const FAR_ISH_FUTURE: Duration = Duration::from_secs(0x800000);
+    pub fn far_future_sys() -> &'static SystemTime {
+        static FAR_FUTURE: LazyLock<SystemTime> = LazyLock::new(||
+            Timestamp::MAX_SYS.to_system_time()
+                .or_else(|| SystemTime::now().checked_add(WallInstant::FAR_ENOUGH_FUTURE))
+                .unwrap_or_else(|| SystemTime::now() + WallInstant::FAR_ISH_FUTURE)
+        );
+        &FAR_FUTURE
+    }
+
+    #[inline]
+    pub fn with_parts(instant: Instant, timestamp: Timestamp) -> Self {
+        Self { instant, timestamp }
+    }
+    pub fn new_calibrated(instant: Instant, calibration: &SystemTime) -> Self {
+        let timestamp = Timestamp::try_from_system_time(calibration)
+            .context("now precedes unix, expect time to break");
+        Self {
+            instant,
+            timestamp: rt::log::error_ok(timestamp).unwrap_or_default(),
+        }
+    }
+
+    pub fn calibrated() -> &'static Self {
+        static CALIBRATED: LazyLock<WallInstant> = LazyLock::new(|| {
+            let now_sys = SystemTime::now();
+            let now = StdInstant::now();
+            WallInstant::new_calibrated(now.into(), &now_sys)
+        });
+        &CALIBRATED
+    }
+
+    /// not necessarily far, just already elapsed
+    pub fn past_instant() -> &'static StdInstant {
+        static PAST: LazyLock<StdInstant> = LazyLock::new(|| {
+            let snapshot = WallInstant::calibrated().instant.into_std();
+            snapshot.checked_sub(Timestamp::DAY)
+                .or_else(|| snapshot.checked_sub(Timestamp::HOUR))
+                .unwrap_or(snapshot)
+        });
+        &PAST
+    }
+    pub fn far_future() -> Self {
+        Self::with_parts(Self::far_future_instant().into(), Timestamp::MAX_INSTANT)
+    }
+    pub fn far_future_instant() -> StdInstant {
+        static FAR_FUTURE: LazyLock<Option<StdInstant>> = LazyLock::new(|| {
+            let snapshot = StdInstant::now();
+            let future = snapshot.checked_add(WallInstant::FAR_ENOUGH_FUTURE)
+                .or_else(|| snapshot.checked_add(WallInstant::FAR_ISH_FUTURE));
+            if future.is_none() {
+                log::error!("not much time left it seems?");
+            }
+            future
+        });
+        FAR_FUTURE
+            .unwrap_or_else(|| {
+                let snapshot = StdInstant::now();
+                snapshot.checked_add(Timestamp::WEEK)
+                    .or(snapshot.checked_add(Timestamp::DAY))
+                    .unwrap_or(snapshot)
+            })
+    }
+    pub fn as_system_time(&self) -> SystemTime {
+        self.timestamp.into_system_time()
+    }
+
+    pub fn timestamp_at_instant(instant: &StdInstant) -> Timestamp {
+        let cal = Self::calibrated();
+        let diff = Timestamp::instant_checked_duration_since(instant, cal.instant.into_std());
+        cal.timestamp.saturating_signed_add(diff)
+    }
+    pub fn timestamp_at_tokio_instant(instant: &Instant) -> Timestamp {
+        Self::timestamp_at_instant(&instant.into_std())
+    }
+    pub fn instant_at_system_time(time: &SystemTime) -> StdInstant {
+        let ts = Timestamp::from_system_time(time);
+        Self::instant_at_timestamp(ts)
+    }
+    pub fn instant_at_timestamp(timestamp: Timestamp) -> StdInstant {
+        let cal = Self::calibrated();
+        let diff = timestamp.checked_duration_since(&cal.timestamp);
+        let neg = Timestamp::signed_duration_neg(&diff);
+        Timestamp::signed_duration_instant(diff, &cal.instant.into_std())
+            .unwrap_or(Self::saturated_instant(neg))
+    }
+
+    fn saturated_instant(neg: bool) -> StdInstant {
+        match neg {
+            true => Self::past_instant().clone(),
+            false => Self::far_future_instant(),
+        }
+    }
+    pub fn add(mut self, amt: Duration) -> Self {
+        self.timestamp.saturating_add_mut(amt);
+        self.instant = self.instant.checked_add(amt).unwrap_or_else(|| Self::far_future_instant().into());
+        self
+    }
+    pub fn sub(mut self, amt: Duration) -> Self {
+        self.timestamp.saturating_sub_mut(amt);
+        self.instant = self.instant.checked_sub(amt).unwrap_or_else(|| Self::past_instant().clone().into());
+        self
+    }
+
+    #[inline]
+    pub fn to_future(&self) -> time::Sleep {
+        time::sleep_until(self.instant.clone())
+    }
+    #[doc(alias = "far_future_future")]
+    #[inline]
+    pub fn big_sleep() -> time::Sleep {
+        Self::far_future().to_future()
+    }
+}
+/// [Self::from_system_time]
+impl From<SystemTime> for WallInstant {
+    #[inline]
+    fn from(time: SystemTime) -> Self {
+        Self::from_system_time(&time)
+    }
+}
+/// [Self::from_instant]
+impl From<StdInstant> for WallInstant {
+    #[inline]
+    fn from(instant: StdInstant) -> Self {
+        Self::from_instant(instant)
+    }
+}
+/// [Self::from_tokio_instant]
+impl From<Instant> for WallInstant {
+    #[inline]
+    fn from(instant: Instant) -> Self {
+        Self::from_tokio_instant(instant)
+    }
+}
+/// [Self::from_timestamp]
+impl From<Timestamp> for WallInstant {
+    #[inline]
+    fn from(timestamp: Timestamp) -> Self {
+        Self::from_timestamp(timestamp)
+    }
+}
+/// [Self::soon]
+impl From<Duration> for WallInstant {
+    #[inline]
+    fn from(wait: Duration) -> Self {
+        Self::soon(wait)
+    }
+}
+impl From<WallInstant> for Timestamp {
+    #[inline]
+    fn from(i: WallInstant) -> Self {
+        i.timestamp
+    }
+}
+impl From<WallInstant> for Instant {
+    #[inline]
+    fn from(i: WallInstant) -> Self {
+        i.instant
+    }
+}
+impl From<WallInstant> for StdInstant {
+    #[inline]
+    fn from(i: WallInstant) -> Self {
+        i.instant.into_std()
+    }
+}
+impl From<WallInstant> for SystemTime {
+    #[inline]
+    fn from(i: WallInstant) -> Self {
+        i.as_system_time()
+    }
+}
+#[test]
+fn future_is_now_sys() {
+    let now_sys = SystemTime::now();
+    let headroom = WallInstant::far_future_sys().duration_since(&now_sys).unwrap();
+    assert!(headroom > WallInstant::FAR_ENOUGH_FUTURE);
+}
+#[test]
+fn future_is_now_instant() {
+    let now = Instant::now();
+    let headroom = WallInstant::far_future_instant().duration_since(&now).unwrap();
+    assert!(headroom >= WallInstant::FAR_ENOUGH_FUTURE);
 }

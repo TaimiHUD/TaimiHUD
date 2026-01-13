@@ -4,12 +4,12 @@ use {
             info::MapPackInfo,
             registry::{PackCategoryInfo, PackLoader, PackMapPath, PackPath},
             shared::SharedPackConfig,
-            state::{LoadedCategory, LoadedMapPack},
+            state::{filter::{self, FilterState}, LoadedCategory, LoadedMapPack},
             ExternalFilterState,
             PathingController,
             VisibilityFlagsExt,
         },
-        settings::PathingSettings,
+        settings::{state::SaveState, PathingSettings},
         space::{engine::SpaceEvent, Engine},
     },
     std::{
@@ -33,6 +33,7 @@ use {
     },
     taimi_pack::{attributes::FilterAttributes, category::id::AsFullId, Pack},
     taimi_sync::watched::watch,
+    taimi_hoard::time::Timestamp,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -135,7 +136,6 @@ impl PathingController {
         self.trim_inactive_maps(false);
         let Some((info, _info)) = self.packs.lookup_info(path) else { return };
         let mut dirty = false;
-        let mut external_filters = None;
         for (map_path, map, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, path) {
             {
                 let config = config.borrow();
@@ -147,10 +147,8 @@ impl PathingController {
                 // TODO: filter out unaffected pack+maps here using damage
                 dirty |= true;
             }
-            let rx = &self.rx;
-            let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
             dirty |=
-                Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&*external_filters));
+                Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&self.filter_state));
         }
         if dirty {
             let maps = self.maps.iter_pack_with_info(&self.map_info, path);
@@ -258,7 +256,7 @@ impl PathingController {
         path: PackMapPath,
         map_pack: &mut LoadedMapPack,
         map_info: &MapPackInfo,
-        filter_state: Option<&ExternalFilterState>,
+        filter_state: Option<&FilterState>,
     ) -> bool {
         let pois = map_info.pois().zip(map_pack.pois.iter_mut());
         let pois = pois.map(|(poi_path, poi)| {
@@ -297,19 +295,11 @@ impl PathingController {
             }
             match (filters, filter_state) {
                 (Some(filters), Some(filter_state)) if visibility.is_visible() => {
-                    if Self::is_filtered(filters, filter_state) {
+                    if let filter::FILTER_HIDDEN = filter::FilterConfig::filters_is_visible(filters, filter_state) {
                         visibility.remove(VisibilityFlags::TOGGLE);
                     }
                 },
                 _ => (),
-            }
-            #[cfg(todo)]
-            if visibility.is_visible() {
-                if let Some(filter) = &filter {
-                    if let filter::FILTER_HIDDEN = filter.is_visible(filter_state) {
-                        visibility.remove(VisibilityFlags::TOGGLE);
-                    }
-                }
             }
             #[cfg(todo)]
             if visibility.is_visible() {
@@ -343,19 +333,23 @@ impl PathingController {
         }
         dirty
     }
-    pub(super) fn update_loaded_visibility(&mut self) -> bool {
+    /// TODO: if individual maps can be marked dirty or something this could be removed
+    pub(super) const ALLOW_INCOMPLETE_VIS_UPDATE: bool = true;
+    /// XXX: after a [partial update](Self::ALLOW_INCOMPLETE_VIS_UPDATE) (all=false), an unconditional update on map switch will be
+    /// required!!
+    pub(super) fn update_loaded_visibility(&mut self, all: bool) -> bool {
         let map_id = self.gameplay_map();
         #[cfg(todo)]
         let hidden_guids =
             SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
-        #[cfg(todo)]
-        let filter_state = &self.filter_state;
-        let mut external_filters = None;
         let mut dirty = false;
-        for (path, map_pack, map_info) in self.maps.iter_mut_with_info(&self.map_info, None) {
-            let rx = &self.rx;
-            let external_filters = external_filters.get_or_insert_with(move || rx.get_filter_state());
-            if Self::update_loaded_visibility_inner(path, map_pack, map_info, Some(&*external_filters))
+        let update_map_id = match (map_id, all) {
+            (None, false) => return dirty,
+            (Some(map_id), false) => Some(map_id),
+            (_, true) => None,
+        };
+        for (path, map_pack, map_info) in self.maps.iter_mut_with_info(&self.map_info, update_map_id) {
+            if Self::update_loaded_visibility_inner(path, map_pack, map_info, Some(&self.filter_state))
                 && Some(path.path) == map_id
             {
                 dirty = true;
@@ -390,22 +384,32 @@ impl PathingController {
         }
         false
     }
-    /// limited support atm
+    /// deleteme
     pub(super) fn can_filter(filters: &FilterAttributes) -> bool {
-        match filters.achievement_id {
-            None | Some(0) => (),
-            Some(..) => return true,
-        }
-        match filters.festivals {
-            Some(f) if !f.is_empty() => return true,
-            _ => (),
-        }
-        match &filters.raids {
-            Some(r) if !r[..].is_empty() => return true,
-            _ => (),
-        }
+        filter::FilterConfig::filters_is_empty(filters)
+    }
 
-        false
+    pub(super) fn populate_hidden_guids(&mut self, for_map_id: Option<MapIndex>, now: Timestamp) -> bool {
+        let hidden_guids = SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
+        let mut dirty = false;
+        if let Some(hidden_guids) = hidden_guids {
+            let all_guids = self.maps.iter(for_map_id)
+                .flat_map(|(_, map)| map.poi_guids.iter().chain(map.trail_guids.iter()));
+            for guid in all_guids {
+                if self.filter_state.hidden.hidden.contains_key(&guid.0) {
+                    continue
+                }
+                let Some(&expiry_timestamp) = hidden_guids.get(guid) else { continue };
+                if expiry_timestamp <= now { continue }
+                dirty |= self.filter_state.hidden.expire_at(guid.0.clone(), expiry_timestamp).1;
+            }
+        }
+        dirty
+    }
+    pub(super) fn refresh_hidden_guids(&mut self, for_map_id: Option<MapIndex>, now: Timestamp) -> bool {
+        let mut dirty = self.populate_hidden_guids(for_map_id, now);
+        dirty |= self.filter_state.hidden.reset_expired(&now);
+        dirty
     }
 
     fn visibility_update(

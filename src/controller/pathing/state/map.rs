@@ -7,7 +7,7 @@ use {
     std::sync::Arc,
     taimi_hoard::{collections::lru::RecentlyUsed, loc::indexed::IndexedList},
     taimi_meta::packs::{CategoryPath, MapIndex, PoiPath, TrailPath},
-    taimi_pack::Pack,
+    taimi_pack::{attributes::keys::Guid, Pack},
 };
 
 #[cfg(todo)]
@@ -23,14 +23,12 @@ pub struct LoadedMapPack {
     pub info_sig: PackInfoSignature,
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
-    #[cfg(todo)]
     pub poi_guids: Arc<[Guid]>,
     #[cfg(todo)]
     pub interactive_pois: Arc<[InteractivePoi]>,
     #[cfg(todo)]
     pub interactive_pois_nearby: BitVec,
     pub trails: Box<[LoadedTrail]>,
-    #[cfg(todo)]
     pub trail_guids: Box<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
     #[cfg(todo)]
@@ -48,10 +46,8 @@ impl LoadedMapPack {
             #[cfg(todo)]
             interactive_pois_nearby: Default::default(),
             pois: Default::default(),
-            #[cfg(todo)]
             poi_guids: Default::default(),
             trails: Default::default(),
-            #[cfg(todo)]
             trail_guids: Default::default(),
             categories: Default::default(),
             #[cfg(todo)]
@@ -61,7 +57,6 @@ impl LoadedMapPack {
 
     pub fn from_pack(map_id: MapIndex, info: &MapPackInfo, pack: &Pack) -> Self {
         let pois = info.pois().map(|path| LoadedPoi::from_pack(path, pack)).collect();
-        #[cfg(todo)]
         let poi_guids = info
             .poi_guid_filter(info.pois())
             .map(|path| {
@@ -82,7 +77,6 @@ impl LoadedMapPack {
             .trails()
             .map(|path| LoadedTrail::from_pack(path, pack))
             .collect();
-        #[cfg(todo)]
         let trail_guids = info
             .trail_guid_filter(info.trails())
             .map(|path| {
@@ -103,10 +97,8 @@ impl LoadedMapPack {
             #[cfg(todo)]
             interactive_pois,
             pois,
-            #[cfg(todo)]
             poi_guids,
             trails,
-            #[cfg(todo)]
             trail_guids,
             #[cfg(todo)]
             filters,
@@ -147,7 +139,6 @@ impl LoadedMapPack {
     {
         info.pois().zip(self.pois.iter_mut())
     }
-    #[cfg(todo)]
     pub fn poi_guids<'a, 'i>(
         &'a self,
         info: &'i MapPackInfo,
@@ -192,7 +183,6 @@ impl LoadedMapPack {
     {
         info.trails().zip(self.trails.iter_mut())
     }
-    #[cfg(todo)]
     pub fn trail_guids<'a, 'i>(
         &'a self,
         info: &'i MapPackInfo,

@@ -9,7 +9,12 @@ use {
 use {
     taimi_meta::ui::MapContext,
     taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+    taimi_hoard::time::Timestamp,
 };
+#[cfg(not(feature = "space"))]
+type Timestamp = u64;
+#[cfg(not(feature = "space"))]
+type Guid = String;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PathingSettings {
@@ -618,7 +623,7 @@ impl TriggerKind {
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PathingSave {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub hidden_guid_expiry: Arc<BTreeMap<Guid, u64>>,
+    pub hidden_guid_expiry: Arc<BTreeMap<Guid, Timestamp>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_account: BTreeMap<String, PathingAccountSave>,
 }
@@ -630,29 +635,6 @@ impl PathingSave {
             Self { hidden_guid_expiry: _, per_account: _ } => true,
         }
     }
-    pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, u64> {
-        Arc::make_mut(&mut self.hidden_guid_expiry)
-    }
-    pub fn hidden_guid_expire_at(&mut self, guid: Guid, expiry: time::SystemTime) {
-        if let Ok(timestamp) = expiry.duration_since(time::UNIX_EPOCH) {
-            self.hidden_guid_expiry_mut().insert(guid, timestamp.as_secs());
-        }
-    }
-    pub fn hidden_guid_expire(&mut self, guid: &Guid) -> Option<u64> {
-        if self.hidden_guid_expiry.contains_key(guid) {
-            self.hidden_guid_expiry_mut().remove(guid)
-        } else {
-            None
-        }
-    }
-    pub fn hidden_guid_expiry_get(&self, guid: &Guid) -> Option<&u64> {
-        self.hidden_guid_expiry.get(guid)
-    }
-    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
-        self.hidden_guid_expiry
-            .get(guid)
-            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
-    }
 
     pub(crate) fn is_empty_opt(save: &Option<Self>) -> bool {
         match save {
@@ -662,6 +644,31 @@ impl PathingSave {
     }
     pub(crate) fn is_per_account_empty(per_account: &BTreeMap<String, PathingAccountSave>) -> bool {
         per_account.values().all(|a| a.is_empty())
+    }
+}
+#[cfg(feature = "space")]
+impl PathingSave {
+    pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, Timestamp> {
+        Arc::make_mut(&mut self.hidden_guid_expiry)
+    }
+    pub fn hidden_guid_expire_at(&mut self, guid: Guid, expiry: Timestamp) {
+        self.hidden_guid_expiry_mut().insert(guid, expiry);
+    }
+    pub fn hidden_guid_expire(&mut self, guid: &Guid) -> Option<Timestamp> {
+        if self.hidden_guid_expiry.contains_key(guid) {
+            self.hidden_guid_expiry_mut().remove(guid)
+        } else {
+            None
+        }
+    }
+    pub fn hidden_guid_expiry_get(&self, guid: &Guid) -> Option<&Timestamp> {
+        self.hidden_guid_expiry.get(guid)
+    }
+    #[cfg(deleteme)]
+    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
+        self.hidden_guid_expiry
+            .get(guid)
+            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
     }
 }
 

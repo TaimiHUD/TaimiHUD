@@ -1,15 +1,20 @@
-use std::{collections::BTreeSet, fmt, num::NonZero, ops, sync::{Arc, LazyLock}};
+use std::{collections::BTreeSet, mem, fmt, num::NonZero, ops, hash::Hash, sync::{Arc, LazyLock}};
+use std::marker::PhantomData;
 use crate::{
     controller::pathing::{
         state::hidden::MarkerState,
+        registry::PackInfoSignature,
         info::MapPackInfo,
     },
-    controller::api::AchievementState,
+    controller::api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
     render::machine::MumbleIdentityUpdate,
     exports::runtime as rt,
 };
-use taimi_meta::packs::{PoiPath, TrailPath, MapIndex, MarkerId, MarkerIndex, MarkerPath};
-use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes};
+use taimi_meta::packs::{collections::MarkerSet, PoiPath, TrailPath, MapIndex, MarkerId, MarkerIndex, MarkerPath};
+use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes, Festivals};
+use taimi_pack::Pack;
+use taimi_hoard::collections::TaimiSet;
+use taimi_sync::arcs::ArcPtrCmp;
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
@@ -23,63 +28,106 @@ pub const FILTER_ALLOWED: Option<bool> = None;
 pub const FILTER_VISIBLE_OVERRIDE: Option<bool> = Some(true);
 pub type FilterAllow = Option<bool>;
 
-/// TODO: probably just replacing this with a collection of [keys]
+/// TODO: hopefully can replacing this with a collection/typeset of [keys] soon
 #[derive(Debug, Clone, Default)]
-#[cfg(deleteme)]
 pub struct FilterConfig {
-    pub achievement: Option<AchievementConfig>,
+    /// TODO: probably make this field Arc on upstream [attr::MarkerAttributes]
+    filters: FilterAttributes,
     #[cfg(feature = "paths-schedule")]
-    pub schedule: Option<ScheduleConfig>,
-    #[cfg(todo)]
-    pub profession: Professions,
-    #[cfg(todo)]
-    pub specialization: Specialization,
-    #[cfg(todo)]
-    pub race: Race,
-    #[cfg(todo)]
-    pub mount: Mounts,
-    #[cfg(todo)]
-    pub festival: attr::Festivals,
-    #[cfg(todo)]
-    pub raid: Raids,
-    #[cfg(todo)]
-    /// kinda is one?
-    pub visibility: Option<VisibilityFlags>,
-    /// this seems mostly pointless until scripting works
-    #[cfg(todo)]
-    pub map_type: keys::MapTypes,
+    schedule: Option<ScheduleConfig>,
 }
-#[cfg(deleteme)]
 impl FilterConfig {
-    pub const EMPTY: Self = Self {
-        achievement: None,
+    pub fn from_attributes(filters: FilterAttributes) -> Self {
+        #[cfg(todo = "unnecessary")]
+        if Self::filters_is_empty(&filters) { return None }
         #[cfg(feature = "paths-schedule")]
-        schedule: None,
-    };
-
-    pub fn from_attributes(attrs: &MarkerAttributes) -> Self {
-        let achievement = AchievementConfig::from_attributes(attrs);
-        #[cfg(feature = "paths-schedule")]
-        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(attrs)).flatten();
+        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(&filters)).flatten();
         Self {
-            achievement,
+            filters,
             #[cfg(feature = "paths-schedule")]
             schedule,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        match self {
-            Self {
-                achievement: None,
-                schedule: None,
-            } => true,
-            _ => false,
+        Self::filters_is_empty(&self.filters)
+    }
+    pub(crate) fn filters_is_empty(filters: &FilterAttributes) -> bool {
+        if !filters.festivals().is_empty() { return false }
+        if !filters.mounts().is_empty() { return false }
+        if !filters.professions().is_empty() { return false }
+        if !filters.races().is_empty() { return false }
+        if !filters.specializations().is_empty() { return false }
+        if !filters.map_types().is_empty() { return false }
+        #[cfg(feature = "paths-schedule")]
+        if !filters.schedule().is_empty() { return false }
+        if !filters.raids().is_empty() { return false }
+        if !filters.achievement_id().is_none() { return false }
+        true
+    }
+    fn filters_achievement(filters: &FilterAttributes) -> Option<AchievementConfig> {
+        filters.achievement_id().map(|id| AchievementConfig {
+            id: id.into(),
+            bit: filters.achievement_bit().map(Into::into),
+        })
+    }
+    /// may not include full functionality of [FilterConfig] that requires
+    /// pre-processing (atm this means cron schedule and achievementid)
+    fn filters_from<'a, S: 'a>(filters: &'a FilterAttributes) -> impl Iterator<Item = &'a (dyn MarkerFilter<State = S> + 'a)> where
+        S: AsRef<Festivals>,
+        S: AsRef<AvatarMetadata>,
+        S: AsRef<CharacterMetadata>,
+        S: AsRef<MapMetadata>,
+        S: AsRef<RaidState>,
+        //S: AsRef<AchievementState>,
+    {
+        let specializations = filters.specializations();
+        let map_types = filters.map_types();
+        let raids = filters.raids();
+        IntoIterator::into_iter([
+            filters.festivals.as_ref()
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.mounts.as_ref()
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.professions.as_ref()
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.races.as_ref()
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            //(!specializations.is_empty()).then_some(specializations).map(FilterFor::<_, S>::dyn_from_ref),
+            //(!map_types.is_empty()).then_some(map_types).map(FilterFor::<_, S>::dyn_from_ref),
+            filters.specializations.as_ref().map(keys::Specializations::from_attrlist)
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.map_types.as_ref().map(keys::MapTypes::from_attrlist)
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.raids.as_ref().map(keys::Raids::from_attrlist)
+                .map(FilterFor::<_, S>::dyn_from_ref),
+            //(!raids.is_empty()).then_some(raids).map(FilterFor::<_, S>::dyn_from_ref),
+            #[cfg(todo)]
+            filters.achievement_id().map(|id| AchievementConfig {
+                id,
+                bit: filters.achievement_bit(),
+            }),
+        ]).flatten()
+    }
+    pub fn filters_is_visible(filters: &FilterAttributes, state: &FilterState) -> FilterAllow {
+        let achievement = Self::filters_achievement(filters);
+        let mut filters = Self::filters_from::<FilterState>(filters)
+            .chain(achievement.as_ref().map(FilterFor::<_, FilterState>::dyn_from_ref));
+
+        match filters.all(|f| f.is_visible(state) != FILTER_HIDDEN) {
+            true => FILTER_ALLOWED,
+            false => FILTER_HIDDEN,
         }
     }
 }
+impl MarkerFilter for FilterConfig {
+    type State = FilterState;
 
-/// TODO: impl Deserialize here
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        Self::filters_is_visible(&self.filters, state)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RaidState {
     pub completed: BTreeSet<keys::Raid>,
@@ -93,35 +141,51 @@ impl RaidState {
             completed: completed.into_iter().map(Into::into).collect(),
         }
     }
+
+    pub fn update_with(&mut self, raids: &SharedRaidState) -> bool {
+        let mut dirty = false;
+        self.completed.retain(|raid| {
+            let keep = raids.contains(raid);
+            if !keep { dirty = true; }
+            keep
+        });
+
+        for raid in raids.iter() {
+            if self.completed.contains(raid) {
+                continue
+            }
+            dirty |= self.completed.insert(raid.into());
+        }
+
+        dirty
+    }
 }
 
-/// TODO: impl Deserialize here
+/// TODO: consider more than just a dumb clone
 #[derive(Debug, Clone, Default)]
 pub struct AchievementState {
-    pub status: Arc<PathingAchievementSave>,
+    pub status: SharedAchievementState,
+    pub hash: u32,
 }
 impl AchievementState {
-    pub fn new(status: impl Into<Arc<PathingAchievementSave>>) -> Self {
+    pub fn new(status: impl Into<SharedAchievementState>) -> Self {
         Self {
             status: status.into(),
+            hash: PackInfoSignature::EMPTY.hash,
         }
     }
-    /// see [crate::settings::pathing::PathingAccountSave]
-    #[cfg(todo)]
-    pub fn update_from_save(&mut self) {
-        let acc = crate::ACCOUNT_NAME_CELL.get().map(|n| &n[..]);
-        SaveState::read_with(|s| if let Some(p) = &s.pathing_state {
-            let a = p.per_account.get(acc.unwrap_or(""))
-                .or_else(|| if p.per_account.len() <= 1 {
-                    p.per_account.values().next()
-                } else { None });
 
-            if let Some(a) = a {
-                if !Arc::ptr_eq(&self.status, &a.achievements) {
-                    self.status = a.achievements.clone();
-                }
-            }
-        });
+    pub fn update_with(&mut self, new: &SharedAchievementState) -> bool {
+        if Arc::ptr_eq(&self.status, new) { return false }
+
+        let prev_hash = mem::replace(&mut self.hash, Self::hash_state(new));
+        prev_hash == 0 || prev_hash != self.hash
+    }
+
+    fn hash_state(status: &ApiAchievementState) -> u32 {
+        PackInfoSignature::hash_with(|h| {
+            status.hash(h)
+        }).hash
     }
 }
 #[derive(Debug, Clone)]
@@ -138,15 +202,9 @@ impl AchievementConfig {
     }
 
     pub fn is_complete(&self, state: &AchievementState) -> bool {
-        if state.status.completed.contains(&self.id.0) {
-            return true
-        }
-        if let Some(bit) = self.bit {
-            if let Some(progress) = state.status.progress.get(&self.id.0) {
-                return progress.bit_complete(bit.0)
-            }
-        }
-        false
+        self.bit
+            .and_then(|bit| state.status.is_bit_complete(self.id.0, bit.0))
+            .unwrap_or_else(|| state.status.is_complete(self.id.0))
     }
 }
 impl MarkerFilter for AchievementConfig {
@@ -348,16 +406,25 @@ impl MarkerFilter for HiddenForCharacter {
     }
 }
 
+fn any_or_empty<I: IntoIterator<Item = FilterAllow>>(filters: I) -> FilterAllow {
+    let mut filters = filters.into_iter().peekable();
+    if filters.peek().is_none() {
+        return FILTER_ALLOWED
+    }
+    match filters.any(|f| f != FILTER_HIDDEN) {
+        true => FILTER_ALLOWED,
+        false => FILTER_HIDDEN,
+    }
+}
 impl MarkerFilter for attr::Festival {
-    type State = FestivalState;
+    type State = Festivals;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
         attr::Festivals::from(*self).is_visible(state)
     }
 }
 impl MarkerFilter for attr::Festivals {
-    type State = FestivalState;
+    type State = Festivals;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        let state = state.get();
         match (*self).into_iter().find(|&flag| state.contains(flag)) {
             None if !self.is_empty() =>
                 FILTER_HIDDEN,
@@ -374,13 +441,20 @@ impl MarkerFilter for attr::Mount {
         }
     }
 }
+impl MarkerFilter for attr::Mounts {
+    type State = <attr::Mount as MarkerFilter>::State;
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        if self.is_empty() { return FILTER_ALLOWED }
+        match state.mount().map(|m| self.get(m)) {
+            Some(true) => FILTER_ALLOWED,
+            None | Some(false) => FILTER_HIDDEN,
+        }
+    }
+}
 impl MarkerFilter for keys::Mounts {
     type State = <attr::Mount as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.0.iter_mounts().all(|mount| mount.is_visible(state) != FILTER_HIDDEN) {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
+        any_or_empty(self.0.iter_mounts().map(|mount| mount.is_visible(state)))
     }
 }
 impl MarkerFilter for attr::Profession {
@@ -392,13 +466,20 @@ impl MarkerFilter for attr::Profession {
         }
     }
 }
+impl MarkerFilter for attr::Professions {
+    type State = <attr::Profession as MarkerFilter>::State;
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        if self.is_empty() { return FILTER_ALLOWED }
+        match state.prof.map(|p| self.get(p)) {
+            Some(true) => FILTER_ALLOWED,
+            None | Some(false) => FILTER_HIDDEN,
+        }
+    }
+}
 impl MarkerFilter for keys::Professions {
     type State = <attr::Profession as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.0.iter_professions().all(|prof| prof.is_visible(state) != FILTER_HIDDEN) {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
+        any_or_empty(self.0.iter_professions().map(|prof| prof.is_visible(state)))
     }
 }
 impl MarkerFilter for attr::Race {
@@ -410,13 +491,20 @@ impl MarkerFilter for attr::Race {
         }
     }
 }
+impl MarkerFilter for attr::Races {
+    type State = <attr::Race as MarkerFilter>::State;
+    fn is_visible(&self, state: &Self::State) -> FilterAllow {
+        if self.is_empty() { return FILTER_ALLOWED }
+        match state.race.map(|r| self.get(r)) {
+            Some(true) => FILTER_ALLOWED,
+            None | Some(false) => FILTER_HIDDEN,
+        }
+    }
+}
 impl MarkerFilter for keys::Races {
     type State = <attr::Race as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.0.iter_races().all(|race| race.is_visible(state) != FILTER_HIDDEN) {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
+        any_or_empty(self.0.iter_races().map(|race| race.is_visible(state)))
     }
 }
 impl MarkerFilter for attr::MapType {
@@ -431,10 +519,7 @@ impl MarkerFilter for attr::MapType {
 impl MarkerFilter for keys::MapTypes {
     type State = <attr::MapType as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.iter().all(|map| map.is_visible(state) != FILTER_HIDDEN) {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
+        any_or_empty(self.iter().map(|map| map.is_visible(state)))
     }
 }
 impl MarkerFilter for keys::Specialization {
@@ -455,10 +540,7 @@ impl MarkerFilter for arcdps::Specialization {
 impl MarkerFilter for keys::Specializations {
     type State = <keys::Specialization as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        match self.iter().all(|spec| spec.is_visible(state) != FILTER_HIDDEN) {
-            true => FILTER_ALLOWED,
-            false => FILTER_HIDDEN,
-        }
+        any_or_empty(self.iter().map(|spec| spec.is_visible(state)))
     }
 }
 impl MarkerFilter for keys::Raid {
@@ -495,6 +577,15 @@ impl AvatarMetadata {
     pub fn update_from_mumblelink_context(&mut self, ml: &rt::MumblePtr) {
         *self = Self::from_mumblelink_context(ml);
     }
+
+    pub fn mount(&self) -> Option<attr::Mount> {
+        let repr = self.mount.map(|m| m.get()).unwrap_or(0);
+        let mount = attr::Mount::from_repr(repr);
+        if mount.is_none() {
+            log::info!("unrecognized mount #{repr}, please report this as a bug!");
+        }
+        mount
+    }
 }
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapMetadata {
@@ -527,16 +618,22 @@ impl CharacterMetadata {
         meta.update_from_mumblelink(id);
         meta
     }
-    pub fn update_from_mumblelink(&mut self, id: &MumbleIdentityUpdate) {
-        self.race = (id.race as i32).try_into().ok();
-        self.prof = (id.profession as i32).try_into().ok();
-        self.spec = NonZero::new(id.specialization);
+    pub fn update_from_mumblelink(&mut self, id: &MumbleIdentityUpdate) -> bool {
+        let mut dirty = false;
+        let prev_race = mem::replace(&mut self.race, (id.race as i32).try_into().ok());
+        dirty |= prev_race != self.race;
+        let prev_prof = mem::replace(&mut self.prof, (id.profession as i32).try_into().ok());
+        dirty |= prev_prof != self.prof;
+        let prev_spec = mem::replace(&mut self.spec, NonZero::new(id.specialization));
+        dirty |= prev_spec != self.spec;
         let name_len = id.name.iter().position(|&c| c == 0)
             .unwrap_or(id.name.len());
         let name = unsafe { id.name.get_unchecked(..name_len) };
         if self.name.len() != name_len || name != &self.name[..] {
             self.name = name.into();
+            dirty = true;
         }
+        dirty
     }
 }
 
@@ -544,7 +641,7 @@ impl CharacterMetadata {
 pub struct FilterState {
     pub achievements: AchievementState,
     pub raids: RaidState,
-    pub festival: FestivalState,
+    pub festival: Festivals,
     pub map: MapMetadata,
     pub character: CharacterMetadata,
     pub avatar: AvatarMetadata,
@@ -574,17 +671,38 @@ impl<T> MarkerFilterState for T where
     // TODO: equality/dedupe checks?
 }
 
-#[cfg(todo)]
 #[derive(Debug, Clone, Default)]
-pub struct FilterFor<T>(pub T);
-#[cfg(todo)]
-impl<T> MarkerFilter for FilterFor<T> where
+#[repr(transparent)]
+pub struct FilterFor<T: ?Sized, S: ?Sized = FilterState> {
+    _state: PhantomData<fn(&S) -> FilterAllow>,
+    filter: T,
+}
+impl<T: ?Sized, S: ?Sized> FilterFor<T, S> {
+    #[inline]
+    pub const fn new(filter: T) -> Self where T: Sized {
+        Self {
+            _state: PhantomData,
+            filter,
+        }
+    }
+    #[inline]
+    pub const fn from_ref(filter: &T) -> &Self {
+        unsafe { mem::transmute(filter) }
+    }
+    pub fn dyn_from_ref<'a>(filter: &'a T) -> &'a (dyn MarkerFilter<State = S> + 'a) where
+        T: Sized + 'a,
+        Self: MarkerFilter<State = S>,
+    {
+        Self::from_ref(filter)
+    }
+}
+impl<T: ?Sized, S: ?Sized> MarkerFilter for FilterFor<T, S> where
     T: MarkerFilter,
-    FilterState: AsRef<<T as MarkerFilter>::State>,
+    S: AsRef<<T as MarkerFilter>::State>,
 {
-    type State = FilterState;
+    type State = S;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        self.0.is_visible(state.as_ref())
+        self.filter.is_visible(state.as_ref())
     }
 }
 impl AsRef<AchievementState> for FilterState {
@@ -597,8 +715,8 @@ impl AsRef<RaidState> for FilterState {
 impl AsRef<ScheduleState> for FilterState {
     fn as_ref(&self) -> &ScheduleState { &self.schedule }
 }
-impl AsRef<FestivalState> for FilterState {
-    fn as_ref(&self) -> &FestivalState { &self.festival }
+impl AsRef<Festivals> for FilterState {
+    fn as_ref(&self) -> &Festivals { &self.festival }
 }
 impl AsRef<MapMetadata> for FilterState {
     fn as_ref(&self) -> &MapMetadata { &self.map }
@@ -627,7 +745,7 @@ pub struct MapFilters {
 }
 
 impl MapFilters {
-    pub fn from_pack(info: &MapPackInfo, active: &ActivePack) -> Self {
+    pub fn from_pack(info: &MapPackInfo, pack: &Pack) -> Self {
         #[cfg(feature = "paths-schedule")]
         let mut schedules = Vec::new();
         let mut achievements = Vec::new();
@@ -635,11 +753,11 @@ impl MapFilters {
         // TODO: filter_map + filters.as_ref().map(FilterStateFilters::from_attributes) - repeat trails too
         let pois = info.pois()
             .filter_map(|path|
-                active.pack.pois.get(path.path as usize).map(|t| (path, t))
+                pack.pois.get(path.path as usize).map(|t| (path, t))
             ).map(|(path, poi)| (path, FilterStateFilters::from_attributes(&poi.attributes.filters())))
             .filter(|(path, (f, extras))| {
                 if let Some(GroupConfig { inverted: true, .. }) = extras.group {
-                    inversions.insert(*path);
+                    inversions.insert_poi(*path);
                 }
                 !f.is_empty() || !extras.is_empty()
             })
@@ -657,11 +775,11 @@ impl MapFilters {
             }).collect::<Vec<_>>();
         let trails = info.trails()
             .filter_map(|path|
-                active.pack.trails.get(path.path as usize).map(|t| (path, t))
+                pack.trails.get(path.path as usize).map(|t| (path, t))
             ).map(|(path, trail)| (path, FilterStateFilters::from_attributes(&trail.attributes.filters())))
             .filter(|(path, (f, extras))| {
                 if let Some(GroupConfig { inverted: true, .. }) = extras.group {
-                    inversions.insert(*path);
+                    inversions.insert_trail(*path);
                 }
                 !f.is_empty() || !extras.is_empty()
             }).map(|(path, (mut f, extras))| {
@@ -691,12 +809,12 @@ impl MapFilters {
         }
     }
 
-    pub fn group_filter_for<I>(&self, path: I, guid: &Guid) -> Option<GroupConfig> where
-        I: Into<MarkerIndex>,
+    pub fn group_filter_for<I>(&self, path: &I, guid: &Guid) -> Option<GroupConfig> where
+        MarkerSet: TaimiSet<I>,
     {
         (!guid.is_empty()).then(move || GroupConfig {
             guid: *guid,
-            inverted: self.inversions.contains(path),
+            inverted: self.inversions.set_contains(path),
         })
     }
 

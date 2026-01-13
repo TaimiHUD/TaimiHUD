@@ -46,6 +46,8 @@ mod festivals;
 pub type RequestBox = Pin<Box<dyn Future<Output = anyhow::Result<Option<ApiMessage>>> + Send + 'static>>;
 /// TODO
 pub type RaidState = BTreeSet<String>;
+pub type SharedRaidState = Arc<RaidState>;
+pub type SharedAchievementState = Arc<AchievementState>;
 
 pub type ApiTimeZone = chrono::Utc;
 pub type ApiTimestamp = chrono::DateTime<ApiTimeZone>;
@@ -407,9 +409,9 @@ pub struct ApiSender {
     #[cfg(feature = "paths")]
     pub festivals: watch::Sender<FestivalState>,
     #[cfg(feature = "paths")]
-    pub achievements: watch::Sender<Arc<AchievementState>>,
+    pub achievements: watch::Sender<SharedAchievementState>,
     #[cfg(feature = "paths")]
-    pub raids: watch::Sender<Arc<RaidState>>,
+    pub raids: watch::Sender<SharedRaidState>,
     pub account_state: watch::Sender<ApiAccountState>,
 }
 pub struct ApiReceiver {
@@ -417,9 +419,9 @@ pub struct ApiReceiver {
     #[cfg(feature = "paths")]
     pub festivals: watch::Sender<FestivalState>,
     #[cfg(feature = "paths")]
-    pub achievements: watch::Sender<Arc<AchievementState>>,
+    pub achievements: watch::Sender<SharedAchievementState>,
     #[cfg(feature = "paths")]
-    pub raids: watch::Sender<Arc<RaidState>>,
+    pub raids: watch::Sender<SharedRaidState>,
     pub gameplay: Watched<GameplayState>,
     pub account_state: Watched<ApiAccountState>,
 }
