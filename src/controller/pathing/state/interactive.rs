@@ -322,18 +322,15 @@ pub enum InteractionEvent {
     Nearby {
         path: PoiPath,
         loaded_path: Locator<PackMapPath, PoiIndex>,
-        interactive_path: PoiPath<()>,
     },
     Gone {
         path: PoiPath,
         loaded_path: Locator<PackMapPath, PoiIndex>,
-        interactive_path: PoiPath<()>,
     },
     Interact {
         action: InteractionEventAction,
         path: PoiPath,
         loaded_path: Locator<PackMapPath, PoiIndex>,
-        interactive_path: PoiPath<()>,
     },
 }
 

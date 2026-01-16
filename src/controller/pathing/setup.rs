@@ -3,12 +3,13 @@ use {
         controller::pathing::{
             info::MapPackInfo,
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
-            shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
+            shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks, HiddenGuids},
             state::{filter::FilterState, LoadedMapInfoStorage, LoadedMapPack, LoadedPackInfo},
             PathingController,
             PathingEvent,
             PathingReceiver,
         },
+        controller::runtime::WallInstant,
         exports::runtime as rt,
         settings::{Settings, SourceKind},
     },
@@ -23,12 +24,12 @@ use {
         sync::Arc,
     },
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
+    taimi_hoard::time::Timestamp,
     taimi_meta::packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
     taimi_pack::Pack,
     taimi_sync::watched::watch,
     tokio::{
         fs::create_dir_all,
-        sync::Semaphore,
         task::JoinSet,
         time::{timeout, Duration},
     },
@@ -141,6 +142,13 @@ impl PathingController {
             self.cleanup_pack_subresources(path, reason.as_ref());
         }
         self.maps.prune(Some(&self.map_info));
+    }
+    pub(super) fn pack_unload_unused(&mut self) -> PackSet {
+        let unused_packs = self.packs.expired_packs()
+            .map(|(p, _)| p)
+            .collect::<PackSet>();
+        self.pack_unload(None, &mut unused_packs.iter());
+        unused_packs
     }
 
     pub(super) fn preload_all(&self) -> impl Future<Output = ()> + Send + 'static {
@@ -287,6 +295,8 @@ impl PathingController {
         };
         if !reentering_urgent {
             self.maps.prune(Some(&self.map_info));
+            let now = WallInstant::now_timestamp_system_checked();
+            Self::prune_hidden_guids_settings(&now);
         }
     }
     pub(super) fn handle_map_leave(&mut self) {
@@ -295,7 +305,8 @@ impl PathingController {
         self.maps.age_tick(None);
         self.maps.prune(Some(&self.map_info));
         // TODO: shared map update to None ig
-        //self.filter_state.hidden.reset_map_leave();
+        self.filter_state.hidden.reset_map_leave();
+        self.interact.handle_map_leave();
     }
     pub(super) fn handle_map_enter(&mut self, map_id: MapIndex) {
         self.map_info.age_tick(Some(map_id));
@@ -306,15 +317,19 @@ impl PathingController {
         let map_packs = self.packs.on_map(map_id).map(|(p, _)| p).collect::<PackSet>();
         self.map_info.prune(Some(&self.packs));
         self.maps.prune(Some(&self.map_info));
+        let hidden_guids = Self::clone_hidden_guids();
+        let hidden_ctx = hidden_guids.as_ref().map(|h|
+            (&**h, WallInstant::now_timestamp_mono())
+        );
         let mut shared_map_dirty = self.loader.shared.update_map_id(Some(map_id), false);
         for path in &map_packs {
             let map_path = path.rel(map_id);
-            shared_map_dirty |= match self.prepare_for_pack_map(map_path, false) {
+            shared_map_dirty |= match self.prepare_for_pack_map(map_path, false, hidden_ctx) {
                 Ok(dirty) => dirty,
                 Err(()) => match self.packs.lookup_ref(&path) {
                     Some(LoadedPackInfo { unloaded: Some(reason), .. })
                         if !reason.can_reactivate(false) =>
-                        continue,
+                            continue,
                     Some(LoadedPackInfo { unloaded: None | Some(..), .. }) => {
                         need_load.insert(path);
                         continue
@@ -323,13 +338,37 @@ impl PathingController {
                 },
             };
         }
+        if let Some((_, now)) = hidden_ctx {
+            if self.filter_state.hidden.reset_expired(&now) {
+                #[cfg(todo = "unnecessary")]
+                {
+                    shared_map_dirty |= true;
+                }
+                // would rather not do this, but
+                self.filter_state_signal = Some(true);
+            }
+        }
         if shared_map_dirty {
             self.loader.shared.update_map_notify(map_id);
         }
-        self.packs.age_tick(Some(&self.map_info));
+        self.packs.age_tick(Some(&self.map_info), false);
         self.request_pack_loads(need_load);
+        self.interact.handle_map_enter(&self.maps, &self.map_info, map_id);
     }
-    pub(super) fn prepare_for_pack_map(&mut self, map_path: PackMapPath, notify: bool) -> Result<bool, ()> {
+    pub(super) fn prepare_for_pack_map(
+        &mut self,
+        map_path: PackMapPath,
+        notify: bool,
+        hidden_ctx: Option<(&HiddenGuids, Timestamp)>,
+    ) -> Result<bool, ()> {
+        let hidden_guids;
+        let (now, hidden_guids) = match hidden_ctx {
+            Some((hidden, now)) => (Some(now), Some(hidden)),
+            None => {
+                hidden_guids = Self::clone_hidden_guids();
+                (None, hidden_guids.as_ref().map(|h| &**h))
+            },
+        };
         let pack_data = Self::pack_data_if_loaded(&self.loader, map_path.root);
         let info = if let Some((data, pack_info, info)) = &pack_data {
             if self.map_info.lookup_ref(&map_path).is_none() {
@@ -360,8 +399,16 @@ impl PathingController {
             None
         };
         let (dirty, map, map_info) = if let Some((info, map, map_info, data)) = info {
-            Self::prepare_map_for_pack(&self.rx, &self.filter_state, map_path, info, data, map, map_info)
-                .map(move |dirty| (dirty, map, map_info))
+            match Self::init_map_for_pack(map_path, info, data, map, map_info) {
+                Ok(dirty) => {
+                    let vis_dirty = hidden_guids.as_ref().map(|guids|
+                        Self::populate_hidden_guids_for_map(&mut self.filter_state, guids, map, map_info, now)
+                    );
+                    Self::continue_map_for_pack(&self.rx, &self.filter_state, map_path, info, data, map, map_info, (dirty, vis_dirty))
+                        .map(|dirty| dirty | vis_dirty.unwrap_or(false))
+                },
+                d => d,
+            }.map(move |dirty| (dirty, map, map_info))
         } else {
             Err(())
         }?;
@@ -393,7 +440,7 @@ impl PathingController {
             Ok(false)
         }
     }
-    fn prepare_map_for_pack(
+    fn continue_map_for_pack(
         rx: &PathingReceiver,
         filter_state: &FilterState,
         map_path: PackMapPath,
@@ -401,8 +448,8 @@ impl PathingController {
         data: Option<&Pack>,
         map: &mut LoadedMapPack,
         map_info: &mut LoadedMapInfoStorage,
+        (mut dirty, vis_dirty): (bool, Option<bool>),
     ) -> Result<bool, ()> {
-        let mut dirty = Self::init_map_for_pack(map_path, (pack_info, info), data, map, map_info)?;
         #[cfg(todo)]
         if !dirty {
             // what if config is dirty though? :<
@@ -435,7 +482,7 @@ impl PathingController {
                         true
                     }
                 } else {
-                    false
+                    vis_dirty.unwrap_or(false)
                 }
             } else {
                 false
@@ -711,6 +758,13 @@ impl PackLoader {
 
     pub(super) async fn pack_loader_for(&self, path: PackPath) -> anyhow::Result<SharedLoaderBox> {
         self.shared.packs.pack_loader_for(path).await
+    }
+    pub(super) async fn pack_data_for(&self, path: PackPath) -> Option<Arc<Pack>> {
+        if let Some(pack_data) = self.get_pack_loaded_data(path) {
+            return Some(pack_data)
+        }
+        log::warn!("TODO: late-load pack_data_for");
+        None
     }
 }
 impl SharedPacks {

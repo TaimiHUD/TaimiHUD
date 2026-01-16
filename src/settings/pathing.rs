@@ -57,15 +57,6 @@ impl PathingSettings {
     pub const DEFAULT_LOAD_SIMULTANEOUS: usize = 4;
 
     #[cfg(feature = "space")]
-    pub async fn pathing_state_update(settings: &mut Settings, path: String, state: bool) {
-        if settings.disabled_paths.contains(&path) && state {
-            settings.disabled_paths_mut().remove(&path);
-        } else if !state {
-            settings.disabled_paths_mut().insert(path);
-        }
-    }
-
-    #[cfg(feature = "space")]
     pub fn get_festival_preference(&self, festival: Festival) -> Option<FestivalPreference> {
         self.festival_filter.get(festival.as_str()).copied()
     }
@@ -115,6 +106,17 @@ impl PathingSettings {
         self.load_simultaneous = Some(v);
     }
 }
+#[cfg(feature = "space")]
+impl Settings {
+    pub fn pathing_state_update(&mut self, path: String, state: bool) {
+        if self.disabled_paths.contains(&path) && state {
+            self.disabled_paths_mut().remove(&path);
+        } else if !state {
+            self.disabled_paths_mut().insert(path);
+        }
+    }
+}
+
 impl Default for PathingSettings {
     fn default() -> Self {
         Self {
@@ -620,10 +622,11 @@ impl TriggerKind {
     }
 }
 
+pub type HiddenGuids = BTreeMap<Guid, Timestamp>;
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PathingSave {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub hidden_guid_expiry: Arc<BTreeMap<Guid, Timestamp>>,
+    pub hidden_guid_expiry: Arc<HiddenGuids>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_account: BTreeMap<String, PathingAccountSave>,
 }
@@ -669,6 +672,14 @@ impl PathingSave {
         self.hidden_guid_expiry
             .get(guid)
             .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
+    }
+    /// TODO: initial search can get an index to continue retain from afterward
+    pub fn hidden_guid_prune_older_than(&mut self, now: &Timestamp) -> bool {
+        let dirty = self.hidden_guid_expiry.values().any(|expiry| expiry <= now);
+        if dirty {
+            self.hidden_guid_expiry_mut().retain(|_, expiry| &*expiry > now)
+        }
+        dirty
     }
 }
 

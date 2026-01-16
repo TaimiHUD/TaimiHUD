@@ -620,7 +620,7 @@ impl SharedMapPackState {
                     .map(|path| path.root == map_path)
                     .unwrap_or(false) =>
                     true,
-                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id.as_ref())),
+                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id)),
             })
             .cloned()
             .collect()

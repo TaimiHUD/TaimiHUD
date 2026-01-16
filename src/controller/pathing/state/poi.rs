@@ -9,7 +9,7 @@ use {
     glamour::{Box3, Point3, Size3},
     taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
     taimi_pack::{
-        attributes::{keys::{self, GetAttr}, PoiAttributes, RenderAttributes},
+        attributes::{keys::{self, GetAttr}, PoiAttributes, RenderAttributes, InteractionAttributes},
         Pack,
         Poi,
     },
@@ -74,6 +74,10 @@ impl LoadedPoi {
     pub fn poi_attrs(&self) -> &PoiAttributes {
         let poi = self.render_attrs().poi.as_ref().map(|p| &**p);
         unsafe { poi.unwrap_unchecked() }
+    }
+    #[inline]
+    pub fn interaction_attrs(&self) -> &InteractionAttributes {
+        self.info().interaction_attrs()
     }
     #[cfg(todo = "unused")]
     pub fn filter_attrs(&self) -> Option<&FilterAttributes> {
