@@ -45,6 +45,15 @@ impl MaybeFmt<FormatterFn> {
             None => fmt::Display::fmt(&fallback, f),
         })
     }
+    /// format `Some(T)` or fallback
+    pub const fn fmt_ok_or<T: fmt::Display, U: fmt::Display>(
+        v: Result<T, U>,
+    ) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+        MaybeFmt::new(move |f| match &v {
+            Ok(v) => fmt::Display::fmt(v, f),
+            Err(v) => fmt::Display::fmt(v, f),
+        })
+    }
 }
 pub const fn fmt_or<T: fmt::Display, F: fmt::Display>(
     v: Option<T>,
@@ -61,6 +70,11 @@ pub const fn or_unavail<T: fmt::Display>(
     v: Option<T>,
 ) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
     fmt_or(v, UNAVAILABLE)
+}
+pub const fn ok_or<T: fmt::Display, U: fmt::Display>(
+    v: Result<T, U>,
+) -> MaybeFmt<impl Fn(&mut fmt::Formatter) -> fmt::Result> {
+    MaybeFmt::fmt_ok_or(v)
 }
 impl<F> fmt::Display for MaybeFmt<F>
 where

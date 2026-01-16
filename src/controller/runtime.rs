@@ -9,7 +9,7 @@ use {
     },
     anyhow::Context,
     futures::future::Either,
-    std::{fmt, ptr, sync::LazyLock, time::{Duration, SystemTime, Instant as StdInstant}},
+    std::{fmt, ptr, sync::{LazyLock, RwLock}, time::{Duration, SystemTime, Instant as StdInstant}},
     tokio::{
         runtime::{Builder, Handle, Runtime},
         sync::oneshot,
@@ -227,6 +227,41 @@ impl WallInstant {
     pub fn now_timestamp_system() -> Timestamp {
         Timestamp::from_system_time(&SystemTime::now())
     }
+    pub fn now_timestamp_system_checked() -> Timestamp {
+        let now = SystemTime::now();
+        let ts = Timestamp::from_system_time(&SystemTime::now());
+        let calib_delta = Self::get_calibrated().map(|(sys, calib)| {
+            let instant = StdInstant::now();
+            (
+                Timestamp::instant_checked_duration_since(&instant, calib.instant.into_std()),
+                now.duration_since(sys).map_err(|e| e.duration()),
+            )
+        });
+        let recalib = match calib_delta {
+            None => false,
+            Some((Err(amt), _)) if amt > Self::DRIFT_THRESHOLD_EARLY => {
+                log::warn!("system clock drifted behind by {}s, recalibrating", amt.as_secs());
+                true
+            },
+            Some((Ok(delta), _)) if delta > Self::DRIFT_THRESHOLD => {
+                log::warn!("system clock drifted ahead by {}s, recalibrating", delta.as_secs());
+                true
+            },
+            Some((_, Err(amt))) if amt > Self::DRIFT_THRESHOLD_EARLY => {
+                log::warn!("monotonic clock drifted behind by {}s, recalibrating", amt.as_secs());
+                true
+            },
+            Some((_, Ok(delta))) if delta > Self::DRIFT_THRESHOLD => {
+                log::warn!("monotonic clock drifted ahead by {}s, recalibrating", delta.as_secs());
+                true
+            },
+            _ => false,
+        };
+        if recalib {
+            Self::recalibrate();
+        }
+        ts
+    }
 
     const FAR_ENOUGH_FUTURE: Duration = Duration::from_secs(Self::FAR_ISH_FUTURE.as_secs() * 32);
     /// a couple months is enough for a single session at least!
@@ -244,6 +279,8 @@ impl WallInstant {
     pub fn with_parts(instant: Instant, timestamp: Timestamp) -> Self {
         Self { instant, timestamp }
     }
+    const DRIFT_THRESHOLD: Duration = Duration::from_secs(60);
+    const DRIFT_THRESHOLD_EARLY: Duration = Self::DRIFT_THRESHOLD;
     pub fn new_calibrated(instant: Instant, calibration: &SystemTime) -> Self {
         let timestamp = Timestamp::try_from_system_time(calibration)
             .context("now precedes unix, expect time to break");
@@ -252,14 +289,39 @@ impl WallInstant {
             timestamp: rt::log::error_ok(timestamp).unwrap_or_default(),
         }
     }
-
-    pub fn calibrated() -> &'static Self {
-        static CALIBRATED: LazyLock<WallInstant> = LazyLock::new(|| {
-            let now_sys = SystemTime::now();
-            let now = StdInstant::now();
-            WallInstant::new_calibrated(now.into(), &now_sys)
-        });
+    fn calibrated_shared() -> &'static RwLock<Option<(SystemTime, Self)>> {
+        static CALIBRATED: RwLock<Option<(SystemTime, WallInstant)>> = RwLock::new(None);
         &CALIBRATED
+    }
+    fn get_calibrated() -> Option<(SystemTime, Self)> {
+        Self::calibrated_shared().read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+    pub fn calibrated() -> Self {
+        let calib = Self::calibrated_shared().read()
+            .ok()
+            .and_then(|e| e.map(|(_, calib)| calib.clone()));
+        match calib {
+            Some(calib) => calib,
+            None => Self::recalibrate(),
+        }
+    }
+    pub fn recalibrate() -> Self {
+        log::trace!("recalibrating mono clock to system");
+        let shared = Self::calibrated_shared();
+        shared.clear_poison();
+        let calib = Self::now_calibrated();
+        if let Ok(mut shared) = shared.write() {
+            *shared = Some(calib)
+        }
+        calib.1
+    }
+    fn now_calibrated() -> (SystemTime, Self) {
+        let now_sys = SystemTime::now();
+        let now = StdInstant::now();
+        let calib = WallInstant::new_calibrated(now.into(), &now_sys);
+        (now_sys, calib)
     }
 
     /// not necessarily far, just already elapsed

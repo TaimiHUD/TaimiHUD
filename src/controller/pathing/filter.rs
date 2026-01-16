@@ -1,8 +1,14 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{PackMapPath, PackPath},
-            state::hidden::{AutoReset, HideContext},
+            registry::{PackMapPath, PackPath, LoadedPoiPath, LoadedMarkerPath},
+            state::{
+                hidden::{AutoReset, HideContext},
+                filter::FilterState,
+                LoadedMaps, LoadedMapInfo, LoadedMapPack,
+            },
+            info::MapPackInfo,
+            shared::HiddenGuids,
             PathingController, PathingEvent,
         },
         controller::runtime::WallInstant,
@@ -11,45 +17,48 @@ use {
     },
     taimi_meta::packs::{
         collections::PackSet,
-        id::{MarkerId, MarkerPath, MarkerIndex, IdVariant},
-        PoiPath,
+        id::{MarkerId, MarkerPath, IdVariant},
     },
     taimi_hoard::time::Timestamp,
     taimi_hoard::loc::{Locator, LocationRef},
     futures::future::Either,
     std::iter,
+    std::sync::Arc,
     std::collections::BTreeMap,
     std::time::Duration,
     taimi_pack::attributes::keys::Guid,
+    taimi_meta::packs::MapIndex,
     tokio::task::AbortHandle,
 };
 
 impl PathingController {
-    pub(super) async fn handle_dismiss(&mut self, path: PoiPath<PackMapPath>, expiry: Option<Either<Timestamp, Duration>>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
-        let guid = {
-            self.maps.lookup_with_info(&self.map_info, &path.root)
-                .and_then(|(map, info)| map.poi_guids(info)
-                    .find(|(p, ..)| p.path == path.path)
-                    .map(|(_, guid)| guid.clone())
-                )
-            /*Self::packs().read().await.lookup_ref(&path.root)
-                .and_then(|pack| pack.active.as_ref())
-                .and_then(|active| active.pack.pois.get(path.path as usize))
-                .and_then(|poi| match poi.guid {
-                    guid if guid == Uuid::nil() => None,
-                    guid => Some(guid),
-                })*/
+    pub(super) fn filter_dismiss_poi(&mut self, lpath: LoadedPoiPath<PackMapPath>, expiry: Option<Either<Timestamp, Duration>>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
+        let map_path = lpath.root;
+        let lpoi_path: LoadedPoiPath = lpath.unscope();
+        let (poi_path, guid) = match self.maps.lookup_with_info(&self.map_info, &map_path) {
+            Some((map, map_info)) => {
+                let guid = map.poi_guids(map_info)
+                    .find(|(_, lp, ..)| lp == lpoi_path)
+                    .map(|(_, _, guid)| guid.clone());
+                let poi_path = map_info.poi_path(lpoi_path);
+                (poi_path, guid)
+            },
+            None => (None, None),
         };
+        let pack_path = map_path.root;
         let id = match guid {
-            Some(guid) => MarkerId::from(guid.0.clone()),
-            None => {
-                let path = path.map_path(MarkerIndex::with_poi);
+            Some(guid) if !guid.is_empty() => MarkerId::from(guid.0.clone()),
+            _ => if let Some(poi_path) = poi_path {
+                let marker_path: MarkerPath = poi_path.pivot_from();
                 match &hide_contexts {
                     #[cfg(todo)]
                     c if c.iter().any(|c| matches!(c, HideContext::Local(..))) =>
                         MarkerId::for_marker(path),
-                    _ => MarkerId::for_marker(path.map_root(|map_path| map_path.root)),
+                    _ => MarkerId::for_marker(marker_path.pivot(pack_path)),
                 }
+            } else {
+                let lmarker_path: LoadedMarkerPath = lpoi_path.pivot_to();
+                MarkerId::for_marker(lmarker_path.pivot(map_path))
             },
         };
         let expiry = expiry.map(WallInstant::from_moment);
@@ -88,29 +97,33 @@ impl PathingController {
                 save.pathing_mut().hidden_guid_expire_at(guid.into(), expiry.timestamp)
             });
         }
-        self.filter_state_signal = true;
-        self.update_shared_hidden(Some(&mut iter::once(path.root)));
+        self.filter_state_signal = Some(true);
+        self.update_shared_hidden(Some(&mut iter::once(map_path)));
     }
 
-    pub fn update_filter_state(&mut self) {
-        #[cfg(todo = "unnecessary")]
-        {
-            self.filter_state.festival = self.festivals.read().clone();
-            self.filter_state.achievements.update_from_save();
-        }
+    /// TODO: maintain interest list of states that are actually relevant to loaded marker filters
+    pub fn update_filter_state(&mut self, now: Option<Timestamp>) -> bool {
+        let mut dirty = false;
         if let Ok(ml) = rt::mumble_link_ptr() {
-            self.filter_state.map.update_from_mumblelink_context(&ml);
-            self.filter_state.avatar.update_from_mumblelink_context(&ml);
+            dirty |= self.filter_state.map.update_from_mumblelink_context(&ml);
+            dirty |= self.filter_state.avatar.update_from_mumblelink_context(&ml);
             // TODO: self.filter_state.character.update_from_mumblelink(ml);
         }
-        self.update_filter_state_schedule();
+        if let Some(now) = now {
+            dirty |= self.filter_state.hidden.reset_expired(&now);
+        }
+        #[cfg(todo)]
+        {
+            dirty |= self.update_filter_state_schedule(now);
+        }
+        dirty
     }
-    pub fn update_filter_state_schedule(&mut self) {
+    pub fn filter_state_next_schedule(&mut self, _now: Option<Timestamp>) -> Option<Timestamp> {
         #[cfg(feature = "paths-schedule")]
         let next_scheduled = {
             self.filter_state.schedule.update_time();
             let mut next_scheduled = None;
-            if let Some(now) = &self.filter_state.schedule.now {
+            if let Some(now) = &_now {
                 if let Some(map_id) = self.gameplay_map() {
                     let next_update = self.map_packs.iter_mut()
                         .filter(|(path, _)| path.path == map_id)
@@ -131,20 +144,27 @@ impl PathingController {
         #[cfg(todo = "unnecessary")]
         let next_expire = next_expire
             .and_then(|expiry| expiry.checked_duration_since(std::time::Instant::now()));
-        let next = [
+        [
             #[cfg(feature = "paths-schedule")]
             next_schedule,
             next_expire,
-        ].into_iter().flatten().min();
-        let next = match next {
-            Some(next) => Some(WallInstant::from(next)),
-            None => Some(WallInstant::soon(Self::SCHEDULE_TIMEOUT)),
-            #[cfg(todo = "unnecessary")]
-            _ => None,
+        ].into_iter().flatten().min()
+    }
+    pub fn schedule_filter_state(&mut self, when: Option<Timestamp>) {
+        let next = match when {
+            Some(next) => {
+                self.filter_next_schedule_dirty = true;
+                WallInstant::from(next)
+            },
+            None => WallInstant::soon(Self::SCHEDULE_TIMEOUT),
+            #[cfg(todo)]
+            _ => return,
         };
-        if let Some(next) = next {
-            self.filter_next_schedule.set(next.to_future());
-        }
+        self.filter_next_schedule.set(next.to_future());
+    }
+    pub fn reschedule_filter_state(&mut self, now: Option<Timestamp>) {
+        let when = self.filter_state_next_schedule(now);
+        self.schedule_filter_state(when);
     }
 
     #[doc(alias = "mark_hidden_dirty")]
@@ -256,7 +276,7 @@ impl PathingController {
             }
             let id_dirty = hidden_dirty | Self::unexpire_at(&mut self.filter_expiry, &id);
             if id_dirty {
-                self.filter_state_signal = true;
+                self.filter_state_signal = Some(true);
             }
         }
         if hidden_dirty_unk || !hidden_dirty_packs.is_empty() {
@@ -281,5 +301,41 @@ impl PathingController {
             }
             dirty
         })
+    }
+
+    pub(super) fn clone_hidden_guids() -> Option<Arc<HiddenGuids>> {
+        SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()))
+    }
+    pub(super) fn prune_hidden_guids_settings(now: &Timestamp) -> bool {
+        SaveState::try_write_with(|save| {
+            save.pathing_state.as_mut().map(|pathing| pathing.hidden_guid_prune_older_than(now))
+                .unwrap_or(false)
+        })
+    }
+    pub(super) fn populate_hidden_guids_for_map(
+        filter_state: &mut FilterState,
+        hidden_guids: &HiddenGuids,
+        map: &LoadedMapPack,
+        map_info: &MapPackInfo,
+        now: Option<Timestamp>
+    ) -> bool {
+        let all_guids = map.marker_guids(map_info)
+            .map(|(_, _, guid)| MarkerId::from_uuid_ref(guid.as_ref()));
+        filter_state.hidden.populate_from_settings(hidden_guids, &mut {all_guids}, now)
+    }
+    pub(super) fn populate_hidden_guids(filter_state: &mut FilterState, maps: &LoadedMaps, map_info: &LoadedMapInfo, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
+        let all_guids = maps.marker_guids(map_info, for_map_id).map(|(_, _, guid)| MarkerId::from_uuid_ref(guid.as_ref()));
+        Self::clone_hidden_guids().map(move |hidden_guids| filter_state.hidden.populate_from_settings(&hidden_guids, &mut {all_guids}, now))
+            .unwrap_or(false)
+    }
+    pub(super) fn refresh_hidden_guids_inner(filter_state: &mut FilterState, maps: &LoadedMaps, map_info: &LoadedMapInfo, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
+        let mut dirty = Self::populate_hidden_guids(&mut *filter_state, maps, map_info, for_map_id, now);
+        if let Some(now) = now {
+            dirty |= filter_state.hidden.reset_expired(&now);
+        }
+        dirty
+    }
+    pub(super) fn refresh_hidden_guids(&mut self, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
+        Self::refresh_hidden_guids_inner(&mut self.filter_state, &self.maps, &self.map_info, for_map_id, now)
     }
 }

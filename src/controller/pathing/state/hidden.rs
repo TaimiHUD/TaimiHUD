@@ -1,9 +1,14 @@
 use std::num::NonZero;
 use std::sync::Arc;
 use std::collections::BTreeMap;
-use crate::controller::pathing::state::filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter};
+use crate::controller::pathing::state::{
+    filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter},
+    LoadedMaps,
+};
+use crate::controller::pathing::shared::HiddenGuids;
 use taimi_meta::packs::{MapIndex, MarkerId};
 use taimi_hoard::time::Timestamp;
+use taimi_pack::attributes::keys::Guid;
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct MarkerState {
@@ -55,6 +60,10 @@ impl MarkerState {
     pub fn reset(&mut self, id: impl AsRef<MarkerId>) -> bool {
         self.hidden.remove(id.as_ref()).is_some()
     }
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.hidden.is_empty()
+    }
 
     #[cfg(deleteme)]
     pub fn expire_at_timestamp(&mut self, id: impl Into<MarkerId>, expiry_timestamp: u64, now: &SystemTime, now_mono: &Instant) {
@@ -78,6 +87,36 @@ impl MarkerState {
                 false,
             _ => true,
         })
+    }
+
+    pub(crate) fn populate_from_settings(
+        &mut self,
+        hidden_guids: &HiddenGuids,
+        all_ids: &mut dyn Iterator<Item = &MarkerId>,
+        now: Option<Timestamp>,
+    ) -> bool {
+        let mut dirty = false;
+        for id in all_ids {
+            let duplicate_expired = match (self.hidden.get(id), &now) {
+                (Some(HiddenMarker { reset: AutoReset::Expiry { expiry }, .. }), Some(now)) => Some(expiry <= now),
+                (Some(..), _) => Some(false),
+                (None, _) => None,
+            };
+            if let Some(expired) = duplicate_expired {
+                if expired {
+                    self.hidden.remove(id);
+                    dirty = true;
+                }
+                continue
+            }
+            let Some(&expiry_timestamp) = hidden_guids.get(Guid::from_uuid_ref(id)) else { continue };
+            match now {
+                Some(now) if expiry_timestamp <= now => continue,
+                _ => (),
+            }
+            dirty |= self.expire_at(id.clone(), expiry_timestamp).1;
+        }
+        dirty
     }
 }
 

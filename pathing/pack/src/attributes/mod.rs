@@ -3,6 +3,7 @@ use {
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, num::NonZero, str::FromStr, sync::Arc},
+    taimi_hoard::str_opt_ref,
     uuid::Uuid,
     xml::name::Name,
 };
@@ -108,7 +109,7 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("canfade") {
             self.render_mut().can_fade = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("color") || attr_name.eq_ignore_ascii_case("tint") {
-            if let Some(tint) = opt_str(&value).map(parse_color).transpose()? {
+            if let Some(tint) = str_opt_ref(&value).map(parse_color).transpose()? {
                 self.render_mut().tint = Some(tint);
             }
         } else if attr_name.eq_ignore_ascii_case("cull") {
@@ -158,7 +159,7 @@ impl MarkerAttributes {
                 self.poi_mut().billboard_text = Some(string_into(value));
             }
         } else if attr_name.eq_ignore_ascii_case("title-color") {
-            self.poi_mut().billboard_text_color = opt_str(&value).map(parse_color).transpose()?;
+            self.poi_mut().billboard_text_color = str_opt_ref(&value).map(parse_color).transpose()?;
         } else if attr_name.eq_ignore_ascii_case("tip-name") {
             self.tip_name = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("tip-description") {
@@ -461,6 +462,45 @@ impl InteractionAttributes {
             _ => true,
         }
     }
+
+    pub fn trigger_range(&self) -> f32 {
+        self.info_range
+            .unwrap_or(keys::TriggerRange::DEFAULT.into())
+    }
+    pub fn auto_trigger(&self) -> bool {
+        self.auto_trigger
+            .unwrap_or(keys::AutoTrigger::DEFAULT.into())
+    }
+    pub fn info(&self) -> Option<&str> {
+        self.info.as_ref().map(|i| &i[..])
+    }
+    pub fn copy_value(&self) -> Option<&str> {
+        self.copy_value.as_ref().map(|s| &s[..])
+    }
+    pub fn reset_guids(&self) -> Option<&[keys::Guid]> {
+        self.reset_guids.as_ref().map(|guids| keys::Guid::from_slice(&guids[..]))
+    }
+    pub fn copy_message(&self) -> Option<&str> {
+        self.copy_message.as_ref().map(|s| &s[..])
+    }
+    /// TODO: [keys::ShowHideAction]
+    pub fn category_actions(&self) -> impl Iterator<Item = (&IdNameBox, keys::ShowHideAction)> {
+        let actions = [
+            (self.show_category.as_ref(), keys::ShowHideAction::Show),
+            (self.hide_category.as_ref(), keys::ShowHideAction::Hide),
+            (self.toggle_category.as_ref(), keys::ShowHideAction::Toggle),
+        ];
+        IntoIterator::into_iter(actions)
+            .filter_map(|(cat, action)| cat.map(|cat| (cat, action)))
+    }
+    pub fn behaviour(&self) -> Option<keys::Behaviour> {
+        self.taco_behavior.map(keys::Behaviour::from)
+    }
+    pub fn reset_delay(&self) -> f32 {
+        self.reset_length.map(keys::ResetLength)
+            .unwrap_or_default()
+            .into()
+    }
 }
 
 /// Filters.
@@ -761,14 +801,7 @@ pub fn parse_bool(value: &str) -> anyhow::Result<bool> {
 }
 
 pub fn parse_opt<T: FromStr>(value: &str) -> Result<Option<T>, T::Err> {
-    opt_str(value).map(T::from_str).transpose()
-}
-
-fn opt_str(value: &str) -> Option<&str> {
-    match value.is_empty() {
-        false => Some(value),
-        true => None,
-    }
+    str_opt_ref(value).map(T::from_str).transpose()
 }
 
 fn parse_color(value: &str) -> anyhow::Result<Vec4> {

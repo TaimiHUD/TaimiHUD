@@ -20,7 +20,7 @@ use {
         ops,
     },
     taimi_hoard::{
-        collections::slice_offset_from,
+        collections::{TaimiSet as _, slice_offset_from},
         flags::BitSet,
         iters::IterExt as _,
         loc::{indexed::IndexedList, LocationMut, LocationRef},
@@ -28,6 +28,7 @@ use {
     taimi_meta::{
         coords::vec_eq,
         packs::{
+            collections::PackSet,
             id::{MarkerId, MarkerIndex, MarkerPath},
             MapIndex,
             PackIndex,
@@ -655,6 +656,54 @@ impl SpacePackCollection {
     pub fn entities_dirty(&self, map_id: MapIndex, packs: &LoadedPacks) -> bool {
         self.render_entities.needs_rebuild()
     }
+    pub(super) fn expired_entities_dirty(
+        &self,
+        map_id: MapIndex,
+        map_info: &LoadedMapInfo,
+        maps: &LoadedMaps,
+    ) -> Result<BTreeMap<MarkerId, usize>, ()> {
+        let mut expired = BTreeMap::new();
+        let Some(map_id) = self.map_id else {
+            return Ok(expired)
+        };
+        let mut expired_packs = PackSet::default();
+        let mut any_remain = false;
+        for (pack_path, pack) in self.loaded_packs.iter() {
+            if !pack.any_populated() { continue }
+            match maps.set_contains(&pack_path.rel(map_id)) {
+                true => any_remain = true,
+                false => {
+                    expired_packs.insert(pack_path);
+                },
+            }
+        }
+        if expired_packs.is_empty() {
+            return Ok(expired)
+        }
+        if !any_remain { return Err(()) }
+
+        for (i, e) in self.render_entities.entities.iter().enumerate() {
+            if e.is_invalid() {
+                continue
+            }
+            let pack_path = e.id.get_marker_pack_path();
+            if expired_packs.contains(pack_path) {
+                expired.insert(e.id.clone(), i);
+            }
+        }
+
+        Ok(expired)
+    }
+
+    pub(super) fn invalidate_entities(
+        &mut self,
+        expired: &mut dyn Iterator<Item = (MarkerId, usize)>,
+    ) {
+        for (_mid, i) in expired {
+            self.render_entities
+                .invalidate(self.loaded_packs.map_mut_as_slice(), i);
+        }
+    }
 
     #[cfg(todo)]
     pub fn needs_bvh_rebuild(&self) -> bool {
@@ -698,7 +747,7 @@ impl SpacePackCollection {
             pack.clear();
         }
         self.render_entities.clear();
-        self.bvh = Bvh { nodes: Vec::new() };
+        self.clear_bvh();
         self.map_id = None;
     }
     pub fn is_empty(&self) -> bool {

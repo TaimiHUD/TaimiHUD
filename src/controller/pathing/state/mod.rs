@@ -1,13 +1,13 @@
 use {
     crate::controller::pathing::{
         info::{MapPackInfo, EMPTY_RENDER_ATTRS},
-        registry::{PackInfo, PackInfoSignature},
+        registry::{PackInfo, PackInfoSignature, LoadedMarkerPath},
         shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded},
         UnloadedReason,
     },
     std::{collections::BTreeMap, iter, ops, sync::Arc},
     taimi_hoard::{
-        collections::{lru::RecentlyUsed, TaimiSet},
+        collections::{lru::RecentlyUsed, traits::{TaimiDictMut as _, TaimiSet}},
         iters::{IterExt as _, all_zipped},
         loc::{indexed::IndexedList, LocationMut, LocationRef},
     },
@@ -22,7 +22,7 @@ use {
         PackRegistryNs,
         VisibilityFlags,
     },
-    taimi_pack::attributes::RenderAttributes,
+    taimi_pack::attributes::{keys::Guid, RenderAttributes},
     taimi_sync::arcs::ArcPtrCmp,
 };
 
@@ -93,8 +93,8 @@ impl LoadedMapInfo {
     /// remove outdated info from the cache
     ///
     /// TODO: BTreemap::extract_if (for [LoadedMaps] too)
-    pub fn prune(&mut self, packs: Option<&LoadedPacks>) {
-        self.map_info.retain(|path, map_info| {
+    pub fn prune(&mut self, packs: Option<&LoadedPacks>) -> bool {
+        self.map_info.dict_retain_mut_count(|path, map_info| {
             if map_info.used.is_elderly(Self::USED_THRESHOLD) {
                 return false
             }
@@ -110,13 +110,17 @@ impl LoadedMapInfo {
                 }
             }
             true
-        });
+        }) > 0
     }
     /// optional exception for current map
-    pub fn clear(&mut self, map_id: Option<MapIndex>) {
+    pub fn clear(&mut self, map_id: Option<MapIndex>) -> usize {
         match map_id {
-            None => self.map_info.clear(),
-            Some(map_id) => self.map_info.retain(|path, _| path.path == map_id),
+            None => {
+                let prev_len = self.map_info.len();
+                self.map_info.clear();
+                prev_len
+            },
+            Some(map_id) => self.map_info.dict_retain_mut_count(|path, _| path.path == map_id),
         }
     }
 
@@ -224,8 +228,8 @@ impl LoadedMaps {
         }
     }
     /// remove outdated info from the cache
-    pub fn prune(&mut self, map_info: Option<&LoadedMapInfo>) {
-        self.maps.retain(|path, map| {
+    pub fn prune(&mut self, map_info: Option<&LoadedMapInfo>) -> bool {
+        self.maps.dict_retain_mut_count(|path, map| {
             if map.used.is_elderly(Self::USED_THRESHOLD) {
                 return false
             }
@@ -241,7 +245,7 @@ impl LoadedMaps {
                 }
             }
             true
-        });
+        }) > 0
     }
     pub fn clear(&mut self) {
         self.maps.clear();
@@ -368,6 +372,21 @@ impl LoadedMaps {
                 .map(move |map_info| (path, map, &map_info.info))
         })
     }
+
+    pub fn marker_guids<'a, 'i>(
+        &'a self,
+        map_info: &'i LoadedMapInfo,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (MarkerPath, LoadedMarkerPath<PackMapPath>, &'a Guid)> + 'i where
+        'a: 'i,
+    {
+        self.iter_with_info(map_info, map_id)
+            .flat_map(move |(map_path, map, info)|
+                map.marker_guids(info)
+                .lazy_map(move |(p, lp, guid)|
+                    (p, map_path.rel(lp.path), guid)
+                ))
+    }
 }
 impl LocationRef<PackPath, MapIndex> for LoadedMaps {
     type LookupRef = LoadedMapPack;
@@ -479,10 +498,14 @@ impl LoadedPacks {
     }
 
     const USED_THRESHOLD: u32 = 2;
-    pub fn age_tick(&mut self, map_info: Option<&LoadedMapInfo>) {
+    pub fn age_tick(&mut self, map_info: Option<&LoadedMapInfo>, aggressive: bool) {
         for (path, pack) in self.packs.iter_mut() {
-            let used = match map_info {
-                Some(map_info) if map_info.set_contains(&path) => true,
+            let used = match (map_info, aggressive) {
+                (Some(map_info), _) if map_info.set_contains(&path) => true,
+                (Some(..), true) => {
+                    pack.used.mark_for_death();
+                    continue
+                },
                 _ => false,
             };
             pack.used.mark_if(used);
@@ -547,6 +570,13 @@ impl LoadedPacks {
             packs.next().map(|(path, _)| path)
         })
     }
+
+    pub fn expired_packs(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
+        self.packs.iter().filter(|(_, i)|
+            i.used.is_elderly(Self::USED_THRESHOLD) && i.is_loaded()
+        )
+    }
+
     pub fn clear(&mut self) {
         self.packs.clear();
     }

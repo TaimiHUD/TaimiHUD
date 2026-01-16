@@ -1262,8 +1262,17 @@ pub struct Guid(pub Uuid);
 impl Guid {
     pub const EMPTY: Self = Self(Uuid::nil());
 
-    pub const fn from_uuid_ref(uuid: &Uuid) -> &Self {
+    #[inline]
+    pub const fn from_ref(uuid: &Uuid) -> &Self {
         unsafe { mem::transmute(uuid) }
+    }
+    #[inline]
+    pub const fn from_slice(uuids: &[Uuid]) -> &[Self] {
+        unsafe { mem::transmute(uuids) }
+    }
+    #[inline]
+    pub fn from_uuid_ref<U: AsRef<Uuid>>(uuid: &U) -> &Self {
+        Self::from_ref(uuid.as_ref())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1311,6 +1320,30 @@ impl From<Guid> for Uuid {
     #[inline]
     fn from(v: Guid) -> Self {
         v.0
+    }
+}
+impl<'a> From<&'a Uuid> for &'a Guid {
+    #[inline]
+    fn from(v: &'a Uuid) -> Self {
+        Guid::from_ref(v)
+    }
+}
+impl<'a> From<&'a Guid> for &'a Uuid {
+    #[inline]
+    fn from(v: &'a Guid) -> Self {
+        &v.0
+    }
+}
+impl AsRef<Uuid> for Guid {
+    #[inline]
+    fn as_ref(&self) -> &Uuid {
+        &self.0
+    }
+}
+impl AsRef<Guid> for Uuid {
+    #[inline]
+    fn as_ref(&self) -> &Guid {
+        Guid::from_ref(self)
     }
 }
 #[cfg(feature = "serde")]
