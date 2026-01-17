@@ -387,11 +387,14 @@ impl RenderMachine {
         }
 
         let gameplay_transition = gameplay_change.and_then(|gameplay| match gameplay {
-            GameplayState::Intermission { next_map_id: map_id @ Some(..), .. } =>
-                self.gameplay.commit_loading(map_id),
-            GameplayState::Intermission { next_map_id: None, .. } => {
+            GameplayState::Intermission {
+                next_map_id: map_id @ Some(..),
+                prev_map_id,
+                ..
+            } if map_id == prev_map_id => self.gameplay.commit_intermission(),
+            GameplayState::Intermission { next_map_id: map_id, .. } => {
                 //self.map.calibration.clear_map();
-                self.gameplay.commit_intermission()
+                self.gameplay.commit_loading(map_id)
             },
             GameplayState::Gameplay { map_id } => {
                 if let Some(_map_id) = map_id {
