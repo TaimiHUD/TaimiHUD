@@ -972,7 +972,7 @@ impl CategoryCollectionState {
             .copied()
             .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
             .path;
-        let open_sig = self.open_mask.count_ones() as CategoryIndex ^ open_menu_sig;
+        let open_sig = self.open_mask.count() as CategoryIndex ^ open_menu_sig;
         let cats_dirty = pack_damage.info.is_some()
             || pack_damage.loaded
             || pack_damage.visibility.is_some()

@@ -93,6 +93,12 @@ pub struct BitSet<V: ?Sized = BitVec, T: BitStore = usize, O: BitOrder = BitsNat
     pub _bits: PhantomData<bitptr::BitPtr<bitptr::Mut, T, O>>,
     pub flags: V,
 }
+impl BitSet {
+    #[inline]
+    pub fn new_vec() -> Self {
+        Self::new(BitVec::new())
+    }
+}
 impl<V, T: BitStore, O: BitOrder> BitSet<V, T, O> {
     #[inline]
     pub const fn new(flags: V) -> Self {
@@ -131,6 +137,18 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> {
             Some(offset)
         }
     }
+
+    /// shadow surprising deref behaviour
+    #[doc(hidden)]
+    pub fn remove(&mut self) {}
+    /// shadow surprising deref behaviour
+    #[doc(hidden)]
+    pub fn insert(&mut self) {}
+    /// shadow surprising deref behaviour
+    #[doc(hidden)]
+    pub fn set(&mut self) {}
+    #[doc(hidden)]
+    pub fn len(&mut self) {}
 }
 impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
     #[inline]
@@ -188,6 +206,17 @@ where
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.as_bitslice().not_any()
+    }
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.as_bitslice().count_ones()
+    }
+    /// allocated capacity, effectively highest index+1
+    ///
+    /// (not necessarily max insert index though, since no eager truncation occurs)
+    #[inline]
+    pub fn end_len(&self) -> usize {
+        self.as_bitslice().len()
     }
 
     #[inline]
@@ -413,8 +442,8 @@ impl<F: BitFlagForSet> FlagSet<F> {
 
     pub fn extend_to(&mut self, min_len: usize, fill: bool) {
         let min_size = min_len * F::BIT_WIDTH;
-        if self.flags.len() < min_size {
-            self.flags.resize(min_size, fill);
+        if self.flags.flags.len() < min_size {
+            self.flags.flags.resize(min_size, fill);
         }
     }
 
@@ -429,7 +458,7 @@ impl<F: BitFlagForSet> FlagSet<F> {
     }
 
     pub fn push(&mut self, flags: &F) {
-        self.flags.extend_from_bitslice(flags.as_bitslice());
+        self.flags.flags.extend_from_bitslice(flags.as_bitslice());
     }
 }
 

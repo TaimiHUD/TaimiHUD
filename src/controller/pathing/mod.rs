@@ -5,6 +5,7 @@ use {
         registry::{PackLoader, PackMapPath, LoadedMarkerPath},
         space::{SpaceContext, SpacePackShared},
         state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
+        interact::InteractReactor,
     },
     crate::{
         controller::{
@@ -50,6 +51,7 @@ use {
         ui::{
             gameplay::{GameplayState, GameplayTransition},
             MapContext,
+            UiState,
         },
     },
     taimi_pack::attributes::{AttrString, Festivals},
@@ -157,7 +159,7 @@ pub(crate) struct PathingController {
     filter_next_schedule: ReusableBoxFuture<'static, ()>,
     /// whether `filter_next_schedule` indicates dirty state after
     filter_next_schedule_dirty: bool,
-    interact: interact::InteractReactor,
+    interact: InteractReactor,
     // watchers...
     pack_configs: watched::WatchStreamBox<PackPath, shared::SharedPackConfig>,
     /// we only need to regen if a new pack slot is allocated
@@ -353,15 +355,9 @@ impl PathingController {
                 }
             },
             event = self.interact.with_rx(&mut self.rx.interact) => {
-                let cx = (&self.maps, &self.map_info, &self.filter_state);
+                let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
                 let followup = self.interact.process_event(&mut self.rx, cx, event).await;
-                match followup {
-                    PathingEvent::Nop => (),
-                    e @ (PathingEvent::Exit(..) | PathingEvent::FanOut(..)) => {
-                        self.tasks.spawn(future::ready(Ok(e)));
-                    },
-                    event => self.process_message(event).await,
-                }
+                self.process_or_spawn_message(followup).await;
             },
             trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
                 for trail in trail_reqs {
@@ -495,13 +491,13 @@ impl PathingController {
                 if new_map {
                     if instantaneous {
                         // make up for missing the loading screen...
-                        self.handle_map_suspend(true);
+                        self.handle_map_suspend(&gameplay);
                     }
                     self.handle_map_leave();
                 }
                 self.handle_map_enter(map_id)
             },
-            GameplayState::Intermission { initial: false, .. } => self.handle_map_suspend(false),
+            GameplayState::Intermission { initial: false, .. } => self.handle_map_suspend(&gameplay),
             _ => (),
         }
     }
@@ -631,17 +627,37 @@ impl PathingController {
     pub(crate) async fn handle_presses(&mut self, state: GameControls, changed: GameControls) {
         let pressed = state & changed;
         if pressed.contains(GameControl::Miscellaneous_Interact) {
-            self.handle_press_interact().await;
+            if let Some(map_id) = self.filter_press_gameplay(GameControl::Miscellaneous_Interact) {
+                self.handle_press_interact(map_id).await;
+            }
         }
     }
 
-    pub(crate) async fn handle_press_interact(&mut self) {
-        log::trace!("TODO: player interaction");
+    /// ignore if not in-game or textbox has focus etc
+    ///
+    /// TODO: might still be possible to use if bound to a mouse button maybe?
+    fn filter_press_gameplay(&mut self, control: GameControl) -> Option<MapIndex> {
+        let ml = match () {
+            #[cfg(todo = "unnecessary")]
+            _ => rt::mumble_link_ptr().ok(),
+            _ => self.rx.interact.player_pos.ml,
+        };
+        self.gameplay_map().and_then(|map_id| {
+            let is_text_input = ml.map(|ml| ml.read_ui_state())
+                .map(|state| UiState::from(state).contains(UiState::TextInput))
+                .unwrap_or(true);
+            (!is_text_input).then_some(map_id)
+        })
+    }
+    pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
+        let interact_ctx = (&self.map_info, &self.maps, map_id, &self.filter_state);
+        let followup = self.interact.trigger_interact_action(&mut self.rx.interact, interact_ctx, InteractReactor::INTERACT_ACTION).await;
+        self.process_or_spawn_message(followup).await;
     }
 
     pub(crate) async fn collect_garbage(&mut self, tick: u32, aggressive: bool, map_id: Option<MapIndex>) {
-        let mut map_info_dirty = false;
-        let mut maps_dirty = false;
+        let mut map_info_dirty;
+        let mut maps_dirty;
         match (tick, aggressive) {
             (_, true) => {
                 map_info_dirty = self.map_info.clear(map_id) > 0;
@@ -693,6 +709,16 @@ impl PathingController {
             })
         })
         .flatten()
+    }
+
+    async fn process_or_spawn_message(&mut self, msg: PathingEvent) {
+        match msg {
+            PathingEvent::Nop => (),
+            e @ (PathingEvent::Exit(..) | PathingEvent::FanOut(..)) => {
+                self.tasks.spawn(future::ready(Ok(e)));
+            },
+            event => self.process_message(event).await,
+        }
     }
 
     #[inline]

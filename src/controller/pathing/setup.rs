@@ -25,7 +25,10 @@ use {
     },
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_hoard::time::Timestamp,
-    taimi_meta::packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
+    taimi_meta::{
+        packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
+        ui::GameplayState,
+    },
     taimi_pack::Pack,
     taimi_sync::watched::watch,
     tokio::{
@@ -287,17 +290,18 @@ impl PathingController {
     /// eager [self.handle_map_leave()]
     ///
     /// unless reentering, which indicates leave+enter will immediately follow
-    pub(super) fn handle_map_suspend(&mut self, reentering_urgent: bool) {
+    pub(super) fn handle_map_suspend(&mut self, gameplay: &GameplayState) {
         match &mut self.space.packs {
             #[cfg(todo = "unnecessary")]
             packs => Arc::make_mut(packs).clear(),
             packs => *packs = Arc::new(Default::default()),
         };
-        if !reentering_urgent {
+        if matches!(gameplay, GameplayState::Intermission { next_map_id: None, .. }) {
             self.maps.prune(Some(&self.map_info));
             let now = WallInstant::now_timestamp_system_checked();
             Self::prune_hidden_guids_settings(&now);
         }
+        self.interact.handle_map_suspend(&mut self.rx, gameplay);
     }
     pub(super) fn handle_map_leave(&mut self) {
         self.map_info.age_tick(None);
@@ -306,7 +310,7 @@ impl PathingController {
         self.maps.prune(Some(&self.map_info));
         // TODO: shared map update to None ig
         self.filter_state.hidden.reset_map_leave();
-        self.interact.handle_map_leave();
+        self.interact.handle_map_leave(&mut self.rx);
     }
     pub(super) fn handle_map_enter(&mut self, map_id: MapIndex) {
         self.map_info.age_tick(Some(map_id));
@@ -353,7 +357,7 @@ impl PathingController {
         }
         self.packs.age_tick(Some(&self.map_info), false);
         self.request_pack_loads(need_load);
-        self.interact.handle_map_enter(&self.maps, &self.map_info, map_id);
+        self.interact.handle_map_enter(&mut self.rx, &self.maps, &self.map_info, map_id);
     }
     pub(super) fn prepare_for_pack_map(
         &mut self,

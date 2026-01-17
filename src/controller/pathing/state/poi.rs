@@ -75,9 +75,15 @@ impl LoadedPoi {
         let poi = self.render_attrs().poi.as_ref().map(|p| &**p);
         unsafe { poi.unwrap_unchecked() }
     }
+    /// TODO: might want ability to override later, in which case make sure
+    /// [Self::get_interaction_attrs] is adjusted to match!
     #[inline]
     pub fn interaction_attrs(&self) -> &InteractionAttributes {
         self.info().interaction_attrs()
+    }
+    #[inline]
+    pub fn get_interaction_attrs(&self) -> Option<&InteractionAttributes> {
+        self.info().get_interaction_attrs().map(|i| &**i)
     }
     #[cfg(todo = "unused")]
     pub fn filter_attrs(&self) -> Option<&FilterAttributes> {

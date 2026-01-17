@@ -477,8 +477,9 @@ impl InteractionAttributes {
     pub fn copy_value(&self) -> Option<&str> {
         self.copy_value.as_ref().map(|s| &s[..])
     }
-    pub fn reset_guids(&self) -> Option<&[keys::Guid]> {
+    pub fn reset_guids(&self) -> &[keys::Guid] {
         self.reset_guids.as_ref().map(|guids| keys::Guid::from_slice(&guids[..]))
+            .unwrap_or(&[])
     }
     pub fn copy_message(&self) -> Option<&str> {
         self.copy_message.as_ref().map(|s| &s[..])
