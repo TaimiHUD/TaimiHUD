@@ -15,6 +15,8 @@ use taimi_meta::spatial::BvhShape;
 use taimi_sync::watched;
 use futures::ready;
 use futures::stream::Stream;
+use futures::future::Either;
+use futures::future;
 use std::future::Future;
 use std::collections::{BTreeMap, BTreeSet};
 use std::task::Poll;
@@ -22,13 +24,14 @@ use std::task::Context;
 use std::{ptr, mem};
 use std::time::Duration;
 use std::fmt;
+use std::cmp;
 use std::pin::Pin;
 use std::sync::{LazyLock, Arc};
 use tokio::sync::RwLock;
 use taimi_hoard::iters::IterExt as _;
 use taimi_hoard::loc::Locator;
 
-pub use crate::controller::pathing::interact::SpaceInteraction;
+pub use crate::controller::pathing::interact::{SpaceInteraction, InteractMessage};
 
 pub type InteractShared = InteractSender;
 
@@ -82,6 +85,14 @@ impl SharedInteractEntities {
             trigger_bvh: empty_trigger_bvh().clone(),
             entities: Vec::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.entities.clear();
     }
 }
 /// POI trigger bvh traversal doesn't really need 3D?
@@ -176,8 +187,13 @@ impl NearbyMarkers {
     pub fn remove_pois_sorted_dyn(&mut self, pois: &mut dyn Iterator<Item = NearbyPoiPath>) {
         let mut pois = pois.peekable();
         self.pois.retain(|key, _| {
-            pois.next_if(|up| up == key)
-                .is_some()
+            let mut cmp = cmp::Ordering::Less;
+            while let Some(..) = pois.next_if(|up| {
+                let c = key.cmp(up);
+                cmp = cmp.max(c);
+                cmp.is_le()
+            }) {}
+            cmp.is_ne()
         });
     }
     pub fn remove_pois(&mut self, pois: &BTreeSet<PoiMapPath>) {
@@ -200,7 +216,7 @@ impl NearbyMarkers {
 
 pub struct FollowPlayer {
     pub ml: Option<MumblePtr>,
-    pub update_throttle: Pin<Box<Sleep>>,
+    pub update_throttle: Either<Pin<Box<Sleep>>, future::Ready<()>>,
     update_throttle_ready: bool,
     threshold_time: Duration,
     /// don't bother triggering if player hasn't moved at least `sqrt(distance)` [metres](LocalSpace)
@@ -234,7 +250,7 @@ impl FollowPlayer {
     pub fn new() -> Self {
         Self {
             ml: None,
-            update_throttle: Box::pin(WallInstant::no_sleep()),
+            update_throttle: Either::Right(future::ready(())),
             update_throttle_ready: true,
             threshold_time: Self::DEFAULT_THRESHOLD_TIME,
             threshold_distance_squared: Self::DEFAULT_THRESHOLD_DIST_DIST,
@@ -335,7 +351,7 @@ impl FollowPlayer {
         let rem = self.read_remaining_throttle_ticks();
 
         if rem > 0 {
-            ready!(self.update_throttle.as_mut().poll(cx));
+            ready!(self.update_throttle_mut().poll(cx));
             // fuse/mark it as ready even if ml may not have ticked yet
             self.update_throttle_tick = self.update_throttle_tick.wrapping_add(rem);
         }
@@ -348,9 +364,26 @@ impl FollowPlayer {
         #[cfg(todo = "unnecessary")]
         {
             self.last_emitted = WallInstant::past_instant().clone().into();
-            self.update_throttle.as_mut().reset(self.last_emitted);
+            self.update_throttle_mut().reset(self.last_emitted);
         }
         self.set_update_throttle_ready();
+    }
+    #[cfg(todo = "unused")]
+    pub fn update_throttle(&self) -> Option<Pin<&Sleep>> {
+        match &mut self.update_throttle {
+            Either::Left(sleep) => Some(sleep.as_ref()),
+            _ => None,
+        }
+    }
+    pub fn update_throttle_mut(&mut self) -> Pin<&mut Sleep> {
+        let needs_setup = matches!(&self.update_throttle, Either::Right(..));
+        if needs_setup {
+            self.update_throttle = Either::Left(Box::pin(WallInstant::no_sleep()));
+        }
+        match &mut self.update_throttle {
+            Either::Left(sleep) => sleep.as_mut(),
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        }
     }
     pub fn set_threshold_timeout(&mut self, interval: Duration) {
         if self.threshold_time == interval { return }
@@ -371,9 +404,12 @@ impl FollowPlayer {
             // went back in time?
             return
         };
-        let deadline = self.update_throttle.deadline().max(when);
-        self.reset_throttle_at(deadline + adj);
+        if adj >= Self::READJUST_THRESHOLD {
+            let deadline = self.update_throttle_mut().deadline().max(when);
+            self.reset_throttle_at(deadline + adj);
+        }
     }
+    const READJUST_THRESHOLD: Duration = Duration::from_millis(8);
     /// returns elapsed ticks since last read,
     /// so 0 indicates no change detected
     fn read_ml_tick(ml: MumblePtr, dest: &mut u32) -> u32 {
@@ -418,7 +454,7 @@ impl FollowPlayer {
         changed
     }
     pub fn reset_throttle_at(&mut self, deadline: Instant) {
-        self.update_throttle.as_mut().reset(deadline);
+        self.update_throttle_mut().reset(deadline);
         self.clear_update_throttle_ready();
     }
     pub fn has_moved(&self) -> bool {
@@ -456,7 +492,7 @@ impl FollowPlayer {
     /// otherwise a recent update emitted means we're waiting for throttle to timeout
     pub fn poll_ready(&mut self, cx: &mut Context) -> Poll<()> {
         if !self.update_throttle_ready() {
-            ready!(self.update_throttle.as_mut().poll(cx));
+            ready!(self.update_throttle_mut().poll(cx));
             self.set_update_throttle_ready();
         }
         Poll::Ready(())

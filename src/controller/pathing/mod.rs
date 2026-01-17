@@ -127,6 +127,7 @@ pub(crate) enum PathingEvent {
         loaded_path: LoadedMarkerPath<PackMapPath>,
         message: AttrString,
     },
+    InteractControl(interact::InteractMessage),
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(shared::LoadReport),
@@ -567,6 +568,11 @@ impl PathingController {
                 self.process_marker_info(path, loaded_path, message).await,
             DismissMarker { path, loaded_path, until, contexts, reset } =>
                 self.process_marker_dismiss(path, loaded_path, until, contexts, reset),
+            InteractControl(msg) => {
+                let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
+                let followup = self.interact.process_event(&mut self.rx, cx, msg).await;
+                Box::pin(self.process_or_spawn_message(followup)).await;
+            },
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,

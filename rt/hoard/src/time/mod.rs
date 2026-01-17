@@ -250,6 +250,21 @@ impl Timestamp {
                 to.checked_sub(amt),
         }
     }
+    pub fn signed_duration_saturating_sub(lhs: SignedDuration, rhs: SignedDuration) -> SignedDuration {
+        let neg = match (lhs, rhs) {
+            (Ok(..), Err(..)) => false,
+            (Err(..), Ok(..)) => true,
+            (Ok(l), Ok(r)) => r > l,
+            (Err(l), Err(r)) => l > r,
+        };
+        let amt = match (lhs, rhs, neg) {
+            (Ok(l), Err(r), _) => return Ok(l.saturating_add(r)),
+            (Err(l), Ok(r), _) => return Err(l.saturating_add(r)),
+            (Ok(l), Ok(r), true) | (Err(l), Err(r), false) => r.saturating_sub(l),
+            (Ok(l), Ok(r), false) | (Err(l), Err(r), true) => l.saturating_sub(r),
+        };
+        Self::signed_duration_new(amt, neg)
+    }
     pub fn saturating_signed_add(mut self, amt: SignedDuration) -> Self {
         self.saturating_signed_add_mut(amt);
         self

@@ -232,27 +232,18 @@ impl WallInstant {
         let ts = Timestamp::from_system_time(&SystemTime::now());
         let calib_delta = Self::get_calibrated().map(|(sys, calib)| {
             let instant = StdInstant::now();
-            (
-                Timestamp::instant_checked_duration_since(&instant, calib.instant.into_std()),
-                now.duration_since(sys).map_err(|e| e.duration()),
-            )
+            let mono_delta = Timestamp::instant_checked_duration_since(&instant, calib.instant.into_std());
+            let sys_delta = now.duration_since(sys).map_err(|e| e.duration());
+            Timestamp::signed_duration_saturating_sub(sys_delta, mono_delta)
         });
         let recalib = match calib_delta {
             None => false,
-            Some((Err(amt), _)) if amt > Self::DRIFT_THRESHOLD_EARLY => {
+            Some(Err(amt)) if amt > Self::DRIFT_THRESHOLD_SYSTEM => {
                 log::warn!("system clock drifted behind by {}s, recalibrating", amt.as_secs());
                 true
             },
-            Some((Ok(delta), _)) if delta > Self::DRIFT_THRESHOLD => {
-                log::warn!("system clock drifted ahead by {}s, recalibrating", delta.as_secs());
-                true
-            },
-            Some((_, Err(amt))) if amt > Self::DRIFT_THRESHOLD_EARLY => {
+            Some(Ok(amt)) if amt > Self::DRIFT_THRESHOLD_MONO => {
                 log::warn!("monotonic clock drifted behind by {}s, recalibrating", amt.as_secs());
-                true
-            },
-            Some((_, Ok(delta))) if delta > Self::DRIFT_THRESHOLD => {
-                log::warn!("monotonic clock drifted ahead by {}s, recalibrating", delta.as_secs());
                 true
             },
             _ => false,
@@ -279,8 +270,8 @@ impl WallInstant {
     pub fn with_parts(instant: Instant, timestamp: Timestamp) -> Self {
         Self { instant, timestamp }
     }
-    const DRIFT_THRESHOLD: Duration = Duration::from_secs(60);
-    const DRIFT_THRESHOLD_EARLY: Duration = Self::DRIFT_THRESHOLD;
+    const DRIFT_THRESHOLD_MONO: Duration = Duration::from_secs(60);
+    const DRIFT_THRESHOLD_SYSTEM: Duration = Self::DRIFT_THRESHOLD_MONO;
     pub fn new_calibrated(instant: Instant, calibration: &SystemTime) -> Self {
         let timestamp = Timestamp::try_from_system_time(calibration)
             .context("now precedes unix, expect time to break");
