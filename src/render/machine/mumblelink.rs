@@ -281,7 +281,16 @@ impl RenderMachine {
                     .map(|(_tick, when)| when.elapsed() > Self::MUMBLELINK_PLAYER_LOADING)
                     .unwrap_or(false);
                 if probably_loading {
-                    gameplay_change = Some(GameplayState::LOADING);
+                    let prev_map_id = self.gameplay.latest_map().map(|m| m.get());
+                    // we don't know what map we're loading in to,
+                    // but have no good way to indicate that uncertainty other than to convey
+                    // we're likely returning to the same map
+                    // (this contrasts with rtapi which can at least discern pauses in some cases like cinematics)
+                    let map_id = None;
+                    #[cfg(todo)]
+                    let map_id = NonZero::new(rt::mumble_link_ptr().ok().and_then(|ml| ml.read_map_id()));
+                    let map_id = map_id.or(prev_map_id);
+                    gameplay_change = Some(GameplayState::new_loading(map_id.unwrap_or_default(), prev_map_id.unwrap_or_default()));
                 }
                 self.mumblelink_frame_skip = self.mumblelink_frame_skip.saturating_add(1);
                 None

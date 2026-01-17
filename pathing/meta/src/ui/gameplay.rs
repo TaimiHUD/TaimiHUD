@@ -45,7 +45,7 @@ impl GameplayState {
     pub const fn new_loading(map_id: MapID, prev_map_id: MapID) -> Self {
         let prev_map_id = NonZero::new(prev_map_id);
         Self::Intermission {
-            initial: prev_map_id.is_none(),
+            initial: false,
             prev_map_id,
             next_map_id: NonZero::new(map_id),
         }
@@ -121,6 +121,19 @@ impl GameplayState {
         }
     }
 
+    pub const fn prev_map(&self) -> Option<NonZero<MapID>> {
+        match self {
+            &Self::Intermission { prev_map_id, .. } => prev_map_id,
+            Self::Gameplay { .. } => None,
+        }
+    }
+    pub fn intermission_set_initial(&mut self, is_initial: bool) {
+        match self {
+            Self::Intermission { initial, .. } => *initial = is_initial,
+            Self::Gameplay { .. } => (),
+        }
+    }
+
     pub const fn gameplay_map(&self) -> Option<NonZero<MapID>> {
         match self {
             &Self::Gameplay { map_id } => map_id,
@@ -179,6 +192,8 @@ impl From<GameplayState> for NexusGameState {
     fn from(state: GameplayState) -> Self {
         match state {
             GameplayState::Intermission { initial: true, .. } => NexusGameState::CharacterSelection,
+            #[cfg(todo)]
+            GameplayState::Intermission { initial: false, prev_map_id: Some(prev), next_map_id: Some(next), .. } if prev == next => NexusGameState::Cinematic,
             GameplayState::Intermission { initial: false, .. } => NexusGameState::LoadingScreen,
             GameplayState::Gameplay { .. } => NexusGameState::Gameplay,
         }
