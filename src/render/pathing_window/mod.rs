@@ -105,23 +105,33 @@ impl PathingWindowState {
         engine: Option<&mut anyhow::Result<Engine>>,
     ) {
         let rendered_err = if let Some(Ok(_engine)) = engine {
-            self.draw_categories_header(ui, machine);
-            if self.filter_open {
-                self.draw_filter_content(ui, machine);
-            }
             None
         } else {
             Some(engine.map(|e| e.as_ref().err()))
         };
+        let draw_content = rendered_err.is_none() || machine.pack_ui_state.any_loaded();
+        let tabs = draw_content.then(|| ui.tab_bar("packs")).flatten();
+        let draw_packs = tabs.as_ref().and_then(|_| ui.tab_item("packz"));
         if let Some(e) = rendered_err {
             PathingConfig::draw_space_error(ui, machine, e.flatten());
         }
-        ChildWindow::new("pathing_subwindow")
-            .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
-            .size([0.0; 2])
-            .build(ui, || {
-                self.draw_categories_content(ui, machine);
-            });
+        if let Some(_tab) = draw_packs {
+            self.draw_categories_header(ui, machine);
+            if self.filter_open {
+                self.draw_filter_content(ui, machine);
+            }
+            ChildWindow::new("pathing_subwindow")
+                .flags(WindowFlags::ALWAYS_VERTICAL_SCROLLBAR)
+                .size([0.0; 2])
+                .build(ui, || {
+                    self.draw_categories_content(ui, machine);
+                });
+        }
+        let draw_pois = tabs.as_ref().and_then(|_| ui.tab_item("poiz"));
+        if let Some(_tab) = draw_pois {
+            self.draw_interact_content(ui, machine);
+        }
+        drop(tabs);
     }
     pub fn draw_categories_header(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         if machine.pack_ui_state.any_loaded() {
@@ -208,5 +218,95 @@ impl PathingWindowState {
                 .filter_map(|pack| pack.state.pack_data());
             self.search_state.commit(packs);
         }
+    }
+}
+
+use {
+    crate::render::element::pack::interact::{RenderInteractivePoi, DrawInteractivePoi},
+    crate::controller::pathing::{
+        registry::{LoadedPoiPath, PoiMapPath, PackPath},
+        info::EMPTY_INTERACTION_ATTRS,
+        shared::{SharedGameplayMap, LocDisplay},
+    },
+    taimi_meta::packs::{
+        CategoryIndex, PoiIndex, CategoryPath, PoiPath,
+    },
+    taimi_hoard::loc::LocationRef,
+    std::borrow::Cow,
+};
+impl PathingWindowState {
+    pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+        let Some(pathing) = machine.pathing.as_ref() else { return };
+        let table = RenderInteractivePoi::draw_table_start(ui, "pois-nearby");
+        if let Some(_table) = table {
+            let nearby = pathing.interact.nearby.borrow().clone();
+            let maps = pathing.gameplay.borrow();
+            for (lpath, path) in nearby.iter_pois() {
+                self.draw_one_poi(ui, &maps, lpath, Some(path));
+            }
+        }
+        if let Some(_table) = RenderInteractivePoi::draw_table_start(ui, "pois-map") {
+            let entities = pathing.interact.entities.borrow();
+            // TODO: use bvh to sort by distance bleh
+            let bvh = &entities.trigger_bvh;
+            let maps = pathing.gameplay.borrow();
+            for e in entities.entities.iter() {
+                let e = &e.value;
+                let lpath = e.poi_path();
+                self.draw_one_poi(ui, &maps, lpath, None);
+            }
+        }
+        let _ = RenderInteractivePoi::draw_table_start(ui, "pois-hidden");
+    }
+    fn draw_one_poi(&mut self, ui: &Ui, maps: &SharedGameplayMap, lpath: PoiMapPath, mut poi_path: Option<PoiPath>) {
+        let lpoi_path: LoadedPoiPath = lpath.unscope();
+        let (attrs, lguid, name, category_path, lcat_path) = if let Some((_map_path, map_info)) = maps.get_info_for(lpath.root.root) {
+            let linfo = map_info.pois().lookup_ref(&lpoi_path);
+            // find is incorrect!
+            let TODO = ();
+            // TODO: map_info.marker_guid(lpath);
+            if poi_path.is_none() {
+                poi_path = map_info.poi_path(lpoi_path);
+            }
+            let lguid = map_info.poi_guids().find(|(p, ..)| Some(*p) == poi_path);
+            let cat_path: Option<CategoryPath> = linfo.map(|i| i.category_path);
+            let lcat_path = cat_path.and_then(|p| map_info.category_index(p));
+            let attrs = linfo.map(|li| li.interaction_attrs());
+            let name = linfo.and_then(|li| li.get_marker_attrs())
+                .and_then(|ma| ma.tip_name.as_ref()
+                    .or(ma.tip_description.as_ref())
+                    .map(|name| &name[..])
+                );
+            (attrs, lguid, name, cat_path, lcat_path)
+        } else { (None, None, None, None, None) };
+        let (position, visibility, category_visibility) = if let Some(map) = maps.get_state(lpath.root) {
+            let lpoi = map.pois().lookup_ref(&lpoi_path);
+            let vis = lpoi.map(|lpoi| lpoi.visibility);
+            let lcat = lcat_path.and_then(|p| map.categories().lookup_ref(&p));
+            let cat_vis = lcat.map(|lcat| lcat.visibility);
+            let pos = lpoi.map(|lpoi| lpoi.position);
+            (pos, vis, cat_vis)
+        } else { (None, None, None) };
+        let guid = lguid.and_then(|(_, g)| g.cloned());
+        let display_name = name.map(Cow::Borrowed)
+            .unwrap_or_else(|| {
+                let n = LocDisplay(lpath.root.rel(lpoi_path));
+                Cow::Owned(n.to_string())
+            });
+        let attrs = attrs.unwrap_or(&EMPTY_INTERACTION_ATTRS);
+        let context_opened = RenderInteractivePoi {
+            path: poi_path.unwrap_or(PoiPath::with_path(PoiIndex::MAX)),
+            category_path: category_path.unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
+            map_path: lpath.root,
+            loaded_index: lpath.path,
+            guid,
+            visibility: visibility.unwrap_or_default(),
+            category_visibility: category_visibility.unwrap_or_default(),
+            #[cfg(todo)]
+            hidden: visibility.map(|v| v.is_visible() ^ config_vis).unwrap_or(false),
+            hidden: false,
+            position: Default::default(),
+            nearby: Default::default(),
+        }.draw(ui, attrs, &display_name);
     }
 }

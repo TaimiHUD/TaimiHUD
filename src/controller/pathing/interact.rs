@@ -31,7 +31,7 @@ use {
         spatial::{MintConv, BvhShape, TriggerBoundsInfo},
         ui::gameplay::GameplayState,
     },
-    taimi_pack::attributes::{keys, AttrString, InteractionAttributes},
+    taimi_pack::attributes::{keys, AttrString, InteractionAttributes, MarkerAttributes},
     taimi_hoard::loc::LocationRef,
     taimi_hoard::flags::BitSet,
     taimi_hoard::cmp::CmpIgnore,
@@ -124,6 +124,16 @@ impl SpaceInteraction {
         }
         (interest, auto)
     }
+    pub fn interest_for_marker(attrs: &MarkerAttributes) -> (TriggerKind, bool) {
+        let (mut interest, auto) = match attrs.interaction.as_ref() {
+            Some(i) => Self::interest_for(i),
+            None => (TriggerKind::empty(), false)
+        };
+        if attrs.script.is_some() {
+            interest.insert(TriggerKind::SCRIPT);
+        }
+        (interest, auto)
+    }
     pub fn interest_for(attrs: &InteractionAttributes) -> (TriggerKind, bool) {
         let mut interest = TriggerKind::empty();
         if attrs.copy_value().is_some() {
@@ -138,9 +148,12 @@ impl SpaceInteraction {
         if attrs.taco_behavior.is_some() {
             interest.insert(TriggerKind::BEHAVIOUR);
         }
+        if attrs.bounce_behavior.is_some() {
+            interest.insert(TriggerKind::BOUNCE);
+        }
         #[cfg(todo)]
         if !lpoi.guid.is_nil() {
-            interest.insert(TriggerKind::DISMISS);
+            interest.insert(TriggerKind::BEHAVIOUR);
         }
         if attrs.show_category.is_some() {
             interest.insert(TriggerKind::SHOW);
@@ -904,8 +917,9 @@ impl InteractReactor {
                 if self.map_interactions.trigger_bvh_dirty {
                     // TODO: spawn/bg this thanks
                     self.map_interactions.rebuild_trigger_bvh().await;
-                    rx.interact.trigger_bvh_tx.send_if_modified(|shared| {
-                        let _ptr_dirty = ArcPtrCmp::from_mut(shared).clone_from_arc(&self.map_interactions.trigger_bvh);
+                    rx.interact.entities_tx.send_if_modified(|shared| {
+                        let _ptr_dirty = ArcPtrCmp::from_mut(&mut shared.trigger_bvh).clone_from_arc(&self.map_interactions.trigger_bvh);
+                        shared.entities.clone_from(&self.map_interactions.entities);
                         // XXX: notify anyway in case watcher is used to cache data? idk
                         true
                     });

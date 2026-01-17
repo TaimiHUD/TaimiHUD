@@ -8,7 +8,7 @@ use {
 #[cfg(feature = "space")]
 use {
     taimi_meta::ui::MapContext,
-    taimi_pack::attributes::{keys::Guid, Festival, Festivals},
+    taimi_pack::attributes::{keys::{Guid, ShowHideAction}, Festival, Festivals},
     taimi_hoard::time::Timestamp,
 };
 #[cfg(not(feature = "space"))]
@@ -569,6 +569,9 @@ impl<'de> serde::Deserialize<'de> for TriggerKind {
 }
 impl TriggerKind {
     pub const AUTO_TRIGGER_MASK: Self = Self::SETTINGS_DEFAULT_AUTO;
+    /// [Self::SHOW] | [Self::HIDE] | [Self::TOGGLE]
+    pub const CATEGORY_MASK: Self =
+        Self::from_bits_retain(Self::SHOW.bits() | Self::HIDE.bits() | Self::TOGGLE.bits());
     pub const SETTINGS_GUI: Self =
         Self::from_bits_retain(Self::all().bits() & !(Self::SHOW.bits() | Self::HIDE.bits()));
     pub const SETTINGS_TOGGLE_SHOWHIDE: Self =
@@ -604,6 +607,21 @@ impl TriggerKind {
     }
     pub const fn settings_default_is_interact(&self) -> bool {
         self.bits() == Self::settings_default_interact().bits()
+    }
+
+    #[cfg(feature = "space")]
+    pub const fn show_hide_action(&self) -> Option<ShowHideAction> {
+        match *self {
+            Self::SHOW => Some(ShowHideAction::Show),
+            Self::HIDE => Some(ShowHideAction::Hide),
+            Self::TOGGLE => Some(ShowHideAction::Toggle),
+            _ => None,
+        }
+    }
+    pub fn show_hide_actions(self) -> impl Iterator<Item = (Self, ShowHideAction)> {
+        (self & Self::CATEGORY_MASK).into_iter().filter_map(|t| t.show_hide_action().map(|a|
+            (t, a)
+        ))
     }
 }
 

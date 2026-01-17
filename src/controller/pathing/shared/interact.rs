@@ -11,6 +11,7 @@ use tokio::{
 use taimi_meta::coords::vec_eq;
 use taimi_meta::coords::LocalSpace;
 use taimi_meta::packs::{MapIndex, PackPath, PoiPath};
+use taimi_meta::spatial::BvhShape;
 use taimi_sync::watched;
 use futures::ready;
 use futures::stream::Stream;
@@ -27,6 +28,8 @@ use tokio::sync::RwLock;
 use taimi_hoard::iters::IterExt as _;
 use taimi_hoard::loc::Locator;
 
+pub use crate::controller::pathing::interact::SpaceInteraction;
+
 pub type InteractShared = InteractSender;
 
 pub type PlayerPosition = Point3<LocalSpace>;
@@ -34,14 +37,14 @@ pub type PlayerPosition = Point3<LocalSpace>;
 #[derive(Debug, Clone)]
 pub struct InteractSender {
     pub events: broadcast::Sender<InteractionEvent>,
-    pub trigger_bvh: watched::Tx<SharedTriggerBvh>,
     pub nearby: watched::Tx<SharedNearbyMarkers>,
+    pub entities: watched::Tx<SharedInteractEntities>,
 }
 impl InteractSender {
     pub fn new() -> Self {
         Self {
             events: broadcast::Sender::new(Self::EVENT_CAPACITY),
-            trigger_bvh: watched::Tx::new(empty_trigger_bvh().clone()),
+            entities: watched::Tx::new(SharedInteractEntities::new()),
             nearby: watched::Tx::new(Default::default()),
         }
     }
@@ -52,7 +55,7 @@ impl InteractSender {
 pub struct InteractReceiver {
     pub event_tx: broadcast::Sender<InteractionEvent>,
     pub event_rx: broadcast::Receiver<InteractionEvent>,
-    pub trigger_bvh_tx: watched::Tx<SharedTriggerBvh>,
+    pub entities_tx: watched::Tx<SharedInteractEntities>,
     pub nearby_tx: watched::Tx<SharedNearbyMarkers>,
     pub player_pos: FollowPlayer,
 }
@@ -61,13 +64,26 @@ impl InteractReceiver {
         Self {
             event_rx: tx.events.subscribe(),
             event_tx: tx.events.clone(),
-            trigger_bvh_tx: tx.trigger_bvh.clone(),
+            entities_tx: tx.entities.clone(),
             nearby_tx: tx.nearby.clone(),
             player_pos: FollowPlayer::new(),
         }
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SharedInteractEntities {
+    pub trigger_bvh: SharedTriggerBvh,
+    pub entities: Vec<BvhShape<SpaceInteraction>>,
+}
+impl SharedInteractEntities {
+    pub fn new() -> Self {
+        Self {
+            trigger_bvh: empty_trigger_bvh().clone(),
+            entities: Vec::new(),
+        }
+    }
+}
 /// POI trigger bvh traversal doesn't really need 3D?
 pub const TRIGGER_DIMENSION: usize = 2;
 #[cfg(todo = "unnecessary")]

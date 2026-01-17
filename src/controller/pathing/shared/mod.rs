@@ -61,7 +61,7 @@ use {
 };
 
 mod display;
-pub(super) mod interact;
+pub mod interact;
 mod loader;
 mod maps;
 mod space;
