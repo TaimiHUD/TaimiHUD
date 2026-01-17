@@ -4,7 +4,7 @@ use {
         render::machine::{MumblelinkTick, RenderMachine},
     },
     anyhow::Context,
-    core::ptr,
+    core::{mem, ptr},
     glamour::{Point3, Vector3},
     nexus::rtapi::GameState,
     taimi_meta::{coords::LocalSpace, ui::GameplayState},
@@ -15,6 +15,7 @@ pub struct RenderStateRtapi {
     pub camera: (Point3<LocalSpace>, Vector3<LocalSpace>),
     pub player: (Point3<LocalSpace>, Vector3<LocalSpace>),
     pub gameplay: u32,
+    pub prev_map_id: u32,
 }
 
 /// shhh [rt::RealTimeApi] is fine to share tbh
@@ -69,6 +70,7 @@ impl RenderStateRtapi {
             player: RenderMachine::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
             camera: RenderMachine::POSITIONING_EMPTY,
+            prev_map_id: 0,
         }
     }
 
@@ -86,10 +88,17 @@ impl RenderStateRtapi {
         let prev_gameplay = self.gameplay;
         self.gameplay = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state) };
         let map_id = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id) };
+        let prev_map_id = mem::replace(&mut self.prev_map_id, map_id);
         let gameplay_update = match self.gameplay {
+            Self::GAMEPLAY_LOADING if map_id != prev_map_id => Some(
+                GameplayState::new_loading(map_id, prev_map_id)
+            ),
+            Self::GAMEPLAY_INGAME if map_id != prev_map_id || prev_gameplay != Self::GAMEPLAY_INGAME =>
+                Some(GameplayState::new_ingame(map_id)),
             state if state == prev_gameplay => None,
-            Self::GAMEPLAY_INGAME => Some(GameplayState::new_ingame(map_id)),
-            Self::GAMEPLAY_LOADING => Some(GameplayState::new_loading(map_id, Default::default())),
+            Self::GAMEPLAY_LOADING => Some(
+                GameplayState::new_loading(Default::default(), map_id)
+            ),
             Self::GAMEPLAY_CINEMATIC => Some(GameplayState::new_loading(map_id, map_id)),
             state => GameState::try_from(state).ok().map(GameplayState::from),
         };
