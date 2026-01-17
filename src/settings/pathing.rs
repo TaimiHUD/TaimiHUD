@@ -584,6 +584,7 @@ impl<'de> serde::Deserialize<'de> for TriggerKind {
     }
 }
 impl TriggerKind {
+    pub const AUTO_TRIGGER_MASK: Self = Self::SETTINGS_DEFAULT_AUTO;
     pub const SETTINGS_GUI: Self =
         Self::from_bits_retain(Self::all().bits() & !(Self::SHOW.bits() | Self::HIDE.bits()));
     pub const SETTINGS_TOGGLE_SHOWHIDE: Self =

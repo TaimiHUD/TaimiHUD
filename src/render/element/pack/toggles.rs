@@ -355,7 +355,7 @@ impl super::PackElements {
                 .category_info()
                 .map(|(cats, _)| cats.count())
                 .unwrap_or(0);
-            p.categories.open_mask.count() != count || p.categories.open_mask.flags.not_any()
+            p.categories.open_mask.end_len() != count || p.categories.open_mask.flags.not_any()
         })
     }
     pub fn act_expand_all(&mut self) {

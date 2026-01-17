@@ -334,6 +334,16 @@ impl WallInstant {
         });
         &PAST
     }
+    /// An instant that is expected to be earlier than the present
+    ///
+    /// see [Self::past_instant()] for a stationary/static target
+    pub fn passed_instant() -> StdInstant {
+        if let Some((_, calib)) = Self::get_calibrated() {
+            calib.instant.into_std()
+        } else {
+            StdInstant::now()
+        }
+    }
     pub fn far_future() -> Self {
         Self::with_parts(Self::far_future_instant().into(), Timestamp::MAX_INSTANT)
     }
@@ -404,6 +414,10 @@ impl WallInstant {
     #[inline]
     pub fn big_sleep() -> time::Sleep {
         Self::far_future().to_future()
+    }
+    #[inline]
+    pub fn no_sleep() -> time::Sleep {
+        time::sleep_until(Self::passed_instant().into())
     }
 }
 /// [Self::from_system_time]
