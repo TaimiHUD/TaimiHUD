@@ -116,15 +116,23 @@ impl PathingWindowState {
         } else {
             Some(engine.map(|e| e.as_ref().err()))
         };
+        let bookmark_tl = ui.item_rect_min();
+        let bookmark_br = ui.item_rect_max();
         let draw_content = rendered_err.is_none() || machine.pack_ui_state.any_loaded();
-        let tabs = draw_content.then(|| ui.tab_bar("packs")).flatten();
+        let tabs = draw_content.then(|| {
+            ui.tab_bar("packs")
+        }).flatten();
         let draw_packs = tabs.as_ref().and_then(|_| ui.tab_item("packz"));
         if let Some(e) = rendered_err {
             PathingConfig::draw_space_error(ui, machine, e.flatten());
         }
         if let Some(_tab) = draw_packs {
+            let bookmark = ui.cursor_screen_pos();
+            ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
             self.draw_categories_header(ui, machine);
+            ui.set_cursor_screen_pos(bookmark);
             if self.filter_open {
+                //ui.separator();
                 self.draw_filter_content(ui, machine);
             }
             let content = ui.begin_content(c"pathing_subwindow", true);
@@ -134,6 +142,19 @@ impl PathingWindowState {
         }
         let draw_pois = tabs.as_ref().and_then(|_| ui.tab_item("poiz"));
         if let Some(_tab) = draw_pois {
+            #[cfg(deleteme)]
+            if let Some(e) = rendered_err {
+                PathingConfig::draw_space_error(ui, machine, e.flatten());
+            }
+            let bookmark = ui.cursor_screen_pos();
+            ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
+            if ui.button("rebuild") {
+                if let Some(pathing) = machine.pathing.as_ref() {
+                    PathingEvent::InteractControl(InteractMessage::RequestRebuild).try_send();
+                }
+            }
+            ui.set_cursor_screen_pos(bookmark);
+
             self.draw_interact_content(ui, machine);
         }
         drop(tabs);
@@ -145,18 +166,25 @@ impl PathingWindowState {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
+        let mut drawn = false;
+        ui.dummy([4.0; 2]);
+        ui.same_line();
+        drawn = true;
         if machine.pack_ui_state.any_loaded() {
-            ui.same_line();
             let button_text = match self.filter_open {
                 true => fl!("hide-filter"),
                 false => fl!("show-filter"),
             };
+            if drawn {
+                ui.same_line();
+            }
             if ui.button(button_text) {
                 self.filter_open = !self.filter_open;
                 self.ui_state.write_with(|state| {
                     state.search.open = self.filter_open;
                 });
             }
+            drawn = true;
 
             if machine.pack_ui_state.can_expand() {
                 ui.same_line();
@@ -166,12 +194,17 @@ impl PathingWindowState {
             }
         }
         if machine.pack_ui_state.can_collapse() {
-            ui.same_line();
+            if drawn {
+                ui.same_line();
+            }
             if ui.button(fl!("collapse-all")) {
                 machine.pack_ui_state.act_collapse_all();
             }
+            drawn = true;
         }
-        ui.same_line();
+        if drawn {
+            ui.same_line();
+        }
         if with_i18n!("reload-packs", |msg| ui.button(msg)) {
             PathingEvent::ReloadAll(true).try_send();
         }
@@ -179,6 +212,7 @@ impl PathingWindowState {
         if with_i18n!("deactivate-packs", |msg| ui.button(msg)) {
             PathingEvent::UnloadAll(false).try_send();
         }
+        ui.same_line();
         if with_i18n!("remove-packs", |msg| ui.button(msg)) {
             PathingEvent::UnloadAll(true).try_send();
         }
@@ -265,7 +299,6 @@ impl PathingWindowState {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        ui.separator();
         let filter_prev = self.filter_state;
         let search_dirty = self.draw_filters(ui);
         ui.dummy([4.0; 2]);
@@ -294,11 +327,11 @@ impl PathingWindowState {
 }
 
 use {
-    crate::render::element::pack::interact::{RenderInteractivePoi, DrawInteractivePoi},
+    crate::render::element::pack::interact::RenderInteractivePoi,
     crate::controller::pathing::{
-        registry::{LoadedPoiPath, PoiMapPath, PackPath},
+        registry::{LoadedPoiPath, PoiMapPath},
         info::EMPTY_INTERACTION_ATTRS,
-        shared::{SharedGameplayMap, LocDisplay},
+        shared::{interact::InteractMessage, SharedGameplayMap, LocDisplay},
     },
     taimi_meta::packs::{
         CategoryIndex, PoiIndex, CategoryPath, PoiPath,
@@ -312,16 +345,16 @@ impl PathingWindowState {
         let table = RenderInteractivePoi::draw_table_start(ui, "pois-nearby");
         if let Some(_table) = table {
             let nearby = pathing.interact.nearby.borrow().clone();
-            let maps = pathing.gameplay.borrow();
+            let maps = pathing.gameplay.borrow().clone();
             for (lpath, path) in nearby.iter_pois() {
                 self.draw_one_poi(ui, &maps, lpath, Some(path));
             }
         }
         if let Some(_table) = RenderInteractivePoi::draw_table_start(ui, "pois-map") {
+            let maps = pathing.gameplay.borrow().clone();
             let entities = pathing.interact.entities.borrow();
             // TODO: use bvh to sort by distance bleh
             let bvh = &entities.trigger_bvh;
-            let maps = pathing.gameplay.borrow();
             for e in entities.entities.iter() {
                 let e = &e.value;
                 let lpath = e.poi_path();

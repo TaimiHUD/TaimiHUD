@@ -42,6 +42,7 @@ use {
     tokio::sync::broadcast::{self, error::RecvError as BroadcastError},
     tokio::pin,
     tokio_util::sync::ReusableBoxFuture,
+    std::fmt,
 };
 
 #[derive(Debug, Clone)]
@@ -242,7 +243,7 @@ impl MapInteractState {
         let mut interest_auto = self.interest_auto;
         let mut interest_nearby = self.interest_nearby;
         for (map_path, map, map_info) in maps.iter_with_info(map_info, Some(map_id)) {
-            let pois = map.pois(map_info)
+            let pois = map.lpois().iter()
                 .filter_map(|(lpath, poi)| {
                     let (interest, auto) = SpaceInteraction::poi_interest(poi);
                     interest_nearby.insert(interest);
@@ -379,6 +380,16 @@ impl InteractReactor {
     pub(super) fn handle_map_leave(&mut self, rx: &mut PathingReceiver) {
         self.map_interactions.clear_active();
         rx.interact.player_pos.reset();
+        rx.interact.nearby_tx.send_if_modified(|nearby| {
+            let dirty = !nearby.is_empty();
+            nearby.clear();
+            dirty
+        });
+        rx.interact.entities_tx.send_if_modified(|entities| {
+            let dirty = !entities.is_empty();
+            entities.clear();
+            dirty
+        });
     }
     pub(super) fn handle_map_suspend(&mut self, rx: &mut PathingReceiver, gameplay: &GameplayState) {
         let (reentering_urgent, next_map_id, prev_map_id) = match *gameplay {
@@ -688,7 +699,7 @@ impl InteractReactor {
         &mut self,
         rx: &mut InteractReceiver,
         map_info: &'_ LoadedMapInfo,
-        _maps: &'a LoadedMaps,
+        maps: &'a LoadedMaps,
         pos: PlayerPosition,
     ) -> PathingEvent {
         let Some(map_id) = self.map_interactions.map_id() else { return PathingEvent::Nop };
@@ -729,7 +740,9 @@ impl InteractReactor {
             });
         let mut incoming_move = incoming.clone();
         let incoming = incoming.iter_pois()
-            .map(|(loaded_path, path)| InteractionEvent::Nearby {
+            .filter(|(lpath, _)| Self::lookup_lpoi_at(map_info, maps, *lpath)
+                .map(|(lpoi, ..)| lpoi.visibility.is_visible()).unwrap_or(false)
+            ).map(|(loaded_path, path)| InteractionEvent::Nearby {
                 path,
                 loaded_path,
             });
@@ -841,6 +854,18 @@ impl InteractReactor {
     pub(super) const INTERACT_ACTION: InteractionEventAction = InteractionEventAction::Interact;
 
     pub(super) fn poll_event(&mut self, cx: &mut Context, rx: &mut InteractReceiver) -> Poll<InteractMessage> {
+        if self.event_dirty_settings {
+            self.event_dirty_settings = false;
+            return Poll::Ready(InteractMessage::RefreshSettings)
+        }
+        if self.event_dirty_entities {
+            self.event_dirty_entities = false;
+            return Poll::Ready(InteractMessage::UpdateEntities)
+        }
+        if self.event_dirty_bvh_rebuild {
+            self.event_dirty_bvh_rebuild = false;
+            return Poll::Ready(InteractMessage::BvhRebuild)
+        }
         for _ in 0..Self::EVENT_RX_RETRY {
             let event_rx = rx.event_rx.recv();
             pin!(event_rx);
@@ -862,18 +887,6 @@ impl InteractReactor {
             if let Poll::Ready(pos) = rx.player_pos.poll_next_update(cx) {
                 return Poll::Ready(InteractMessage::PlayerMoved(pos))
             }
-        }
-        if self.event_dirty_settings {
-            self.event_dirty_settings = false;
-            return Poll::Ready(InteractMessage::RefreshSettings)
-        }
-        if self.event_dirty_entities {
-            self.event_dirty_entities = false;
-            return Poll::Ready(InteractMessage::UpdateEntities)
-        }
-        if self.event_dirty_bvh_rebuild {
-            self.event_dirty_bvh_rebuild = false;
-            return Poll::Ready(InteractMessage::BvhRebuild)
         }
         Poll::Pending
     }
@@ -950,6 +963,10 @@ impl InteractReactor {
                 }
                 out
             },
+            InteractMessage::RequestRebuild => {
+                self.event_dirty_entities = true;
+                PathingEvent::Nop
+            },
         }
     }
     pub(super) async fn reload_config(
@@ -991,14 +1008,22 @@ impl Future for InteractReactor {
         self.get_mut().poll_event_fallback(cx)
     }
 }
+#[derive(Debug)]
 pub enum InteractMessage {
     Nop,
     BvhRebuild,
     UpdateEntities,
     RefreshSettings,
+    RequestRebuild,
     Event(InteractionEvent),
     PlayerMoved(PlayerPosition),
     FanOut(Vec<Self>),
+}
+impl fmt::Display for InteractMessage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let TODO = ();
+        f.write_str("InteractMessage")
+    }
 }
 impl InteractMessage {
     pub fn join(self, e: Self) -> Self {
