@@ -1,31 +1,45 @@
-#![cfg(todo)]
-
 use std::iter;
 use glamour::Point3;
 use taimi_pack::attributes::keys::{self, Guid};
 use {
-    super::PathingWindowState,
     crate::{
+        controller::pathing::{
+            registry::{
+                PackInfo, PackMapPath, PackPath,
+                PoiMapPath,
+            },
+            shared::{interact::SpaceInteraction, SharedMapPackLoaded, SharedMapPackState},
+            state::{
+                interactive::{BehaviourConfig, InteractionEvent, InteractionEventAction, InteractivePoi},
+                LoadedPoi,
+            },
+            PathingEvent,
+        },
         exports::runtime::{imgui::{
             TableToken, TreeNode, Selectable, MouseButton, Condition,
             Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui,
-        }, Locator}, with_i18n, render::machine::RenderMachine, space::engine::Engine, Controller,
+        }},
+        with_i18n,
+        render::machine::RenderMachine,
+        render::PathingWindowState,
+        space::engine::Engine,
+        space::DrawSpace,
+        Controller,
     },
-};
-use crate::{
-    controller::pathing::{
-        registry::{CategoryIndex, CategoryPath, MarkerId, MarkerPath, PackInfo, PackMapPath, PackPath, PoiIndex, PoiPath}, shared::{SharedMapPackLoaded, SharedMapPackState},
-        state::{
-            interactive::{BehaviourConfig, InteractionEvent, InteractionEventAction, InteractivePoi},
-            VisibilityFlags,
-        },
-        SharedPacks, PathingEvent,
+    taimi_hoard::{
+        str_opt_ref,
+        loc::Locator,
     },
-    space::DrawSpace,
+    taimi_meta::packs::{
+        id::{MarkerId, MarkerPath, MarkerIndex},
+        CategoryIndex, CategoryPath, PoiIndex, PoiPath,
+        VisibilityFlags,
+    },
+    taimi_pack::attributes::InteractionAttributes,
 };
-use crate::controller::pathing::registry::MarkerIndex;
 use crate::settings::pathing::TriggerKind;
 
+#[cfg(todo)]
 impl PathingWindowState {
     pub fn draw_pois(
         &mut self,
@@ -346,8 +360,119 @@ impl PathingWindowState {
         }
     }
 
-    pub fn poi_table_start<'u>(
-        &mut self,
+    #[cfg(todo)]
+    pub(super) fn lpoi_get_guid(map_info: &SharedMapPackLoaded, loaded_path: PoiPath<PackMapPath>) -> Option<Guid> {
+        let guid_idx = map_info.info.poi_guid_mask()
+            .take(loaded_path.path as usize)
+            .filter(|&has| has)
+            .count();
+        map_info.poi_guids.get(guid_idx).cloned()
+    }
+    pub(super) fn lpoi_get_hidden(map: &SharedMapPackState, path: MarkerPath<PackPath>, guid: Option<&Guid>) -> bool {
+        let hidden_guid = guid
+            .map(|guid| MarkerId::from_uuid_ref(&guid.0))
+            .map(|id| map.hidden_markers.contains(id))
+            .unwrap_or(false);
+        hidden_guid || map.hidden_markers.contains(&MarkerId::from(path))
+    }
+    #[cfg(todo)]
+    pub(super) fn lpoi_get_filtered(map: &SharedMapPackState, ipoi_idx: usize, lpoi_path: Locator<PackPath, usize>, engine: Option<&Engine>) -> bool {
+        #[cfg(deleteme)]
+        {
+            let pack_path = lpoi_path.root;
+            let spacepoi = engine
+                .and_then(|e| e.packs.loaded_packs.get(pack_path.path as usize))
+                .and_then(|p| p.active_pois.get(lpoi_path.path as usize));
+            let Some(spacepoi) = spacepoi else {
+                // idunno
+                return false
+            };
+
+            !spacepoi.visibility.is_visible()
+        }
+        map.interactive_poi_pois.get(ipoi_idx)
+            .map(|poi| !poi.visibility.is_visible())
+            .unwrap_or(false)
+    }
+}
+
+/// TODO: deleteme
+#[derive(Debug, Clone)]
+pub(in super::super::super) struct RenderInteractivePoi {
+    pub path: PoiPath,
+    pub category_path: CategoryPath,
+    pub map_path: PackMapPath,
+    pub loaded_index: PoiIndex,
+    pub guid: Option<Guid>,
+    pub visibility: VisibilityFlags,
+    pub category_visibility: VisibilityFlags,
+    pub position: Point3<DrawSpace>,
+    pub nearby: bool,
+    pub hidden: bool,
+}
+impl RenderInteractivePoi {
+    pub fn new(
+        map_path: PackMapPath,
+        category_path: CategoryPath,
+        path: PoiPath,
+        loaded_index: PoiIndex,
+        guid: Option<Guid>,
+        visibility: VisibilityFlags,
+        position: Point3<DrawSpace>,
+        (nearby, hidden): (bool, bool),
+    ) -> Self {
+        Self {
+            map_path,
+            category_path,
+            path,
+            loaded_index,
+            guid,
+            category_visibility: visibility.default_toggles(),
+            visibility,
+            position,
+            nearby,
+            hidden,
+        }
+    }
+
+    pub fn path(&self) -> PoiPath<PackPath> {
+        self.path.pivot(self.pack_path())
+    }
+    pub fn pack_path(&self) -> PackPath {
+        self.map_path.root
+    }
+    pub fn marker_path(&self) -> MarkerPath<PackPath> {
+        self.path().map_path(MarkerIndex::with_poi)
+    }
+    pub fn loaded_path(&self) -> PoiMapPath {
+        self.map_path.rel(self.loaded_index)
+    }
+    pub fn category_path(&self) -> CategoryPath<PackPath> {
+        self.category_path.pivot(self.pack_path())
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        !self.category_visibility.is_visible()
+            || (!self.visibility.is_visible() && !self.hidden)
+    }
+
+    pub fn action_trigger(&self, action: InteractionEventAction) -> InteractionEvent {
+        InteractionEvent::Interact {
+            action,
+            path: self.path,
+            loaded_path: self.loaded_path(),
+        }
+    }
+    pub fn action_untrigger(&self) -> PathingEvent {
+        match self.guid.clone() {
+            Some(guid) =>
+                PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]),
+            None =>
+                PathingEvent::ResetMarkerPath(self.marker_path())
+        }
+    }
+
+    pub fn draw_table_start<'u>(
         ui: &Ui<'u>,
         title_id: &str,
     ) -> Option<TableToken<'u>> {
@@ -374,21 +499,85 @@ impl PathingWindowState {
         table_token
     }
 
+    pub fn draw(&self, ui: &Ui, interact: &InteractionAttributes, display_name: &str) -> bool {
+        let mut draw = DrawInteractivePoi {
+            ui,
+            rpoi: self,
+            interact,
+            display_name,
+            #[cfg(deleteme)]
+            act_selected_poi: None,
+            act_selected_poi_open: false
+        };
+        draw.draw_poi_row();
+        draw.ui.table_next_column();
+        draw.act_selected_poi_open
+    }
+}
+/// TODO: deleteme
+pub(in super::super::super) struct DrawInteractivePoi<'a, 'ui> {
+    ui: &'a Ui<'ui>,
+    rpoi: &'a RenderInteractivePoi,
+    interact: &'a InteractionAttributes,
+    display_name: &'a str,
+    act_selected_poi_open: bool,
+    #[cfg(deleteme)]
+    act_selected_poi: Option<PoiMapPath>,
+}
+impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
+    /// TODO: SpaceInteraction::interest_for_marker if attrs exist
+    fn interest(&self) -> TriggerKind {
+        SpaceInteraction::interest_for(self.interact).0
+    }
+
+    pub(super) fn draw_poi_row(
+        &mut self,
+    ) {
+        let Self { ui, rpoi, .. } = *self;
+        let _id = ui.push_id(Id::Int(rpoi.path.path as i32 ^ (rpoi.pack_path().path as i32) << 28));
+        let action = self.draw_poi_name()
+            .map(Err);
+
+        ui.table_next_column();
+
+        let action = action.or(match rpoi.hidden {
+            true => with_i18n!("trigger-untrigger", |label| ui.small_button(&label))
+                .then(|| Ok(rpoi.action_untrigger())),
+            false => with_i18n!("trigger-trigger", |label| ui.small_button(&label))
+                .then(|| Err(rpoi.action_trigger(InteractionEventAction::Trigger))),
+        });
+        if ui.is_item_clicked_with_button(MouseButton::Right) {
+            #[cfg(deleteme)]
+            {
+            self.act_selected_poi = None;
+            }
+            self.act_selected_poi_open = true;
+        }
+        match action {
+            Some(Ok(action)) =>
+                action.try_send(),
+            Some(Err(action)) => {
+                Controller::with_sender(|s| if let Some(s) = &s.pathing {
+                    let _ = s.shared.interact.events.send(action);
+                });
+            },
+            None => (),
+        }
+
+        #[cfg(deleteme)]
+        if self.act_selected_poi_open {
+            let _ = self.act_selected_poi.get_or_insert_with(|| rpoi.loaded_path());
+        }
+    }
     pub(super) fn draw_poi_name(
         &mut self,
-        ui: &Ui,
-        pack_info: &PackInfo,
-        rpoi: &RenderInteractivePoi,
-        ipoi: &InteractivePoi,
-        display_name: &str,
     ) -> Option<InteractionEvent> {
+        let Self { ui, rpoi, display_name, .. } = *self;
+        let interest = self.interest();
         let path = rpoi.path;
         let marker_path = rpoi.marker_path();
         let display_name_storage;
-        let display_name = match display_name.is_empty() {
-            false => Some(display_name),
-            true => Self::marker_display_name(&self.pack_loader_data, &mut self.category_names, pack_info, marker_path),
-        };
+        let display_name = str_opt_ref(display_name);
         let display_name = match display_name {
             Some(name) => name,
             None => {
@@ -411,16 +600,23 @@ impl PathingWindowState {
             _ => false,
         };
         if wrapped {
-            //ui.text_wrapped(display_name);
+            ui.text_wrapped(display_name);
 
-            Self::draw_title_text_truncate(ui, display_name);
-            visible_title = Self::NAME_TEMPLATE;
+            let TODO = ();
+            #[cfg(todo)]
+            {
+                Self::draw_title_text_truncate(ui, display_name);
+                visible_title = Self::NAME_TEMPLATE;
+            }
         } else {
             ui.text(display_name);
         }
         let hover = ui.is_item_hovered();
         if ui.is_item_clicked_with_button(MouseButton::Right) {
+            #[cfg(deleteme)]
+            {
             self.act_selected_poi = None;
+            }
             self.act_selected_poi_open = true;
         }
         let mut same_line = wrapped;
@@ -444,20 +640,27 @@ impl PathingWindowState {
             with_i18n!("disabled", |msg| ui.text_disabled(&msg));
         }
 
-        if let Some(r) = &ipoi.reset {
+        if interest.contains(TriggerKind::RESET) {
             same_line();
             if ui.small_button("reset") {
-                PathingEvent::GuidReset(r.guid.iter().cloned().collect()).try_send();
+                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::RESET)));
+                #[cfg(todo)]
+                if let Some(r) = &ipoi.reset {
+                    PathingEvent::GuidReset(r.guid.iter().cloned().collect()).try_send();
+                }
             }
         }
-        for showhide in ipoi.show_hide() {
+        for (trigger, showhide_action) in interest.show_hide_actions() {
             same_line();
-            if ui.small_button(showhide.action.to_string()) {
+            if ui.small_button(showhide_action.to_string()) {
+                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(trigger)));
+                #[cfg(todo)] {
                 let cat_path = showhide.category().pivot(rpoi.pack_path());
                 PathingEvent::CategorySetToggle(cat_path, showhide.action.tristate()).try_send();
+                }
             }
         }
-        if let Some(dismiss) = &ipoi.behaviour {
+        if interest.contains(TriggerKind::BEHAVIOUR) {
             same_line();
             if with_i18n!("trigger-behaviour", |label| ui.small_button(&label)) {
                 //PathingEvent::DismissMarker(poi_path, std::time::Duration::from_secs(5)).try_send();
@@ -465,52 +668,64 @@ impl PathingWindowState {
             }
             if ui.is_item_hovered() {
                 ui.tooltip(|| {
+                    let mode = self.interact.behaviour().map(|b| b.value())
+                        .unwrap_or(keys::TacoBehaviour::ResetInstance.value());
                     // TODO: idk how to do a select case is our fluent too old?
-                    with_i18n!(&format!("dismiss-behaviour-{}", dismiss.mode.value()), |label|
+                    with_i18n!(&format!("dismiss-behaviour-{}", mode), |label|
                         ui.text(label)
                     );
                 });
             }
         }
-        if let Some(copy) = &ipoi.copy {
+        if interest.contains(TriggerKind::COPY) {
             same_line();
             if with_i18n!("trigger-copy", |label| ui.small_button(&label)) {
                 action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::COPY)));
             }
             if ui.is_item_hovered() {
-                Self::draw_tooltip(ui, display_name, || {
-                    let copy_value = &copy.value.0[..];
-                    let copy_message = copy.message.as_ref()
-                        .map(|m| &m.0[..])
-                        .unwrap_or("");
-                    Self::draw_tooltip_copyable(ui, visible_title, copy_value, copy_message);
-                });
+                let TODO = ();
+                #[cfg(todo)] {
+                    if let Some(copy_value) = self.interact.copy_value() {
+                        Self::draw_tooltip(ui, display_name, || {
+                            let copy_message = self.interact.copy_message()
+                                .unwrap_or("");
+                            Self::draw_tooltip_copyable(ui, visible_title, copy_value, copy_message);
+                        });
+                    }
+                }
             }
         }
-        if let Some(info) = &ipoi.info {
+        if interest.contains(TriggerKind::INFO) {
             same_line();
             if ui.small_button("read") {
                 action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::INFO)));
             }
             if ui.is_item_hovered() {
-                Self::draw_tooltip(ui, display_name, || {
-                    ui.text_wrapped(&info.message[..]);
-                });
+                if let Some(info) = self.interact.info() {
+                    ui.tooltip_text(info);
+                    #[cfg(todo)]
+                    {
+                        Self::draw_tooltip(ui, display_name, || {
+                            ui.text_wrapped(&info.message[..]);
+                        });
+                    }
+                }
             }
         }
-        if let Some(..) = &ipoi.bounce {
+        if interest.contains(TriggerKind::BOUNCE) {
             same_line();
             if ui.small_button("anim") {
                 action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::BOUNCE)));
             }
         }
-        if let Some(..) = &ipoi.script {
+        if interest.contains(TriggerKind::SCRIPT) {
             same_line();
             if ui.small_button("script") {
                 action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::SCRIPT)));
             }
         }
 
+        #[cfg(todo)] {
         let pack_loader_data = &self.pack_loader_data;
         let tip = &*self.category_tips.entry(marker_path)
             .or_insert_with(|| {
@@ -532,6 +747,8 @@ impl PathingWindowState {
                 }
             },
         }
+        }
+        #[cfg(todo)]
         if hover {
             let display_name = display_name.to_owned();
             let visible_title = visible_title.to_owned();
@@ -594,163 +811,5 @@ impl PathingWindowState {
         }
 
         action
-    }
-    pub(super) fn draw_poi_row(
-        &mut self,
-        ui: &Ui,
-        pack_info: &PackInfo,
-        map_info: &SharedMapPackLoaded,
-        map: &SharedMapPackState,
-        rpoi: &RenderInteractivePoi,
-        ipoi: &InteractivePoi,
-    ) {
-        let _id = ui.push_id(Id::Int(rpoi.path.path as i32 ^ (rpoi.pack_path().path as i32) << 28));
-        let action = self.draw_poi_name(ui, pack_info, rpoi, ipoi, Default::default())
-            .map(Err);
-
-        ui.table_next_column();
-
-        let action = action.or(match rpoi.hidden {
-            true => with_i18n!("trigger-untrigger", |label| ui.small_button(&label))
-                .then(|| Ok(rpoi.action_untrigger())),
-            false => with_i18n!("trigger-trigger", |label| ui.small_button(&label))
-                .then(|| Err(rpoi.action_trigger(InteractionEventAction::Trigger))),
-        });
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
-            self.act_selected_poi = None;
-            self.act_selected_poi_open = true;
-        }
-        match action {
-            Some(Ok(action)) =>
-                action.try_send(),
-            Some(Err(action)) => {
-                Controller::with_sender(|s| if let Some(s) = &s.pathing {
-                    let _ = s.interactions.send(action);
-                });
-            },
-            None => (),
-        }
-
-        if self.act_selected_poi_open {
-            let _ = self.act_selected_poi.get_or_insert_with(|| rpoi.clone());
-        }
-    }
-
-    #[cfg(todo)]
-    pub(super) fn lpoi_get_guid(map_info: &SharedMapPackLoaded, loaded_path: PoiPath<PackMapPath>) -> Option<Guid> {
-        let guid_idx = map_info.info.poi_guid_mask()
-            .take(loaded_path.path as usize)
-            .filter(|&has| has)
-            .count();
-        map_info.poi_guids.get(guid_idx).cloned()
-    }
-    pub(super) fn lpoi_get_hidden(map: &SharedMapPackState, path: MarkerPath<PackPath>, guid: Option<&Guid>) -> bool {
-        let hidden_guid = guid
-            .map(|guid| MarkerId::from_uuid_ref(&guid.0))
-            .map(|id| map.hidden_markers.contains(id))
-            .unwrap_or(false);
-        hidden_guid || map.hidden_markers.contains(&MarkerId::from(path))
-    }
-    #[cfg(todo)]
-    pub(super) fn lpoi_get_filtered(map: &SharedMapPackState, ipoi_idx: usize, lpoi_path: Locator<PackPath, usize>, engine: Option<&Engine>) -> bool {
-        #[cfg(deleteme)]
-        {
-            let pack_path = lpoi_path.root;
-            let spacepoi = engine
-                .and_then(|e| e.packs.loaded_packs.get(pack_path.path as usize))
-                .and_then(|p| p.active_pois.get(lpoi_path.path as usize));
-            let Some(spacepoi) = spacepoi else {
-                // idunno
-                return false
-            };
-
-            !spacepoi.visibility.is_visible()
-        }
-        map.interactive_poi_pois.get(ipoi_idx)
-            .map(|poi| !poi.visibility.is_visible())
-            .unwrap_or(false)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct RenderInteractivePoi {
-    pub path: PoiPath,
-    pub category_path: CategoryPath,
-    pub map_path: PackMapPath,
-    pub loaded_index: PoiIndex,
-    pub ipoi_index: PoiIndex,
-    pub guid: Option<Guid>,
-    pub visibility: VisibilityFlags,
-    pub category_visibility: VisibilityFlags,
-    pub position: Point3<DrawSpace>,
-    pub nearby: bool,
-    pub hidden: bool,
-}
-impl RenderInteractivePoi {
-    pub fn new(
-        map_path: PackMapPath,
-        category_path: CategoryPath,
-        path: PoiPath,
-        loaded_index: PoiIndex,
-        ipoi_index: PoiIndex,
-        guid: Option<Guid>,
-        visibility: VisibilityFlags,
-        position: Point3<DrawSpace>,
-        (nearby, hidden): (bool, bool),
-    ) -> Self {
-        Self {
-            map_path,
-            category_path,
-            path,
-            loaded_index,
-            ipoi_index,
-            guid,
-            category_visibility: visibility.default_toggles(),
-            visibility,
-            position,
-            nearby,
-            hidden,
-        }
-    }
-
-    pub fn path(&self) -> PoiPath<PackPath> {
-        self.path.pivot(self.pack_path())
-    }
-    pub fn pack_path(&self) -> PackPath {
-        self.map_path.root
-    }
-    pub fn marker_path(&self) -> MarkerPath<PackPath> {
-        self.path().map_path(MarkerIndex::with_poi)
-    }
-    pub fn loaded_path(&self) -> Locator<PackMapPath, PoiIndex> {
-        self.map_path.rel(self.loaded_index)
-    }
-    pub fn category_path(&self) -> CategoryPath<PackPath> {
-        self.category_path.pivot(self.pack_path())
-    }
-    pub fn ipoi_path(&self) -> Locator<PackMapPath, usize> {
-        self.map_path.rel(self.ipoi_index as usize)
-    }
-
-    pub fn is_disabled(&self) -> bool {
-        !self.category_visibility.is_visible()
-            || (!self.visibility.is_visible() && !self.hidden)
-    }
-
-    pub fn action_trigger(&self, action: InteractionEventAction) -> InteractionEvent {
-        InteractionEvent::Interact {
-            action,
-            path: self.path,
-            loaded_path: self.loaded_path(),
-            interactive_path: Locator::with_path(self.ipoi_index),
-        }
-    }
-    pub fn action_untrigger(&self) -> PathingEvent {
-        match self.guid.clone() {
-            Some(guid) =>
-                PathingEvent::GuidReset(vec![guid]),
-            None =>
-                PathingEvent::ResetMarker(self.marker_path())
-        }
     }
 }

@@ -55,7 +55,8 @@ pub use self::{
 
 mod categories;
 mod menu;
-mod interact;
+/// TODO: un-pub!
+pub(in super::super) mod interact;
 mod toggles;
 
 #[derive(Debug, Default)]
