@@ -1055,9 +1055,14 @@ impl PathingController {
 
     pub(super) async fn process_marker_copy(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, value: AttrString, message: Option<AttrString>) {
         log::debug!("TODO: marker copy {} {message:?}", &value[..]);
+        RenderState::try_send(RenderEvent::SendToClipboard(value[..].into()));
+        if let Some(message) = &message {
+            self.spawn_alert(message[..].into(), Duration::from_secs(4));
+        }
     }
     pub(super) async fn process_marker_info(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, message: AttrString) {
         log::debug!("TODO: marker info {}", &message[..]);
+        self.spawn_alert(message[..].into(), Duration::from_secs(7));
     }
     pub(super) fn process_marker_dismiss(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, until: Option<Either<Timestamp, Duration>>, contexts: Vec<HideContext>, reset: Option<AutoReset>) {
         if let MarkerIndex::NS_POI = loaded_path.path.namespace() {
@@ -1068,8 +1073,49 @@ impl PathingController {
         }
     }
 }
-#[cfg(deleteme)]
 impl PathingController {
+    /// TODO: deleteme
+    pub fn spawn_alert(&mut self, message: String, duration: Duration) {
+        use tokio::time::sleep;
+        static PATHING_ALERT_HACK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+        log::debug!("TODO: replace alert system lol");
+        self.tasks.spawn(async move {
+            let lock = PATHING_ALERT_HACK.lock().await;
+            let alert = crate::timer::TextAlert {
+                    timer: crate::timer::TimerFile {
+                            icon: Default::default(),
+                            map_id: Default::default(),
+                            reset: crate::timer::TimerTrigger {
+                                    require_entry: false,
+                                    require_combat: false,
+                                    require_departure: false,
+                                    require_out_of_combat: false,
+                                    radius: None,
+                                    antipode: None,
+                                    position: None,
+                                    key_bind: None,
+                                    kind: crate::timer::TimerTriggerType::Key,
+                            },
+                            phases: Default::default(),
+                            author: Default::default(),
+                            description: Default::default(),
+                            name: Default::default(),
+                            category: Default::default(),
+                            id: Default::default(),
+                            path: None,
+                            association: None,
+                    }.into(),
+                    message: message.into(),
+            };
+            let timer = alert.timer.clone();
+            crate::render::RenderState::try_send(crate::render::RenderEvent::AlertStart(alert));
+            sleep(duration).await;
+            crate::render::RenderState::try_send(crate::render::RenderEvent::AlertEnd(timer));
+            drop(lock);
+            Ok(PathingEvent::Nop)
+        });
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InteractSettings {
