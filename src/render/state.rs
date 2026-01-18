@@ -81,6 +81,7 @@ pub enum RenderEvent {
     #[cfg(feature = "markers-edit")]
     GiveMarkerPaths(Vec<PathBuf>),
     ProgressBarUpdate(ProgressBarSettings),
+    SendToClipboard(String),
     Reload,
     ReloadAll,
     /// user pressed "quit" button, which should initiate shutdown as much as
@@ -190,6 +191,9 @@ impl RenderState {
                     },
                     ProgressBarUpdate(settings) => {
                         self.timer_window.progress_bar = settings;
+                    },
+                    SendToClipboard(data) => {
+                        ui.set_clipboard_text(data);
                     },
                     CheckingForUpdates { checking, downloading } => {
                         let sources = &mut self.primary_window.data_sources_tab;
