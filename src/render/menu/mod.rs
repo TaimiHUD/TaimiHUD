@@ -240,6 +240,9 @@ impl RenderState {
             if with_i18n!("toggle", |msg| ui.pressable(msg)) {
                 PathingEvent::ToggleKatRender.try_send();
             }
+            if let Some(_menu) = ui.begin_menu(fl!("advanced")) {
+                self.machine.pack_ui_state.draw_menu_advanced(ui);
+            }
         });
         if !inline {
             if let Some(_popup) = ui.begin_popup(submenu_id, Default::default()) {

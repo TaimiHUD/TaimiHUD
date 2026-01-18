@@ -49,7 +49,13 @@ pub use self::{
         DrawCategoryTooltip,
         DrawPackUnloaded,
     },
-    menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu},
+    menu::{
+        DrawCategoryCollectionMenu,
+        DrawCategoryContextMenu,
+        DrawCategoryMenu,
+        DrawPackAdvancedMenu,
+        DrawPackContextMenu,
+    },
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
 };
 

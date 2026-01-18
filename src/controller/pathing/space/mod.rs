@@ -622,6 +622,47 @@ impl PathingController {
             });
         }
     }
+    pub async fn debug_req_space_build(&mut self, entities: Option<bool>, bvh: Option<bool>) {
+        let Some(map_id) = self.gameplay_map() else {
+            log::warn!("mapless");
+            return
+        };
+        let space_packs = Arc::make_mut(&mut self.space.packs);
+        let bvh_dirty = {
+            if let Some(true) = entities {
+                space_packs.clear();
+            }
+            match entities {
+                Some(false) => None,
+                _ => {
+                    log::info!("space entity rebuild...");
+                    Some(space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps))
+                },
+            }
+        };
+        let _dirty = match (bvh, bvh_dirty) {
+            (Some(true), _) | (None, Some(Err(true))) => {
+                log::info!("space bvh rebuild...");
+                space_packs.rebuild_bvh();
+                true
+            },
+            (Some(false), _) => {
+                log::warn!("clearing bvh, have fun!");
+                space_packs.clear_bvh();
+                true
+            },
+            (None, Some(Err(false))) => true,
+            (None, Some(Ok(()))) => false,
+            (None, None) => true,
+        };
+        log::info!("space updated");
+        let new_copy = self.space.packs.clone();
+        self.loader.shared.space.collection.send_if_modified(|shared| {
+            *shared = new_copy;
+            true
+        });
+        log::info!("space shared");
+    }
 }
 type SpaceTextureHandle = (TextureKey, Result<TextureSlot, AttrString>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -588,6 +588,65 @@ impl PathingController {
 
         set
     }
+
+    pub async fn debug_req_config_vis(
+        &mut self,
+        pack_path: Option<PackPath>,
+        partial: bool,
+        publish: Option<bool>,
+    ) {
+        let mut dirty = false;
+        let maps = self
+            .maps
+            .iter_mut_with_info(&self.map_info, None)
+            .filter(|(path, ..)| pack_path.map(|p| path.root == p).unwrap_or(true));
+        for (map_path, map, map_info) in maps {
+            let pack_path = map_path.root;
+            let mut pack_dirty = true;
+            {
+                let info = self
+                    .packs
+                    .lookup_info(pack_path)
+                    .and_then(|i| self.loader.pack_config(pack_path).map(|c| (i, c)));
+                let Some(((info, _info), config)) = info else {
+                    log::error!("missing info+config for {map_path}");
+                    continue
+                };
+                let config = config.borrow();
+                let damage = match map.update_category_config(&map_info, &info.categories, &config.config) {
+                    Ok(true) => {
+                        pack_dirty = false;
+                        if partial {
+                            log::info!("vis update for {map_path} undamaged");
+                            continue
+                        } else {
+                            None
+                        }
+                    },
+                    _ if !partial => None,
+                    damage => damage.err(),
+                };
+                log::info!("vis updating for {map_path}...");
+                map.refresh_categories(&map_info, &info.categories, &config.config, damage.as_ref());
+            }
+            pack_dirty |=
+                Self::update_loaded_visibility_inner(map_path, map, map_info, Some(&self.filter_state));
+            log::info!("vis updated; pack_dirty={pack_dirty}");
+            dirty |= pack_dirty;
+        }
+        let publish = match (dirty, publish) {
+            (false, None) | (_, Some(false)) => false,
+            (true, _) | (_, Some(true)) => true,
+        };
+        log::info!("vis updated; dirty={dirty}, publish={publish}");
+        if publish {
+            let maps = self
+                .maps
+                .iter_with_info(&self.map_info, None)
+                .filter(|(path, ..)| pack_path.map(|p| path.root == p).unwrap_or(true));
+            self.loader.update_map_states(true, true, &mut { maps });
+        }
+    }
 }
 
 impl LoadedMapPack {
