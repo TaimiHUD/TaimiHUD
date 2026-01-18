@@ -41,7 +41,6 @@ use {
     tokio::sync::RwLock,
     tokio::sync::broadcast::{self, error::RecvError as BroadcastError},
     tokio::pin,
-    tokio_util::sync::ReusableBoxFuture,
     std::fmt,
 };
 
@@ -1008,7 +1007,7 @@ impl Future for InteractReactor {
         self.get_mut().poll_event_fallback(cx)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, strum::Display)]
 pub enum InteractMessage {
     Nop,
     BvhRebuild,
@@ -1018,12 +1017,6 @@ pub enum InteractMessage {
     Event(InteractionEvent),
     PlayerMoved(PlayerPosition),
     FanOut(Vec<Self>),
-}
-impl fmt::Display for InteractMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let TODO = ();
-        f.write_str("InteractMessage")
-    }
 }
 impl InteractMessage {
     pub fn join(self, e: Self) -> Self {
@@ -1046,6 +1039,10 @@ impl InteractMessage {
             (e0, e1) =>
                 vec![e0, e1],
         })
+    }
+
+    pub fn try_send(self) {
+        PathingEvent::InteractControl(self).try_send()
     }
 }
 

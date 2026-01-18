@@ -2,12 +2,12 @@ use {
     crate::{
         controller::{
             api::ApiController,
-            pathing::{PathingController, PathingEnables, PathingEvent},
+            pathing::{InteractMessage, PathingController, PathingEnables, PathingEvent},
             Controller,
         },
         render::{element::prelude::*, machine::RenderMachine, RenderEvent, RenderState},
         settings::{
-            pathing::{CameraSource, PathingSettings, SpaceSettings},
+            pathing::{CameraSource, PathingSettings, SpaceSettings, TriggerKind},
             Settings,
         },
         with_i18n,
@@ -482,7 +482,7 @@ impl PathingConfig {
         }
 
         let filters_tree = with_i18n!("pathing-config-filters", |label| ui.begin_tree_node_framed(
-            ImCondition::startup(false),
+            ImCondition::startup(true),
             c"pathing-config-filters",
             label,
             false,
@@ -499,15 +499,17 @@ impl PathingConfig {
             if ui.is_item_hovered() {
                 with_i18n!("pathing-config-api-bypass-notice", |msg| ui.tooltip_text(&msg));
             }
-        }
-        let festivals_tree = with_i18n!("pathing-config-festivals", |label| ui.begin_tree_node_framed(
-            ImCondition::startup(false),
-            c"pathing-config-festivals",
-            label,
-            false,
-        ));
-        if let Some(_tree) = festivals_tree {
-            self.draw_festival_opts(ui)
+            self.draw_interaction_opts(ui);
+
+            let festivals_tree = with_i18n!("pathing-config-festivals", |label| ui.begin_tree_node_framed(
+                ImCondition::startup(false),
+                c"pathing-config-festivals",
+                label,
+                false,
+            ));
+            if let Some(_tree) = festivals_tree {
+                self.draw_festival_opts(ui)
+            }
         }
 
         let advanced = with_i18n!("pathing-config-advanced", |label| ui.begin_tree_node_framed(
@@ -752,6 +754,56 @@ impl PathingConfig {
         }
     }
 
+    fn draw_interaction_opts(&mut self, ui: &Ui) {
+        let settings = Self::get_pathing(|s| (s.trigger_allow_auto, s.trigger_allow_interact));
+        let Some((
+            trigger_allow_auto,
+            trigger_allow_interact,
+        )) = settings else {
+            return
+        };
+
+        let interaction_tree = with_i18n!("pathing-config-interactions", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(false)
+            .push(ui));
+        if let Some(_tree) = interaction_tree {
+            let _id = ui.push_id("trigger_allow_interact");
+            if let Some(set) = self.draw_trigger_opts(ui, trigger_allow_interact) {
+                Self::set_pathing(|s| s.trigger_allow_interact = set);
+                InteractMessage::RefreshSettings.try_send();
+            }
+        }
+
+        ui.indent();
+        let autotrigger_tree = with_i18n!("pathing-config-autotrigger", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(false)
+            .push(ui));
+        if let Some(_tree) = autotrigger_tree {
+            let _id = ui.push_id("trigger_allow_auto");
+            with_i18n!("pathing-config-autotrigger-notice", |msg| ui.text_wrapped(msg));
+            if let Some(set) = self.draw_trigger_opts(ui, trigger_allow_auto) {
+                Self::set_pathing(|s| s.trigger_allow_auto = set);
+                InteractMessage::RefreshSettings.try_send();
+            }
+        }
+        ui.unindent();
+    }
+    fn draw_trigger_opts(&mut self, ui: &Ui, mut setting: TriggerKind) -> Option<TriggerKind> {
+        let mut changed = false;
+        for (i, flag) in TriggerKind::SETTINGS_GUI.into_iter().enumerate() {
+            if i % 4 != 0 {
+                ui.same_line();
+            }
+            changed |= with_i18n!(flag.flag_str().unwrap_or_default(), |msg| ui.checkbox_flags(msg, &mut setting, flag));
+        }
+        setting.set(TriggerKind::SETTINGS_TOGGLE_SHOWHIDE, setting.contains(TriggerKind::TOGGLE));
+        changed.then_some(setting)
+    }
+
     #[cfg(feature = "goggles")]
     fn draw_goggles_opts<'ui, U>(ui: &mut U, machine: &mut RenderMachine) -> Option<()>
     where
@@ -850,6 +902,7 @@ impl PathingConfig {
             c"advanced lens config",
         );
         if let Some(_tree) = lenses_tree {
+            let _id = ui.push_id(c"lens");
             render_goggles::options_ui_lenses(ui);
         }
 
