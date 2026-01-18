@@ -218,6 +218,9 @@ impl RenderState {
             if with_i18n!("toggle", |msg| Selectable::new(&msg).build(ui)) {
                 PathingEvent::ToggleKatRender.try_send();
             }
+            if let Some(_menu) = with_i18n!("advanced", |msg| ui.begin_menu(&msg)) {
+                self.machine.pack_ui_state.draw_menu_advanced(ui);
+            }
             if let Some(_menu) = ui.begin_menu("some") {
                 self.pathing_menu_open = true;
                 if pathing_enabled {

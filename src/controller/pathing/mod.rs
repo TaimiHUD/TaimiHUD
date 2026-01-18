@@ -140,6 +140,9 @@ pub(crate) enum PathingEvent {
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
     Nop,
+    // Debug and diagnostics commands
+    RequestRebuildSpace { entities: Option<bool>, bvh: Option<bool> },
+    RequestRebuildVis { pack_path: Option<PackPath>, partial: bool, notify: Option<bool> },
 }
 pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
 
@@ -582,6 +585,12 @@ impl PathingController {
                 self.collect_garbage(tick, aggressive, self.gameplay_map()).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
             Nop => (),
+            RequestRebuildSpace { entities, bvh } => {
+                self.debug_req_space_build(entities, bvh).await;
+            },
+            RequestRebuildVis { pack_path, partial, notify } => {
+                self.debug_req_config_vis(pack_path, partial, notify).await;
+            },
             #[cfg(debug_assertions)]
             Exit(..) | FanOut(..) => unreachable!(),
             #[cfg(not(debug_assertions))]

@@ -37,6 +37,7 @@ clear = Clear
 refresh = Refresh
 refresh-files = Refresh files
 loading = Loading
+advanced = Advanced
 # as in 3D
 model = Model
 revert = Revert

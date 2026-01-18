@@ -11,12 +11,14 @@ use {
         UiAction,
     },
     crate::{
+        controller::pathing::PathingEvent,
         exports::runtime::imgui::{MenuItem, MenuToken, MouseButton, Selectable, StyleVar, Ui},
         with_i18n,
     },
+    std::borrow::Cow,
     glam::Vec2,
     glamour::Rect,
-    taimi_meta::packs::{CategoryIndex, CategoryPath},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath},
 };
 
 impl<'a, 'u> super::DrawCategoryToggle<'a, 'u> {
@@ -144,6 +146,22 @@ impl super::PackElement {
         }
         self.act_post_draw(ui, act_cat, act_pack, false);
     }
+    pub fn draw_menu_advanced(&self, ui: &Ui) {
+        let display_name = self.state.display_name().map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(self.state.info.to_string()));
+        let menu = ui.begin_menu(&display_name);
+        if let Some(_menu) = menu {
+            let mut draw = DrawPackAdvancedMenu {
+                ui,
+                path: self.state.pack_path(),
+                act_pathing: None,
+            };
+            draw.draw();
+            if let Some(pmsg) = draw.act_pathing {
+                pmsg.try_send();
+            }
+        }
+    }
 
     pub(super) fn draw_pack_context(&mut self, ui: &Ui) {
         let draw_cat = if let Some(root) = self.state.info.unique_root().map(|r| r.path()) {
@@ -203,6 +221,39 @@ impl super::PackElement {
             pack_visible,
             any_open,
             any_closed,
+        }
+    }
+}
+impl super::PackElements {
+    pub fn draw_menu_advanced(&mut self, ui: &Ui) {
+        let mut act_pathing = None;
+        if MenuItem::new("refresh vis").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: false, notify: None });
+        }
+        if MenuItem::new("rebuild vis (force)").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: false, notify: Some(true) });
+        }
+        if MenuItem::new("rebuild vis (partial)").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: true, notify: Some(true) });
+        }
+        if MenuItem::new("rebuild space").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: None, bvh: None });
+        }
+        if MenuItem::new("rebuild space (force)").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(true) });
+        }
+        if MenuItem::new("rebuild space (bvh only)").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(false), bvh: Some(true) });
+        }
+        if MenuItem::new("nuke space bvh").build(ui) {
+            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
+        }
+        ui.separator();
+        if let Some(pmsg) = act_pathing {
+            pmsg.try_send();
+        }
+        for (_pack_path, pack) in self.pack_state.iter() {
+            pack.draw_menu_advanced(ui);
         }
     }
 }
@@ -680,5 +731,20 @@ impl<'a, 'u> DrawCategoryContextMenu<'a, 'u> {
 
     pub fn id() -> &'static str {
         "cat-context"
+    }
+}
+pub struct DrawPackAdvancedMenu<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub path: PackPath,
+    pub act_pathing: Option<PathingEvent>,
+}
+impl<'a, 'u> DrawPackAdvancedMenu<'a, 'u> {
+    pub fn draw(&mut self) {
+        if MenuItem::new("rebuild vis").build(self.ui) {
+            self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: false, notify: Some(true) });
+        }
+        if MenuItem::new("rebuild vis (partial)").build(self.ui) {
+            self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: true, notify: None });
+        }
     }
 }
