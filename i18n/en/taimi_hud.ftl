@@ -393,7 +393,10 @@ pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
 pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
-pathing-config-filters = Filters
+pathing-config-filters = Dynamic Content
+pathing-config-interactions = Interactions
+pathing-config-autotrigger = Auto-trigger
+pathing-config-autotrigger-notice = Additionally allow the following to automatically trigger when in range
 pathing-config-api-bypass = API bypass
 pathing-config-api-bypass-notice = Temporarily show completed achievements when replaying content with your friends
 pathing-config-festivals = {festival}s
@@ -425,9 +428,6 @@ dragonbash = Dragon Bash
 
 ## Interaction
 
-pathing-config-interactions = Interactions
-pathing-config-autotrigger = Auto-trigger
-pathing-config-autotrigger-notice = Additionally allow the following to automatically trigger when in range
 trigger-copy = Copy
 trigger-info = Info popup
 trigger-reset = POI reset

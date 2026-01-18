@@ -17,7 +17,7 @@ use {
     },
     crate::{
         controller::pathing::registry::UnloadedReason,
-        exports::runtime::imgui::{self, Condition, TreeNodeToken, Ui},
+        exports::runtime::imgui::{self, StyleVar, Condition, TreeNodeToken, Ui},
         with_i18n,
     },
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
@@ -55,6 +55,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             let (act, token) = header.draw();
             pack_act = act;
             pack_toggle = header.draw_toggle_inline();
+            if token.is_some() {
+                self.ui.indent();
+            }
             token
         } else {
             None
@@ -92,6 +95,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
                 }
                 categories.pop_all();
             }
+        }
+        if token.is_some() {
+            self.ui.unindent();
         }
         drop(token);
         if let Some(act) = pack_toggle {
@@ -259,6 +265,31 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
 
     pub(super) fn has_toggle(&self) -> bool {
         !self.flags.contains(CategoryFlags::SEPARATOR) && !self.is_lonely
+    }
+}
+impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
+    pub fn draw_toggle_inline(&mut self) -> Option<bool> {
+        self.ui.same_line();
+        self.ui.dummy([4.0, 0.0]);
+        self.ui.same_line();
+        self.draw_toggle_checkbox()
+    }
+    pub fn draw_toggle_prefix(&mut self) -> (Option<bool>, imgui::StyleStackToken<'a>) {
+        self.ui.unindent();
+        let checkbox_gap = self.ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+        #[cfg(todo = "unnecessary")]
+        let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
+        let act = self.draw_toggle_checkbox();
+        self.ui.same_line();
+        (act, checkbox_gap)
+    }
+    pub fn end_toggle_prefix(&mut self) {
+        self.ui.indent();
+    }
+    pub fn draw_toggle_checkbox(&mut self) -> Option<bool> {
+        self.ui
+            .checkbox("", &mut self.toggle_state)
+            .then(move || self.toggle_state)
     }
 }
 

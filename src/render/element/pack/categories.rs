@@ -113,29 +113,6 @@ impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
         };
         (action, tree_token)
     }
-    pub fn draw_toggle_inline(&mut self) -> Option<bool> {
-        self.ui.same_line();
-        self.ui.dummy([4.0, 0.0]);
-        self.ui.same_line();
-        self.draw_toggle_checkbox()
-    }
-    pub fn draw_toggle_prefix(&mut self) -> (Option<bool>, imgui::StyleStackToken<'a>) {
-        self.ui.unindent();
-        let checkbox_gap = self.ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
-        #[cfg(todo = "unnecessary")]
-        let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
-        let act = self.draw_toggle_checkbox();
-        self.ui.same_line();
-        (act, checkbox_gap)
-    }
-    pub fn end_toggle_prefix(&mut self) {
-        self.ui.indent();
-    }
-    pub fn draw_toggle_checkbox(&mut self) -> Option<bool> {
-        self.ui
-            .checkbox("", &mut self.toggle_state)
-            .then(move || self.toggle_state)
-    }
 }
 
 pub struct DrawPackUnloaded<'a, 'ui> {

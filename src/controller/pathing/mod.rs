@@ -64,6 +64,7 @@ use {
 #[allow(unused_imports)]
 pub use self::{
     config::PackConfig,
+    interact::InteractMessage,
     festivals::FestivalFixup,
     registry::{LoaderBox, UnloadedReason},
     shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
@@ -127,6 +128,7 @@ pub(crate) enum PathingEvent {
         loaded_path: LoadedMarkerPath<PackMapPath>,
         message: AttrString,
     },
+    #[strum(to_string = "InteractControl {0}")]
     InteractControl(interact::InteractMessage),
     ToggleKatRender,
     ApiBypass(Option<bool>),
