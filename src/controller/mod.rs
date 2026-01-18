@@ -406,11 +406,11 @@ impl Controller {
         if combat_state != self.previous_combat_state {
             let cbt = match combat_state {
                 true => {
-                    log::debug!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
+                    log::trace!("MumbleLink: Combat begins at {:?}!", SystemTime::now());
                     CombatState::Entered
                 },
                 false => {
-                    log::debug!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
+                    log::trace!("MumbleLink: Combat ends at {:?}!", SystemTime::now());
                     CombatState::Exited
                 },
             };
@@ -476,11 +476,11 @@ impl Controller {
         let propagate = match evt.get_statechange() {
             StateChange::None => None,
             StateChange::EnterCombat => {
-                log::debug!("ArcDPS: Combat begins at {}!", evt.time);
+                log::trace!("ArcDPS: Combat begins at {}!", evt.time);
                 Some(CombatState::Entered)
             },
             StateChange::ExitCombat => {
-                log::debug!("ArcDPS: Combat ends at {}!", evt.time);
+                log::trace!("ArcDPS: Combat ends at {}!", evt.time);
                 Some(CombatState::Exited)
             },
             _ => None,
