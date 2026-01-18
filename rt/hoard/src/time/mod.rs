@@ -258,10 +258,14 @@ impl Timestamp {
             (Err(l), Err(r)) => l > r,
         };
         let amt = match (lhs, rhs, neg) {
-            (Ok(l), Err(r), _) => return Ok(l.saturating_add(r)),
-            (Err(l), Ok(r), _) => return Err(l.saturating_add(r)),
-            (Ok(l), Ok(r), true) | (Err(l), Err(r), false) => r.saturating_sub(l),
-            (Ok(l), Ok(r), false) | (Err(l), Err(r), true) => l.saturating_sub(r),
+            | (Ok(p), Err(n), _)
+            | (Err(n), Ok(p), _)
+            => p.saturating_add(n),
+            | (Ok(s), Ok(b), true)
+            | (Err(s), Err(b), false)
+            | (Ok(b), Ok(s), false)
+            | (Err(b), Err(s), true)
+                => b.saturating_sub(s),
         };
         Self::signed_duration_new(amt, neg)
     }
