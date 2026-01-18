@@ -19,7 +19,7 @@ fn watch_next_change<'a, K: 'a, T: 'static>(
 ) -> impl Stream<Item = (K, Rx<T>)> + Unpin + Send + Sync + 'a
 where
     T: Sync + Send,
-    K: Sync + Send,
+    K: Sync + Send + Clone,
 {
     let mut key = Some(key);
     let mut storage = Some(ReusableBoxFuture::new(changed_static(rx)));
@@ -29,7 +29,7 @@ where
         match res {
             Ok(watch) => {
                 changed.set(changed_static(watch.clone()));
-                Poll::Ready(key.take().map(|k| (k, watch)))
+                Poll::Ready(key.clone().map(|k| (k, watch)))
             },
             Err(..) => {
                 let _ = storage.take();
@@ -42,7 +42,7 @@ where
 pub fn stream_watch_changes_of<'t, K, T, I>(senders: I, mark_changed: bool) -> WatchStreamBox<K, T>
 where
     I: IntoIterator<Item = (K, &'t Tx<T>)>,
-    K: Sync + Send + 'static,
+    K: Sync + Send + Clone + 'static,
     T: Sync + Send + 'static,
 {
     let stream = stream_watch_changes(senders.into_iter().map(|(key, tx)| {
@@ -60,7 +60,7 @@ pub fn stream_watch_changes<'k, 'i, K, T, I>(
 ) -> impl FusedStream<Item = (K, Rx<T>)> + Unpin + Send + Sync + 'k
 where
     I: IntoIterator<Item = (K, Rx<T>)> + 'i,
-    K: Sync + Send + 'k,
+    K: Sync + Send + Clone + 'k,
     T: Sync + Send + 'static,
 {
     senders
