@@ -17,6 +17,7 @@ use {
     anyhow::Context,
     std::{
         collections::{BTreeMap, HashSet, VecDeque},
+        future::Future,
         iter,
         mem,
         sync::Arc,
@@ -262,14 +263,25 @@ impl PathingController {
                 format!("{pack_path} missing category {}", id.as_str())
             })
     }
-    pub(super) async fn category_commit_vis(&mut self, pack_path: PackPath, dirty_cats: &mut (dyn Iterator<Item = CategoryPath> + Send)) {
-        let pack_info = self.loader.pack_info(pack_path);
-        let categories = pack_info.as_ref().and_then(|pack_info| pack_info.category_info());
-        let config = self.loader.pack_config(pack_path);
-        let (Some((categories, _)), Some(config)) = (categories, config) else {
+    pub(super) fn category_commit_vis<'a>(&'a mut self, pack_path: PackPath, dirty_cats: &'_ mut dyn Iterator<Item = CategoryPath>) -> impl Future<Output = ()> + 'a {
+        let commit = self.category_commit_vis_of(pack_path, dirty_cats);
+        if commit.is_none() {
             log::error!("cannot save category settings for unloaded {pack_path}");
-            return
-        };
+        }
+        async move {
+            if let Some(commit) = commit {
+                commit.await
+            }
+        }
+    }
+    pub(super) fn category_commit_vis_of<'a>(
+        &'a mut self,
+        pack_path: PackPath,
+        dirty_cats: &'_ mut dyn Iterator<Item = CategoryPath>,
+    ) -> Option<impl Future<Output = ()> + 'a> {
+        let pack_info = self.loader.pack_info(pack_path);
+        let (categories, ..) = pack_info.as_ref().and_then(|pack_info| pack_info.category_info())?;
+        let config = self.loader.pack_config(pack_path)?;
         let changes = {
             // TODO: avoid collect but also avoid borrowing or copying config :<
             let config = config.borrow();
@@ -282,7 +294,7 @@ impl PathingController {
                 })
                 .collect::<Vec<_>>()
         };
-        self.category_commit_vis_post(pack_path, changes).await
+        Some(self.category_commit_vis_post(pack_path, changes))
     }
     async fn category_commit_vis_task<C>(loader: Arc<PackLoader>, pack_path: PackPath, dirty_cats: C) -> anyhow::Result<PathingEvent> where
         C: IntoIterator<Item = (CategoryPath, bool)> + Send,

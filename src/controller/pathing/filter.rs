@@ -194,6 +194,7 @@ impl PathingController {
     }
 
     #[inline]
+    #[cfg(deleteme)]
     pub(super) fn unexpire_at(filter_expiry: &mut BTreeMap<MarkerId, AbortHandle>, item: &MarkerId) -> bool {
         if let Some(handle) = filter_expiry.remove(item) {
             handle.abort();
@@ -203,8 +204,9 @@ impl PathingController {
         }
     }
     pub(super) fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
-        Self::unexpire_at(&mut self.filter_expiry, item.as_ref())
+        Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, item.as_ref())
     }
+    #[cfg(deleteme)]
     pub(super) fn expire_at(&mut self, item: MarkerId, expiry: WallInstant) {
         let handle = self.tasks.spawn(async move {
             let _ = expiry.to_future().await;
@@ -274,7 +276,7 @@ impl PathingController {
                 },
                 None => hidden_dirty_unk = true,
             }
-            let id_dirty = hidden_dirty | Self::unexpire_at(&mut self.filter_expiry, &id);
+            let id_dirty = hidden_dirty | Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, &id);
             if id_dirty {
                 self.filter_state_signal = Some(true);
             }
@@ -323,11 +325,13 @@ impl PathingController {
             .map(|(_, _, guid)| MarkerId::from_uuid_ref(guid.as_ref()));
         filter_state.hidden.populate_from_settings(hidden_guids, &mut {all_guids}, now)
     }
+    #[cfg(todo = "unused")]
     pub(super) fn populate_hidden_guids(filter_state: &mut FilterState, maps: &LoadedMaps, map_info: &LoadedMapInfo, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
         let all_guids = maps.marker_guids(map_info, for_map_id).map(|(_, _, guid)| MarkerId::from_uuid_ref(guid.as_ref()));
         Self::clone_hidden_guids().map(move |hidden_guids| filter_state.hidden.populate_from_settings(&hidden_guids, &mut {all_guids}, now))
             .unwrap_or(false)
     }
+    #[cfg(todo = "unused")]
     pub(super) fn refresh_hidden_guids_inner(filter_state: &mut FilterState, maps: &LoadedMaps, map_info: &LoadedMapInfo, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
         let mut dirty = Self::populate_hidden_guids(&mut *filter_state, maps, map_info, for_map_id, now);
         if let Some(now) = now {
@@ -335,6 +339,7 @@ impl PathingController {
         }
         dirty
     }
+    #[cfg(todo = "unused")]
     pub(super) fn refresh_hidden_guids(&mut self, for_map_id: Option<MapIndex>, now: Option<Timestamp>) -> bool {
         Self::refresh_hidden_guids_inner(&mut self.filter_state, &self.maps, &self.map_info, for_map_id, now)
     }

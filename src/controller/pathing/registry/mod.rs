@@ -283,7 +283,7 @@ impl PackCategoryInfo {
                         .then_some(i),
                 )
             })
-            .collect();
+            .unzip4_flatten();
 
         Self {
             all: all.into_boxed_slice(),

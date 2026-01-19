@@ -26,8 +26,13 @@ impl<N, L> Locator<N, L> {
         let Self { root, path } = self;
         (root, path)
     }
+    #[inline]
     pub fn into_path(self) -> L {
         self.path
+    }
+    #[inline]
+    pub fn into_root(self) -> N {
+        self.root
     }
 
     pub fn borrowed(&self) -> Locator<&N, &L> {
@@ -36,6 +41,7 @@ impl<N, L> Locator<N, L> {
     }
 
     /// TODO: rename to `from_path` so this can be const version? .-.
+    #[inline]
     pub fn with_path<P: Into<L>>(path: P) -> Self
     where
         N: Default,
@@ -372,16 +378,32 @@ where
         self.path.as_()
     }
 }
-impl<N: Default, L> num_traits::AsPrimitive<Locator<N, L>> for usize
-where
-    usize: num_traits::AsPrimitive<L>,
-    L: Copy + Clone + 'static,
-    N: Copy + Clone + 'static,
-{
-    fn as_(self) -> Locator<N, L> {
-        Locator::with_parts(N::default(), self.as_())
-    }
+macro_rules! impl_loc {
+    (@primitives($($prim:ty,)*)) => {
+        $(
+            impl_loc! {
+                impl AsPrimitive<Locator<N, L>> for $prim;
+            }
+        )*
+    };
+    (impl AsPrimitive<Locator<N, L>> for $prim:ty;) => {
+        impl<N, L> num_traits::AsPrimitive<Locator<N, L>> for $prim
+        where
+            $prim: num_traits::AsPrimitive<L>,
+            L: Copy + Clone + 'static,
+            N: Default + Copy + Clone + 'static,
+        {
+            #[inline]
+            fn as_(self) -> $crate::loc::Locator<N, L> {
+                $crate::loc::Locator::with_path(self.as_())
+            }
+        }
+    };
 }
+impl_loc! { @primitives(
+    usize, u64, u32, u16, u8, bool,
+    isize, i64, i32, i16, i8,
+) }
 
 pub unsafe trait PhantomNamespace: Sized {
     const ZST: Self;

@@ -142,7 +142,7 @@ impl NearbyMarkers {
                 .lazy_map(move |(lpath, poi_path)| {
                     let lpath =
                         lpath.map_root(|root| root.rel(map_id))
-                        .map_path(|p| p.path);
+                        .map_path(Locator::into_path);
                     (lpath, *poi_path)
                 })
             ).into_iter().flatten()

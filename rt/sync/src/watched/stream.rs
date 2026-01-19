@@ -21,7 +21,7 @@ where
     T: Sync + Send,
     K: Sync + Send + Clone,
 {
-    let mut key = Some(key);
+    let key = Some(key);
     let mut storage = Some(ReusableBoxFuture::new(changed_static(rx)));
     stream::poll_fn(move |cx| {
         let Some(changed) = &mut storage else { return Poll::Pending };

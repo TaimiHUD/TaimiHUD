@@ -152,6 +152,55 @@ impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O> {
 }
 impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
     #[inline]
+    pub fn empty() -> Self {
+        Self::new(BitVec::new())
+    }
+    pub fn with_capacity(cap: usize) -> Self {
+        Self::new(BitVec::with_capacity(cap))
+    }
+    pub fn with_capacity_exact(max: usize) -> Self {
+        let mut flags = BitVec::new();
+        flags.reserve_exact(max);
+        Self::new(flags)
+    }
+
+    pub fn extend_sorted<L, I>(&mut self, iter: I) where
+        I: IntoIterator<Item = L>,
+        I::IntoIter: DoubleEndedIterator,
+        L: AsPrimitive<usize>,
+    {
+        let mut iter = iter.into_iter();
+        let max = iter.next_back().map(AsPrimitive::as_);
+        if let Some(max) = max {
+            let new_len = max + 1;
+            let additional = new_len.saturating_sub(self.end_len());
+            if new_len > self.flags.capacity() && additional > 0 {
+                self.reserve_exact(additional);
+            }
+            self.flags.resize(new_len, false);
+            unsafe {
+                *self.flags.get_unchecked_mut(max) = true;
+            }
+        }
+        for i in iter {
+            let index = i.as_();
+            debug_assert!(index <= self.end_len());
+            unsafe {
+                *self.flags.get_unchecked_mut(index) = true;
+            }
+        }
+    }
+    pub fn collect_sorted<L, I>(iter: I) -> Self where
+        I: IntoIterator<Item = L>,
+        I::IntoIter: DoubleEndedIterator,
+        L: AsPrimitive<usize>,
+    {
+        let mut flags = Self::empty();
+        flags.extend_sorted(iter);
+        flags
+    }
+
+    #[inline]
     pub fn extend_to<L: AsPrimitive<usize>>(&mut self, min_size: L, fill: bool) {
         self.extend_to_size(min_size.as_(), fill)
     }
@@ -416,11 +465,15 @@ pub struct FlagSet<F: BitFlagForSet, V = BitVec<<F as BitFlagForSet>::Repr>> {
 
 impl<F: BitFlagForSet, V> FlagSet<F, V> {
     #[inline]
-    pub const fn new(flags: V) -> Self {
+    pub const fn with_set(flags: BitSet<V, <F as BitFlagForSet>::Repr>) -> Self {
         Self {
-            flags: BitSet::new(flags),
+            flags,
             _values: PhantomData,
         }
+    }
+    #[inline]
+    pub const fn new(flags: V) -> Self {
+        Self::with_set(BitSet::new(flags))
     }
 }
 
@@ -428,16 +481,13 @@ impl<F: BitFlagForSet> FlagSet<F> {
     #[inline]
     pub fn with_capacity(amt: usize) -> Self {
         let len = F::range_for(amt).start;
-        let mut flags = BitVec::new();
-        flags.reserve_exact(len);
-        Self::new(flags)
+        Self::with_set(BitSet::with_capacity_exact(len))
     }
     pub fn with_len(amt: usize, fill: bool) -> Self {
         let len = F::range_for(amt).start;
-        let mut flags = BitVec::new();
-        flags.reserve_exact(len);
+        let mut flags = BitSet::with_capacity_exact(len);
         flags.resize(len, fill);
-        Self::new(flags)
+        Self::with_set(flags)
     }
 
     pub fn extend_to(&mut self, min_len: usize, fill: bool) {

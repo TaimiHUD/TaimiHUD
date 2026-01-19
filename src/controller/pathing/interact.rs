@@ -241,7 +241,7 @@ impl MapInteractState {
 
         let mut interest_auto = self.interest_auto;
         let mut interest_nearby = self.interest_nearby;
-        for (map_path, map, map_info) in maps.iter_with_info(map_info, Some(map_id)) {
+        for (map_path, map, _map_info) in maps.iter_with_info(map_info, Some(map_id)) {
             let pois = map.lpois().iter()
                 .filter_map(|(lpath, poi)| {
                     let (interest, auto) = SpaceInteraction::poi_interest(poi);
@@ -368,7 +368,7 @@ impl InteractReactor {
             event_dirty_entities: false,
         }
     }
-    pub(super) fn handle_map_enter(&mut self, rx: &mut PathingReceiver, maps: &LoadedMaps, map_info: &LoadedMapInfo, map_id: MapIndex) {
+    pub(super) fn handle_map_enter(&mut self, rx: &mut PathingReceiver, _maps: &LoadedMaps, _map_info: &LoadedMapInfo, _map_id: MapIndex) {
         if rx.interact.player_pos.ml.is_none() {
             // some initial setup...
             rx.interact.player_pos.set_ml(rt::mumble_link_ptr().ok());
@@ -670,7 +670,7 @@ impl InteractReactor {
         if let Some(guid) = guid {
             // TODO: does ResetMarkerPath already fan this out and make this unnecessary? could be an or...
             if self.handle_interaction_end(filter_state, guid.0.as_ref()) {
-                msg = msg.join(PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]));
+                msg.push(PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]));
             }
         }
 
@@ -838,9 +838,9 @@ impl InteractReactor {
                 if !matches!((&res, &interact), (PathingEvent::Nop, PathingEvent::Nop)) {
                     log::debug!("TODO: activating multiple POIs, should've stopped at the closest?");
                 }
-                res = match interact {
-                    PathingEvent::Nop => continue,
-                    e => res.join(e),
+                match interact {
+                    e if e.is_empty() => continue,
+                    e => res.push(e),
                 };
                 #[cfg(todo)]
                 {
@@ -956,7 +956,7 @@ impl InteractReactor {
                         m => {
                             let process = self.process_event(rx, (maps, map_info, filter_state, settings), m);
                             let process = Box::pin(process).await;
-                            out = out.join(process);
+                            out.push(process);
                         },
                     }
                 }
@@ -1053,7 +1053,7 @@ impl PathingController {
         true
     }
 
-    pub(super) async fn process_marker_copy(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, value: AttrString, message: Option<AttrString>) {
+    pub(super) async fn process_marker_copy(&mut self, _path: MarkerPath, _loaded_path: LoadedMarkerPath<PackMapPath>, value: AttrString, message: Option<AttrString>) {
         log::debug!("TODO: marker copy {} {message:?}", &value[..]);
         RenderState::try_send(RenderEvent::SendToClipboard(value[..].into()));
         if let Some(message) = &message {
