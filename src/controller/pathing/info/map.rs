@@ -27,8 +27,10 @@ use {
     taimi_hoard::{
         iters::IterExt as _,
         loc::{indexed::IndexedList, LocationRef, NamespacePivotTo},
+        flags::BitSet,
     },
     taimi_meta::packs::{
+        collections::CategorySet,
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
         CategoryIndex,
         CategoryPath,
@@ -73,23 +75,14 @@ impl MapPackInfo {
     pub fn with_pack(map_id: MapIndex, pack: &Pack, info: &PackInfo) -> Self {
         let info_sig = PackInfoSignature::from_info(info);
 
-        // TODO: this doesn't need to use the string ids anymore...
         let id32 = map_id.get() as i32;
         let mut categories = {
             let category_estimate = pack.categories.all_categories.len() / 32;
-            Vec::<CategoryIndex>::with_capacity(category_estimate)
+            CategorySet::with_capacity(category_estimate)
         };
         let mut insert_cat = |category: &FullIdRef| -> bool {
             if let Some(idx) = pack.categories.all_categories.get_index_of(category) {
-                let idx = idx as CategoryIndex;
-                let insert = categories.partition_point(|&i| i < idx);
-                match categories.get(insert) {
-                    Some(&i) if i == idx => false,
-                    _ => {
-                        categories.insert(insert, idx);
-                        true
-                    },
-                }
+                categories.insert_index(idx)
             } else {
                 true
             }
@@ -110,47 +103,29 @@ impl MapPackInfo {
                 false
             }
         };
-        let mut pois = BitVec::new();
         let mut active_pois = pack
             .pois
             .iter()
             .enumerate()
             .filter(|(_i, poi)| filter_mapid(poi.map_id, poi.category.as_ref()))
-            .map(|(i, _)| i)
-            .rev();
-        if let Some(i) = active_pois.next() {
-            pois.reserve_exact(i + 1);
-            pois.resize(i, false);
-            pois.push(true);
-        }
-        for i in active_pois {
-            pois.set(i, true);
-        }
+            .lazy_map(|(i, _)| i);
+        let pois = BitSet::collect_sorted(active_pois);
         // TODO: use some sort of space-efficient encoding like RLE for these masks
         // even just an initial offset or vec of bit group lengths (pos/neg for 0 vs 1) would help?
-        let mut trails = BitVec::new();
         let mut active_trails = pack
             .trails
             .iter()
             .enumerate()
             .filter(|(_i, trail)| filter_mapid(trail.map_id.unwrap_or(0), trail.category.as_ref()))
-            .map(|(i, _)| i)
-            .rev();
-        if let Some(i) = active_trails.next() {
-            trails.reserve_exact(i + 1);
-            trails.resize(i, false);
-            trails.push(true);
-        }
-        for i in active_trails {
-            trails.set(i, true);
-        }
+            .lazy_map(|(i, _)| i);
+        let trails = BitSet::collect_sorted(active_trails);
 
-        let categories = categories.into_boxed_slice();
+        let categories = categories.into_index_boxed();
 
         Self {
             info_sig,
-            pois,
-            trails,
+            pois: pois.into_flags(),
+            trails: trails.into_flags(),
             categories,
             trail_info: Default::default(),
         }

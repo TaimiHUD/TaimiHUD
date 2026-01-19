@@ -78,6 +78,7 @@ mod festivals;
 mod filter;
 pub mod info;
 mod interact;
+pub mod reactor;
 pub mod registry;
 mod setup;
 pub mod shared;
@@ -86,7 +87,7 @@ pub mod state;
 
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Default)]
 pub(crate) enum PathingEvent {
     VisibleToggle {
         context: Option<MapContext>,
@@ -141,8 +142,13 @@ pub(crate) enum PathingEvent {
         tick: u32,
         aggressive: bool,
     },
+    #[cfg(todo = "unused")]
+    SpawnTask(PathingTaskBox),
+    #[cfg(todo = "unused")]
+    Scheduled(WallInstant, Vec<Self>),
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
+    #[default]
     Nop,
     // Debug and diagnostics commands
     RequestRebuildSpace { entities: Option<bool>, bvh: Option<bool> },
@@ -154,6 +160,7 @@ pub(crate) struct PathingController {
     loader: Arc<PackLoader>,
     rx: PathingReceiver,
     tasks: JoinSet<anyhow::Result<PathingEvent>>,
+    scheduled_events: reactor::ScheduledEvents,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,
     settings: SettingsLock,
@@ -165,7 +172,7 @@ pub(crate) struct PathingController {
     filter_state: state::filter::FilterState,
     /// TODO: replace this with a watcher or something
     filter_state_signal: Option<bool>,
-    filter_expiry: BTreeMap<MarkerId, AbortHandle>,
+    filter_expiry: reactor::FilterExpiryMap,
     filter_next_schedule: ReusableBoxFuture<'static, ()>,
     /// whether `filter_next_schedule` indicates dirty state after
     filter_next_schedule_dirty: bool,
@@ -192,6 +199,7 @@ impl PathingController {
             controls: CONTROLS.subscribe_controls(),
             keybinds: CONTROLS.subscribe_taimi(),
             tasks: Default::default(),
+            scheduled_events: Default::default(),
             settings,
             active: true,
             packs: Default::default(),
@@ -310,6 +318,9 @@ impl PathingController {
                 let gameplay = *gameplay;
                 let trans = gameplay.latest_transition_from(gameplay_prev);
                 self.handle_gameplay(gameplay, trans).await;
+            },
+            Some((_when, m)) = self.scheduled_events.infinite_mut().next() => {
+                return self.handle_message(m).await
             },
             Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
                 Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
@@ -580,8 +591,7 @@ impl PathingController {
             CategoryEnableById(pack_path, cat_id, state) =>
                 self.process_category_set_id(pack_path, cat_id, state).await,
             CategoryEnableCommit(pack_path, cats) => {
-                let changed = cats.into_iter().map(CategoryPath::with_path);
-                self.category_commit_vis(pack_path, &mut {changed}).await
+                self.category_commit_vis(pack_path, &mut cats.into_paths()).await
             },
             ResetMarkerIds(ids) =>
                 self.process_filter_clear_ids(ids),
@@ -612,6 +622,14 @@ impl PathingController {
             },
             RequestRebuildVis { pack_path, partial, notify } => {
                 self.debug_req_config_vis(pack_path, partial, notify).await;
+            },
+            #[cfg(todo = "unused")]
+            SpawnTask(task) => {
+                self.tasks.spawn(task);
+            },
+            #[cfg(todo = "unused")]
+            Scheduled(when, events) => {
+                self.scheduled_events.schedule_append(when.instant, events);
             },
             #[cfg(debug_assertions)]
             Exit(..) | FanOut(..) => unreachable!(),
@@ -770,57 +788,6 @@ impl PathingController {
     }
 }
 
-impl PathingEvent {
-    pub const COLLECT_GARBAGE_PRUNE_ONLY: Self = Self::CollectGarbage { tick: 0, aggressive: false };
-    pub const COLLECT_GARBAGE_TICK: Self = Self::CollectGarbage { tick: 1, aggressive: true };
-    pub const COLLECT_GARBAGE_NOW: Self = Self::CollectGarbage { tick: 0, aggressive: true };
-
-    #[inline]
-    pub fn try_send(self) {
-        let _ = PathingController::try_send(self);
-    }
-
-    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None };
-    pub const fn visible_toggle(context: MapContext) -> Self {
-        Self::VisibleToggle { context: Some(context), set: None }
-    }
-
-    pub fn join(self, e: Self) -> Self {
-        Self::FanOut(match (self, e) {
-            (Self::Nop, e) | (e, Self::Nop) =>
-                return e,
-            (Self::FanOut(mut events), e) => {
-                match e {
-                    Self::FanOut(e) =>
-                        events.extend(e),
-                    e =>
-                        events.push(e),
-                }
-                events
-            },
-            (e, Self::FanOut(mut trailing)) => {
-                trailing.insert(0, e);
-                trailing
-            },
-            (e0, e1) =>
-                vec![e0, e1],
-        })
-    }
-    pub fn flatten(self) -> Self {
-        match self {
-            Self::FanOut(e) => match e.len() {
-                0 => Self::Nop,
-                1 => unsafe {
-                    e.into_iter().next().unwrap_unchecked()
-                },
-                #[cfg(todo)]
-                _ if e.iter().all(|e| matches!(e, Self::ResetMarkerIds(..))) => join_all_iguess,
-                _ => Self::FanOut(e),
-            },
-            e => e,
-        }
-    }
-}
 impl InterruptionSignal for PathingEvent {
     fn interrupted(&self) -> Option<Interruption> {
         match self {
