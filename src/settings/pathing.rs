@@ -1,9 +1,10 @@
 use {
     crate::{controller::Controller, settings::Settings},
     bitflags::bitflags,
-    serde::{Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt, sync::Arc, time},
+    serde::{de::DeserializeSeed, Deserialize, Serialize},
+    std::{collections::BTreeMap, fmt, sync::Arc, str::FromStr, num::NonZero},
     strum::{IntoStaticStr, VariantArray},
+    taimi_hoard::flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
 };
 #[cfg(feature = "space")]
 use {
@@ -557,14 +558,22 @@ impl fmt::Display for TriggerKind {
         }
     }
 }
-impl serde::Serialize for TriggerKind {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.bits().serialize(serializer)
-    }
-}
-impl<'de> serde::Deserialize<'de> for TriggerKind {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        u16::deserialize(deserializer).map(Self::from_bits_retain)
+impl FromStr for TriggerKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "trigger-behaviour" => Self::BEHAVIOUR,
+            "trigger-copy" => Self::COPY,
+            "trigger-info" => Self::INFO,
+            "trigger-reset" => Self::RESET,
+            "trigger-toggle" => Self::TOGGLE,
+            "trigger-show" => Self::SHOW,
+            "trigger-hide" => Self::HIDE,
+            "trigger-script" => Self::SCRIPT,
+            "trigger-bounce" => Self::BOUNCE,
+            _ => anyhow::bail!("unsupported interaction trigger `{s}`"),
+        })
     }
 }
 impl TriggerKind {
@@ -624,6 +633,46 @@ impl TriggerKind {
         ))
     }
 }
+impl<'de> Deserialize<'de> for TriggerKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        BitFlagDe::new().deserialize(deserializer)
+    }
+}
+impl Serialize for TriggerKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        BitFlagSer::<Self>::new_human(*self).serialize(serializer)
+    }
+}
+impl BitFlagContainer for TriggerKind {
+    type ClonedIter = <Self as IntoIterator>::IntoIter;
+    type FromStrErr = <Self as FromStr>::Err;
+    fn all() -> Self {
+        Self::all()
+    }
+    fn empty() -> Self {
+        Self::empty()
+    }
+    fn bit_name(&self) -> Option<&'static str> {
+        self.flag_str()
+    }
+    fn iter(&self) -> Self::ClonedIter {
+        self.clone().into_iter()
+    }
+    fn bits64(&self) -> u64 {
+        self.bits() as u64
+    }
+    fn from_bits64(bits: u64) -> Result<Self, (Self, NonZero<u64>)> {
+        let flags = Self::from_bits_truncate(bits as _);
+        let rest = bits ^ flags.bits() as u64;
+        match NonZero::new(rest) {
+            Some(rest) => Err((flags, rest)),
+            None => Ok(flags),
+        }
+    }
+    fn try_from_str(s: &str) -> Result<Self, Self::FromStrErr> {
+        Self::from_str(s)
+    }
+}
 
 pub type HiddenGuids = BTreeMap<Guid, Timestamp>;
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -669,12 +718,6 @@ impl PathingSave {
     }
     pub fn hidden_guid_expiry_get(&self, guid: &Guid) -> Option<&Timestamp> {
         self.hidden_guid_expiry.get(guid)
-    }
-    #[cfg(deleteme)]
-    pub fn hidden_guid_expiry(&self, guid: &Guid) -> Option<time::SystemTime> {
-        self.hidden_guid_expiry
-            .get(guid)
-            .and_then(|&expiry| time::UNIX_EPOCH.checked_add(time::Duration::from_secs(expiry)))
     }
     /// TODO: initial search can get an index to continue retain from afterward
     pub fn hidden_guid_prune_older_than(&mut self, now: &Timestamp) -> bool {
