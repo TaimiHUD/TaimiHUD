@@ -399,6 +399,10 @@ impl MarkerId {
     #[cfg(todo)]
     pub const fn from_guid_ref(guid: &Guid) -> &Self {}
 
+    pub const fn is_empty(&self) -> bool {
+        self.uuid.is_nil()
+    }
+
     /// any data present in `d3 & 0xf000` and `d4[0] & 0xc0` will be cleared
     ///
     /// See also: [Uuid::from_fields]

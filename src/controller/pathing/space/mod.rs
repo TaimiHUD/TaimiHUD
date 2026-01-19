@@ -608,19 +608,28 @@ impl PathingController {
             (changed, true)
         };
         if space_dirty || is_empty {
-            let new_copy = (!is_empty).then(|| self.space.packs.clone());
-            self.loader.shared.space.collection.send_if_modified(|shared| {
-                if let Some(new_copy) = new_copy {
-                    *shared = new_copy;
-                    true
-                } else if !shared.is_empty() {
-                    Arc::make_mut(shared).clear();
-                    true
-                } else {
-                    false
-                }
-            });
+            let packs = (!is_empty).then_some(&self.space.packs);
+            Self::space_publish_packs(&self.loader, packs, None);
         }
+    }
+    fn space_publish_packs(
+        loader: &PackLoader,
+        packs: Option<&Arc<SpacePackCollection>>,
+        notify: Option<bool>,
+    ) -> bool {
+        let new_copy = packs.cloned();
+        let mut dirty = false;
+        loader.shared.space.collection.send_if_modified(|shared| {
+            if let Some(new_copy) = new_copy {
+                *shared = new_copy;
+                dirty = true;
+            } else if !shared.is_empty() {
+                Arc::make_mut(shared).clear();
+                dirty = true;
+            }
+            notify.unwrap_or(dirty)
+        });
+        dirty
     }
     pub async fn debug_req_space_build(&mut self, entities: Option<bool>, bvh: Option<bool>) {
         let Some(map_id) = self.gameplay_map() else {
@@ -656,11 +665,7 @@ impl PathingController {
             (None, None) => true,
         };
         log::info!("space updated");
-        let new_copy = self.space.packs.clone();
-        self.loader.shared.space.collection.send_if_modified(|shared| {
-            *shared = new_copy;
-            true
-        });
+        Self::space_publish_packs(&self.loader, Some(&self.space.packs), Some(true));
         log::info!("space shared");
     }
 }
