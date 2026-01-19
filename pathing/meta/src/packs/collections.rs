@@ -26,7 +26,7 @@ use {
     },
     taimi_hoard::{
         collections::TaimiSet,
-        iters::{IterExt, LazyMapFn},
+        iters::{IterExt as _, LazyMapFn},
         loc::{indexed, LocationGet, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     },
 };
@@ -88,6 +88,12 @@ impl CategorySet {
     pub fn empty() -> Self {
         Self::default()
     }
+    /// TODO: switch to something that doesn't use so much pointer indirection...
+    pub fn with_capacity(cap: usize) -> Self {
+        let _ = cap;
+        Self::empty()
+    }
+
     #[inline]
     pub fn insert_index<C: AsPrimitive<CategoryIndex>>(&mut self, index: C) -> bool {
         self.0.insert(index.as_())
@@ -118,11 +124,23 @@ impl CategorySet {
     pub fn iter<'a>(&'a self) -> <&'a Self as IntoIterator>::IntoIter {
         IntoIterator::into_iter(self)
     }
-    pub fn paths<'a>(&'a self) -> impl Iterator<Item = CategoryPath> + Clone + 'a {
-        self.iter().map(CategoryPath::with_path)
+    pub fn into_iter<T>(self) -> impl Iterator<Item = T>
+    where
+        T: Copy + 'static,
+        CategoryIndex: AsPrimitive<T>,
+    {
+        IntoIterator::into_iter(self).lazy_map(AsPrimitive::as_)
     }
+    pub fn paths<'a>(&'a self) -> impl Iterator<Item = CategoryPath> + Clone + 'a {
+        self.iter().lazy_map(CategoryPath::with_path)
+    }
+    #[inline]
     pub fn into_paths(self) -> impl Iterator<Item = CategoryPath> {
-        self.into_iter().map(CategoryPath::with_path)
+        self.into_iter::<CategoryPath>()
+    }
+
+    pub fn into_index_boxed(self) -> Box<[CategoryIndex]> {
+        self.0.into_iter().collect()
     }
 }
 
@@ -141,33 +159,27 @@ impl<'a> IntoIterator for &'a CategorySet {
     }
 }
 
-impl FromIterator<CategoryIndex> for CategorySet {
-    fn from_iter<I: IntoIterator<Item = CategoryIndex>>(iter: I) -> Self {
-        Self(iter.into_iter().collect())
+impl<T: AsPrimitive<CategoryIndex>> FromIterator<T> for CategorySet {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let iter = iter.into_iter().map(AsPrimitive::as_);
+        Self(iter.collect())
     }
 }
-impl FromIterator<Option<CategoryIndex>> for CategorySet {
-    fn from_iter<I: IntoIterator<Item = Option<CategoryIndex>>>(iter: I) -> Self {
-        Self(iter.into_iter().filter_map(|c| c).collect())
-    }
-}
-impl Extend<CategoryIndex> for CategorySet {
-    fn extend<I: IntoIterator<Item = CategoryIndex>>(&mut self, iter: I) {
-        self.0.extend(iter)
-    }
-}
-impl<N> Extend<Locator<N, CategoryIndex>> for CategorySet {
-    #[inline]
-    fn extend<I: IntoIterator<Item = Locator<N, CategoryIndex>>>(&mut self, iter: I) {
-        self.extend(iter.into_iter().map(Locator::into_path))
-    }
-}
-impl Extend<Option<CategoryIndex>> for CategorySet {
-    fn extend<I: IntoIterator<Item = Option<CategoryIndex>>>(&mut self, iter: I) {
-        self.0.extend(iter.into_iter().filter_map(|c| c))
+impl<T: AsPrimitive<CategoryIndex>> Extend<T> for CategorySet {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.0.extend(iter.into_iter().map(AsPrimitive::as_))
     }
 }
 
+impl<T> TaimiSet<T> for CategorySet
+where
+    T: Copy + AsPrimitive<CategoryIndex>,
+{
+    #[inline]
+    fn set_contains(&self, index: &T) -> bool {
+        self.contains_index(index.as_())
+    }
+}
 impl<N> LocationGet<N, CategoryIndex> for CategorySet {
     type LookupGet = ();
 

@@ -2,6 +2,7 @@ pub use std::sync::PoisonError as StdPoisonError;
 
 pub mod arcs;
 pub mod poll_once;
+pub mod scheduled;
 pub mod typemap;
 pub mod watched;
 
