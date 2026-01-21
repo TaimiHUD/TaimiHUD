@@ -113,6 +113,9 @@ pub(crate) enum PathingEvent {
     /// explicit request to keep pack and its resources unloaded
     /// (and optionally remove from registry)
     UnloadPack(PackPath, bool),
+    Refresh {
+        include_datasources: bool,
+    },
     ReloadAll(bool),
     LoadAll,
     UnloadAll(bool),
@@ -172,6 +175,12 @@ pub(crate) enum PathingEvent {
         pack_path: Option<PackPath>,
         partial: bool,
         notify: Option<bool>,
+    },
+    RequestResourceRelease {
+        pack_path: Option<PackPath>,
+    },
+    RequestResourceReport {
+        pack_path: Option<PackPath>,
     },
 }
 pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
@@ -259,13 +268,9 @@ impl PathingController {
                 Interruption::try_drain_signals(&mut self.rx.command).unwrap_or(Interruption::Unspecified),
             )
         }
-        let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
-        let load_throttle_prev = self
-            .rx
-            .load_throttle
-            .cached
-            .clone()
-            .unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
+        let gameplay_prev = self.rx.gameplay.get_mut().clone();
+        let enables_prev = self.rx.enables.get_mut().clone();
+        let load_throttle_prev = self.rx.load_throttle.get_mut().clone();
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {
@@ -321,6 +326,12 @@ impl PathingController {
                 }
                 for path in &configs_dirty {
                     self.reload_config_for(path);
+                }
+            },
+            enables = self.rx.enables.when_changed() => {
+                let changed = *enables ^ enables_prev;
+                if changed.contains(PathingEnables::ENGINE) && enables.contains(PathingEnables::ENGINE) {
+                    log::debug!("engine online, let's go!");
                 }
             },
             load_throttle = self.rx.load_throttle.when_changed() => {
@@ -463,11 +474,11 @@ impl PathingController {
 
     async fn setup(&mut self) {
         let get_settings = {
-            let enables = self.rx.enables.clone();
+            let enables = self.rx.enables.watch.clone();
             let load_throttle = self.rx.load_throttle.watch.sender();
             let settings = self.settings.clone();
             async move {
-                let mut enable_flags = enables.borrow().clone();
+                let mut enable_flags = enables.read().clone();
                 let settings = settings.read().await;
                 let (load_simultaneous, interact_config) = match settings.pathing.as_ref() {
                     Some(p) => (
@@ -487,7 +498,7 @@ impl PathingController {
                     enable_flags.set(PathingEnables::SCRIPTING_UNSECURED, unsecure);
                 }
                 drop(settings);
-                enables.send_replace(enable_flags);
+                enables.replace(enable_flags);
                 if let Some(load_simultaneous) = load_simultaneous {
                     load_throttle.send_replace(load_simultaneous);
                 }
@@ -500,25 +511,50 @@ impl PathingController {
         let (settings_interact_config,) = get_settings;
         if let Some(config) = settings_interact_config {
             self.interact.config = config;
+            self.interact.enables = self.rx.enables();
         }
     }
 
-    async fn toggle_katrender(&self) {
-        let mut settings_lock = Settings::async_write()
-            .await
-            .expect("Settings unitialized, impossible");
-        settings_lock.toggle_katrender();
-        let katrender = settings_lock.enable_katrender;
-        drop(settings_lock);
-        self.rx
-            .enables
-            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
+    async fn toggle_katrender(&mut self) {
+        let katrender = {
+            let latest = self.rx.enables.get_mut().contains(PathingEnables::KATRENDER);
+            let mut settings_lock = self.loader.settings.write().await;
+            let mismatched = settings_lock.enable_katrender && !latest;
+            match mismatched {
+                true => {
+                    // presumably because we were unloaded without saving settings...
+                    log::info!("katrender resync");
+                    !latest
+                },
+                false => {
+                    settings_lock.toggle_katrender();
+                    let katrender = settings_lock.enable_katrender;
+                    if katrender != latest {
+                        settings_lock.mark_dirty();
+                    }
+                    katrender
+                },
+            }
+        };
+        let mut engine_online = false;
+        self.rx.enables.write_if(|en| {
+            engine_online = en.contains(PathingEnables::ENGINE);
+            en.set(PathingEnables::KATRENDER, katrender);
+            Some(true)
+        });
+        #[cfg(todo)]
+        if !engine_online && katrender && self.gameplay_map().is_some() {
+            RenderEvent::StartEngine.try_send()
+        }
     }
 
-    fn toggle_api_bypass(&self, set: Option<bool>) {
-        self.rx.enables.send_modify(|en| match set {
-            Some(set) => en.set(PathingEnables::API_BYPASS, set),
-            None => en.toggle(PathingEnables::API_BYPASS),
+    fn toggle_api_bypass(&mut self, set: Option<bool>) {
+        self.rx.enables.write_if(|en| {
+            match set {
+                Some(set) => en.set(PathingEnables::API_BYPASS, set),
+                None => en.toggle(PathingEnables::API_BYPASS),
+            }
+            Some(true)
         });
     }
     #[cfg(feature = "paths-lua")]
@@ -539,7 +575,12 @@ impl PathingController {
     }
 
     async fn handle_gameplay(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
-        if let GameplayTransition::Loaded { initial: true, .. } = trans {}
+        if let GameplayTransition::Loaded { initial: true, .. } = trans {
+            #[cfg(todo)]
+            if self.rx.is_katrender_enabled() && !self.rx.is_engine_active() {
+                RenderEvent::StartEngine.try_send();
+            }
+        }
         match gameplay {
             GameplayState::Gameplay { map_id: Some(map_id) } => {
                 let (new_map, instantaneous) = match trans {
@@ -607,6 +648,7 @@ impl PathingController {
             LoadPack(path) => self.process_pack_activate(path),
             OffloadPack(path) => self.process_pack_deactivate(path),
             UnloadPack(path, remove) => self.process_pack_unload(path, remove),
+            Refresh { include_datasources } => self.process_pack_refresh_all(include_datasources).await,
             ReloadAll(remove) => self.process_pack_reload_all(remove).await,
             UnloadAll(remove) => self.process_pack_unload_all(remove),
             ReloadPack(path, remove) => self.process_pack_reload(path, remove),
@@ -632,7 +674,7 @@ impl PathingController {
             InteractControl(msg) => {
                 let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
                 let followup = self.interact.process_event(&mut self.rx, cx, msg).await;
-                Box::pin(self.process_or_spawn_message(followup)).await;
+                self.spawn_message(followup);
             },
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
@@ -648,6 +690,12 @@ impl PathingController {
             },
             RequestRebuildVis { pack_path, partial, notify } => {
                 self.debug_req_config_vis(pack_path, partial, notify).await;
+            },
+            RequestResourceRelease { pack_path } => {
+                self.debug_req_resource_release(pack_path).await;
+            },
+            RequestResourceReport { pack_path } => {
+                self.debug_req_resource_report(pack_path);
             },
             #[cfg(todo = "unused")]
             SpawnTask(task) => {
@@ -802,15 +850,20 @@ impl PathingController {
     }
     pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
         let interact_ctx = (&self.map_info, &self.maps, map_id, &self.filter_state);
-        let followup = self
-            .interact
-            .trigger_interact_action(
-                &mut self.rx.interact,
-                interact_ctx,
-                InteractReactor::INTERACT_ACTION,
-            )
-            .await;
-        self.process_or_spawn_message(followup).await;
+        if self.rx.interact.try_throttle_press() {
+            let followup = self
+                .interact
+                .trigger_interact_action(
+                    &mut self.rx.interact,
+                    interact_ctx,
+                    InteractReactor::INTERACT_ACTION,
+                )
+                .await;
+            self.process_or_spawn_message(followup).await;
+        } else {
+            log::debug!("throttling interact handler");
+        }
+        self.rx.interact.report_throttle_press();
     }
 
     pub(crate) async fn collect_garbage(&mut self, tick: u32, aggressive: bool, map_id: Option<MapIndex>) {
@@ -873,11 +926,26 @@ impl PathingController {
 
     async fn process_or_spawn_message(&mut self, msg: PathingEvent) {
         match msg {
+            e @ (PathingEvent::Nop | PathingEvent::Exit(..) | PathingEvent::FanOut(..)) =>
+                self.spawn_message(e),
+            e @ PathingEvent::InteractControl(..) => self.spawn_message(e),
+            event => self.process_message(event).await,
+        }
+    }
+    fn spawn_message(&mut self, msg: PathingEvent) {
+        match msg {
             PathingEvent::Nop => (),
-            e @ (PathingEvent::Exit(..) | PathingEvent::FanOut(..)) => {
+            PathingEvent::InteractControl(interact::InteractMessage::Nop) => (),
+            e @ PathingEvent::InteractControl(..) => {
+                // TODO: deleteme
+                self.tasks.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(7)).await;
+                    Ok(e)
+                });
+            },
+            e => {
                 self.tasks.spawn(future::ready(Ok(e)));
             },
-            event => self.process_message(event).await,
         }
     }
 

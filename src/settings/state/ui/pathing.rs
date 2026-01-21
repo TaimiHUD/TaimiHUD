@@ -14,27 +14,38 @@ bitflags! {
         const Enabled = 1;
         const Disabled = 1 << 1;
         const CurrentMap = 1 << 2;
-        const IgnoreRoot = 1 << 3;
-        const IgnoreLeaves = 1 << 4;
-        const IgnoreBranches = 1 << 5;
+        /// previously IgnoreRoot
+        const Unassigned3 = 1 << 3;
+        /// previously IgnoreLeaves
+        const Unassigned4 = 1 << 4;
+        /// previously IgnoreBranches
+        const Unassigned5 = 1 << 5;
         const ShowHidden = 1 << 6;
     }
 }
 
 impl PathingFilterFlags {
-    pub const DEFAULT: Self =
-        Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits() | Self::IgnoreRoot.bits());
-    /// TODO: implement [Self::ShowHidden]
-    pub const USER: Self = Self::from_bits_retain(Self::all().bits() & !Self::ShowHidden.bits());
+    pub const DEFAULT: Self = Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits());
+    pub const USER: Self = Self::from_bits_retain(
+        Self::all().bits()
+            & !(Self::Unassigned3.bits() | Self::Unassigned4.bits() | Self::Unassigned5.bits()),
+    );
+    pub const FILTERS_INFO: Self = Self::from_bits_retain(Self::ShowHidden.bits());
+    pub const FILTERS_ENABLE: Self = Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits());
+    pub const FILTERS_CONFIG: Self = Self::FILTERS_ENABLE;
+    pub const FILTERS_STATE: Self = Self::from_bits_retain(Self::CurrentMap.bits());
+    pub const FILTERS_ALL: Self = Self::from_bits_retain(
+        Self::FILTERS_INFO.bits() | Self::FILTERS_CONFIG.bits() | Self::FILTERS_STATE.bits(),
+    );
+    pub const FILTERS_INVERTED: Self =
+        Self::from_bits_retain(Self::DEFAULT.bits() & Self::FILTERS_ALL.bits());
+    pub const EMPTY: Self = Self::empty();
 
     pub fn as_str(self) -> Option<&'static str> {
         Some(match self {
             Self::Enabled => "enabled",
             Self::Disabled => "disabled",
             Self::CurrentMap => "current-map",
-            Self::IgnoreRoot => "ignore-root",
-            Self::IgnoreLeaves => "ignore-leaf",
-            Self::IgnoreBranches => "ignore-branch",
             Self::ShowHidden => "show-hidden",
             _ => return None,
         })
@@ -42,6 +53,30 @@ impl PathingFilterFlags {
     #[cfg(todo = "unnecessary")]
     pub fn bit_as_str(self) -> Option<&'static str> {
         self.into_iter().next()?.as_str()
+    }
+
+    pub fn enable_filter(self) -> Option<bool> {
+        match self & Self::FILTERS_ENABLE {
+            Self::Enabled | Self::Disabled => Some(self.contains(Self::Enabled)),
+            _ => None,
+        }
+    }
+    pub fn filter_for_enable(enable: Option<bool>) -> Self {
+        match enable {
+            Some(true) => Self::Enabled,
+            Some(false) => Self::Disabled,
+            None => Self::empty(),
+        }
+    }
+    pub fn set_enable_filter(&mut self, enable: Option<bool>) {
+        self.remove(Self::FILTERS_ENABLE);
+        self.insert(Self::filter_for_enable(enable));
+    }
+    /// clear out the invalid [Self::Enabled] | [Self::Disabled] combination
+    pub fn canonicalize_enable_filter(&mut self) {
+        if self.enable_filter().is_none() {
+            self.remove(Self::FILTERS_ENABLE);
+        }
     }
 }
 
@@ -58,11 +93,12 @@ impl FromStr for PathingFilterFlags {
         Ok(match s {
             "enabled" => Self::Enabled,
             "disabled" => Self::Disabled,
-            "ignore-root" => Self::IgnoreRoot,
-            "ignore-leaf" => Self::IgnoreLeaves,
-            "ignore-branch" => Self::IgnoreBranches,
             "show-hidden" => Self::ShowHidden,
             "current-map" => Self::CurrentMap,
+            "ignore-root" | "ignore-leaf" | "ignore-branch" => {
+                // moved to search flags
+                Self::empty()
+            },
             _ => anyhow::bail!("unsupported filter option `{s}`"),
         })
     }
@@ -113,15 +149,43 @@ bitflags! {
     pub struct PathingSearchFlags: u8 {
         const IGNORE_CASE = 1 << 0;
         const IGNORE_SPACE = 1 << 1;
+        const INCLUDE_ID = 1 << 2;
+        const PATTERN_REGEX = 1 << 3;
+        #[cfg(deleteme)]
+        const IGNORE_ROOT = 1 << 2;
+        #[cfg(deleteme)]
+        const IGNORE_LEAVES = 1 << 3;
+        #[cfg(deleteme)]
+        const IGNORE_BRANCHES = 1 << 4;
+        #[cfg(deleteme)]
+        const INCLUDE_CHILDREN = 1 << 5;
+        const NEGATIVE = 1 << 7;
     }
 }
 impl PathingSearchFlags {
     pub const DEFAULT: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits());
+    pub const USER: Self = Self::from_bits_retain(
+        Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits(), /*| Self::INCLUDE_ID.bits()*/
+    );
+    pub const ADVANCED: Self = Self::from_bits_retain(Self::all().bits() & !(Self::USER.bits()));
+    pub const PERSIST: Self =
+        Self::from_bits_retain((Self::USER.bits() | Self::ADVANCED.bits()) & !(Self::NEGATIVE.bits()));
 
     pub fn as_str(self) -> Option<&'static str> {
         Some(match self {
             Self::IGNORE_CASE => "case-insensitive",
             Self::IGNORE_SPACE => "ignore-whitespace",
+            Self::INCLUDE_ID => "include-id",
+            Self::PATTERN_REGEX => "pattern-regex",
+            Self::NEGATIVE => "negative",
+            #[cfg(deleteme)]
+            Self::IGNORE_ROOT => "ignore-root",
+            #[cfg(deleteme)]
+            Self::IGNORE_LEAVES => "ignore-leaf",
+            #[cfg(deleteme)]
+            Self::IGNORE_BRANCHES => "ignore-branch",
+            #[cfg(deleteme)]
+            Self::INCLUDE_CHILDREN => "include-children",
             _ => return None,
         })
     }
@@ -142,6 +206,17 @@ impl FromStr for PathingSearchFlags {
         Ok(match s {
             "case-insensitive" => Self::IGNORE_CASE,
             "ignore-whitespace" => Self::IGNORE_SPACE,
+            "include-id" => Self::INCLUDE_ID,
+            "pattern-regex" => Self::PATTERN_REGEX,
+            "negative" => Self::NEGATIVE,
+            #[cfg(deleteme)]
+            "ignore-root" => Self::IGNORE_ROOT,
+            #[cfg(deleteme)]
+            "ignore-leaf" => Self::IGNORE_LEAVES,
+            #[cfg(deleteme)]
+            "ignore-branch" => Self::IGNORE_BRANCHES,
+            #[cfg(deleteme)]
+            "include-children" => Self::INCLUDE_CHILDREN,
             _ => anyhow::bail!("unsupported search option `{s}`"),
         })
     }
@@ -153,7 +228,8 @@ impl<'de> de::Deserialize<'de> for PathingSearchFlags {
 }
 impl ser::Serialize for PathingSearchFlags {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BitFlagSer::<Self>::new_human(*self).serialize(serializer)
+        let persist = *self & Self::PERSIST;
+        BitFlagSer::<Self>::new_human(persist).serialize(serializer)
     }
 }
 impl BitFlagContainer for PathingSearchFlags {

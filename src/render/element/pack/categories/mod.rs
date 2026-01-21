@@ -13,7 +13,20 @@ use {
     crate::{
         controller::{
             pathing::{
-                registry::{PackCategory, PackCategoryInfo, PackInfoSignature, PackRoot, UnloadedReason},
+                info::MapPackInfo,
+                registry::{
+                    LoadedCategoryIndex,
+                    LoadedCategoryNs,
+                    PackCategory,
+                    PackCategoryInfo,
+                    PackInfoSignature,
+                    PackMapPath,
+                    PackRoot,
+                    UnloadedReason,
+                },
+                shared::SharedMapPackLoaded,
+                state::LoadedCategory,
+                PackConfig,
                 PathingController,
                 PathingEvent,
                 VisibilityFlagsExt as _,
@@ -22,15 +35,43 @@ use {
         },
         exports::runtime as rt,
         render::element::prelude::*,
+        settings::state::ui::pathing::PathingFilterFlags,
     },
     std::{collections::BTreeMap, iter, mem, sync::Arc},
-    taimi_hoard::{flags::BitSet, loc::LocationRef, str_opt, str_opt_ref},
-    taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, PackPath, VisibilityFlags},
+    taimi_hoard::{
+        flags::BitSet,
+        iters::{tree::DfsPre, IterExt as _},
+        loc::{indexed::IndexedList, LocationRef},
+        str_opt,
+        str_opt_ref,
+    },
+    taimi_meta::packs::{
+        collections::CategorySet,
+        CategoryIndex,
+        CategoryPath,
+        MapIndex,
+        PackPath,
+        VisibilityFlags,
+    },
     taimi_pack::{
         attributes::InteractionAttributes,
         category::{id::AsFullId, Category, CategoryFlags, CategoryId},
     },
 };
+
+pub use self::{
+    action::{CategoryAction, CategoryActionSlot},
+    filter::{
+        CategoryEnableFilterState,
+        CategoryFilterQuery,
+        CategorySearchFilter,
+        CategorySearchQuery,
+        PackCategoryMaskState,
+    },
+};
+
+mod action;
+mod filter;
 
 #[derive(Debug)]
 pub struct DrawCategoryHeader<'a, 'u, U: ?Sized + 'u> {
@@ -41,99 +82,114 @@ pub struct DrawCategoryHeader<'a, 'u, U: ?Sized + 'u> {
     pub toggle_state: bool,
     pub is_leaf: Option<bool>,
     pub is_decorative: bool,
+    pub is_header: bool,
     pub button_interact: Option<bool>,
     pub allow_overlap: bool,
+    pub filter_selected: Option<bool>,
 }
 impl<'a, 'u, 'ui, U> DrawCategoryHeader<'a, 'u, U>
 where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     pub fn draw(&mut self) -> (Option<UiAction>, Option<UiTokenDyn<'ui>>) {
-        let mut tree_span_avail = false;
-        let mut tree_allow_overlap = false;
-        let mut tree_bullet = false;
-        let mut tree_selected = false;
         let tree_leaf = self.is_leaf.unwrap_or(true);
+        let leaf = self.is_leaf.unwrap_or(true);
+        let mut framed = self.is_header;
+        let mut selected = false;
+        let mut bullet = self.is_leaf == Some(true) || self.is_header & leaf;
+        let mut tree_span_avail = false;
         match self.button_interact {
-            Some(false) if self.is_decorative || self.is_leaf.unwrap_or(true) => tree_span_avail = true,
+            Some(false) if self.is_decorative || leaf => tree_span_avail = true,
+            #[cfg(todo)]
             None => tree_allow_overlap = true,
             _ => (),
         }
-        let mut framed = false;
-        match self.is_leaf {
-            Some(false) =>
-                if !self.is_decorative {
-                    framed = true;
-                },
-            Some(true) => tree_bullet = true,
-            None => (),
-        }
         if self.is_decorative {
             match self.is_leaf {
-                Some(true) => tree_selected = true,
-                Some(false) => {
-                    framed = true;
-                    tree_bullet = true;
-                },
+                Some(true) => selected = true,
+                Some(false) =>
+                    if self.filter_selected.is_none() && !framed {
+                    } else {
+                        bullet = true;
+                    },
                 None => {
                     // needs to stand out more among branches too..?
                     // TODO: less necessary once checkboxes become left-aligned
-                    tree_selected = true;
+                    framed = true;
                     // would use this but leaf|framed results in strange text alignment...
                     // framed = true
                 },
             }
         }
         let open = framed.then_some((self.open, self.open_cond));
+        match self.filter_selected {
+            None => (),
+            Some(false) if selected => selected = false,
+            Some(false) if framed => framed = false,
+            Some(false) if bullet && !framed => bullet = false,
+            Some(false) => framed ^= true,
+            Some(true) if !selected => selected = true,
+            Some(true) if !bullet && leaf => bullet = true,
+            Some(true) => framed ^= true,
+        }
+        let header_name;
+        let mut label = self.display_name;
+        if framed && leaf {
+            // results in strange text alignment... visually equivalent to selected,
+            // but there's a benefit to the alignment actually, so...
+            if self.is_decorative {
+                header_name = format!("  {}", &self.display_name);
+                label = &header_name[..];
+            } else {
+                framed = false;
+                selected ^= true;
+            }
+        }
+        let overlap = self.allow_overlap;
         let flags = match self.ui.imgui_version_num() {
             #[cfg(taimi_imgui = "180")]
-            Some(im180::VERSION_NUM) => imw::DynArgsTreeNode::new(Some(
-                im180::sys::ImGuiTreeNodeFlags_FramePadding
-                    | im180::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen
-                    | framed
-                        .then_some(im180::sys::ImGuiTreeNodeFlags_Framed)
-                        .unwrap_or(0) | tree_span_avail
-                    .then_some(im180::sys::ImGuiTreeNodeFlags_SpanAvailWidth)
-                    .unwrap_or(0) | tree_allow_overlap
-                    .then_some(im180::sys::ImGuiTreeNodeFlags_AllowItemOverlap)
-                    .unwrap_or(0) | tree_leaf
-                    .then_some(im180::sys::ImGuiTreeNodeFlags_Leaf)
-                    .unwrap_or(0) | tree_bullet
-                    .then_some(im180::sys::ImGuiTreeNodeFlags_Bullet)
-                    .unwrap_or(0) | tree_selected
-                    .then_some(im180::sys::ImGuiTreeNodeFlags_Selected)
-                    .unwrap_or(0),
-            )),
+            Some(im180::VERSION_NUM) => imw::DynArgsTreeNode::new(Some({
+                let f_common = im180::sys::ImGuiTreeNodeFlags_FramePadding
+                    | im180::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                IntoIterator::into_iter([
+                    Some(f_common),
+                    framed.then_some(im180::sys::ImGuiTreeNodeFlags_Framed),
+                    tree_span_avail.then_some(im180::sys::ImGuiTreeNodeFlags_SpanAvailWidth),
+                    overlap.then_some(im180::sys::ImGuiTreeNodeFlags_AllowItemOverlap),
+                    leaf.then_some(im180::sys::ImGuiTreeNodeFlags_Leaf),
+                    bullet.then_some(im180::sys::ImGuiTreeNodeFlags_Bullet),
+                    selected.then_some(im180::sys::ImGuiTreeNodeFlags_Selected),
+                ])
+                .flatten()
+                .sum()
+            })),
             #[cfg(taimi_imgui = "192")]
-            Some(im192::VERSION_NUM) => imw::DynArgsTreeNode::new(Some(
-                im192::sys::ImGuiTreeNodeFlags_FramePadding
-                    | im192::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen
-                    | framed
-                        .then_some(im192::sys::ImGuiTreeNodeFlags_Framed)
-                        .unwrap_or(0) | tree_span_avail
-                    .then_some(im192::sys::ImGuiTreeNodeFlags_SpanAvailWidth)
-                    .unwrap_or(0) | tree_allow_overlap
-                    .then_some(im192::sys::ImGuiTreeNodeFlags_AllowOverlap)
-                    .unwrap_or(0) | tree_leaf
-                    .then_some(im192::sys::ImGuiTreeNodeFlags_Leaf)
-                    .unwrap_or(0) | tree_bullet
-                    .then_some(im192::sys::ImGuiTreeNodeFlags_Bullet)
-                    .unwrap_or(0) | tree_selected
-                    .then_some(im192::sys::ImGuiTreeNodeFlags_Selected)
-                    .unwrap_or(0),
-            )),
+            Some(im192::VERSION_NUM) => imw::DynArgsTreeNode::new(Some({
+                let f_common = im192::sys::ImGuiTreeNodeFlags_FramePadding
+                    | im192::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                IntoIterator::into_iter([
+                    Some(f_common),
+                    framed.then_some(im192::sys::ImGuiTreeNodeFlags_Framed),
+                    tree_span_avail.then_some(im192::sys::ImGuiTreeNodeFlags_SpanAvailWidth),
+                    overlap.then_some(im192::sys::ImGuiTreeNodeFlags_AllowOverlap),
+                    leaf.then_some(im192::sys::ImGuiTreeNodeFlags_Leaf),
+                    bullet.then_some(im192::sys::ImGuiTreeNodeFlags_Bullet),
+                    selected.then_some(im192::sys::ImGuiTreeNodeFlags_Selected),
+                ])
+                .flatten()
+                .sum()
+            })),
             _ => Default::default(),
         };
-        let tree_token = self
-            .ui
-            .begin_tree_node(open, self.display_name, self.display_name, flags);
+        let open = (!leaf).then_some((self.open, self.open_cond));
+        let tree_token = self.ui.begin_tree_node(open, self.display_name, label, flags);
         let action = match (self.open_cond, self.open, &tree_token) {
-            (ImCondition::Always, open, token) if framed && open != token.is_some() =>
+            (ImCondition::Always, open, token) if !leaf && open != token.is_some() =>
                 Some(UiAction::Primary),
             _ if self.ui.is_item_right_clicked() => Some(UiAction::RIGHT_CLICK),
             #[cfg(todo)]
             _ if !framed && self.ui.is_item_clicked() => Some(UiAction::Primary),
-            _ if !framed && self.ui.is_item_clicked() => Some(UiAction::LEFT_CLICK),
+            _ if leaf && self.ui.is_item_clicked() => Some(UiAction::LEFT_CLICK),
             _ if self.ui.is_item_hovered() => Some(UiAction::Hovered),
             _ => None,
         };
@@ -692,6 +748,41 @@ impl super::PackElement {
         }
         true
     }
+
+    pub(super) fn reset_filter_interest(&mut self) {
+        let cats = self.state.info.category_info().map(|(cats, ..)| &**cats);
+        self.categories.filter_state.reset_interest(cats);
+    }
+    #[cfg(todo)]
+    pub(super) fn apply_search_filter<F: CategorySearchFilter>(&mut self, filter: &mut F) {
+        let pack_data = self.state.activate_pack_data().ok();
+        self.categories
+            .filter_state
+            .update_search_candidates(self.state.pack_path(), pack_data, filter)
+    }
+    fn apply_search_filter(&mut self, filter: Option<()>) {
+        let clear_mask = match (&self.categories.filter_state.search_candidates, filter) {
+            (None, None) => return,
+            (Some(..), None) => true,
+            _ => false,
+        };
+        self.categories.filter_state.clear_search_candidates();
+        if clear_mask {
+            self.categories.filter_state.clear_mask();
+        }
+    }
+}
+impl super::PackElements {
+    /// TODO: parallel and/or schedule via controller?
+    pub fn apply_search_filter(&mut self) {
+        for pack in self.pack_state.values_mut() {
+            pack.apply_search_filter(self.filter_query.search.as_ref().map(drop));
+        }
+    }
+    pub fn clear_search_filter(&mut self) {
+        self.filter_query.search = None;
+        self.apply_search_filter();
+    }
 }
 
 impl PackElementState {
@@ -731,7 +822,7 @@ pub struct DrawCategoryCollection<'a, 'u, 'ui, U: ?Sized + 'u> {
     pub state: &'a CategoryCollectionState,
     pub pack: &'a PackElementState,
     pub path_stack: Vec<CategoryPath>,
-    /// TODO: these are ZSTs, just make a collection type for this?
+    /// XXX: these are ZSTs, just make a collection type for this?
     pub id_stack: Vec<UiTokenDyn<'ui>>,
 }
 impl<'a, 'u, 'ui, U> DrawCategoryCollection<'a, 'u, 'ui, U>
@@ -804,6 +895,33 @@ where
             None => &CategoryInfo::EMPTY,
         };
         vis ^= self.pack.category_visibility_deviation(path);
+        let is_lonely = match pseudo_root {
+            Some(..) => false,
+            None => cats.map(|cats| cats.lonely.contains(path)).unwrap_or(false),
+        };
+        let mut filter_whitelisted = None;
+        let mut filter_whitelisted =
+            || *filter_whitelisted.get_or_insert_with(|| self.state.filter_state.contains_category(path));
+        let filter_selected = match self.state.filter_state.is_active() {
+            false => None,
+            true => match (pseudo_root, self.state.filter_state.all_filtered()) {
+                (Some(..), true) => Some(false),
+                (None, true) => None,
+                (pseudo_root, false) if self.state.filter_state.is_matching() =>
+                    match self.state.filter_state.matches_category(path) {
+                        false
+                            if pseudo_root.is_some()
+                                && self.state.filter_state.search_candidates.is_none() =>
+                            None,
+                        matches => Some(matches),
+                    },
+                (pseudo_root, false) if pseudo_root.is_none() || is_lonely => match filter_whitelisted() {
+                    false => Some(false),
+                    true => None,
+                },
+                (_, false) => None,
+            },
+        };
 
         DrawCategoryToggle {
             ui: self.ui,
@@ -813,10 +931,7 @@ where
             flags: self.pack.category_flags(path),
             toggle_state: vis,
             open_state: self.state.open_mask.contains(path),
-            is_lonely: match pseudo_root {
-                Some(..) => false,
-                None => cats.map(|cats| cats.lonely.contains(path)).unwrap_or(false),
-            },
+            is_lonely,
             is_copyable: info.copyable().is_some(),
             has_children: cat.map(|cat| cat.child().is_some()).unwrap_or(true),
             // caller should decide this...
@@ -825,6 +940,7 @@ where
                 .map(|cats| cats.root_paths().all(|p| p == path))
                 .unwrap_or(false),
             pseudo_root: pseudo_root.unwrap_or(false),
+            filter_selected,
         }
     }
 
@@ -885,6 +1001,7 @@ pub struct DrawCategoryCollectionTree<'a, 'u, 'ui, U: ?Sized + 'u> {
     /// XXX: same as [self.draw.id_stack]
     pub node_stack: Vec<Option<UiTokenDyn<'ui>>>,
     pub act: CategoryActionSlot,
+    pub unfilter_interest: Option<CategoryPath>,
 }
 impl<'a, 'u, 'ui, U> DrawCategoryCollectionTree<'a, 'u, 'ui, U>
 where
@@ -895,53 +1012,236 @@ where
             draw,
             node_stack: Vec::new(),
             act: Default::default(),
+            unfilter_interest: None,
         }
     }
 
-    pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
+    pub fn draw_root_then<R, F: FnOnce(&mut Self) -> R>(
+        &mut self,
+        path: CategoryPath,
+        pseudo_root: bool,
+        f: F,
+    ) -> Option<R> {
         self.push_and_draw(path, Some(pseudo_root));
-        let cats = self
-            .node_contents_visible()
-            .then(|| self.draw.pack.info.info.as_ref().map(|i| &i.categories))
-            .flatten();
 
-        if let Some(cats) = cats {
-            let mut cat_iter = cats.nested_descendents_of(path);
-            let mut prev_depth = cat_iter.depth();
-            'cats: while let Some(cat_path) = cat_iter.next() {
-                let depth = cat_iter.depth();
-                if let Some(popping) = prev_depth.checked_sub(depth) {
-                    for _ in 0..=popping {
-                        if self.pop_to(path).is_none() {
-                            break 'cats
-                        }
-                    }
-                }
-                if depth <= prev_depth {
-                    self.draw.ui.table_next_column();
-                } else {
-                    self.draw.ui.spacing();
-                }
-                prev_depth = depth;
-                if self.draw_one(cat_path).is_none() {
-                    cat_iter.skip_to_sibling();
-                }
-            }
-        }
+        let res = self.node_contents_visible().then(|| f(self));
+
         while let Some(..) = self.pop_to(path) {}
+
         #[cfg(todo)]
         if draw_footer_idk {
             self.pop_draw(token);
             footer_stuff();
         }
         self.pop();
+
+        if res.is_none() {
+            self.draw.ui.table_next_column();
+        }
+
+        res
     }
-    pub fn draw_one(&mut self, path: CategoryPath) -> Option<()> {
+    pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
+        self.draw_root_then(path, pseudo_root, move |draw| draw.draw_children_of(path));
+    }
+    pub fn draw_children_of(&mut self, path: CategoryPath) {
+        let Some(cats) = self.draw.pack.info.info.as_ref().map(|i| &i.categories) else {
+            return
+        };
+        #[cfg(todo)]
+        return self.draw_children(path, &mut cats.nested_descendents_of(path));
+
+        let mut cat_iter = cats.nested_descendents_of(path);
+        let initial_depth = cat_iter.depth();
+        let mut prev_depth = initial_depth;
+        let mut pending_row = false;
+        let mut children_filtered = match self.draw.state.filter_state.is_active() {
+            true => vec![0usize],
+            false => Vec::new(),
+        };
+        while let Some(cat_path) = cat_iter.next() {
+            let depth = cat_iter.depth();
+            if let Some(popping) = prev_depth.checked_sub(depth) {
+                if !self.pop_amt_from(&mut children_filtered, path, popping) {
+                    break
+                }
+            }
+            match depth.checked_sub(prev_depth) {
+                _ if children_filtered.is_empty() => (),
+                Some(pushing) => {
+                    children_filtered.extend(iter::repeat_n(0usize, pushing + 1));
+                },
+                _ => (),
+            };
+            let visible = self.draw.state.category_is_whitelisted(&self.draw.pack, cat_path);
+            if visible {
+                if depth <= prev_depth {
+                    if pending_row {
+                        self.draw.ui.table_next_column();
+                        pending_row = false;
+                    }
+                } else {
+                    {
+                        let _padding = self
+                            .draw
+                            .ui
+                            .push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                        //self.draw.ui.spacing();
+                        self.draw.ui.dummy([1.0, 1.0]);
+                    }
+                }
+            }
+            prev_depth = depth;
+            let open = if !visible {
+                // avoid messing with node stack pop counts...
+                self.push(cat_path);
+                if let Some(filtered) = children_filtered.iter_mut().nth_back(1) {
+                    *filtered = filtered.saturating_add(1);
+                }
+                Some(false)
+            } else {
+                let drawn = self.draw_one(cat_path).map(|drawn| drawn.is_some());
+                if drawn.is_some() {
+                    pending_row = true;
+                    if !self
+                        .draw
+                        .state
+                        .filter_state
+                        .flags
+                        .contains(PathingFilterFlags::ShowHidden)
+                    {
+                        // at least one child rendered, so don't complain anymore
+                        if let Some(filtered) = children_filtered.iter_mut().nth_back(1) {
+                            *filtered = usize::MAX;
+                        }
+                    }
+                }
+                drawn
+            };
+            if matches!(open, Some(false)) {
+                cat_iter.skip_to_sibling();
+            }
+        }
+        if let Some(popping) = prev_depth.checked_sub(initial_depth) {
+            self.pop_amt_from(&mut children_filtered, path, popping);
+        }
+        debug_assert!(children_filtered.len() <= 1);
+        if pending_row || true {
+            self.draw.ui.table_next_column();
+        }
+    }
+    fn pop_amt_from(
+        &mut self,
+        children_filtered: &mut Vec<usize>,
+        path: CategoryPath,
+        popping: usize,
+    ) -> bool {
+        for _ in 0..=popping {
+            let was_open = self.node_contents_visible();
+            let child_path = self.pop_to(path);
+            let filtered = children_filtered.pop();
+            match was_open.then_some(filtered) {
+                Some(Some(0)) | Some(Some(usize::MAX)) => (),
+                Some(Some(amt)) => {
+                    if child_path.is_some() {
+                        self.draw.ui.indent();
+                    }
+                    let checkpoint = self.draw.ui.cursor_pos();
+                    let msg = format!("{amt} hidden by filter");
+                    self.draw.ui.text_disabled(&msg);
+                    if self.draw.ui.is_item_clicked() {
+                        self.unfilter_interest = Some(child_path.unwrap_or(path));
+                    } else if self.draw.ui.is_item_hovered() {
+                        self.draw.ui.set_cursor_pos(checkpoint);
+                        self.draw.ui.text(&msg);
+                    }
+                    if child_path.is_some() {
+                        self.draw.ui.unindent();
+                    } else {
+                        self.draw.ui.spacing();
+                    }
+                },
+                _ => (),
+            }
+            if child_path.is_none() {
+                return false
+            }
+        }
+        true
+    }
+    pub fn draw_children(
+        &mut self,
+        root_path: Option<CategoryPath>,
+        cat_iter: &mut dyn DfsPre<Item = CategoryPath>,
+    ) {
+        let mut start_depth = None;
+        let mut prev_depth: Option<usize> = None;
+        let mut prev_closed = None;
+        let mut pending_row = false;
+        'cats: loop {
+            let next = match prev_closed {
+                Some(true) => cat_iter.node_next_sibling(),
+                _ => cat_iter.next().map(Ok),
+            };
+            let Some(Ok(cat_path) | Err(cat_path)) = next else { break };
+
+            let depth = cat_iter.node_depth();
+            if start_depth.is_none() {
+                start_depth = depth;
+            }
+            if let Some(depth) = depth {
+                let pop_depth = prev_depth.and_then(|prev| prev.checked_sub(depth));
+                if let Some(popping) = pop_depth {
+                    for _ in 0..=popping {
+                        let popped = match root_path {
+                            Some(root_path) => self.pop_to(root_path),
+                            None => self.pop(),
+                        };
+                        if popped.is_none() {
+                            break 'cats
+                        }
+                    }
+                }
+                if depth <= prev_depth.unwrap_or(depth) {
+                    self.draw.ui.table_next_column();
+                    pending_row = false;
+                } else {
+                    self.draw.ui.spacing();
+                }
+            }
+            prev_depth = depth;
+            let drawn = self.draw_one(cat_path);
+            pending_row = true;
+            prev_closed = drawn.map(|d| d.is_none());
+        }
+        match root_path {
+            Some(root_path) => while let Some(..) = self.pop_to(root_path) {},
+            None => {
+                let rem_depth =
+                    start_depth.and_then(|start| prev_depth.and_then(|prev| prev.checked_sub(start)));
+                if let Some(rem) = rem_depth {
+                    for _ in 0..=rem {
+                        let popped = match root_path {
+                            Some(root_path) => self.pop_to(root_path),
+                            None => self.pop(),
+                        };
+                        if self.pop().is_none() {
+                            break
+                        }
+                    }
+                }
+            },
+        }
+        if pending_row {
+            self.draw.ui.table_next_column();
+        }
+    }
+    pub fn draw_one(&mut self, path: CategoryPath) -> Option<Option<()>> {
         let token = self.push_and_draw(path, None);
         token
     }
 
-    fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
+    fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<Option<()>> {
         self.push(path)?;
         let mut toggle = self.draw.prepare_toggle(path, pseudo_root);
         let prev_toggle = toggle.toggle_state.is_visible();
@@ -967,7 +1267,7 @@ where
             let clobbered = act.clobber(path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
-        res
+        Some(res)
     }
 
     /// in case we want to keep id token active for footer/menus/etc
@@ -1028,14 +1328,17 @@ pub struct CategoryCollectionState {
     /// TODO: visible draw elements (or acting on an open event) could just
     /// mark specific cats as dirty/visible instead?
     pub open_sig_prev: CategoryIndex,
+    pub filter_state: PackCategoryMaskState,
 }
 impl CategoryCollectionState {
     pub fn pre_draw(
         &mut self,
         pack: &PackElementState,
+        filter_query: &CategoryFilterQuery,
         pack_damage: &PackDamageReport,
         visibility: PackVisibility,
     ) {
+        self.filter_state.set_flags(filter_query.flags);
         let open_menu_sig = self
             .open_menu
             .last()
@@ -1043,6 +1346,7 @@ impl CategoryCollectionState {
             .unwrap_or(CategoryPath::with_path(CategoryIndex::MAX))
             .path;
         let open_sig = self.open_mask.count() as CategoryIndex ^ open_menu_sig;
+        let map_id = pack.map_info.as_ref().map(|i| i.path.path.get()).unwrap_or(0);
         let cats_dirty = pack_damage.info.is_some()
             || pack_damage.loaded
             || pack_damage.visibility.is_some()
@@ -1052,6 +1356,7 @@ impl CategoryCollectionState {
                 self.cleanup_cache(true);
             } else if self.info_sig != pack.info.sig {
                 self.categories.clear();
+                self.filter_state.info_invalidated();
                 //self.open_mask.clear();
             }
             self.info_sig = pack.info.sig;
@@ -1063,7 +1368,86 @@ impl CategoryCollectionState {
             return
         }
         self.open_sig_prev = open_sig;
-        let Some(info) = &pack.info.info else { return };
+
+        let mut filter_dirty = false;
+        let category_info = pack.info.info.as_ref().map(|info| &info.categories);
+        if self.filter_state.is_dirty_hidden(category_info) {
+            self.filter_state.update_hidden(category_info);
+        }
+        let category_info = category_info.map(|cats| &**cats);
+        let loaded_map_info = self
+            .filter_state
+            .flags
+            .contains(PathingFilterFlags::CurrentMap)
+            .then_some(pack.map_info.as_ref());
+        if pack_damage.map.is_some() || self.filter_state.is_dirty_loaded(loaded_map_info) {
+            match loaded_map_info {
+                Some(map_info) => self.filter_state.update_loaded(category_info, map_info),
+                _ => self.filter_state.clear_loaded(),
+            }
+            filter_dirty |= !self.filter_state.is_dirty_loaded(loaded_map_info);
+        }
+        let pack_config = pack.config.cached.as_ref().map(|c| &c.config);
+        let enable_filter = self.filter_state.flags.enable_filter();
+        if self.filter_state.is_dirty_enable(enable_filter) {
+            match enable_filter {
+                Some(enable) => self
+                    .filter_state
+                    .update_enable(pack_config, category_info, enable),
+                _ => self.filter_state.clear_enable(),
+            }
+            filter_dirty |= !self.filter_state.is_dirty_enable(enable_filter);
+        }
+        if self.filter_state.is_dirty_search(filter_query.search.as_ref()) {
+            match filter_query.search.as_ref() {
+                Some(query) => {
+                    let filtered_loaded = match loaded_map_info {
+                        Some(Some(..)) => self.filter_state.loaded.as_ref().map(|loaded| loaded.is_empty()),
+                        _ => None,
+                    };
+                    let filtered_enabled = match enable_filter {
+                        Some(en) if en != matches!(pack.unloaded, Some(UnloadedReason::Disabled)) =>
+                            Some(en),
+                        Some(false) if pack.unloaded.is_some() => Some(false),
+                        _ => None,
+                    };
+                    let pack_data = match pack.pack_data() {
+                        Some(pd) => Some(Some(Some(pd))),
+                        None if filtered_loaded == Some(true) => Some(None),
+                        None if filtered_loaded == Some(false) => None,
+                        None if filtered_enabled == Some(true) => Some(None),
+                        None if filtered_enabled == Some(false) => None,
+                        _ => Some(None),
+                    };
+                    if let Some(pack_data) = pack_data {
+                        let pack_data = pack_data.as_ref().map(|pd| pd.as_ref().map(|pd| &**pd));
+                        self.filter_state.update_search_candidates(
+                            pack.pack_path(),
+                            category_info,
+                            pack_data,
+                            query,
+                        )
+                    }
+                },
+                None => self.filter_state.clear_search_candidates(),
+            }
+            filter_dirty |= !self.filter_state.is_dirty_search(filter_query.search.as_ref());
+        }
+
+        let Some(info) = &pack.info.info else {
+            self.filter_state.clear_mask();
+            return
+        };
+
+        if filter_dirty {
+            let category_info = match () {
+                #[cfg(todo = "unnecessary")]
+                _ => category_info,
+                _ => Some(&*info.categories),
+            };
+            self.filter_state.refresh_mask(category_info);
+        }
+
         if cats_dirty {
             let cats = &info.categories;
             match visibility {
@@ -1112,6 +1496,11 @@ impl CategoryCollectionState {
         self.categories = Default::default();
         if purge {
             self.open_mask = Default::default();
+            self.filter_state.clear();
+        } else {
+            if self.filter_state.is_active() {
+                self.filter_state.clear_active();
+            }
         }
         self.open_sig_prev = 0;
         self.info_sig = PackInfoSignature::EMPTY;
@@ -1156,10 +1545,166 @@ impl CategoryCollectionState {
             .map(|p| open_mask.contains(p) || Self::is_path_open_menu(open_menu, p));
         direct_parent_open.unwrap_or(true)
     }
+    #[cfg(deleteme)]
+    fn has_filter_flags(&self) -> bool {
+        (self.filter_flags ^ PathingFilterFlags::FILTERS_INVERTED)
+            .intersects(PathingFilterFlags::FILTERS_ALL)
+    }
+    #[cfg(deleteme)]
+    pub fn has_filters(&self) -> bool {
+        if self.has_filter_flags() {
+            return true
+        }
+        if self.filter.is_searching() {
+            return true
+        }
+        false
+    }
+    pub fn iter_whitelisted<'a>(
+        &'a self,
+        pack: &'a PackElementState,
+    ) -> impl Iterator<Item = CategoryPath> + 'a {
+        let category_info = pack.info.info.as_ref().map(|i| &*i.categories);
+        self.filter_state.iter_categories(category_info)
+    }
+    pub fn category_is_whitelisted(&self, pack: &PackElementState, path: CategoryPath) -> bool {
+        self.filter_state.visible_category(path)
+    }
+    #[cfg(deleteme)]
+    pub fn iter_whitelisted<'a>(
+        &'a self,
+        pack: &'a PackElementState,
+    ) -> impl Iterator<Item = CategoryPath> + 'a {
+        let filter = &self.filter;
+        let filter_flags = self.filter_flags;
+        let cats = pack.info.category_info().map(|(c, ..)| c);
 
-    /// TODO
-    pub fn category_is_on_map(&self, path: CategoryPath) -> bool {
+        let config_filters =
+            (filter_flags ^ PathingFilterFlags::FILTERS_CONFIG) & PathingFilterFlags::FILTERS_CONFIG;
+        let config_filter = match config_filters {
+            PathingFilterFlags::EMPTY => None,
+            PathingFilterFlags::Enabled => Some(Some(false)),
+            PathingFilterFlags::Disabled => Some(Some(true)),
+            _ => Some(None),
+        };
+        let config = config_filter.and_then(|_| pack.config.cached.as_ref());
+        let config_filter = config_filter.flatten();
+
+        let mut search = (filter.is_searching()).then_some(filter);
+
+        let loaded = filter_flags
+            .contains(PathingFilterFlags::CurrentMap)
+            .then_some(pack.map_info.as_ref())
+            .flatten()
+            .map(|map_info| map_info.info.categories());
+
+        let (b0, b1, b2) = if let Some(loaded) = loaded {
+            (Some(loaded), None, None)
+        } else if let Some(search) = search.take() {
+            (None, Some(search.category_matches()), None)
+        } else if let Some(cats) = cats {
+            (None, None, Some(cats.all().paths()))
+        } else {
+            (None, None, None)
+        };
+        let baseline = b0
+            .into_iter()
+            .flatten()
+            .chain(b1.into_iter().flatten())
+            .chain(b2.into_iter().flatten());
+
+        baseline.filter(move |&path| {
+            let mut default_toggle = true;
+            let mut is_root = false;
+            let mut is_branch = false;
+            let mut is_lonely = false;
+            if let Some(cats) = cats {
+                if !filter_flags.contains(PathingFilterFlags::ShowHidden) && cats.hidden.contains(path) {
+                    return false
+                }
+                default_toggle = cats.disabled.contains(path);
+                is_root = cats.is_root(path);
+                is_lonely = cats.lonely.contains(path);
+                is_branch = cats.info_of(path).and_then(|cat| cat.child()).is_some();
+            }
+            if let Some(search) = search {
+                if !search.matches_category(path) {
+                    return false
+                }
+            }
+            if let Some(config) = config {
+                match config_filter {
+                    #[cfg(todo = "unnecessary")]
+                    None => return false,
+                    _ if is_root => (),
+                    Some(false) if !is_branch => (),
+                    Some(true) if is_branch => (),
+                    Some(filter) => {
+                        let state =
+                            default_toggle ^ config.config.visibility_deviation_for(path).is_visible();
+                        if state == filter {
+                            return false
+                        }
+                    },
+                    _ => (),
+                }
+            }
+            true
+        })
+    }
+    #[cfg(deleteme)]
+    pub fn category_is_whitelisted(&self, pack: &PackElementState, path: CategoryPath) -> bool {
+        let cats = pack.info.category_info().map(|(c, ..)| c);
+
+        let mut default_toggle = true;
+        if let Some(cats) = cats {
+            if !self.filter_flags.contains(PathingFilterFlags::ShowHidden) && cats.hidden.contains(path) {
+                return false
+            }
+            default_toggle = cats.disabled.contains(path);
+        }
+
+        if self.filter.is_searching() {
+            if !self.filter.matches_category(path) {
+                return false
+            }
+        }
+
+        if self.filter_flags.contains(PathingFilterFlags::CurrentMap) {
+            if self.category_is_loaded(pack, path) != Some(true) {
+                return false
+            }
+        }
+
+        let config_filters =
+            (self.filter_flags ^ PathingFilterFlags::FILTERS_CONFIG) & PathingFilterFlags::FILTERS_CONFIG;
+        let config_filter = match config_filters {
+            PathingFilterFlags::EMPTY => None,
+            PathingFilterFlags::Enabled => Some(Some(false)),
+            PathingFilterFlags::Disabled => Some(Some(true)),
+            _ => Some(None),
+        };
+        let config = config_filter.and_then(|_| pack.config.cached.as_ref());
+        if let Some(config) = config {
+            match config_filter {
+                #[cfg(todo = "unnecessary")]
+                None | Some(None) => return false,
+                Some(Some(filter)) => {
+                    let state = default_toggle ^ config.config.visibility_deviation_for(path).is_visible();
+                    if state == filter {
+                        return false
+                    }
+                },
+                _ => (),
+            }
+        }
+
         true
+    }
+    pub(crate) fn category_is_loaded(&self, pack: &PackElementState, path: CategoryPath) -> Option<bool> {
+        pack.map_info
+            .as_ref()
+            .map(|map_info| map_info.info.category_index(path).is_some())
     }
 
     pub fn update_open(&mut self, path: CategoryPath, open: Option<bool>) {
@@ -1172,11 +1717,12 @@ impl CategoryCollectionState {
         };
         if let Some(open) = open {
             self.open_mask.insert_at_if(path, open);
+            if open && self.filter_state.is_active() {}
         }
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CategoryInfo {
     /// TODO: probably not yet used?
     pub id: Option<CategoryId>,
@@ -1206,7 +1752,7 @@ impl CategoryInfo {
     pub fn from_pack_root(root: &PackRoot) -> Self {
         Self {
             id: Some(root.id.clone()),
-            display_name: Some(root.display_name.clone()),
+            display_name: root.display_name.clone(),
             visibility: VisibilityFlags::from_pack_root(root),
             tooltip: PackTooltip::EMPTY,
             interaction: None,
@@ -1244,115 +1790,3 @@ impl CategoryInfo {
         Some((copy_value, copy_message))
     }
 }
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum CategoryAction {
-    HoverTooltip,
-    /// right-clicked
-    ContextMenu,
-    Open(Option<bool>),
-    OpenChildren(Option<bool>),
-    Copy,
-    Enable(Option<bool>),
-    EnableParents(bool),
-    EnableChildren(Option<bool>),
-    /// EnableSiblings
-    Isolate(Option<bool>),
-    ResetChildren,
-    ResetSiblings,
-}
-impl CategoryAction {
-    pub const ISOLATE: Self = Self::Isolate(None);
-    pub const TOGGLE: Self = Self::Enable(None);
-    pub const ENABLE: Self = Self::Enable(Some(true));
-    pub const DISABLE: Self = Self::Enable(Some(false));
-
-    pub fn clobber(
-        self,
-        path: CategoryPath,
-        dest: &mut CategoryActionSlot,
-    ) -> Result<Option<(CategoryPath, Self)>, Self> {
-        match &*dest {
-            Some((p, present)) if *p == path && *present == self => return Ok(None),
-            Some((_, present)) if *present > self => return Err(self),
-            _ => (),
-        }
-        Ok(mem::replace(dest, Some((path, self))))
-    }
-    pub fn try_clobber(
-        self,
-        path: CategoryPath,
-        pack_path: PackPath,
-        dest: &mut CategoryActionSlot,
-    ) -> Result<Option<(CategoryPath, Self)>, Self> {
-        if let Some((dest_path, present)) = dest.take() {
-            if let Some(couldnt_dismiss) = present.try_act(dest_path, pack_path) {
-                *dest = Some((dest_path, couldnt_dismiss));
-                if self.try_act(path, pack_path).is_none() {
-                    // but we were able to dismiss self, good enough!
-                    return Ok(None)
-                }
-            }
-        }
-        self.clobber(path, dest)
-    }
-    pub(crate) fn as_pathing_message(
-        self,
-        path: CategoryPath,
-        pack_path: PackPath,
-    ) -> Option<PathingEvent> {
-        match self {
-            Self::Enable(enable) => Some(PathingEvent::CategoryEnableSet(pack_path, path, enable)),
-            Self::EnableChildren(..) | Self::EnableParents(..) => None,
-            Self::ResetChildren | Self::ResetSiblings => None,
-            Self::Isolate(..) => None,
-            #[cfg(todo)]
-            Self::Copy => {
-                // technically doable via render sender or something if we can find attrs but ew
-            },
-            // anything else requires context or state we don't have access to
-            _unactionable => None,
-        }
-    }
-    pub fn try_act(self, path: CategoryPath, pack_path: PackPath) -> Option<Self> {
-        let msg = match self {
-            #[cfg(todo)]
-            Self::Copy => {
-                // technically doable via render sender or something if we can find attrs but ew
-            },
-            // not important enough to keep around...
-            Self::HoverTooltip | Self::ContextMenu => return None,
-            #[cfg(todo = "unnecessary")]
-            action if path.path == CategoryIndex::MAX => action.as_pack_message(pack_path),
-            action => action.as_pathing_message(path, pack_path),
-        };
-        match msg.map(PathingController::try_send) {
-            Some(true) => None,
-            _ => Some(self),
-        }
-    }
-    pub fn clobbered_action(res: Result<Option<(CategoryPath, Self)>, Self>) -> Option<Self> {
-        match res {
-            Err(lost) | Ok(Some((_, lost))) => Some(lost),
-            _ => None,
-        }
-    }
-    pub(super) fn warn_clobbered(
-        slot: &CategoryActionSlot,
-        res: Result<Option<(CategoryPath, Self)>, Self>,
-    ) {
-        if let Some(clobbered) = Self::clobbered_action(res) {
-            let slot = match slot {
-                #[cfg(debug_assertions)]
-                None => unreachable!("clobbered {clobbered:?} by nothing? weird..."),
-                #[cfg(not(debug_assertions))]
-                None => return,
-                Some(slot) => slot,
-            };
-            if let CategoryAction::HoverTooltip = clobbered {
-                return
-            }
-            log::debug!("clobbered action {clobbered:?} in favour of {slot:?}");
-        }
-    }
-}
-pub type CategoryActionSlot = Option<(CategoryPath, CategoryAction)>;

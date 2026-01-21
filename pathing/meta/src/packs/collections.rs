@@ -17,19 +17,18 @@ use {
             TrailPath,
         },
     },
-    bitvec::vec::BitVec,
     core::iter,
     num_traits::AsPrimitive,
-    std::{
-        collections::{btree_set, BTreeSet},
-        mem,
-    },
+    std::collections::{btree_set, BTreeSet},
     taimi_hoard::{
         collections::TaimiSet,
-        iters::{IterExt as _, LazyMapFn},
-        loc::{indexed, LocationGet, Locator, NamespacePivotFrom, NamespaceTryConvTo},
+        flags::set::{self as bitset, BitSet},
+        iters::IterExt as _,
+        loc::{LocationGet, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     },
 };
+
+pub use super::visible::VisibilityFlagSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MapSet(BTreeSet<MapID>);
@@ -120,22 +119,25 @@ impl CategorySet {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 
     pub fn iter<'a>(&'a self) -> <&'a Self as IntoIterator>::IntoIter {
         IntoIterator::into_iter(self)
     }
-    pub fn into_iter<T>(self) -> impl Iterator<Item = T>
+    pub fn into_iter<T>(self) -> impl DoubleEndedIterator<Item = T>
     where
         T: Copy + 'static,
         CategoryIndex: AsPrimitive<T>,
     {
         IntoIterator::into_iter(self).lazy_map(AsPrimitive::as_)
     }
-    pub fn paths<'a>(&'a self) -> impl Iterator<Item = CategoryPath> + Clone + 'a {
+    pub fn paths<'a>(&'a self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + 'a {
         self.iter().lazy_map(CategoryPath::with_path)
     }
     #[inline]
-    pub fn into_paths(self) -> impl Iterator<Item = CategoryPath> {
+    pub fn into_paths(self) -> impl DoubleEndedIterator<Item = CategoryPath> {
         self.into_iter::<CategoryPath>()
     }
 
@@ -392,30 +394,18 @@ where
     }
 }
 
-/// TODO: this is what BitSet is for
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackSet(BitVec);
+pub struct PackSet(BitSet);
 impl PackSet {
     pub fn new() -> Self {
         Default::default()
     }
 
     pub fn insert_index<I: AsPrimitive<usize>>(&mut self, index: I) -> bool {
-        let index = index.as_() as usize;
-        if let Some(mut b) = self.0.get_mut(index) {
-            return mem::replace(&mut *b, true)
-        }
-
-        self.0.resize(index, false);
-        self.0.push(true);
-        false
+        self.0.insert_at(index)
     }
     pub fn remove_index<I: AsPrimitive<usize>>(&mut self, index: I) -> bool {
-        let index = index.as_() as usize;
-        self.0
-            .get_mut(index)
-            .map(|mut b| mem::replace(&mut *b, false))
-            .unwrap_or(false)
+        self.0.remove_at(index).unwrap_or(false)
     }
     pub fn insert(&mut self, path: PackPath) -> bool {
         self.insert_index(path.path)
@@ -426,8 +416,7 @@ impl PackSet {
 
     #[inline]
     pub fn contains_index<I: AsPrimitive<usize>>(&self, index: I) -> bool {
-        let index = index.as_() as usize;
-        self.0.get(index).map(|b| *b).unwrap_or(false)
+        self.0.contains(index)
     }
     pub fn contains(&self, path: PackPath) -> bool {
         self.contains_index(path.path)
@@ -435,47 +424,33 @@ impl PackSet {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.not_any()
+        self.0.is_empty()
     }
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.0.count_ones()
+        self.0.count()
     }
 
-    /// TODO: what's the wrapper for this called...
-    pub fn iter(&self) -> impl Iterator<Item = PackPath> + '_ {
-        self.0
-            .iter_ones()
-            .lazy_map(|idx| PackPath::with_path(idx as PackIndex))
+    pub fn iter<N: Default + Copy + 'static>(&self) -> bitset::BitSetIterOf<'_, PackPath<N>> {
+        self.0.iter_of::<PackPath<N>>()
     }
-    /// TODO: still use iter_ones approach ugh
-    #[cfg(todo)]
-    pub fn into_iter(self) -> impl Iterator<Item = PackPath> {}
-}
-fn filter_pack_item<N, P>((path, present): (Locator<N, P>, bool)) -> Option<Locator<N, P>> {
-    present.then_some(path)
-}
-fn map_pack_index(index: usize) -> PackPath {
-    PackPath::with_path(index as PackIndex)
+    pub fn into_iter<N: Default + Clone>(self) -> bitset::BitSetVecIter<N, PackIndex> {
+        self.0.bitvec_iter_of()
+    }
 }
 impl IntoIterator for PackSet {
     type Item = PackPath;
-    type IntoIter = iter::FilterMap<
-        indexed::LocatorEnumerateAsRel<PackRegistryNs, PackIndex, bitvec::vec::IntoIter>,
-        fn((PackPath, bool)) -> Option<PackPath>,
-    >;
+    type IntoIter = bitset::BitSetVecIter<PackRegistryNs, PackIndex>;
     fn into_iter(self) -> Self::IntoIter {
-        indexed::LocatorRelIter0::enumerate(Default::default(), self.0.into_iter())
-            .filter_map(filter_pack_item)
+        self.into_iter()
     }
 }
 impl<'a> IntoIterator for &'a PackSet {
     type Item = PackPath;
-    type IntoIter =
-        LazyMapFn<bitvec::slice::IterOnes<'a, usize, bitvec::order::Lsb0>, fn(usize) -> PackPath>;
+    type IntoIter = bitset::BitSetIterOf<'a, PackPath>;
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter_ones().lazy_map(map_pack_index)
+        self.iter()
     }
 }
 impl FromIterator<PackIndex> for PackSet {
@@ -524,6 +499,15 @@ impl Extend<Option<PackIndex>> for PackSet {
                 self.insert_index(index);
             }
         }
+    }
+}
+impl<T> TaimiSet<T> for PackSet
+where
+    T: Copy + AsPrimitive<PackIndex>,
+{
+    #[inline]
+    fn set_contains(&self, index: &T) -> bool {
+        self.contains_index(index.as_())
     }
 }
 impl From<PackPath> for PackSet {

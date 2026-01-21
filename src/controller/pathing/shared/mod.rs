@@ -17,6 +17,7 @@ pub use {
         maps::{
             LoadedMarkerRef,
             LoadedPoiRef,
+            LoadedPoiShared,
             LoadedTrailRef,
             LoadedTrailShared,
             SharedGameplayMap,
@@ -97,9 +98,13 @@ impl PathingSender {
             festivals: festivals.subscribe(),
             achievements: achievements.subscribe(),
             raids: raids.subscribe(),
-            gameplay: Watched::subscribe_to(gameplay),
+            gameplay: {
+                let mut gameplay = Watched::subscribe_to(gameplay);
+                gameplay.cached = Some(GameplayState::INITIAL);
+                gameplay
+            },
             mumble_identity: mumble_identity.subscribe(),
-            enables: sender.enables.clone(),
+            enables: Watched::subscribe_to(&sender.enables),
             load_throttle: {
                 let mut load_throttle = Watched::subscribe_to(&sender.load_throttle);
                 let _ = load_throttle.try_read_mut();
@@ -115,7 +120,7 @@ impl PathingSender {
 pub struct PathingReceiver {
     pub shared: Arc<PathingShared>,
     pub command: mpsc::Receiver<PathingEvent>,
-    pub enables: watched::Tx<PathingEnables>,
+    pub enables: Watched<PathingEnables>,
     pub load_throttle: Watched<usize>,
     pub festivals: watched::Rx<FestivalState>,
     /// TODO: cfg(feature = "api")
@@ -132,17 +137,32 @@ impl PathingReceiver {
         let loader = PackLoader::new(self.shared.clone(), settings, load_throttle);
         Arc::new(loader)
     }
+    #[inline]
+    pub(super) fn enables(&self) -> PathingEnables {
+        self.enables.cached.unwrap_or_default()
+    }
 
     /// TODO: with_filter_state borrowing variant to avoid clone?
     /// lock should be fine to hold...
     pub(super) fn get_filter_state(&self) -> ExternalFilterState {
         let festivals = self.festivals.borrow().get();
-        let bypass = self.enables.borrow().contains(PathingEnables::API_BYPASS);
+        let bypass = self.enables().contains(PathingEnables::API_BYPASS);
         let (clears, achievements) = match bypass {
             true => Default::default(),
             false => (self.raids.borrow().clone(), self.achievements.borrow().clone()),
         };
         (festivals, clears, achievements)
+    }
+
+    pub(super) fn is_katrender_enabled(&self) -> bool {
+        self.enables().contains(PathingEnables::KATRENDER)
+    }
+    pub(super) fn is_engine_active(&self) -> bool {
+        self.enables().contains(PathingEnables::ENGINE)
+    }
+    pub(super) fn is_online(&self) -> bool {
+        self.enables()
+            .contains(PathingEnables::KATRENDER | PathingEnables::ENGINE)
     }
 }
 
@@ -228,9 +248,11 @@ bitflags::bitflags! {
     pub struct PathingEnables: u8 {
         const KATRENDER = 0x01;
         const API_BYPASS = 0x02;
+        /// signals that katrender is successfully initialized and running
+        const ENGINE = 0x04;
         #[cfg(feature = "paths-lua")]
-        const SCRIPTING_LUA = 0x04;
+        const SCRIPTING_LUA = 0x08;
         #[cfg(feature = "paths-lua")]
-        const SCRIPTING_UNSECURED = 0x08;
+        const SCRIPTING_UNSECURED = 0x10;
     }
 }

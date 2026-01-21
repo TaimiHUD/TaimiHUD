@@ -1,9 +1,13 @@
 use {
-    self::pathing::{PathingFilterFlags, PathingSearchFlags},
+    self::{
+        interact::{InteractFilterFlags, InteractSortFlags},
+        pathing::{PathingFilterFlags, PathingSearchFlags},
+    },
     serde::{Deserialize, Serialize},
     taimi_sync::watched,
 };
 
+pub mod interact;
 pub mod pathing;
 
 pub type UiState = Render2DState;
@@ -50,11 +54,13 @@ pub struct PathingWindowState {
     pub search: PathingSearchState,
     #[serde(default, skip_serializing_if = "PathingFilterState::is_empty")]
     pub filter: PathingFilterState,
+    #[serde(default, skip_serializing_if = "InteractPoiState::is_empty")]
+    pub interact_pois: InteractPoiState,
 }
 impl PathingWindowState {
     pub fn is_empty(&self) -> bool {
-        let Self { search, filter } = self;
-        search.is_empty() && filter.is_empty()
+        let Self { search, filter, interact_pois } = self;
+        search.is_empty() & filter.is_empty() & interact_pois.is_empty()
     }
 }
 
@@ -93,6 +99,48 @@ impl PathingFilterState {
     pub fn is_empty(&self) -> bool {
         let Self { flags: PathingFilterFlags::DEFAULT } = self else { return false };
         true
+    }
+}
+
+/// TODO: sort order too (but maybe let imgui persist it for us and serde(skip))?
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct InteractPoiState {
+    #[serde(
+        default = "InteractFilterFlags::settings_default",
+        skip_serializing_if = "InteractFilterFlags::is_settings_default"
+    )]
+    pub flags: InteractFilterFlags,
+    #[serde(
+        default = "InteractSortFlags::settings_default",
+        skip_serializing_if = "InteractSortFlags::is_settings_default"
+    )]
+    pub sort: InteractSortFlags,
+    #[serde(
+        default = "InteractSortFlags::settings_default_descending",
+        skip_serializing_if = "InteractSortFlags::is_settings_default_descending"
+    )]
+    pub sort_desc: InteractSortFlags,
+}
+impl InteractPoiState {
+    pub fn is_empty(&self) -> bool {
+        let Self {
+            flags: InteractFilterFlags::DEFAULT_UI,
+            sort: InteractSortFlags::DEFAULT_UI,
+            sort_desc: InteractSortFlags::DEFAULT_UI_DESC,
+        } = self
+        else {
+            return false
+        };
+        true
+    }
+}
+impl Default for InteractPoiState {
+    fn default() -> Self {
+        Self {
+            flags: InteractFilterFlags::settings_default(),
+            sort: InteractSortFlags::settings_default(),
+            sort_desc: InteractSortFlags::settings_default_descending(),
+        }
     }
 }
 

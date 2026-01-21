@@ -6,7 +6,7 @@ use {
 
 pub use self::{
     id::{IdVariant, MarkerId, MarkerIndex, MarkerIndexNamespace, MarkerIndexVariant, MarkerPath},
-    visible::{VisibilityFlagSet, VisibilityFlags},
+    visible::VisibilityFlags,
 };
 
 pub mod collections;

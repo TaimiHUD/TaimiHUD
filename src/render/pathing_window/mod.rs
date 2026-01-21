@@ -1,7 +1,12 @@
 use {
     crate::{
-        controller::pathing::PathingEvent,
-        render::{element::prelude::*, machine::RenderMachine, PathingConfig, RenderState},
+        controller::pathing::{shared::interact::InteractMessage, PathingEvent},
+        render::{
+            element::{pack::PackVisibility, prelude::*},
+            machine::RenderMachine,
+            PathingConfig,
+            RenderState,
+        },
         settings::{
             state::ui::{pathing::PathingFilterFlags, PathingWindowState as UiState},
             Settings,
@@ -23,10 +28,15 @@ mod menu;
 
 pub struct PathingWindowState {
     pub open: bool,
+    /// window can be `open` but minimized or collapsed
+    ///
+    /// (or even dragged off-screen?)
+    pub visible: bool,
     pub filter_open: bool,
     pub filter_state: PathingFilterFlags,
-    pub open_items: HashSet<CategoryId>,
     pub search_state: PathingSearchState,
+    pub search_show_options: bool,
+    pub search_focus_latch: bool,
     pub ui_state: Watched<UiState>,
 }
 
@@ -34,10 +44,12 @@ impl PathingWindowState {
     pub fn new() -> Self {
         Self {
             open: false,
+            visible: false,
             filter_open: false,
             filter_state: Default::default(),
-            open_items: Default::default(),
             search_state: Default::default(),
+            search_show_options: false,
+            search_focus_latch: false,
             ui_state: Watched::empty_with(Default::default()),
         }
     }
@@ -54,13 +66,25 @@ impl PathingWindowState {
             self.filter_state = ui_state.filter.flags;
             self.search_state.flags = ui_state.search.flags;
             match ui_state.search.query() {
-                Some(query) if self.search_state.buffer.is_empty() =>
-                    self.search_state.buffer = query.into(),
+                Some(query) if self.search_state.buffer.is_empty() => {
+                    self.search_state.buffer = query.into();
+                    self.search_state.commit(true);
+                },
                 _ => (),
             }
         }
+        if !self.visible {
+            self.search_focus_latch = false;
+        }
     }
-    pub fn pre_draw(&mut self, _machine: &mut RenderMachine) {}
+    pub fn pre_draw(&mut self, machine: &mut RenderMachine) {
+        let filter_query = &mut machine.pack_ui_state.filter_query;
+        let prev_flags = filter_query.flags;
+        filter_query.set_flags(self.filter_state);
+        if prev_flags != filter_query.flags {
+            machine.pack_ui_state.filter_query.search = self.search_state.to_query();
+        }
+    }
 
     pub fn draw<'ui, U>(
         &mut self,
@@ -96,12 +120,17 @@ impl PathingWindowState {
             ImCondition::initial(ImSize2::new(300.0, 200.0)),
             &mut open,
         ));
+        let visible = window.is_some();
         if let Some(_window) = window {
             let pathing_dir = crate::ADDON_DIR.join("pathing");
             RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
             self.draw_content(ui, machine, engine)
         }
         self.open = open;
+        self.visible = match open {
+            false => false,
+            _ => visible,
+        };
     }
     pub fn draw_content<'ui, U>(
         &mut self,
@@ -153,7 +182,7 @@ impl PathingWindowState {
             }
             ui.set_cursor_screen_pos(bookmark);
 
-            self.draw_interact_content(ui, machine);
+            machine.pack_ui_state.draw_interact(ui);
         }
         drop(tabs);
     }
@@ -184,7 +213,9 @@ impl PathingWindowState {
             if machine.pack_ui_state.can_expand() {
                 ui.same_line();
                 if ui.button(fl!("expand-all")) {
-                    machine.pack_ui_state.act_expand_all();
+                    machine
+                        .pack_ui_state
+                        .act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
                 }
             }
         }
@@ -193,7 +224,9 @@ impl PathingWindowState {
                 ui.same_line();
             }
             if ui.button(fl!("collapse-all")) {
-                machine.pack_ui_state.act_collapse_all();
+                machine
+                    .pack_ui_state
+                    .act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
             }
             drawn = true;
         }
@@ -212,6 +245,7 @@ impl PathingWindowState {
             PathingEvent::UnloadAll(true).try_send();
         }
     }
+    const FILTER_EXPAND_COLLAPSE: bool = true;
     pub fn draw_categories_content<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
     where
         U: ?Sized + ImDrawWindow<'ui>,
@@ -275,8 +309,8 @@ impl PathingWindowState {
             }
         }
         if let Some(_token) = table_token {
-            machine.pack_ui_state.draw(ui);
             ui.table_next_column();
+            machine.pack_ui_state.draw(ui);
         }
         if !machine.pack_ui_state.any_loaded() {
             with_i18n!("packs-empty", |msg| ui.text_with_font(NexusLinkFont::Big, msg));
@@ -290,130 +324,38 @@ impl PathingWindowState {
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let filter_prev = self.filter_state;
-        let search_dirty = self.draw_filters(ui);
-        ui.dummy([4.0; 2]);
+        let search_dirty = self.draw_filters(ui, machine);
         ui.separator();
-        ui.dummy([4.0; 2]);
 
-        if search_dirty || filter_prev != self.filter_state {
+        let query_dirty = match search_dirty {
+            Some(hard) => self.search_state.commit(!hard),
+            None => false,
+        };
+        if query_dirty || filter_prev != self.filter_state {
+            machine.pack_ui_state.filter_query.set_flags(self.filter_state);
             self.ui_state.write_if(|s| {
                 let flags = (self.search_state.flags, self.filter_state);
                 let changed = (s.search.flags, s.filter.flags) != flags;
-                s.search.query = self.search_state.buffer.clone();
+                match self.search_state.query_str() {
+                    Some(Some(query)) if !query.is_empty() && search_dirty != Some(true) => (),
+                    Some(query) => s.search.query = query.cloned().unwrap_or_default(),
+                    _ => (),
+                }
                 s.search.flags = flags.0;
                 s.filter.flags = flags.1;
                 changed.then_some(true)
             });
         }
-        if search_dirty {
-            let packs = machine
-                .pack_ui_state
-                .pack_state
-                .values()
-                .filter_map(|pack| pack.state.pack_data());
-            self.search_state.commit(packs);
+        if query_dirty {
+            machine.pack_ui_state.filter_query.search = self.search_state.to_query();
+            machine.pack_ui_state.apply_search_filter();
         }
     }
-}
 
-use {
-    crate::{
-        controller::pathing::{
-            info::EMPTY_INTERACTION_ATTRS,
-            registry::{LoadedPoiPath, PoiMapPath},
-            shared::{interact::InteractMessage, LocDisplay, SharedGameplayMap},
-        },
-        render::element::pack::interact::RenderInteractivePoi,
-    },
-    std::borrow::Cow,
-    taimi_hoard::loc::LocationRef,
-    taimi_meta::packs::{CategoryIndex, CategoryPath, PoiIndex, PoiPath},
-};
-impl PathingWindowState {
-    pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let Some(pathing) = machine.pathing.as_ref() else { return };
-        let table = RenderInteractivePoi::draw_table_start(ui, "pois-nearby");
-        if let Some(_table) = table {
-            let nearby = pathing.interact.nearby.borrow().clone();
-            let maps = pathing.gameplay.borrow().clone();
-            for (lpath, path) in nearby.iter_pois() {
-                self.draw_one_poi(ui, &maps, lpath, Some(path));
-            }
+    pub fn visibility(&self) -> PackVisibility {
+        match self.open {
+            true if !self.visible => PackVisibility::Pending,
+            open => PackVisibility::visible(open),
         }
-        if let Some(_table) = RenderInteractivePoi::draw_table_start(ui, "pois-map") {
-            let maps = pathing.gameplay.borrow().clone();
-            let entities = pathing.interact.entities.borrow();
-            // TODO: use bvh to sort by distance bleh
-            let bvh = &entities.trigger_bvh;
-            for e in entities.entities.iter() {
-                let e = &e.value;
-                let lpath = e.poi_path();
-                self.draw_one_poi(ui, &maps, lpath, None);
-            }
-        }
-        let _ = RenderInteractivePoi::draw_table_start(ui, "pois-hidden");
-    }
-    fn draw_one_poi(
-        &mut self,
-        ui: &Ui,
-        maps: &SharedGameplayMap,
-        lpath: PoiMapPath,
-        mut poi_path: Option<PoiPath>,
-    ) {
-        let lpoi_path: LoadedPoiPath = lpath.unscope();
-        let (attrs, lguid, name, category_path, lcat_path) =
-            if let Some((_map_path, map_info)) = maps.get_info_for(lpath.root.root) {
-                let linfo = map_info.pois().lookup_ref(&lpoi_path);
-                // find is incorrect!
-                let TODO = ();
-                // TODO: map_info.marker_guid(lpath);
-                if poi_path.is_none() {
-                    poi_path = map_info.poi_path(lpoi_path);
-                }
-                let lguid = map_info.poi_guids().find(|(p, ..)| Some(*p) == poi_path);
-                let cat_path: Option<CategoryPath> = linfo.map(|i| i.category_path);
-                let lcat_path = cat_path.and_then(|p| map_info.category_index(p));
-                let attrs = linfo.map(|li| li.interaction_attrs());
-                let name = linfo.and_then(|li| li.get_marker_attrs()).and_then(|ma| {
-                    ma.tip_name
-                        .as_ref()
-                        .or(ma.tip_description.as_ref())
-                        .map(|name| &name[..])
-                });
-                (attrs, lguid, name, cat_path, lcat_path)
-            } else {
-                (None, None, None, None, None)
-            };
-        let (position, visibility, category_visibility) = if let Some(map) = maps.get_state(lpath.root) {
-            let lpoi = map.pois().lookup_ref(&lpoi_path);
-            let vis = lpoi.map(|lpoi| lpoi.visibility);
-            let lcat = lcat_path.and_then(|p| map.categories().lookup_ref(&p));
-            let cat_vis = lcat.map(|lcat| lcat.visibility);
-            let pos = lpoi.map(|lpoi| lpoi.position);
-            (pos, vis, cat_vis)
-        } else {
-            (None, None, None)
-        };
-        let guid = lguid.and_then(|(_, g)| g.cloned());
-        let display_name = name.map(Cow::Borrowed).unwrap_or_else(|| {
-            let n = LocDisplay(lpath.root.rel(lpoi_path));
-            Cow::Owned(n.to_string())
-        });
-        let attrs = attrs.unwrap_or(&EMPTY_INTERACTION_ATTRS);
-        let context_opened = RenderInteractivePoi {
-            path: poi_path.unwrap_or(PoiPath::with_path(PoiIndex::MAX)),
-            category_path: category_path.unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
-            map_path: lpath.root,
-            loaded_index: lpath.path,
-            guid,
-            visibility: visibility.unwrap_or_default(),
-            category_visibility: category_visibility.unwrap_or_default(),
-            #[cfg(todo)]
-            hidden: visibility.map(|v| v.is_visible() ^ config_vis).unwrap_or(false),
-            hidden: false,
-            position: Default::default(),
-            nearby: Default::default(),
-        }
-        .draw(ui, attrs, &display_name);
     }
 }

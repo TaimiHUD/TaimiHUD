@@ -5,7 +5,9 @@ use {
                 registry::{PackInfoSignature, PackVecOf, UnloadedReason},
                 shared::{
                     PathingShared,
+                    SharedGameplayMap,
                     SharedLoaderPacksInfo,
+                    SharedMapPackLoaded,
                     SharedPackConfig,
                     SharedPackInfo,
                     SharedPackLoad,
@@ -25,7 +27,7 @@ use {
         sync::{Arc, Weak},
     },
     taimi_hoard::{loc::LocationMut, str_opt, str_opt_ref},
-    taimi_meta::packs::{CategoryIndex, CategoryPath, PackIndex, PackPath},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, MapIndex, PackIndex, PackPath},
     taimi_pack::{
         attributes::{self, AttrString, MarkerAttributes},
         Pack,
@@ -42,13 +44,19 @@ pub use self::{
         CategoryAction,
         CategoryActionSlot,
         CategoryCollectionState,
+        CategoryEnableFilterState,
+        CategoryFilterQuery,
         CategoryInfo,
+        CategorySearchFilter,
+        CategorySearchQuery,
         DrawCategoryCollection,
         DrawCategoryCollectionTree,
         DrawCategoryHeader,
         DrawCategoryTooltip,
         DrawPackUnloaded,
+        PackCategoryMaskState,
     },
+    interact::{DrawPoiInfo, PoiInfo, PoiInfoContext},
     menu::{
         DrawCategoryCollectionMenu,
         DrawCategoryContextMenu,
@@ -60,8 +68,7 @@ pub use self::{
 };
 
 mod categories;
-/// TODO: un-pub!
-pub(in super::super) mod interact;
+mod interact;
 mod menu;
 mod toggles;
 
@@ -69,7 +76,10 @@ mod toggles;
 pub struct PackElements {
     pub shared: Option<Arc<PathingShared>>,
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
+    pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
+    pub interact: PoiInfo,
+    pub filter_query: CategoryFilterQuery,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
 impl PackElements {
@@ -86,6 +96,8 @@ impl PackElements {
             });
             if let Some(shared) = &self.shared {
                 self.packs_rx.restart_watching(&shared.packs.packs);
+                self.maps_rx.restart_watching(&shared.gameplay);
+                self.interact.init(shared);
             }
         }
         let Some(_shared) = &self.shared else { return };
@@ -102,22 +114,151 @@ impl PackElements {
                 self.pack_state.data.push(PackElement::new(&pack));
             }
         }
-        for pack in self.pack_state.values_mut() {
-            pack.pre_draw(visibility);
+        if let Some(maps) = self.maps_rx.try_read_if_changed() {
+            if let Some(..) = maps.map_id {
+                let maps_iter = self.pack_state.values_mut().zip(maps.iter());
+                for (pack_state, (path, map_info, _map)) in maps_iter {
+                    let dest = &mut pack_state.state.map_info;
+                    let mut dirty = dest.is_some() != map_info.is_some();
+                    match (dest, map_info) {
+                        (Some(dest), Some(map_info)) => {
+                            dirty |= Arc::as_ptr(&dest.info) != Arc::as_ptr(&map_info.info);
+                            dest.clone_from(map_info);
+                        },
+                        (dest, map_info) => {
+                            // TODO: need to hold off on clearing immediately when in-between maps or no?
+                            *dest = map_info.cloned()
+                        },
+                    }
+                    if dirty {
+                        let map_id = map_info.map(|i| i.path.path);
+                        pack_state.state.damage.map = Some(map_id);
+                    }
+                }
+            } else {
+                for pack_state in self.pack_state.values_mut() {
+                    pack_state.state.map_info = None;
+                }
+            }
+            self.interact.wants_maps = true;
         }
+        let interact_vis = match visibility {
+            vis @ PackVisibility::Closed => vis,
+            _ => self.interact.visibility(),
+        };
+        if interact_vis.is_visible() {
+            self.interact.rx_nearby();
+            if self.interact.wants_maps() {
+                if let Some(maps) = self.maps_rx.try_read() {
+                    self.interact.rx_maps(&maps);
+                }
+            }
+            self.interact.update_entities_relaxed();
+        }
+        for pack in self.pack_state.values_mut() {
+            pack.pre_draw(&mut self.filter_query, visibility);
+        }
+    }
+    /// TODO: binary heap with real sort key
+    fn iter_packs_draw<'a, 'u, 'ui, U>(
+        ui: &'u mut U,
+        pack_state: &'a mut PackVecOf<PackElement>,
+        filtered: Option<bool>,
+        amt_hidden: &'a mut usize,
+    ) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui
+    where
+        U: ImDrawWindow<'ui>,
+        'u: 'ui,
+        'a: 'u,
+    {
+        let mut unloaded = Vec::new();
+        let mut delayed = Vec::new();
+        let mut delayed_sep = false;
+        let mut packs = pack_state.values_mut();
+        let mut sep = None;
+        core::iter::from_fn(move || {
+            let mut next = None;
+            while let Some(pack) = packs.next() {
+                let delay = match &pack.state.unloaded {
+                    Some(UnloadedReason::Gravestone) => continue,
+                    _ if filtered.is_some() && pack.categories.filter_state.all_filtered() => true,
+                    Some(
+                        UnloadedReason::Disabled
+                        | UnloadedReason::UnknownFormat
+                        | UnloadedReason::LoadingFailed(..),
+                    ) => true,
+                    _ => false,
+                };
+                match delay {
+                    true if filtered.is_some() && pack.categories.filter_state.any_visible() =>
+                        delayed.push(pack),
+                    true => unloaded.push(pack),
+                    false => {
+                        next = Some(pack);
+                        sep = Some(false);
+                        break
+                    },
+                }
+            }
+            next.or_else(|| {
+                let delayed = delayed.pop();
+                if delayed.is_some() && sep == Some(false) && !delayed_sep {
+                    ui.separator();
+                    ui.spacing();
+                    ui.separator();
+                    delayed_sep = true;
+                }
+                delayed
+            })
+            .or_else(|| {
+                let matching = matches!(filtered, Some(true));
+                match sep {
+                    _ if unloaded.is_empty() => (),
+                    Some(false) if matching => {
+                        *amt_hidden = unloaded.len();
+                        return None
+                    },
+                    Some(false) => {
+                        ui.separator();
+                        if !delayed_sep {
+                            ui.spacing();
+                            ui.separator();
+                        }
+                        sep = Some(true);
+                    },
+                    Some(true) | None => (),
+                }
+                unloaded.pop()
+            })
+        })
     }
     pub fn draw<'ui, U>(&mut self, ui: &mut U)
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        for pack in self.pack_state.values_mut() {
+        let filtered = match self.filter_query.is_empty() {
+            true => None,
+            false => {
+                let matching = self.filter_query.is_matching();
+                Some(matching)
+            },
+        };
+        let mut amt_hidden = 0;
+        let mut any_packs = false;
+        let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered, &mut amt_hidden);
+        for pack in packs {
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
                 _ => pack.context_menu = None,
             }
-            if matches!(pack.state.unloaded, Some(UnloadedReason::Gravestone)) {
-                continue
-            }
+            any_packs |= !matches!(
+                pack.state.unloaded,
+                Some(
+                    UnloadedReason::Gravestone
+                        | UnloadedReason::UnknownFormat
+                        | UnloadedReason::LoadingFailed(..)
+                )
+            );
             pack.draw(ui);
             if let Some(cat_path) = pack.context_menu {
                 let new_menu = (pack.state.pack_path(), cat_path);
@@ -126,6 +267,27 @@ impl PackElements {
                 }
                 self.context_menu = Some((pack.state.pack_path(), cat_path));
             }
+        }
+        if amt_hidden > 0 {
+            ui.spacing();
+            let checkpoint = ui.cursor_pos();
+            let msg = format!("{amt_hidden} packs hidden by filter");
+            ui.text_disabled(&msg);
+            if ui.is_item_clicked() {
+                for pack in self.pack_state.values_mut() {
+                    let cats = pack.state.info.info.as_ref().map(|i| &*i.categories);
+                    pack.categories.filter_state.populate_interest(cats);
+                }
+            } else if ui.is_item_hovered() {
+                ui.set_cursor_pos(checkpoint);
+                ui.text(&msg);
+            }
+            ui.spacing();
+            ui.table_next_column();
+        } else if !any_packs {
+            with_i18n!("packs-empty", |msg| ui.text_with_font(NexusLinkFont::Big, msg));
+            with_i18n!("packs-empty-notice", |notice| ui
+                .wrap_text_with_font(NexusLinkFont::Ui, notice));
         }
 
         let (mut menu_pack, menu_cat) = match self.context_menu {
@@ -175,8 +337,8 @@ impl PackElement {
         }
     }
 
-    pub fn pre_draw(&mut self, visibility: PackVisibility) {
-        if let PackVisibility::Closed = visibility {
+    pub fn pre_draw(&mut self, filter_query: &mut CategoryFilterQuery, visibility: PackVisibility) {
+        if visibility.is_closed() {
             self.hovered = None;
         }
         let damage = self.state.pre_draw(visibility);
@@ -188,7 +350,7 @@ impl PackElement {
             v => v,
         };
         self.categories
-            .pre_draw(&self.state, &damage, category_visibility);
+            .pre_draw(&self.state, &*filter_query, &damage, category_visibility);
     }
 
     pub fn draw_pack_tooltip<'ui, U>(&mut self, ui: &mut U, title_visible: bool, reason_visible: bool)
@@ -210,8 +372,7 @@ impl PackElement {
     {
         let title = (!title_visible).then_some(self.state.display_name()).flatten();
         if let Some(title) = title {
-            let _title_font = ui.push_font(NexusLinkFont::Big);
-            ui.text(title);
+            ui.text_with_font(NexusLinkFont::Big, title);
             ui.spacing();
         }
         let path = rt::relative_path(&self.state.info.path);
@@ -235,6 +396,7 @@ pub struct PackElementState {
     pub loaded: watch::Receiver<SharedPackLoaded>,
     pub unloaded: Option<UnloadedReason>,
     pub pack: Option<Weak<Pack>>,
+    pub map_info: Option<SharedMapPackLoaded>,
 
     /// info.categories is relied on too heavily atm for this to be useful
     category_flags: Option<()>,
@@ -257,6 +419,7 @@ impl PackElementState {
             },
             unloaded: None,
             pack: None,
+            map_info: None,
             category_flags: None,
             display_name: String::new(),
             id_name: String::new(),
@@ -269,7 +432,7 @@ impl PackElementState {
         if damage.visibility == Some(visibility) {
             damage.visibility = None;
         }
-        if let Some(_config) = self.config.try_read_if_changed() {
+        if let Some(_config) = self.config.try_read_if_changed_or_clone() {
             damage.config = true;
         }
         if self.loaded.has_changed().unwrap_or(false) {
@@ -278,7 +441,7 @@ impl PackElementState {
             self.unloaded = loaded.unloaded.clone();
             self.pack = loaded.pack.as_ref().map(Arc::downgrade);
         }
-        if let PackVisibility::Closed = visibility {
+        if visibility.is_closed() {
             self.cleanup_cache();
             return damage
         }
@@ -454,6 +617,7 @@ impl ToOwned for PackTooltipRef<'_> {
 pub struct PackDamageReport {
     visibility: Option<PackVisibility>,
     info: Option<PackInfoSignature>,
+    map: Option<Option<MapIndex>>,
     config: bool,
     loaded: bool,
 }
@@ -461,12 +625,14 @@ impl PackDamageReport {
     pub const CLEAN: Self = Self {
         visibility: None,
         info: None,
+        map: None,
         config: false,
         loaded: false,
     };
     pub const ALL: Self = Self {
         visibility: Some(PackVisibility::Pending),
         info: Some(PackInfoSignature::EMPTY),
+        map: Some(None),
         config: true,
         loaded: true,
     };
@@ -482,6 +648,23 @@ pub enum PackVisibility {
     Pending = 2,
     /// window closed
     Closed = 1,
+}
+impl PackVisibility {
+    pub fn visible(visible: bool) -> Self {
+        match visible {
+            true => Self::Visible,
+            false => Self::Closed,
+        }
+    }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        matches!(self, Self::Visible)
+    }
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[must_use]

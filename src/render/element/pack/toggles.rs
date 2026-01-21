@@ -15,7 +15,12 @@ use {
         PackElementState,
         UiAction,
     },
-    crate::{controller::pathing::registry::UnloadedReason, render::element::prelude::*},
+    crate::{
+        controller::pathing::registry::UnloadedReason,
+        render::element::prelude::*,
+        settings::state::ui::pathing::PathingFilterFlags,
+    },
+    taimi_hoard::flags::BitSet,
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
 };
@@ -26,6 +31,7 @@ pub struct DrawPackRoots<'a, 'u, U: ?Sized + 'u> {
     pub categories: Option<&'a CategoryCollectionState>,
     pub act_cat: CategoryActionSlot,
     pub act_pack: PackActionSlot,
+    pub unfilter_interest: Option<CategoryPath>,
     pub last_menu_open: Option<CategoryPath>,
 }
 impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U>
@@ -51,7 +57,6 @@ where
         let cats = self.state.info.info.as_ref().map(|i| &i.categories);
         let pseudo_root = self.state.info.unique_root().map(|r| r.path());
         let (mut pack_act, mut pack_toggle) = (None, None);
-        self.ui.table_next_column();
         let token = if pseudo_root.is_none() {
             let mut header = self.prepare_header();
             let (act, token) = header.draw();
@@ -81,7 +86,6 @@ where
                 };
                 for root in cats.root_paths() {
                     categories.draw_root(root, pseudo_root.is_some());
-                    categories.draw.ui.table_next_column();
                     let act_cat = match categories.act.take() {
                         Some((
                             path,
@@ -113,8 +117,13 @@ where
         }
         if token.is_some() {
             self.ui.unindent();
+        } else if pseudo_root.is_none() {
+            self.ui.table_next_column();
         }
         drop(token);
+        if let Some(unfilter) = categories.unfilter_interest {
+            self.unfilter_interest = Some(unfilter);
+        }
         if let Some(act) = pack_toggle {
             self.act_pack = Some((self.state.pack_path(), PackAction::Cat {
                 path: pseudo_root,
@@ -139,7 +148,6 @@ where
         }
     }
     fn draw_unloaded(&mut self) {
-        self.ui.table_next_column();
         let act = DrawPackUnloaded { ui: self.ui, state: self.state }.draw();
         let act_pack = match act {
             Some(UiAction::RIGHT_CLICK) => Some(PackAction::Root(CategoryAction::ContextMenu)),
@@ -161,6 +169,7 @@ where
             let clobbered = act_pack.clobber(self.state.pack_path(), &mut self.act_pack);
             PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
+        self.ui.table_next_column();
     }
     pub(super) fn prepare_header(&mut self) -> DrawCategoryHeader<'a, '_, U> {
         DrawCategoryHeader {
@@ -176,8 +185,19 @@ where
                 .as_ref()
                 .map(|i| i.categories.roots.is_empty()),
             is_decorative: false,
+            is_header: true,
             button_interact: None,
             allow_overlap: true,
+            filter_selected: self
+                .categories
+                .as_ref()
+                .and_then(|c| match c.filter_state.is_active() {
+                    false => None,
+                    true => match c.filter_state.all_filtered() {
+                        true => Some(false),
+                        false => None,
+                    },
+                }),
         }
     }
 
@@ -201,6 +221,7 @@ pub struct DrawCategoryToggle<'a, 'u, U: ?Sized> {
     pub is_copyable: bool,
     pub has_children: bool,
     pub pseudo_root: bool,
+    pub filter_selected: Option<bool>,
 }
 impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U>
 where
@@ -271,6 +292,7 @@ where
         'a0: 'u0,
     {
         let allow_overlap = self.pseudo_root && self.has_toggle();
+        let is_decorative = self.flags.contains(CategoryFlags::SEPARATOR);
         DrawCategoryHeader {
             ui: &mut *self.ui,
             open: self.open_state,
@@ -284,9 +306,11 @@ where
                 false if self.is_lonely => None,
                 is_parent => Some(!is_parent),
             },
-            is_decorative: self.flags.contains(CategoryFlags::SEPARATOR),
+            is_header: (self.has_children && !is_decorative) || self.pseudo_root,
+            is_decorative,
             button_interact: Some(self.is_copyable),
             allow_overlap,
+            filter_selected: self.filter_selected,
         }
     }
 
@@ -392,19 +416,42 @@ impl super::PackElements {
             p.categories.open_mask.end_len() != count || p.categories.open_mask.flags.not_any()
         })
     }
-    pub fn act_expand_all(&mut self) {
+    pub fn act_expand_all(&mut self, skip_filtered: bool) {
         for pack in self.pack_state.values_mut() {
             if let Some((cats, _)) = pack.state.info.category_info() {
-                log::debug!("TODO: avoid opening filtered/hidden cats");
-                pack.categories.open_mask.flags.fill(true);
-                pack.categories.open_mask.extend_for(cats.count(), true);
+                let apply_filters = match skip_filtered {
+                    false => pack.categories.filter_state.is_active(),
+                    true => false,
+                };
+                if apply_filters {
+                    // TODO: go one level up? only open parents with at least one whitelisted child!
+                    let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
+                    pack.categories.open_mask.extend(cats.iter_of::<CategoryPath>());
+                } else {
+                    pack.categories.open_mask.flags.fill(true);
+                    pack.categories.open_mask.extend_for(cats.count(), true);
+                }
             }
         }
     }
-    pub fn act_collapse_all(&mut self) {
+    pub fn act_collapse_all(&mut self, skip_filtered: bool) {
         for pack in self.pack_state.values_mut() {
-            // TODO: avoid closing filtered ones too?
-            pack.categories.open_mask.clear();
+            let apply_filters = match skip_filtered {
+                false => pack.categories.filter_state.is_active() && pack.categories.open_mask.any(),
+                true => false,
+            };
+            let cats = apply_filters.then_some(pack.state.info.category_info()).flatten();
+            if let Some((cats, _)) = cats {
+                let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
+                for cat in cats.iter_of::<CategoryPath>() {
+                    pack.categories.open_mask.remove_at(cat);
+
+                    let new_len = pack.categories.open_mask.last_one().map(|i| i + 1).unwrap_or(0);
+                    pack.categories.open_mask.truncate(new_len);
+                }
+            } else {
+                pack.categories.open_mask.clear();
+            }
         }
     }
 }
@@ -415,8 +462,26 @@ impl PackElement {
     {
         let mut roots = self.prepare_draw(ui);
         roots.draw();
-        let DrawPackRoots { act_cat, act_pack, .. } = roots;
+        let DrawPackRoots {
+            act_cat, act_pack, unfilter_interest, ..
+        } = roots;
         self.act_post_draw(ui, act_cat, act_pack, true);
+        if let Some(interest) = unfilter_interest {
+            if let Some(cats) = self.state.info.info.as_ref().map(|i| &i.categories) {
+                let hide = self
+                    .categories
+                    .filter_state
+                    .flags
+                    .contains(PathingFilterFlags::ShowHidden);
+                let filter = move |path: &CategoryPath| match hide {
+                    false => !cats.hidden.contains(*path),
+                    true => true,
+                };
+                self.categories
+                    .filter_state
+                    .extend_interest(cats.children_of(interest).filter(filter));
+            }
+        }
     }
 
     pub fn prepare_draw<'a, 'u, 'ui, U>(&'a self, ui: &'u mut U) -> DrawPackRoots<'a, 'u, U>
@@ -430,6 +495,7 @@ impl PackElement {
             act_cat: Default::default(),
             act_pack: Default::default(),
             last_menu_open: self.categories.open_menu.last().copied(),
+            unfilter_interest: None,
         }
     }
 }
