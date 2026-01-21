@@ -325,6 +325,7 @@ current-map = Current map
 ignore-root = Ignore root state
 ignore-leaf = Ignore leaf state
 ignore-branch = Ignore branch state
+include-children = Descend
 show-hidden = Show hidden
 show-all = Show all
 #off-map = Elsewhere

@@ -216,11 +216,12 @@ impl Engine {
         Ok(engine)
     }
 
+    /// `Ok(true)` if freshly (re)initialized
     pub fn init_mut<F>(
         machine: &mut RenderMachine,
         slot: &mut Option<anyhow::Result<Self>>,
         f: F,
-    ) -> anyhow::Result<()>
+    ) -> anyhow::Result<bool>
     where
         F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
     {
@@ -230,11 +231,12 @@ impl Engine {
             None if machine.gameplay.is_initial() || !enabled.unwrap_or(false) => {
                 // if early game loading or charsel, delay init
                 // TODO: make this an option, but have fallback plan if you cause crashes...
-                return Ok(())
+                return Ok(false)
             },
             e => e,
         };
         let mut res = None;
+        let fresh = engine.is_none();
         let engine = engine.get_or_insert_with(|| {
             log::debug!("setting up space engine...");
             let (tx, rx) = tokio::sync::mpsc::channel::<SpaceEvent>(64);
@@ -274,9 +276,9 @@ impl Engine {
             return Err(e)
         }
         match engine {
-            Ok(..) if !enabled.unwrap_or(true) => Ok(()),
-            Ok(e) => f(e, machine),
-            Err(..) => Ok(()),
+            Ok(..) if !enabled.unwrap_or(true) => Ok(false),
+            Ok(e) => f(e, machine).map(move |()| fresh),
+            Err(..) => Ok(false),
         }
     }
 

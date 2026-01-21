@@ -3,7 +3,7 @@ use {
     crate::{
         controller::pathing::{
             registry::{PoiMapPath, LoadedPoiPath, PackMapPath, LoadedMarkerPath},
-            shared::{interact::{empty_trigger_bvh, NearbyMarkers, PlayerPosition, SharedTriggerBvh, TriggerBvh, TRIGGER_DIMENSION}, PathingReceiver, InteractReceiver},
+            shared::{interact::{empty_trigger_bvh, NearbyMarkers, PlayerPosition, SharedTriggerBvh, TriggerBvh, TRIGGER_DIMENSION}, PathingReceiver, InteractReceiver, PathingEnables},
             state::{
                 hidden::{AutoReset, HideContext},
                 interactive::{InteractionEvent, InteractionEventAction, InteractivePoi},
@@ -351,6 +351,7 @@ impl Default for MapInteractState {
 pub struct InteractReactor {
     pub map_interactions: MapInteractState,
     pub config: InteractSettings,
+    pub enables: PathingEnables,
     /// TODO: passive interval as a multiple of this seems dumb
     pub update_interval: Duration,
     event_dirty_bvh_rebuild: bool,
@@ -362,6 +363,7 @@ impl InteractReactor {
         Self {
             map_interactions: Default::default(),
             config: Default::default(),
+            enables: Default::default(),
             update_interval: Self::UPDATE_INTERVAL_RESPONSIVE,
             event_dirty_bvh_rebuild: false,
             event_dirty_settings: false,
@@ -889,12 +891,20 @@ impl InteractReactor {
         }
         Poll::Pending
     }
-    /// whether we need to check frequently for nearby auto-trigger POIs
-    pub fn interest_movement(&self) -> Option<(bool, bool)> {
+    fn get_interest_movement(&self) -> Option<(bool, bool)> {
         let has_pois = self.map_interactions.interest_nearby & self.config.trigger_allow_interact;
         let needs_auto = self.map_interactions.interest_auto.intersects(self.config.trigger_allow_auto);
         let passive_monitor = has_pois.intersects(SpaceInteraction::PASSIVE_NEARBY);
         (!has_pois.is_empty()).then_some((needs_auto, passive_monitor))
+    }
+    /// whether we need to check frequently for nearby auto-trigger POIs
+    pub fn interest_movement(&self) -> Option<(bool, bool)> {
+        let (auto, passive) = self.get_interest_movement()?;
+        if !self.enables.contains(PathingEnables::KATRENDER | PathingEnables::ENGINE) {
+            Some((false, passive))
+        } else {
+            Some((auto, passive))
+        }
     }
     pub(super) fn with_rx<'a>(&'a mut self, rx: &'a mut InteractReceiver) -> impl Future<Output = InteractMessage> + 'a {
         future::poll_fn(move |cx| self.poll_event(cx, rx))
@@ -970,13 +980,14 @@ impl InteractReactor {
     }
     pub(super) async fn reload_config(
         &mut self,
-        _rx: &mut PathingReceiver,
+        rx: &mut PathingReceiver,
         settings: &SettingsLock,
     ) {
         let settings = settings.read().await;
         let pathing = settings.pathing();
 
         self.config = InteractSettings::from_settings(&pathing);
+        self.enables = rx.enables();
     }
     pub(super) async fn collect_garbage(&mut self, _rx: &mut PathingReceiver, (_map_info, _maps): (&LoadedMapInfo, &LoadedMaps), map_id: Option<MapIndex>, aggressive: bool) {
         let interact_map_id = self.map_interactions.map_id();

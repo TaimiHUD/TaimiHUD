@@ -10,6 +10,8 @@ use {
                     SharedPackInfo,
                     SharedPackLoad,
                     SharedPackLoaded,
+                    SharedMapPackLoaded,
+                    SharedGameplayMap,
                 },
                 PathingController,
                 PathingEvent,
@@ -28,7 +30,7 @@ use {
         sync::{Arc, Weak},
     },
     taimi_hoard::{loc::LocationMut, str_opt, str_opt_ref},
-    taimi_meta::packs::{CategoryIndex, CategoryPath, PackIndex, PackPath},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, PackIndex, PackPath, MapIndex},
     taimi_pack::{
         attributes::{self, AttrString, MarkerAttributes},
         Pack,
@@ -51,6 +53,9 @@ pub use self::{
         DrawCategoryHeader,
         DrawCategoryTooltip,
         DrawPackUnloaded,
+        CategoryFilter,
+        PackMapMask,
+        PackCategoryMask,
     },
     menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu, DrawPackAdvancedMenu},
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
@@ -66,7 +71,9 @@ mod toggles;
 pub struct PackElements {
     pub shared: Option<Arc<PathingShared>>,
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
+    pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
+    pub pack_filters: CategoryFilter,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
 impl PackElements {
@@ -83,6 +90,7 @@ impl PackElements {
             });
             if let Some(shared) = &self.shared {
                 self.packs_rx.restart_watching(&shared.packs.packs);
+                self.maps_rx.restart_watching(&shared.gameplay);
             }
         }
         let Some(_shared) = &self.shared else { return };
@@ -99,8 +107,35 @@ impl PackElements {
                 self.pack_state.data.push(PackElement::new(&pack));
             }
         }
+        if let Some(maps) = self.maps_rx.try_read_if_changed() {
+            if let Some(..) = maps.map_id {
+                let maps_iter = self.pack_state.values_mut().zip(maps.iter());
+                for (pack_state, (path, map_info, _map)) in maps_iter {
+                    let dest = &mut pack_state.state.map_info;
+                    let mut dirty = dest.is_some() != map_info.is_some();
+                    match (dest, map_info) {
+                        (Some(dest), Some(map_info)) => {
+                            dirty |= Arc::as_ptr(&dest.info) != Arc::as_ptr(&map_info.info);
+                            dest.clone_from(map_info);
+                        },
+                        (dest, map_info) => {
+                            // TODO: need to hold off on clearing immediately when in-between maps or no?
+                            *dest = map_info.cloned()
+                        },
+                    }
+                    if dirty {
+                        let map_id = map_info.map(|i| i.path.path);
+                        pack_state.state.damage.map = Some(map_id);
+                    }
+                }
+            } else {
+                for pack_state in self.pack_state.values_mut() {
+                    pack_state.state.map_info = None;
+                }
+            }
+        }
         for pack in self.pack_state.values_mut() {
-            pack.pre_draw(visibility);
+            pack.pre_draw(&mut self.pack_filters, visibility);
         }
     }
     pub fn draw(&mut self, ui: &Ui) {
@@ -169,7 +204,8 @@ impl PackElement {
         }
     }
 
-    pub fn pre_draw(&mut self, visibility: PackVisibility) {
+    pub fn pre_draw(&mut self, pack_filters: &mut CategoryFilter, visibility: PackVisibility) {
+        self.categories.filter_flags = pack_filters.flags;
         if let PackVisibility::Closed = visibility {
             self.hovered = None;
         }
@@ -182,7 +218,7 @@ impl PackElement {
             v => v,
         };
         self.categories
-            .pre_draw(&self.state, &damage, category_visibility);
+            .pre_draw(&self.state, &*pack_filters, &damage, category_visibility);
     }
 
     pub fn draw_pack_tooltip(&mut self, ui: &Ui, title_visible: bool, reason_visible: bool) {
@@ -223,6 +259,7 @@ pub struct PackElementState {
     pub loaded: watch::Receiver<SharedPackLoaded>,
     pub unloaded: Option<UnloadedReason>,
     pub pack: Option<Weak<Pack>>,
+    pub map_info: Option<SharedMapPackLoaded>,
 
     /// info.categories is relied on too heavily atm for this to be useful
     category_flags: Option<()>,
@@ -245,6 +282,7 @@ impl PackElementState {
             },
             unloaded: None,
             pack: None,
+            map_info: None,
             category_flags: None,
             display_name: String::new(),
             id_name: String::new(),
@@ -442,6 +480,7 @@ impl ToOwned for PackTooltipRef<'_> {
 pub struct PackDamageReport {
     visibility: Option<PackVisibility>,
     info: Option<PackInfoSignature>,
+    map: Option<Option<MapIndex>>,
     config: bool,
     loaded: bool,
 }
@@ -449,12 +488,14 @@ impl PackDamageReport {
     pub const CLEAN: Self = Self {
         visibility: None,
         info: None,
+        map: None,
         config: false,
         loaded: false,
     };
     pub const ALL: Self = Self {
         visibility: Some(PackVisibility::Pending),
         info: Some(PackInfoSignature::EMPTY),
+        map: Some(None),
         config: true,
         loaded: true,
     };

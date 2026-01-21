@@ -178,7 +178,7 @@ impl PathingWindowState {
             if machine.pack_ui_state.can_expand() {
                 ui.same_line();
                 if ui.button(&fl!("expand-all")) {
-                    machine.pack_ui_state.act_expand_all();
+                    machine.pack_ui_state.act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
                 }
             }
         }
@@ -187,7 +187,7 @@ impl PathingWindowState {
                 ui.same_line();
             }
             if ui.button(&fl!("collapse-all")) {
-                machine.pack_ui_state.act_collapse_all();
+                machine.pack_ui_state.act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
             }
             drawn = true;
         }
@@ -206,6 +206,7 @@ impl PathingWindowState {
             PathingEvent::UnloadAll(true).try_send();
         }
     }
+    const FILTER_EXPAND_COLLAPSE: bool = true;
     pub fn draw_categories_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
         let table_name = format!("pathing");
@@ -228,12 +229,13 @@ impl PathingWindowState {
     }
     pub fn draw_filter_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let filter_prev = self.filter_state;
-        let search_dirty = self.draw_filters(ui);
+        let search_dirty = self.draw_filters(ui, machine);
         ui.dummy([4.0; 2]);
         ui.separator();
         ui.dummy([4.0; 2]);
 
         if search_dirty || filter_prev != self.filter_state {
+            machine.pack_ui_state.pack_filters.flags = self.filter_state;
             self.ui_state.write_if(|s| {
                 let flags = (self.search_state.flags, self.filter_state);
                 let changed = (s.search.flags, s.filter.flags) != flags;
@@ -249,7 +251,7 @@ impl PathingWindowState {
                 .pack_state
                 .values()
                 .filter_map(|pack| pack.state.pack_data());
-            self.search_state.commit(packs);
+            self.search_state.commit(&mut machine.pack_ui_state.pack_filters, packs);
         }
     }
 }

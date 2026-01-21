@@ -33,6 +33,11 @@ pub struct PathingSettings {
         skip_serializing_if = "TriggerKind::settings_default_is_interact"
     )]
     pub trigger_allow_interact: TriggerKind,
+    #[serde(
+        default = "TriggerKind::settings_default_enable",
+        skip_serializing_if = "TriggerKind::settings_default_is_enable"
+    )]
+    pub trigger_enable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_simultaneous: Option<usize>,
 }
@@ -107,8 +112,9 @@ impl Default for PathingSettings {
         Self {
             space: Default::default(),
             festival_filter: Default::default(),
-            trigger_allow_auto: TriggerKind::SETTINGS_DEFAULT_AUTO,
-            trigger_allow_interact: TriggerKind::SETTINGS_DEFAULT_INTERACT,
+            trigger_enable: TriggerKind::settings_default_enable(),
+            trigger_allow_auto: TriggerKind::settings_default_auto(),
+            trigger_allow_interact: TriggerKind::settings_default_interact(),
             load_simultaneous: None,
         }
     }
@@ -616,6 +622,12 @@ impl TriggerKind {
     }
     pub const fn settings_default_is_interact(&self) -> bool {
         self.bits() == Self::settings_default_interact().bits()
+    }
+    pub const fn settings_default_enable() -> bool {
+        true
+    }
+    pub const fn settings_default_is_enable(enable: &bool) -> bool {
+        *enable == Self::settings_default_enable()
     }
 
     #[cfg(feature = "space")]

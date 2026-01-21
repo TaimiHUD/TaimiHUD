@@ -36,11 +36,12 @@ impl PathingWindowState {
                     .filter_map(|path| cats.info_of(path).map(|_| (path, cats.lookup_flags(path))))
                     .filter(|(_p, flags)| !flags.contains(CategoryFlags::HIDDEN))
                     .filter_map(|(path, flags)| {
-                        let filtered = match pack.categories.category_is_on_map(path) {
-                            true if !unfiltered => return None,
+                        let filtered = match pack.categories.category_is_loaded(&pack.state, path) {
+                            Some(false) if !unfiltered => return None,
                             #[cfg(todo = "unnecessary")]
                             _ if filtered => None,
-                            f => Some(f),
+                            Some(f) => Some(!f),
+                            None => Some(false),
                         };
                         Some((path, flags, filtered))
                     })
