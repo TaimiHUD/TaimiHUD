@@ -779,42 +779,116 @@ impl PathingConfig {
     }
 
     fn draw_interaction_opts(&mut self, ui: &Ui) {
-        let settings = Self::get_pathing(|s| (s.trigger_allow_auto, s.trigger_allow_interact));
-        let Some((trigger_allow_auto, trigger_allow_interact)) = settings else {
+        let settings =
+            Self::get_pathing(|s| (s.trigger_enable, s.trigger_allow_auto, s.trigger_allow_interact));
+        let Some((mut trigger_enable, trigger_allow_auto, trigger_allow_interact)) = settings else {
             return
         };
+        let mut settings_dirty = false;
+
+        let indent_token = {
+            ui.unindent();
+            || ui.indent()
+        };
+        let enable_toggled = {
+            let _id = ui.push_id("trigger_enable");
+            ui.checkbox("", &mut trigger_enable)
+        }
+        .then(move || trigger_enable);
+        let mut trigger_reset = trigger_enable && ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+        ui.same_line();
 
         let interaction_tree = with_i18n!("pathing-config-interactions", |label| TreeNode::new(&label)
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(false)
             .push(ui));
-        if let Some(_tree) = interaction_tree {
-            let _id = ui.push_id("trigger_allow_interact");
-            if let Some(set) = self.draw_trigger_opts(ui, trigger_allow_interact) {
-                Self::set_pathing(|s| s.trigger_allow_interact = set);
-                InteractMessage::RefreshSettings.try_send();
-            }
-        }
+        trigger_reset |= ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+        indent_token();
 
-        ui.indent();
+        let mut interact_toggled = None;
+        let set_interact = if let Some(_tree) = interaction_tree {
+            let _id = ui.push_id("trigger_allow_interact");
+
+            ui.unindent();
+            let mut interact_enabled = !trigger_allow_interact.is_empty();
+            interact_toggled = {
+                let _id = ui.push_id("trigger_any_interact");
+                ui.checkbox("", &mut interact_enabled)
+            }
+            .then(move || interact_enabled);
+            ui.indent();
+            ui.same_line();
+
+            self.draw_trigger_opts(ui, trigger_allow_interact)
+        } else {
+            None
+        };
+
+        let mut auto_enabled = !trigger_allow_auto.is_empty();
+        let auto_toggled = {
+            let _id = ui.push_id("trigger_any_auto");
+            ui.checkbox("", &mut auto_enabled)
+        }
+        .then(move || auto_enabled);
+        ui.same_line();
         let autotrigger_tree = with_i18n!("pathing-config-autotrigger", |label| TreeNode::new(&label)
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(false)
             .push(ui));
-        if let Some(_tree) = autotrigger_tree {
+        ui.indent();
+        let set_auto = if let Some(_tree) = autotrigger_tree {
             let _id = ui.push_id("trigger_allow_auto");
             with_i18n!("pathing-config-autotrigger-notice", |msg| ui.text_wrapped(msg));
-            if let Some(set) = self.draw_trigger_opts(ui, trigger_allow_auto) {
-                Self::set_pathing(|s| s.trigger_allow_auto = set);
-                InteractMessage::RefreshSettings.try_send();
-            }
+            self.draw_trigger_opts(ui, trigger_allow_auto)
+        } else {
+            None
+        };
+
+        let set_interact = set_interact.or(interact_toggled.map(|reset| match reset {
+            true => None,
+            false => Some(TriggerKind::empty()),
+        }));
+        let set_auto = set_auto.or(auto_toggled.map(|reset| match reset {
+            true => None,
+            false => Some(TriggerKind::empty()),
+        }));
+        if let Some(set) = set_auto {
+            Self::set_pathing(|s| {
+                s.trigger_allow_auto = set.unwrap_or(TriggerKind::settings_default_auto())
+            });
+            settings_dirty = true;
+        } else if let Some(set) = set_interact {
+            Self::set_pathing(|s| {
+                s.trigger_allow_interact = set.unwrap_or(TriggerKind::settings_default_interact())
+            });
+            settings_dirty = true;
         }
         ui.unindent();
+
+        match (enable_toggled, trigger_reset) {
+            (Some(..), _) | (_, true) => {
+                Self::set_pathing(|s| {
+                    if let Some(enable) = enable_toggled {
+                        s.trigger_enable = enable;
+                    }
+                    if trigger_reset {
+                        s.trigger_allow_auto = TriggerKind::settings_default_auto();
+                        s.trigger_allow_interact = TriggerKind::settings_default_interact();
+                    }
+                });
+                settings_dirty = true;
+            },
+            (None, false) => (),
+        }
+        if settings_dirty {
+            InteractMessage::RefreshSettings.try_send();
+        }
     }
-    fn draw_trigger_opts(&mut self, ui: &Ui, mut setting: TriggerKind) -> Option<TriggerKind> {
+    fn draw_trigger_opts(&mut self, ui: &Ui, mut setting: TriggerKind) -> Option<Option<TriggerKind>> {
         let mut changed = false;
+        let mut reset = false;
         for (i, flag) in TriggerKind::SETTINGS_GUI.into_iter().enumerate() {
             if i % 4 != 0 {
                 ui.same_line();
@@ -824,12 +898,18 @@ impl PathingConfig {
                 &mut setting,
                 flag
             ));
+            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+                reset = true;
+            }
         }
         setting.set(
             TriggerKind::SETTINGS_TOGGLE_SHOWHIDE,
             setting.contains(TriggerKind::TOGGLE),
         );
-        changed.then_some(setting)
+        match (reset, changed) {
+            (true, _) => Some(None),
+            (_, changed) => changed.then_some(setting).map(Some),
+        }
     }
 
     #[cfg(feature = "goggles")]

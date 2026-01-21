@@ -75,6 +75,7 @@ enable = Enable
 cancel = Cancel
 default = Default
 disable = Disable
+all = All
 enabled = { enable }d
 disabled = { disable }d
 unloaded = Unloaded
@@ -365,17 +366,20 @@ filter-options = Filter Options
 search = Search
 pathing-search = { search }
 pathing-search-clear = Clear the search bar and results.
+options = Options
 show-filter = Show filter options
 hide-filter = Hide filter options
 current-map = Current map
-ignore-root = Ignore root state
-ignore-leaf = Ignore leaf state
-ignore-branch = Ignore branch state
+include-id = Match ID
+#include-children = Descend
 show-hidden = Show hidden
 show-all = Show all
 #off-map = Elsewhere
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
+pattern-regex = Regex
+#negative = Negate
+negative = Invert
 
 toggle = Toggle
 enable-all = Enable all
@@ -391,9 +395,18 @@ pack-category = Category
 pack-root = Main { pack-category }
 pack-root-submenu = Pack Control
 
+pois-interactive = Interactive
 pois-nearby = Nearby
 pois-map = On-map
+#pois-map = Loaded
 pois-hidden = Hidden
+pois-other = { poi-static } Markers
+poi-auto = { pathing-config-autotrigger }
+poi-filtered = { pois-hidden }
+poi-static = Static
+poi-guid = GUID
+poi-category-navigate = Open category
+poi-copy-guid = { copy } { poi-guid }
 # idk how to do a select case is our fluent too old?
 #dismiss-behaviour-1 = leave
 dismiss-behaviour-1 = temporarily
@@ -479,6 +492,11 @@ trigger-hide = Hide category
 trigger-script = Scripts
 trigger-behaviour = Dismiss
 trigger-bounce = Animations
+poi-activate-bounce = Animate
+poi-activate-info = Read
+poi-activate-copy = { trigger-copy }
+poi-activate-behaviour = { trigger-behaviour }
+poi-activate = Activate
 
 ## Festivals
 

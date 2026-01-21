@@ -1,43 +1,31 @@
 #[cfg(doc)]
 use taimi_pack::attributes::keys;
 use {
-    crate::{
-        controller::pathing::{PackConfig, VisibilityFlagsExt},
-        exports::runtime as rt,
-        settings::source::sources::DataSourcePath,
-    },
-    anyhow::anyhow,
+    crate::controller::pathing::{PackConfig, VisibilityFlagsExt},
     bitvec::vec::BitVec,
-    futures::{
-        future::{self, Either},
-        stream::{self, FusedStream, Stream, StreamExt},
-        FutureExt,
-    },
     rustc_hash::FxHasher,
     std::{
+        borrow::Cow,
         cmp,
         collections::BTreeSet,
         error::Error as StdError,
         fmt,
         hash::{Hash, Hasher},
         iter,
-        path::{Path, PathBuf},
         ptr,
         sync::Arc,
     },
     taimi_hoard::{
-        iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationMut},
+        iters::{tree, IterExt as _},
+        loc::indexed::IndexedList,
     },
     taimi_meta::{
         map::MapID,
         packs::{
-            collections::{CategorySet, MapSet},
+            collections::{CategorySet, MapSet, VisibilityFlagSet},
             CategoryIndex,
             CategoryPath,
-            MapIndex,
             PackCategoryNs,
-            VisibilityFlagSet,
             VisibilityFlags,
         },
     },
@@ -51,9 +39,6 @@ use {
         pack::CategoryCollection,
         Pack,
     },
-    taimi_sync::watched::watch,
-    tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockWriteGuard},
-    tokio_util::sync::ReusableBoxFuture,
 };
 
 #[doc(inline)]
@@ -130,14 +115,14 @@ impl PackInfo {
 
 impl fmt::Display for PackInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.primary_root() {
-            Some(root) => f.write_str(&root.display_name),
+        match self.primary_root().and_then(|root| root.display_name.as_ref()) {
+            Some(display_name) => f.write_str(&display_name[..]),
             None => fmt::Display::fmt(&self.format, f),
         }
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct PackInfoSignature {
     // TODO: consider atomic variant? sad that the traits are unstable...
@@ -223,11 +208,23 @@ impl PackInfoSignature {
         }
     }
 }
+impl fmt::Debug for PackInfoSignature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("PackInfoSignature")
+            .field(&format_args!("{self}"))
+            .finish()
+    }
+}
+impl fmt::Display for PackInfoSignature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:08X}", self.hash)
+    }
+}
 type PackInfoHasher = FxHasher;
 #[cfg(todo)]
 type PackInfoHasher = impl Hasher + Clone + 'static;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackCategoryInfo {
     pub all: Box<[PackCategory]>,
     pub roots: Box<[CategoryIndex]>,
@@ -341,7 +338,7 @@ impl PackCategoryInfo {
         }
     }
 
-    pub fn root_paths(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn root_paths(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.roots.iter().lazy_map(|&p| CategoryPath::with_path(p))
     }
     /// TODO: sorted lookup? probably a bad idea when there's likely just 1 or 2 at the most though...
@@ -479,13 +476,13 @@ impl PackCategoryInfo {
             .map(CategoryPath::with_path)
     }
 
-    pub fn disabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn disabled(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.disabled.iter().lazy_map(CategoryPath::with_path)
     }
-    pub fn hidden(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn hidden(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.hidden.iter().lazy_map(CategoryPath::with_path)
     }
-    pub fn separators(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn separators(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.separators.iter().lazy_map(CategoryPath::with_path)
     }
 
@@ -494,7 +491,9 @@ impl PackCategoryInfo {
         IndexedList::from_ref(&self.all)
     }
 
-    pub fn all_flags(&self) -> impl Iterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
+    pub fn all_flags(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
         self.all().iter().lazy_map(|(path, cat)| {
             let mut flag = CategoryFlags::empty();
             if cat.parent().is_none() {
@@ -519,11 +518,32 @@ impl PackCategoryInfo {
             .unwrap_or(CategoryFlags::empty())
     }
 
+    #[cfg(todo)]
     pub fn collect_all_flags(&self) -> PackCategoryFlags {
         let flags = self.all_flags().map(|(_, _, flags)| flags).collect();
         IndexedList::new(flags)
     }
 }
+impl fmt::Debug for PackCategoryInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut f = f.debug_struct("PackCategoryInfo");
+        f.field("count", &self.all.len()).field("roots", &&self.roots[..]);
+        let tagged = [
+            ("hidden", &self.hidden),
+            ("disabled", &self.disabled),
+            ("copyable", &self.copyable),
+            ("lonely", &self.lonely),
+        ];
+        for (name, cats) in tagged {
+            if !cats.is_empty() {
+                f.field(name, &cats.len());
+            }
+        }
+        f.finish()
+    }
+}
+
+#[cfg(todo)]
 pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
 #[derive(Debug, Copy, Clone)]
 struct DescendentIterNode {
@@ -734,6 +754,37 @@ impl Iterator for DescendentIter<'_> {
         }
     }
 }
+impl tree::TreeTraversal<tree::PreOrder> for DescendentIter<'_> {
+    fn node_depth(&self) -> Option<usize> {
+        Some(self.depth())
+    }
+}
+impl tree::DfsPre for DescendentIter<'_> {
+    fn node_next_sibling(&mut self) -> Option<Result<Self::Item, Self::Item>> {
+        let _skipped_children = self.skip_to_sibling();
+        match self.peek_next_is_ancestor() {
+            true => self.next().map(Err),
+            false => self.next().map(Ok),
+        }
+    }
+}
+impl tree::PeekableTreeTraversal<tree::PreOrder> for DescendentIter<'_> {
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>>
+    where
+        Self::Item: Clone,
+    {
+        self.peek_next().map(|(path, _d)| Cow::Owned(path))
+    }
+    fn peek_depth(&mut self) -> Option<usize> {
+        self.peek_next().map(|(_path, depth)| depth)
+    }
+    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)>
+    where
+        Self::Item: Clone,
+    {
+        self.peek_next().map(|(p, d)| (Cow::Owned(p), d))
+    }
+}
 
 /// TODO: anything else interesting about the root category?
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -741,7 +792,7 @@ pub struct PackRoot {
     pub index: CategoryIndex,
     pub id: CategoryId,
     pub flags: CategoryFlags,
-    pub display_name: Arc<str>,
+    pub display_name: Option<Arc<str>>,
     pub child_count: usize,
 }
 

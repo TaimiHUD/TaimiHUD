@@ -48,9 +48,8 @@ impl PathingController {
         let (poi_path, guid) = match self.maps.lookup_with_info(&self.map_info, &map_path) {
             Some((map, map_info)) => {
                 let guid = map
-                    .poi_guids(map_info)
-                    .find(|(_, lp, ..)| lp == lpoi_path)
-                    .and_then(|(_, _, guid)| guid.or_empty().cloned());
+                    .poi_guid_by_index(map_info, lpoi_path)
+                    .and_then(|g| g.or_empty().cloned());
                 let poi_path = map_info.poi_path(lpoi_path);
                 (poi_path, guid)
             },
@@ -201,7 +200,7 @@ impl PathingController {
             for path in dirty_packs {
                 let Some(shared_state) = shared_map.get_state_mut(path) else { continue };
                 if let Some(map) = maps.lookup_ref(&path) {
-                    updated |= shared_state.update_with_hidden(path, state, map);
+                    updated |= shared_state.update_with_hidden(path, state, map).unwrap_or(true);
                 }
             }
             updated

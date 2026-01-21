@@ -555,6 +555,12 @@ impl RenderState {
         };
         let window = ui.begin_window_with(c"TAIMIHUD_ALERT_AREA", None, window_flags);
         if let Some(_window) = imw::BeginVisible::pop_open(window) {
+            let checkpoint = ui.cursor_pos();
+            ui.set_cursor_pos((checkpoint - Vec2::splat(1.0)));
+            ui.text_colored([1.0; 4], &text);
+            ui.set_cursor_pos((checkpoint + Vec2::splat(1.0)));
+            ui.text_colored([0.0, 0.0, 0.0, 1.0], &text);
+            ui.set_cursor_pos(checkpoint);
             ui.text(text);
         }
     }
@@ -702,13 +708,37 @@ impl RenderState {
         {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
-            self.machine
-                .pack_ui_state
-                .pre_draw(match self.pathing_window.open {
-                    _ if self.pathing_menu_open => PackVisibility::Visible,
-                    true => PackVisibility::Visible,
-                    false => PackVisibility::Closed,
+            let visibility = self.pathing_window.visibility();
+            let interact_visibility = self.machine.pack_ui_state.interact.visibility().min(visibility);
+            let pack_visibility =
+                PackVisibility::visible(self.pathing_menu_open).max(match interact_visibility {
+                    // if poi tab open, packs aren't!
+                    PackVisibility::Visible => visibility.min(PackVisibility::Pending),
+                    _ => visibility,
                 });
+            self.machine.pack_ui_state.pre_draw(pack_visibility);
+            self.machine.pack_ui_state.interact.pre_draw(visibility);
+            if interact_visibility.is_visible() {
+                let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
+                let interact = &mut self.machine.pack_ui_state.interact;
+                if interact.wants_static {
+                    let wants_all = interact.wants_static_all();
+                    if let Some(Ok(engine)) = &self.engine {
+                        interact.update_static_render(&engine.packs);
+                    }
+                    if wants_all && !self.machine.pack_ui_state.pack_state.is_empty() {
+                        interact
+                            .update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
+                    }
+                }
+                let player_pos = match self.machine.gameplay.gameplay_map() {
+                    Some(..) => player_pos,
+                    None => None,
+                };
+                if interact.wants_pos(player_pos) {
+                    interact.update_dist(player_pos);
+                }
+            }
             self.pathing_window.pre_draw(&mut self.machine);
             self.pathing_menu_open = false;
         }

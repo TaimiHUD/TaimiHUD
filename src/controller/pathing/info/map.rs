@@ -27,7 +27,7 @@ use {
     taimi_hoard::{
         flags::BitSet,
         iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationRef, NamespacePivotTo},
+        loc::{indexed::IndexedList, LocationGet, LocationRef, NamespacePivotTo},
     },
     taimi_meta::packs::{
         collections::CategorySet,
@@ -35,6 +35,7 @@ use {
         CategoryIndex,
         CategoryPath,
         MapIndex,
+        PackCategoryNs,
         PoiIndex,
         PoiPath,
         TrailIndex,
@@ -180,18 +181,24 @@ impl MapPackInfo {
             _ => match self.pois.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b => None,
-                Some(_) => Some(unsafe {
-                    let index = path.path as usize;
-                    let preceding = self.pois.get_unchecked(..index);
-                    LoadedPoiPath::with_path(preceding.count_ones() as LoadedPoiIndex)
-                }),
+                Some(_) => Some(unsafe { self.poi_index_unchecked(path) }),
             },
         }
+    }
+    pub unsafe fn poi_index_unchecked(&self, path: PoiPath) -> LoadedPoiPath {
+        let index = path.path as usize;
+        let preceding = self.pois.get_unchecked(..index);
+        LoadedPoiPath::with_path(preceding.count_ones() as LoadedPoiIndex)
     }
     /// TODO: `nth` isn't implemented on [bitvec::slice::IterOnes], it should
     /// probably popcnt instead?
     pub fn poi_path(&self, path: LoadedPoiPath) -> Option<PoiPath> {
         self.pois().nth(path.path as usize)
+    }
+    /// TODO?
+    #[inline]
+    pub unsafe fn poi_path_unchecked(&self, path: LoadedPoiPath) -> PoiPath {
+        self.poi_path(path).unwrap_unchecked()
     }
     pub fn trail_count(&self) -> usize {
         self.trails.count_ones()
@@ -231,18 +238,24 @@ impl MapPackInfo {
             _ => match self.trails.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b => None,
-                Some(_) => Some(unsafe {
-                    let index = path.path as usize;
-                    let preceding = self.trails.get_unchecked(..index);
-                    LoadedTrailPath::with_path(preceding.count_ones() as LoadedTrailIndex)
-                }),
+                Some(_) => Some(unsafe { self.trail_index_unchecked(path) }),
             },
         }
+    }
+    pub unsafe fn trail_index_unchecked(&self, path: TrailPath) -> LoadedTrailPath {
+        let index = path.path as usize;
+        let preceding = self.trails.get_unchecked(..index);
+        LoadedTrailPath::with_path(preceding.count_ones() as LoadedTrailIndex)
     }
     /// TODO: `nth` isn't implemented on [bitvec::slice::IterOnes], it should
     /// probably popcnt instead?
     pub fn trail_path(&self, path: LoadedTrailPath) -> Option<TrailPath> {
         self.trails().nth(path.path as usize)
+    }
+    /// TODO?
+    #[inline]
+    pub unsafe fn trail_path_unchecked(&self, path: LoadedTrailPath) -> TrailPath {
+        self.trail_path(path).unwrap_unchecked()
     }
     #[cfg(todo = "unnecessary")]
     pub fn trail_info(&self) -> &IndexedList<LoadedTrailNs, LoadedTrailIndex, [MapTrailInfo]> {
@@ -257,11 +270,33 @@ impl MapPackInfo {
     pub fn category_max_count(&self) -> CategoryIndex {
         self.category_max().map(|c| c + 1).unwrap_or(0)
     }
+    #[inline(always)]
+    pub fn categories_ref(&self) -> &IndexedList<LoadedCategoryNs, LoadedCategoryIndex, [CategoryPath]> {
+        let categories =
+            unsafe { mem::transmute::<&[CategoryIndex], &[CategoryPath]>(&self.categories[..]) };
+        IndexedList::from_ref(categories)
+    }
     pub fn categories(&self) -> impl Iterator<Item = CategoryPath> + '_ {
         self.categories.iter().lazy_map(|&i| CategoryPath::with_path(i))
     }
+    #[cfg(todo)]
+    pub fn loaded_categories(&self) -> impl Iterator<Item = (LoadedCategoryPath, CategoryPath)> + '_ {
+        self.categories()
+            .enumerate()
+            .lazy_map(|(i, path)| (LoadedCategoryPath::with_path(i as LoadedCategoryIndex), path))
+    }
+    #[inline]
+    pub fn loaded_categories(&self) -> impl Iterator<Item = (LoadedCategoryPath, CategoryPath)> + '_ {
+        self.categories_ref()
+            .map_data_to(|cats| cats.iter().copied())
+            .into_iter()
+    }
     pub fn category_path(&self, path: LoadedCategoryPath) -> Option<CategoryPath> {
         self.categories().nth(path.path as usize)
+    }
+    #[inline(always)]
+    pub unsafe fn category_path_unchecked(&self, path: LoadedCategoryPath) -> CategoryPath {
+        *self.categories_ref().map_ref_as_slice().index_unchecked(path)
     }
     pub fn category_index(&self, path: CategoryPath) -> Option<LoadedCategoryPath> {
         match () {
@@ -276,6 +311,11 @@ impl MapPackInfo {
                 .ok()
                 .map(|i| LoadedCategoryPath::with_path(i as LoadedCategoryIndex)),
         }
+    }
+    /// TODO?
+    #[inline]
+    pub unsafe fn category_index_unchecked(&self, path: CategoryPath) -> LoadedCategoryPath {
+        self.category_index(path).unwrap_unchecked()
     }
 
     pub fn marker_index(&self, path: MarkerPath) -> Option<LoadedMarkerPath> {
@@ -342,6 +382,22 @@ impl MapPackInfo {
             },
         })
     }
+    pub unsafe fn marker_path_unchecked(&self, path: LoadedMarkerPath) -> MarkerPath {
+        match path.path.namespace() {
+            MarkerIndex::NS_POI => self
+                .poi_path_unchecked(LoadedPoiPath::with_path(path.path.index_poi_unchecked()))
+                .pivot_from(),
+            MarkerIndex::NS_TRAIL => self
+                .trail_path_unchecked(LoadedTrailPath::with_path(path.path.trail_index_unchecked()))
+                .pivot_from(),
+            MarkerIndex::NS_CAT => self
+                .category_path_unchecked(LoadedCategoryPath::with_path(
+                    path.path.index_category_unchecked(),
+                ))
+                .pivot_from(),
+            _ => MarkerPath::with_path(MarkerIndex::UNK),
+        }
+    }
 
     pub fn is_trail_info_loaded(&self, path: LoadedTrailPath) -> bool {
         self.trail_info
@@ -358,6 +414,20 @@ impl MapPackInfo {
             .trail_info
             .lookup_extend_with(path.path, MapTrailInfo::default);
         trail_info.sections = Some(IndexedList::new(sections));
+    }
+}
+impl LocationGet<PackCategoryNs, CategoryIndex> for MapPackInfo {
+    type LookupGet = LoadedCategoryPath;
+    #[inline]
+    fn lookup_get(&self, &loc: &CategoryPath) -> Option<Self::LookupGet> {
+        self.category_index(loc)
+    }
+}
+impl LocationGet<LoadedCategoryNs, LoadedCategoryIndex> for MapPackInfo {
+    type LookupGet = CategoryPath;
+    #[inline]
+    fn lookup_get(&self, &loc: &LoadedCategoryPath) -> Option<Self::LookupGet> {
+        self.category_path(loc)
     }
 }
 

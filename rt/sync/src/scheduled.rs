@@ -142,9 +142,10 @@ impl<V> ScheduledStream<BTreeMap<Instant, V>> {
     }
 
     pub fn poll_scheduled_next(&mut self, cx: &mut Context) -> Poll<(Instant, V)> {
-        #[cfg(todo = "unnecessary")]
+        //#[cfg(todo = "unnecessary")]
         let when = self.next_scheduled();
         ready!(self.poll_ready(cx));
+        #[cfg(todo)]
         let when = self.next_scheduled();
         debug_assert!(when.is_some());
         let res = match &when {
