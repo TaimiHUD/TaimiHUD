@@ -7,7 +7,7 @@ use taimi_meta::{
     ui::MapContext,
 };
 use std::collections::BTreeMap;
-use core::{slice, mem};
+use core::{slice, mem, iter};
 
 pub type ScheduledEvents = ScheduledStream<BTreeMap<Instant, PathingEvent>>;
 pub type FilterExpiryMap = BTreeMap<MarkerId, Instant>;
@@ -149,8 +149,12 @@ impl PathingEvent {
     }
     /// WARNING: recursive/heapy :<
     pub fn iter(&self) -> impl Iterator<Item = &Self> {
+        let recurse = matches!(self, Self::FanOut(..));
         self.iter_shallow()
-            .flat_map(|e| Box::new(e.iter()) as Box<dyn Iterator<Item = &Self>>)
+            .flat_map(move |e| match recurse {
+                true => Box::new(e.iter()) as Box<dyn Iterator<Item = &Self>>,
+                false => Box::new(iter::once(e)) as Box<_>,
+            })
     }
     pub(super) fn iter_mut_shallow(&mut self) -> impl Iterator<Item = &mut Self> {
         match self {
@@ -161,8 +165,12 @@ impl PathingEvent {
     }
     /// WARNING: recursive/heapy :<
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Self> {
+        let recurse = matches!(self, Self::FanOut(..));
         self.iter_mut_shallow()
-            .flat_map(|e| Box::new(e.iter_mut()) as Box<dyn Iterator<Item = &mut Self>>)
+            .flat_map(move |e| match recurse {
+                true => Box::new(e.iter_mut()) as Box<dyn Iterator<Item = &mut Self>>,
+                false => Box::new(iter::once(e)) as Box<_>,
+            })
     }
     pub fn is_empty(&self) -> bool {
         match self {
@@ -192,8 +200,12 @@ impl IntoIterator for PathingEvent {
     type IntoIter = Box<dyn Iterator<Item = Self>>;
 
     fn into_iter(self) -> Self::IntoIter {
+        let recurse = matches!(self, Self::FanOut(..));
         let iter = self.into_iter_shallow()
-            .flat_map(|e| Box::new(e.into_iter()) as Box<dyn Iterator<Item = Self>>);
+            .flat_map(move |e| match recurse {
+                true => Box::new(e.into_iter()) as Box<dyn Iterator<Item = Self>>,
+                false => Box::new(iter::once(e)) as Box<_>,
+            });
         Box::new(iter) as Box<_>
     }
 }

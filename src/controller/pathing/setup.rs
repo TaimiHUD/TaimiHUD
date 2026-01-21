@@ -296,7 +296,11 @@ impl PathingController {
             packs => Arc::make_mut(packs).clear(),
             packs => *packs = Arc::new(Default::default()),
         };
-        if matches!(gameplay, GameplayState::Intermission { next_map_id: None, .. }) {
+        if !self.rx.is_katrender_enabled() {
+            self.map_info.clear(None);
+        }
+        let probably_loading = matches!(gameplay, GameplayState::Intermission { next_map_id: None, .. });
+        if probably_loading {
             self.maps.prune(Some(&self.map_info));
             let now = WallInstant::now_timestamp_system_checked();
             Self::prune_hidden_guids_settings(&now);
@@ -331,6 +335,9 @@ impl PathingController {
             shared_map_dirty |= match self.prepare_for_pack_map(map_path, false, hidden_ctx) {
                 Ok(dirty) => dirty,
                 Err(()) => match self.packs.lookup_ref(&path) {
+                    _ if !self.rx.is_katrender_enabled() =>
+                        // would check is_online but could still be starting up?
+                        continue,
                     Some(LoadedPackInfo { unloaded: Some(reason), .. })
                         if !reason.can_reactivate(false) =>
                             continue,

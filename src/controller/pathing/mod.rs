@@ -240,6 +240,7 @@ impl PathingController {
             )
         }
         let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
+        let enables_prev = self.rx.enables.cached.clone().unwrap_or_default();
         let load_throttle_prev = self
             .rx
             .load_throttle
@@ -301,6 +302,12 @@ impl PathingController {
                 }
                 for path in &configs_dirty {
                     self.reload_config_for(path);
+                }
+            },
+            enables = self.rx.enables.when_changed() => {
+                let changed = *enables ^ enables_prev;
+                if changed.contains(PathingEnables::ENGINE) && enables.contains(PathingEnables::ENGINE) {
+                    log::debug!("engine online, let's go!");
                 }
             },
             load_throttle = self.rx.load_throttle.when_changed() => {
@@ -440,11 +447,11 @@ impl PathingController {
 
     async fn setup(&mut self) {
         let get_settings = {
-            let enables = self.rx.enables.clone();
+            let enables = self.rx.enables.watch.clone();
             let load_throttle = self.rx.load_throttle.watch.sender();
             let settings = self.settings.clone();
             async move {
-                let mut enable_flags = enables.borrow().clone();
+                let mut enable_flags = enables.read().clone();
                 let settings = settings.read().await;
                 let (load_simultaneous, interact_config) = match settings.pathing.as_ref() {
                     Some(p) => (p.load_simultaneous, Some(interact::InteractSettings::from_settings(p))),
@@ -461,7 +468,7 @@ impl PathingController {
                     enable_flags.set(PathingEnables::SCRIPTING_UNSECURED, unsecure);
                 }
                 drop(settings);
-                enables.send_replace(enable_flags);
+                enables.replace(enable_flags);
                 if let Some(load_simultaneous) = load_simultaneous {
                     load_throttle.send_replace(load_simultaneous);
                 }
@@ -476,25 +483,52 @@ impl PathingController {
         let (settings_interact_config,) = get_settings;
         if let Some(config) = settings_interact_config {
             self.interact.config = config;
+            self.interact.enables = self.rx.enables();
         }
     }
 
-    async fn toggle_katrender(&self) {
-        let mut settings_lock = Settings::async_write()
-            .await
-            .expect("Settings unitialized, impossible");
-        settings_lock.toggle_katrender();
-        let katrender = settings_lock.enable_katrender;
-        drop(settings_lock);
+    async fn toggle_katrender(&mut self) {
+        let katrender = {
+            let latest = self.rx.enables.get_mut().contains(PathingEnables::KATRENDER);
+            let mut settings_lock = self.loader.settings.write().await;
+            let mismatched = settings_lock.enable_katrender && !latest;
+            match mismatched {
+                true => {
+                    // presumably because we were unloaded without saving settings...
+                    log::info!("katrender resync");
+                    !latest
+                },
+                false => {
+                    settings_lock.toggle_katrender();
+                    let katrender = settings_lock.enable_katrender;
+                    if katrender != latest {
+                        settings_lock.mark_dirty();
+                    }
+                    katrender
+                },
+            }
+        };
+        let mut engine_online = false;
         self.rx
             .enables
-            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
+            .write_if(|en| {
+                engine_online = en.contains(PathingEnables::ENGINE);
+                en.set(PathingEnables::KATRENDER, katrender);
+                Some(true)
+            });
+        #[cfg(todo)]
+        if !engine_online && katrender && self.gameplay_map().is_some() {
+            RenderEvent::StartEngine.try_send()
+        }
     }
 
-    fn toggle_api_bypass(&self, set: Option<bool>) {
-        self.rx.enables.send_modify(|en| match set {
-            Some(set) => en.set(PathingEnables::API_BYPASS, set),
-            None => en.toggle(PathingEnables::API_BYPASS),
+    fn toggle_api_bypass(&mut self, set: Option<bool>) {
+        self.rx.enables.write_if(|en| {
+            match set {
+                Some(set) => en.set(PathingEnables::API_BYPASS, set),
+                None => en.toggle(PathingEnables::API_BYPASS),
+            }
+            Some(true)
         });
     }
     #[cfg(feature = "paths-lua")]
@@ -515,7 +549,12 @@ impl PathingController {
     }
 
     async fn handle_gameplay(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
-        if let GameplayTransition::Loaded { initial: true, .. } = trans {}
+        if let GameplayTransition::Loaded { initial: true, .. } = trans {
+            #[cfg(todo)]
+            if self.rx.is_katrender_enabled() && !self.rx.is_engine_active() {
+                RenderEvent::StartEngine.try_send();
+            }
+        }
         match gameplay {
             GameplayState::Gameplay { map_id: Some(map_id) } => {
                 let (new_map, instantaneous) = match trans {

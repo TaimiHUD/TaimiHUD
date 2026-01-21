@@ -3,44 +3,65 @@ use {
     crate::{
         render::element::prelude::*,
         settings::state::ui::pathing::{PathingFilterFlags, PathingSearchFlags},
+        render::{
+            machine::RenderMachine,
+            element::pack::CategoryFilter,
+        },
         with_i18n,
     },
     regex::{Regex, RegexBuilder},
-    std::collections::{BTreeMap, HashSet},
-    taimi_hoard::flags::BitSet,
-    taimi_meta::packs::{CategoryPath, PackIndex, PackPath},
-    taimi_pack::Pack,
+    std::collections::HashSet,
+    taimi_meta::packs::{PackIndex, PackPath},
+    taimi_pack::{category::CategoryFlags, Pack},
 };
 
 #[derive(Clone)]
 pub struct PathingSearchState {
     pub buffer: String,
     matcher: Option<Regex>,
+    #[cfg(todo = "unnecessary")]
     search_candidates: HashSet<String>,
     /// TODO: BTreeSet<CategoryPath> instead?
+    #[cfg(deleteme)]
     pub candidate_mask: BTreeMap<PackPath, BitSet>,
     pub flags: PathingSearchFlags,
 }
 
 impl PathingSearchState {
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
         self.buffer.clear();
         self.matcher = None;
-        self.clear_matches();
+        self.clear_matches(candidate_mask);
     }
-    pub fn clear_matches(&mut self) {
-        self.search_candidates.clear();
-        self.candidate_mask.clear();
+    pub fn clear_matches(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
+        #[cfg(todo = "unnecessary")]
+        {
+            self.search_candidates = Default::default();
+        }
+        if let Some(candidate_mask) = candidate_mask {
+            candidate_mask.clear_search();
+        }
+    }
+    pub fn clear_matches_active(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
+        #[cfg(todo = "unnecessary")]
+        {
+            self.search_candidates.clear();
+        }
+        if let Some(candidate_mask) = candidate_mask {
+            candidate_mask.clear_search_active();
+        }
     }
 
-    pub fn commit<'p, P, I>(&mut self, packs: I)
+    pub fn commit<'p, P, I>(&mut self, candidate_mask: &mut CategoryFilter, packs: I)
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Pack>,
     {
-        self.clear_matches();
         if self.buffer.is_empty() {
+            self.clear_matches(Some(candidate_mask));
             return
+        } else {
+            self.clear_matches_active(Some(candidate_mask));
         }
         self.matcher = {
             let pattern = regex::escape(&self.buffer);
@@ -57,27 +78,58 @@ impl PathingSearchState {
         for (i, pack) in packs.into_iter().enumerate() {
             let pack = pack.as_ref();
             let path: PackPath = PackPath::with_path(i as PackIndex);
-            if let Some(mask) = self.candidate_mask.get_mut(&path) {
+            if let Some(mask) = candidate_mask.pack_mask.get_mut(&path) {
                 mask.clear();
             }
 
             for (idx, (full_id, category)) in pack.categories.all_categories.iter().enumerate() {
+                if self.flags.contains(PathingSearchFlags::IGNORE_ROOT) && category.flags.contains(CategoryFlags::ROOT) {
+                    continue
+                }
+                if self.flags.contains(PathingSearchFlags::IGNORE_BRANCHES) && category.sub_categories.is_empty() {
+                    continue
+                }
+                if self.flags.contains(PathingSearchFlags::IGNORE_LEAVES) && !category.sub_categories.is_empty() {
+                    continue
+                }
                 if self.matches_name(category.display_name())
                     || self.matches_name(category.id().as_str())
                 {
-                    let mask = self.candidate_mask.entry(path).or_default();
+                    let mask = candidate_mask.pack_mask.entry(path).or_default();
                     if mask.as_bitslice().is_empty() {
                         mask.reserve_exact(pack.categories.all_categories.len());
                     }
-                    self.search_candidates.insert(full_id.into());
-                    mask.insert_at(idx);
+                    #[cfg(todo = "unnecessary")]
+                    {
+                        self.search_candidates.insert(full_id.into());
+                    }
+                    if mask.insert_at(idx) { continue }
                     for sub_id in full_id.as_id().ancestors() {
-                        self.search_candidates.insert(sub_id.into());
+                        #[cfg(todo = "unnecessary")]
+                        {
+                            self.search_candidates.insert(sub_id.into());
+                        }
                         if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
-                            mask.insert_at(parent_idx);
+                            if mask.insert_at(parent_idx) {
+                                // already been here
+                                //break
+                            }
+                        }
+                    }
+                    if self.flags.contains(PathingSearchFlags::INCLUDE_CHILDREN) {
+                        let mut children: Vec<_> = category.child_ids().collect();
+                        while let Some(child_id) = children.pop() {
+                            let Some((child_idx, _id, child)) = pack.categories.all_categories.get_full(child_id) else { continue };
+                            if mask.insert_at(child_idx) { continue }
+                            children.extend(child.child_ids());
                         }
                     }
                 }
+            }
+
+            let mask = candidate_mask.pack_mask.entry(path).or_default();
+            if mask.flags.is_empty() {
+                mask.flags.push(false);
             }
         }
     }
@@ -91,6 +143,7 @@ impl PathingSearchState {
         }
     }
 
+    #[cfg(todo = "unnecessary")]
     pub fn matches_id(&self, full_id: &str) -> bool {
         match self.buffer.is_empty() {
             false => self.search_candidates.contains(full_id),
@@ -98,6 +151,7 @@ impl PathingSearchState {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn matches_category(&self, path: CategoryPath<PackPath>) -> bool {
         let cat_path: CategoryPath = path.unscope();
         self.candidate_mask
@@ -112,7 +166,9 @@ impl Default for PathingSearchState {
         Self {
             buffer: Default::default(),
             matcher: Default::default(),
+            #[cfg(todo = "unnecessary")]
             search_candidates: Default::default(),
+            #[cfg(deleteme)]
             candidate_mask: Default::default(),
             flags: PathingSearchFlags::DEFAULT,
         }
@@ -120,7 +176,7 @@ impl Default for PathingSearchState {
 }
 
 impl PathingWindowState {
-    pub fn draw_filters<'ui, U>(&mut self, ui: &mut U) -> bool
+    pub fn draw_filters<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine) -> bool
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
@@ -134,7 +190,7 @@ impl PathingWindowState {
         ));
         ui.same_line();
         if ui.button(c"X") {
-            self.search_state.clear();
+            self.search_state.clear(Some(&mut machine.pack_ui_state.pack_filters));
             self.ui_state.write_if(|s| {
                 s.search.query.clear();
                 None
@@ -143,16 +199,20 @@ impl PathingWindowState {
         if ui.is_item_hovered() {
             with_i18n!("pathing-search-clear", |msg| ui.tooltip_text(msg));
         }
-        let search_flags = PathingSearchFlags::all()
-            .iter()
-            .filter_map(|search_flag| search_flag.as_str().map(|name| (search_flag, name)));
-        for (flag, search_flag_name) in search_flags {
-            ui.same_line();
-            search_dirty |= with_i18n!(search_flag_name, |name| ui.checkbox_flags(
-                name,
-                &mut self.search_state.flags,
-                flag
-            ));
+        if !self.search_state.buffer.is_empty() {
+            let search_flags = PathingSearchFlags::all()
+                .iter()
+                .filter_map(|search_flag| search_flag.as_str().map(|name| (search_flag, name)));
+            for (i, (flag, search_flag_name)) in search_flags.enumerate() {
+                if i % 3 != 2 {
+                    ui.same_line();
+                }
+                search_dirty |= with_i18n!(search_flag_name, |name| ui.checkbox_flags(
+                    name,
+                    &mut self.search_state.flags,
+                    flag
+                ));
+            }
         }
         pushy.end();
         ui.dummy([4.0; 2]);

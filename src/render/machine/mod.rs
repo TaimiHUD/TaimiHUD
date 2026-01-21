@@ -14,12 +14,11 @@ use {
 #[cfg(feature = "space")]
 use {
     crate::{
-        controller::pathing::shared::{PathingShared, SharedGameplayMap},
+        controller::pathing::shared::{PathingEnables, PathingShared},
         render::element::pack::PackElements,
         space::engine::Engine,
     },
     std::{ops::Range, sync::Arc},
-    taimi_sync::watched::Watched,
 };
 use {
     crate::{controller::Controller, exports::runtime as rt, render::RenderState, settings::Settings},
@@ -429,11 +428,22 @@ impl RenderMachine {
                 }
                 res
             }).context("Initializing space engine");
-            if let Err(e) = res {
+            if let Err(e) = &res {
                 log::error!("{e:#}");
-                if init {
-                    log::info!("Stopping render for now, resize game to retry (Alt+Enter) and consider reporting the error");
-                }
+            }
+            let signal_engine = |active: bool| Controller::with_sender(|s| if let Some(s) = s.pathing.as_ref() {
+                s.enables.send_modify(|enables|
+                    enables.set(PathingEnables::ENGINE, active)
+                )
+            });
+            match res {
+                Err(e) if init => {
+                    signal_engine(false);
+                },
+                Ok(true) => {
+                    signal_engine(true);
+                },
+                _ => (),
             }
         }
     }

@@ -21,6 +21,7 @@ use {
     },
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
+    taimi_hoard::flags::BitSet,
 };
 
 pub struct DrawPackRoots<'a, 'u, U: ?Sized + 'u> {
@@ -35,6 +36,11 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     pub fn draw(&mut self) {
+        match self.categories {
+            Some(categories) if categories.all_filtered =>
+                return,
+            _ => (),
+        }
         let _id = self.ui.push_id(self.state.ui_id());
         let categories = match self.state.unloaded.as_ref() {
             None if self.state.pack.is_some() => self.categories.is_some(),
@@ -389,19 +395,45 @@ impl super::PackElements {
             p.categories.open_mask.end_len() != count || p.categories.open_mask.flags.not_any()
         })
     }
-    pub fn act_expand_all(&mut self) {
+    pub fn act_expand_all(&mut self, skip_filtered: bool) {
         for pack in self.pack_state.values_mut() {
             if let Some((cats, _)) = pack.state.info.category_info() {
-                log::debug!("TODO: avoid opening filtered/hidden cats");
-                pack.categories.open_mask.flags.fill(true);
-                pack.categories.open_mask.extend_for(cats.count(), true);
+                let apply_filters = match skip_filtered {
+                    false => pack.categories.has_filters(),
+                    true => false,
+                };
+                if apply_filters {
+                    let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
+                    pack.categories.open_mask.extend(
+                        cats.iter_of::<CategoryPath>()
+                    );
+                } else {
+                    pack.categories.open_mask.flags.fill(true);
+                    pack.categories.open_mask.extend_for(cats.count(), true);
+                }
             }
         }
     }
-    pub fn act_collapse_all(&mut self) {
+    pub fn act_collapse_all(&mut self, skip_filtered: bool) {
         for pack in self.pack_state.values_mut() {
-            // TODO: avoid closing filtered ones too?
-            pack.categories.open_mask.clear();
+            let apply_filters = match skip_filtered {
+                false => pack.categories.has_filters() && pack.categories.open_mask.any(),
+                true => false,
+            };
+            let cats = apply_filters.then_some(pack.state.info.category_info())
+                .flatten();
+            if let Some((cats, _)) = cats {
+                let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
+                for cat in cats.iter_of::<CategoryPath>() {
+                    pack.categories.open_mask.remove_at(cat);
+
+                    let new_len = pack.categories.open_mask.last_one()
+                        .map(|i| i + 1).unwrap_or(0);
+                    pack.categories.open_mask.truncate(new_len);
+                }
+            } else {
+                pack.categories.open_mask.clear();
+            }
         }
     }
 }
