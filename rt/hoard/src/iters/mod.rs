@@ -3,6 +3,7 @@ pub use self::{collect::FlatCollect, macros::impl_iter_wrap, mapfn::LazyMapFn};
 mod macros;
 mod collect;
 mod mapfn;
+pub mod tree;
 
 pub trait IterExt: Sized + Iterator {
     /// [LazyMapFn]

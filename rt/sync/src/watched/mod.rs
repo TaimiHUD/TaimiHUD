@@ -555,10 +555,19 @@ impl<T: Clone + Default> Watched<T> {
         &*self.read_mut()
     }
     pub fn get_mut(&mut self) -> &mut T {
-        if self.cached.is_none() {
-            return self.read_mut()
+        #[cfg(todo = "unnecessary")]
+        {
+            if self.cached.is_none() {
+                if self.try_get_mut().is_none() {
+                    self.cached = Some(T::default());
+                }
+            }
+            unsafe {
+                self.cached.as_mut().unwrap_unchecked()
+            }
         }
-        unsafe { self.cached.as_mut().unwrap_unchecked() }
+        let _ = self.try_get_mut();
+        self.cached.get_or_insert_default()
     }
     #[cfg(todo = "unnecessary")]
     pub fn borrow_mut(&mut self) -> &mut T {

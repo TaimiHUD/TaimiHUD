@@ -637,6 +637,8 @@ impl RenderState {
                 .pack_ui_state
                 .pre_draw(match self.pathing_window.open {
                     _ if self.pathing_menu_open => PackVisibility::Visible,
+                    true if !self.pathing_window.visible =>
+                        PackVisibility::Pending,
                     true => PackVisibility::Visible,
                     false => PackVisibility::Closed,
                 });

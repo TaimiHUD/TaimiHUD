@@ -2,7 +2,7 @@ use {
     crate::{
         controller::pathing::{
             info::MapPackInfo,
-            registry::{LoadedMarkerPath, PackCategoryInfo, PackLoader, PackMapPath, PackPath},
+            registry::{LoadedMarkerPath, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath, PackCategoryInfo, PackLoader, PackMapPath, PackPath},
             shared::{SharedPackConfig, LocDisplay},
             state::{filter::{self, FilterState}, LoadedCategory, LoadedMapPack},
             ExternalFilterState,
@@ -11,24 +11,26 @@ use {
             PathingEvent,
         },
         exports::runtime as rt,
-        settings::{Settings, SettingsLock, PathingSettings},
+        settings::{Settings, PathingSettings},
         space::{engine::SpaceEvent, Engine},
     },
+    taimi_sync::arcs::ArcLazyMut,
     anyhow::Context,
     std::{
+        borrow::BorrowMut,
         collections::{BTreeMap, HashSet, VecDeque},
         future::Future,
         iter,
-        mem,
         sync::Arc,
     },
-    taimi_hoard::loc::LocationRef,
+    taimi_hoard::loc::{indexed::IndexedList, LocationRef, LocationMut, LocationGet, Locator},
     taimi_meta::{
         packs::{
-            id::{MarkerId, MarkerIndex, MarkerPath},
+            id::{MarkerId, MarkerPath},
             collections::CategorySet,
             CategoryIndex,
             CategoryPath,
+            PackCategoryNs,
             MapIndex,
             VisibilityFlags,
         },
@@ -36,7 +38,6 @@ use {
     },
     taimi_pack::{attributes::{MarkerAttributes, FilterAttributes}, category::id::{AsFullId, IdNameBox}, Pack},
     taimi_sync::watched::watch,
-    taimi_hoard::time::Timestamp,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -616,92 +617,144 @@ impl LoadedMapPack {
         categories: &PackCategoryInfo,
         config: &PackConfig,
     ) -> Result<bool, CategorySet> {
-        let mut damage = match self.categories.len() {
-            loaded if info.category_count() != loaded => {
-                self.categories = iter::repeat(LoadedCategory::INVALID)
+        LoadedCategory::update_category_config(&mut self.categories, info, categories, config)
+    }
+
+    pub fn refresh_categories(
+        &mut self,
+        info: &MapPackInfo,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+        damage: Option<&CategorySet>,
+    ) {
+        let mut loaded = IndexedList::from_mut(Arc::make_mut(&mut self.categories));
+        LoadedCategory::refresh_categories(loaded, info, categories, config, damage)
+    }
+}
+impl LoadedCategory {
+    pub(super) fn update_category_config(
+        loaded: &mut Arc<[Self]>,
+        info: &MapPackInfo,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+    ) -> Result<bool, CategorySet> {
+        let mut damage = match loaded.len() {
+            amt if info.category_count() != amt => {
+                *loaded = iter::repeat(LoadedCategory::INVALID)
                     .take(info.category_count())
                     .collect();
                 None
             },
             _ => Some(CategorySet::default()),
         };
-
-        let mut loaded: Result<&mut [LoadedCategory], &mut Arc<[LoadedCategory]>> =
-            Err(&mut self.categories);
-        for (i, path) in info.categories().enumerate() {
-            let Some(prev) = match &mut loaded {
-                Ok(c) => &c[..],
-                Err(c) => &c[..],
-            }
-            .get(i) else {
-                continue
-            };
-            let prev_defaults = prev.visibility & VisibilityFlags::DEFAULTS;
-            let defaults = categories
-                .visibility
-                .get_for(path)
-                .unwrap_or(VisibilityFlags::TOGGLES);
-            let deviation = config.visibility_deviation_for(path);
-            let default_toggles = defaults ^ deviation;
+        let loaded = ArcLazyMut::new(&mut loaded);
+        let _changed = Self::populate_vis(loaded, damage.as_mut(), &mut info.loaded_categories(), categories, config);
+        match damage {
+            #[cfg(todo = "unnecessary")]
+            _ if !_changed => Ok(true),
+            Some(damage) => match damage.is_empty() {
+                true => Ok(true),
+                false => Err(damage),
+            },
+            None => Ok(false),
+        }
+    }
+    /// TODO: LocationMut instead?
+    #[inline]
+    pub(crate) fn populate_vis<L, I>(
+        loaded: L,
+        damage: Option<&mut CategorySet>,
+        category_paths: I,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+    ) -> bool where
+        I: IntoIterator<Item = (LoadedCategoryPath, CategoryPath)>,
+        L: BorrowMut<[Self]>,
+    {
+        let category_paths = category_paths.into_iter();
+        Self::populate_vis_dyn(loaded, damage, &mut {category_paths}, categories, config)
+    }
+    pub(crate) fn populate_vis_dyn(
+        loaded: &mut dyn BorrowMut<[Self]>,
+        mut damage: Option<&mut CategorySet>,
+        category_paths: &mut dyn Iterator<Item = (LoadedCategoryPath, CategoryPath)>,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+    ) -> bool {
+        let mut changed = false;
+        for (lpath, path) in category_paths {
+            let i = lpath.path as usize;
+            let Some(prev) = loaded.borrow().get(i) else { continue };
+            let prev = prev.visibility;
+            let (default_toggles, is_override) = Self::default_toggles_for(path, categories, config);
             let defaults = default_toggles.toggles_to_default();
-            let is_override_clean = !config.visibility_overrides.contains(path)
-                || prev.visibility & VisibilityFlags::TOGGLES == default_toggles;
-            if damage.is_some() && defaults == prev_defaults && is_override_clean {
+            let prev_defaults = prev & VisibilityFlags::DEFAULTS;
+            let is_override_clean = !is_override
+                || prev & VisibilityFlags::TOGGLES == default_toggles;
+            let is_clean = damage.is_some() && defaults == prev_defaults && is_override_clean;
+            if is_clean {
                 continue
             }
 
             let out = unsafe {
-                match (mem::replace(&mut loaded, Ok(&mut [])), &mut loaded) {
-                    (Ok(loaded), Ok(out)) => {
-                        *out = loaded;
-                        out
-                    },
-                    (Err(loaded), Ok(out)) => {
-                        *out = Arc::make_mut(loaded);
-                        out
-                    },
-                    #[cfg(debug_assertions)]
-                    (_, Err(..)) => unreachable!(),
-                    #[cfg(not(debug_assertions))]
-                    (_, Err(..)) => continue,
-                }
-                .get_unchecked_mut(i)
+                loaded.borrow_mut().get_unchecked_mut(i)
             };
             out.visibility.set_defaults(defaults);
 
             if let Some(damage) = &mut damage {
                 damage.insert(path);
             }
+            changed = true;
         }
 
-        match damage {
-            Some(mut damage) => {
-                // not necessarily likely that multiple changes occur at once, but...
-                // we only care about the root-most changes since they propagate down
-                let mut redundant_roots = Vec::new();
-                for damaged in damage.paths() {
-                    let is_redundant = categories.ancestors_of(damaged).any(|p| damage.contains(p));
-                    if is_redundant {
-                        redundant_roots.push(damaged);
-                    }
+        if let Some(damage) = damage {
+            // not necessarily likely that multiple changes occur at once, but...
+            // we only care about the root-most changes since they propagate down
+            let mut redundant_roots = Vec::new();
+            for damaged in damage.paths() {
+                let is_redundant = categories.ancestors_of(damaged).any(|p| damage.contains(p));
+                if is_redundant {
+                    redundant_roots.push(damaged);
                 }
-                for redundant in redundant_roots {
-                    damage.remove(redundant);
-                }
-
-                if !damage.is_empty() {
-                    Err(damage)
-                } else {
-                    Ok(true)
-                }
-            },
-            None => Ok(false),
+            }
+            for redundant in redundant_roots {
+                damage.remove(redundant);
+            }
         }
+        changed
     }
 
-    pub fn refresh_categories(
-        &mut self,
-        info: &MapPackInfo,
+    pub fn default_toggles_for(
+        path: CategoryPath,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+    ) -> (VisibilityFlags, bool) {
+        let defaults = categories
+            .visibility
+            .get_for(path)
+            .unwrap_or(VisibilityFlags::TOGGLES);
+        let deviation = config.visibility_deviation_for(path);
+        let default_toggles = defaults ^ deviation;
+        let is_override = config.visibility_overrides.contains(path);
+        (default_toggles, is_override)
+    }
+
+    /// TODO: LookupMut=VisibilityFlags
+    pub fn refresh_categories<L, I>(
+        mut loaded: L,
+        info: I,
+        categories: &PackCategoryInfo,
+        config: &PackConfig,
+        damage: Option<&CategorySet>,
+    ) where
+        L: LocationMut<LoadedCategoryNs, LoadedCategoryIndex, LookupRef=LoadedCategory>,
+        I: LocationGet<PackCategoryNs, CategoryIndex, LookupGet=LoadedCategoryPath>,
+    {
+        Self::refresh_categories_dyn(&mut loaded, &info, categories, config, damage)
+    }
+    pub(crate) fn refresh_categories_dyn<N, P>(
+        loaded: &mut dyn LocationMut<N, P, LookupRef=LoadedCategory>,
+        info: &dyn LocationGet<PackCategoryNs, CategoryIndex, LookupGet=Locator<N, P>>,
         categories: &PackCategoryInfo,
         config: &PackConfig,
         damage: Option<&CategorySet>,
@@ -718,15 +771,14 @@ impl LoadedMapPack {
             .collect();
 
         let pack_default = VisibilityFlags::TOGGLES;
-        let loaded = Arc::make_mut(&mut self.categories);
         while let Some((path, parent_is_override, parent_vis)) = children.pop_front() {
-            let Some(index) = info.category_index(path) else {
+            let Some(index) = info.lookup_get(&path) else {
                 // rest of tree should be irrelevant
                 continue
             };
             let is_override = config.visibility_overrides.contains(path);
             let default_vis = loaded
-                .get(index.path as usize)
+                .lookup_ref(&index)
                 .map(|cat| cat.visibility.default_toggles());
             let visibility = match is_override {
                 true => default_vis,
@@ -735,8 +787,8 @@ impl LoadedMapPack {
                         categories
                             .parent_of(path)
                             .map(|parent| {
-                                info.category_index(parent)
-                                    .and_then(|i| loaded.get(i.path as usize))
+                                info.lookup_get(&parent)
+                                    .and_then(|i| loaded.lookup_ref(&i))
                                     .map(|parent| parent.visibility & VisibilityFlags::TOGGLES)
                                     .or_else(|| categories.visibility.get_for(parent))
                             })
@@ -754,7 +806,7 @@ impl LoadedMapPack {
                 },
             }
             .unwrap_or(pack_default);
-            if let Some(loaded) = loaded.get_mut(index.path as usize) {
+            if let Some(loaded) = loaded.lookup_mut(&index) {
                 loaded.visibility.set_toggles(visibility);
             }
             children.extend(

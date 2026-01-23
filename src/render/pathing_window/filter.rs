@@ -5,14 +5,12 @@ use {
         settings::state::ui::pathing::{PathingFilterFlags, PathingSearchFlags},
         render::{
             machine::RenderMachine,
-            element::pack::CategoryFilter,
+            element::pack::{CategorySearchQuery},
         },
         with_i18n,
     },
     regex::{Regex, RegexBuilder},
-    std::collections::HashSet,
-    taimi_meta::packs::{PackIndex, PackPath},
-    taimi_pack::{category::CategoryFlags, Pack},
+    taimi_hoard::str_opt,
 };
 
 #[derive(Clone)]
@@ -28,40 +26,28 @@ pub struct PathingSearchState {
 }
 
 impl PathingSearchState {
-    pub fn clear(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
+    pub fn clear(&mut self) {
         self.buffer.clear();
         self.matcher = None;
-        self.clear_matches(candidate_mask);
     }
-    pub fn clear_matches(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
-        #[cfg(todo = "unnecessary")]
-        {
-            self.search_candidates = Default::default();
-        }
-        if let Some(candidate_mask) = candidate_mask {
-            candidate_mask.clear_search();
-        }
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
     }
-    pub fn clear_matches_active(&mut self, candidate_mask: Option<&mut CategoryFilter>) {
-        #[cfg(todo = "unnecessary")]
-        {
-            self.search_candidates.clear();
-        }
-        if let Some(candidate_mask) = candidate_mask {
-            candidate_mask.clear_search_active();
+
+    pub fn query_str(&self) -> Option<&String> {
+        let buffer = str_opt(&self.buffer)?;
+        match self.flags {
+            flags if flags.contains(PathingSearchFlags::PATTERN_REGEX) && self.matcher.is_none() =>
+                None,
+            _ => Some(buffer),
         }
     }
 
-    pub fn commit<'p, P, I>(&mut self, candidate_mask: &mut CategoryFilter, packs: I)
-    where
-        I: IntoIterator<Item = P>,
-        P: AsRef<Pack>,
-    {
+    pub fn commit(&mut self) {
+        self.clear();
         if self.buffer.is_empty() {
-            self.clear_matches(Some(candidate_mask));
+            self.buffer = Default::default();
             return
-        } else {
-            self.clear_matches_active(Some(candidate_mask));
         }
         self.matcher = {
             let pattern = regex::escape(&self.buffer);
@@ -74,66 +60,16 @@ impl PathingSearchState {
             }
             matcher.ok()
         };
-
-        for (i, pack) in packs.into_iter().enumerate() {
-            let pack = pack.as_ref();
-            let path: PackPath = PackPath::with_path(i as PackIndex);
-            if let Some(mask) = candidate_mask.pack_mask.get_mut(&path) {
-                mask.clear();
-            }
-
-            for (idx, (full_id, category)) in pack.categories.all_categories.iter().enumerate() {
-                if self.flags.contains(PathingSearchFlags::IGNORE_ROOT) && category.flags.contains(CategoryFlags::ROOT) {
-                    continue
-                }
-                if self.flags.contains(PathingSearchFlags::IGNORE_BRANCHES) && category.sub_categories.is_empty() {
-                    continue
-                }
-                if self.flags.contains(PathingSearchFlags::IGNORE_LEAVES) && !category.sub_categories.is_empty() {
-                    continue
-                }
-                if self.matches_name(&category.display_name[..])
-                    || self.matches_name(category.id().as_str())
-                {
-                    let mask = candidate_mask.pack_mask.entry(path).or_default();
-                    if mask.as_bitslice().is_empty() {
-                        mask.reserve_exact(pack.categories.all_categories.len());
-                    }
-                    #[cfg(todo = "unnecessary")]
-                    {
-                        self.search_candidates.insert(full_id.into());
-                    }
-                    if mask.insert_at(idx) { continue }
-                    for sub_id in full_id.as_id().ancestors() {
-                        #[cfg(todo = "unnecessary")]
-                        {
-                            self.search_candidates.insert(sub_id.into());
-                        }
-                        if let Some(parent_idx) = pack.categories.all_categories.get_index_of(sub_id) {
-                            if mask.insert_at(parent_idx) {
-                                // already been here
-                                //break
-                            }
-                        }
-                    }
-                    if self.flags.contains(PathingSearchFlags::INCLUDE_CHILDREN) {
-                        let mut children: Vec<_> = category.child_ids().collect();
-                        while let Some(child_id) = children.pop() {
-                            let Some((child_idx, _id, child)) = pack.categories.all_categories.get_full(child_id) else { continue };
-                            if mask.insert_at(child_idx) { continue }
-                            children.extend(child.child_ids());
-                        }
-                    }
-                }
-            }
-
-            let mask = candidate_mask.pack_mask.entry(path).or_default();
-            if mask.flags.is_empty() {
-                mask.flags.push(false);
-            }
+    }
+    pub fn to_query(&self) -> Option<CategorySearchQuery> {
+        match &self.matcher {
+            Some(matcher) => Some(CategorySearchQuery::with_matcher(matcher.clone())),
+            None if self.buffer.is_empty() => None,
+            None => Some(CategorySearchQuery::with_fixed(self.buffer.clone())),
         }
     }
 
+    #[cfg(todo = "unused")]
     pub fn matches_name(&self, name: &str) -> bool {
         match &self.matcher {
             Some(regex) => regex.is_match(name),
@@ -143,21 +79,12 @@ impl PathingSearchState {
         }
     }
 
-    #[cfg(todo = "unnecessary")]
+    #[cfg(todo = "unused")]
     pub fn matches_id(&self, full_id: &str) -> bool {
         match self.buffer.is_empty() {
             false => self.search_candidates.contains(full_id),
             true => true,
         }
-    }
-
-    #[cfg(deleteme)]
-    pub fn matches_category(&self, path: CategoryPath<PackPath>) -> bool {
-        let cat_path: CategoryPath = path.unscope();
-        self.candidate_mask
-            .get(&path.root)
-            .map(|mask| mask.contains(cat_path))
-            .unwrap_or(false)
     }
 }
 
@@ -184,7 +111,8 @@ impl PathingWindowState {
             .build();
         ui.same_line();
         if ui.button("X") {
-            self.search_state.clear(Some(&mut machine.pack_ui_state.pack_filters));
+            self.search_state.clear();
+            machine.pack_ui_state.clear_search_filter();
             self.ui_state.write_if(|s| {
                 s.search.query.clear();
                 None

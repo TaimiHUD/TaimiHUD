@@ -1,4 +1,6 @@
 use core::{fmt, iter};
+use crate::iters::tree;
+use std::borrow::Cow;
 
 /// unlike [iter::Map], [self.map] is not guaranteed to run in sequence
 /// for all items, such as when [Iterator::nth] is used
@@ -43,6 +45,10 @@ impl<I: Iterator, F> LazyMapFn<I, F> {
     #[cfg(todo = "unnecessary")]
     pub fn skip(self, amt: usize) -> LazyMapFn<iter::Skip<I>, F> {
         self.map_iter(|i| i.skip(amt))
+    }
+
+    pub fn advance_by_lazy(&mut self, amt: usize) {
+        let _ = self.iter.by_ref().take(amt).count();
     }
 }
 impl<I: Iterator, F, R> LazyMapFn<I, F>
@@ -119,3 +125,51 @@ impl<I: Iterator, F> fmt::Debug for LazyMapFn<I, F> {
 }
 #[cfg(todo)]
 impl<I, F> From<iter::Map<I, F>> for LazyMapFn<I, F> {}
+
+impl<I, F, O: tree::TraversalOrder> tree::TreeTraversal<O> for LazyMapFn<I, F> where
+    I: tree::TreeTraversal<O>,
+    Self: Iterator,
+{
+    fn node_depth(&self) -> Option<usize> {
+        self.iter.node_depth()
+    }
+    fn node_advance_by(&mut self, amt: usize) {
+        self.iter.node_advance_by(amt);
+    }
+}
+impl<I: tree::DfsPre, F, R> tree::DfsPre for LazyMapFn<I, F>
+where
+    F: FnMut(I::Item) -> R,
+{
+    fn node_next_sibling(&mut self) -> Option<Result<Self::Item, Self::Item>> {
+        match self.iter.node_next_sibling() {
+            None => None,
+            Some(Ok(item)) => Some(Ok((&mut self.map)(item))),
+            Some(Err(item)) => Some(Err((&mut self.map)(item))),
+        }
+    }
+}
+impl<I: tree::PeekableDfsPre, F> tree::PeekableDfsPre for LazyMapFn<I, F>
+where
+    Self: tree::PeekableTreeTraversal<tree::PreOrder> + tree::DfsPre,
+{
+    fn node_skip_to_sibling(&mut self) -> Option<usize> {
+        self.iter.node_skip_to_sibling()
+    }
+}
+impl<O: tree::TraversalOrder, I: tree::PeekableTreeTraversal<O>, F, R> tree::PeekableTreeTraversal<O> for LazyMapFn<I, F>
+where
+    F: FnMut(I::Item) -> R,
+    I::Item: Clone,
+    R: Clone,
+{
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> {
+        self.iter.peek_node()
+            .map(Cow::into_owned)
+            .map(&mut self.map)
+            .map(Cow::Owned)
+    }
+    fn peek_depth(&mut self) -> Option<usize> {
+        self.iter.peek_depth()
+    }
+}

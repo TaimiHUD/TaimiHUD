@@ -36,7 +36,7 @@ pub struct DrawPackRoots<'a, 'ui> {
 impl<'a, 'u> DrawPackRoots<'a, 'u> {
     pub fn draw(&mut self) {
         match self.categories {
-            Some(categories) if categories.all_filtered =>
+            Some(categories) if categories.filter_state.all_filtered() =>
                 return,
             _ => (),
         }

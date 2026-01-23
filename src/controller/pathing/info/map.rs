@@ -26,12 +26,13 @@ use {
     std::{iter, mem, sync::Arc},
     taimi_hoard::{
         iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationRef, NamespacePivotTo},
+        loc::{indexed::IndexedList, LocationRef, LocationGet, NamespacePivotTo},
         flags::BitSet,
     },
     taimi_meta::packs::{
         collections::CategorySet,
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
+        PackCategoryNs,
         CategoryIndex,
         CategoryPath,
         MapIndex,
@@ -260,6 +261,11 @@ impl MapPackInfo {
     pub fn categories(&self) -> impl Iterator<Item = CategoryPath> + '_ {
         self.categories.iter().lazy_map(|&i| CategoryPath::with_path(i))
     }
+    pub fn loaded_categories(&self) -> impl Iterator<Item = (LoadedCategoryPath, CategoryPath)> + '_ {
+        self.categories()
+            .enumerate()
+            .lazy_map(|(i, path)| (LoadedCategoryPath::with_path(i as LoadedCategoryIndex), path))
+    }
     pub fn category_path(&self, path: LoadedCategoryPath) -> Option<CategoryPath> {
         self.categories().nth(path.path as usize)
     }
@@ -354,6 +360,20 @@ impl MapPackInfo {
             .trail_info
             .lookup_extend_with(path.path, MapTrailInfo::default);
         trail_info.sections = Some(IndexedList::new(sections));
+    }
+}
+impl LocationGet<PackCategoryNs, CategoryIndex> for MapPackInfo {
+    type LookupGet = LoadedCategoryPath;
+    #[inline]
+    fn lookup_get(&self, &loc: &CategoryPath) -> Option<Self::LookupGet> {
+        self.category_index(loc)
+    }
+}
+impl LocationGet<LoadedCategoryNs, LoadedCategoryIndex> for MapPackInfo {
+    type LookupGet = CategoryPath;
+    #[inline]
+    fn lookup_get(&self, &loc: &LoadedCategoryPath) -> Option<Self::LookupGet> {
+        self.category_path(loc)
     }
 }
 

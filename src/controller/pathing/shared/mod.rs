@@ -97,7 +97,11 @@ impl PathingSender {
             festivals: festivals.subscribe(),
             achievements: achievements.subscribe(),
             raids: raids.subscribe(),
-            gameplay: Watched::subscribe_to(gameplay),
+            gameplay: {
+                let mut gameplay = Watched::subscribe_to(gameplay);
+                gameplay.cached = Some(GameplayState::INITIAL);
+                gameplay
+            },
             mumble_identity: mumble_identity.subscribe(),
             enables: Watched::subscribe_to(&sender.enables),
             load_throttle: {

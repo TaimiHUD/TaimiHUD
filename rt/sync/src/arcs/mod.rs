@@ -9,10 +9,14 @@ use {
 
 #[cfg(todo)]
 pub use self::iters::{ArcSliceAt, ArcSliceIter};
-pub use self::ptrcmp::ArcPtrCmp;
+pub use self::{
+    ptrcmp::ArcPtrCmp,
+    lazymut::ArcLazyMut,
+};
 
 pub mod iters;
 pub mod moveshare;
+pub mod lazymut;
 mod ptrcmp;
 
 /// unallocated refs are [equivalent](Weak::ptr_eq) to [Weak::new()]

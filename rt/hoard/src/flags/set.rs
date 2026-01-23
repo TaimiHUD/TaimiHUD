@@ -18,9 +18,9 @@ use {
             BitsNative,
         },
         iters::IterExt as _,
-        loc::{LocationGet, LocationMut, LocationRef, Locator},
+        loc::{indexed, LocationGet, LocationMut, LocationRef, Locator},
     },
-    core::{hash, marker::PhantomData, mem, ops},
+    core::{iter, hash, marker::PhantomData, mem, ops},
     num_traits::AsPrimitive,
 };
 pub type BitsOrder = BitsLsb;
@@ -247,7 +247,46 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
             false => self.remove_at_offset(offset).unwrap_or(false),
         }
     }
+
+    #[track_caller]
+    #[inline]
+    pub fn invert_range<L: AsPrimitive<usize>>(&mut self, range: ops::Range<L>) {
+        self.invert_index_range(range.start.as_()..range.end.as_())
+    }
+    #[track_caller]
+    #[inline]
+    pub fn invert_to<L: AsPrimitive<usize>>(&mut self, range: ops::RangeTo<L>) {
+        self.invert_index_range(0..range.end.as_())
+    }
+    #[track_caller]
+    pub fn invert_index_range(&mut self, range: ops::Range<usize>) {
+        debug_assert!(range.end >= range.start);
+        self.extend_to_size(range.end, false);
+        unsafe {
+            self.invert_index_range_unchecked(range)
+        }
+    }
+
+    pub fn bitvec_iter_of<N, L>(self) -> BitSetVecIter<N, L, T, O>
+    where
+        N: Default + Clone,
+        L: Copy + 'static,
+        usize: AsPrimitive<L>,
+    {
+        fn filter_set_bit<T>((value, present): (T, bool)) -> Option<T> {
+            present.then_some(value)
+        }
+        indexed::LocatorRelIter0::enumerate(Default::default(), self.flags.into_iter())
+            .filter_map(filter_set_bit::<Locator<N, L>>)
+    }
 }
+pub type BitSetVecIter<N, L, T = usize, O = BitsOrder> = iter::FilterMap<
+    indexed::LocatorEnumerateAsRel<N, L, bitvec::vec::IntoIter<T, O>>,
+    fn((Locator<N, L>, bool)) -> Option<Locator<N, L>>
+>;
+pub type BitSetIterOf<'a, L, T = usize, O = BitsOrder> = crate::iters::LazyMapFn<
+    bitslice::IterOnes<'a, T, O>, fn(usize) -> L
+>;
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O>
 where
     V: AsRef<BitSlice<T, O>>,
@@ -306,12 +345,12 @@ where
         self.as_ref()
     }
 
-    pub fn iter_of<L>(&self) -> impl Iterator<Item = L> + '_
+    pub fn iter_of<L>(&self) -> BitSetIterOf<'_, L, T, O>
     where
         L: Copy + 'static,
         usize: AsPrimitive<L>,
     {
-        self.as_bitslice().iter_ones().lazy_map(|i| i.as_())
+        self.as_bitslice().iter_ones().lazy_map(AsPrimitive::as_)
     }
 }
 impl<V: ?Sized, T: BitStore, O: BitOrder> BitSet<V, T, O>
@@ -348,6 +387,23 @@ where
     #[inline]
     pub fn as_bitslice_mut(&mut self) -> &mut BitSlice<T, O> {
         self.as_mut()
+    }
+
+    #[track_caller]
+    pub fn try_invert_index_range(&mut self, range: ops::Range<usize>) -> Result<(), ()> {
+        match self.as_bitslice_mut().get(range.clone()) {
+            None => return Err(()),
+            Some(..) => (),
+        }
+        Ok(unsafe {
+            self.invert_index_range_unchecked(range)
+        })
+    }
+    #[inline]
+    pub unsafe fn invert_index_range_unchecked(&mut self, range: ops::Range<usize>) {
+        let selected = self.as_bitslice_mut().get_unchecked_mut(range);
+        // yes this mutates the data, weird I know
+        let _: &mut BitSlice<T, O> = !selected;
     }
 }
 impl<L, V: ?Sized, T: BitStore, O: BitOrder> TaimiSet<L> for BitSet<V, T, O>
