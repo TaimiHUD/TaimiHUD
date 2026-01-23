@@ -31,9 +31,10 @@ impl PathingFilterFlags {
     pub const FILTERS_INFO: Self = Self::from_bits_retain(
         Self::ShowHidden.bits()
     );
-    pub const FILTERS_CONFIG: Self = Self::from_bits_retain(
+    const FILTERS_ENABLE: Self = Self::from_bits_retain(
         Self::Enabled.bits() | Self::Disabled.bits()
     );
+    pub const FILTERS_CONFIG: Self = Self::FILTERS_ENABLE;
     pub const FILTERS_STATE: Self = Self::from_bits_retain(
         Self::CurrentMap.bits()
     );
@@ -55,6 +56,13 @@ impl PathingFilterFlags {
     #[cfg(todo = "unnecessary")]
     pub fn bit_as_str(self) -> Option<&'static str> {
         self.into_iter().next()?.as_str()
+    }
+
+    pub fn enable_filter(self) -> Option<bool> {
+        match self & Self::FILTERS_ENABLE {
+            Self::Enabled | Self::Disabled => Some(self.contains(Self::Enabled)),
+            _ => None
+        }
     }
 }
 
@@ -127,22 +135,35 @@ bitflags! {
     pub struct PathingSearchFlags: u8 {
         const IGNORE_CASE = 1 << 0;
         const IGNORE_SPACE = 1 << 1;
+        const INCLUDE_ID = 1 << 2;
+        const PATTERN_REGEX = 1 << 3;
+        #[cfg(deleteme)]
         const IGNORE_ROOT = 1 << 2;
+        #[cfg(deleteme)]
         const IGNORE_LEAVES = 1 << 3;
+        #[cfg(deleteme)]
         const IGNORE_BRANCHES = 1 << 4;
+        #[cfg(deleteme)]
         const INCLUDE_CHILDREN = 1 << 5;
     }
 }
 impl PathingSearchFlags {
-    pub const DEFAULT: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits() | Self::IGNORE_ROOT.bits());
+    pub const DEFAULT: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits());
+    pub const USER: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits() /*| Self::INCLUDE_ID.bits()*/);
 
     pub fn as_str(self) -> Option<&'static str> {
         Some(match self {
             Self::IGNORE_CASE => "case-insensitive",
             Self::IGNORE_SPACE => "ignore-whitespace",
+            Self::INCLUDE_ID => "include-id",
+            Self::PATTERN_REGEX => "pattern-regex",
+            #[cfg(deleteme)]
             Self::IGNORE_ROOT => "ignore-root",
+            #[cfg(deleteme)]
             Self::IGNORE_LEAVES => "ignore-leaf",
+            #[cfg(deleteme)]
             Self::IGNORE_BRANCHES => "ignore-branch",
+            #[cfg(deleteme)]
             Self::INCLUDE_CHILDREN => "include-children",
             _ => return None,
         })
@@ -164,9 +185,15 @@ impl FromStr for PathingSearchFlags {
         Ok(match s {
             "case-insensitive" => Self::IGNORE_CASE,
             "ignore-whitespace" => Self::IGNORE_SPACE,
+            "include-id" => Self::INCLUDE_ID,
+            "pattern-regex" => Self::PATTERN_REGEX,
+            #[cfg(deleteme)]
             "ignore-root" => Self::IGNORE_ROOT,
+            #[cfg(deleteme)]
             "ignore-leaf" => Self::IGNORE_LEAVES,
+            #[cfg(deleteme)]
             "ignore-branch" => Self::IGNORE_BRANCHES,
+            #[cfg(deleteme)]
             "include-children" => Self::INCLUDE_CHILDREN,
             _ => anyhow::bail!("unsupported search option `{s}`"),
         })

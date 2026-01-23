@@ -23,6 +23,10 @@ mod menu;
 
 pub struct PathingWindowState {
     pub open: bool,
+    /// window can be `open` but minimized or collapsed
+    ///
+    /// (or even dragged off-screen?)
+    pub visible: bool,
     pub filter_open: bool,
     pub filter_state: PathingFilterFlags,
     pub open_items: HashSet<CategoryId>,
@@ -34,6 +38,7 @@ impl PathingWindowState {
     pub fn new() -> Self {
         Self {
             open: false,
+            visible: false,
             filter_open: false,
             filter_state: Default::default(),
             open_items: Default::default(),
@@ -96,12 +101,17 @@ impl PathingWindowState {
             ImCondition::initial(ImSize2::new(300.0, 200.0)),
             &mut open,
         ));
+        let visible = window.is_some();
         if let Some(_window) = window {
             let pathing_dir = crate::ADDON_DIR.join("pathing");
             RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
             self.draw_content(ui, machine, engine)
         }
         self.open = open;
+        self.visible = match open {
+            false => false,
+            _ => visible,
+        };
     }
     pub fn draw_content<'ui, U>(
         &mut self,
@@ -311,7 +321,7 @@ impl PathingWindowState {
             self.ui_state.write_if(|s| {
                 let flags = (self.search_state.flags, self.filter_state);
                 let changed = (s.search.flags, s.filter.flags) != flags;
-                s.search.query = self.search_state.buffer.clone();
+                s.search.query = self.search_state.query_buffer();
                 s.search.flags = flags.0;
                 s.filter.flags = flags.1;
                 changed.then_some(true)
@@ -323,7 +333,9 @@ impl PathingWindowState {
                 .pack_state
                 .values()
                 .filter_map(|pack| pack.state.pack_data());
-            self.search_state.commit(&mut machine.pack_ui_state.pack_filters, packs);
+            self.search_state.commit();
+            machine.pack_ui_state.filter_query.search = self.search_state.to_query();
+            machine.pack_ui_state.apply_search_filter();
         }
     }
 }

@@ -1,43 +1,35 @@
 #[cfg(doc)]
 use taimi_pack::attributes::keys;
 use {
-    crate::{
-        controller::pathing::{PackConfig, VisibilityFlagsExt},
-        exports::runtime as rt,
-        settings::source::sources::DataSourcePath,
-    },
-    anyhow::anyhow,
+    crate::controller::pathing::{PackConfig, VisibilityFlagsExt},
     bitvec::vec::BitVec,
     futures::{
-        future::{self, Either},
-        stream::{self, FusedStream, Stream, StreamExt},
-        FutureExt,
+        stream::StreamExt,
+        future::FutureExt,
     },
     rustc_hash::FxHasher,
     std::{
+        borrow::Cow,
         cmp,
         collections::BTreeSet,
         error::Error as StdError,
         fmt,
         hash::{Hash, Hasher},
         iter,
-        path::{Path, PathBuf},
         ptr,
         sync::Arc,
     },
     taimi_hoard::{
-        iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationMut},
+        iters::{tree, IterExt as _},
+        loc::indexed::IndexedList,
     },
     taimi_meta::{
         map::MapID,
         packs::{
-            collections::{CategorySet, MapSet},
+            collections::{CategorySet, MapSet, VisibilityFlagSet},
             CategoryIndex,
             CategoryPath,
-            MapIndex,
             PackCategoryNs,
-            VisibilityFlagSet,
             VisibilityFlags,
         },
     },
@@ -51,9 +43,6 @@ use {
         pack::CategoryCollection,
         Pack,
     },
-    taimi_sync::watched::watch,
-    tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockWriteGuard},
-    tokio_util::sync::ReusableBoxFuture,
 };
 
 #[doc(inline)]
@@ -736,6 +725,31 @@ impl Iterator for DescendentIter<'_> {
 
             break Some(next_path)
         }
+    }
+}
+impl tree::TreeTraversal<tree::PreOrder> for DescendentIter<'_> {
+    fn node_depth(&self) -> Option<usize> {
+        Some(self.depth())
+    }
+}
+impl tree::DfsPre for DescendentIter<'_> {
+    fn node_next_sibling(&mut self) -> Option<Result<Self::Item, Self::Item>> {
+        let _skipped_children = self.skip_to_sibling();
+        match self.peek_next_is_ancestor() {
+            true => self.next().map(Err),
+            false => self.next().map(Ok),
+        }
+    }
+}
+impl tree::PeekableTreeTraversal<tree::PreOrder> for DescendentIter<'_> {
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> where Self::Item: Clone {
+        self.peek_next().map(|(path, _d)| Cow::Owned(path))
+    }
+    fn peek_depth(&mut self) -> Option<usize> {
+        self.peek_next().map(|(_path, depth)| depth)
+    }
+    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)> where Self::Item: Clone {
+        self.peek_next().map(|(p, d)| (Cow::Owned(p), d))
     }
 }
 

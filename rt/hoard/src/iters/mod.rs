@@ -5,6 +5,7 @@ pub use self::{collect::FlatCollect, macros::impl_iter_wrap, mapfn::LazyMapFn};
 mod collect;
 mod macros;
 mod mapfn;
+pub mod tree;
 
 fn filter_map_if<U>((item, cond): (U, bool)) -> Option<U> {
     cond.then_some(item)

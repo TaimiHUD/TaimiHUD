@@ -37,7 +37,7 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
 {
     pub fn draw(&mut self) {
         match self.categories {
-            Some(categories) if categories.all_filtered =>
+            Some(categories) if categories.filter_state.all_filtered() =>
                 return,
             _ => (),
         }

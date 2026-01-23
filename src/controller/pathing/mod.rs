@@ -239,14 +239,12 @@ impl PathingController {
                 Interruption::try_drain_signals(&mut self.rx.command).unwrap_or(Interruption::Unspecified),
             )
         }
-        let gameplay_prev = self.rx.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
-        let enables_prev = self.rx.enables.cached.clone().unwrap_or_default();
+        let gameplay_prev = self.rx.gameplay.get_mut().clone();
+        let enables_prev = self.rx.enables.get_mut().clone();
         let load_throttle_prev = self
             .rx
             .load_throttle
-            .cached
-            .clone()
-            .unwrap_or(PathingSettings::DEFAULT_LOAD_SIMULTANEOUS);
+            .get_mut().clone();
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {

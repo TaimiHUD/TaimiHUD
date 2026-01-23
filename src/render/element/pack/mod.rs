@@ -50,9 +50,11 @@ pub use self::{
         DrawCategoryHeader,
         DrawCategoryTooltip,
         DrawPackUnloaded,
-        CategoryFilter,
-        PackMapMask,
-        PackCategoryMask,
+        CategorySearchFilter,
+        CategoryEnableFilterState,
+        PackCategoryMaskState,
+        CategorySearchQuery,
+        CategoryFilterQuery,
     },
     menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu, DrawPackAdvancedMenu},
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
@@ -70,7 +72,7 @@ pub struct PackElements {
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
     pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
-    pub pack_filters: CategoryFilter,
+    pub filter_query: CategoryFilterQuery,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
 impl PackElements {
@@ -132,7 +134,7 @@ impl PackElements {
             }
         }
         for pack in self.pack_state.values_mut() {
-            pack.pre_draw(&mut self.pack_filters, visibility);
+            pack.pre_draw(&mut self.filter_query, visibility);
         }
     }
     pub fn draw<'ui, U>(&mut self, ui: &mut U) where
@@ -203,8 +205,7 @@ impl PackElement {
         }
     }
 
-    pub fn pre_draw(&mut self, pack_filters: &mut CategoryFilter, visibility: PackVisibility) {
-        self.categories.filter_flags = pack_filters.flags;
+    pub fn pre_draw(&mut self, filter_query: &mut CategoryFilterQuery, visibility: PackVisibility) {
         if let PackVisibility::Closed = visibility {
             self.hovered = None;
         }
@@ -217,7 +218,7 @@ impl PackElement {
             v => v,
         };
         self.categories
-            .pre_draw(&self.state, &*pack_filters, &damage, category_visibility);
+            .pre_draw(&self.state, &*filter_query, &damage, category_visibility);
     }
 
     pub fn draw_pack_tooltip<'ui, U>(&mut self, ui: &mut U, title_visible: bool, reason_visible: bool) where
