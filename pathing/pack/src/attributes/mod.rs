@@ -329,6 +329,13 @@ impl MarkerAttributes {
     pub fn poi_mut(&mut self) -> &mut PoiAttributes {
         self.render_mut().poi.get_or_insert_default()
     }
+
+    pub fn tip_name(&self) -> Option<&str> {
+        self.tip_name.as_ref().and_then(|s| str_opt_ref(&**s))
+    }
+    pub fn tip_description(&self) -> Option<&str> {
+        self.tip_description.as_ref().and_then(|s| str_opt_ref(&**s))
+    }
 }
 
 /// Scripting.

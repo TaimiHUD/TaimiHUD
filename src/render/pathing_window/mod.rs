@@ -12,7 +12,7 @@ use {
         Controller,
         ControllerEvent,
     },
-    nexus::imgui::{ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags},
+    crate::exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags, TreeNode},
     std::collections::HashSet,
     taimi_pack::category::CategoryId,
     taimi_sync::watched::Watched,
@@ -300,6 +300,7 @@ use {
     },
     taimi_hoard::loc::LocationRef,
     std::borrow::Cow,
+    glamour::{Box2, Point2, Size2},
 };
 impl PathingWindowState {
     pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
@@ -312,6 +313,14 @@ impl PathingWindowState {
                 self.draw_one_poi(ui, &maps, lpath, Some(path));
             }
         }
+        let bounds: Box2<f32> = Box2::new(
+            Point2::from_array(ui.window_content_region_min()),
+            Point2::from_array(ui.window_content_region_max()),
+        );
+        #[cfg(todo = "unused")]
+        let start_pos: Point2<f32> = Point2::from_array(ui.cursor_start_pos());
+        let window_size: Size2<f32> = Size2::from_array(ui.window_size());
+        let bounds_height = (bounds.max.y - bounds.min.y).max(window_size.height) + ui.text_line_height_with_spacing() * 2.0;
         if let Some(_table) = RenderInteractivePoi::draw_table_start(ui, "pois-map") {
             let maps = pathing.gameplay.borrow().clone();
             let entities = pathing.interact.entities.borrow();
@@ -320,7 +329,76 @@ impl PathingWindowState {
             for e in entities.entities.iter() {
                 let e = &e.value;
                 let lpath = e.poi_path();
-                self.draw_one_poi(ui, &maps, lpath, None);
+                let lpoi_path: LoadedPoiPath = lpath.unscope();
+                let mut poi_path = None;
+
+                let _id = ui.push_id(imgui::Id::Int(lpath.path as i32));
+                let pos: Point2<f32> = Point2::from_array(ui.cursor_pos());
+                let offset = pos.y + bounds.min.y;
+                let is_visible = offset >= 0.0 && offset <= bounds_height;
+                let map_info = is_visible.then(|| maps.get_info_for(lpath.root.root)).flatten();
+                let linfo = map_info.as_ref().and_then(|(_, i)| i.pois().lookup_ref(&lpoi_path));
+                let stor;
+                let display_name = match is_visible {
+                    true => {
+                        let pd;
+                        let mut idx = -(lpoi_path.path as i64);
+                        let mut name_or_desc = None;
+                        let mut cat_path = None;
+                        if let (Some(linfo), Some((_map_path, map_info))) = (linfo, map_info) {
+                            if poi_path.is_none() {
+                                poi_path = map_info.poi_path(lpoi_path);
+                                if let Some(pp) = poi_path {
+                                    idx = pp.path as i64;
+                                }
+                            }
+                            cat_path = Some(linfo.category_path);
+                            name_or_desc = linfo.get_marker_attrs().and_then(|attrs| attrs.tip_name().or(attrs.tip_description()));
+                        }
+                        let name = if let Some(name) = name_or_desc {
+                            Ok(Cow::Borrowed(name))
+                        } else if let Some(pack) = machine.pack_ui_state.pack_state.lookup_ref(&lpath.root.root) {
+                            pd = pack.state.pack_data();
+                            let cat = pd.as_ref().and_then(|pd| cat_path.and_then(|path|
+                                pd.categories.all_categories.get_index(path.path as usize)
+                            ));
+                            if let Some((_, cat)) = cat {
+                                Err(Some(Cow::Borrowed(&cat.display_name[..])))
+                            } else if let Some(info) = &pack.state.info.info {
+                                Err(Some(Cow::Owned(info.to_string())))
+                            } else {
+                                Err(Some(Cow::Owned(pack.state.info.to_string())))
+                            }
+                        } else {
+                            Err(None)
+                        };
+
+                        stor = match name {
+                            Ok(name) => name,
+                            Err(Some(pack_name)) => {
+                                Cow::Owned(format!("{pack_name}#{}", idx))
+                            },
+                            Err(None) =>
+                                Cow::Owned(format!("{}#{}", lpath.root.root, idx)),
+                        };
+                        &stor[..]
+                    },
+                    false => "POI",
+                };
+                let node = TreeNode::new("poi")
+                    .flags(TreeNodeFlags::SPAN_FULL_WIDTH)
+                    .label::<&str, _>(display_name)
+                    .tree_push_on_open(false)
+                    .opened(false, Condition::Appearing)
+                    .allow_item_overlap(true)
+                    .leaf(false);
+                let node = node.push(ui);
+                if let Some(_token) = node {
+                    self.draw_one_poi(ui, &maps, lpath, None);
+                } else {
+                    ui.table_next_column();
+                }
+                ui.table_next_column();
             }
         }
         let _ = RenderInteractivePoi::draw_table_start(ui, "pois-hidden");
