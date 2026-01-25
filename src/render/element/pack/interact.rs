@@ -286,79 +286,6 @@ impl PathingWindowState {
             engine.packs.rebuild_active(&engine.render_backend.device);
         }
     }
-    pub fn menu_ipoi(
-        &mut self,
-        ui: &Ui,
-        _machine: &mut RenderMachine,
-        _engine: Option<&Engine>,
-    ) {
-        let Some(rpoi) = &self.act_selected_poi else { return };
-        let mut action_untrigger = false;
-        let mut action_trigger = None;
-        match rpoi.hidden {
-            false => if with_i18n!("trigger-trigger", |label| Selectable::new(label).build(ui)) {
-                let _ = action_trigger.get_or_insert(InteractionEventAction::Trigger);
-            },
-            true =>
-                action_untrigger = with_i18n!("trigger-untrigger", |label| Selectable::new(label).build(ui)),
-        }
-        #[cfg(todo)]
-        if with_i18n!("trigger-behaviour", |label| Selectable::new(label).build(ui)) {
-            action_trigger.get_or_insert(InteractionEventAction::Manual(TriggerKind::ALL));
-        }
-
-        ui.separator();
-        let action_dismiss_open = with_i18n!("trigger-behaviour", |label| Selectable::new(label)
-            .close_popups(false)
-            .build(ui));
-        match action_dismiss_open.then(|| self.act_selected_poi_delay.take()) {
-            Some(Some(..)) => {
-                let _ = action_trigger.get_or_insert(InteractionEventAction::Manual(TriggerKind::DISMISS));
-                ui.close_current_popup();
-            }
-            Some(None) =>
-                self.act_selected_poi_delay = Some(1.0),
-            None => (),
-        }
-        if let Some(delay) = &mut self.act_selected_poi_delay {
-            let mut action_dismiss = None;
-            let behaviours = keys::Behaviour::ALL.iter().skip(1);
-            ui.indent();
-            for &behaviour in behaviours {
-                let label = format!("dismiss-behaviour-{}", behaviour.value());
-                let act = with_i18n!(&label, |label| Selectable::new(label).build(ui));
-                match behaviour {
-                    keys::Behaviour::Taco(keys::TacoBehaviour::ResetDelay) => {
-                        ui.indent();
-                        let _ = ui.input_float("hours", delay)
-                            .build();
-                        ui.unindent();
-                    },
-                    _ => (),
-                }
-                if act {
-                    action_dismiss = Some(behaviour);
-                }
-            }
-            ui.unindent();
-            if let Some(mode) = action_dismiss {
-                let mut config = BehaviourConfig::new(mode);
-                config.reset_delay = self.act_selected_poi_delay.map(|delay|
-                    (delay * 3600.0).into()
-                ).unwrap_or_default();
-                let _ = action_trigger.get_or_insert(InteractionEventAction::Dismiss(config));
-            }
-        }
-
-        if let Some(action) = action_trigger {
-            let action = rpoi.action_trigger(action);
-            Controller::with_sender(|s| if let Some(s) = &s.pathing {
-                let _ = s.interactions.send(action);
-            });
-        } else if action_untrigger {
-            rpoi.action_untrigger().try_send();
-        }
-    }
 
     #[cfg(todo)]
     pub(super) fn lpoi_get_guid(map_info: &SharedMapPackLoaded, loaded_path: PoiPath<PackMapPath>) -> Option<Guid> {
@@ -457,11 +384,7 @@ impl RenderInteractivePoi {
     }
 
     pub fn action_trigger(&self, action: InteractionEventAction) -> InteractionEvent {
-        InteractionEvent::Interact {
-            action,
-            path: self.path,
-            loaded_path: self.loaded_path(),
-        }
+        action_trigger(self.path, self.loaded_path(), action)
     }
     pub fn action_untrigger(&self) -> PathingEvent {
         match self.guid.clone() {
@@ -510,17 +433,16 @@ impl RenderInteractivePoi {
             act_selected_poi_open: false
         };
         draw.draw_poi_row();
-        draw.ui.table_next_column();
         draw.act_selected_poi_open
     }
 }
 /// TODO: deleteme
 pub(in super::super::super) struct DrawInteractivePoi<'a, 'ui> {
-    ui: &'a Ui<'ui>,
-    rpoi: &'a RenderInteractivePoi,
-    interact: &'a InteractionAttributes,
-    display_name: &'a str,
-    act_selected_poi_open: bool,
+    pub ui: &'a Ui<'ui>,
+    pub rpoi: &'a RenderInteractivePoi,
+    pub interact: &'a InteractionAttributes,
+    pub display_name: &'a str,
+    pub act_selected_poi_open: bool,
     #[cfg(deleteme)]
     act_selected_poi: Option<PoiMapPath>,
 }
@@ -811,5 +733,98 @@ impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
         }
 
         action
+    }
+}
+pub(in super::super::super) struct DrawMenuPoi<'a, 'ui> {
+    pub ui: &'a Ui<'ui>,
+    pub hidden: bool,
+    pub act_trigger: Option<InteractionEventAction>,
+    pub act_untrigger: bool,
+    pub act_selected_poi_delay: Option<f32>,
+}
+impl<'a, 'u> DrawMenuPoi<'a, 'u> {
+    pub fn draw(
+        &mut self,
+    ) {
+        let ui = self.ui;
+        match self.hidden {
+            false => if with_i18n!("trigger-trigger", |label| Selectable::new(label).build(ui)) {
+                let _ = self.act_trigger.get_or_insert(InteractionEventAction::Trigger);
+            },
+            true =>
+                self.act_untrigger = with_i18n!("trigger-untrigger", |label| Selectable::new(label).build(ui)),
+        }
+        #[cfg(todo)]
+        if with_i18n!("trigger-behaviour", |label| Selectable::new(label).build(ui)) {
+            self.act_trigger.get_or_insert(InteractionEventAction::Manual(TriggerKind::ALL));
+        }
+
+        ui.separator();
+        let action_dismiss_open = with_i18n!("trigger-behaviour", |label| Selectable::new(label)
+            .close_popups(false)
+            .build(ui));
+        match action_dismiss_open.then(|| self.act_selected_poi_delay.take()) {
+            Some(Some(..)) => {
+                let _ = self.act_trigger.get_or_insert(InteractionEventAction::Manual(TriggerKind::DISMISS));
+                ui.close_current_popup();
+            }
+            Some(None) =>
+                self.act_selected_poi_delay = Some(1.0),
+            None => (),
+        }
+        if let Some(delay) = &mut self.act_selected_poi_delay {
+            let mut action_dismiss = None;
+            let behaviours = keys::Behaviour::ALL.iter().skip(1);
+            ui.indent();
+            for &behaviour in behaviours {
+                let label = format!("dismiss-behaviour-{}", behaviour.value());
+                let act = with_i18n!(&label, |label| Selectable::new(label).build(ui));
+                match behaviour {
+                    keys::Behaviour::Taco(keys::TacoBehaviour::ResetDelay) => {
+                        ui.indent();
+                        let _ = ui.input_float("hours", delay)
+                            .build();
+                        ui.unindent();
+                    },
+                    _ => (),
+                }
+                if act {
+                    action_dismiss = Some(behaviour);
+                }
+            }
+            ui.unindent();
+            if let Some(mode) = action_dismiss {
+                let mut config = BehaviourConfig::new(mode);
+                config.reset_delay = self.act_selected_poi_delay.map(|delay|
+                    (delay * 3600.0).into()
+                ).unwrap_or_default();
+                let _ = self.act_trigger.get_or_insert(InteractionEventAction::Dismiss(config));
+            }
+        }
+    }
+    pub fn action_trigger(&self, path: PoiPath, loaded_path: PoiMapPath, guid: Option<&Guid>) {
+        if let Some(action) = self.act_trigger {
+            let action = action_trigger(path, loaded_path, action);
+            Controller::with_sender(|s| if let Some(s) = &s.pathing {
+                let _ = s.shared.interact.events.send(action);
+            });
+        } else if self.act_untrigger {
+            let msg = match guid.cloned() {
+                Some(guid) =>
+                    PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]),
+                None => {
+                    let marker_path = loaded_path.root.root.rel(MarkerIndex::with_poi(path.path));
+                    PathingEvent::ResetMarkerPath(marker_path)
+                }
+            };
+            msg.try_send();
+        }
+    }
+}
+fn action_trigger(path: PoiPath, loaded_path: PoiMapPath, action: InteractionEventAction) -> InteractionEvent {
+    InteractionEvent::Interact {
+        action,
+        path,
+        loaded_path,
     }
 }
