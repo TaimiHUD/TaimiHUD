@@ -18,6 +18,7 @@ use {
     crate::{
         controller::pathing::registry::UnloadedReason,
         exports::runtime::imgui::{self, StyleVar, Condition, TreeNodeToken, Ui},
+        settings::state::ui::pathing::PathingFilterFlags,
         with_i18n,
     },
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
@@ -31,6 +32,7 @@ pub struct DrawPackRoots<'a, 'ui> {
     pub categories: Option<&'a CategoryCollectionState>,
     pub act_cat: CategoryActionSlot,
     pub act_pack: PackActionSlot,
+    pub unfilter_interest: Option<CategoryPath>,
     pub last_menu_open: Option<CategoryPath>,
 }
 impl<'a, 'u> DrawPackRoots<'a, 'u> {
@@ -101,6 +103,9 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             self.ui.table_next_column();
         }
         drop(token);
+        if let Some(unfilter) = categories.unfilter_interest {
+            self.unfilter_interest = Some(unfilter);
+        }
         if let Some(act) = pack_toggle {
             self.act_pack = Some((self.state.pack_path(), PackAction::Cat {
                 path: pseudo_root,
@@ -422,8 +427,18 @@ impl PackElement {
     pub fn draw(&mut self, ui: &Ui) {
         let mut roots = self.prepare_draw(ui);
         roots.draw();
-        let DrawPackRoots { act_cat, act_pack, .. } = roots;
+        let DrawPackRoots { act_cat, act_pack, unfilter_interest, .. } = roots;
         self.act_post_draw(ui, act_cat, act_pack, true);
+        if let Some(interest) = unfilter_interest {
+            if let Some(cats) = self.state.info.info.as_ref().map(|i| &i.categories) {
+                let hide = self.categories.filter_state.flags.contains(PathingFilterFlags::ShowHidden);
+                let filter = move |path: &CategoryPath| match hide {
+                    false => !cats.hidden.contains(*path),
+                    true => true,
+                };
+                self.categories.filter_state.extend_interest(cats.children_of(interest).filter(filter));
+            }
+        }
     }
 
     pub fn prepare_draw<'a, 'u>(&'a self, ui: &'a Ui<'u>) -> DrawPackRoots<'a, 'u> {
@@ -434,6 +449,7 @@ impl PackElement {
             act_cat: Default::default(),
             act_pack: Default::default(),
             last_menu_open: self.categories.open_menu.last().copied(),
+            unfilter_interest: None,
         }
     }
 }

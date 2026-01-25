@@ -190,6 +190,9 @@ impl PackCategoryMaskState {
             self.interest.extend(cats.root_paths());
         }
     }
+    pub fn extend_interest<I: IntoIterator<Item = CategoryPath>>(&mut self, paths: I) {
+        self.interest.extend(paths);
+    }
 
     /// info sig dirty, mark most items to be regenerated
     pub fn info_invalidated(&mut self) {
@@ -468,6 +471,11 @@ impl PackCategoryMaskState {
         match contained {
             true if self.mask.category_mask.is_empty() && !self.flags.contains(PathingFilterFlags::ShowHidden) =>
                 !self.is_path_hidden(path),
+            c => c,
+        }
+    }
+    pub fn visible_category(&self, path: CategoryPath) -> bool {
+        match self.contains_category(path) {
             false if self.interest.contains(path) => true,
             c => c,
         }

@@ -896,6 +896,7 @@ pub struct DrawCategoryCollectionTree<'a, 'ui> {
     /// XXX: same as [self.draw.id_stack]
     pub node_stack: Vec<Option<TreeNodeToken<'ui>>>,
     pub act: CategoryActionSlot,
+    pub unfilter_interest: Option<CategoryPath>,
 }
 impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
     pub fn new(draw: DrawCategoryCollection<'a, 'u>) -> Self {
@@ -903,6 +904,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
             draw,
             node_stack: Vec::new(),
             act: Default::default(),
+            unfilter_interest: None,
         }
     }
 
@@ -938,32 +940,18 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
         return self.draw_children(path, &mut cats.nested_descendents_of(path));
 
         let mut cat_iter = cats.nested_descendents_of(path);
-        let mut prev_depth = cat_iter.depth();
+        let initial_depth = cat_iter.depth();
+        let mut prev_depth = initial_depth;
         let mut pending_row = false;
         let mut children_filtered = match self.draw.state.filter_state.is_active() {
             true => vec![0usize],
             false => Vec::new(),
         };
-        'cats: while let Some(cat_path) = cat_iter.next() {
+        while let Some(cat_path) = cat_iter.next() {
             let depth = cat_iter.depth();
             if let Some(popping) = prev_depth.checked_sub(depth) {
-                for _ in 0..=popping {
-                    let was_open = self.node_contents_visible();
-                    let child_path = self.pop_to(path);
-                    let filtered = children_filtered.pop();
-                    let Some(_child_path) = child_path else {
-                        break 'cats
-                    };
-                    match was_open.then_some(filtered) {
-                        Some(Some(0)) | Some(Some(usize::MAX)) => (),
-                        Some(Some(amt)) => {
-                            self.draw.ui.text_disabled(format!("{amt} hidden by filter"));
-                            if self.draw.ui.is_item_clicked() {
-                                log::debug!("TODO: add {_child_path} children to interest");
-                            }
-                        }
-                        _ => (),
-                    }
+                if !self.pop_amt_from(&mut children_filtered, path, popping) {
+                    break
                 }
             }
             match depth.checked_sub(prev_depth) {
@@ -1013,19 +1001,47 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                 cat_iter.skip_to_sibling();
             }
         }
-        debug_assert!(children_filtered.len() <= 2);
-        match children_filtered.get(1).copied() {
-            None | Some(0) | Some(usize::MAX) => (),
-            Some(amt) => {
-                self.draw.ui.text_disabled(format!("{amt} hidden by filter"));
-                if self.draw.ui.is_item_clicked() {
-                    log::debug!("TODO: add {path} children to interest");
-                }
-            }
+        if let Some(popping) = prev_depth.checked_sub(initial_depth) {
+            self.pop_amt_from(&mut children_filtered, path, popping);
         }
+        debug_assert!(children_filtered.len() <= 1);
         if pending_row || true {
             self.draw.ui.table_next_column();
         }
+    }
+    fn pop_amt_from(&mut self, children_filtered: &mut Vec<usize>, path: CategoryPath, popping: usize) -> bool {
+        for _ in 0..=popping {
+            let was_open = self.node_contents_visible();
+            let child_path = self.pop_to(path);
+            let filtered = children_filtered.pop();
+            match was_open.then_some(filtered) {
+                Some(Some(0)) | Some(Some(usize::MAX)) => (),
+                Some(Some(amt)) => {
+                    if child_path.is_some() {
+                        self.draw.ui.indent();
+                    }
+                    let checkpoint = self.draw.ui.cursor_pos();
+                    let msg = format!("{amt} hidden by filter");
+                    self.draw.ui.text_disabled(&msg);
+                    if self.draw.ui.is_item_clicked() {
+                        self.unfilter_interest = Some(child_path.unwrap_or(path));
+                    } else if self.draw.ui.is_item_hovered() {
+                        self.draw.ui.set_cursor_pos(checkpoint);
+                        self.draw.ui.text(&msg);
+                    }
+                    if child_path.is_some() {
+                        self.draw.ui.unindent();
+                    } else {
+                        self.draw.ui.spacing();
+                    }
+                }
+                _ => (),
+            }
+            if child_path.is_none() {
+                return false
+            }
+        }
+        true
     }
     pub fn draw_children(&mut self, root_path: Option<CategoryPath>, cat_iter: &mut dyn DfsPre<Item = CategoryPath>) {
         let mut start_depth = None;
@@ -1411,7 +1427,7 @@ impl CategoryCollectionState {
         self.filter_state.iter_categories(category_info)
     }
     pub fn category_is_whitelisted(&self, pack: &PackElementState, path: CategoryPath) -> bool {
-        self.filter_state.contains_category(path)
+        self.filter_state.visible_category(path)
     }
     #[cfg(deleteme)]
     pub fn iter_whitelisted<'a>(&'a self, pack: &'a PackElementState) -> impl Iterator<Item = CategoryPath> + 'a {
