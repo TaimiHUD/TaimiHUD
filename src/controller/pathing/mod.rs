@@ -320,9 +320,6 @@ impl PathingController {
                 let trans = gameplay.latest_transition_from(gameplay_prev);
                 self.handle_gameplay(gameplay, trans).await;
             },
-            Some((_when, m)) = self.scheduled_events.infinite_mut().next() => {
-                return self.handle_message(m).await
-            },
             Some(res) = self.tasks.join_next(), if !self.tasks.is_empty() => match res {
                 Ok(res) => match rt::log::error_ok(res.context("pathing task")) {
                     None | Some(PathingEvent::Nop) => (),
@@ -330,6 +327,9 @@ impl PathingController {
                         return self.handle_message(m).await,
                 },
                 Err(e) => crate::log_join_error("pathing", e),
+            },
+            Some((_when, m)) = self.scheduled_events.infinite_mut().next() => {
+                return self.handle_message(m).await
             },
             _ = &mut self.filter_next_schedule => {
                 // self.update_filter_state_schedule(ctx);
