@@ -109,6 +109,7 @@ impl PathingWindowState {
         let mut open = self.open;
         let visible = Window::new(fl!("pathing-window"))
             .size([300.0, 200.0], Condition::FirstUseEver)
+            .nav_focus(false)
             .opened(&mut open)
             .build(ui, || {
                 let pathing_dir = crate::ADDON_DIR.join("pathing");

@@ -71,6 +71,7 @@ impl PrimaryWindowState {
             Window::new(&fl!("primary-window"))
                 .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
                 .opened(&mut open)
+                .nav_focus(false)
                 .build(ui, || {
                     self.draw_tabs(ui, None, machine, timer_window_state, state_errors, true)
                 });
