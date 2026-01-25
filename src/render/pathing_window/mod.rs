@@ -361,7 +361,7 @@ impl PathingWindowState {
 }
 
 use {
-    crate::render::element::pack::interact::RenderInteractivePoi,
+    crate::render::element::pack::interact::{RenderInteractivePoi, DrawMenuPoi},
     crate::controller::pathing::{
         registry::{LoadedPoiPath, PoiMapPath},
         info::EMPTY_INTERACTION_ATTRS,
@@ -371,18 +371,28 @@ use {
         CategoryIndex, PoiIndex, CategoryPath, PoiPath,
     },
     taimi_hoard::loc::LocationRef,
+    taimi_pack::attributes::keys::Guid,
     std::borrow::Cow,
     glamour::{Box2, Point2, Size2},
+    std::cell::Cell,
 };
+thread_local! {
+    static POI_CONTEXT_OPEN: Cell<bool> = Cell::new(false);
+    static POI_CONTEXT: Cell<Option<(PoiPath, PoiMapPath, Option<Guid>)>> = Cell::new(None);
+    static POI_DELAY: Cell<Option<f32>> = Cell::new(None);
+}
 impl PathingWindowState {
     pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let Some(pathing) = machine.pathing.as_ref() else { return };
+        POI_CONTEXT_OPEN.set(false);
+
         let table = RenderInteractivePoi::draw_table_start(ui, "pois-nearby");
         if let Some(_table) = table {
             let nearby = pathing.interact.nearby.borrow().clone();
             let maps = pathing.gameplay.borrow().clone();
             for (lpath, path) in nearby.iter_pois() {
-                self.draw_one_poi(ui, &maps, lpath, Some(path));
+                self.draw_one_poi(ui, Some(&*machine), &maps, lpath, Some(path));
+                ui.table_next_column();
             }
         }
         let bounds: Box2<f32> = Box2::new(
@@ -403,8 +413,9 @@ impl PathingWindowState {
                 let lpath = e.poi_path();
                 let lpoi_path: LoadedPoiPath = lpath.unscope();
                 let mut poi_path = None;
+                let mut guid = None;
 
-                let _id = ui.push_id(imgui::Id::Int(lpath.path as i32));
+                let _id = ui.push_id(imgui::Id::Int((lpath.root.root.path as i32).rotate_left(20) ^ lpath.root.path.get() as i32 ^ lpath.path as i32));
                 let pos: Point2<f32> = Point2::from_array(ui.cursor_pos());
                 let offset = pos.y + bounds.min.y;
                 let is_visible = offset >= 0.0 && offset <= bounds_height;
@@ -424,6 +435,7 @@ impl PathingWindowState {
                                     idx = pp.path as i64;
                                 }
                             }
+                            guid = map_info.poi_guid_by_index(lpoi_path);
                             cat_path = Some(linfo.category_path);
                             name_or_desc = linfo.get_marker_attrs().and_then(|attrs| attrs.tip_name().or(attrs.tip_description()));
                         }
@@ -465,17 +477,45 @@ impl PathingWindowState {
                     .allow_item_overlap(true)
                     .leaf(false);
                 let node = node.push(ui);
+                let mut right_clicked = ui.is_item_clicked_with_button(MouseButton::Right);
                 if let Some(_token) = node {
-                    self.draw_one_poi(ui, &maps, lpath, None);
+                    self.draw_one_poi(ui, None, &maps, lpath, None);
                 } else {
                     ui.table_next_column();
                 }
+                right_clicked |= ui.is_item_clicked_with_button(MouseButton::Right);
                 ui.table_next_column();
+                drop(_id);
+                let right_clicked = right_clicked.then(|| {
+                    poi_path.map(|path| (path, lpath, guid.cloned()))
+                });
+                if let Some(Some(paths)) = right_clicked {
+                    POI_CONTEXT_OPEN.set(true);
+                    POI_CONTEXT.set(Some(paths));
+                    POI_DELAY.set(None);
+                    ui.open_popup("poi-context");
+                }
             }
         }
         let _ = RenderInteractivePoi::draw_table_start(ui, "pois-hidden");
+        if POI_CONTEXT_OPEN.get() {
+            ui.open_popup("poi-context");
+        }
+        ui.popup("poi-context", || {
+            let Some((path, loaded_path, guid)) = POI_CONTEXT.get() else { return };
+            let mut menu = DrawMenuPoi {
+                ui,
+                hidden: false,
+                act_trigger: None,
+                act_untrigger: false,
+                act_selected_poi_delay: POI_DELAY.get(),
+            };
+            menu.draw();
+            POI_DELAY.set(menu.act_selected_poi_delay);
+            menu.action_trigger(path, loaded_path, guid.as_ref());
+        });
     }
-    fn draw_one_poi(&mut self, ui: &Ui, maps: &SharedGameplayMap, lpath: PoiMapPath, mut poi_path: Option<PoiPath>) {
+    fn draw_one_poi(&mut self, ui: &Ui, machine: Option<&RenderMachine>, maps: &SharedGameplayMap, lpath: PoiMapPath, mut poi_path: Option<PoiPath>) {
         let lpoi_path: LoadedPoiPath = lpath.unscope();
         let (attrs, lguid, name, category_path, lcat_path) = if let Some((_map_path, map_info)) = maps.get_info_for(lpath.root.root) {
             let linfo = map_info.pois().lookup_ref(&lpoi_path);
@@ -501,14 +541,30 @@ impl PathingWindowState {
             let pos = lpoi.map(|lpoi| lpoi.position);
             (pos, vis, cat_vis)
         } else { (None, None, None) };
-        let display_name = name.map(Cow::Borrowed)
-            .unwrap_or_else(|| {
-                let n = LocDisplay(lpath.root.rel(lpoi_path));
-                Cow::Owned(n.to_string())
-            });
+        let pd;
+        let display_name = match name.map(Cow::Borrowed) {
+            Some(name) => Some(name),
+            None => if let Some(pack) = machine.and_then(|m| m.pack_ui_state.pack_state.lookup_ref(&lpath.root.root)) {
+                pd = pack.state.pack_data();
+                let cat = pd.as_ref().and_then(|pd| category_path.and_then(|path|
+                    pd.categories.all_categories.get_index(path.path as usize)
+                ));
+                Some(if let Some((_, cat)) = cat {
+                    Cow::Borrowed(&cat.display_name[..])
+                } else if let Some(info) = &pack.state.info.info {
+                    Cow::Owned(info.to_string())
+                } else {
+                    Cow::Owned(pack.state.info.to_string())
+                })
+            } else { None },
+        }.unwrap_or_else(|| {
+            let n = LocDisplay(lpath.root.rel(lpoi_path));
+            Cow::Owned(n.to_string())
+        });
         let attrs = attrs.unwrap_or(&EMPTY_INTERACTION_ATTRS);
+        let path = poi_path.unwrap_or(PoiPath::with_path(PoiIndex::MAX));
         let context_opened = RenderInteractivePoi {
-            path: poi_path.unwrap_or(PoiPath::with_path(PoiIndex::MAX)),
+            path,
             category_path: category_path.unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
             map_path: lpath.root,
             loaded_index: lpath.path,
@@ -521,5 +577,15 @@ impl PathingWindowState {
             position: Default::default(),
             nearby: Default::default(),
         }.draw(ui, attrs, &display_name);
+        if context_opened {
+            log::debug!("open popup?");
+            if let Some(path) = poi_path {
+                log::debug!("ya open popup!");
+                POI_CONTEXT_OPEN.set(true);
+                POI_CONTEXT.set(Some((path, lpath, lguid.cloned())));
+                POI_DELAY.set(None);
+                ui.open_popup("poi-context");
+            }
+        }
     }
 }
