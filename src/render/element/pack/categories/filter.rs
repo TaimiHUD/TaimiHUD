@@ -184,6 +184,12 @@ impl PackCategoryMaskState {
             None => Default::default(),
         }
     }
+    pub fn populate_interest(&mut self, cats: Option<&PackCategoryInfo>) {
+        let cats = cats.or(self.category_info.as_ref().map(|cats| &**cats));
+        if let Some(cats) = cats {
+            self.interest.extend(cats.root_paths());
+        }
+    }
 
     /// info sig dirty, mark most items to be regenerated
     pub fn info_invalidated(&mut self) {
@@ -413,6 +419,10 @@ impl PackCategoryMaskState {
     pub fn is_active(&self) -> bool {
         self.search_candidates.is_some() || self.has_enable() || self.loaded.is_some()
     }
+    pub fn any_visible(&self) -> bool {
+        if !self.interest.is_empty() { return true }
+        !self.all_filtered()
+    }
     pub fn all_filtered(&self) -> bool {
         if self.flags.contains(PathingFilterFlags::CurrentMap) && self.loaded.as_ref().map(|l| l.is_empty()).unwrap_or(true) {
             return true
@@ -447,7 +457,10 @@ impl PackCategoryMaskState {
             (true, Some(cats)) => Some(self.hidden_filter(cats.all().paths())),
             _ => None,
         };
-        let mask = (!unfiltered).then_some(self.mask.iter_categories().chain(self.interest.paths()));
+        let mask = (!unfiltered).then(|| {
+            let interest = self.interest.paths().filter(|&path| !self.mask.category_mask.contains(path));
+            self.mask.iter_categories().chain(interest)
+        });
         all.into_iter().flatten().chain(mask.into_iter().flatten())
     }
     pub fn contains_category(&self, path: CategoryPath) -> bool {
@@ -455,6 +468,7 @@ impl PackCategoryMaskState {
         match contained {
             true if self.mask.category_mask.is_empty() && !self.flags.contains(PathingFilterFlags::ShowHidden) =>
                 !self.is_path_hidden(path),
+            false if self.interest.contains(path) => true,
             c => c,
         }
     }

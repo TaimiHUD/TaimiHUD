@@ -141,11 +141,13 @@ impl PackElements {
         }
     }
     /// TODO: binary heap with real sort key
-    fn iter_packs_draw<'a, 'u, 'ui>(ui: &'u Ui<'ui>, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
+    fn iter_packs_draw<'a, 'u, 'ui>(ui: &'u Ui<'ui>, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>, amt_hidden: &'a mut usize) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
         'u: 'ui,
         'a: 'u,
     {
         let mut unloaded = Vec::new();
+        let mut delayed = Vec::new();
+        let mut delayed_sep = false;
         let mut packs = pack_state.values_mut();
         let mut sep = None;
         core::iter::from_fn(move || {
@@ -158,6 +160,8 @@ impl PackElements {
                     _ => false,
                 };
                 match delay {
+                    true if filtered.is_some() && pack.categories.filter_state.any_visible() =>
+                        delayed.push(pack),
                     true =>
                         unloaded.push(pack),
                     false => {
@@ -168,17 +172,27 @@ impl PackElements {
                 }
             }
             next.or_else(|| {
+                let delayed = delayed.pop();
+                if delayed.is_some() && sep == Some(false) && !delayed_sep {
+                    ui.separator();
+                    ui.spacing();
+                    ui.separator();
+                    delayed_sep = true;
+                }
+                delayed
+            }).or_else(|| {
                 let matching = matches!(filtered, Some(true));
                 match sep {
                     _ if unloaded.is_empty() => (),
+                    Some(false) if matching => {
+                        *amt_hidden = unloaded.len();
+                        return None
+                    },
                     Some(false) => {
                         ui.separator();
-                        ui.spacing();
-                        if matching {
-                            let amt = unloaded.len();
-                            ui.text_disabled(format!("{amt} packs hidden by filters"));
+                        if !delayed_sep {
                             ui.spacing();
-                            return None
+                            ui.separator();
                         }
                         sep = Some(true);
                     },
@@ -196,7 +210,8 @@ impl PackElements {
                 Some(matching)
             },
         };
-        let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered);
+        let mut amt_hidden = 0;
+        let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered, &mut amt_hidden);
         for pack in packs {
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
@@ -213,6 +228,23 @@ impl PackElements {
                 }
                 self.context_menu = Some((pack.state.pack_path(), cat_path));
             }
+        }
+        if amt_hidden > 0 {
+            ui.spacing();
+            let checkpoint = ui.cursor_pos();
+            let msg = format!("{amt_hidden} packs hidden by filter");
+            ui.text_disabled(&msg);
+            if ui.is_item_clicked() {
+                for pack in self.pack_state.values_mut() {
+                    let cats = pack.state.info.info.as_ref().map(|i| &*i.categories);
+                    pack.categories.filter_state.populate_interest(cats);
+                }
+            } else if ui.is_item_hovered() {
+                ui.set_cursor_pos(checkpoint);
+                ui.text(&msg);
+            }
+            ui.spacing();
+            ui.table_next_column();
         }
 
         let (mut menu_pack, menu_cat) = match self.context_menu {

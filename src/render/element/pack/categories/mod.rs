@@ -1013,7 +1013,16 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                 cat_iter.skip_to_sibling();
             }
         }
-        debug_assert!(children_filtered.len() <= 1);
+        debug_assert!(children_filtered.len() <= 2);
+        match children_filtered.get(1).copied() {
+            None | Some(0) | Some(usize::MAX) => (),
+            Some(amt) => {
+                self.draw.ui.text_disabled(format!("{amt} hidden by filter"));
+                if self.draw.ui.is_item_clicked() {
+                    log::debug!("TODO: add {path} children to interest");
+                }
+            }
+        }
         if pending_row || true {
             self.draw.ui.table_next_column();
         }
