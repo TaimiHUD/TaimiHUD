@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     for (traili, trail) in pack.trails.iter().enumerate() {
-        let trl_name = trail.trail_path.as_ref().map(|p| &p[..]).unwrap_or("<unavail>");
+        let trl_name = trail.trail_path.as_ref().map(|p| &p.path[..]).unwrap_or("<unavail>");
         let context = format!("{trl_name} (trail#{traili} of {})", &trail.category);
         let res = trail.read_trl_data(&mut loader).context(context.clone());
         let trl = match res {
