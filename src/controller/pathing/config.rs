@@ -409,7 +409,7 @@ impl PathingController {
                 let marker_path: MarkerPath<PackPath> = MarkerPath::with_parts(lpath.root.root, marker_path.path);
                 let marker_id = MarkerId::for_marker(marker_path);
                 let lmarker_id = MarkerId::for_marker(lpath);
-                let guid_id = guid.as_ref().and_then(|guid| guid.0.is_nil().then_some(MarkerId::from_uuid_ref(&guid.0)));
+                let guid_id = guid.as_ref().and_then(|guid| (!guid.0.is_nil()).then_some(MarkerId::from_uuid_ref(&guid.0)));
                 let marker_ids: [Option<&MarkerId>; 3] = [
                     Some(&marker_id),
                     Some(&lmarker_id),
