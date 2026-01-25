@@ -628,7 +628,7 @@ impl LoadedMapPack {
         damage: Option<&CategorySet>,
     ) {
         let mut loaded = IndexedList::from_mut(Arc::make_mut(&mut self.categories));
-        LoadedCategory::refresh_categories(loaded, info, categories, config, damage)
+        LoadedCategory::refresh_categories(&mut loaded, info, categories, config, damage)
     }
 }
 impl LoadedCategory {
@@ -647,8 +647,8 @@ impl LoadedCategory {
             },
             _ => Some(CategorySet::default()),
         };
-        let loaded = ArcLazyMut::new(&mut loaded);
-        let _changed = Self::populate_vis(loaded, damage.as_mut(), &mut info.loaded_categories(), categories, config);
+        let mut loaded = ArcLazyMut::new(loaded);
+        let _changed = Self::populate_vis(&mut loaded, damage.as_mut(), &mut info.loaded_categories(), categories, config);
         match damage {
             #[cfg(todo = "unnecessary")]
             _ if !_changed => Ok(true),
@@ -662,7 +662,7 @@ impl LoadedCategory {
     /// TODO: LocationMut instead?
     #[inline]
     pub(crate) fn populate_vis<L, I>(
-        loaded: L,
+        loaded: &mut L,
         damage: Option<&mut CategorySet>,
         category_paths: I,
         categories: &PackCategoryInfo,
@@ -741,8 +741,8 @@ impl LoadedCategory {
 
     /// TODO: LookupMut=VisibilityFlags
     pub fn refresh_categories<L, I>(
-        mut loaded: L,
-        info: I,
+        loaded: &mut L,
+        info: &I,
         categories: &PackCategoryInfo,
         config: &PackConfig,
         damage: Option<&CategorySet>,
@@ -750,7 +750,7 @@ impl LoadedCategory {
         L: LocationMut<LoadedCategoryNs, LoadedCategoryIndex, LookupRef=LoadedCategory>,
         I: LocationGet<PackCategoryNs, CategoryIndex, LookupGet=LoadedCategoryPath>,
     {
-        Self::refresh_categories_dyn(&mut loaded, &info, categories, config, damage)
+        Self::refresh_categories_dyn(loaded, info, categories, config, damage)
     }
     pub(crate) fn refresh_categories_dyn<N, P>(
         loaded: &mut dyn LocationMut<N, P, LookupRef=LoadedCategory>,

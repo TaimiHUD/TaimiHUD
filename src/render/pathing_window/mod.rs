@@ -31,8 +31,9 @@ pub struct PathingWindowState {
     pub visible: bool,
     pub filter_open: bool,
     pub filter_state: PathingFilterFlags,
-    pub open_items: HashSet<CategoryId>,
     pub search_state: PathingSearchState,
+    pub search_show_options: bool,
+    pub search_focus_latch: bool,
     pub ui_state: Watched<UiState>,
 }
 
@@ -43,8 +44,9 @@ impl PathingWindowState {
             visible: false,
             filter_open: false,
             filter_state: Default::default(),
-            open_items: Default::default(),
             search_state: Default::default(),
+            search_show_options: false,
+            search_focus_latch: false,
             ui_state: Watched::empty_with(Default::default()),
         }
     }
@@ -61,13 +63,25 @@ impl PathingWindowState {
             self.filter_state = ui_state.filter.flags;
             self.search_state.flags = ui_state.search.flags;
             match ui_state.search.query() {
-                Some(query) if self.search_state.buffer.is_empty() =>
-                    self.search_state.buffer = query.into(),
+                Some(query) if self.search_state.buffer.is_empty() => {
+                    self.search_state.buffer = query.into();
+                    self.search_state.commit(true);
+                },
                 _ => (),
             }
         }
+        if !self.visible {
+            self.search_focus_latch = false;
+        }
     }
-    pub fn pre_draw(&mut self, _machine: &mut RenderMachine) {}
+    pub fn pre_draw(&mut self, machine: &mut RenderMachine) {
+        let filter_query = &mut machine.pack_ui_state.filter_query;
+        let prev_flags = filter_query.flags;
+        filter_query.set_flags(self.filter_state);
+        if prev_flags != filter_query.flags {
+            machine.pack_ui_state.filter_query.search = self.search_state.to_query();
+        }
+    }
 
     pub fn draw(
         &mut self,
@@ -220,8 +234,8 @@ impl PathingWindowState {
         let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
         let table_name = format!("pathing");
         let table_token = ui.begin_table_with_flags(&table_name, 1, table_flags);
-        machine.pack_ui_state.draw(ui);
         ui.table_next_column();
+        machine.pack_ui_state.draw(ui);
         if let Some(token) = table_token {
             token.end();
         }
@@ -239,28 +253,34 @@ impl PathingWindowState {
     pub fn draw_filter_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let filter_prev = self.filter_state;
         let search_dirty = self.draw_filters(ui, machine);
-        ui.dummy([4.0; 2]);
         ui.separator();
-        ui.dummy([4.0; 2]);
 
-        if search_dirty || filter_prev != self.filter_state {
-            machine.pack_ui_state.pack_filters.flags = self.filter_state;
+        let query_dirty = match search_dirty {
+            Some(hard) => self.search_state.commit(!hard),
+            None => false,
+        };
+        if query_dirty || filter_prev != self.filter_state {
+            machine.pack_ui_state.filter_query.set_flags(self.filter_state);
             self.ui_state.write_if(|s| {
                 let flags = (self.search_state.flags, self.filter_state);
                 let changed = (s.search.flags, s.filter.flags) != flags;
-                s.search.query = self.search_state.query_buffer();
+                match self.search_state.query_str() {
+                    Some(Some(query)) if !query.is_empty() && search_dirty != Some(true) => (),
+                    Some(query) =>
+                        s.search.query = query.cloned().unwrap_or_default(),
+                    _ => (),
+                }
                 s.search.flags = flags.0;
                 s.filter.flags = flags.1;
                 changed.then_some(true)
             });
         }
-        if search_dirty {
+        if query_dirty {
             let packs = machine
                 .pack_ui_state
                 .pack_state
                 .values()
                 .filter_map(|pack| pack.state.pack_data());
-            self.search_state.commit();
             machine.pack_ui_state.filter_query.search = self.search_state.to_query();
             machine.pack_ui_state.apply_search_filter();
         }
@@ -308,13 +328,10 @@ impl PathingWindowState {
         let lpoi_path: LoadedPoiPath = lpath.unscope();
         let (attrs, lguid, name, category_path, lcat_path) = if let Some((_map_path, map_info)) = maps.get_info_for(lpath.root.root) {
             let linfo = map_info.pois().lookup_ref(&lpoi_path);
-            // find is incorrect!
-            let TODO = ();
-            // TODO: map_info.marker_guid(lpath);
             if poi_path.is_none() {
                 poi_path = map_info.poi_path(lpoi_path);
             }
-            let lguid = map_info.poi_guids().find(|(p, ..)| Some(*p) == poi_path);
+            let lguid = map_info.poi_guid_by_index(lpoi_path);
             let cat_path: Option<CategoryPath> = linfo.map(|i| i.category_path);
             let lcat_path = cat_path.and_then(|p| map_info.category_index(p));
             let attrs = linfo.map(|li| li.interaction_attrs());
@@ -333,7 +350,6 @@ impl PathingWindowState {
             let pos = lpoi.map(|lpoi| lpoi.position);
             (pos, vis, cat_vis)
         } else { (None, None, None) };
-        let guid = lguid.and_then(|(_, g)| g.cloned());
         let display_name = name.map(Cow::Borrowed)
             .unwrap_or_else(|| {
                 let n = LocDisplay(lpath.root.rel(lpoi_path));
@@ -345,7 +361,7 @@ impl PathingWindowState {
             category_path: category_path.unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
             map_path: lpath.root,
             loaded_index: lpath.path,
-            guid,
+            guid: lguid.cloned(),
             visibility: visibility.unwrap_or_default(),
             category_visibility: category_visibility.unwrap_or_default(),
             #[cfg(todo)]

@@ -161,6 +161,28 @@ impl LoadedMapPack {
         info.poi_guid_filter(pois).zip(self.poi_guids.iter())
             .lazy_map(|((p, lp), g)| (p, lp, g))
     }
+    pub fn poi_guid_by_index<'a>(
+        &'a self,
+        info: &'_ MapPackInfo,
+        path: LoadedPoiPath,
+    ) -> Option<&'a Guid> {
+        match info.poi_guid_filter(self.lpois().paths()).enumerate().find(|(_, p)| *p >= path) {
+            Some((i, p)) if p == path =>
+                self.poi_guids.get(i),
+            _ => None,
+        }
+    }
+    pub fn poi_guid_by_path<'a>(
+        &'a self,
+        info: &'_ MapPackInfo,
+        path: PoiPath,
+    ) -> Option<&'a Guid> {
+        match info.poi_guid_filter(info.pois()).enumerate().find(|(_, p)| *p >= path) {
+            Some((i, p)) if p == path =>
+                self.poi_guids.get(i),
+            _ => None,
+        }
+    }
     pub fn poi_at<'a>(&'a self, path: PoiPath<&'_ MapPackInfo>) -> Option<&'a LoadedPoi> {
         let info = path.root;
         info.poi_index(path.unscope())

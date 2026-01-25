@@ -518,7 +518,7 @@ impl Engine {
                 },
             )
         });
-        let gameplay_prev = self.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
+        let gameplay_prev = self.gameplay.get_mut().clone();
         if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);
             let res = self

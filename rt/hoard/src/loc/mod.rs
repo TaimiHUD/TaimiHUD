@@ -624,6 +624,64 @@ pub trait LocationMut<N, L>: LocationRef<N, L> {
     fn lookup_mut<'a>(&'a mut self, loc: &Locator<N, L>) -> Option<&'a mut Self::LookupRef>;
 }
 
+impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ T where
+    T: LocationGet<N, L>,
+{
+    type LookupGet = <T as LocationGet<N, L>>::LookupGet;
+    #[inline]
+    fn lookup_get(&self, loc: &Locator<N, L>) -> Option<Self::LookupGet> {
+        T::lookup_get(*self, loc)
+    }
+}
+impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ T where
+    T: LocationRef<N, L>,
+{
+    type LookupRef = <T as LocationRef<N, L>>::LookupRef;
+    #[inline]
+    fn lookup_ref<'a>(&'a self, loc: &Locator<N, L>) -> Option<&'a Self::LookupRef> {
+        T::lookup_ref(*self, loc)
+    }
+}
+impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ mut T where
+    T: LocationGet<N, L>,
+{
+    type LookupGet = <T as LocationGet<N, L>>::LookupGet;
+    #[inline]
+    fn lookup_get(&self, loc: &Locator<N, L>) -> Option<Self::LookupGet> {
+        T::lookup_get(self, loc)
+    }
+}
+impl<N, L, T: ?Sized> LocationMut<N, L> for &'_ mut T where
+    T: LocationMut<N, L>,
+{
+    #[inline]
+    fn lookup_mut<'a>(&'a mut self, loc: &Locator<N, L>) -> Option<&'a mut Self::LookupRef> {
+        T::lookup_mut(*self, loc)
+    }
+}
+impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ mut T where
+    T: LocationRef<N, L>,
+{
+    type LookupRef = <T as LocationRef<N, L>>::LookupRef;
+    fn lookup_ref<'a>(&'a self, loc: &Locator<N, L>) -> Option<&'a Self::LookupRef> {
+        T::lookup_ref(&**self, loc)
+    }
+    #[cfg(deleteme)]
+    fn lookup_ref<'a>(&'a self, _loc: &Locator<N, L>) -> Option<&'a Self::LookupRef> {
+        let msg = "BUG: accessed LocationRef for &mut";
+        match () {
+            #[cfg(debug_assertions)]
+            _ => panic!("{msg}"),
+            #[cfg(not(debug_assertions))]
+            _ => {
+                let e = anyhow::Error::msg(msg);
+                log::error!("{e:#}");
+                None
+            },
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! locator_ns {
     (

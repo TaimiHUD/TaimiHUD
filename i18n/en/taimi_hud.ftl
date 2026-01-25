@@ -71,6 +71,7 @@ enable = Enable
 cancel = Cancel
 default = Default
 disable = Disable
+all = All
 enabled = { enable }d
 disabled = { disable }d
 unloaded = Unloaded
@@ -319,6 +320,8 @@ pack-format-notice = Supported .taco zip file or extracted folder
 
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
+search = Search
+options = Options
 show-filter = Show filter options
 hide-filter = Hide filter options
 current-map = Current map
@@ -332,6 +335,10 @@ show-all = Show all
 #off-map = Elsewhere
 ignore-whitespace = Ignore spaces
 case-insensitive = Ignore case
+include-id = Id
+pattern-regex = Regex
+#negative = Negate
+negative = Invert
 
 toggle = Toggle
 enable-all = Enable all

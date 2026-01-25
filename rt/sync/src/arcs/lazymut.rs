@@ -298,6 +298,22 @@ impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for ArcMutRef<'a, T> where
         Borrow::borrow(&*self.arc)
     }
 }
+impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ ArcMutRef<'a, T> where
+    Arc<T>: Borrow<U>,
+{
+    #[inline]
+    fn borrow(&self) -> &U {
+        Borrow::borrow(&*self.arc)
+    }
+}
+impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ mut ArcMutRef<'a, T> where
+    Arc<T>: Borrow<U>,
+{
+    #[inline]
+    fn borrow(&self) -> &U {
+        Borrow::borrow(&*self.arc)
+    }
+}
 #[cfg(todo)]
 impl<'a, T: ArcMakeMut, U: ?Sized> BorrowMut<U> for ArcMutRef<'a, T> where
     T: AsMut<U>,
@@ -307,7 +323,13 @@ impl<'a, T: ArcMakeMut, U: ?Sized> BorrowMut<U> for ArcMutRef<'a, T> where
         AsMut::as_mut(self.make_mut())
     }
 }
-impl<'a, T: ArcMakeMut> BorrowMut<T> for ArcMutRef<'a, T> {
+impl<'a, T: ?Sized + ArcMakeMut> BorrowMut<T> for ArcMutRef<'a, T> {
+    #[inline]
+    fn borrow_mut(&mut self) -> &mut T {
+        self.make_mut()
+    }
+}
+impl<'a, T: ?Sized + ArcMakeMut> BorrowMut<T> for &'_ mut ArcMutRef<'a, T> {
     #[inline]
     fn borrow_mut(&mut self) -> &mut T {
         self.make_mut()
@@ -321,7 +343,7 @@ impl<'a, T: ?Sized, U: ?Sized> AsRef<U> for ArcMutRef<'a, T> where
         AsRef::as_ref(&*self.arc)
     }
 }
-impl<'a, T: ArcMakeMut, U: ?Sized> AsMut<U> for ArcMutRef<'a, T> where
+impl<'a, T: ?Sized + ArcMakeMut, U: ?Sized> AsMut<U> for ArcMutRef<'a, T> where
     T: AsMut<U>,
 {
     #[inline]

@@ -390,14 +390,14 @@ where
         self.at(*path)
     }
 }
-impl<N, P, T: ?Sized, TI> LocationRef<N, P> for IndexedList<N, P, T>
+impl<N, P, T: ?Sized, TI: ?Sized> LocationRef<N, P> for IndexedList<N, P, T>
 where
     for<'a> &'a T: IntoIterator<Item = &'a TI>,
     P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
 {
     type LookupRef = TI;
-    fn lookup_ref(&self, loc: &'_ Locator<N, P>) -> Option<&Self::LookupRef> {
+    fn lookup_ref(&self, loc: &'_ Locator<N, P>) -> Option<&TI> {
         let Locator { root, path } = loc;
         if root != &self.root {
             return None
@@ -405,14 +405,14 @@ where
         self.at(*path)
     }
 }
-impl<N, P, T: ?Sized> LocationMut<N, P> for IndexedList<N, P, T>
+impl<N, P, T: ?Sized, TI: ?Sized> LocationMut<N, P> for IndexedList<N, P, T>
 where
-    for<'a> &'a mut T: IntoIterator<Item = &'a mut <Self as LocationRef<N, P>>::LookupRef>,
-    Self: LocationRef<N, P>,
+    for<'a> &'a mut T: IntoIterator<Item = &'a mut TI>,
+    for<'a> &'a T: IntoIterator<Item = &'a TI>,
     P: AsPrimitive<usize> + Copy + 'static,
     N: PartialEq,
 {
-    fn lookup_mut(&mut self, loc: &'_ Locator<N, P>) -> Option<&mut Self::LookupRef> {
+    fn lookup_mut(&mut self, loc: &'_ Locator<N, P>) -> Option<&mut TI> {
         let Locator { root, path } = loc;
         if root != &self.root {
             return None

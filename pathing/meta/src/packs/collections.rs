@@ -124,17 +124,17 @@ impl CategorySet {
     pub fn iter<'a>(&'a self) -> <&'a Self as IntoIterator>::IntoIter {
         IntoIterator::into_iter(self)
     }
-    pub fn into_iter<T>(self) -> impl Iterator<Item = T> where
+    pub fn into_iter<T>(self) -> impl DoubleEndedIterator<Item = T> where
         T: Copy + 'static,
         CategoryIndex: AsPrimitive<T>,
     {
         IntoIterator::into_iter(self).lazy_map(AsPrimitive::as_)
     }
-    pub fn paths<'a>(&'a self) -> impl Iterator<Item = CategoryPath> + Clone + 'a {
+    pub fn paths<'a>(&'a self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + 'a {
         self.iter().lazy_map(CategoryPath::with_path)
     }
     #[inline]
-    pub fn into_paths(self) -> impl Iterator<Item = CategoryPath> {
+    pub fn into_paths(self) -> impl DoubleEndedIterator<Item = CategoryPath> {
         self.into_iter::<CategoryPath>()
     }
 

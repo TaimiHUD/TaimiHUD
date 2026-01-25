@@ -31,7 +31,7 @@ impl PathingFilterFlags {
     pub const FILTERS_INFO: Self = Self::from_bits_retain(
         Self::ShowHidden.bits()
     );
-    const FILTERS_ENABLE: Self = Self::from_bits_retain(
+    pub const FILTERS_ENABLE: Self = Self::from_bits_retain(
         Self::Enabled.bits() | Self::Disabled.bits()
     );
     pub const FILTERS_CONFIG: Self = Self::FILTERS_ENABLE;
@@ -64,6 +64,23 @@ impl PathingFilterFlags {
             _ => None
         }
     }
+    pub fn filter_for_enable(enable: Option<bool>) -> Self {
+        match enable {
+            Some(true) => Self::Enabled,
+            Some(false) => Self::Disabled,
+            None => Self::empty(),
+        }
+    }
+    pub fn set_enable_filter(&mut self, enable: Option<bool>) {
+        self.remove(Self::FILTERS_ENABLE);
+        self.insert(Self::filter_for_enable(enable));
+    }
+    /// clear out the invalid [Self::Enabled] | [Self::Disabled] combination
+    pub fn canonicalize_enable_filter(&mut self) {
+        if self.enable_filter().is_none() {
+            self.remove(Self::FILTERS_ENABLE);
+        }
+    }
 }
 
 impl Default for PathingFilterFlags {
@@ -94,10 +111,9 @@ impl<'de> de::Deserialize<'de> for PathingFilterFlags {
         BitFlagDe::new().deserialize(deserializer)
     }
 }
-/// TODO: [BitFlagSer::new_human]
 impl ser::Serialize for PathingFilterFlags {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BitFlagSer::<Self>::new_bits(*self).serialize(serializer)
+        BitFlagSer::<Self>::new_human(*self).serialize(serializer)
     }
 }
 impl BitFlagContainer for PathingFilterFlags {
@@ -146,11 +162,14 @@ bitflags! {
         const IGNORE_BRANCHES = 1 << 4;
         #[cfg(deleteme)]
         const INCLUDE_CHILDREN = 1 << 5;
+        const NEGATIVE = 1 << 7;
     }
 }
 impl PathingSearchFlags {
     pub const DEFAULT: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits());
     pub const USER: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits() /*| Self::INCLUDE_ID.bits()*/);
+    pub const ADVANCED: Self = Self::from_bits_retain(Self::all().bits() & !(Self::USER.bits() ));
+    pub const PERSIST: Self = Self::from_bits_retain((Self::USER.bits() | Self::ADVANCED.bits()) & !(Self::NEGATIVE.bits()));
 
     pub fn as_str(self) -> Option<&'static str> {
         Some(match self {
@@ -158,6 +177,7 @@ impl PathingSearchFlags {
             Self::IGNORE_SPACE => "ignore-whitespace",
             Self::INCLUDE_ID => "include-id",
             Self::PATTERN_REGEX => "pattern-regex",
+            Self::NEGATIVE => "negative",
             #[cfg(deleteme)]
             Self::IGNORE_ROOT => "ignore-root",
             #[cfg(deleteme)]
@@ -188,6 +208,7 @@ impl FromStr for PathingSearchFlags {
             "ignore-whitespace" => Self::IGNORE_SPACE,
             "include-id" => Self::INCLUDE_ID,
             "pattern-regex" => Self::PATTERN_REGEX,
+            "negative" => Self::NEGATIVE,
             #[cfg(deleteme)]
             "ignore-root" => Self::IGNORE_ROOT,
             #[cfg(deleteme)]
@@ -205,10 +226,10 @@ impl<'de> de::Deserialize<'de> for PathingSearchFlags {
         BitFlagDe::new().deserialize(deserializer)
     }
 }
-/// TODO: [BitFlagSer::new_human]
 impl ser::Serialize for PathingSearchFlags {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BitFlagSer::<Self>::new_bits(*self).serialize(serializer)
+        let persist = *self & Self::PERSIST;
+        BitFlagSer::<Self>::new_human(persist).serialize(serializer)
     }
 }
 impl BitFlagContainer for PathingSearchFlags {

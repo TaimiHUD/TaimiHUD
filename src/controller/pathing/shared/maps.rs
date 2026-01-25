@@ -424,6 +424,20 @@ impl SharedMapPackLoaded {
                 })
             })
     }
+    pub fn poi_guid_by_index<'a>(&'a self, path: LoadedPoiPath) -> Option<&'a Guid> {
+        match self.info.poi_guid_filter(self.info.loaded_pois()).enumerate().find(|(_, (p, _))| *p >= path) {
+            Some((i, (p, _))) if p == path =>
+                self.poi_guids.get(i),
+            _ => None,
+        }
+    }
+    pub fn poi_guid_by_path<'a>(&'a self, path: PoiPath) -> Option<&'a Guid> {
+        match self.info.poi_guid_filter(self.info.loaded_pois()).enumerate().find(|(_, (_, p))| *p >= path) {
+            Some((i, (_, p))) if p == path =>
+                self.poi_guids.get(i),
+            _ => None,
+        }
+    }
 }
 impl ops::Deref for SharedMapPackLoaded {
     type Target = MapPackInfo;

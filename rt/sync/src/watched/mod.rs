@@ -396,6 +396,16 @@ impl<T: Clone> Watched<T> {
             (None, _) => None,
         }
     }
+    /// [Self::try_read_if_changed], but ensure cache is filled if possible
+    pub fn try_read_if_changed_or_clone(&mut self) -> Option<&mut T> {
+        let changed = self.try_read_if_changed().is_some();
+        if !changed {
+            let _ = self.try_get_mut();
+        }
+        changed.then(|| unsafe {
+            self.cached.as_mut().unwrap_unchecked()
+        })
+    }
 
     pub fn try_get_mut(&mut self) -> Option<&mut T> {
         if self.cached.is_none() {
