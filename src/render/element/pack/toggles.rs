@@ -36,11 +36,6 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     pub fn draw(&mut self) {
-        match self.categories {
-            Some(categories) if categories.filter_state.all_filtered() =>
-                return,
-            _ => (),
-        }
         let _id = self.ui.push_id(self.state.ui_id());
         let categories = match self.state.unloaded.as_ref() {
             None if self.state.pack.is_some() => self.categories.is_some(),
@@ -59,7 +54,6 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
         let cats = self.state.info.info.as_ref().map(|i| &i.categories);
         let pseudo_root = self.state.info.unique_root().map(|r| r.path());
         let (mut pack_act, mut pack_toggle) = (None, None);
-        self.ui.table_next_column();
         let token = if pseudo_root.is_none() {
             let mut header = self.prepare_header();
             let (act, token) = header.draw();
@@ -87,7 +81,6 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
                 };
                 for root in cats.root_paths() {
                     categories.draw_root(root, pseudo_root.is_some());
-                    categories.draw.ui.table_next_column();
                     let act_cat = match categories.act.take() {
                         Some((
                             path,
@@ -119,6 +112,8 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
         }
         if token.is_some() {
             self.ui.unindent();
+        } else if pseudo_root.is_none() {
+            self.ui.table_next_column();
         }
         drop(token);
         if let Some(act) = pack_toggle {
@@ -145,7 +140,6 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
         }
     }
     fn draw_unloaded(&mut self) {
-        self.ui.table_next_column();
         let act = DrawPackUnloaded { ui: self.ui, state: self.state }.draw();
         let act_pack = match act {
             Some(UiAction::RIGHT_CLICK) => Some(PackAction::Root(CategoryAction::ContextMenu)),
@@ -167,6 +161,7 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
             let clobbered = act_pack.clobber(self.state.pack_path(), &mut self.act_pack);
             PackAction::warn_clobbered(&self.act_pack, clobbered);
         }
+        self.ui.table_next_column();
     }
     pub(super) fn prepare_header(&mut self) -> DrawCategoryHeader<'a, '_, U> {
         DrawCategoryHeader {
@@ -182,8 +177,16 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
                 .as_ref()
                 .map(|i| i.categories.roots.is_empty()),
             is_decorative: false,
+            is_header: true,
             button_interact: None,
             allow_overlap: true,
+            filter_selected: self.categories.as_ref().and_then(|c| match c.filter_state.is_active() {
+                false => None,
+                true => match c.filter_state.all_filtered() {
+                    true => Some(false),
+                    false => None,
+                },
+            }),
         }
     }
 
@@ -207,6 +210,7 @@ pub struct DrawCategoryToggle<'a, 'u, U: ?Sized> {
     pub is_copyable: bool,
     pub has_children: bool,
     pub pseudo_root: bool,
+    pub filter_selected: Option<bool>
 }
 impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U> where
     U: ?Sized + ImDrawWindow<'ui>,
@@ -275,6 +279,7 @@ impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U> where
         'a0: 'u0,
     {
         let allow_overlap = self.pseudo_root && self.has_toggle();
+        let is_decorative = self.flags.contains(CategoryFlags::SEPARATOR);
         DrawCategoryHeader {
             ui: &mut *self.ui,
             open: self.open_state,
@@ -288,9 +293,11 @@ impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U> where
                 false if self.is_lonely => None,
                 is_parent => Some(!is_parent),
             },
-            is_decorative: self.flags.contains(CategoryFlags::SEPARATOR),
+            is_header: (self.has_children && !is_decorative) || self.pseudo_root,
+            is_decorative,
             button_interact: Some(self.is_copyable),
             allow_overlap,
+            filter_selected: self.filter_selected,
         }
     }
 
@@ -399,10 +406,11 @@ impl super::PackElements {
         for pack in self.pack_state.values_mut() {
             if let Some((cats, _)) = pack.state.info.category_info() {
                 let apply_filters = match skip_filtered {
-                    false => pack.categories.has_filters(),
+                    false => pack.categories.filter_state.is_active(),
                     true => false,
                 };
                 if apply_filters {
+                    // TODO: go one level up? only open parents with at least one whitelisted child!
                     let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
                     pack.categories.open_mask.extend(
                         cats.iter_of::<CategoryPath>()
@@ -417,7 +425,7 @@ impl super::PackElements {
     pub fn act_collapse_all(&mut self, skip_filtered: bool) {
         for pack in self.pack_state.values_mut() {
             let apply_filters = match skip_filtered {
-                false => pack.categories.has_filters() && pack.categories.open_mask.any(),
+                false => pack.categories.filter_state.is_active() && pack.categories.open_mask.any(),
                 true => false,
             };
             let cats = apply_filters.then_some(pack.state.info.category_info())

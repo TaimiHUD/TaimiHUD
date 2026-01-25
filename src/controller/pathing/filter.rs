@@ -37,9 +37,7 @@ impl PathingController {
         let lpoi_path: LoadedPoiPath = lpath.unscope();
         let (poi_path, guid) = match self.maps.lookup_with_info(&self.map_info, &map_path) {
             Some((map, map_info)) => {
-                let guid = map.poi_guids(map_info)
-                    .find(|(_, lp, ..)| lp == lpoi_path)
-                    .map(|(_, _, guid)| guid.clone());
+                let guid = map.poi_guid_by_index(map_info, lpoi_path).cloned();
                 let poi_path = map_info.poi_path(lpoi_path);
                 (poi_path, guid)
             },

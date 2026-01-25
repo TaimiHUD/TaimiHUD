@@ -95,7 +95,7 @@ impl CategoryAction {
             _ => None,
         }
     }
-    pub(super) fn warn_clobbered(
+    pub(crate) fn warn_clobbered(
         slot: &CategoryActionSlot,
         res: Result<Option<(CategoryPath, Self)>, Self>,
     ) {

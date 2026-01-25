@@ -643,7 +643,7 @@ impl PathingController {
             InteractControl(msg) => {
                 let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
                 let followup = self.interact.process_event(&mut self.rx, cx, msg).await;
-                Box::pin(self.process_or_spawn_message(followup)).await;
+                self.spawn_message(followup);
             },
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
@@ -749,8 +749,13 @@ impl PathingController {
     }
     pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
         let interact_ctx = (&self.map_info, &self.maps, map_id, &self.filter_state);
-        let followup = self.interact.trigger_interact_action(&mut self.rx.interact, interact_ctx, InteractReactor::INTERACT_ACTION).await;
-        self.process_or_spawn_message(followup).await;
+        if self.rx.interact.try_throttle_press() {
+            let followup = self.interact.trigger_interact_action(&mut self.rx.interact, interact_ctx, InteractReactor::INTERACT_ACTION).await;
+            self.process_or_spawn_message(followup).await;
+        } else {
+            log::debug!("throttling interact handler");
+        }
+        self.rx.interact.report_throttle_press();
     }
 
     pub(crate) async fn collect_garbage(&mut self, tick: u32, aggressive: bool, map_id: Option<MapIndex>) {
@@ -811,11 +816,27 @@ impl PathingController {
 
     async fn process_or_spawn_message(&mut self, msg: PathingEvent) {
         match msg {
+            e @ (PathingEvent::Nop | PathingEvent::Exit(..) | PathingEvent::FanOut(..)) =>
+                self.spawn_message(e),
+            e @ PathingEvent::InteractControl(..) =>
+                self.spawn_message(e),
+            event => self.process_message(event).await,
+        }
+    }
+    fn spawn_message(&mut self, msg: PathingEvent) {
+        match msg {
             PathingEvent::Nop => (),
-            e @ (PathingEvent::Exit(..) | PathingEvent::FanOut(..)) => {
+            PathingEvent::InteractControl(interact::InteractMessage::Nop) => (),
+            e @ PathingEvent::InteractControl(..) => {
+                // TODO: deleteme
+                self.tasks.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(7)).await;
+                    Ok(e)
+                });
+            }
+            e => {
                 self.tasks.spawn(future::ready(Ok(e)));
             },
-            event => self.process_message(event).await,
         }
     }
 

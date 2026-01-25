@@ -855,7 +855,7 @@ impl EntityUpdateReport {
             MarkerIndex::NS_TRAIL => {
                 let lpath: LoadedTrailPath =
                     LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
-                let seci = map_path.path.trail_index_unchecked();
+                let seci = map_path.path.trail_section_unchecked();
                 let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
                 let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
                 let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else { return false };

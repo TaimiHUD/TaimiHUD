@@ -1,21 +1,24 @@
 use {
     crate::{
         controller::pathing::{
-            registry::{PackCategoryInfo, LoadedCategoryNs, LoadedCategoryIndex},
+            registry::{PackCategoryInfo, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath},
             info::MapPackInfo,
             state::LoadedCategory,
             shared::SharedMapPackLoaded,
             PackConfig,
         },
-        settings::state::ui::pathing::PathingFilterFlags,
+        settings::state::ui::pathing::{PathingFilterFlags, PathingSearchFlags},
     },
-    std::{collections::BTreeMap, iter, sync::Arc},
+    std::{collections::BTreeMap, iter, mem, sync::Arc},
     taimi_hoard::{
+        iters::IterExt as _,
+        iters::tree::{TreeTraversal, PeekableDfsPre},
         flags::BitSet,
-        loc::indexed::IndexedList,
+        loc::{indexed::IndexedList, LocationGet},
     },
-    taimi_meta::packs::{collections::CategorySet, CategoryPath, PackPath, VisibilityFlags, MapIndex, CategoryIndex},
+    taimi_meta::packs::{collections::CategorySet, CategoryPath, PackPath, VisibilityFlags, MapIndex, CategoryIndex, PackCategoryNs},
     taimi_pack::{category::{Category, CategoryId}, Pack},
+    taimi_sync::arcs::ArcPtrCmp,
     futures::future::Either,
     regex::Regex,
 };
@@ -37,22 +40,66 @@ pub struct CategoryFilterQuery {
     pub flags: PathingFilterFlags,
     pub search: Option<CategorySearchQuery>,
 }
+impl CategoryFilterQuery {
+    pub fn set_flags(&mut self, mut flags: PathingFilterFlags) {
+        flags.canonicalize_enable_filter();
+        self.flags = flags;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.is_matching() && !self.has_enable()
+    }
+    pub fn is_matching(&self) -> bool {
+        self.search.is_some() | self.flags.contains(PathingFilterFlags::CurrentMap)
+    }
+    fn has_enable(&self) -> bool {
+        self.flags.intersects(PathingFilterFlags::FILTERS_ENABLE)
+    }
+}
 #[derive(Debug, Clone)]
 pub struct CategorySearchQuery {
     pub matcher: Either<Regex, String>,
-    #[cfg(todo)]
     pub flags: PathingSearchFlags,
 }
 impl CategorySearchQuery {
     pub fn with_matcher(matcher: Regex) -> Self {
         Self {
             matcher: Either::Left(matcher),
+            flags: PathingSearchFlags::DEFAULT,
         }
     }
     pub fn with_fixed(query: String) -> Self {
         Self {
             matcher: Either::Right(query),
+            flags: PathingSearchFlags::DEFAULT,
         }
+    }
+    /// matches nothing
+    pub fn negative() -> Self {
+        Self {
+            matcher: Either::Right(String::new()),
+            flags: PathingSearchFlags::NEGATIVE,
+        }
+    }
+    #[cfg(todo = "unused")]
+    pub fn everything() -> Self {
+        Self {
+            matcher: Either::Right(String::new()),
+            flags: PathingSearchFlags::empty(),
+        }
+    }
+
+    pub fn matcher_matches(&self, s: &str) -> bool {
+        match &self.matcher {
+            Either::Left(regex) => regex.is_match(s),
+            #[cfg(todo = "unnecessary")]
+            Either::Right(buffer) if buffer.is_empty() => true,
+            Either::Right(buffer) => s.contains(buffer),
+        }
+    }
+    #[cfg(todo = "unused")]
+    pub fn query_matches(&self, s: &str) -> bool {
+        self.matcher_matches(s) ^ self.flags.contains(PathingSearchFlags::NEGATIVE)
     }
 }
 impl CategorySearchFilter for CategorySearchQuery {
@@ -62,10 +109,8 @@ impl CategorySearchFilter for CategorySearchQuery {
 }
 impl CategorySearchFilter for &'_ CategorySearchQuery {
     fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: &Arc<str>) -> bool {
-        match &self.matcher {
-            Either::Left(regex) => regex.is_match(&display_name),
-            Either::Right(buffer) => display_name.contains(buffer),
-        }
+        let matches = self.matcher_matches(display_name) || self.flags.contains(PathingSearchFlags::INCLUDE_ID).then(|| self.matcher_matches(id.as_str())).unwrap_or(false);
+        matches ^ self.flags.contains(PathingSearchFlags::NEGATIVE)
     }
 }
 #[cfg(todo)]
@@ -115,6 +160,9 @@ impl CategoryFilter {
 #[derive(Debug, Clone, Default)]
 pub struct PackCategoryMaskState {
     pub flags: PathingFilterFlags,
+    pub category_info: Option<Arc<PackCategoryInfo>>,
+    #[cfg(todo = "unnecessary")]
+    pub hidden: CategorySet,
     pub search_candidates: Option<CategorySet>,
     pub loaded: Option<CategorySet>,
     pub loaded_sig: Option<MapIndex>,
@@ -125,6 +173,7 @@ pub struct PackCategoryMaskState {
     pub interest: CategorySet,
     pub enable: Option<CategoryEnableFilterState>,
     pub mask: PackCategoryMask,
+    pub mask_interest: PackCategoryMask,
 }
 impl PackCategoryMaskState {
     /// with roots
@@ -143,17 +192,22 @@ impl PackCategoryMaskState {
         self.enable = None;
         self.interest.clear();
     }
+    pub fn set_flags(&mut self, mut flags: PathingFilterFlags) {
+        flags.canonicalize_enable_filter();
+        self.flags = flags;
+    }
 
     pub fn clear_search_candidates(&mut self) {
+        if self.search_candidates.is_some() {
+            self.interest.clear();
+        }
         self.search_candidates = None;
     }
     pub fn is_dirty_search(&self, query: Option<&CategorySearchQuery>) -> bool {
         self.search_candidates.is_some() != query.is_some()
     }
     pub fn update_search_candidates<F: CategorySearchFilter>(&mut self, pack_path: PackPath, category_info: Option<&PackCategoryInfo>, pack_data: Option<Option<&Pack>>, mut filter: F) {
-        if self.search_candidates.is_some() != pack_data.is_some() & category_info.is_some() {
-            self.reset_interest(category_info);
-        }
+        self.interest.clear();
         let search_candidates = self.search_candidates.get_or_insert_default();
         search_candidates.clear();
         let (Some(cats), Some(pack_data)) = (category_info, pack_data) else { return };
@@ -212,15 +266,14 @@ impl PackCategoryMaskState {
     pub fn is_dirty_enable(&self, enable: Option<bool>) -> bool {
         self.enable.as_ref().map(|e| e.query.state) != enable
     }
-    pub fn update_enable(&mut self, config: Option<&PackConfig>, category_info: Option<&PackCategoryInfo>, map_info: Option<&SharedMapPackLoaded>, state: bool) {
-        let map_info = map_info.map(|i| &*i.info);
+    pub fn update_enable(&mut self, config: Option<&PackConfig>, category_info: Option<&PackCategoryInfo>, state: bool) {
         let enable = self.enable.get_or_insert_default();
         enable.query.state = state;
         let (Some(config), Some(category_info)) = (config, category_info) else {
             enable.clear();
             return
         };
-        enable.refresh(config, category_info, map_info);
+        enable.refresh(config, category_info, None);
         #[cfg(todo)]
         let paths = CategoryEnableFilterInfo {
             state: enable,
@@ -228,41 +281,282 @@ impl PackCategoryMaskState {
             map_info,
         };
     }
+    pub fn is_dirty_hidden(&self, category_info: Option<&Arc<PackCategoryInfo>>) -> bool {
+        let prev = self.category_info.as_ref().map(|i| Arc::as_ptr(i) as *const _  as usize);
+        let ptr = category_info.map(|i| Arc::as_ptr(i) as *const _  as usize);
+        match (prev, ptr) {
+            #[cfg(todo = "unnecessary")]
+            (None, _) if self.flags.contains(PathingFilterFlags::ShowHidden) =>
+                false,
+            (prev, ptr) => prev != ptr,
+        }
+    }
+    pub fn clear_hidden(&mut self) {
+        #[cfg(todo = "unnecessary")]
+        {
+            //self.category_info = None;
+            self.hidden = Default::default();
+        }
+    }
+    pub fn update_hidden(&mut self, category_info: Option<&Arc<PackCategoryInfo>>) {
+        match category_info {
+            None if self.flags.contains(PathingFilterFlags::ShowHidden) =>
+                self.clear_hidden(),
+            _ => (),
+        }
+        self.category_info = category_info.cloned();
+    }
+    fn is_path_hidden(&self, path: CategoryPath) -> bool {
+        if let Some(true) = self.category_info.as_ref().map(|i| i.hidden.contains(path)) {
+            return true
+        }
+
+        #[cfg(todo = "unnecessary")]
+        if self.hidden.contains(path) {
+            return true
+        }
+
+        false
+    }
+    fn hidden_paths(category_info: Option<&PackCategoryInfo>) -> impl DoubleEndedIterator<Item = CategoryPath> + '_ {
+        let hidden = category_info.as_ref().map(|i| i.hidden()).into_iter().flatten();
+        #[cfg(todo = "unnecessary")]
+        let hidden = hidden.chain(self.hidden.paths());
+        hidden
+    }
+
+    pub fn clear_mask(&mut self) {
+        self.mask.clear();
+        self.mask_interest.clear();
+    }
+    pub fn refresh_mask(&mut self, category_info: Option<&PackCategoryInfo>) {
+        self.mask_interest.clear();
+        match self.is_active() {
+            false => {
+                self.mask.clear();
+                return
+            },
+            true => {
+                self.mask.prepare();
+            }
+        }
+        let Some(cats) = category_info else {
+            self.mask.finalize();
+            return
+        };
+        let enable = self.enable.as_ref().map(|state| CategoryEnableFilterInfo {
+            state,
+        });
+        if let Some(enable) = &enable {
+            let as_filter = self.search_candidates.is_some();
+            let as_filter_pre = as_filter | self.loaded.is_some();
+            let paths = match as_filter_pre {
+                true => enable.iter_for_filter(),
+                false => enable.iter_matching(),
+            };
+            self.mask.init_mask_with(paths);
+            if as_filter {
+                self.mask.fill_to_root_with(cats, &mut enable.iter_for_filter());
+            }
+        }
+        if let Some(loaded) = &self.loaded {
+            // TODO: use full loaded set/arc if as_filter
+            let as_filter = self.search_candidates.is_some();
+            self.mask.prepare_mask_and(loaded);
+            if as_filter {
+                self.mask.fill_to_root_with(cats, &mut loaded.paths());
+            }
+        }
+        if let Some(search) = &self.search_candidates {
+            self.mask.prepare_mask_and(search);
+        }
+        if !self.flags.contains(PathingFilterFlags::ShowHidden) {
+            let category_info = category_info.or(self.category_info.as_ref().map(|cats| &**cats));
+            self.mask.prepare_mask_without(&mut Self::hidden_paths(category_info));
+        }
+        for root in cats.root_paths() {
+            let mut nodes = cats.nested_descendents_of(root);
+            while let Some(path) = nodes.next_node() {
+                if self.mask.category_mask.contains(path) {
+                    nodes.skip_to_sibling();
+                    let Some(parent_path) = cats.parent_of(path) else { continue };
+                    if self.mask_interest.category_mask.insert_at(parent_path) {
+                        continue
+                    }
+                    self.mask_interest.fill_to_root_with(cats, &mut iter::once(parent_path));
+                }
+            }
+        }
+        if let Some(search) = &self.search_candidates {
+            self.mask.fill_to_root_with(cats, &mut search.paths());
+        } else if let Some(loaded) = &self.loaded {
+            self.mask.fill_to_root_with(cats, &mut loaded.paths());
+        } else if let Some(enable) = &enable {
+            self.mask.fill_to_root_with(cats, &mut enable.iter_matching());
+        }
+
+        self.mask.finalize();
+    }
     pub fn clear(&mut self) {
         self.clear_search_candidates();
         self.clear_loaded();
         self.clear_enable();
-        self.mask.clear();
+        self.clear_mask();
     }
     /// TODO
     pub fn clear_active(&mut self) {
         self.clear();
     }
+    fn has_enable(&self) -> bool {
+        self.flags.intersects(PathingFilterFlags::FILTERS_ENABLE)
+    }
     pub fn is_active(&self) -> bool {
-        self.search_candidates.is_some() || self.flags.enable_filter().is_some() || self.loaded.is_some()
+        self.search_candidates.is_some() || self.has_enable() || self.loaded.is_some()
     }
     pub fn all_filtered(&self) -> bool {
-        self.is_active() && self.mask.is_empty()
+        if self.flags.contains(PathingFilterFlags::CurrentMap) && self.loaded.as_ref().map(|l| l.is_empty()).unwrap_or(true) {
+            return true
+        }
+        if self.search_candidates.as_ref().map(|s| s.is_empty()).unwrap_or(false) {
+            return true
+        }
+        if self.enable.as_ref().map(|e| e.is_empty()).unwrap_or(false) {
+            return true
+        }
+        !self.mask.has_any()
+    }
+
+    /// TODO: use a real iter adapter for the lockstep filter
+    fn hidden_filter<'a, I: IntoIterator<Item = CategoryPath> + 'a>(&'a self, paths: I) -> impl Iterator<Item = CategoryPath> + 'a {
+        let mut hidden = (!self.flags.contains(PathingFilterFlags::ShowHidden)).then_some(
+            self.category_info.as_ref().map(|i| i.hidden().peekable())
+        );
+        paths.into_iter().filter(move |path| {
+            match &mut hidden {
+                Some(Some(hidden)) => {
+                    while let Some(..) = hidden.next_if(|p| p < path) {}
+                    hidden.peek() != Some(path)
+                }
+                _ => true,
+            }
+        })
+    }
+    pub fn iter_categories<'a>(&'a self, category_info: Option<&'a PackCategoryInfo>) -> impl Iterator<Item = CategoryPath> + 'a {
+        let unfiltered = self.mask.has_all();
+        let all = match (unfiltered, category_info) {
+            (true, Some(cats)) => Some(self.hidden_filter(cats.all().paths())),
+            _ => None,
+        };
+        let mask = (!unfiltered).then_some(self.mask.iter_categories().chain(self.interest.paths()));
+        all.into_iter().flatten().chain(mask.into_iter().flatten())
+    }
+    pub fn contains_category(&self, path: CategoryPath) -> bool {
+        let contained = self.mask.category_mask.contains(path) ^ self.mask.invert;
+        match contained {
+            true if self.mask.category_mask.is_empty() && !self.flags.contains(PathingFilterFlags::ShowHidden) =>
+                !self.is_path_hidden(path),
+            c => c,
+        }
+    }
+    pub fn is_matching(&self) -> bool {
+        self.search_candidates.is_some() | self.enable.is_some()
+    }
+    pub fn matches_category(&self, path: CategoryPath) -> bool {
+        let mut matching = true;
+        if let Some(enable) = &self.enable {
+            matching &= enable.matches_category(path);
+        }
+        if let Some(Some(search)) = matching.then_some(&self.search_candidates) {
+            matching &= search.contains(path);
+        }
+        matching
     }
 }
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PackCategoryMask {
     pub category_mask: BitSet,
+    pub invert: bool,
 }
 impl PackCategoryMask {
-    pub fn refill_with<I>(&mut self, info: &PackCategoryInfo, cats: I) where
+    pub fn everything() -> Self {
+        Self {
+            category_mask: BitSet::empty(),
+            invert: true,
+        }
+    }
+    /// deleteme?
+    #[cfg(todo)]
+    pub fn refill_with<I>(&mut self, info: Option<&PackCategoryInfo>, cats: I) where
         I: IntoIterator<Item = CategoryPath> + Clone,
     {
         self.category_mask.clear();
         self.category_mask.extend(cats.clone());
-        self.fill_to_root(info, &mut cats.into_iter());
+        if let Some(info) = info {
+            self.fill_to_root(info, &mut cats.into_iter());
+        }
     }
-    pub fn fill_to_root(&mut self, info: &PackCategoryInfo, cats: &mut dyn Iterator<Item = CategoryPath>) {
-        for path in cats {
+    pub fn prepare(&mut self) {
+        self.category_mask.clear();
+        self.invert = true;
+    }
+    pub fn finalize(&mut self) {
+        self.category_mask.truncate_to_fit();
+        self.invert = false;
+    }
+    pub fn prepare_mask_and(&mut self, paths: &CategorySet) {
+        if mem::replace(&mut self.invert, false) {
+            self.category_mask.extend_sorted(paths.paths());
+            return
+        }
+        for (path, mut mask) in self.category_mask.enum_paths_mut::<PackCategoryNs, CategoryIndex>() {
+            if *mask && !paths.contains(path) {
+                *mask = false;
+            }
+        }
+    }
+    pub fn prepare_mask_without(&mut self, paths: &mut dyn Iterator<Item = CategoryPath>) {
+        if self.category_mask.is_empty() { return }
+        for path in paths {
+            self.category_mask.remove_at(path);
+        }
+    }
+    pub fn init_mask_with<I>(&mut self, paths: I) where
+        I: IntoIterator<Item = CategoryPath>,
+    {
+        match self.invert {
+            true if self.category_mask.is_empty() => self.invert = false,
+            false if self.category_mask.is_empty() => return,
+            _ => {
+                log::info!("BUG: filter mask already init?");
+                return
+            },
+        }
+        self.category_mask.extend(paths);
+    }
+    #[cfg(todo)]
+    pub fn prepare_mask_sorted<I>(&mut self, paths: I) {
+        for (path, mask) in self.category_mask.enum_paths_mut::<CategoryPath>() {
+            if !*mask { continue }
+            etc
+        }
+    }
+    #[cfg(todo = "unused")]
+    pub fn fill_to_root(&mut self, info: &PackCategoryInfo) {
+        let mask = self.category_mask.clone();
+        self.fill_to_root_with(info, &mut mask.iter_of())
+    }
+    pub fn fill_to_root_with(&mut self, info: &PackCategoryInfo, paths: &mut dyn Iterator<Item = CategoryPath>) {
+        for path in paths {
+            let mut filling = self.category_mask.contains(path);
             for parent_path in info.ancestors_of(path) {
-                if self.category_mask.insert_at(parent_path) {
-                    // already been here or cats will emit it...
-                    break
+                match filling {
+                    true if self.category_mask.insert_at(parent_path) => {
+                        // already been here or iter will emit it...
+                        break
+                    },
+                    false if self.category_mask.contains(parent_path) =>
+                        filling = true,
+                    _ => (),
                 }
             }
         }
@@ -299,11 +593,38 @@ impl PackCategoryMask {
             }
         }
     }
+    #[cfg(todo)]
     pub fn is_empty(&self) -> bool {
-        self.category_mask.is_empty()
+        self.category_mask.is_empty() && !self.invert
+    }
+    pub fn has_any(&self) -> bool {
+        match self.invert {
+            #[cfg(todo = "unnecessary")]
+            true => self.category_mask.flags.is_empty() || !self.category_mask.is_full(),
+            true => true,
+            false => !self.category_mask.is_empty(),
+        }
+    }
+    pub fn has_all(&self) -> bool {
+        let blacklist_empty = match &self.category_mask {
+            #[cfg(todo = "unnecessary")]
+            mask => mask.is_empty(),
+            _ => true,
+        };
+        // TODO: && !self.is_active()?
+        self.invert && blacklist_empty
     }
     pub fn clear(&mut self) {
         self.category_mask.clear();
+        self.invert = true;
+    }
+    pub fn iter_categories(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + '_ {
+        self.category_mask.iter_of()
+    }
+}
+impl Default for PackCategoryMask {
+    fn default() -> Self {
+        Self::everything()
     }
 }
 #[cfg(todo)]
@@ -375,6 +696,7 @@ pub struct CategoryEnableFilterState {
     pub effective: BitSet,
 }
 impl CategoryEnableFilterState {
+    #[cfg(deleteme)]
     pub fn new(query: CategoryEnableFilterQuery, config: &PackConfig, cats: &PackCategoryInfo, info: Option<&MapPackInfo>) -> Self {
         let mut filter = Self {
             query,
@@ -390,7 +712,7 @@ impl CategoryEnableFilterState {
         let paths = cats.all().paths()
             .map(|p| (p.unscope(), p));
         let mut loaded = vec![LoadedCategory::INVALID; cats.count()];
-        let loaded = IndexedList::<LoadedCategoryNs, LoadedCategoryIndex, _>::from_mut(&mut loaded[..]);
+        let loaded = IndexedList::<LoadedCategoryNs, LoadedCategoryIndex, _>::from_mut(&mut loaded);
         let mut dirty = false;
         let damage: Option<Option<CategorySet>> = match LoadedCategory::populate_vis(&mut loaded.data, None, paths, cats, config) {
             #[cfg(todo)]
@@ -415,10 +737,23 @@ impl CategoryEnableFilterState {
             let configured = l.visibility.contains(VisibilityFlags::DEFAULT_TOGGLE);
             dirty |= self.configured.insert_at_if(path, configured) != configured;
         }
+        //self.effective.resize(loaded.end_path().path as usize, false);
         if let Some(damage) = damage {
-            LoadedCategory::refresh_categories(loaded, info, cats, config, damage.as_mut());
+            let mut loaded = loaded.map_mut_as_slice();
+            struct FakePackMap<'a>(Option<&'a MapPackInfo>);
+            impl LocationGet<PackCategoryNs, CategoryIndex> for FakePackMap<'_> {
+                type LookupGet = LoadedCategoryPath;
+                fn lookup_get(&self, &path: &CategoryPath) -> Option<LoadedCategoryPath> {
+                    match self.0 {
+                        Some(map_info) if map_info.category_index(path).is_none() => None,
+                        _ => Some(path.unscope()),
+                    }
+                }
+            }
+            let info = FakePackMap(info);
+            LoadedCategory::refresh_categories(&mut loaded, &info, cats, config, damage.as_ref());
             for (path, l) in loaded.iter() {
-            let effective = l.visibility.is_visible();
+                let effective = l.visibility.is_visible();
                 dirty |= self.effective.insert_at_if(path, effective) != effective;
             }
         }
@@ -428,6 +763,12 @@ impl CategoryEnableFilterState {
     pub fn clear(&mut self) {
         self.configured.clear();
         self.effective.clear();
+    }
+    pub fn is_empty(&self) -> bool {
+        match self.query.state {
+            true => self.configured.is_empty(),
+            false => self.configured.is_full(),
+        }
     }
 
     /// whether [Self::configured_categories] contains `path`
@@ -445,11 +786,14 @@ impl CategoryEnableFilterState {
             ) as Box<dyn Iterator<Item = CategoryPath>>,
         }
     }
+
+    pub fn matches_category(&self, path: CategoryPath) -> bool {
+        self.effective.contains(path) == self.query.state
+    }
 }
+#[derive(Debug, Copy, Clone)]
 pub struct CategoryEnableFilterInfo<'a> {
     pub state: &'a CategoryEnableFilterState,
-    pub category_info: &'a PackCategoryInfo,
-    pub map_info: &'a MapPackInfo,
 }
 impl CategoryEnableFilterInfo<'_> {
     /// for any given category matching query, find the most shallow parent(s)
@@ -458,16 +802,15 @@ impl CategoryEnableFilterInfo<'_> {
     /// e.g. if a category is enabled *and* all of its child cats are too,
     /// they are deemed less interesting.
     /// (conversely, a category with some disabled children may want to be seen)
-    pub fn open_interest(&self) -> BitSet {
+    pub fn open_interest(&self, category_info: &PackCategoryInfo) -> BitSet {
         let mut interest = self.state.configured.clone();
         let query = self.state.query.state;
         if !query {
             let end = interest.end_len();
             interest.invert_to(..end);
         }
-        let cats = self.category_info;
-        for root in cats.root_paths() {
-            let dfs = cats.descendents_of(root)
+        for root in category_info.root_paths() {
+            let dfs = category_info.descendents_of(root)
                 .chain(iter::once(root));
             let mut parental_failures = Vec::new();
             let mut inconclusive = CategorySet::empty();
@@ -477,7 +820,7 @@ impl CategoryEnableFilterInfo<'_> {
                 // the parent serves as their representative!
                 let mut children_conform = true;
                 let mut rewind = Vec::new();
-                for child_path in cats.children_of(path) {
+                for child_path in category_info.children_of(path) {
                     match interest.remove_at(child_path) {
                         Some(true) => {
                             if parent_state {
@@ -519,7 +862,7 @@ impl CategoryEnableFilterInfo<'_> {
                 }
             }
             while let Some(path) = parental_failures.pop() {
-                for child_path in cats.children_of(path) {
+                for child_path in category_info.children_of(path) {
                     match interest.remove_at(child_path) {
                         Some(false) if inconclusive.contains(child_path) => {
                             parental_failures.push(child_path);
@@ -531,15 +874,37 @@ impl CategoryEnableFilterInfo<'_> {
         }
         interest
     }
+
+    pub fn iter_enabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+        self.state.effective.iter_of::<CategoryPath>()
+    }
+    pub fn iter_disabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+        self.state.effective.flags.iter_zeros()
+            .lazy_map(|i| CategoryPath::with_path(i as CategoryIndex))
+    }
+    pub fn iter_disabled_conservative(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+        let configured = &self.state.configured;
+        self.iter_disabled().filter(|&path| !configured.contains(path))
+    }
+    pub fn iter_matching(&self) -> Box<dyn Iterator<Item = CategoryPath> + '_> {
+        match self.state.query.state {
+            true => Box::new(self.iter_enabled()) as Box<dyn Iterator<Item = CategoryPath>>,
+            false => Box::new(self.iter_disabled_conservative()) as Box<dyn Iterator<Item = CategoryPath>>,
+        }
+    }
+    pub fn iter_for_filter(&self) -> Box<dyn Iterator<Item = CategoryPath> + '_> {
+        match self.state.query.state {
+            true => Box::new(self.iter_enabled()) as Box<dyn Iterator<Item = CategoryPath>>,
+            false => Box::new(self.iter_disabled()) as Box<dyn Iterator<Item = CategoryPath>>,
+        }
+    }
 }
 #[cfg(todo)]
 impl<'a> IntoIterator for CategoryEnableFilterInfo<'a> {
-    type IntoIter = Box<dyn Iterator<Item = Self::Item> + 'a>;
+    type IntoIter = Box<dyn Iterator<Item = Self::Item> + Clone + 'a>;
     type Item = CategoryPath;
     fn into_iter(self) -> Self::IntoIter {
-        let cats = self.category_info;
-        let configured = interest.iter_of::<CategoryPath>().collect::<CategorySet>();
-        Box::new(configured.into_iter()) as Box<_>
+        self.iter_matching()
     }
 }
 

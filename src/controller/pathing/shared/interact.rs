@@ -61,6 +61,7 @@ pub struct InteractReceiver {
     pub entities_tx: watched::Tx<SharedInteractEntities>,
     pub nearby_tx: watched::Tx<SharedNearbyMarkers>,
     pub player_pos: FollowPlayer,
+    pub press_throttle: Option<Instant>,
 }
 impl InteractReceiver {
     pub fn new(tx: &InteractSender) -> Self {
@@ -70,7 +71,20 @@ impl InteractReceiver {
             entities_tx: tx.entities.clone(),
             nearby_tx: tx.nearby.clone(),
             player_pos: FollowPlayer::new(),
+            press_throttle: None,
         }
+    }
+
+    const PRESS_THROTTLE_TIMEOUT: Duration = Duration::from_millis(98);
+    pub fn try_throttle_press(&mut self) -> bool {
+        let ok = match &mut self.press_throttle {
+            None => true,
+            Some(when) => when.elapsed() >= Self::PRESS_THROTTLE_TIMEOUT,
+        };
+        ok
+    }
+    pub fn report_throttle_press(&mut self) {
+        self.press_throttle = Some(Instant::now());
     }
 }
 

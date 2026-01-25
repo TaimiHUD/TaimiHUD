@@ -137,10 +137,67 @@ impl PackElements {
             pack.pre_draw(&mut self.filter_query, visibility);
         }
     }
+    /// TODO: binary heap with real sort key
+    fn iter_packs_draw<'a, 'u, 'ui, U>(ui: &'u mut U, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
+        U: ImDrawWindow<'ui>,
+        'u: 'ui,
+        'a: 'u,
+    {
+        let mut unloaded = Vec::new();
+        let mut packs = pack_state.values_mut();
+        let mut sep = None;
+        core::iter::from_fn(move || {
+            let mut next = None;
+            while let Some(pack) = packs.next() {
+                let delay = match &pack.state.unloaded {
+                    Some(UnloadedReason::Gravestone) => false,
+                    _ if filtered.is_some() && pack.categories.filter_state.all_filtered() => true,
+                    Some(UnloadedReason::Disabled | UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)) => true,
+                    _ => false,
+                };
+                match delay {
+                    true =>
+                        unloaded.push(pack),
+                    false => {
+                        next = Some(pack);
+                        sep = Some(false);
+                        break
+                    },
+                }
+            }
+            next.or_else(|| {
+                let matching = matches!(filtered, Some(true));
+                match sep {
+                    _ if unloaded.is_empty() => (),
+                    Some(false) => {
+                        ui.separator();
+                        ui.spacing();
+                        if matching {
+                            let amt = unloaded.len();
+                            ui.text_disabled(format!("{amt} packs hidden by filters"));
+                            ui.spacing();
+                            return None
+                        }
+                        sep = Some(true);
+                    },
+                    Some(true) | None => (),
+                }
+                unloaded.pop()
+            })
+        })
+    }
     pub fn draw<'ui, U>(&mut self, ui: &mut U) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        for pack in self.pack_state.values_mut() {
+        let filtered = match self.filter_query.is_empty() {
+            true => None,
+            false => {
+                let matching = self.filter_query.is_matching();
+                Some(matching)
+            },
+        };
+        let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered);
+        for pack in packs {
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
                 _ => pack.context_menu = None,
@@ -299,7 +356,7 @@ impl PackElementState {
         if damage.visibility == Some(visibility) {
             damage.visibility = None;
         }
-        if let Some(_config) = self.config.try_read_if_changed() {
+        if let Some(_config) = self.config.try_read_if_changed_or_clone() {
             damage.config = true;
         }
         if self.loaded.has_changed().unwrap_or(false) {

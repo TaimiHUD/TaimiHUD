@@ -334,7 +334,7 @@ impl PackCategoryInfo {
         }
     }
 
-    pub fn root_paths(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn root_paths(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.roots.iter().lazy_map(|&p| CategoryPath::with_path(p))
     }
     /// TODO: sorted lookup? probably a bad idea when there's likely just 1 or 2 at the most though...
@@ -472,13 +472,13 @@ impl PackCategoryInfo {
             .map(CategoryPath::with_path)
     }
 
-    pub fn disabled(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn disabled(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.disabled.iter().lazy_map(CategoryPath::with_path)
     }
-    pub fn hidden(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn hidden(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.hidden.iter().lazy_map(CategoryPath::with_path)
     }
-    pub fn separators(&self) -> impl Iterator<Item = CategoryPath> + Clone + '_ {
+    pub fn separators(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
         self.separators.iter().lazy_map(CategoryPath::with_path)
     }
 
@@ -487,7 +487,7 @@ impl PackCategoryInfo {
         IndexedList::from_ref(&self.all)
     }
 
-    pub fn all_flags(&self) -> impl Iterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
+    pub fn all_flags(&self) -> impl DoubleEndedIterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
         self.all().iter().lazy_map(|(path, cat)| {
             let mut flag = CategoryFlags::empty();
             if cat.parent().is_none() {
@@ -512,11 +512,13 @@ impl PackCategoryInfo {
             .unwrap_or(CategoryFlags::empty())
     }
 
+    #[cfg(todo)]
     pub fn collect_all_flags(&self) -> PackCategoryFlags {
         let flags = self.all_flags().map(|(_, _, flags)| flags).collect();
         IndexedList::new(flags)
     }
 }
+#[cfg(todo)]
 pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
 #[derive(Debug, Copy, Clone)]
 struct DescendentIterNode {
