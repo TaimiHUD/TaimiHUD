@@ -343,7 +343,7 @@ impl PathingWindowState {
                 let mut poi_path = None;
                 let mut guid = None;
 
-                let _id = ui.push_id(imgui::Id::Int(lpath.root.root.path as i32 ^ lpath.root.path.get() as i32 ^ lpath.path as i32));
+                let _id = ui.push_id(imgui::Id::Int((lpath.root.root.path as i32).rotate_left(20) ^ lpath.root.path.get() as i32 ^ lpath.path as i32));
                 let pos: Point2<f32> = Point2::from_array(ui.cursor_pos());
                 let offset = pos.y + bounds.min.y;
                 let is_visible = offset >= 0.0 && offset <= bounds_height;
