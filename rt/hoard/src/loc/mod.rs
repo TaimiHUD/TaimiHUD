@@ -666,20 +666,6 @@ impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ mut T where
     fn lookup_ref<'a>(&'a self, loc: &Locator<N, L>) -> Option<&'a Self::LookupRef> {
         T::lookup_ref(&**self, loc)
     }
-    #[cfg(deleteme)]
-    fn lookup_ref<'a>(&'a self, _loc: &Locator<N, L>) -> Option<&'a Self::LookupRef> {
-        let msg = "BUG: accessed LocationRef for &mut";
-        match () {
-            #[cfg(debug_assertions)]
-            _ => panic!("{msg}"),
-            #[cfg(not(debug_assertions))]
-            _ => {
-                let e = anyhow::Error::msg(msg);
-                log::error!("{e:#}");
-                None
-            },
-        }
-    }
 }
 
 #[macro_export]
