@@ -611,21 +611,14 @@ impl SpacePackCollection {
             let update_count = dirty.len() + new_entities.len();
             wasted < threshold && update_count < used_threshold
         };
-        let full_rebuild = match partial_rebuild {
+        let mut full_rebuild = match partial_rebuild {
             _ if self.bvh.nodes.len() <= 1 => true,
             true if removed_count == 0 => false,
             _ if dirty.is_empty() && new_entities.is_empty() => false,
             _ => true,
         };
 
-        if full_rebuild {
-            // since we're doing a full rebuild anyway, free up the filtered items
-            for (_mid, &i) in hidden.iter() {
-                self.render_entities
-                    .invalidate(self.loaded_packs.map_mut_as_slice(), i);
-            }
-            self.signal_bvh_rebuild();
-        } else {
+        if !full_rebuild {
             #[cfg(todo)]
             let deactivations = dirty.values().copied().chain(removed.iter_ones());
             let mut removed = removed;
@@ -637,10 +630,36 @@ impl SpacePackCollection {
                 &mut self.bvh,
                 &mut { deactivations },
             );
+            let mut check_interval = match dirty_indices.clone().next().is_some() {
+                true => -((removed_count + Self::BVH_DEPTH_INTERVAL) as isize),
+                false => 0,
+            };
             for i in dirty_indices.clone() {
                 self.bvh.add_shape(&mut self.render_entities.entities, i);
+                check_interval += 1;
+                if check_interval >= Self::BVH_DEPTH_INTERVAL as isize {
+                    check_interval = 0;
+                }
+                if check_interval == 0 {
+                    if !Self::check_bvh_depth(&self.bvh) {
+                        let dirty_count = dirty_indices.clone().count();
+                        log::debug!("rebuild ?/+{dirty_count}-{removed_count}");
+                        full_rebuild = true;
+                        break
+                    }
+                }
             }
-            self.render_entities.trim_trailing(Some(&self.bvh));
+            if check_interval != 0 && !Self::check_bvh_depth(&self.bvh) {
+                full_rebuild = true;
+            }
+        }
+        if full_rebuild {
+            // since we're doing a full rebuild anyway, free up the filtered items
+            for (_mid, &i) in hidden.iter() {
+                self.render_entities
+                    .invalidate(self.loaded_packs.map_mut_as_slice(), i);
+            }
+            self.signal_bvh_rebuild();
         }
 
         if full_rebuild || self.render_entities.entities.is_empty() != self.bvh.nodes.is_empty() {
@@ -695,6 +714,76 @@ impl SpacePackCollection {
         }
 
         Ok(expired)
+    }
+
+    const BVH_DEPTH_MAX: usize = 32;
+    const BVH_DEPTH_INTERVAL: usize = 58;
+    /// TODO: this could checkpoint or something idk
+    fn check_bvh_depth(bvh: &Bvh<f32, 3>) -> bool {
+        match Self::bvh_depth(bvh) {
+            Ok(0..=Self::BVH_DEPTH_MAX) => true,
+            Ok(depth) => {
+                log::debug!("space too deep, rebuilding; {depth}");
+                false
+            },
+            Err(()) => {
+                log::debug!("BUG: space got crazy");
+                false
+            },
+        }
+    }
+    /// we're in too deep :<
+    ///
+    /// https://github.com/svenstaro/bvh/issues/136
+    fn bvh_depth(bvh: &Bvh<f32, 3>) -> Result<usize, ()> {
+        let mut iter_limit: usize = bvh.nodes.len();
+        let depth = 0;
+        #[cfg(todo = "unnecessary")]
+        if bvh.nodes.is_empty() {
+            return Ok(depth)
+        }
+        Self::bvh_depth_inner(bvh, &mut iter_limit, 0, depth)
+    }
+    fn bvh_depth_inner(
+        bvh: &Bvh<f32, 3>,
+        iter_limit: &mut usize,
+        mut idx: usize,
+        mut depth: usize,
+    ) -> Result<usize, ()> {
+        use bvh::bvh::BvhNode;
+        let mut max_l = depth;
+        loop {
+            match iter_limit.checked_sub(1) {
+                None if depth == 0 => break,
+                None => return Err(()),
+                Some(l) => *iter_limit = l,
+            }
+            depth += 1;
+            match bvh.nodes.get(idx) {
+                None => return Err(()),
+                #[cfg(todo)]
+                Some(BvhNode::Leaf { parent_index: _, .. } | BvhNode::Node { parent_index: _, .. })
+                    if parent_index != parent =>
+                    return Err(()),
+                Some(&BvhNode::Leaf { .. }) => break,
+                #[cfg(todo)]
+                | Some(BvhNode::Node { child_l_index: 0, .. })
+                | Some(BvhNode::Node { child_r_index: 0, .. }) => break,
+                Some(BvhNode::Node { child_l_index: 0, .. } | BvhNode::Node { child_r_index: 0, .. }) => {
+                    log::info!("BUG? bvh root ref");
+                    return Err(())
+                },
+                Some(
+                    BvhNode::Node { child_l_index: child, .. } | BvhNode::Node { child_r_index: child, .. },
+                ) if *child == idx => return Err(()),
+                Some(&BvhNode::Node { child_l_index, child_r_index, .. }) => {
+                    idx = child_r_index;
+                    let depth_l = Self::bvh_depth_inner(bvh, iter_limit, child_l_index, depth)?;
+                    max_l = max_l.max(depth_l);
+                },
+            }
+        }
+        Ok(depth.max(max_l))
     }
 
     pub(super) fn invalidate_entities(&mut self, expired: &mut dyn Iterator<Item = (MarkerId, usize)>) {
