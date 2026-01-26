@@ -520,6 +520,9 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         r#"=\s*""#,
         pats!(&),
         "\"",
+        // tekkit
+        "|",
+        r#"\s*type="(?<type_typo>tw_guides\.tw_jw\.tw_jw_janthirsyntri\.tw_jw_lowlandshore_[a-z]*\.tw_jw_janthirsyntri)(?<type_rest>[^" ]+)""#,
         // reactif-en
         "|",
         r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
@@ -613,6 +616,17 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                     },
                 };
                 dst.push_str(replacement);
+            } else if let Some(attr_value) = caps.name("type_typo") {
+                let replacement = match attr_value.as_str() {
+                    v if v.contains("tw_jw_lowlandshore_janthiritreasurehunter.tw_jw_janthirsyntri") =>
+                        Cow::Owned(v.replace("_lowlandshore_", "_janthirsyntri_")),
+                    typo => {
+                        log::error!("unexpected type typo {typo:?}");
+                        Cow::Borrowed(replacements_0(caps))
+                    },
+                };
+                let rest = caps.name("type_rest").map(|m| m.as_str()).unwrap_or_default();
+                let _ = write!(dst, " type=\"{replacement}{rest}\"");
             } else if let Some(attr_nospace) = caps.name("attr_nospace") {
                 let attr_nospace = attr_nospace.as_str();
                 let _ = write!(dst, "\" {attr_nospace}=\"");
