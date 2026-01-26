@@ -103,13 +103,15 @@ impl CategorySearchQuery {
     }
 }
 impl CategorySearchFilter for CategorySearchQuery {
-    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: &Arc<str>) -> bool {
+    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: Option<&Arc<str>>) -> bool {
         CategorySearchFilter::category_name_matches(&mut &*self, path, id, display_name)
     }
 }
 impl CategorySearchFilter for &'_ CategorySearchQuery {
-    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: &Arc<str>) -> bool {
-        let matches = self.matcher_matches(display_name) || self.flags.contains(PathingSearchFlags::INCLUDE_ID).then(|| self.matcher_matches(id.as_str())).unwrap_or(false);
+    fn category_name_matches(&mut self, _path: CategoryPath<PackPath>, id: &CategoryId, display_name: Option<&Arc<str>>) -> bool {
+        let matches_name = display_name.as_ref().map(|name| self.matcher_matches(&name[..])).unwrap_or(false);
+        let matches_id = self.flags.contains(PathingSearchFlags::INCLUDE_ID).then(|| self.matcher_matches(id.as_str())).unwrap_or(false);
+        let matches = matches_name || matches_id;
         matches ^ self.flags.contains(PathingSearchFlags::NEGATIVE)
     }
 }
@@ -934,12 +936,12 @@ pub trait CategorySearchFilter {
     #[inline]
     fn pack_category_matches(&mut self, path: CategoryPath<PackPath>, cat: &Category) -> bool {
         if self.category_path_matches(path) { return true }
-        self.category_name_matches(path, &cat.full_id, &cat.display_name)
+        self.category_name_matches(path, &cat.full_id, cat.display_name.as_ref())
     }
     #[inline]
     fn category_path_matches(&mut self, path: CategoryPath<PackPath>) -> bool { false }
     #[inline]
-    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: &Arc<str>) -> bool { false }
+    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: Option<&Arc<str>>) -> bool { false }
 }
 impl<F: CategorySearchFilter> CategorySearchFilter for &'_ mut F {
     #[inline]
@@ -951,7 +953,7 @@ impl<F: CategorySearchFilter> CategorySearchFilter for &'_ mut F {
         CategorySearchFilter::category_path_matches(*self, path)
     }
     #[inline]
-    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: &Arc<str>) -> bool {
+    fn category_name_matches(&mut self, path: CategoryPath<PackPath>, id: &CategoryId, display_name: Option<&Arc<str>>) -> bool {
         CategorySearchFilter::category_name_matches(*self, path, id, display_name)
     }
 }

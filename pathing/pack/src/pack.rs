@@ -2,7 +2,7 @@ use {
     crate::{
         attributes,
         category::{
-            id::{CategoryId, FullIdRef},
+            id::{CategoryId, FullIdRef, IdCmpRelaxed, IdNameBox, IdNameSeg},
             Category,
         },
         loader::PackLoaderContext,
@@ -12,6 +12,7 @@ use {
     anyhow::Context,
     indexmap::{map::Entry, IndexMap, IndexSet},
     std::{
+        collections::HashSet,
         fmt,
         io::{Cursor, Read as _},
         iter,
@@ -39,11 +40,12 @@ impl Pack {
 
     pub fn load_strict<L: PackLoaderContext>(loader: &mut L, strict: bool) -> anyhow::Result<Pack> {
         let mut pack = Pack::default();
+        let mut builder = PackBuilder::new_empty(&mut pack);
 
         let pack_defs = loader.all_files_with_ext_owned("xml");
         let mut error = None;
         for def in pack_defs {
-            let res = def.and_then(|def| parse_pack_def(&mut pack, loader, &def.to_string_lossy()));
+            let res = def.and_then(|def| parse_pack_def(&mut builder, loader, &def.to_string_lossy()));
             match res {
                 Ok(()) => (),
                 Err(e) if strict => return Err(e.into()),
@@ -55,12 +57,12 @@ impl Pack {
         }
 
         match error {
-            Some(e) if pack.is_empty() => return Err(e.into()),
+            Some(e) if builder.pack.is_empty() => return Err(e.into()),
             _ => (),
         }
 
-        merge_category_attributes(&mut pack);
-        apply_marker_attributes(&mut pack);
+        builder.merge_category_attributes();
+        builder.apply_marker_attributes();
 
         Ok(pack)
     }
@@ -154,8 +156,8 @@ pub fn taco_xml_to_guid(value: &str) -> Uuid {
     Uuid::from_bytes_le(Md5::digest(value).into())
 }
 
-pub fn parse_pack_def(
-    pack: &mut Pack,
+fn parse_pack_def(
+    pack: &mut PackBuilder,
     ctx: &mut impl PackLoaderContext,
     asset: &str,
 ) -> anyhow::Result<()> {
@@ -171,12 +173,6 @@ pub fn parse_pack_def(
     match inner_parse_pack_def(pack, ctx, &mut parser, asset) {
         Ok(()) => Ok(()),
         Err(e) => Err(e).context(format!("Parsing pack def at {asset}:{}", parser.position())),
-    }
-}
-
-fn merge_category_attributes(pack: &mut Pack) {
-    for id in &pack.categories.root_categories {
-        inner_merge_category_attributes(&mut pack.categories.all_categories, id);
     }
 }
 
@@ -227,30 +223,175 @@ fn inner_merge_category_attributes(categories: &mut IndexMap<CategoryId, Categor
     }
 }
 
-fn apply_marker_attributes(pack: &mut Pack) {
-    for poi in &mut pack.pois {
-        let Some(category) = pack.categories.all_categories.get(&poi.category[..]) else {
-            continue;
-        };
-        if let Some(id) = category.full_id.as_full_id() {
-            poi.category = id.clone();
-        }
-        poi.attributes.merge(&category.marker_attributes, true);
+#[derive(Debug)]
+struct PackBuilder<'a> {
+    pack: &'a mut Pack,
+    category_ids: HashSet<IdCmpRelaxed<CategoryId>>,
+}
+impl<'a> PackBuilder<'a> {
+    pub fn new_empty(pack: &'a mut Pack) -> Self {
+        Self { pack, category_ids: Default::default() }
     }
-    for trail in &mut pack.trails {
-        let Some(category) = pack.categories.all_categories.get(&trail.category[..]) else {
-            continue;
-        };
-        if let Some(id) = category.full_id.as_full_id() {
-            trail.category = id.clone();
+    pub fn commit_trail(&mut self, trail: Trail) {
+        self.pack.trails.push(trail);
+    }
+    pub fn commit_poi(&mut self, poi: Poi) {
+        self.pack.pois.push(poi);
+    }
+    pub fn push_category(
+        &mut self,
+        parse_stack: &mut Vec<PartialItem>,
+        mut category: Category,
+    ) -> anyhow::Result<()> {
+        let parent = PartialItem::category_stack_id(&*parse_stack)?;
+        let is_root = parent.is_none();
+        let is_full = false;
+        #[cfg(todo)]
+        let is_full = is_root;
+        let new_id = to_taco_safe_name(&category.full_id, is_full).err();
+        let mut new_id = {
+            let safe_id = new_id
+                .as_ref()
+                .map(|id| &id[..])
+                .unwrap_or(category.full_id.as_str());
+            parent.map(|parent| CategoryId::with_full_id(format!("{parent}.{safe_id}")))
         }
-        trail.attributes.merge(&category.marker_attributes, true);
-        let _ = trail.attributes.interaction.take();
+        .or(new_id.map(CategoryId::with_full_id));
+        let id = new_id.as_ref().unwrap_or(&category.full_id);
+        if let Some(canon_id) = self.category_ids.get(IdCmpRelaxed::with_ref(id)) {
+            if log::log_enabled!(log::Level::Info) {
+                if id != &canon_id.id {
+                    log::info!("Inconsistent category ID `{id}`");
+                    panic!("Inconsistent category ID `{id}`");
+                }
+            }
+            new_id = Some(canon_id.id.clone());
+        } else {
+            self.category_ids.insert(IdCmpRelaxed::new(id.clone()));
+        }
+        if let Some(new_id) = new_id {
+            category.full_id = new_id;
+        }
+        if is_root {
+            self.pack
+                .categories
+                .root_categories
+                .insert(category.full_id.clone());
+        }
+        parse_stack.push(PartialItem::MarkerCategory(category));
+        Ok(())
+    }
+    pub fn commit_category(&mut self, parse_stack: &mut [PartialItem], category: Category) {
+        if let Some(PartialItem::MarkerCategory(parent)) = parse_stack.last_mut() {
+            parent.append_children(iter::once(category.full_id.clone()));
+        }
+        match self
+            .pack
+            .categories
+            .all_categories
+            .entry(category.full_id.clone())
+        {
+            Entry::Occupied(mut existing) => {
+                existing.get_mut().merge(category);
+            },
+            Entry::Vacant(vacant) => {
+                vacant.insert(category);
+            },
+        }
+    }
+    pub fn pop_category(&mut self, parse_stack: &mut Vec<PartialItem>) -> anyhow::Result<()> {
+        let Some(PartialItem::MarkerCategory(category)) = parse_stack.pop() else {
+            anyhow::bail!("Inconsistent internal state");
+        };
+
+        self.commit_category(parse_stack, category);
+        Ok(())
+    }
+    pub fn pop_poi(&mut self, parse_stack: &mut Vec<PartialItem>) -> anyhow::Result<()> {
+        let Some(PartialItem::Poi(poi)) = parse_stack.pop() else {
+            anyhow::bail!("Inconsistent internal state");
+        };
+
+        self.commit_poi(poi);
+        Ok(())
+    }
+    pub fn pop_trail(&mut self, parse_stack: &mut Vec<PartialItem>) -> anyhow::Result<()> {
+        let Some(PartialItem::Trail(trail)) = parse_stack.pop() else {
+            anyhow::bail!("Inconsistent internal state");
+        };
+
+        self.commit_trail(trail);
+        Ok(())
+    }
+
+    fn merge_category_attributes(&mut self) {
+        for id in &self.pack.categories.root_categories {
+            inner_merge_category_attributes(&mut self.pack.categories.all_categories, id);
+        }
+    }
+
+    fn lookup_category_relaxed<'c>(
+        category_ids: &HashSet<IdCmpRelaxed<CategoryId>>,
+        all_categories: &'c IndexMap<CategoryId, Category>,
+        id: &mut IdNameBox,
+    ) -> Option<&'c Category> {
+        all_categories.get(id.as_id()).or_else(|| {
+            match category_ids.get(IdCmpRelaxed::with_ref(id.as_id())) {
+                Some(canon_id) => {
+                    let cat = all_categories.get(&canon_id.id);
+                    if cat.is_some() {
+                        log::info!("Inconsistent case for {id}: {}", canon_id.id);
+                        *id = canon_id
+                            .id
+                            .as_full_id()
+                            .cloned()
+                            .unwrap_or_else(|| IdNameBox::new_cloned(&canon_id.id));
+                    }
+                    cat
+                },
+                None => None,
+            }
+        })
+    }
+
+    fn apply_marker_attributes(&mut self) {
+        let pack = &mut *self.pack;
+        for poi in &mut pack.pois {
+            let category = Self::lookup_category_relaxed(
+                &self.category_ids,
+                &pack.categories.all_categories,
+                &mut poi.category,
+            );
+            let Some(category) = category else {
+                log::warn!("missing category {} for {}", poi.category, poi);
+                continue;
+            };
+            if let Some(id) = category.full_id.as_full_id() {
+                poi.category = id.clone();
+            }
+            poi.attributes.merge(&category.marker_attributes, true);
+        }
+        for trail in &mut pack.trails {
+            let category = Self::lookup_category_relaxed(
+                &self.category_ids,
+                &pack.categories.all_categories,
+                &mut trail.category,
+            );
+            let Some(category) = category else {
+                log::warn!("missing category {} for {}", trail.category, trail);
+                continue;
+            };
+            if let Some(id) = category.full_id.as_full_id() {
+                trail.category = id.clone();
+            }
+            trail.attributes.merge(&category.marker_attributes, true);
+            let _ = trail.attributes.interaction.take();
+        }
     }
 }
 
 fn inner_parse_pack_def(
-    pack: &mut Pack,
+    pack: &mut PackBuilder,
     ctx: &mut impl PackLoaderContext,
     parser: &mut xml::EventReader<impl std::io::Read>,
     asset: &str,
@@ -322,8 +463,16 @@ fn inner_parse_pack_def(
                         parse_stack.push(PartialItem::OverlayData);
                     },
                     "markercategory" => {
-                        let category = Category::from_xml(&parse_stack, attributes)?;
-                        parse_stack.push(PartialItem::MarkerCategory(category));
+                        let category = Category::from_xml(attributes)
+                            .with_context(|| format!("Category parse failed in {asset}"))
+                            .and_then(|category| pack.push_category(&mut parse_stack, category));
+                        match category {
+                            Ok(()) => (),
+                            Err(e) => {
+                                log::error!("{e:#}");
+                                parse_stack.push(PartialItem::PoisonElem);
+                            },
+                        }
                     },
                     "pois" => {
                         parse_stack.push(PartialItem::PoiGroup);
@@ -382,41 +531,13 @@ fn inner_parse_pack_def(
                         parse_stack.pop();
                     },
                     "markercategory" => {
-                        let Some(PartialItem::MarkerCategory(category)) = parse_stack.pop() else {
-                            anyhow::bail!("Inconsistent internal state");
-                        };
-
-                        match parse_stack.last_mut() {
-                            Some(PartialItem::OverlayData) => {
-                                pack.categories.root_categories.insert(category.full_id.clone());
-                            },
-                            Some(PartialItem::MarkerCategory(parent)) => {
-                                parent.append_children(iter::once(category.full_id.clone()));
-                            },
-                            _ => anyhow::bail!("Inconsistent internal state"),
-                        }
-                        match pack.categories.all_categories.entry(category.full_id.clone()) {
-                            Entry::Occupied(mut existing) => {
-                                existing.get_mut().merge(category);
-                            },
-                            Entry::Vacant(vacant) => {
-                                vacant.insert(category);
-                            },
-                        }
+                        pack.pop_category(&mut parse_stack)?;
                     },
                     "poi" => {
-                        let Some(PartialItem::Poi(poi)) = parse_stack.pop() else {
-                            anyhow::bail!("Inconsistent internal state");
-                        };
-
-                        pack.pois.push(poi);
+                        pack.pop_poi(&mut parse_stack)?;
                     },
                     "trail" => {
-                        let Some(PartialItem::Trail(trail)) = parse_stack.pop() else {
-                            anyhow::bail!("Inconsistent internal state");
-                        };
-
-                        pack.trails.push(trail);
+                        pack.pop_trail(&mut parse_stack)?;
                     },
                     _ => anyhow::bail!("Unexpected </{name}>"),
                 }
@@ -457,6 +578,62 @@ impl PartialItem {
             PartialItem::MarkerCategory(category) => Some(category),
             _ => None,
         }
+    }
+
+    #[cfg(todo = "unnecessary")]
+    fn category_stack_ids(
+        items: &[PartialItem],
+    ) -> impl DoubleEndedIterator<Item = anyhow::Result<&IdNameSeg>> {
+        let subset = match items.rsplitn(1, |i| matches!(i, Self::OverlayData)).next() {
+            Some(r) if r.len() == items.len() =>
+            // wasn't found
+                None,
+            r => r,
+        };
+        let inconsistent = || anyhow!("Inconsistent internal state");
+        let items = subset.unwrap_or(items);
+        let cap = subset.is_none().then(inconsistent);
+        items
+            .into_iter()
+            .map(move |item| match item {
+                Self::MarkerCategory(cat) => Ok(cat.id()),
+                _ => Err(inconsistent()),
+            })
+            .chain(cap.map(Err))
+    }
+    #[cfg(todo = "unused")]
+    fn category_stack_ids(items: &[PartialItem]) -> impl Iterator<Item = anyhow::Result<&IdNameSeg>> {
+        let (id, cap) = match items.last() {
+            Some(Self::MarkerCategory(cat)) => (Some(cat.full_id.segments().map(Ok)), None),
+            Some(Self::OverlayData) => (None, None),
+            _ => (None, Some(Err(anyhow!("Inconsistent internal state")))),
+        };
+        id.into_iter().flatten().chain(cap)
+    }
+    #[cfg(todo = "unnecessary")]
+    fn category_stack_id(items: &[PartialItem]) -> anyhow::Result<Option<&IdNameSeg>> {
+        let mut parent_id = PartialItem::category_stack_id(&*parse_stack).peekable();
+        let id = match parent_id.next() {
+            Some(Err(e)) => return Err(e),
+            Some(Ok(root)) => {
+                let mut id: String = root.into();
+                for seg in parent_id {
+                    let seg = seg?;
+                    write!(&mut id, ".{seg}");
+                }
+                Some(id)
+            },
+            None => None,
+        };
+        Ok(id)
+    }
+    #[track_caller]
+    fn category_stack_id(items: &[PartialItem]) -> anyhow::Result<Option<&IdNameSeg>> {
+        Ok(match items.last() {
+            Some(Self::MarkerCategory(cat)) => Some(cat.full_id.as_id()),
+            Some(Self::OverlayData) => None,
+            _ => anyhow::bail!("Inconsistent internal state"),
+        })
     }
 }
 

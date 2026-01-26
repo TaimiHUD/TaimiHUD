@@ -1,9 +1,6 @@
 use {
     self::id::IdNameSeg,
-    crate::{
-        attributes::{parse_bool, MarkerAttributes},
-        pack::{to_taco_safe_name, PartialItem},
-    },
+    crate::attributes::{parse_bool, MarkerAttributes},
     anyhow::{anyhow, Context},
     bitflags::bitflags,
     core::{mem, ops},
@@ -24,7 +21,7 @@ pub mod id;
 #[derive(Debug, Clone)]
 pub struct Category {
     pub full_id: CategoryId,
-    pub display_name: Arc<str>,
+    pub display_name: Option<Arc<str>>,
     pub flags: CategoryFlags,
     // Map of local to global name.
     pub sub_categories: Box<[CategoryId]>,
@@ -33,10 +30,7 @@ pub struct Category {
 }
 
 impl Category {
-    pub fn from_xml(
-        parse_stack: &[PartialItem],
-        attrs: Vec<xml::attribute::OwnedAttribute>,
-    ) -> anyhow::Result<Category> {
+    pub fn from_xml(attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Category> {
         let mut marker_attributes = MarkerAttributes::default();
         let mut attributes_bh = MarkerAttributes::default();
 
@@ -108,25 +102,21 @@ impl Category {
             }
         }
 
-        let name = id.or(bh_id).ok_or_else(|| anyhow!("category missing name"))?;
+        let id = id.or(bh_id).ok_or_else(|| anyhow!("category missing name"))?;
+        #[cfg(todo)]
         let (id, name) = match to_taco_safe_name(&name, false) {
             Ok(..) => (name, None),
             Err(safe) => (safe, Some(name)),
         };
 
-        let full_id = if let Some(PartialItem::MarkerCategory(cat)) = parse_stack.last() {
-            Some(CategoryId::with_full_id(format!("{}.{id}", cat.full_id)))
-        } else {
-            CategoryId::try_with_full_id(&id)
-        };
-        let Some(full_id) = full_id else {
+        let Some(id) = CategoryId::try_with_full_id(&id) else {
             anyhow::bail!("empty category name");
         };
 
         // TODO: support bh features properly...
         marker_attributes.merge(&attributes_bh, false);
 
-        let display_name = display_name.or(bh_display_name).or(name).unwrap_or(id.clone());
+        let display_name = display_name.or(bh_display_name);
 
         let is_separator = is_separator.or(bh_is_separator).unwrap_or(false);
         let is_hidden = is_hidden.or(bh_is_hidden).unwrap_or(false);
@@ -141,8 +131,8 @@ impl Category {
         .collect::<CategoryFlags>();
 
         Ok(Category {
-            display_name: display_name.into(),
-            full_id,
+            display_name: display_name.map(|n| n.into()),
+            full_id: id,
             flags,
             sub_categories: Default::default(),
             marker_attributes,
@@ -159,13 +149,26 @@ impl Category {
             return;
         }
         new.attributes_mut().merge(&self.marker_attributes, false);
+        if self.display_name.is_none() {
+            self.display_name = new.display_name;
+        }
         self.append_children(new.sub_categories);
     }
+    pub fn get_display_name(&self) -> Option<&str> {
+        self.display_name.as_ref().map(|n| &**n)
+    }
+    pub fn display_name(&self) -> &str {
+        self.get_display_name().unwrap_or(self.id().as_str())
+    }
+
     /// TODO: way too thrashy :<
     pub fn append_children<I: IntoIterator<Item = CategoryId>>(&mut self, children: I) {
         let mut sub_categories = Vec::from(mem::take(&mut self.sub_categories));
         for id in children {
-            if sub_categories.iter().any(|c| c == &id) {
+            let contained = sub_categories.iter();
+            #[cfg(todo = "unnecessary")]
+            let contained = contained.map(IdCmpRelaxed::with_ref);
+            if { contained }.any(|c| c == &id) {
                 continue
             }
             sub_categories.push(id);

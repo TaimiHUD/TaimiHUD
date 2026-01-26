@@ -7,6 +7,7 @@ use std::{
     mem,
     num::NonZero,
     ops,
+    slice,
     str,
     sync::Arc,
 };
@@ -156,9 +157,13 @@ impl Ord for IdNameSeg {
         self.as_str().cmp(rhs.as_str())
     }
 }
+/// TODO: trailing prefix once [FullIdRef] is a real type and can be distinguished
+/// (update other ID Hash impls to match)
 impl hash::Hash for IdNameSeg {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.as_str().hash(state)
+        state.write(self.as_str().as_bytes());
+        state.write_u8(0xff);
+        //state.write_u8(SEP_CHAR as u8);
     }
 }
 impl AsFullId for IdNameSeg {
@@ -241,7 +246,7 @@ impl<'a> From<&'a IdNameSeg> for String {
 /// TODO: newtype that validates ascii+alphanum?
 pub type IdStr = str;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct IdNameBox {
     /// TODO: `Arc<IdStr>>` may be a better measure...
@@ -282,6 +287,12 @@ impl AsFullId for IdNameBox {
 impl fmt::Display for IdNameBox {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self.as_id(), f)
+    }
+}
+impl hash::Hash for IdNameBox {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.as_id().hash(state);
+        //state.write_u8(0xff);
     }
 }
 impl ops::Index<ops::RangeFull> for IdNameBox {
@@ -511,7 +522,8 @@ impl<T: ?Sized + AsRef<IdStr>, R: ?Sized + AsRef<FullIdRef>> PartialEq<R> for Ca
 }
 impl<T: ?Sized + AsRef<IdStr>> hash::Hash for CategoryId<T> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        self.as_id().hash(state)
+        self.as_id().hash(state);
+        //state.write_u8(0xff);
     }
 }
 impl<T: ?Sized + AsRef<IdStr>> Eq for CategoryId<T> {}
@@ -729,6 +741,13 @@ impl FullIdOf<FullIdRef> {
             _ => Some(false),
         }
     }
+    fn name_iter_eq_relaxed(seg: Option<&IdNameSeg>, rhs: Option<&IdNameSeg>) -> Option<bool> {
+        match (seg, rhs) {
+            (Some(seg), Some(rhs)) if seg.as_str().eq_ignore_ascii_case(rhs.as_str()) => None,
+            (None, None) => Some(true),
+            _ => Some(false),
+        }
+    }
     fn name_iter_cmp(seg: Option<&IdNameSeg>, rhs: Option<&IdNameSeg>) -> Option<cmp::Ordering> {
         match (seg, rhs) {
             #[cfg(todo)]
@@ -737,6 +756,26 @@ impl FullIdOf<FullIdRef> {
                 // TODO: skip this is we can intern and compare pointers someday...
                 cmp::Ordering::Equal => None,
                 ord => Some(ord),
+            },
+            (seg, rhs) => Some(seg.is_some().cmp(&rhs.is_some())),
+        }
+    }
+    fn name_iter_cmp_relaxed(seg: Option<&IdNameSeg>, rhs: Option<&IdNameSeg>) -> Option<cmp::Ordering> {
+        match (seg, rhs) {
+            #[cfg(todo)]
+            (Some(seg), Some(rhs)) if seg == rhs => None,
+            // TODO: skip this is we can intern and compare pointers someday...
+            (Some(seg), Some(rhs)) => {
+                // zip truncates, so add a trailing 0
+                let seg = seg.as_str().bytes().chain(iter::once(0));
+                let rhs = rhs.as_str().bytes().chain(iter::once(0));
+                let cmp = seg.zip(rhs).find_map(|(l, r)| {
+                    match l.to_ascii_lowercase().cmp(&r.to_ascii_lowercase()) {
+                        cmp::Ordering::Equal => None,
+                        ord => Some(ord),
+                    }
+                });
+                cmp
             },
             (seg, rhs) => Some(seg.is_some().cmp(&rhs.is_some())),
         }
@@ -789,14 +828,167 @@ impl<T: ?Sized + AsFullId> Ord for FullIdOf<T> {
         self.cmp_with(rhs)
     }
 }
+/// TODO: combine this with the Display impl
 impl<T: ?Sized + AsFullId> hash::Hash for FullIdOf<T> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         for (i, seg) in self.segments().into_iter().enumerate() {
             let seg = seg.as_ref();
             if i > 0 {
-                SEP_STR.hash(state);
+                state.write(SEP_STR.as_bytes());
             }
-            seg.hash(state);
+            state.write(seg.as_str().as_bytes());
         }
+        // as write_str typically would...
+        state.write_u8(0xff);
+    }
+}
+
+/// case-insensitive comparisons
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(transparent)]
+pub struct IdCmpRelaxed<T: ?Sized> {
+    pub id: T,
+}
+impl<T: AsFullId> IdCmpRelaxed<T> {
+    pub const fn new(id: T) -> Self {
+        Self { id }
+    }
+}
+impl<T: ?Sized> IdCmpRelaxed<T> {
+    pub const fn with_ref(id: &T) -> &Self {
+        unsafe { mem::transmute(id) }
+    }
+
+    pub fn with_mut(id: &mut T) -> &mut Self {
+        unsafe { mem::transmute(id) }
+    }
+
+    pub fn cmp_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> cmp::Ordering
+    where
+        T: AsFullId,
+    {
+        let mut segs = self.id.segments().into_iter();
+        let mut rhs = rhs.segments().into_iter();
+        loop {
+            let seg = segs.next();
+            let rhs = rhs.next();
+            let ord = FullIdOf::name_iter_cmp_relaxed(
+                seg.as_ref().map(AsRef::as_ref),
+                rhs.as_ref().map(AsRef::as_ref),
+            );
+            if let Some(ord) = ord {
+                break ord
+            }
+        }
+    }
+    pub fn eq_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> bool
+    where
+        T: AsFullId,
+    {
+        let mut segs = self.id.segments().into_iter();
+        let mut rhs = rhs.segments().into_iter();
+        loop {
+            let seg = segs.next();
+            let rhs = rhs.next();
+            let eq = FullIdOf::name_iter_eq_relaxed(
+                seg.as_ref().map(AsRef::as_ref),
+                rhs.as_ref().map(AsRef::as_ref),
+            );
+            if let Some(eq) = eq {
+                break eq
+            }
+        }
+    }
+}
+impl<T: ?Sized + AsFullId> AsFullId for IdCmpRelaxed<T> {
+    type SegmentRef<'s>
+        = <T as AsFullId>::SegmentRef<'s>
+    where
+        T: 's;
+    type SegmentIter<'s>
+        = <T as AsFullId>::SegmentIter<'s>
+    where
+        T: 's;
+    fn segments(&self) -> Self::SegmentIter<'_> {
+        self.id.segments()
+    }
+    fn id_len(&self) -> usize {
+        self.id.id_len()
+    }
+    fn id_to_str(&self) -> Cow<'_, str> {
+        self.id.id_to_str()
+    }
+}
+/// TODO: `[u8]::split_inclusive` if ascii already guaranteed
+impl<T: ?Sized + AsFullId> fmt::Display for IdCmpRelaxed<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, seg) in self.id.segments().into_iter().enumerate() {
+            if i > 0 {
+                f.write_str(SEP_STR)?;
+            }
+            let seg = seg.as_ref();
+            for s in seg.as_str().split_inclusive(|c: char| c.is_ascii_uppercase()) {
+                let (upper, s) = match s.as_bytes().split_last() {
+                    Some((upper, s)) => (upper, unsafe { str::from_utf8_unchecked(s) }),
+                    None => continue,
+                };
+                f.write_str(s)?;
+                let lower = upper.to_ascii_lowercase();
+                let lower = unsafe { str::from_utf8_unchecked(slice::from_ref(&lower)) };
+                f.write_str(lower)?;
+            }
+        }
+        Ok(())
+    }
+}
+impl<T: ?Sized + AsFullId, R: ?Sized + AsFullId> PartialEq<R> for IdCmpRelaxed<T> {
+    fn eq(&self, rhs: &R) -> bool {
+        self.eq_with(rhs)
+    }
+}
+impl<T: ?Sized + AsFullId> Eq for IdCmpRelaxed<T> {}
+impl<T: ?Sized + AsFullId, R: ?Sized + AsFullId> PartialOrd<R> for IdCmpRelaxed<T> {
+    fn partial_cmp(&self, rhs: &R) -> Option<cmp::Ordering> {
+        Some(self.cmp_with(rhs))
+    }
+}
+impl<T: ?Sized + AsFullId> Ord for IdCmpRelaxed<T> {
+    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+        self.cmp_with(&rhs.id)
+    }
+}
+/// TODO: combine this with the Display impl
+impl<T: ?Sized + AsFullId> hash::Hash for IdCmpRelaxed<T> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        for (i, seg) in self.id.segments().into_iter().enumerate() {
+            if i > 0 {
+                state.write(SEP_STR.as_bytes());
+            }
+            let seg = seg.as_ref();
+            for s in seg
+                .as_str()
+                .as_bytes()
+                .split_inclusive(|c| c.is_ascii_uppercase())
+            {
+                if let Some((upper, s)) = s.split_last() {
+                    state.write(s);
+                    state.write_u8(upper.to_ascii_lowercase());
+                }
+            }
+            state.write_u8(0xff);
+        }
+    }
+}
+impl<T: ?Sized> Borrow<IdCmpRelaxed<FullIdRef>> for IdCmpRelaxed<CategoryId<T>>
+where
+    CategoryId<T>: Borrow<FullIdRef>,
+{
+    fn borrow(&self) -> &IdCmpRelaxed<FullIdRef> {
+        IdCmpRelaxed::with_ref(self.id.borrow())
+    }
+}
+impl Borrow<IdCmpRelaxed<FullIdRef>> for IdCmpRelaxed<IdNameBox> {
+    fn borrow(&self) -> &IdCmpRelaxed<FullIdRef> {
+        IdCmpRelaxed::with_ref(self.id.borrow())
     }
 }
