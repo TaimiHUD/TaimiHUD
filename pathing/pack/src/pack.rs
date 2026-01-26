@@ -228,6 +228,8 @@ struct PackBuilder<'a> {
     pack: &'a mut Pack,
     category_ids: HashSet<IdCmpRelaxed<CategoryId>>,
     warnings_case: HashSet<CategoryId>,
+    warnings_empty: HashSet<Uuid>,
+    warnings_missing: HashSet<IdCmpRelaxed<CategoryId>>,
 }
 impl<'a> PackBuilder<'a> {
     pub fn new_empty(pack: &'a mut Pack) -> Self {
@@ -235,6 +237,8 @@ impl<'a> PackBuilder<'a> {
             pack,
             category_ids: Default::default(),
             warnings_case: Default::default(),
+            warnings_empty: Default::default(),
+            warnings_missing: Default::default(),
         }
     }
     pub fn commit_trail(&mut self, trail: Trail) {
@@ -337,8 +341,10 @@ impl<'a> PackBuilder<'a> {
     fn lookup_category_relaxed<'c>(
         category_ids: &HashSet<IdCmpRelaxed<CategoryId>>,
         warnings_case: &mut HashSet<CategoryId>,
+        warnings_empty: &mut HashSet<Uuid>,
         all_categories: &'c IndexMap<CategoryId, Category>,
         id: &mut IdNameBox,
+        guid: &Uuid,
     ) -> Option<&'c Category> {
         all_categories.get(id.as_id()).or_else(|| {
             match category_ids.get(IdCmpRelaxed::with_ref(id.as_id())) {
@@ -356,6 +362,12 @@ impl<'a> PackBuilder<'a> {
                     }
                     cat
                 },
+                None if id.as_str().is_empty() => {
+                    if warnings_empty.insert(guid.clone()) {
+                        log::warn!("No category provided for {guid}");
+                    }
+                    None
+                },
                 None => None,
             }
         })
@@ -367,11 +379,17 @@ impl<'a> PackBuilder<'a> {
             let category = Self::lookup_category_relaxed(
                 &self.category_ids,
                 &mut self.warnings_case,
+                &mut self.warnings_empty,
                 &pack.categories.all_categories,
                 &mut poi.category,
+                &poi.guid,
             );
             let Some(category) = category else {
-                log::warn!("missing category {} for {}", poi.category, poi);
+                if let Some(id) = CategoryId::try_with_full_id(poi.category.clone()) {
+                    if self.warnings_missing.insert(IdCmpRelaxed::new(id)) {
+                        log::warn!("missing category `{}` for {}", poi.category, poi);
+                    }
+                }
                 continue;
             };
             if let Some(id) = category.full_id.as_full_id() {
@@ -383,11 +401,17 @@ impl<'a> PackBuilder<'a> {
             let category = Self::lookup_category_relaxed(
                 &self.category_ids,
                 &mut self.warnings_case,
+                &mut self.warnings_empty,
                 &pack.categories.all_categories,
                 &mut trail.category,
+                &trail.guid,
             );
             let Some(category) = category else {
-                log::warn!("missing category {} for {}", trail.category, trail);
+                if let Some(id) = CategoryId::try_with_full_id(trail.category.clone()) {
+                    if self.warnings_missing.insert(IdCmpRelaxed::new(id)) {
+                        log::warn!("missing category `{}` for {}", trail.category, trail);
+                    }
+                }
                 continue;
             };
             if let Some(id) = category.full_id.as_full_id() {
