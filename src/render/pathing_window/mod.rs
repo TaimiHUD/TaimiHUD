@@ -447,7 +447,7 @@ impl PathingWindowState {
                                 pd.categories.all_categories.get_index(path.path as usize)
                             ));
                             if let Some((_, cat)) = cat {
-                                Err(Some(Cow::Borrowed(&cat.display_name[..])))
+                                Err(Some(Cow::Borrowed(cat.display_name())))
                             } else if let Some(info) = &pack.state.info.info {
                                 Err(Some(Cow::Owned(info.to_string())))
                             } else {
@@ -550,7 +550,7 @@ impl PathingWindowState {
                     pd.categories.all_categories.get_index(path.path as usize)
                 ));
                 Some(if let Some((_, cat)) = cat {
-                    Cow::Borrowed(&cat.display_name[..])
+                    Cow::Borrowed(cat.display_name())
                 } else if let Some(info) = &pack.state.info.info {
                     Cow::Owned(info.to_string())
                 } else {

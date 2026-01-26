@@ -119,8 +119,8 @@ impl PackInfo {
 
 impl fmt::Display for PackInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.primary_root() {
-            Some(root) => f.write_str(&root.display_name),
+        match self.primary_root().and_then(|root| root.display_name.as_ref()) {
+            Some(display_name) => f.write_str(&display_name[..]),
             None => fmt::Display::fmt(&self.format, f),
         }
     }
@@ -761,7 +761,7 @@ pub struct PackRoot {
     pub index: CategoryIndex,
     pub id: CategoryId,
     pub flags: CategoryFlags,
-    pub display_name: Arc<str>,
+    pub display_name: Option<Arc<str>>,
     pub child_count: usize,
 }
 

@@ -256,8 +256,8 @@ impl Default for SharedPackInfo {
 }
 impl fmt::Display for SharedPackInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(root) = self.primary_root() {
-            f.write_str(&root.display_name)
+        if let Some(display_name) = self.primary_root().and_then(|r| r.display_name.as_ref()) {
+            f.write_str(&display_name[..])
         } else if let Some(datasource) = &self.datasource {
             fmt::Display::fmt(&datasource.path, f)
         } else if !self.path.as_os_str().is_empty() {

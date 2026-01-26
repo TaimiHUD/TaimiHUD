@@ -1651,7 +1651,7 @@ impl CategoryInfo {
     pub fn from_pack_root(root: &PackRoot) -> Self {
         Self {
             id: Some(root.id.clone()),
-            display_name: Some(root.display_name.clone()),
+            display_name: root.display_name.clone(),
             visibility: VisibilityFlags::from_pack_root(root),
             tooltip: PackTooltip::EMPTY,
             interaction: None,
