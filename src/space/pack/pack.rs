@@ -297,16 +297,16 @@ impl ActivePack {
             };
             if let Some(..) = is_copyable {
                 ui.indent();
-                if ui.small_button(&fl!("copy-arg", arg = (&category.display_name[..]))) {
+                if ui.small_button(&fl!("copy-arg", arg = (category.display_name()))) {
                     Self::copy_copyable(ui, &category.marker_attributes);
                 }
                 if ui.is_item_hovered() {
-                    Self::draw_tooltip(ui, &category.display_name, || {
+                    Self::draw_tooltip(ui, category.display_name(), || {
                         Self::draw_tooltip_category(ui, category);
                         Self::draw_tooltip_copyable(
                             ui,
                             &category.marker_attributes,
-                            Some(&category.display_name),
+                            category.get_display_name(),
                         );
                     });
                 }
@@ -350,7 +350,7 @@ impl ActivePack {
                     .map(|idx| copyable_categories.contains(&idx))
                     .unwrap_or(false);
 
-                let mut unbuilt = TreeNode::new(&category.display_name);
+                let mut unbuilt = TreeNode::new(category.display_name());
                 if (category.is_separator() || category.sub_categories.is_empty())
                     && copy_value.is_none()
                     && !has_copyable_pois
@@ -373,7 +373,7 @@ impl ActivePack {
                 let tree_token = unbuilt.push(ui);
                 drop(checkbox_gap);
                 if ui.is_item_hovered() && Self::category_has_tooltip(category) {
-                    Self::draw_tooltip(ui, &category.display_name, || {
+                    Self::draw_tooltip(ui, category.display_name(), || {
                         Self::draw_tooltip_category(ui, category);
                     });
                 }
@@ -391,11 +391,11 @@ impl ActivePack {
                         Self::copy_copyable(ui, &category.marker_attributes);
                     }
                     if ui.is_item_hovered() {
-                        Self::draw_tooltip(ui, &category.display_name, || {
+                        Self::draw_tooltip(ui, category.display_name(), || {
                             Self::draw_tooltip_copyable(
                                 ui,
                                 &category.marker_attributes,
-                                Some(&category.display_name),
+                                category.get_display_name(),
                             );
                         });
                     }
@@ -490,7 +490,7 @@ impl ActivePack {
             _ => None,
         };
         let title = match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name.starts_with(&title[..]) =>
+            Some(title) if !title.is_empty() && !category.display_name().starts_with(&title[..]) =>
                 Some(&title[..]),
             _ => None,
         };
@@ -526,7 +526,7 @@ impl ActivePack {
             _ => (),
         }
         match &category.marker_attributes.tip_name {
-            Some(title) if !title.is_empty() && !category.display_name[..].starts_with(&title[..]) =>
+            Some(title) if !title.is_empty() && !category.display_name().starts_with(&title[..]) =>
                 return true,
             _ => (),
         }

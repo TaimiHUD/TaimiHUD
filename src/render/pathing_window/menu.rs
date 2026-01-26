@@ -119,11 +119,11 @@ impl PathingWindowState {
             .as_ref()
             .and_then(|i| i.copy_value.as_ref())
             .is_some();
-        let item = MenuItem::new(&cat.display_name)
+        let item = MenuItem::new(cat.display_name())
             .selected(state.unwrap_or(false))
             .enabled(!decorative || is_copyable);
         let mut toggled = match () {
-            _ if cat.is_separator() && cat.display_name.is_empty() => {
+            _ if cat.is_separator() && cat.display_name().is_empty() => {
                 ui.separator();
                 Self::dead_zone_spacing(ui, false);
                 return (false, false)
@@ -168,8 +168,8 @@ impl PathingWindowState {
         // TODO: manually igSetNextWindowSize when opening a new category
         // because it seems to "inherit" the last menu's size and that's dumb
         let menu_start = Vec2::from_array(ui.cursor_pos());
-        let menu_size = Vec2::from_array(ui.calc_text_size(&cat.display_name));
-        let menu = ui.begin_menu_with_enabled(&cat.display_name, true);
+        let menu_size = Vec2::from_array(ui.calc_text_size(cat.display_name()));
+        let menu = ui.begin_menu_with_enabled(cat.display_name(), true);
         let mut toggled = false;
         if let Some(_menu) = &menu {
             toggled |= Self::draw_context_menu_cat_children(ui, pack, cat_index, cat, filtered, state, ctx);
@@ -377,7 +377,7 @@ impl PathingWindowState {
             }
         }
         if hovered && (ActivePack::category_has_tooltip(cat) || draw_tooltip.is_some()) {
-            ActivePack::draw_tooltip(ui, &cat.display_name, || {
+            ActivePack::draw_tooltip(ui, cat.display_name(), || {
                 if let Some(draw) = &mut draw_tooltip {
                     draw(0);
                 }
