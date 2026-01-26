@@ -262,7 +262,6 @@ impl<'a> PackBuilder<'a> {
             if log::log_enabled!(log::Level::Info) {
                 if id != &canon_id.id {
                     log::info!("Inconsistent category ID `{id}`");
-                    panic!("Inconsistent category ID `{id}`");
                 }
             }
             new_id = Some(canon_id.id.clone());
