@@ -80,6 +80,15 @@ impl SpacePack {
         }
         .unwrap_or(false)
     }
+    pub fn unpopulate(&mut self, marker: MarkerIndex) -> bool {
+        match marker.namespace() {
+            MarkerIndex::NS_TRAIL => false,
+            _ => {
+                self.mark_unpopulated(marker);
+                true
+            },
+        }
+    }
     pub fn mark_populated(&mut self, marker: MarkerIndex) -> bool {
         match marker.namespace() {
             MarkerIndex::NS_POI => {
@@ -333,7 +342,9 @@ impl SpaceEntities {
                 _ if e.is_invalid() => None,
                 false => {
                     if let Some((path, pack_data)) = pack_data {
-                        pack_data.mark_unpopulated(path.path);
+                        if !pack_data.unpopulate(path.path) {
+                            return None
+                        }
                     }
                     e.value = SpaceEntity::invalid();
                     Some(i)
@@ -352,6 +363,7 @@ impl SpaceEntities {
         &mut self,
         pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [SpacePack]>,
         index: usize,
+        force: bool,
     ) {
         let Some(e) = self.entities.get_mut(index) else { return };
         let pack_data = e
@@ -360,7 +372,13 @@ impl SpaceEntities {
             .marker_path::<PackMapPath>()
             .and_then(|path| pack_data.lookup_mut(&path.root.root).map(|d| (path, d)));
         if let Some((path, pack_data)) = pack_data {
-            pack_data.mark_unpopulated(path.path);
+            match force {
+                true => {
+                    pack_data.mark_unpopulated(path.path);
+                },
+                false =>
+                    if !pack_data.unpopulate(path.path) { return },
+            }
         }
         e.value = SpaceEntity::invalid();
         #[cfg(todo = "unnecessary")]
@@ -556,6 +574,7 @@ impl SpacePackCollection {
             let trails = trails
                 .zip(pack_data.populated_trails.iter_mut())
                 .filter(|(((_, ltrail), _), _)| ltrail.visibility.is_visible())
+                .filter(|(((_, _), trail_info), _)| !trail_info.sections().is_empty())
                 .filter_map(|(v, mut populated)| match mem::replace(&mut *populated, true) {
                     false => Some(v),
                     true => None,
@@ -655,10 +674,7 @@ impl SpacePackCollection {
         }
         if full_rebuild {
             // since we're doing a full rebuild anyway, free up the filtered items
-            for (_mid, &i) in hidden.iter() {
-                self.render_entities
-                    .invalidate(self.loaded_packs.map_mut_as_slice(), i);
-            }
+            self.invalidate_hidden(&hidden);
             self.signal_bvh_rebuild();
         }
 
@@ -669,6 +685,12 @@ impl SpacePackCollection {
                 true => Err(false),
                 false => Ok(()),
             }
+        }
+    }
+    fn invalidate_hidden(&mut self, hidden: &BTreeMap<MarkerId, usize>) {
+        for (_mid, &i) in hidden.iter() {
+            self.render_entities
+                .invalidate(self.loaded_packs.map_mut_as_slice(), i, true);
         }
     }
     /// TODO: check map state sigs or something idk what needs to change
@@ -778,7 +800,7 @@ impl SpacePackCollection {
     ) {
         for (_mid, i) in expired {
             self.render_entities
-                .invalidate(self.loaded_packs.map_mut_as_slice(), i);
+                .invalidate(self.loaded_packs.map_mut_as_slice(), i, false);
         }
     }
 
