@@ -349,7 +349,7 @@ nexus = { git = "https://github.com/zerthox/nexus-rs" }
 glam = "0.30"
 glamour = "0.18"
 num-traits = { version = "0.2", default-features = false }
-indexmap = "2.11"
+indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
 # TODO: macro_rules_attribute = "0.2"
