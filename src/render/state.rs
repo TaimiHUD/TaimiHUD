@@ -692,9 +692,11 @@ impl RenderState {
             if self.pathing_window.pois_visible(&self.machine) {
                 let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
                 let interact = &mut self.machine.pack_ui_state.interact;
-                if let Some(Ok(engine)) = &self.engine {
-                    if interact.wants_static {
-                        interact.update_static(&engine.packs);
+                if interact.wants_static | interact.dirty_markers {
+                    if let Some(Ok(engine)) = &self.engine {
+                        interact.update_static_render(&engine.packs);
+                    } else if !self.machine.pack_ui_state.pack_state.is_empty() {
+                        interact.update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
                     }
                 }
                 let player_pos = match self.machine.gameplay.gameplay_map() {

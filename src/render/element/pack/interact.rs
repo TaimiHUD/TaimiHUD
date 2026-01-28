@@ -1,9 +1,9 @@
-use taimi_pack::attributes::keys::{self, Guid};
 use {
     crate::{
         controller::pathing::{
             registry::{
                 PackInfo, PackMapPath, PackPath,
+                PackRegistryNs, PackIndex,
                 LoadedPoiPath,
                 LoadedMarkerPath, LoadedMarkerNs,
                 PoiMapPath,
@@ -16,13 +16,16 @@ use {
             },
             PathingEvent,
         },
-        exports::runtime::{imgui::{
+        exports::runtime::{self as rt, imgui::{
             TableToken, TreeNode, TreeNodeFlags, Selectable, MouseButton, Condition,
-            Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui,
+            Id as UiId, TableColumnFlags, TableColumnSetup, TableFlags, Ui,
             TableSortDirection,
         }},
         with_i18n,
-        render::element::pack::{PackVisibility, PackVecOf, PackElement},
+        settings::Settings,
+        render::element::pack::{PackVisibility, PackElement,
+    CategoryInfo,
+        },
         render::machine::RenderMachine,
         render::PathingWindowState,
         space::engine::Engine,
@@ -34,16 +37,21 @@ use {
     rustc_hash::FxBuildHasher,
     taimi_hoard::{
         str_opt_ref,
-        loc::{Locator, LocationRef},
+        loc::{indexed::IndexedList, Locator, LocationRef},
     },
     taimi_sync::arcs::ArcPtrCmp,
     taimi_meta::packs::{
         collections::PackSet,
         id::{MarkerId, MarkerPath, MarkerIndex},
         CategoryIndex, CategoryPath, PoiIndex, PoiPath,
+        MapPath,
         VisibilityFlags,
     },
-    taimi_pack::attributes::InteractionAttributes,
+    taimi_pack::attributes::{
+        keys::{self, Guid},
+        AttrString,
+        InteractionAttributes,
+    },
     glamour::{Box2, Point2, Size2, Size3, Point3, Box3},
     bvh::bvh::Bvh,
     std::sync::Arc,
@@ -56,6 +64,8 @@ use {
     taimi_meta::coords::{LocalSpace, vec_eq},
     taimi_sync::watched::{self, Watched, Watcher},
     taimi_meta::spatial::{box2aabb, IRRELEVANT_MID},
+    std::cell::{Cell, LazyCell},
+    std::cmp,
 };
 use crate::settings::pathing::TriggerKind;
 
@@ -427,13 +437,13 @@ impl RenderInteractivePoi {
                     name: &header_title,
                     flags: TableColumnFlags::WIDTH_STRETCH,
                     init_width_or_weight: 0.0,
-                    user_id: Id::Str("name"),
+                    user_id: UiId::Str("name"),
                 },
                 TableColumnSetup {
                     name: &header_cat,
                     flags: TableColumnFlags::WIDTH_FIXED,
                     init_width_or_weight: 0.0,
-                    user_id: Id::Str("toggle"),
+                    user_id: UiId::Str("toggle"),
                 },
             ],
             table_flags)
@@ -476,7 +486,7 @@ impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
         &mut self,
     ) {
         let Self { ui, rpoi, .. } = *self;
-        let _id = ui.push_id(Id::Int(rpoi.path.path as i32 ^ (rpoi.pack_path().path as i32) << 28));
+        let _id = ui.push_id(UiId::Int(rpoi.path.path as i32 ^ (rpoi.pack_path().path as i32) << 28));
         let action = self.draw_poi_name()
             .map(Err);
 
@@ -758,8 +768,10 @@ impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
 pub(in super::super::super) struct DrawMenuPoi<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub hidden: bool,
+    pub guid: bool,
     pub act_trigger: Option<InteractionEventAction>,
     pub act_untrigger: bool,
+    pub act_guid_copy: bool,
     pub act_selected_poi_delay: Option<f32>,
 }
 impl<'a, 'u> DrawMenuPoi<'a, 'u> {
@@ -773,6 +785,9 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
             },
             true =>
                 self.act_untrigger = with_i18n!("trigger-untrigger", |label| Selectable::new(label).build(ui)),
+        }
+        if self.guid {
+            self.act_guid_copy = with_i18n!("poi-copy-guid", |label| Selectable::new(label).build(ui));
         }
         #[cfg(todo)]
         if with_i18n!("trigger-behaviour", |label| Selectable::new(label).build(ui)) {
@@ -838,6 +853,14 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
                 }
             };
             msg.try_send();
+        } else if self.act_guid_copy {
+            if let Some(guid) = guid {
+                let guid = guid.to_string();
+                with_i18n!("copied", |copied|
+                    rt::send_alert(self.ui, &format!("{copied}: {guid}"))
+                );
+                self.ui.set_clipboard_text(guid);
+            }
         }
     }
 }
@@ -915,8 +938,10 @@ impl PoiInfoContext {
         DrawMenuPoi {
             ui,
             hidden: self.hidden,
+            guid: true,
             act_trigger: None,
             act_untrigger: false,
+            act_guid_copy: false,
             act_selected_poi_delay: self.selected_delay,
         }
     }
@@ -933,6 +958,7 @@ impl PoiInfoContext {
 pub struct PoiInfo {
     pub context: Option<PoiInfoContext>,
     pub wants_static: bool,
+    pub wants_maps: bool,
     pub wants_entities: bool,
     pub include_static: bool,
     pub include_far: bool,
@@ -961,6 +987,7 @@ impl Default for PoiInfo {
             dirty_pos: Default::default(),
             dirty_markers: true,
             wants_static: false,
+            wants_maps: false,
             wants_entities: false,
             include_far: false,
             include_static: false,
@@ -1043,10 +1070,10 @@ impl PoiInfo {
             }
         }
     }
-    pub fn iter_markers<'a>(&'a self) -> impl Iterator<Item = (MarkerId, Option<&'a PoiInfoMarker>)> + 'a {
+    pub fn iter_markers<'a>(&'a mut self) -> impl Iterator<Item = (MarkerId, Option<&'a mut PoiInfoMarker>)> + 'a {
         let exclude_not = self.filter_exclude_not();
         let include_far = self.include_far;
-        self.markers.iter()
+        self.markers.iter_mut()
             .filter(move |(_id, marker)| {
                 if (!marker.sort_flags()).intersects(exclude_not) { return false }
                 let too_far = match marker.has_dist() {
@@ -1116,12 +1143,8 @@ impl PoiInfo {
             false => None,
             true => Some(self.nearby.cached.clone()),
         };
-        let Some(nearby) = self.nearby.try_read_if_changed() else { return };
-        let Some(mut prev) = prev else {
-            // next frame we'll get it idk
-            self.nearby.mark_changed();
-            return
-        };
+        let Some(nearby) = prev.as_ref().and_then(|_| self.nearby.try_read_update()) else { return };
+        let mut prev = prev.flatten();
         let mut nearby = Cow::Borrowed(&*nearby);
         match &mut prev {
             Some(prev) if prev.map_id != nearby.map_id => {
@@ -1155,6 +1178,7 @@ impl PoiInfo {
             prev = None;
         }
         if let Some(prev) = &prev {
+            self.wants_maps = true;
             self.mark_gone(prev.iter_pois().map(|(lpath, _)| {
                 let lpoi_path: Locator<PackMapPath, LoadedPoiPath> = lpath.map_path(LoadedPoiPath::with_path);
                 let mpath: LoadedMarkerPath<PackMapPath> = lpoi_path.map_path(|p| p.pivot_to::<LoadedMarkerNs>().path);
@@ -1162,10 +1186,11 @@ impl PoiInfo {
             }));
         }
         if let Some(nearby) = nearby {
+            self.wants_maps = true;
             self.extend_nearby(nearby.as_ref());
         }
     }
-    pub fn update_static_of<'a>(
+    fn update_static_of_inner<'a>(
         &mut self,
         updates: impl IntoIterator<Item = (MarkerId, PoiPath, &'a LoadedPoiInfo, Option<&'a LoadedPoiShared>, bool)>,
     ) {
@@ -1199,6 +1224,7 @@ impl PoiInfo {
         &mut self,
         updates: &mut dyn Iterator<Item = (MarkerId, PoiPath, CategoryPath, Point3<LocalSpace>, (TriggerKind, bool), (PoiInfoSorts, PoiInfoSorts))>,
     ) {
+        let auto_config = LazyCell::new(|| Settings::try_read().map(|s| s.pathing.as_ref().map(|p| p.trigger_allow_auto).unwrap_or_else(TriggerKind::settings_default_interact)));
         for (mid, poi_path, category_path, pos, (interactive, auto), (flags, flags_populated)) in updates {
             #[cfg(todo)]
             let map_path = mid.get_marker_pack_map_path();
@@ -1220,13 +1246,19 @@ impl PoiInfo {
                 },
             };
             let mut dirty_int = false;
-            if (flags | flags_populated).contains(PoiInfoSorts::INTERACTIVE) {
-                let prev = mem::replace(&mut marker.auto, auto);
-                dirty_int |= prev != marker.auto;
-            }
             if flags_populated.contains(PoiInfoSorts::INTERACTIVE) {
                 let prev = mem::replace(&mut marker.interactive, interactive);
                 dirty_int |= prev != marker.interactive;
+            }
+            if (flags | flags_populated).contains(PoiInfoSorts::INTERACTIVE) {
+                let assume_auto = false;
+                let auto = match auto {
+                    true if auto_config.map(|allowed| marker.interactive.intersects(!allowed)).unwrap_or(!assume_auto) =>
+                        false,
+                    auto => auto,
+                };
+                let prev = mem::replace(&mut marker.auto, auto);
+                dirty_int |= prev != marker.auto;
             }
             if dirty_int {
                 self.dirty.insert(PoiInfoSorts::INTERACTIVE);
@@ -1257,26 +1289,33 @@ impl PoiInfo {
                 }
             }
             if flags_populated.contains(PoiInfoSorts::UNFILTERED) {
-                let prev = mem::replace(&mut marker.filtered, flags.contains(PoiInfoSorts::UNFILTERED));
+                let prev = mem::replace(&mut marker.filtered, !flags.contains(PoiInfoSorts::UNFILTERED));
                 if prev != marker.filtered {
                     self.dirty.insert(PoiInfoSorts::UNFILTERED);
                 }
             }
         }
     }
-    pub fn update_static(&mut self, render: &PackRender) {
-        self.wants_static = false;
-        let mut remove_packs = PackSet::new();
-        let entities = render.pack_data.iter().filter_map(|(pack_path, pack)|
+    pub fn update_static_render(&mut self, render: &PackRender) {
+        let updates = render.pack_data.iter().filter_map(|(_pack_path, pack)|
             match &pack.map_info {
-                Some(map_info) => Some((map_info, &pack.map_state)),
-                None => {
-                    remove_packs.insert(pack_path);
-                    None
-                },
+                Some(map_info) => Some((map_info, Some(&pack.map_state))),
+                None => None,
             }
-        ).flat_map(|(map_info, map)| {
-            map_info.pois().iter().zip(map_info.poi_guids()).map(|((lpath, pinfo), (poi_path, guid))| {
+        );
+        self.update_static_of(&mut {updates})
+    }
+    pub fn update_static_ui(&mut self, packs: &IndexedList<PackRegistryNs, PackIndex, [PackElement]>) {
+        let updates = packs.values().filter_map(|pack_state|
+            pack_state.state.map_info.as_ref().map(|map_info| (map_info, None))
+        );
+        self.update_static_of(&mut {updates})
+    }
+    pub fn update_static_of<'a>(&mut self, updates: &mut dyn Iterator<Item = (&'a SharedMapPackLoaded, Option<&'a SharedMapPackState>)>) {
+        self.wants_static = false;
+        self.dirty_markers = false;
+        let updates = updates.flat_map(move |(map_info, map)| {
+            map_info.pois().iter().zip(map_info.poi_guids()).map(move |((lpath, pinfo), (poi_path, guid))| {
                 let lpoi_path: Locator<PackMapPath, LoadedPoiPath> = map_info.path.rel(lpath);
                 let mpath: LoadedMarkerPath<PackMapPath> = lpoi_path.map_path(|p| p.pivot_to::<LoadedMarkerNs>().path);
                 let mid = MarkerId::for_marker(mpath);
@@ -1294,21 +1333,21 @@ impl PoiInfo {
                         continue,
                     IndexEntry::Vacant(e) => e.insert(Default::default()),
                 };
-                let spoi = map.pois().lookup_ref(&lpath);
-                let mids = [
-                    mid,
-                    MarkerId::with_uuid(guid.cloned().unwrap_or_default().into()),
-                ];
-                let is_hidden = map.is_hidden(match guid.is_some() {
-                    true => &mids,
-                    false => &mids[..1],
+                let spoi = map.and_then(move |map| map.pois().lookup_ref(&lpath));
+                let is_hidden = map.map(move |map| {
+                    let mids = [
+                        mid,
+                        MarkerId::with_uuid(guid.cloned().unwrap_or_default().into()),
+                    ];
+                    map.is_hidden(match guid.is_some() {
+                        true => &mids,
+                        false => &mids[..1],
+                    })
                 });
-                (mid, poi_path, pinfo, spoi, is_hidden)
+                (mid, poi_path, pinfo, spoi, is_hidden.unwrap_or(false))
             })
         });
-        self.update_static_of(entities);
-        if !remove_packs.is_empty() {
-        }
+        self.update_static_of_inner(updates);
     }
     /// XXX: 2 locks is scary :<
     pub fn update_entities(&mut self, range: Box3<LocalSpace>) {
@@ -1384,14 +1423,39 @@ impl PoiInfo {
         }
     }
     pub fn rx_maps(&mut self, maps: &SharedGameplayMap) {
+        self.wants_maps = false;
+        log::debug!("rx maps");
         if let Some(map_id) = maps.map_id {
-            self.markers.retain(|k, _| {
+            let dirty = &mut self.dirty;
+            self.markers.retain(|k, marker| {
                 let map_path = k.get_marker_pack_map_path();
                 if map_path.path != map_id { return false }
-                if maps.get_info_for(map_path.root).is_none() { return false }
-                true
+                let lpoi = maps.ref_loaded_marker(*k)
+                    .and_then(|l| l.to_loaded_poi());
+                if let Some(poi) = lpoi {
+                    if let Some((interest, _auto)) = poi.lpoi_info().get_interaction_attrs().map(|i| SpaceInteraction::interest_for(i)) {
+                        let prev = mem::replace(&mut marker.interactive, interest);
+                        if prev != marker.interactive {
+                            dirty.insert(PoiInfoSorts::INTERACTIVE);
+                        }
+                    }
+
+                    let lpoi = poi.lpoi();
+
+                    let prev = mem::replace(&mut marker.visible, lpoi.visibility.is_visible());
+                    if prev != marker.visible {
+                        dirty.insert(PoiInfoSorts::VISIBLE);
+                    }
+                    let prev = mem::replace(&mut marker.filtered, poi.is_hidden());
+                    if prev != marker.filtered {
+                        dirty.insert(PoiInfoSorts::UNFILTERED);
+                    }
+                    true
+                } else if let Some(_map_info) = maps.get_info_for(map_path.root) {
+                    true
+                } else { false }
             });
-            self.wants_static = true;
+            //self.wants_static = true;
         } else {
             if !self.markers.is_empty() {
                 log::debug!("TODO: premature clear or no?");
@@ -1401,9 +1465,6 @@ impl PoiInfo {
     }
     pub fn pre_draw(&mut self, visibility: PackVisibility) {
         if let PackVisibility::Closed = visibility { return }
-        if self.dirty_markers {
-            self.dirty_markers = false;
-        }
     }
     pub(crate) fn range_for(&self, player_pos: Point3<LocalSpace>) -> Box3<LocalSpace> {
         let half = PoiInfoMarker::DIST_FAR_FILTER_2;
@@ -1413,12 +1474,33 @@ impl PoiInfo {
         )
     }
 }
-#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PoiInfoSort {
     pub dist: u32,
     pub flags: PoiInfoSorts,
     pub pack_path: PackMapPath,
     pub index: MarkerIndex,
+}
+impl PoiInfoSort {
+    const SORT_INVERTED: PoiInfoSorts = PoiInfoSorts::from_bits_retain(
+        PoiInfoSorts::NEARBY.bits()
+        | PoiInfoSorts::VISIBLE.bits()
+        | PoiInfoSorts::INTERACTIVE.bits()
+        | PoiInfoSorts::ENABLED.bits()
+    );
+}
+impl cmp::PartialOrd for PoiInfoSort {
+    fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+impl cmp::Ord for PoiInfoSort {
+    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+        self.dist.cmp(&rhs.dist)
+            .then((self.flags ^ Self::SORT_INVERTED).cmp(&(rhs.flags ^ Self::SORT_INVERTED)))
+            .then(self.pack_path.path.cmp(&rhs.pack_path.path))
+            .then(self.index.cmp(&rhs.index))
+    }
 }
 #[derive(Debug, Clone)]
 pub struct PoiInfoMarker {
@@ -1430,26 +1512,11 @@ pub struct PoiInfoMarker {
     pub category_path: CategoryPath,
     pub dist_dist: f32,
     pub pos: Point3<LocalSpace>,
+    pub display_name: Option<Result<AttrString, Arc<str>>>,
     pub filtered: bool,
     #[cfg(todo = "unnecessary")]
     pub interactive: Option<InteractionAttributes>,
     pub interactive: TriggerKind,
-}
-impl Default for PoiInfoMarker {
-    fn default() -> Self {
-        Self {
-            path: Default::default(),
-            nearby: false,
-            visible: true,
-            enabled: true,
-            auto: false,
-            filtered: false,
-            interactive: TriggerKind::DISMISS,
-            dist_dist: Self::DIST_DIST_MODERATE,
-            pos: Point3::INFINITY,
-            category_path: CategoryPath::with_path(CategoryIndex::MAX),
-        }
-    }
 }
 impl PoiInfoMarker {
     const DIST_DIST_MODERATE: f32 = 100_00.0007;
@@ -1480,7 +1547,8 @@ impl PoiInfoMarker {
     pub fn sort_flags(&self) -> PoiInfoSorts {
         [
             self.nearby.then_some(PoiInfoSorts::NEARBY),
-            self.visible.then_some(PoiInfoSorts::VISIBLE),
+            (self.visible & !self.filtered).then_some(PoiInfoSorts::VISIBLE),
+            (!self.filtered).then_some(PoiInfoSorts::UNFILTERED),
             self.enabled.then_some(PoiInfoSorts::ENABLED),
             #[cfg(todo = "unnecessary")]
             self.has_dist().then_some(PoiInfoSorts::DISTANCE),
@@ -1503,23 +1571,72 @@ impl PoiInfoMarker {
             },
         }
     }
+
+    pub fn display_name(&self) -> Option<&str> {
+        self.display_name.as_ref().map(|n| match n {
+            Ok(n) => &n[..],
+            Err(n) => &n[..],
+        })
+    }
+    pub fn ui_id(&self, mid: &MarkerId) -> (MapPath, UiId) {
+        let map_path = mid.get_marker_pack_map_path();
+        let idx = match self.path.path {
+            #[cfg(todo = "unnecessary")]
+            i if i != PoiIndex::MAX => MarkerIndex::with_poi(idx),
+            _ => mid.get_marker_index().index_poi_unchecked(),
+        };
+        let pidx = (map_path.root.path as u32).rotate_left(28);
+        (map_path.unscope(), UiId::Int((pidx ^ idx) as i32))
+    }
+}
+impl Default for PoiInfoMarker {
+    fn default() -> Self {
+        Self {
+            path: Default::default(),
+            nearby: false,
+            visible: true,
+            enabled: true,
+            auto: false,
+            filtered: false,
+            interactive: TriggerKind::DISMISS,
+            dist_dist: Self::DIST_DIST_MODERATE,
+            pos: Point3::INFINITY,
+            display_name: None,
+            category_path: CategoryPath::with_path(CategoryIndex::MAX),
+        }
+    }
 }
 pub struct DrawPoiInfo<'s, 'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub state: &'s mut PoiInfo,
-    pub pack_state: &'a PackVecOf<PackElement>,
+    pub pack_state: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
+    pub bounds: Box2<f32>,
+    pub bounds_height: f32,
 }
 impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
+    pub fn new(
+        ui: &'a Ui<'u>,
+        state: &'s mut PoiInfo,
+        pack_state: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
+    ) -> Self {
+        Self {
+            ui,
+            state,
+            pack_state,
+            bounds: Box2::ZERO,
+            bounds_height: 0.0,
+        }
+    }
     pub fn draw(&mut self) {
         let ui = self.ui;
-        let bounds: Box2<f32> = Box2::new(
+        self.bounds = Box2::new(
             Point2::from_array(ui.window_content_region_min()),
             Point2::from_array(ui.window_content_region_max()),
         );
         #[cfg(todo = "unused")]
         let start_pos: Point2<f32> = Point2::from_array(ui.cursor_start_pos());
         let window_size: Size2<f32> = Size2::from_array(ui.window_size());
-        let bounds_height = (bounds.max.y - bounds.min.y).max(window_size.height) + ui.text_line_height_with_spacing() * 2.0;
+        self.bounds_height = (self.bounds.max.y - self.bounds.min.y).max(window_size.height) + ui.text_line_height_with_spacing() * 2.0;
 
         if with_i18n!("pois-hidden", |label| ui.checkbox(&label, &mut self.state.include_hidden)) {
             self.state.dirty_markers = true;
@@ -1575,6 +1692,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
     pub fn draw_nearby(
         &mut self,
     ) {
+        let mut map_id_token = (None, None);
         let ui = self.ui;
         let label_static = fl!("poi-static");
         let label_filtered = fl!("poi-filtered");
@@ -1590,205 +1708,244 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
         let mut open_context = None;
         for (mid, marker) in self.state.iter_markers() {
             let Some(marker) = marker else { continue };
-            let render = ui.table_next_column();
-            let named = match marker.category_path {
-                _ if !render => Ok(Some("POI")),
-                cat_path if cat_path.path != CategoryIndex::MAX => {
-                    // TODO: lookup name x.x
-                    let name = 0;
-                    match name {
-                        #[cfg(todo)]
-                        _ => Ok(None),
-                        _ => Err(()),
-                    }
-                },
-                _ => Err(()),
+            let (map_id, ui_id) = marker.ui_id(&mid);
+            if map_id_token.0 != Some(map_id) {
+                // drop prior token first!
+                map_id_token.1 = None;
+                map_id_token.1 = Some(ui.push_id(UiId::Int(map_id.path.get() as i32)));
+                map_id_token.0 = Some(map_id);
+            }
+            let _id = ui.push_id(ui_id);
+            let pos: Point2<f32> = Point2::from_array(ui.cursor_pos());
+            let offset = pos.y + self.bounds.min.y;
+            let render = offset >= 0.0 && offset <= self.bounds_height;
+
+            let marker_path = mid.get_marker_path_pack_map();
+            let map_path = marker_path.root;
+            let lpoi_path: Option<LoadedPoiPath> = match marker_path.path.namespace() {
+                MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(marker_path.path.index_poi_unchecked())),
+                _ => None,
             };
-            match named {
-                Ok(Some(name)) => ui.text(name),
-                Ok(None) => (),
-                Err(()) => {
+            let pack_state = self.pack_state;
+            let pd = LazyCell::new(|| pack_state.lookup_ref(&map_path.root));
+            let map_info = LazyCell::new(|| pd.and_then(|pd| pd.state.map_info.as_ref()));
+            let info = LazyCell::new(|| map_info
+                .and_then(|map_info| lpoi_path.and_then(|loc| map_info.pois().lookup_ref(&loc))));
+            let guid = || lpoi_path.and_then(|lpoi_path|
+                map_info.and_then(|map_info| map_info.poi_guid_by_index(lpoi_path))
+            );
+            let poi_attrs = || info.and_then(|i| i.get_marker_attrs());
+
+            for i in 0..4 {
+                #[cfg(todo)]
+                let coli = {
+                    if !ui.table_next_column() { continue }
+                    ui.table_column_index()
+                };
+                let coli = {
+                    if i == 0 {
+                        ui.table_next_row();
+                        continue
+                    }
+                    ui.table_set_column_index(i);
+                    i
+                };
+                match coli {
+                    0 => (),
+                    1 => {
+                        let label = match (marker.nearby, marker.dist_dist) {
+                            _ if !render => "",
+                            (true, _) => "<",
+                            (false, PoiInfoMarker::DIST_DIST_MODERATE) => "❓",
+                            (false, PoiInfoMarker::DIST_DIST_FAR) => ">",
+                            (false, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "",
+                            (false, _) => "×",
+                        };
+                        if !label.is_empty() {
+                            ui.text(label)
+                        }
+                    },
+                    2 => {
+                        let label = match (marker.filtered, marker.visible) {
+                            _ if !render => "",
+                            (true, _) =>
+                                &label_filtered[..],
+                            (_, false) =>
+                                &label_hidden[..],
+                            _ => "",
+                        };
+                        ui.text(label);
+                    },
+                    3 => {
+                        let mut trigger = false;
+                        let interactive = marker.interactive & PoiInfoSorts::INTERACTIVE_MASK;
+                        let interest = marker.interactive;
+                        let label = match interactive.is_empty() {
+                            _ if !render => continue,
+                            true if marker.interactive.contains(TriggerKind::BOUNCE) => {
+                                if ui.small_button(&label_bounce) {
+                                    trigger = true;
+                                }
+                                ""
+                            },
+                            true => {
+                                &label_static[..]
+                            },
+                            false if marker.auto => &label_auto[..],
+                            false => {
+                                let label = if interest.contains(TriggerKind::COPY) {
+                                    &label_copy[..]
+                                } else if interest.contains(TriggerKind::INFO) {
+                                    &label_info[..]
+                                } else if interactive == TriggerKind::BEHAVIOUR {
+                                    &label_behaviour[..]
+                                } else {
+                                    &label_activate[..]
+                                };
+                                if ui.small_button(&label) {
+                                    trigger = true;
+                                }
+                                ""
+                            },
+                        };
+                        if !label.is_empty() {
+                            ui.text(label)
+                        }
+                        let has_tooltip = interest.intersects(TriggerKind::INFO | TriggerKind::COPY | TriggerKind::BEHAVIOUR);
+                        if has_tooltip && ui.is_item_hovered() {
+                            #[cfg(deleteme)]
+                            let pack_path = mid.get_marker_path_pack_map();
+                            #[cfg(deleteme)]
+                            let lidx = mid.get_marker_index();
+                            #[cfg(deleteme)]
+                            let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
+                                MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
+                                _ => None,
+                            };
+                            #[cfg(deleteme)]
+                            let pd = self.pack_state.lookup_ref(&pack_path.root.root);
+                            #[cfg(deleteme)]
+                            let map_info = pd.and_then(|pd| pd.state.map_info.as_ref());
+                            #[cfg(deleteme)]
+                            let info = map_info
+                                .and_then(|map_info| lpoi_path.and_then(|loc| map_info.pois().lookup_ref(&loc)));
+                            if let Some(attrs) = poi_attrs() {
+                                ui.tooltip(|| {
+                                    let copyable = attrs.interaction.as_ref().and_then(|i| i.copy_value().map(|v| (v, i.copy_message())));
+                                    let info = attrs.interaction.as_ref().and_then(|i| i.info());
+                                    if let Some(msg) = info {
+                                        ui.text(msg);
+                                    }
+                                    if let Some((value, msg)) = copyable {
+                                        if info.is_some() {
+                                            ui.separator();
+                                        }
+                                        ui.text("\"");
+                                        ui.same_line();
+                                        ui.text(value);
+                                        ui.same_line();
+                                        ui.text("\"");
+                                        if let Some(msg) = msg {
+                                            ui.separator();
+                                            ui.text(msg);
+                                        }
+                                    }
+                                })
+                            }
+                        }
+                    },
+                    _ => (),
+                }
+            }
+            ui.table_set_column_index(0);
+
+            let pack_data = LazyCell::new(|| pd.and_then(|pd| pd.state.pack_data()));
+            let cat_path = match marker.category_path {
+                p if p.path != CategoryIndex::MAX => Some(p),
+                _ => None,
+            };
+            let cat = LazyCell::new(||{
+                let cat_path = cat_path.or_else(|| info.map(|pinfo| pinfo.category_path));
+                pd.and_then(|state| cat_path.and_then(|cat_path| {
+                    state.categories.categories.get(&cat_path).map(Ok)
+                    .or_else(|| {
+                        pack_data.as_ref().and_then(|pack| pack.categories.all_categories.get_index(cat_path.path as usize).map(Err))
+                    })
+                }))
+            });
+            let cat_info = LazyCell::new(|| cat.map(|cat| match cat {
+                Ok(cat_info) => {
+                    Cow::Borrowed(cat_info)
+                },
+                Err((_cat_id, cat)) => {
+                    Cow::Owned(CategoryInfo::from_pack_category(cat))
+                },
+            }));
+            #[cfg(deleteme)]
+            let poi_attrs = LazyCell::new(|| {
+                info.and_then(|i| i.get_marker_attrs())
+                .map(Ok)
+                .or_else(|| cat_info.as_ref().map(Err))
+            });
+
+            let mut name_is_cat = false;
+            let named = if !render {
+                Some("POI")
+            } else if marker.display_name.is_none() {
+                let poi_name = poi_attrs().and_then(|a| a.tip_name.clone());
+                name_is_cat = poi_name.is_none();
+                marker.display_name = poi_name.map(Ok).or_else(||
+                    cat_info.as_ref().and_then(|info| info.display_name.clone())
+                        .map(Err)
+                );
+                None
+            } else {
+                None
+            };
+            match named.or(marker.display_name()) {
+                Some(name) => ui.text(name),
+                None => {
                     ui.text(mid.get_marker_path_pack_map().root.rel(marker.path).to_string())
                 },
             }
             if ui.is_item_clicked_with_button(MouseButton::Right) {
-                let lidx = mid.get_marker_index();
-                let pack_path = mid.get_marker_path_pack_map();
-                let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
-                    MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
-                    _ => None,
-                };
                 open_context = lpoi_path.map(|loaded_path| PoiInfoContext::new(
                     marker.path,
-                    pack_path.root.rel(loaded_path.path),
-                    {
-                        let pd = self.pack_state.lookup_ref(&pack_path.root.root);
-                        let map_info = pd.and_then(|pd| pd.state.map_info.as_ref());
-                        map_info.and_then(|map_info| map_info.poi_guid_by_index(loaded_path)).cloned()
-                    },
+                    map_path.rel(loaded_path.path),
+                    guid().cloned(),
                     !marker.visible | marker.filtered,
                 ));
             } else if ui.is_item_hovered() {
-                let pack_path = mid.get_marker_path_pack_map();
-                let lidx = mid.get_marker_index();
-                let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
-                    MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
-                    _ => None,
+                let name_is_cat = matches!(marker.display_name, Some(Err(..)));
+                let (poi_tip, poi_desc) = match poi_attrs() {
+                    Some(attrs) =>
+                        (attrs.tip_name(), attrs.tip_description()),
+                    None => (None, None),
                 };
-                let pd = self.pack_state.lookup_ref(&pack_path.root.root);
-                let map_info = pd.and_then(|pd| pd.state.map_info.as_ref());
-                let info = map_info
-                    .and_then(|map_info| lpoi_path.and_then(|loc| map_info.pois().lookup_ref(&loc)));
-                    let mut pack_data = None;
-                let attrs = info.and_then(|i| i.get_marker_attrs())
-                    .map(Ok)
-                    .or_else(|| {
-                        let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
-                            MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
-                            _ => None,
-                        };
-                        let cat_path = match marker.category_path {
-                            p if p.path != CategoryIndex::MAX => Some(p),
-                            _ => lpoi_path.and_then(|lpath| pd.and_then(|pd| pd.state.map_info.as_ref())
-                                .and_then(|map_info| map_info.pois().lookup_ref(&lpath))
-                                .map(|pinfo| pinfo.category_path)),
-                        };
-                        self.pack_state.lookup_ref(&pack_path.root.root).and_then(|state| cat_path.and_then(|cat_path| {
-                            state.categories.categories.get(&cat_path).map(Ok)
-                            .or_else(|| {
-                                pack_data = state.state.pack_data();
-                                pack_data.as_ref().and_then(|pd| pd.categories.all_categories.get_index(cat_path.path as usize).map(Err))
-                            })
-                        })).map(Err)
-                    });
-                let cat_info_storage;
-                let cat_info = match attrs {
-                    Some(Ok(attrs)) => {
-                        ui.tooltip(|| {
-                            if let Some(name) = attrs.tip_name() {
-                                ui.text(name);
-                            }
-                            if let Some(desc) = attrs.tip_description() {
-                                ui.text(desc);
-                            }
-                        });
-                        None
-                    },
-                    Some(Err(Ok(cat_info))) => {
-                        Some(cat_info)
-                    },
-                    Some(Err(Err((_cat_id, cat)))) => {
-                        cat_info_storage = super::CategoryInfo::from_pack_category(cat);
-                        Some(&cat_info_storage)
-                    },
-                    None => None,
-                };
-                if let Some((info, tooltip)) = cat_info.and_then(|i| i.tooltip().map(|tt| (i, tt))) {
-                    super::DrawCategoryTooltip {
-                        ui,
-                        info,
-                        tooltip,
-                        display_name_visible: false,
-                        include_copyable: false,
-                    }.draw();
-                }
-            }
-            ui.table_next_column();
-            let label = match (marker.nearby, marker.dist_dist) {
-                _ if !render => "",
-                (true, _) => "<",
-                (false, PoiInfoMarker::DIST_DIST_MODERATE) => "❓",
-                (false, PoiInfoMarker::DIST_DIST_FAR) => ">",
-                (false, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "",
-                (false, _) => "×",
-            };
-            if !label.is_empty() {
-                ui.text(label)
-            }
-            ui.table_next_column();
-            let label = match (marker.filtered, marker.visible) {
-                _ if !render => "",
-                (true, _) =>
-                    &label_filtered[..],
-                (_, false) =>
-                    &label_hidden[..],
-                _ => "",
-            };
-            ui.text(label);
-            ui.table_next_column();
-            let mut trigger = false;
-            let interactive = marker.interactive & PoiInfoSorts::INTERACTIVE_MASK;
-            let label = match interactive.is_empty() {
-                _ if !render => "",
-                true if marker.interactive.contains(TriggerKind::BOUNCE) => {
-                    if ui.small_button(&label_bounce) {
-                        trigger = true;
-                    }
-                    ""
-                },
-                true => {
-                    &label_static[..]
-                },
-                false if marker.auto => &label_auto[..],
-                false => {
-                    let mut interest = marker.interactive;
-                    let label = if interest.contains(TriggerKind::COPY) {
-                        &label_copy[..]
-                    } else if interest.contains(TriggerKind::INFO) {
-                        &label_info[..]
-                    } else if interactive == TriggerKind::BEHAVIOUR {
-                        &label_behaviour[..]
-                    } else {
-                        &label_activate[..]
-                    };
-                    if ui.small_button(&label) {
-                        trigger = true;
-                    }
-                    let has_tooltip = interest.intersects(TriggerKind::INFO | TriggerKind::COPY | TriggerKind::BEHAVIOUR);
-                    if has_tooltip && ui.is_item_hovered() {
-                        let pack_path = mid.get_marker_path_pack_map();
-                        let lidx = mid.get_marker_index();
-                        let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
-                            MarkerIndex::NS_POI => Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
-                            _ => None,
-                        };
-                        let pd = self.pack_state.lookup_ref(&pack_path.root.root);
-                        let map_info = pd.and_then(|pd| pd.state.map_info.as_ref());
-                        let info = map_info
-                            .and_then(|map_info| lpoi_path.and_then(|loc| map_info.pois().lookup_ref(&loc)));
-                        let attrs = info.and_then(|i| i.get_marker_attrs());
-                        if let Some(attrs) = attrs {
-                            ui.tooltip(|| {
-                                let copyable = attrs.interaction.as_ref().and_then(|i| i.copy_value().map(|v| (v, i.copy_message())));
-                                let info = attrs.interaction.as_ref().and_then(|i| i.info());
-                                if let Some(msg) = info {
-                                    ui.text(msg);
-                                }
-                                if let Some((value, msg)) = copyable {
-                                    if info.is_some() {
-                                        ui.separator();
-                                    }
-                                    ui.text("\"");
-                                    ui.same_line();
-                                    ui.text(value);
-                                    ui.same_line();
-                                    ui.text("\"");
-                                    if let Some(msg) = msg {
-                                        ui.separator();
-                                        ui.text(msg);
-                                    }
-                                }
-                            })
+                if poi_tip.is_some() | poi_desc.is_some() {
+                    ui.tooltip(|| {
+                        if let Some(name) = poi_tip {
+                            ui.text(name);
                         }
+                        if let Some(desc) = poi_desc {
+                            ui.text(desc);
+                        }
+                    });
+                } else if let Some(info) = cat_info.as_ref() {
+                    if let Some(tooltip) = info.tooltip() {
+                        super::DrawCategoryTooltip {
+                            ui,
+                            info,
+                            tooltip,
+                            display_name_visible: name_is_cat,
+                            include_copyable: false,
+                        }.draw();
                     }
-                    ""
-                },
-            };
-            if !label.is_empty() {
-                ui.text(label)
+                }
             }
         }
 
+        #[cfg(deleteme)]
         if let Some(context) = open_context {
             let open = self.state.context.is_none();
             self.state.context = Some(context);
@@ -1823,17 +1980,17 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
         let table_token = ui.begin_table_with_flags(title_id, 4, table_flags);
         if let Some(..) = &table_token {
             let cols = [
-                (Self::HEADER_TITLE, TableColumnFlags::WIDTH_STRETCH | TableColumnFlags::NO_REORDER | TableColumnFlags::NO_HIDE | TableColumnFlags::DEFAULT_SORT),
-                (Self::HEADER_NEARBY, TableColumnFlags::WIDTH_STRETCH | TableColumnFlags::DEFAULT_SORT),
-                (Self::HEADER_INTERACT, TableColumnFlags::DEFAULT_SORT | TableColumnFlags::PREFER_SORT_DESCENDING),
-                (Self::HEADER_HIDDEN, TableColumnFlags::DEFAULT_SORT),
+                (Self::HEADER_TITLE, TableColumnFlags::WIDTH_STRETCH | TableColumnFlags::NO_REORDER | TableColumnFlags::NO_HIDE | TableColumnFlags::DEFAULT_SORT, 2.0),
+                (Self::HEADER_NEARBY, TableColumnFlags::WIDTH_STRETCH /*| TableColumnFlags::DEFAULT_SORT*/, 0.5),
+                (Self::HEADER_HIDDEN, TableColumnFlags::DEFAULT_SORT, 1.5),
+                (Self::HEADER_INTERACT, TableColumnFlags::DEFAULT_SORT /*| TableColumnFlags::PREFER_SORT_DESCENDING*/, 1.0),
             ];
-            for (i, (id, flags)) in cols.into_iter().enumerate() {
+            for (i, (id, flags, weight)) in cols.into_iter().enumerate() {
                 with_i18n!(id, |header| ui.table_setup_column_with(TableColumnSetup {
                     name: &header,
                     flags,
                     init_width_or_weight: 0.0,
-                    user_id: Id::Int(i as _),
+                    user_id: UiId::Ptr(id.as_ptr() as *const _),
                 }));
                 #[cfg(todo = "unnecessary")]
                 if ui.table_next_column() {
@@ -1858,11 +2015,11 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                 let cols = [
                     (Self::HEADER_TITLE, PoiInfoSorts::DISTANCE),
                     (Self::HEADER_NEARBY, PoiInfoSorts::NEARBY),
-                    (Self::HEADER_INTERACT, self.state.include_static.then_some(PoiInfoSorts::INTERACTIVE).unwrap_or_default()),
                     (Self::HEADER_HIDDEN, self.state.include_hidden.then_some(PoiInfoSorts::VISIBLE).unwrap_or_default()),
+                    (Self::HEADER_INTERACT, self.state.include_static.then_some(PoiInfoSorts::INTERACTIVE).unwrap_or_default()),
                 ];
                 for spec in specs.iter() {
-                    let Some(&(_id, flag)) = cols.get(spec.column_user_id() as usize) else {
+                    let Some(&(_id, flag)) = cols.get(spec.column_idx() as usize) else {
                         log::debug!("BUG: spec idx");
                         continue
                     };
@@ -1883,7 +2040,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
             } else {
                 sorts = PoiInfoSorts::DEFAULT_UI
             };
-            if self.state.prepare_sort(sorts) {
+            if self.state.prepare_sort(sorts) | should_sort.unwrap_or(false) {
                 self.state.apply_sort(sorts, sort_desc)
             }
             if let (Some(mut sorting), Some(true)) = (sorting, should_sort) {

@@ -373,13 +373,15 @@ pack-root-submenu = Pack Control
 
 pois-interactive = Interactive
 pois-nearby = Nearby
-#pois-map = On-map
-pois-map = Loaded
+pois-map = On-map
+#pois-map = Loaded
 pois-hidden = Hidden
 pois-other = { poi-static } Markers
 poi-auto = { pathing-config-autotrigger }
 poi-filtered = { pois-hidden }
 poi-static = Static
+poi-guid = GUID
+poi-copy-guid = { copy } { poi-guid }
 # idk how to do a select case is our fluent too old?
 #dismiss-behaviour-1 = leave
 dismiss-behaviour-1 = temporarily

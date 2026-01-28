@@ -1621,7 +1621,7 @@ impl CategoryCollectionState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct CategoryInfo {
     /// TODO: probably not yet used?
     pub id: Option<CategoryId>,
