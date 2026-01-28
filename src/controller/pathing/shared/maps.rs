@@ -639,6 +639,10 @@ impl SharedMapPackState {
             .cloned()
             .collect()
     }
+    /// TODO: ensure sorted and binary search instead?
+    pub fn is_hidden(&self, marker_ids: &[MarkerId]) -> bool {
+        self.hidden_markers.iter().any(|hidden| marker_ids.contains(hidden))
+    }
 
     pub fn loaded_pois<'a>(
         &'a self,

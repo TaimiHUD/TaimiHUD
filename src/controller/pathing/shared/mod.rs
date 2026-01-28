@@ -17,6 +17,7 @@ pub use {
         maps::{
             LoadedMarkerRef,
             LoadedPoiRef,
+            LoadedPoiShared,
             LoadedTrailRef,
             LoadedTrailShared,
             SharedGameplayMap,

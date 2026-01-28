@@ -42,6 +42,7 @@ where
 }
 pub const IRRELEVANT_MIN: f32 = -9999.0;
 pub const IRRELEVANT_MAX: f32 = -9990.0;
+pub const IRRELEVANT_MID: f32 = (IRRELEVANT_MAX - IRRELEVANT_MIN) / 2.0;
 pub const fn irrelevant_box2<U: Unit<Scalar = f32>>() -> Box2<U> {
     let min = Point2::new(IRRELEVANT_MIN, IRRELEVANT_MIN);
     let max = Point2::new(IRRELEVANT_MAX, IRRELEVANT_MAX);

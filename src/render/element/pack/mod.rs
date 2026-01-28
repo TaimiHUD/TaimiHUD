@@ -61,6 +61,7 @@ pub use self::{
     },
     menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu, DrawPackAdvancedMenu},
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
+    interact::{PoiInfo, DrawPoiInfo},
 };
 
 mod categories;
@@ -75,6 +76,7 @@ pub struct PackElements {
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
     pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
+    pub interact: PoiInfo,
     pub filter_query: CategoryFilterQuery,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
@@ -93,6 +95,7 @@ impl PackElements {
             if let Some(shared) = &self.shared {
                 self.packs_rx.restart_watching(&shared.packs.packs);
                 self.maps_rx.restart_watching(&shared.gameplay);
+                self.interact.init(shared);
             }
         }
         let Some(_shared) = &self.shared else { return };
@@ -135,10 +138,14 @@ impl PackElements {
                     pack_state.state.map_info = None;
                 }
             }
+            self.interact.rx_maps(&maps);
         }
+        self.interact.rx_nearby();
+        self.interact.update_entities_relaxed();
         for pack in self.pack_state.values_mut() {
             pack.pre_draw(&mut self.filter_query, visibility);
         }
+        self.interact.pre_draw(visibility);
     }
     /// TODO: binary heap with real sort key
     fn iter_packs_draw<'a, 'u, 'ui>(ui: &'u Ui<'ui>, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>, amt_hidden: &'a mut usize) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
