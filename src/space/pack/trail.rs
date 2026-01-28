@@ -44,6 +44,7 @@ impl ActiveTrail {
         render_bookmark: usize,
         device: &Dx11Device,
     ) -> anyhow::Result<ActiveTrail> {
+        let colour = trail.attributes.render().tint().truncate();
         let trail_width = params.width();
         let resolution = params.resolution();
         let smoothing = params.smoothing();
@@ -145,13 +146,13 @@ impl ActiveTrail {
 
                 vertices.push(Vertex {
                     position: (cur_point - mod_distance).into(),
-                    colour: glam::Vec3::ONE,
+                    colour,
                     normal: -normal_scale_dir,
                     texture: glam::vec2(1.0, distance / trail_width - 1.0),
                 });
                 vertices.push(Vertex {
                     position: (cur_point + mod_distance).into(),
-                    colour: glam::Vec3::ONE,
+                    colour,
                     normal: normal_scale_dir,
                     texture: glam::vec2(0.0, distance / trail_width - 1.0),
                 });
@@ -168,13 +169,13 @@ impl ActiveTrail {
             );
             vertices.push(Vertex {
                 position: (cur_point - mod_distance).into(),
-                colour: glam::Vec3::ONE,
+                colour,
                 normal: -normal_scale_dir,
                 texture: glam::vec2(1.0, distance / trail_width - 1.0),
             });
             vertices.push(Vertex {
                 position: (cur_point + mod_distance).into(),
-                colour: glam::Vec3::ONE,
+                colour,
                 normal: normal_scale_dir,
                 texture: glam::vec2(0.0, distance / trail_width - 1.0),
             });
