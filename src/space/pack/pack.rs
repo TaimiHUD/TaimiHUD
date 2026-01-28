@@ -514,6 +514,197 @@ impl PackRender {
         }
     }
 
+    pub(crate) fn check_bvh(&mut self) -> bool {
+        true
+    }
+    #[cfg(todo)]
+    pub(crate) fn check_bvh(&mut self) -> bool {
+        use bvh::bvh::BvhNode;
+        let Some(spacepacks) = self.spacepacks.cached.as_ref() else { return true };
+        let ecount = spacepacks.render_entities.entities.len();
+        thread_local! {
+            static BVH_AAA: std::cell::Cell<u64> = std::cell::Cell::new(0);
+            static BVH_BROKEN: std::cell::Cell<bool> = std::cell::Cell::new(false);
+        }
+        if BVH_BROKEN.get() { return false }
+
+        let prevecount = STATS_ENTITY_COUNT.get() as usize;
+        let nodecount = spacepacks.bvh.nodes.len();
+        let spacks = &**spacepacks;
+        let mut hasher = rustc_hash::FxHasher::with_seed(1);
+        use std::hash::{Hash, Hasher};
+        spacks.bvh.nodes.len().hash(&mut hasher);
+        for n in &spacks.bvh.nodes {
+            let parent_index = match n {
+                &BvhNode::Leaf { parent_index, .. } => parent_index,
+                &BvhNode::Node { parent_index, .. } => parent_index,
+            };
+            parent_index.hash(&mut hasher);
+        }
+        for e in &spacks.render_entities.entities {
+            e.id.hash(&mut hasher);
+            e.bounds.min.x.to_bits().hash(&mut hasher);
+        }
+        let hash = hasher.finish();
+        let dirty = ecount != prevecount || BVH_AAA.get() != hash;
+        BVH_AAA.set(hash);
+
+        let mut invalid = false;
+        let mut invalide = false;
+        let mut alive = BTreeSet::<usize>::new();
+        let mut checkalive = |index: usize| -> bool {
+            let Some(&BvhNode::Node { parent_index, child_l_index, child_r_index, .. }) = spacks.bvh.nodes.first() else { return false };
+
+            if parent_index != 0 {
+                log::warn!("bad root parent");
+                return false
+            }
+            alive.insert(0);
+            let mut init = vec![(child_l_index, 0), (child_r_index, 0)];
+            while let Some((i, parent)) = init.pop() {
+                alive.insert(i);
+                match spacks.bvh.nodes.get(i) {
+                    None => {
+                        log::warn!("missing child {i} via parent={parent}");
+                    },
+                    Some(BvhNode::Leaf { parent_index, .. } | BvhNode::Node { parent_index, .. }) if *parent_index != parent => {
+                        log::warn!("bad parent of child {i} expected {parent}, but got {parent_index}");
+                    },
+                    Some(&BvhNode::Leaf { shape_index, .. }) if shape_index >= ecount => {
+                        log::warn!("live reference to shape#{shape_index} via {i} via {parent}");
+                    },
+                    Some(&BvhNode::Leaf { .. }) => (),
+                    Some(&BvhNode::Node { child_l_index, child_r_index, .. }) => {
+                        if !alive.contains(&child_l_index) {
+                            init.push((child_l_index, i));
+                        }
+                        if !alive.contains(&child_r_index) {
+                            init.push((child_r_index, i));
+                        }
+                    },
+                };
+            }
+            alive.contains(&index)
+        };
+        let mut checknode = |i: usize, index: usize| if index >= nodecount {
+            if dirty | true {
+                log::warn!("bvhnode#{i} points to invalid node#{index}");
+                #[cfg(deleteme)]
+                if !invalid && !checkalive(i) {
+                    log::warn!("node dead though?");
+                }
+            }
+            invalid = true;
+        };
+        let mut checkentity = |i: usize, index: usize| match spacks.render_entities.entities.get(index) {
+            None => {
+                if dirty | true {
+                    log::warn!("bvhnode#{i} points to invalid shape#{index}");
+                    #[cfg(deleteme)]
+                    if !invalide && !checkalive(i) {
+                        log::warn!("node dead though?");
+                    }
+                }
+                invalide = true;
+            },
+            Some(e) if e.bh_index != i => {
+                if dirty | true {
+                    log::warn!("bvhnode#{i} points to shape#{index}, bit it points to bvhnode#{} instead!", e.bh_index);
+                    #[cfg(deleteme)]
+                    if !invalide && !checkalive(i) {
+                        log::warn!("node dead though?");
+                    }
+                }
+                invalide = true;
+            },
+            _ => (),
+        };
+        if dirty {
+            fn print_node(
+                nodes: &[BvhNode<f32, 3>],
+                node_index: usize,
+                depth: usize,
+            ) -> bool {
+                match nodes.get(node_index) {
+                    _ if depth > 34 => {
+                        log::error!("too deep");
+                        false
+                    },
+                    Some(&BvhNode::Node {
+                        child_l_index,
+                        child_r_index,
+
+                        child_l_aabb,
+
+                        child_r_aabb,
+
+                        ..
+
+                    }) => {
+
+                        let padding: String = " ".repeat(depth);
+
+                        log::debug!("{}child_l#{child_l_index} {}", padding, child_l_aabb);
+
+                        let res = print_node(nodes, child_l_index, depth + 1);
+
+                        log::debug!("{}child_r#{child_r_index} {}", padding, child_r_aabb);
+
+                        if !res {
+                            res
+                        } else {
+                            print_node(nodes, child_r_index, depth + 1)
+                        }
+                    }
+                    Some(&BvhNode::Leaf { shape_index, .. }) => {
+
+                        let padding: String = " ".repeat(depth);
+
+                        log::debug!("{}shape#{:?}", padding, shape_index);
+
+                        true
+                    },
+                    None => {
+                        log::error!("too deep");
+                        false
+                    },
+                }
+            }
+            fn pretty_print(bvh: &bvh::bvh::Bvh<f32, 3>) -> bool {
+        let nodes = &bvh.nodes;
+                print_node(nodes, 0, 0)
+    }
+            if !pretty_print(&spacks.bvh) {
+                log::warn!("nodes: {}, entities: {}", spacks.bvh.nodes.len(), spacks.render_entities.entities.len());
+                checkalive(0);
+                for &i in &alive {
+                    match spacks.bvh.nodes.get(i) {
+                        Some(&BvhNode::Leaf { parent_index, shape_index }) => {
+                            checknode(i, parent_index);
+                            checkentity(i, shape_index);
+                        },
+                        Some(&BvhNode::Node { parent_index, child_l_index, child_l_aabb: _, child_r_index, child_r_aabb: _ }) => {
+                            checknode(i, parent_index);
+                            checknode(i, child_l_index);
+                            checknode(i, child_r_index);
+                        },
+                        None => log::warn!("bvhnode#{i} gone?"),
+                    }
+                }
+                BVH_BROKEN.set(true);
+                return false
+            }
+        }
+        #[cfg(todo)]
+        for (i, node) in spacks.bvh.nodes.iter().enumerate() {
+        }
+        #[cfg(todo)]
+        if invalid || invalide {
+            return
+        }
+        true
+    }
+
     pub fn draw(
         &mut self,
         camera: RenderPosition,

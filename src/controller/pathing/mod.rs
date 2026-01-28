@@ -334,6 +334,7 @@ impl PathingController {
                 Err(e) => crate::log_join_error("pathing", e),
             },
             Some((_when, m)) = self.scheduled_events.infinite_mut().next() => {
+                log::debug!("time@{_when:?} for {m:?}");
                 return self.handle_message(m).await
             },
             _ = &mut self.filter_next_schedule => {
