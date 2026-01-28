@@ -9,7 +9,7 @@ use {
         },
         resources::Vertex,
     },
-    glamour::Box3,
+    glamour::{Box3, Vector3},
     std::mem,
     taimi_hoard::iters::IterExt,
     taimi_meta::{
@@ -124,8 +124,9 @@ impl LoadedTrail {
         trail_data: &TrailData,
         trail: &Trail,
         params: &TrailParams,
+        colour: Vector3,
     ) -> LoadedTrailGeometry {
-        Self::vertices_with_data(trail_data, params, trail.scale(), trail.is_wall())
+        Self::vertices_with_data(trail_data, params, trail.scale(), trail.is_wall(), colour)
     }
 
     pub fn vertices_with_data(
@@ -134,6 +135,7 @@ impl LoadedTrail {
         scale: f32,
         is_wall: bool,
         y_offset: f32,
+        colour: Vector3<f32>,
     ) -> LoadedTrailGeometry {
         let mut params = params.bake();
         params.y_offset = y_offset;
@@ -147,7 +149,7 @@ impl LoadedTrail {
                 log::trace!("Section {isec} is empty.");
                 0
             } else {
-                params.interpolate_section_vertices(&mut vertices, section, scale, is_wall);
+                params.interpolate_section_vertices(&mut vertices, section, scale, is_wall, colour);
                 let vertex_count = vertices.len() - prior_count;
                 if log::log_enabled!(log::Level::Trace) {
                     let point_count = vertex_count / 2;
