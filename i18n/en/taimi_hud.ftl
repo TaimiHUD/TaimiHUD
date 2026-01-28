@@ -371,9 +371,15 @@ pack-category = Category
 pack-root = Main { pack-category }
 pack-root-submenu = Pack Control
 
+pois-interactive = Interactive
 pois-nearby = Nearby
-pois-map = On-map
+#pois-map = On-map
+pois-map = Loaded
 pois-hidden = Hidden
+pois-other = { poi-static } Markers
+poi-auto = { pathing-config-autotrigger }
+poi-filtered = { pois-hidden }
+poi-static = Static
 # idk how to do a select case is our fluent too old?
 #dismiss-behaviour-1 = leave
 dismiss-behaviour-1 = temporarily
@@ -459,6 +465,11 @@ trigger-hide = Hide category
 trigger-script = Scripts
 trigger-behaviour = Dismiss
 trigger-bounce = Animations
+poi-activate-bounce = Animate
+poi-activate-info = Read
+poi-activate-copy = { trigger-copy }
+poi-activate-behaviour = { trigger-behaviour }
+poi-activate = Activate
 
 ## Festivals
 

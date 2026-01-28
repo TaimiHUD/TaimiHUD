@@ -679,15 +679,30 @@ impl RenderState {
         {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
+            let visibility = match self.pathing_window.open {
+                _ if self.pathing_menu_open => PackVisibility::Visible,
+                true if !self.pathing_window.visible =>
+                    PackVisibility::Pending,
+                true => PackVisibility::Visible,
+                false => PackVisibility::Closed,
+            };
             self.machine
                 .pack_ui_state
-                .pre_draw(match self.pathing_window.open {
-                    _ if self.pathing_menu_open => PackVisibility::Visible,
-                    true if !self.pathing_window.visible =>
-                        PackVisibility::Pending,
-                    true => PackVisibility::Visible,
-                    false => PackVisibility::Closed,
-                });
+                .pre_draw(visibility);
+            if self.pathing_window.pois_visible(&self.machine) {
+                let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
+                let interact = &mut self.machine.pack_ui_state.interact;
+                if let Some(Ok(engine)) = &self.engine {
+                    if interact.wants_static {
+                        interact.update_static(&engine.packs);
+                    }
+                }
+                let player_pos = match self.machine.gameplay.gameplay_map() {
+                    Some(..) => player_pos,
+                    None => None,
+                };
+                interact.update_pos_relaxed(player_pos);
+            }
             self.pathing_window.pre_draw(&mut self.machine);
             self.pathing_menu_open = false;
         }

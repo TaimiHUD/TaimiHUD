@@ -102,9 +102,21 @@ impl SpaceInteraction {
         struct RoundPointQuery(Point3<LocalSpace>);
         impl aabb::IntersectsAabb<f32, 3> for RoundPointQuery {
             fn intersects_aabb(&self, aabb: &aabb::Aabb<f32, 3>) -> bool {
-                let midpoint: Point3<LocalSpace> = MintConv::from_nalg(aabb.center());
-                let radius = (aabb.max.x - aabb.min.x) / 2.0;
-                midpoint.distance(self.0) <= radius
+                const DIFF_EPSILON: f32 = 0.0001;
+                let is_leaf = match aabb.size() {
+                    sz => (sz.x - sz.y).abs() < DIFF_EPSILON,
+                };
+                match is_leaf {
+                    true => {
+                        let midpoint: Point3<LocalSpace> = MintConv::from_nalg(aabb.center());
+                        let radius = (aabb.max.x - aabb.min.x) / 2.0;
+                        midpoint.distance(self.0) <= radius
+                    },
+                    false => {
+                        // branch nodes contain union of bounds, so radius would be incorrect?
+                        aabb.contains(&self.0.into_nalg())
+                    },
+                }
             }
         }
         RoundPointQuery(pos)
@@ -169,8 +181,11 @@ impl SpaceInteraction {
     pub fn is_interactive(poi: &LoadedPoi) -> bool {
         !poi.get_interaction_attrs().map(|i| Self::interaction_is_empty(i)).unwrap_or(true)
     }
+    pub fn interaction_is(i: &InteractionAttributes, mask: TriggerKind) -> bool {
+        Self::interest_for(i).0.intersects(mask)
+    }
     fn interaction_is_empty(i: &InteractionAttributes) -> bool {
-        Self::interest_for(i).0.is_empty()
+        Self::interaction_is(i, TriggerKind::all())
     }
     /// short-circuiting version, do we care?
     #[cfg(todo)]

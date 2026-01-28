@@ -361,7 +361,7 @@ impl PathingWindowState {
 }
 
 use {
-    crate::render::element::pack::interact::{RenderInteractivePoi, DrawMenuPoi},
+    crate::render::element::pack::interact::{RenderInteractivePoi, DrawMenuPoi, DrawPoiInfo},
     crate::controller::pathing::{
         registry::{LoadedPoiPath, PoiMapPath},
         info::EMPTY_INTERACTION_ATTRS,
@@ -382,8 +382,49 @@ thread_local! {
     static POI_DELAY: Cell<Option<f32>> = Cell::new(None);
 }
 impl PathingWindowState {
+    /// TODO
+    pub fn pois_visible(&self, machine: &RenderMachine) -> bool {
+        self.open
+    }
+
+    pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+        let mut draw = DrawPoiInfo {
+            ui,
+            state: &mut machine.pack_ui_state.interact,
+            pack_state: &mut machine.pack_ui_state.pack_state,
+        };
+        let was_context = draw.state.context.is_some();
+        draw.draw();
+        let context_id = "poi-context";
+        let popup = ui.begin_popup(context_id);
+        let popup_drawn = popup.is_some();
+        if let Some(_token) = popup {
+            if let Some(context) = &mut draw.state.context {
+                let mut menu = context.prepare_draw_menu(ui);
+                menu.draw();
+                context.finish_draw_menu(menu);
+            } else {
+                ui.close_current_popup();
+            }
+        }
+        if popup_drawn && draw.state.context.is_some() {
+            if !was_context {
+                ui.open_popup(context_id);
+            }
+        } else if popup_drawn != was_context {
+            draw.state.context = None;
+        }
+    }
+    #[cfg(deleteme)]
     pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
         let Some(pathing) = machine.pathing.as_ref() else { return };
+
+        let mut draw = DrawPoiInfo {
+            ui,
+            state: &mut machine.pack_ui_state.interact,
+            pack_state: &mut machine.pack_ui_state.pack_state,
+        };
+        return draw.draw();
         POI_CONTEXT_OPEN.set(false);
 
         let table = RenderInteractivePoi::draw_table_start(ui, "pois-nearby");
