@@ -324,6 +324,7 @@ impl RenderMachine {
             },);
             state.machine.turn_render(render_slot);
         }
+    }
 
     pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_lines256";
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
