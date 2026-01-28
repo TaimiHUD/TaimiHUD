@@ -526,6 +526,12 @@ impl RenderState {
         };
         let window = ui.begin_window_with(c"TAIMIHUD_ALERT_AREA", None, window_flags);
         if let Some(_window) = imw::BeginVisible::pop_open(window) {
+            let checkpoint = ui.cursor_pos();
+            ui.set_cursor_pos((checkpoint - Vec2::splat(1.0)));
+            ui.text_colored([1.0; 4], &text);
+            ui.set_cursor_pos((checkpoint + Vec2::splat(1.0)));
+            ui.text_colored([0.0, 0.0, 0.0, 1.0], &text);
+            ui.set_cursor_pos(checkpoint);
             ui.text(text);
         }
     }
