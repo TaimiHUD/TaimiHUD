@@ -1820,7 +1820,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
     ) -> Option<TableToken<'u>> {
         let table_flags =
             TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS | TableFlags::SORTABLE | TableFlags::SORT_MULTI | TableFlags::SORT_TRISTATE;
-        let table_token = ui.begin_table_with_flags(title_id, 3, table_flags);
+        let table_token = ui.begin_table_with_flags(title_id, 4, table_flags);
         if let Some(..) = &table_token {
             let cols = [
                 (Self::HEADER_TITLE, TableColumnFlags::WIDTH_STRETCH | TableColumnFlags::NO_REORDER | TableColumnFlags::NO_HIDE | TableColumnFlags::DEFAULT_SORT),
