@@ -485,6 +485,12 @@ impl RenderState {
             .position([text_x, text_y], Condition::Always)
             .size([text_width * 1.25, text_height * 2.0], Condition::Always)
             .build(ui, || {
+                let checkpoint = Vec2::from_array(ui.cursor_pos());
+                ui.set_cursor_pos((checkpoint - Vec2::splat(1.0)).into());
+                ui.text_colored([1.0; 4], &text);
+                ui.set_cursor_pos((checkpoint + Vec2::splat(1.0)).into());
+                ui.text_colored([0.0, 0.0, 0.0, 1.0], &text);
+                ui.set_cursor_pos(checkpoint.into());
                 ui.text(text);
             });
         drop(font_handle);
