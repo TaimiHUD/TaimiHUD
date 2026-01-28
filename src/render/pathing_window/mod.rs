@@ -316,11 +316,11 @@ impl PathingWindowState {
     }
 
     pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let mut draw = DrawPoiInfo {
+        let mut draw = DrawPoiInfo::new(
             ui,
-            state: &mut machine.pack_ui_state.interact,
-            pack_state: &mut machine.pack_ui_state.pack_state,
-        };
+            &mut machine.pack_ui_state.interact,
+            machine.pack_ui_state.pack_state.map_ref_as_slice(),
+        );
         let was_context = draw.state.context.is_some();
         draw.draw();
         let context_id = "poi-context";
@@ -335,8 +335,8 @@ impl PathingWindowState {
                 ui.close_current_popup();
             }
         }
-        if popup_drawn && draw.state.context.is_some() {
-            if !was_context {
+        if draw.state.context.is_some() && !was_context {
+            if !popup_drawn {
                 ui.open_popup(context_id);
             }
         } else if popup_drawn != was_context {

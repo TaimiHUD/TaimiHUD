@@ -625,13 +625,13 @@ impl SharedMapPackState {
             .keys()
             .filter(|id| match id {
                 id if id
-                    .marker_path::<PackPath>()
-                    .map(|path| path.root == pack_path)
+                    .marker_path::<PackMapPath>()
+                    .map(|path| path.root == map_path)
                     .unwrap_or(false) =>
                     true,
                 id if id
-                    .marker_path::<PackMapPath>()
-                    .map(|path| path.root == map_path)
+                    .marker_path::<PackPath>()
+                    .map(|path| path.root == pack_path)
                     .unwrap_or(false) =>
                     true,
                 _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id)),
@@ -1055,6 +1055,24 @@ impl<'a> LoadedPoiRef<'a> {
     #[inline]
     pub fn poi_attrs(&self) -> &Box<PoiAttributes> {
         unsafe { self.render_attrs().poi.as_ref().unwrap_unchecked() }
+    }
+
+    pub fn guid(&self) -> Option<&'a Guid> {
+        self.marker.marker.map_info.poi_guid_by_index(self.marker.loaded_path())
+    }
+    pub fn is_hidden(&self) -> bool {
+        let guid = self.guid();
+        let has_guid = guid.is_some();
+        let mids = [
+            MarkerId::with_uuid(guid.copied().unwrap_or_default().0),
+            self.marker.marker.loaded_id,
+            self.marker.marker.marker_id(),
+        ];
+        let mids = match (has_guid, &mids[..]) {
+            (false, &[_, ref rest @ ..]) => rest,
+            (_, mids) => mids,
+        };
+        self.marker.marker.map.is_hidden(mids)
     }
 }
 impl<'a> ops::Deref for LoadedPoiRef<'a> {
