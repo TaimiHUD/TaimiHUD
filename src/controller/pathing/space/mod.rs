@@ -29,6 +29,7 @@ use {
         collections::{btree_map, BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
     },
+    glam::{Vec4, Vec3},
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},
@@ -159,7 +160,7 @@ impl SpaceContext {
     }
 }
 
-type TrlLoadContext = (TrlPath, f32, bool);
+type TrlLoadContext = (TrlPath, f32, bool, Vec3);
 impl PathingController {
     pub(super) async fn report_load(&mut self, mut loaded: LoadReport) {
         match &mut loaded {
@@ -221,7 +222,12 @@ impl PathingController {
         map.ltrails().lookup_ref(&path).and_then(|ltrail| {
             let trl = ltrail.info().trl.as_ref()?;
             let attrs = ltrail.trail_attrs();
-            Some((trl.clone(), GetAttr::<keys::TrailScale>::get_attr_or_default(attrs).into_owned().into(), GetAttr::<keys::IsWall>::get_attr_or_default(attrs).into_owned().into()))
+            Some((
+                trl.clone(),
+                GetAttr::<keys::TrailScale>::get_attr_or_default(attrs).into_owned().into(),
+                GetAttr::<keys::IsWall>::get_attr_or_default(attrs).into_owned().into(),
+                Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned()).truncate(),
+            ))
         })
     }
     pub(super) fn request_texture_load(&mut self, id: MarkerId) -> bool {
@@ -335,12 +341,12 @@ impl PathingController {
         loader: SharedLoaderBox,
         ctx: TrlLoadContext,
     ) -> anyhow::Result<(LoadedTrailGeometry, TrailGeometrySections)> {
-        let (trl_path, scale, is_wall) = ctx;
+        let (trl_path, scale, is_wall, colour) = ctx;
         let trl = Self::load_trail_data(loader, trl_path).await?;
         let y_sig = (path.root.root.path as usize) << 24 | path.path.path as usize;
         let params = manager.trail_params().await;
         let section_info = LoadedTrailSection::with_sections(&trl.sections).collect();
-        Self::load_trail_geometry(trl, (scale, is_wall), params, y_sig)
+        Self::load_trail_geometry(trl, (scale, is_wall, colour), params, y_sig)
             .await
             .map(move |geo| (geo, section_info))
     }
@@ -350,14 +356,14 @@ impl PathingController {
     }
     fn load_trail_geometry(
         trl: TrailData,
-        (scale, is_wall): (f32, bool),
+        (scale, is_wall, colour): (f32, bool, Vec3),
         params: TrailParams,
         y_sig: usize,
     ) -> impl Future<Output = anyhow::Result<LoadedTrailGeometry>> + Send + 'static {
         let y_offset = params.y_offset_for(y_sig);
         Controller::try_run_blocking("calculating vertices", move || {
             Ok(LoadedTrail::vertices_with_data(
-                &trl, &params, scale, is_wall, y_offset,
+                &trl, &params, scale, is_wall, y_offset, colour.into(),
             ))
         })
     }

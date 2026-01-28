@@ -162,13 +162,18 @@ impl Default for TrailTextureMap {
 
 impl TrailParams {
     /// Interpolate points to be no more than 1/resolution metres apart.
+    ///
+    /// TODO: colour is a hack,
+    /// switch to compact vertex layout and provide as instance data instead
     pub fn interpolate_section_vertices(
         &self,
         vertices: &mut Vec<Vertex>,
         section: &TrailSection,
         scale: f32,
         is_wall: bool,
+        colour: Vector3<f32>,
     ) {
+        let colour = colour.to_raw();
         let width = self.width();
         let resolution = self.resolution();
         let smoothing = self.smoothing();
@@ -231,13 +236,13 @@ impl TrailParams {
 
             vertices.push(Vertex {
                 position: (cur_point - mod_distance).into(),
-                colour: glam::Vec3::ONE,
+                colour,
                 normal: -normal_scale_dir,
                 texture: glam::vec2(1.0, distance / width - 1.0),
             });
             vertices.push(Vertex {
                 position: (cur_point + mod_distance).into(),
-                colour: glam::Vec3::ONE,
+                colour,
                 normal: normal_scale_dir,
                 texture: glam::vec2(0.0, distance / width - 1.0),
             });
@@ -254,13 +259,13 @@ impl TrailParams {
         );
         vertices.push(Vertex {
             position: (cur_point - mod_distance).into(),
-            colour: glam::Vec3::ONE,
+            colour,
             normal: -normal_scale_dir,
             texture: glam::vec2(1.0, distance / width - 1.0),
         });
         vertices.push(Vertex {
             position: (cur_point + mod_distance).into(),
-            colour: glam::Vec3::ONE,
+            colour,
             normal: normal_scale_dir,
             texture: glam::vec2(0.0, distance / width - 1.0),
         });

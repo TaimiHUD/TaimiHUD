@@ -49,7 +49,7 @@ VSOutput VSMain(VSInput input)
     float scaleTex = Expand.w - 1.0;
     output.tex = float2(input.tex.x, input.tex.y + isTrail * (input.tex.y * scaleTex + Expand.z));
 
-    output.colour = float4(input.colour.xyz * input.vcolour, input.colour.w);
+    output.colour = input.colour * float4(input.vcolour, 1.0);
 
     return output;
 }
