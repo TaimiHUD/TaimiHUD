@@ -339,7 +339,12 @@ pathing-config-goggles-notice = This currently requires setting Render Sampling 
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
 pathing-config-reset-notice = Right-click any slider below to restore its default setting.
+pathing-config-edge-feather-scale = edge feather scale
+pathing-config-corner-boudary-scale = corner boundary scale
 pathing-notice-space = {space} is required for pathing functionality.
+pathing-notice-mumblelink = if you experience stuttering, try changing Vertical Sync under the in-game graphical settings
+pathing-notice-rtapi-missing = RTAPI is a separate addon that must be installed via Nexus
+pathing-notice-rtapi = if you experience stuttering, try changing Vertical Sync or switching to MumbleLink
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
 

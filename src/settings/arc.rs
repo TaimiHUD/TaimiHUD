@@ -226,9 +226,9 @@ impl ArcUpdatePreference {
     pub fn as_str(&self) -> &'static str {
         //TODO: i18n
         match self {
-            Self::Always => "always",
-            Self::Ask { .. } => "ask",
-            _ => "never",
+            Self::Always => "Always",
+            Self::Ask { .. } => "Ask",
+            _ => "Never",
         }
     }
 

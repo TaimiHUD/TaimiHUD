@@ -392,7 +392,7 @@ impl PathingConfig {
         }
         #[cfg(feature = "goggles")]
         if let Some(value) =
-            Self::slider_opt_setting_or_min(ui, "corner boundary scale", edge_scale, (0.1f32, 5.0))
+            Self::slider_opt_setting_or_min(ui, fl!("corner-boundary-scale"), edge_scale, (0.1f32, 5.0))
         {
             let mut edge_scale = value;
             Self::set_pathing(|s| {
@@ -424,18 +424,12 @@ impl PathingConfig {
         }
         #[cfg(feature = "extension-nexus")]
         match camera_source {
-            CameraSource::MumbleLink => ui.text_wrapped(
-                "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
-            ),
+            CameraSource::MumbleLink => ui.text_wrapped(fl!("pathing-notice-mumblelink")),
             CameraSource::RealTimeAPI => {
                 if machine.rtapi.is_none() {
-                    ui.text_wrapped(
-                        "RTAPI is a separate addon that must be installed via Nexus"
-                    );
+                    ui.text_wrapped(fl!("pathing-notice-rtapi-missing"));
                 }
-                ui.text_wrapped(
-                    "if you experience stuttering, try changing Vertical Sync or switching to MumbleLink",
-                );
+                ui.text_wrapped(fl!("pathing-notice-rtapi"));
             },
         }
 
