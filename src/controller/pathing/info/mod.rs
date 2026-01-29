@@ -99,7 +99,7 @@ impl LoadedMarkerInfo {
     pub fn interaction_attrs(&self) -> &InteractionAttributes {
         self.get_interaction_attrs()
             .map(|f| &**f)
-            .unwrap_or_else(|| &EMPTY_INTERACTION_ATTRS)
+            .unwrap_or_else(|| &**EMPTY_INTERACTION_ATTRS)
     }
 
     pub(super) fn sig_ptr(ptr: *const ()) -> [u32; 2] {
@@ -150,6 +150,8 @@ impl LoadedTrailInfo {
         }
         Self { marker_info, trl: None }
     }
+    #[inline(always)]
+    pub fn marker_info(&self) -> &LoadedMarkerInfo { &self.marker_info }
 }
 impl ops::Deref for LoadedTrailInfo {
     type Target = LoadedMarkerInfo;
@@ -182,6 +184,8 @@ impl LoadedPoiInfo {
         }
         Self { marker_info }
     }
+    #[inline(always)]
+    pub fn marker_info(&self) -> &LoadedMarkerInfo { &self.marker_info }
 }
 impl ops::Deref for LoadedPoiInfo {
     type Target = LoadedMarkerInfo;
@@ -206,5 +210,5 @@ pub(crate) static EMPTY_RENDER_ATTRS: LazyLock<Arc<RenderAttributes>> = LazyLock
 });
 pub(crate) static EMPTY_FILTER_ATTRS: LazyLock<FilterAttributes> =
     LazyLock::new(|| FilterAttributes::default());
-pub(crate) static EMPTY_INTERACTION_ATTRS: LazyLock<InteractionAttributes> =
-    LazyLock::new(|| InteractionAttributes::default());
+pub(crate) static EMPTY_INTERACTION_ATTRS: LazyLock<Arc<InteractionAttributes>> =
+    LazyLock::new(|| Arc::new(InteractionAttributes::default()));

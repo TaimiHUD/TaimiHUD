@@ -679,20 +679,24 @@ impl RenderState {
         {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
-            let visibility = match self.pathing_window.open {
-                _ if self.pathing_menu_open => PackVisibility::Visible,
-                true if !self.pathing_window.visible =>
-                    PackVisibility::Pending,
-                true => PackVisibility::Visible,
-                false => PackVisibility::Closed,
-            };
+            let visibility = self.pathing_window.visibility();
+            let interact_visibility = self.machine.pack_ui_state.interact.visibility().min(visibility);
+            let pack_visibility = PackVisibility::visible(self.pathing_menu_open).max(match interact_visibility {
+                // if poi tab open, packs aren't!
+                PackVisibility::Visible => visibility.min(PackVisibility::Pending),
+                _ => visibility,
+            });
             self.machine
                 .pack_ui_state
-                .pre_draw(visibility);
-            if self.pathing_window.pois_visible(&self.machine) {
+                .pre_draw(pack_visibility);
+            self.machine
+                .pack_ui_state
+                .interact
+                .pre_draw(interact_visibility);
+            if interact_visibility.is_visible() {
                 let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
                 let interact = &mut self.machine.pack_ui_state.interact;
-                if interact.wants_static | interact.dirty_markers {
+                if interact.wants_static {
                     if let Some(Ok(engine)) = &self.engine {
                         interact.update_static_render(&engine.packs);
                     } else if !self.machine.pack_ui_state.pack_state.is_empty() {
@@ -703,7 +707,9 @@ impl RenderState {
                     Some(..) => player_pos,
                     None => None,
                 };
-                interact.update_pos_relaxed(player_pos);
+                if interact.wants_pos(player_pos) {
+                    interact.update_dist(player_pos);
+                }
             }
             self.pathing_window.pre_draw(&mut self.machine);
             self.pathing_menu_open = false;
