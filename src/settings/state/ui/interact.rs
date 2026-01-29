@@ -152,7 +152,7 @@ bitflags! {
         const FILTERED = InteractSortFlags::FILTERED.bits();
         const FAR = InteractSortFlags::DISTANCE.bits();
         const STATIC = InteractSortFlags::INTERACTIVE.bits();
-        const DISABLED = InteractSortFlags::VISIBLE.bits();
+        const DISABLED = InteractSortFlags::ENABLED.bits();
     }
 }
 impl InteractFilterFlags {
@@ -185,7 +185,10 @@ impl InteractFilterFlags {
     }
     /// blacklist anything that doesn't contain all of these flags
     pub fn to_sort_exclude_not(self) -> InteractSortFlags {
-        (self ^ Self::SORT_INVERT_MASK).as_sort_bits()
+        ((!self) & (Self::STATIC | Self::DISABLED)).as_sort_bits()
+    }
+    pub fn to_sort_exclude(self) -> InteractSortFlags {
+        ((!self) & Self::FILTERED).as_sort_bits()
     }
     pub fn interactive(flags: TriggerKind) -> Self {
         Self::for_sort(InteractSortFlags::interactive(flags))

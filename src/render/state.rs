@@ -692,14 +692,16 @@ impl RenderState {
             self.machine
                 .pack_ui_state
                 .interact
-                .pre_draw(interact_visibility);
+                .pre_draw(visibility);
             if interact_visibility.is_visible() {
                 let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
                 let interact = &mut self.machine.pack_ui_state.interact;
                 if interact.wants_static {
+                    let wants_all = interact.wants_static_all();
                     if let Some(Ok(engine)) = &self.engine {
                         interact.update_static_render(&engine.packs);
-                    } else if !self.machine.pack_ui_state.pack_state.is_empty() {
+                    }
+                    if (wants_all | interact.wants_static) && !self.machine.pack_ui_state.pack_state.is_empty() {
                         interact.update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
                     }
                 }

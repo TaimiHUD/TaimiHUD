@@ -100,6 +100,7 @@ pub(crate) enum PathingEvent {
     /// explicit request to keep pack and its resources unloaded
     /// (and optionally remove from registry)
     UnloadPack(PackPath, bool),
+    Refresh { include_datasources: bool },
     ReloadAll(bool),
     LoadAll,
     UnloadAll(bool),
@@ -153,6 +154,8 @@ pub(crate) enum PathingEvent {
     // Debug and diagnostics commands
     RequestRebuildSpace { entities: Option<bool>, bvh: Option<bool> },
     RequestRebuildVis { pack_path: Option<PackPath>, partial: bool, notify: Option<bool> },
+    RequestResourceRelease { pack_path: Option<PackPath> },
+    RequestResourceReport { pack_path: Option<PackPath> },
 }
 pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
 
@@ -620,6 +623,7 @@ impl PathingController {
             LoadPack(path) => self.process_pack_activate(path),
             OffloadPack(path) => self.process_pack_deactivate(path),
             UnloadPack(path, remove) => self.process_pack_unload(path, remove),
+            Refresh { include_datasources } => self.process_pack_refresh_all(include_datasources).await,
             ReloadAll(remove) => self.process_pack_reload_all(remove).await,
             UnloadAll(remove) => self.process_pack_unload_all(remove),
             ReloadPack(path, remove) => self.process_pack_reload(path, remove),
@@ -659,6 +663,12 @@ impl PathingController {
             },
             RequestRebuildVis { pack_path, partial, notify } => {
                 self.debug_req_config_vis(pack_path, partial, notify).await;
+            },
+            RequestResourceRelease { pack_path } => {
+                self.debug_req_resource_release(pack_path).await;
+            },
+            RequestResourceReport { pack_path } => {
+                self.debug_req_resource_report(pack_path);
             },
             #[cfg(todo = "unused")]
             SpawnTask(task) => {

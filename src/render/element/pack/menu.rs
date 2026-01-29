@@ -11,7 +11,7 @@ use {
         UiAction,
     },
     crate::{
-        controller::pathing::PathingEvent,
+        controller::pathing::{PathingEvent, InteractMessage},
         render::element::prelude::*,
     },
     std::borrow::Cow,
@@ -297,7 +297,15 @@ impl super::PackElement {
 }
 impl super::PackElements {
     pub fn draw_menu_advanced(&mut self, ui: &Ui) {
+        ui.text_disabled("debug menu");
         let mut act_pathing = None;
+        if MenuItem::new("scan for packs").build(ui) {
+            act_pathing = Some(PathingEvent::Refresh { include_datasources: true });
+        }
+        if MenuItem::new("scan for packs (sans datasources)").build(ui) {
+            act_pathing = Some(PathingEvent::Refresh { include_datasources: false });
+        }
+        ui.separator();
         if MenuItem::new("refresh vis").build(ui) {
             act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: false, notify: None });
         }
@@ -320,9 +328,36 @@ impl super::PackElements {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
         }
         ui.separator();
+        if MenuItem::new("rebuild interact").build(ui) {
+            act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RequestRebuild));
+        }
+        if MenuItem::new("rebuild interact (bvh only)").build(ui) {
+            act_pathing = Some(PathingEvent::InteractControl(InteractMessage::BvhRebuild));
+        }
+        ui.separator();
+        if MenuItem::new("collect garbage").build(ui) {
+            act_pathing = Some(PathingEvent::CollectGarbage { tick: 1, aggressive: false });
+        }
+        if MenuItem::new("collect garbage timidly").build(ui) {
+            act_pathing = Some(PathingEvent::CollectGarbage { tick: 0, aggressive: false });
+        }
+        if MenuItem::new("collect garbage aggressively").build(ui) {
+            act_pathing = Some(PathingEvent::CollectGarbage { tick: 0, aggressive: true });
+        }
+        if MenuItem::new("report resources").build(ui) {
+            act_pathing = Some(PathingEvent::RequestResourceReport { pack_path: None });
+        }
+        if MenuItem::new("release resources").build(ui) {
+            act_pathing = Some(PathingEvent::RequestResourceRelease { pack_path: None });
+        }
+        #[cfg(todo = "unnecessary")]
+        if MenuItem::new("reload interact settings").build(ui) {
+            act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RefreshSettings));
+        }
         if let Some(pmsg) = act_pathing {
             pmsg.try_send();
         }
+        ui.separator();
         for (_pack_path, pack) in self.pack_state.iter() {
             pack.draw_menu_advanced(ui);
         }
@@ -819,11 +854,19 @@ pub struct DrawPackAdvancedMenu<'a, 'ui> {
 }
 impl<'a, 'u> DrawPackAdvancedMenu<'a, 'u> {
     pub fn draw(&mut self) {
-        if MenuItem::new("rebuild vis").build(self.ui) {
+        let ui = self.ui;
+        if MenuItem::new("rebuild vis").build(ui) {
             self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: false, notify: Some(true) });
         }
-        if MenuItem::new("rebuild vis (partial)").build(self.ui) {
+        if MenuItem::new("rebuild vis (partial)").build(ui) {
             self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: true, notify: None });
+        }
+        ui.separator();
+        if MenuItem::new("report resources").build(ui) {
+            self.act_pathing = Some(PathingEvent::RequestResourceReport { pack_path: Some(self.path) });
+        }
+        if MenuItem::new("release resources").build(ui) {
+            self.act_pathing = Some(PathingEvent::RequestResourceRelease { pack_path: Some(self.path) });
         }
     }
 }

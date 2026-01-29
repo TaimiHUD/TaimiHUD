@@ -248,6 +248,9 @@ impl SharedPackInfo {
         let mut keys = self.allocated_keys.write().unwrap_or_else(|e| e.into_inner());
         keys.drain().collect::<Vec<_>>()
     }
+    pub(crate) fn shared_subresources(&self) -> &Arc<RwLock<FxHashMap<AttrString, Arc<str>>>> {
+        &self.allocated_keys
+    }
 }
 impl Default for SharedPackInfo {
     fn default() -> Self {
