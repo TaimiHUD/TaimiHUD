@@ -17,11 +17,15 @@ save-standalone = { save } sous un nouveau fichier
 save-append = Ajouter à un fichier existant
 save-edit = { save } les changements
 save-edit-item = { save-edit } to "{ $item }"?
-save-mode = Save mode
+save-mode = Mode de sauvegarde
 error = Erreur
 remove = Supprimer
 unknown = Inconnu
 update = Mettre à jour
+ask = Demander
+always = Toujours
+never = Jamais
+auto-update = Mise à jour automatique
 unset = Désactiver #TODO: context?
 add = Ajouter
 create-arg = Créer nouveau { $arg }
@@ -56,10 +60,10 @@ rt-api-required-base = RTAPI est requis pour
 rt-api-required = { rt-api-required-base } { $reason }.
 no-description = Pas de description.
 no-thing-arg = Pas de { $thing } fourni.e.
-expand-all = Expand All
+expand-all = Tout développer
 filetype = Type du Fichier
 filename = Nom du Fichier
-collapse-all = Collapse All
+collapse-all = Tout réduire
 active = Actif #TODO: should this be woke?
 inactive = Inactif #TODO: should this be woke?
 enable = Activer
@@ -80,12 +84,14 @@ map-id-wrong = ID de Carte incorrect.
 no-positions = Pas de position de marqueur fournie.
 validation-fail = Validation failed due to:
 filename-empty = Pas de nom de fichier fourni.
-count = Compte
+count = Compte #TODO: context?
 actions = Actions
 module = Module
+unspecified = Non spécifié
 
 ## Addon
 
+addon = Addon #TODO: keep it english or use module?
 primary-window-toggle = Activer/Désactiver Fenêtre Taimi
 context-menu-primary = { menu }
 timer-window-toggle = Activer/Désactiver Fenêtre Minuteur
@@ -101,7 +107,7 @@ timer-key-reset = Réinitialiser { timers }
 ## Config
 
 config-tab = Configuration
-stock-imgui-progress-bar = Stock Imgui Progress Bar
+stock-imgui-progress-bar = Barre de progression par défaut d'ImGui
 shadow = Ombrage #TODO: or just Ombre?
 centre-text-after-icon = Centrer texte après icône
 imgui-notice = Vous pouvez Ctrl+Clic gauche sur les curseurs, ou autre, pour directement entrer une valeur manuellement. N'oubliez pas d'appuyer sur Entrée pour confirmer la valeur.
@@ -124,6 +130,7 @@ addonbinds = Raccourcis
 gamebinds = Raccourcis clavier du jeu
 keybind = Raccourci clavier
 gamebind-notice = Configurez les raccourcis ici pour qu'ils correspondent aux raccourcis du jeu. La détection des raccourcis du jeu peut être automatique si arcdps-unofficial-extras est installé.
+precise-markers = Marqueurs précis
 
 ## Windows
 
@@ -150,7 +157,8 @@ open-error = { error } en ouvrant { $kind }: { $path }
 ## Data sources
 
 intro-to-data-sources = Veillez à rafraîchir le répertoire avant de vérifier les mises à jour.
-data-sources-tab = Sources de données
+data-sources = Sources de données
+data-sources-tab = { data-sources }
 data-source-repo-update = Rafraîchir le répertoire des sources
 data-source-repo-update-tooltip = Récupérer le répertoire des sources de données pour voir les éléments téléchargeables.
 checking-for-updates = Vérification des mises à jour...
@@ -173,6 +181,8 @@ download = Télécharger
 install = Installer
 attempt-update = Essayer quand même de mettre à jour ?
 settings-unloaded = Les paramètres n'ont pas encore été chargés !
+available = Disponible
+up-to-date = À jour !
 
 ## Info tab
 
@@ -216,14 +226,14 @@ marker-set-delete = Supprimer { marker-set }
 scaling-factor = facteur d'échelle
 current-scaling-factor = { scaling-factor } actuel: ({ $x }, { $y })
 current-scaling-factor-multiple = { scaling-factor } actuel en multiples de pieds par unité continentale : ({ $x }, { $y })
-scaling-factor-reset = { reset } a détecté { scaling-factor }
+scaling-factor-reset = { reset } le { scaling-factor } détecté
 no-file-associated = Fichier associé introuvable
 markers-arg = { markers }: { $count }
 marker-type = Type de { marker } 
-local-header = Local (XYZ)
-map-header = Carte (XY)
-screen-header = Écran (XY)
-marker-not-on-screen = Pas à l'écran
+local-header = (XYZ) Local
+map-header = (XY) Carte
+screen-header = (XY) Écran
+marker-not-on-screen = Pas sur l'écran
 select-a-marker = Veuillez sélectionner un marqueur à configurer!
 marker-filetype-explanation = There are three kinds of markers file, there is the kind that
   comes with the BlishHUD Commander's Markers module (integrated), there is the kind that they use to ship Community Markers and then there is my own format, which takes the per marker set format and makes it a single file per marker set.
@@ -231,6 +241,13 @@ no-markers-for-map = Pas de marqueurs trouvés pour la carte actuelle.
 cant-place-markers = Impossible à placer
 autoplacement-disable = Désactiver placement automatique
 autoplacement-enable = Activer placement automatique
+always-do-action = Toujours faire l'action
+do-action-if-commander = Faire l'action si commandant
+do-action-if-lieutenant = Faire l'action si lieutenant ou commandant
+never-do-action = Jamais faire l'action
+open-markers-window = Ouvrir la fenêtre des marqueurs
+place-markers-automatically = Placer les marqueurs automatiquement
+do-nothing = Ne rien faire
 
 ## Markers window
 clear-markers = { clear } { markers }
@@ -269,15 +286,15 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
-trail = Trail #TODO: there are so many translations of this... Chemin, Traînée, Tracé
+trail = Trail #TODO: there are so many translations of this... Chemin, Traînée, Tracé, chemin balisé, trajet
 poi = POI/PI #TODO: this is never ever named like that in french.
 space = KatRender
 reload-packs = Rafraîchir
 unload-packs = Unload All
 filter-options = Filter Options
 searchbar-clear = Clear the search bar and results.
-show-filter = Show filter options
-hide-filter = Hide filter options
+show-filter = Afficher les options de filtrage
+hide-filter = Cacher les options de filtrage
 current-map = Carte actuelle
 ignore-root = Ignore root state
 ignore-leaf = Ignore leaf state
@@ -288,20 +305,20 @@ show-all = Tout afficher #TODO: Afficher tout?
 ignore-whitespace = Ignorer espaces
 case-insensitive = Ignorer la casse
 toggle = Activer/Désactiver
-pathing-config = Pathing Options
+pathing-config = Paramètres Pathing
 pathing-config-enable = {space} Pathing (Expérimental)
-pathing-config-minimap = Minimap Options
-pathing-config-worldmap = Map Options
+pathing-config-minimap = Paramètres Mini-carte
+pathing-config-worldmap = Paramètres Carte
 pathing-config-trail-alpha = Opacité
 pathing-config-trail-alpha-minimap = Opacité Mini-carte
 pathing-config-trail-alpha-worldmap = Opacité Carte
-pathing-config-poi-alpha = Billboard Opacity
+pathing-config-poi-alpha = Opacité Panneau d'Affichage
 pathing-config-poi-alpha-minimap = Opacité POI Mini-carte
 pathing-config-poi-alpha-worldmap = Opacité POI
 pathing-config-trail-scale = Échelle
 pathing-config-trail-scale-minimap = Échelle Mini-carte
 pathing-config-trail-scale-worldmap = Échelle Carte
-pathing-config-poi-scale = Billboard Size
+pathing-config-poi-scale = Taille Panneau d'Affichage
 pathing-config-poi-scale-minimap = Taille POI Mini-carte
 pathing-config-poi-scale-worldmap = Taille POI 
 pathing-config-player-overlap-threshold = Fade near player

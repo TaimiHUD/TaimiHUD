@@ -1,5 +1,5 @@
 use {
-    crate::{exports::runtime::bindings::TaimiControls, settings::Settings},
+    crate::{exports::runtime::bindings::TaimiControls, fl, settings::Settings},
     serde::{Deserialize, Serialize},
     std::{collections::HashMap, fmt},
     windows::Win32::UI::Input::KeyboardAndMouse::{self as vk, VIRTUAL_KEY},
@@ -224,10 +224,11 @@ impl ArcUpdatePreference {
     }
 
     pub fn as_str(&self) -> &'static str {
+        //TODO: i18n
         match self {
-            Self::Always => "Always",
-            Self::Ask { .. } => "Ask",
-            _ => "Never",
+            Self::Always => "always",
+            Self::Ask { .. } => "ask",
+            _ => "never",
         }
     }
 
