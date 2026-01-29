@@ -140,14 +140,17 @@ impl PackElements {
             }
             self.interact.wants_maps = true;
         }
-        let interact_vis = visibility.min(self.interact.visibility());
+        let interact_vis = match visibility {
+            vis @ PackVisibility::Closed => vis,
+            _ => self.interact.visibility(),
+        };
         if interact_vis.is_visible() {
-            if self.interact.wants_maps {
+            self.interact.rx_nearby();
+            if self.interact.wants_maps() {
                 if let Some(maps) = self.maps_rx.try_read() {
                     self.interact.rx_maps(&maps);
                 }
             }
-            self.interact.rx_nearby();
             self.interact.update_entities_relaxed();
         }
         for pack in self.pack_state.values_mut() {

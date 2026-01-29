@@ -12,6 +12,7 @@ use {
         controller::runtime::WallInstant,
         exports::runtime as rt,
         settings::{Settings, SourceKind},
+        TEXTURES,
     },
     anyhow::{anyhow, Context},
     futures::stream::{self, Stream, StreamExt},
@@ -161,6 +162,17 @@ impl PathingController {
         let _ = create_dir_all(SourceKind::Pathing.get_user_dir()).await;
 
         let _ = Self::do_refresh_all(&manager, true).await;
+    }
+    pub(super) async fn process_pack_refresh_all(&mut self, include_datasources: bool) {
+        let manager = self.loader.clone();
+        let _ = self.tasks.spawn(async move {
+            let new_packs = Self::do_refresh_all(&manager, include_datasources).await;
+            let followup = new_packs.map(|path| {
+                log::debug!("refresh launch pack: {path}");
+                PathingEvent::LoadPack(path)
+            });
+            Ok(followup.collect())
+        });
     }
     async fn do_refresh_all(
         manager: &Arc<PackLoader>,
@@ -711,6 +723,138 @@ impl PathingController {
     pub(super) fn cleanup_pack_subresources(&self, path: PackPath, reason: Option<&UnloadedReason>) {
         self.loader.cleanup_pack_subresources(path, reason)
     }
+
+    pub(super) async fn debug_req_resource_release(&mut self, path: Option<PackPath>) {
+        let rest = path.is_none().then_some(self.packs.packs.paths());
+        let packs = rest.into_iter().flatten().chain(path);
+        for path in packs {
+            log::debug!("manual resource cleanup of {path}...");
+            self.cleanup_pack_subresources(path, None);
+        }
+    }
+    pub(super) fn debug_req_resource_report(&self, path: Option<PackPath>) {
+        use core::fmt::Write;
+        use taimi_hoard::lazyfmt;
+        use crate::exports::runtime::textures::TextureSlot;
+        use windows::core::{Interface, IUnknown};
+
+        let pack = path.map(|path| self.packs.lookup_ref(&path));
+        let rest = pack.is_none().then_some(self.packs.packs.values());
+        let packs = rest.into_iter().flatten().chain(pack.flatten());
+
+        let mut report = String::new();
+        let _ = writeln!(report, "dbg resource report");
+        for pack in packs {
+            let _ = writeln!(report, "{}@{}: {}", pack.info, pack.info.index, pack.info.sig);
+            let _ = writeln!(report, "\tage: {}", pack.used.generation);
+            let _ = write!(report, "\tloaded? {}", lazyfmt::or_empty(pack.unloaded.as_ref()));
+            if let Some(info) = &pack.info.info {
+                let _ = writeln!(report, " prolly? spanning {} maps", info.maps.len());
+                let cats = &info.categories;
+                let _ = writeln!(report, "\t{cats:?}");
+                for root in &info.roots {
+                    let _ = writeln!(report, "\t\t{} {} ({}): children={} {:?}", root.path(), lazyfmt::or_empty(root.display_name.as_ref()), root.id, root.child_count, root.flags);
+                }
+            } else {
+                let _ = writeln!(report, " nope");
+            }
+            let map_info = self.map_info.iter(None)
+                .filter(|(p, _)| p.root == pack.info.index);
+            for (map_path, map_info) in map_info {
+                let map = self.maps.lookup_ref(&map_path);
+                let status = match map {
+                    Some(..) => "loaded",
+                    None => "cached",
+                };
+                let _ = writeln!(report, "\tmap#{} {status}{}; {} pois, ({}/{}) trails, {} cats age={}",
+                    map_path.path,
+                    lazyfmt::or_empty(map.map(|map| lazyfmt::MaybeFmt::new(|f| write!(f, "(age={})", map.used.generation)))),
+                    map_info.poi_count(),
+                    map_info.trail_info.len(),
+                    map_info.trail_count(),
+                    map_info.category_count(),
+                    map_info.used.generation,
+                );
+                if let Some(map) = map {
+                    let _ = writeln!(report, "\t\t{} pois(guid={}), {} trails(guid={}), {} cats",
+                    map.pois.len(),
+                    map.poi_guids.len(),
+                    map.trails.len(),
+                    map.trail_guids.len(),
+                    map.categories.len(),
+                    );
+                }
+            }
+            let resources = pack.info.shared_subresources();
+            if let Ok(resources) = resources.try_read() {
+                if !resources.is_empty() {
+                    let _ = writeln!(report, "\tsubresources:");
+                }
+                let mut sz = 0usize;
+                for (path, key) in resources.iter() {
+                    let _ = write!(report, "\t\t{key}: {path}");
+                    let mut count = (0usize, 0usize);
+                    let mut icount = 0u32;
+                    let mut bytes = 0usize;
+                    let status = TEXTURES.lookup_with(key, |slot| {
+                        let mut iunk = None::<IUnknown>;
+                        let status = match slot {
+                            TextureSlot::Loading => "loading",
+                            TextureSlot::Reserved => "reserved",
+                            TextureSlot::Unavailable => "unavailable",
+                            TextureSlot::Inactive(tex) => {
+                                count = (tex.strong_count(), tex.weak_count().saturating_sub(1));
+                                "inactive"
+                            },
+                            TextureSlot::Loaded(tex) => {
+                                count = (Arc::strong_count(tex).saturating_sub(1), Arc::weak_count(tex));
+                                bytes = tex.texture.as_buffer().map(|b| b.size()).unwrap_or(0);
+                                iunk = Some(tex.view.clone().into_d3d().into());
+                                "loaded"
+                            },
+                            #[cfg(feature = "extension-nexus")]
+                            TextureSlot::Nexus(tex) => {
+                                use taimi_d3d::dx11::buffer::TextureView2;
+                                let srv = Some(tex.resource.clone());
+                                if let Some(srv) = TextureView2::from_ref_opt(&srv) {
+                                    let tex = srv.get_resource();
+                                    bytes = tex.as_ref().ok().and_then(|tex| tex.as_buffer()).map(|buf| buf.size()).unwrap_or(0);
+                                }
+                                iunk = srv.map(Into::into);
+                                "nexus"
+                            },
+                        };
+                        icount = iunk.map(|iunk| {
+                            let rel = iunk.vtable().Release;
+                            unsafe {
+                                rel(iunk.into_raw())
+                            }
+                        }).unwrap_or(0);
+                        status
+                    });
+                    match status {
+                        None => {
+                            let _ = writeln!(report, " UNLOADED");
+                        },
+                        Some(status) => {
+                            let _ = write!(report, " {status}");
+                            if bytes > 0 {
+                                let _ = write!(report, " {}KB", bytes / 1024);
+                            }
+                            let (strong, weak) = count;
+                            if icount > 0 || strong > 0 || weak > 0 {
+                                let _ = write!(report, " irefs={icount}, strong={strong}, weak={weak}");
+                            }
+                            writeln!(report);
+                        },
+                    }
+                    sz = sz.saturating_add(bytes);
+                }
+                let _ = writeln!(report, "\t{}MB sum", sz / 1024 / 1024);
+            }
+        }
+        log::debug!("{report}");
+    }
 }
 impl PackLoader {
     pub(super) fn cleanup_pack_subresources(&self, path: PackPath, reason: Option<&UnloadedReason>) {
@@ -733,7 +877,7 @@ impl PackLoader {
             Some(reason) if !reason.can_reactivate(false) => true,
             _ => false,
         };
-        crate::TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.contains_key(key));
+        TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.contains_key(key));
     }
 
     pub(super) fn update_map_states(

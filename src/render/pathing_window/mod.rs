@@ -179,7 +179,7 @@ impl PathingWindowState {
             }
             ui.set_cursor_screen_pos(bookmark);
 
-            self.draw_interact_content(ui, machine);
+            machine.pack_ui_state.draw_interact(ui);
         }
         drop(tabs);
     }
@@ -282,41 +282,8 @@ impl PathingWindowState {
             });
         }
         if query_dirty {
-            let packs = machine
-                .pack_ui_state
-                .pack_state
-                .values()
-                .filter_map(|pack| pack.state.pack_data());
             machine.pack_ui_state.filter_query.search = self.search_state.to_query();
             machine.pack_ui_state.apply_search_filter();
-        }
-    }
-
-    pub fn draw_interact_content(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let mut draw = DrawPoiInfo::new(
-            ui,
-            &mut machine.pack_ui_state.interact,
-            machine.pack_ui_state.pack_state.map_ref_as_slice(),
-        );
-        let was_context = draw.state.context.is_some();
-        draw.draw();
-        let context_id = "poi-context";
-        if draw.state.context.is_some() && !was_context {
-            ui.open_popup(context_id);
-        }
-        let popup = ui.begin_popup(context_id);
-        let popup_drawn = popup.is_some();
-        if let Some(_token) = popup {
-            if let Some(context) = &mut draw.state.context {
-                let mut menu = context.prepare_draw_menu(ui);
-                menu.draw();
-                context.finish_draw_menu(menu);
-            } else {
-                ui.close_current_popup();
-            }
-        }
-        if draw.state.context.is_some() == was_context && popup_drawn != was_context {
-            draw.state.context = None;
         }
     }
 

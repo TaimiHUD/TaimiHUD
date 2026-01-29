@@ -3,10 +3,6 @@ use taimi_pack::attributes::keys;
 use {
     crate::controller::pathing::{PackConfig, VisibilityFlagsExt},
     bitvec::vec::BitVec,
-    futures::{
-        stream::StreamExt,
-        future::FutureExt,
-    },
     rustc_hash::FxHasher,
     std::{
         borrow::Cow,
@@ -126,7 +122,7 @@ impl fmt::Display for PackInfo {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct PackInfoSignature {
     // TODO: consider atomic variant? sad that the traits are unstable...
@@ -216,11 +212,23 @@ impl PackInfoSignature {
         }
     }
 }
+impl fmt::Debug for PackInfoSignature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("PackInfoSignature")
+            .field(&format_args!("{self}"))
+            .finish()
+    }
+}
+impl fmt::Display for PackInfoSignature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:08X}", self.hash)
+    }
+}
 type PackInfoHasher = FxHasher;
 #[cfg(todo)]
 type PackInfoHasher = impl Hasher + Clone + 'static;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackCategoryInfo {
     pub all: Box<[PackCategory]>,
     pub roots: Box<[CategoryIndex]>,
@@ -518,6 +526,26 @@ impl PackCategoryInfo {
         IndexedList::new(flags)
     }
 }
+impl fmt::Debug for PackCategoryInfo {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut f = f.debug_struct("PackCategoryInfo");
+        f.field("count", &self.all.len())
+            .field("roots", &&self.roots[..]);
+        let tagged = [
+            ("hidden", &self.hidden),
+            ("disabled", &self.disabled),
+            ("copyable", &self.copyable),
+            ("lonely", &self.lonely),
+        ];
+        for (name, cats) in tagged {
+            if !cats.is_empty() {
+                f.field(name, &cats.len());
+            }
+        }
+        f.finish()
+    }
+}
+
 #[cfg(todo)]
 pub type PackCategoryFlags<N = PackCategoryNs> = IndexedList<N, CategoryIndex, CategoryFlagSet>;
 #[derive(Debug, Copy, Clone)]

@@ -23,9 +23,6 @@ use {
         }},
         with_i18n,
         settings::{state::ui::interact::{InteractFilterFlags, InteractSortFlags}, Settings},
-        render::element::pack::{PackVisibility, PackElement,
-    CategoryInfo,
-        },
         render::machine::RenderMachine,
         render::PathingWindowState,
         space::engine::Engine,
@@ -34,10 +31,15 @@ use {
         Controller,
         fl,
     },
+        super::{PackVisibility, PackElement,
+    CategoryInfo,
+    CategoryAction,
+    CategoryActionSlot,
+        },
     rustc_hash::FxBuildHasher,
     taimi_hoard::{
         str_opt_ref,
-        loc::{indexed::IndexedList, Locator, LocationRef},
+        loc::{indexed::IndexedList, Locator, LocationRef, LocationMut},
     },
     taimi_sync::arcs::ArcPtrCmp,
     taimi_meta::packs::{
@@ -485,13 +487,14 @@ impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
         action
     }
 }
-pub(in super::super::super) struct DrawMenuPoi<'a, 'ui> {
+pub struct DrawMenuPoi<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub hidden: bool,
     pub guid: bool,
     pub act_trigger: Option<InteractionEventAction>,
     pub act_untrigger: bool,
     pub act_guid_copy: bool,
+    pub act_cat_open: bool,
     pub act_selected_poi_delay: Option<f32>,
 }
 impl<'a, 'u> DrawMenuPoi<'a, 'u> {
@@ -556,6 +559,8 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
                 let _ = self.act_trigger.get_or_insert(InteractionEventAction::Dismiss(config));
             }
         }
+        ui.separator();
+        self.act_cat_open = with_i18n!("poi-category-navigate", |label| Selectable::new(label).build(ui));
     }
     pub fn action_trigger(&self, path: PoiPath, loaded_path: PoiMapPath, guid: Option<&Guid>) {
         if let Some(action) = self.act_trigger {
@@ -595,23 +600,28 @@ type PoiInfoSorts = InteractSortFlags;
 pub struct PoiInfoContext {
     pub path: PoiPath,
     pub loaded_path: PoiMapPath,
+    pub category_path: CategoryPath,
     pub guid: Guid,
     pub hidden: bool,
     pub selected_delay: Option<f32>,
+    pub act_cat: CategoryActionSlot,
 }
 impl PoiInfoContext {
     pub fn new(
         path: PoiPath,
         loaded_path: PoiMapPath,
+        category_path: Option<CategoryPath>,
         guid: Option<Guid>,
         hidden: bool,
     ) -> Self {
         Self {
             path,
             loaded_path,
+            category_path: category_path.unwrap_or(CategoryPath::with_path(CategoryIndex::MAX)),
             guid: guid.unwrap_or_default(),
             hidden,
             selected_delay: None,
+            act_cat: None,
         }
     }
 
@@ -624,6 +634,7 @@ impl PoiInfoContext {
             act_untrigger: false,
             act_guid_copy: false,
             act_selected_poi_delay: self.selected_delay,
+            act_cat_open: false,
         }
     }
     pub fn finish_draw_menu(&mut self, draw: DrawMenuPoi) {
@@ -633,6 +644,13 @@ impl PoiInfoContext {
             false => Some(&self.guid),
         };
         draw.action_trigger(self.path, self.loaded_path, guid);
+        if draw.act_cat_open {
+            if self.category_path.path == CategoryIndex::MAX {
+                log::warn!("category unknown :<");
+            } else {
+                self.act_cat = Some((self.category_path, CategoryAction::Open(Some(true))));
+            }
+        }
     }
 }
 #[derive(Debug)]
@@ -649,7 +667,6 @@ pub struct PoiInfo {
     pub dirty: PoiInfoSorts,
     pub dirty_sort: bool,
     pub dirty_pos: bool,
-    pub dirty_markers: bool,
     pub last_pos: Point3<LocalSpace>,
     pub nearby: Watched<SharedNearbyMarkers>,
     pub entities: Watcher<SharedInteractEntities>,
@@ -665,7 +682,6 @@ impl Default for PoiInfo {
             dirty: PoiInfoSorts::empty(),
             dirty_sort: Default::default(),
             dirty_pos: Default::default(),
-            dirty_markers: true,
             wants_static: false,
             wants_maps: false,
             wants_entities: false,
@@ -749,11 +765,13 @@ impl PoiInfo {
         }
     }
     pub fn iter_markers<'a>(&'a mut self) -> impl Iterator<Item = (MarkerId, Option<&'a mut PoiInfoMarker>)> + 'a {
-        let exclude_not = self.filters.to_sort_exclude_not();
+        let exclude_not = self.filters.to_sort_exclude_not() & !InteractSortFlags::DISTANCE;
+        let exclude = self.filters.to_sort_exclude();
         let include_far = self.filters.contains(InteractFilterFlags::FAR);
         self.markers.iter_mut()
             .filter(move |(_id, marker)| {
-                if (!marker.sort_flags()).intersects(exclude_not) { return false }
+                let flags = marker.sort_flags();
+                if (!flags).intersects(exclude_not) | flags.intersects(exclude) { return false }
                 let too_far = match marker.has_dist() {
                     _ if include_far => false,
                     true => marker.dist_dist >= PoiInfoMarker::DIST_DIST_FAR_FILTER,
@@ -776,11 +794,14 @@ impl PoiInfo {
         self.last_pos = player_pos.unwrap_or(Point3::INFINITY);
 
         let markers = {
-            let exclude_not = self.filters.to_sort_exclude_not();
+            let exclude_not = self.filters.to_sort_exclude_not() & !InteractSortFlags::DISTANCE;
+            let exclude = self.filters.to_sort_exclude();
+            let include_far = self.filters.contains(InteractFilterFlags::FAR);
             self.markers.values_mut()
                 .filter(move |marker| {
-                    if (!marker.sort_flags()).intersects(exclude_not) { return false }
-                    if !marker.has_pos() | marker.dist_is_far() { return false }
+                    let flags = marker.sort_flags();
+                    if (!flags).intersects(exclude_not) | flags.intersects(exclude) { return false }
+                    if !marker.has_pos() | (!include_far & marker.dist_is_far()) { return false }
                     true
                 })
         };
@@ -933,7 +954,7 @@ impl PoiInfo {
                 if let Ok(interactive) = is_interactive {
                     filterable.set(InteractFilterFlags::STATIC.as_sort_bits(), !interactive);
                 }
-                !(!self.filters & InteractFilterFlags::sort_as_bits(filterable)).is_empty()
+                ((self.filters ^ InteractFilterFlags::SORT_INVERTED) & InteractFilterFlags::sort_as_bits(filterable)).intersects(InteractFilterFlags::SORT_MASK)
             };
             let marker = match self.markers.entry(mid) {
                 IndexEntry::Occupied(e) if is_blacklisted => {
@@ -991,6 +1012,12 @@ impl PoiInfo {
                     self.dirty.insert(PoiInfoSorts::VISIBLE);
                 }
             }
+            if flags_populated.contains(PoiInfoSorts::ENABLED) {
+                let prev = mem::replace(&mut marker.enabled, flags.contains(PoiInfoSorts::ENABLED));
+                if prev != marker.visible {
+                    self.dirty.insert(PoiInfoSorts::ENABLED);
+                }
+            }
             if flags_populated.contains(PoiInfoSorts::DISTANCE) {
                 let prev = mem::replace(&mut marker.pos, pos);
                 if !vec_eq(prev, marker.pos) {
@@ -1022,6 +1049,7 @@ impl PoiInfo {
                 sp => sp,
             }
         };
+        self.wants_static = false;
         match spacepacks {
             Some(spacepacks) => {
                 let range = self.range_for(self.last_pos);
@@ -1059,7 +1087,7 @@ impl PoiInfo {
                         })
                     });
                     self.update_static_of_inner(updates);
-                    }
+                }
             },
             _ => {
                 let updates = render.pack_data.iter().filter_map(|(_pack_path, pack)|
@@ -1073,14 +1101,13 @@ impl PoiInfo {
         }
     }
     pub fn update_static_ui(&mut self, packs: &IndexedList<PackRegistryNs, PackIndex, [PackElement]>) {
+        self.wants_static = false;
         let updates = packs.values().filter_map(|pack_state|
             pack_state.state.map_info.as_ref().map(|map_info| (map_info, None))
         );
         self.update_static_of(&mut {updates})
     }
     pub fn update_static_of<'a>(&mut self, updates: &mut dyn Iterator<Item = (&'a SharedMapPackLoaded, Option<&'a SharedMapPackState>)>) {
-        self.wants_static = false;
-        self.dirty_markers = false;
         let updates = updates.flat_map(move |(map_info, map)| {
             map_info.loaded_pois(map).map(move |poi| {
                 let mid = poi.as_marker().loaded_id();
@@ -1182,18 +1209,34 @@ impl PoiInfo {
         }
     }
     pub fn update_entities_relaxed(&mut self) {
-        if self.wants_entities {
+        if self.wants_entities & !self.wants_static {
             if !self.last_pos.x.is_infinite() {
                 let range = self.range_for(self.last_pos);
                 self.update_entities(range)
             }
         }
     }
+    pub fn wants_maps(&self) -> bool {
+        self.wants_maps && !(self.wants_static | self.wants_entities | self.nearby.cached.is_none())
+    }
     pub fn rx_maps(&mut self, maps: &SharedGameplayMap) {
         self.wants_maps = false;
         log::debug!("rx maps");
         if let Some(map_id) = maps.map_id {
             let dirty = &mut self.dirty;
+            match self.filters.contains(InteractFilterFlags::DISABLED) {
+                false => {
+                    let updates = maps.iter_state()
+                        .map(|(_, map, map_info)| (map_info, Some(map)));
+                    self.update_static_of(&mut {updates})
+                },
+                true => {
+                    let updates = maps.iter_loaded()
+                        .map(|(_, map_info, map)| (map_info, map));
+                    self.update_static_of(&mut {updates})
+                },
+            }
+            #[cfg(todo)]
             self.markers.retain(|k, marker| {
                 let map_path = k.get_marker_pack_map_path();
                 if map_path.path != map_id { return false }
@@ -1222,7 +1265,6 @@ impl PoiInfo {
                     true
                 } else { false }
             });
-            //self.wants_static = true;
         } else {
             if !self.markers.is_empty() {
                 log::debug!("TODO: premature clear or no?");
@@ -1230,17 +1272,31 @@ impl PoiInfo {
             self.markers.clear();
         }
     }
+    pub fn wants_static_all(&self) -> bool {
+        self.wants_static & self.filters.contains(InteractFilterFlags::DISABLED)
+    }
     /// TODO: populate+sync filter+sort flags with settings
     pub fn pre_draw(&mut self, visibility: PackVisibility) {
-        let rendered = match visibility {
-            PackVisibility::Closed =>
+        let rendered = match (visibility, self.since_rendered) {
+            (PackVisibility::Closed, _) =>
                 usize::MAX,
+            (PackVisibility::Visible, usize::MAX) => {
+                self.wants_static |= self.filters.intersects(InteractFilterFlags::STATIC | InteractFilterFlags::DISABLED);
+                self.wants_entities |= self.filters.contains(InteractFilterFlags::FAR);
+                self.wants_maps |= true;
+                self.nearby.mark_changed();
+                1
+            },
+            (_, usize::MAX) =>
+                Self::GIVE_UP_FRAMES + 1,
             _ => self.since_rendered.saturating_add(1),
         };
         let prev = mem::replace(&mut self.since_rendered, rendered);
         if visibility.is_closed() {
             if prev == usize::MAX { return }
             self.cleanup_cache();
+            self.nearby.mark_changed();
+            self.wants_maps = true;
         }
     }
     pub fn cleanup_cache(&mut self) {
@@ -1428,29 +1484,34 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
         let window_size: Size2<f32> = Size2::from_array(ui.window_size());
         self.bounds_height = (self.bounds.max.y - self.bounds.min.y).max(window_size.height) + ui.text_line_height_with_spacing() * 2.0;
 
-        if with_i18n!("pois-map", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::FAR)) {
-            self.state.dirty_markers = true;
-            if self.state.filters.contains(InteractFilterFlags::FAR) {
-                self.state.wants_entities = true;
+        {
+            let _flags = ui.push_id("filter-flags");
+            if with_i18n!("pois-map", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::FAR)) {
+                if self.state.filters.contains(InteractFilterFlags::FAR) {
+                    self.state.wants_entities = true;
+                }
+                if self.state.filters.intersects(InteractFilterFlags::STATIC | InteractFilterFlags::DISABLED) {
+                    self.state.wants_static = true;
+                }
             }
-        }
-        ui.same_line();
-        if with_i18n!("pois-other", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::STATIC)) {
-            self.state.dirty_markers = true;
-            if self.state.filters.contains(InteractFilterFlags::STATIC) {
-                self.state.wants_static = true;
+            ui.same_line();
+            if with_i18n!("pois-other", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::STATIC)) {
+                if self.state.filters.contains(InteractFilterFlags::STATIC) {
+                    self.state.wants_static = true;
+                }
             }
-        }
-        ui.same_line();
-        if with_i18n!("disabled", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::DISABLED)) {
-            self.state.dirty_markers = true;
-        }
-        ui.same_line();
-        if with_i18n!("pois-hidden", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::FILTERED)) {
-            self.state.dirty_markers = true;
-            #[cfg(todo = "unnecessary")]
-            if self.filters.contains(InteractFilterFlags::FILTERED) {
-                self.state.wants_static = true;
+            ui.same_line();
+            if with_i18n!("disabled", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::DISABLED)) {
+                if self.state.filters.contains(InteractFilterFlags::DISABLED) {
+                    self.state.wants_static = true;
+                }
+            }
+            ui.same_line();
+            if with_i18n!("pois-hidden", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::FILTERED)) {
+                #[cfg(todo = "unnecessary")]
+                if self.filters.contains(InteractFilterFlags::FILTERED) {
+                    self.state.wants_static = true;
+                }
             }
         }
         #[cfg(deleteme)]
@@ -1548,13 +1609,14 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                 match coli {
                     0 => (),
                     1 => {
-                        let label = match (marker.nearby, marker.dist_dist) {
+                        let label = match (marker.nearby, marker.nearish, marker.dist_dist) {
                             _ if !render => "",
-                            (true, _) => "<",
-                            (false, PoiInfoMarker::DIST_DIST_MODERATE) => "❓",
-                            (false, PoiInfoMarker::DIST_DIST_FAR) => ">",
-                            (false, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "",
-                            (false, _) => "×",
+                            (true, _, _) => "<",
+                            (false, true, _) => "❓",
+                            (false, _, PoiInfoMarker::DIST_DIST_MODERATE) => "❓",
+                            (false, _, PoiInfoMarker::DIST_DIST_FAR) => ">",
+                            (false, _, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "",
+                            (false, _, _) => "×",
                         };
                         if !label.is_empty() {
                             ui.text(label)
@@ -1707,6 +1769,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                 open_context = lpoi_path.map(|loaded_path| PoiInfoContext::new(
                     marker.path,
                     map_path.rel(loaded_path.path),
+                    cat_path,
                     guid().cloned(),
                     !marker.visible | marker.filtered,
                 ));
@@ -1912,6 +1975,54 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
             poi.scale_map = 20.0;
             pack.active_pois.push(poi);
             engine.packs.rebuild_active(&engine.render_backend.device);
+        }
+    }
+}
+impl super::PackElements {
+    pub fn draw_interact(&mut self, ui: &Ui) {
+        let mut draw = DrawPoiInfo::new(
+            ui,
+            &mut self.interact,
+            self.pack_state.map_ref_as_slice(),
+        );
+        let was_context = draw.state.context.is_some();
+        draw.draw();
+        let context_id = "poi-context";
+        if draw.state.context.is_some() && !was_context {
+            ui.open_popup(context_id);
+        }
+        let popup = ui.begin_popup(context_id);
+        let popup_drawn = popup.is_some();
+        let mut act_cat = None;
+        if let Some(_token) = popup {
+            if let Some(context) = &mut draw.state.context {
+                let mut menu = context.prepare_draw_menu(ui);
+                menu.draw();
+                context.finish_draw_menu(menu);
+                act_cat = context.act_cat.take().map(|act| (context.loaded_path, act));
+            } else {
+                ui.close_current_popup();
+            }
+        }
+        if draw.state.context.is_some() == was_context && popup_drawn != was_context {
+            draw.state.context = None;
+        }
+        if let Some((lpath, (cat_path, act))) = act_cat {
+            let category_path = lpath.root.root.rel(cat_path.path);
+            let pack = self.pack_state.lookup_mut(&category_path.root);
+            match (pack, act) {
+                (Some(pack), CategoryAction::Open(open)) => {
+                    pack.categories.update_open(cat_path, open);
+                    if let Some(cats) = pack.state.info.info.as_ref().map(|i| &i.categories) {
+                        for parent in cats.ancestors_of(cat_path) {
+                            pack.categories.update_open(parent, open);
+                        }
+                    }
+                    let _ = rt::send_alert(ui, "navigate over yourself, im sleepy");
+                },
+                (Some(..), act) => log::warn!("unexpected action {act:?}"),
+                (None, _) => (),
+            }
         }
     }
 }

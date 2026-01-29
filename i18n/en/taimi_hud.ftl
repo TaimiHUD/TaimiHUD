@@ -360,6 +360,7 @@ poi-auto = { pathing-config-autotrigger }
 poi-filtered = { pois-hidden }
 poi-static = Static
 poi-guid = GUID
+poi-category-navigate = Open category
 poi-copy-guid = { copy } { poi-guid }
 # idk how to do a select case is our fluent too old?
 #dismiss-behaviour-1 = leave
