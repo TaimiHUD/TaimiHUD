@@ -280,6 +280,13 @@ impl NamespacePivotFrom<PackTrailNs, TrailIndex> for PackMarkerNs {
         Locator::with_path(MarkerIndex::with_trail(path.path))
     }
 }
+impl NamespacePivotFrom<PackCategoryNs, CategoryIndex> for PackMarkerNs {
+    type NsPivotFromPath = MarkerIndex;
+    #[inline]
+    fn loc_pivot_from(path: CategoryPath) -> Locator<Self, Self::NsPivotFromPath> {
+        Locator::with_path(MarkerIndex::with_category(path.path))
+    }
+}
 impl NamespacePivotFrom<TrailPath, TrailSectionPath> for PackMarkerNs {
     type NsPivotFromPath = MarkerIndex;
     #[inline]

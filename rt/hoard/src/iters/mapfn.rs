@@ -1,6 +1,6 @@
-use core::{fmt, iter};
+use core::{fmt, iter, mem};
 use crate::iters::tree;
-use std::borrow::Cow;
+use std::{borrow::Cow, slice};
 
 /// unlike [iter::Map], [self.map] is not guaranteed to run in sequence
 /// for all items, such as when [Iterator::nth] is used
@@ -59,6 +59,45 @@ where
     pub fn into_std(self) -> iter::Map<I, F> {
         let Self { iter, map } = self;
         iter.map(map)
+    }
+}
+impl<'a, T, F, R> LazyMapFn<slice::Iter<'a, T>, F> where
+    F: FnMut(&'a T) -> R,
+{
+    /// non-consuming peek
+    #[inline(always)]
+    pub unsafe fn index_unchecked(&mut self, index: usize) -> R {
+        let item = self.iter.as_slice().get_unchecked(index);
+        (&mut self.map)(item)
+    }
+}
+impl<'a, T, F, R> LazyMapFn<slice::IterMut<'a, T>, F> where
+    F: FnMut(&'a mut T) -> R,
+{
+    #[inline(always)]
+    pub unsafe fn into_index_mut_unchecked(self, index: usize) -> R {
+        let Self { iter, mut map } = self;
+        (map)(iter.into_slice().get_unchecked_mut(index))
+    }
+    /// non-consuming peek, but prefer [Self::into_index_mut_unchecked] if possible
+    ///
+    /// TODO: unstable..
+    #[inline(always)]
+    pub unsafe fn index_mut_unchecked<'b>(&'b mut self, index: usize) -> R where
+        R: 'b,
+    {
+        let slice: *mut [T] = {
+            let slice = mem::replace(&mut self.iter, [].iter_mut()).into_slice();
+            slice as *mut [T]
+        };
+        self.iter = <[T]>::iter_mut(mem::transmute(slice));
+        // now it's nice and pointery again maybe? this would be easier but useless if R weren't allowed to borrow...
+        (&mut self.map)(&mut *(slice as *mut T).add(index))
+    }
+    #[cfg(todo)]
+    pub unsafe fn index_mut_unchecked(&mut self, index: usize) -> R {
+        let item = self.iter.as_mut_slice().get_unchecked_mut(index);
+        (&mut self.map)(item)
     }
 }
 impl<I: Iterator, F, R> Iterator for LazyMapFn<I, F>

@@ -1,6 +1,13 @@
-pub use self::{collection::TaimiCollection, extend::TaimiExtend, dict::{TaimiDict, TaimiDictMut, TaimiDictStorage}, set::TaimiSet};
+pub use self::{
+    collection::TaimiCollection,
+    extend::TaimiExtend,
+    dict::{TaimiDict, TaimiDictMut, TaimiDictStorage},
+    set::TaimiSet,
+    seq::{TaimiSeq, TaimiSeqMut, TaimiSeqIndex, TaimiSeqIndexMut, TaimiSeqGet, TaimiSeqKey, TaimiSeqStorage},
+};
 mod extend;
 mod set;
+mod seq;
 mod dict;
 
 mod collection {

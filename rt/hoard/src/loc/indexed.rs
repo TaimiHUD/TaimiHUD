@@ -34,6 +34,16 @@ impl<N, P, T> IndexedList<N, P, T> {
         Self::with_parts(root, T::default())
     }
     #[inline(always)]
+    pub fn map_into<R, F: FnOnce(&N, T) -> R>(self, f: F) -> IndexedList<N, P, R> {
+        let Self { root, data, .. } = self;
+        let data = f(&root, data);
+        IndexedList::with_parts(root, data)
+    }
+    #[inline(always)]
+    pub fn map_data<R, F: FnOnce(T) -> R>(self, f: F) -> IndexedList<N, P, R> {
+        self.map_into(move |_, data| f(data))
+    }
+    #[inline(always)]
     pub fn into_values(self) -> <T as IntoIterator>::IntoIter
     where
         T: IntoIterator,
@@ -169,6 +179,22 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> {
             v => unsafe { v.unwrap_unchecked() },
         }
     }
+    #[inline(always)]
+    pub fn map_data_to<'a, R, F: FnOnce(&'a T) -> R>(&'a self, f: F) -> IndexedList<N, P, R> where
+        N: Clone,
+    {
+        let Self { root, data, .. } = self;
+        let data = f(data);
+        IndexedList::with_parts(root.clone(), data)
+    }
+    #[inline(always)]
+    pub fn map_data_to_mut<'a, R, F: FnOnce(&'a mut T) -> R>(&'a mut self, f: F) -> IndexedList<N, P, R> where
+        N: Clone,
+    {
+        let Self { root, data, .. } = self;
+        let data = f(data);
+        IndexedList::with_parts(root.clone(), data)
+    }
     #[inline]
     pub fn map_full(
         &self,
@@ -228,6 +254,40 @@ impl<N, P, T: ?Sized> IndexedList<N, P, T> {
         N: PhantomNamespace,
     {
         self.map_mut()
+    }
+}
+impl<N, P, T> IndexedList<N, P, [T]> {
+    #[inline]
+    pub fn get_index(&self, loc: Locator<N, P>) -> Option<&T> where
+        P: AsPrimitive<usize> + Copy + 'static,
+        N: PartialEq,
+    {
+        if loc.root != self.root {
+            return None
+        }
+        self.data.get(loc.path.as_())
+    }
+    #[inline]
+    pub fn get_index_mut(&mut self, loc: Locator<N, P>) -> Option<&mut T> where
+        P: AsPrimitive<usize> + Copy + 'static,
+        N: PartialEq,
+    {
+        if loc.root != self.root {
+            return None
+        }
+        self.data.get_mut(loc.path.as_())
+    }
+    #[inline(always)]
+    pub unsafe fn index_unchecked(&self, loc: Locator<N, P>) -> &T where
+        P: AsPrimitive<usize> + Copy + 'static,
+    {
+        self.data.get_unchecked(loc.path.as_())
+    }
+    #[inline(always)]
+    pub unsafe fn index_mut_unchecked(&mut self, loc: Locator<N, P>) -> &mut T where
+        P: AsPrimitive<usize> + Copy + 'static,
+    {
+        self.data.get_unchecked_mut(loc.path.as_())
     }
 }
 impl<N, P, T: ?Sized> IndexedList<N, P, T> {

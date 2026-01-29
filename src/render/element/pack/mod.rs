@@ -138,19 +138,21 @@ impl PackElements {
                     pack_state.state.map_info = None;
                 }
             }
-            self.interact.rx_maps(&maps);
+            self.interact.wants_maps = true;
         }
-        if self.interact.wants_maps {
-            if let Some(maps) = self.maps_rx.try_read() {
-                self.interact.rx_maps(&maps);
+        let interact_vis = visibility.min(self.interact.visibility());
+        if interact_vis.is_visible() {
+            if self.interact.wants_maps {
+                if let Some(maps) = self.maps_rx.try_read() {
+                    self.interact.rx_maps(&maps);
+                }
             }
+            self.interact.rx_nearby();
+            self.interact.update_entities_relaxed();
         }
-        self.interact.rx_nearby();
-        self.interact.update_entities_relaxed();
         for pack in self.pack_state.values_mut() {
             pack.pre_draw(&mut self.filter_query, visibility);
         }
-        self.interact.pre_draw(visibility);
     }
     /// TODO: binary heap with real sort key
     fn iter_packs_draw<'a, 'u, 'ui>(ui: &'u Ui<'ui>, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>, amt_hidden: &'a mut usize) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
@@ -307,7 +309,7 @@ impl PackElement {
     }
 
     pub fn pre_draw(&mut self, filter_query: &mut CategoryFilterQuery, visibility: PackVisibility) {
-        if let PackVisibility::Closed = visibility {
+        if visibility.is_closed() {
             self.hovered = None;
         }
         let damage = self.state.pre_draw(visibility);
@@ -405,7 +407,7 @@ impl PackElementState {
             self.unloaded = loaded.unloaded.clone();
             self.pack = loaded.pack.as_ref().map(Arc::downgrade);
         }
-        if let PackVisibility::Closed = visibility {
+        if visibility.is_closed() {
             self.cleanup_cache();
             return damage
         }
@@ -612,6 +614,23 @@ pub enum PackVisibility {
     Pending = 2,
     /// window closed
     Closed = 1,
+}
+impl PackVisibility {
+    pub fn visible(visible: bool) -> Self {
+        match visible {
+            true => Self::Visible,
+            false => Self::Closed,
+        }
+    }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        matches!(self, Self::Visible)
+    }
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[must_use]
