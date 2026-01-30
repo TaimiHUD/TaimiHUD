@@ -704,6 +704,9 @@ impl RenderState {
             return
         }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
+        rt::setup_stats();
+        #[cfg(feature = "space")]
+        crate::space::Engine::setup_stats();
 
         let mut state = Self::lock();
         if let Some(state) = state.as_mut() {

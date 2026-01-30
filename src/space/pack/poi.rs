@@ -188,7 +188,7 @@ impl PoiCommonRenderData {
         self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
 
         let (data_world, data_map) = (&data_world[..], &data_map[..]);
-        STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(data_map) + size_of_val(data_world)) as _);
+        STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(data_map) + size_of_val(data_world)));
         let (poi_ib_world, poi_ib_map) = (
             BufferOf::new_with_data(device, Ok(data_world), ())?,
             BufferOf::new_with_data(device, Ok(data_map), ())?,

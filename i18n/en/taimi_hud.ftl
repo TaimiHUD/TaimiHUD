@@ -214,13 +214,26 @@ object-data = { object } { data }
 object-kind = { object } Kind
 model-files = { model } Files
 vertices = Vertices
-textures = Textures: { $count }
-alloc-size = Allocations: { $size }
-d3d-textures = D3D Textures: { $count }
+textures = { stats-engine-texture-count }: { $count }
+alloc-size = { stats-runtime-alloc }: { $size }
+d3d-textures = { stats-engine-texture-size }: { $count }
 size-frag = { $size } { $suffix }
 #size-frag-mb = { size-frag(suffix: "MB", size: "$size") }
 size-frag-mb = { $size } MB
 size-frag-kb = { $size } KB
+stats = Statistics
+stats-runtime-allocator = Runtime Allocator
+stats-runtime-alloc = Memory Usage
+stats-space-pack = Pathing Stats
+stats-engine-drawn = Drawn
+stats-engine-mapped = Mapped
+stats-engine-entities = Total
+stats-space-engine-d3d = { space } D3D
+stats-engine-instance-poi = POI Instance Buffer
+stats-engine-vertex-trail = { vertices }
+stats-space-engine-textures = Textures
+stats-engine-texture-count = Loaded
+stats-engine-texture-size = Video Memory Usage
 
 ## Arc
 

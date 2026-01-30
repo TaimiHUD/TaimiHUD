@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
+use num_traits::AsPrimitive;
 
 #[derive(Debug)]
 pub struct Counter {
@@ -15,25 +16,25 @@ impl Counter {
     }
 
     #[inline(always)]
-    pub fn increment_by<F: FnOnce() -> usize>(&self, f: F) -> usize {
+    pub fn increment_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, f: F) -> A {
         let amt = f();
         self.increment(amt);
         amt
     }
     #[inline(always)]
-    pub fn decrement_by<F: FnOnce() -> usize>(&self, f: F) -> usize {
+    pub fn decrement_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, f: F) -> A {
         let amt = f();
         self.decrement(amt);
         amt
     }
     #[inline(always)]
-    pub fn adjust_by<F: FnOnce() -> isize>(&self, f: F) -> isize {
+    pub fn adjust_by<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, f: F) -> A {
         let amt = f();
         self.adjust(amt);
         amt
     }
     #[inline(always)]
-    pub fn reset_with<F: FnOnce() -> isize>(&self, f: F) -> isize {
+    pub fn reset_with<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, f: F) -> A {
         let amt = f();
         self.reset(amt);
         amt
@@ -51,18 +52,18 @@ impl Counter {
 impl Counter {
     pub const ORDERING: Ordering = Ordering::Relaxed;
 
-    pub fn increment(&self, amt: usize) {
-        self.count.fetch_add(amt as isize, Self::ORDERING);
+    pub fn increment(&self, amt: impl AsPrimitive<usize>) {
+        self.count.fetch_add(amt.as_() as isize, Self::ORDERING);
     }
-    pub fn decrement(&self, amt: usize) {
-        self.count.fetch_sub(amt as isize, Self::ORDERING);
+    pub fn decrement(&self, amt: impl AsPrimitive<usize>) {
+        self.count.fetch_sub(amt.as_() as isize, Self::ORDERING);
     }
-    pub fn adjust(&self, amt: isize) {
-        self.count.fetch_add(amt, Self::ORDERING);
+    pub fn adjust(&self, amt: impl AsPrimitive<isize>) {
+        self.count.fetch_add(amt.as_(), Self::ORDERING);
     }
 
-    pub fn reset(&self, amt: isize) {
-        self.count.store(amt, Self::ORDERING);
+    pub fn reset(&self, amt: impl AsPrimitive<isize>) {
+        self.count.store(amt.as_(), Self::ORDERING);
     }
 
     pub fn get(&self) -> isize {
