@@ -9,7 +9,6 @@ members = [
   "rt/input",
   "rt/sync",
   "space/d3d",
-  "space/d3d",
 ]
 
 [package]
