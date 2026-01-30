@@ -457,6 +457,7 @@ impl PoiRender {
         ]) }
     }
 
+    /// TODO: texture manager should handle cleanup explcitly...
     #[inline]
     pub fn cleanup_background(mut self) {
         mem::forget(self.icon.take());
