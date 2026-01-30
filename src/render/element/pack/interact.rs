@@ -1514,12 +1514,6 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                 }
             }
         }
-        #[cfg(deleteme)]
-        {
-        WAIT("table_next_column tells you if it's visible anyway!!!");
-
-        todo("interact column with buttons or STATIC Marker label");
-        }
         let table = Self::open_table(ui, "ipois");
         if let Some(_table) = table {
             self.state.since_rendered = 0;
