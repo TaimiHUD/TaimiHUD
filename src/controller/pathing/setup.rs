@@ -10,7 +10,7 @@ use {
             PathingReceiver,
         },
         controller::runtime::WallInstant,
-        exports::runtime as rt,
+        exports::runtime::{self as rt, textures::TextureKey},
         settings::{Settings, SourceKind},
         TEXTURES,
     },
@@ -37,6 +37,7 @@ use {
         task::JoinSet,
         time::{timeout, Duration},
     },
+    taimi_hoard::collections::TaimiSet,
 };
 
 impl PathingController {
@@ -725,11 +726,18 @@ impl PathingController {
     }
 
     pub(super) async fn debug_req_resource_release(&mut self, path: Option<PackPath>) {
-        let rest = path.is_none().then_some(self.packs.packs.paths());
-        let packs = rest.into_iter().flatten().chain(path);
-        for path in packs {
-            log::debug!("manual resource cleanup of {path}...");
-            self.cleanup_pack_subresources(path, None);
+        let pack = path.map(|path| self.packs.lookup_ref(&path));
+        let rest = pack.is_none().then_some(self.packs.packs.values());
+        let packs = rest.into_iter().flatten().chain(pack.flatten());
+
+        for pack in packs {
+            let resources = pack.info.shared_subresources();
+            let resources = match resources.try_read() {
+                Ok(resources) if !resources.is_empty() => resources,
+                _ => continue,
+            };
+            let keys = resources.values().collect::<BTreeSet<_>>();
+            self.loader.cleanup_pack_subresources_of(false, &keys);
         }
     }
     pub(super) fn debug_req_resource_report(&self, path: Option<PackPath>) {
@@ -863,16 +871,19 @@ impl PackLoader {
             log::warn!("can't cleanup missing {path}");
             return
         };
-        let mut keys = keys.into_iter().peekable();
-        if keys.peek().is_none() {
-            return
-        }
-        let keys = keys.map(|(name, key)| (key, name)).collect::<BTreeMap<_, _>>();
         let cleanup = match reason {
             Some(reason) if !reason.can_reactivate(false) => true,
             _ => false,
         };
-        TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.contains_key(key));
+        let mut keys = keys.into_iter().peekable();
+        if keys.peek().is_none() {
+            return
+        }
+        let keys = keys.map(|(_name, key)| key).collect::<BTreeSet<_>>();
+        self.cleanup_pack_subresources_of(cleanup, &keys);
+    }
+    pub(super) fn cleanup_pack_subresources_of(&self, cleanup: bool, keys: &dyn TaimiSet<TextureKey>) {
+        TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.set_contains(key));
     }
 
     pub(super) fn update_map_states(
