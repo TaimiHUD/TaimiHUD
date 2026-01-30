@@ -121,6 +121,8 @@ impl PathingWindowState {
         if let Some(_window) = window {
             let pathing_dir = crate::ADDON_DIR.join("pathing");
             RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
+            ui.same_line();
+            ui.dummy([4.0; 2]);
             self.draw_content(ui, machine, engine)
         }
         self.open = open;
@@ -182,6 +184,19 @@ impl PathingWindowState {
             ui.set_cursor_screen_pos(bookmark);
 
             machine.pack_ui_state.draw_interact(ui);
+        }
+        let draw_pe = tabs.as_ref().and_then(|_| ui.tab_item("editz"));
+        if let Some(_tab) = draw_pe {
+            let bookmark = ui.cursor_screen_pos();
+            ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
+            if machine.pack_ui_state.pack_edit.is_open() {
+                if ui.button("close") {
+                    machine.pack_ui_state.pack_edit.close();
+                }
+            }
+            ui.set_cursor_screen_pos(bookmark);
+
+            machine.pack_ui_state.draw_dynamic(ui);
         }
         drop(tabs);
     }

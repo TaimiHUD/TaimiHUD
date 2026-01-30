@@ -815,12 +815,12 @@ impl PoiInfo {
         match &mut self.nearby {
             #[cfg(todo = "unnecessary")]
             nearby if self.nearby.is_watching() => (),
-            nearby => nearby.resubscribe_to(&pathing.interact.nearby),
+            nearby => nearby.restart_watching(&pathing.interact.nearby),
         }
         match &mut self.entities {
             #[cfg(todo = "unnecessary")]
             entities if self.entities.is_watching() => (),
-            entities => entities.resubscribe_to(&pathing.interact.entities),
+            entities => entities.restart_watching(&pathing.interact.entities),
         }
     }
     pub fn rx_nearby(&mut self) {

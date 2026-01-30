@@ -273,6 +273,12 @@ impl TrailHeader0 {
             )),
         }
     }
+    pub fn write_header<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        let [v0, v1, v2, v3] = Self::VERSION.to_le_bytes();
+        let [m0, m1, m2, m3] = self.map_id.to_le_bytes();
+        let buf: [u8; Self::SIZE] = [v0, v1, v2, v3, m0, m1, m2, m3];
+        writer.write_all(&buf)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -394,7 +400,7 @@ impl TrailSection {
     }
 
     pub const POINT_SIZE: usize = mem::size_of::<f32>() * 3;
-    const POINT_EMPTY_DATA: [u8; Self::POINT_SIZE] = [0u8; Self::POINT_SIZE];
+    pub const POINT_EMPTY_DATA: [u8; Self::POINT_SIZE] = [0u8; Self::POINT_SIZE];
     pub fn read_point<R: Read>(reader: &mut R) -> io::Result<Option<Option<Point3<f32>>>> {
         let point_data = {
             let mut buf = Self::POINT_EMPTY_DATA;
@@ -415,6 +421,25 @@ impl TrailSection {
                 f32::from_le_bytes([z0, z1, z2, z3]),
             )),
         }))
+    }
+
+    pub fn encode_point(point: Point3<f32>) -> [u8; Self::POINT_SIZE] {
+        let [
+            [x0, x1, x2, x3],
+            [y0, y1, y2, y3],
+            [z0, z1, z2, z3],
+        ] = [
+            point.x.to_le_bytes(),
+            point.y.to_le_bytes(),
+            point.z.to_le_bytes(),
+        ];
+        [x0, x1, x2, x3, y0, y1, y2, y3, z0, z1, z2, z3]
+    }
+    pub fn encode_record(point: Option<Point3<f32>>) -> [u8; Self::POINT_SIZE] {
+        match point {
+            None => Self::POINT_EMPTY_DATA,
+            Some(point) => Self::encode_point(point),
+        }
     }
 
     pub fn is_empty(&self) -> bool {

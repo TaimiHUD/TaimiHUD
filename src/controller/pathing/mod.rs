@@ -104,6 +104,8 @@ pub(crate) enum PathingEvent {
     ReloadAll(bool),
     LoadAll,
     UnloadAll(bool),
+    PackLock { path: PackPath },
+    PackUnlock { path: PackPath },
     /// toggle or set category state
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
     /// until we maintain the mapping for interaction attrs that toggle/show/hide...
@@ -626,6 +628,8 @@ impl PathingController {
             Refresh { include_datasources } => self.process_pack_refresh_all(include_datasources).await,
             ReloadAll(remove) => self.process_pack_reload_all(remove).await,
             UnloadAll(remove) => self.process_pack_unload_all(remove),
+            PackLock { path } => self.process_pack_lock(path),
+            PackUnlock { path } => self.process_pack_unlock(path),
             ReloadPack(path, remove) => self.process_pack_reload(path, remove),
             CategoryEnableSet(pack_path, cat, state) =>
                 self.process_category_set(pack_path.rel(cat.path), state).await,
