@@ -17,9 +17,10 @@ use {
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::{PackRender, PackRenderList},
+            pack::{self, PackRender, PackRenderList},
         },
         timer::{PhaseState, TimerDirection, TimerFile, TimerMarker},
+        exports::runtime::statistics::{StatsUnit, StatsRef, StatsDesc},
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
@@ -214,6 +215,8 @@ impl Engine {
         receiver: Receiver<SpaceEvent>,
         gameplay: &watch::Sender<GameplayState>,
     ) -> anyhow::Result<Engine> {
+        Self::setup_stats();
+
         let display_size = machine
             .display_size()
             .ok_or_else(|| anyhow!("display size unknown"))?;
@@ -1312,6 +1315,44 @@ impl Engine {
                 let reference = RenderMachine::GOGGLES_DEPTH_RANGE;
                 machine.depth_range = Some(reference.start * min..reference.end * max);
             }
+        }
+    }
+
+    pub(crate) fn setup_stats() {
+        use crate::resources::texture;
+
+        const SEC: &'static str = "stats-space-pack";
+        const SEC3D: &'static str = "stats-space-engine-d3d";
+        const SEC2D: &'static str = "stats-space-engine-textures";
+        let stats_counters = &[
+            (StatsRef::with_counter(&pack::STATS_ENTITY_DRAW, StatsUnit::Count), StatsDesc::new(
+                SEC, "stats-engine-drawn",
+            )),
+            (StatsRef::with_counter(&pack::STATS_ENTITY_DRAW_MAP, StatsUnit::Count), StatsDesc::new(
+                SEC, "stats-engine-mapped",
+            )),
+            (StatsRef::with_counter(&pack::STATS_ENTITY_COUNT, StatsUnit::Count), StatsDesc::new(
+                SEC, "stats-engine-entities",
+            )),
+            (StatsRef::new(&pack::STATS_POI_INSTANCE_SIZE, StatsUnit::Size), StatsDesc::new(
+                SEC3D, "stats-engine-instance-poi",
+            )),
+            (StatsRef::new(&pack::STATS_TRAIL_VERTEX_SIZE, StatsUnit::Size), StatsDesc::new(
+                SEC3D, "stats-engine-vertex-trail",
+            )),
+            //#[cfg(feature = "texture-loader")]
+            (StatsRef::new(&texture::STATS_TEXTURE_COUNT, StatsUnit::Count), StatsDesc::new(
+                SEC3D, "stats-engine-texture-count",
+            )),
+            (StatsRef::new(&texture::STATS_TEXTURE_SIZE, StatsUnit::Size), StatsDesc::new(
+                SEC2D, "stats-engine-texture-size",
+            )),
+            (StatsRef::new(&texture::STATS_TEXTURE_SIZE_CLONED, StatsUnit::Size), StatsDesc::new(
+                SEC2D, "stats-engine-texture-size-max",
+            )),
+        ];
+        for &(counter, desc) in stats_counters {
+            counter.register(desc);
         }
     }
 }
