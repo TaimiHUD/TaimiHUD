@@ -687,3 +687,12 @@ pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
 
     msg
 }
+
+pub(crate) fn setup_stats() {
+    #[cfg(all(feature = "allocator", feature = "statistics"))]
+    {
+        statistics::StatsRef::new(&self::allocator::STATS_ALLOC_SIZE, statistics::StatsUnit::Size).register(
+            statistics::StatsDesc::new("stats-runtime-allocator", "stats-runtime-alloc"),
+        )
+    }
+}

@@ -1189,7 +1189,7 @@ impl PackRender {
             backend,
             entities,
         );
-        STATS_ENTITY_COUNT.reset_with(|| spacepacks.render_entities.entities.len() as _);
+        STATS_ENTITY_COUNT.reset_with(|| spacepacks.render_entities.entities.len());
     }
     #[cfg(feature = "goggles")]
     pub fn draw_obscured(
@@ -1338,7 +1338,7 @@ impl PackRender {
                 }
             }
         }
-        STATS_ENTITY_DRAW.reset(num_drawn as _);
+        STATS_ENTITY_DRAW.reset(num_drawn);
     }
     pub fn draw_map_entities<'e, E>(
         draw_state: &mut PackRenderState,
@@ -1450,7 +1450,6 @@ impl PackRender {
             }
             num_drawn += 1;
         }
-        STATS_ENTITY_DRAW_MAP.reset(num_drawn as _);
         #[cfg(todo)]
         if trail_colour.is_some() {
             // reset back to default...
@@ -1460,6 +1459,7 @@ impl PackRender {
                 }
             }
         }
+        STATS_ENTITY_DRAW_MAP.reset(num_drawn);
     }
 
     pub fn clear(&mut self) {
