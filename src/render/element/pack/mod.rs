@@ -56,6 +56,7 @@ pub use self::{
         DrawPackUnloaded,
         PackCategoryMaskState,
     },
+    dynamic::{DrawPe, PackData, PackEdit, PackEditEnv},
     interact::{DrawPoiInfo, PoiInfo, PoiInfoContext},
     menu::{
         DrawCategoryCollectionMenu,
@@ -68,6 +69,7 @@ pub use self::{
 };
 
 mod categories;
+mod dynamic;
 mod interact;
 mod menu;
 mod toggles;
@@ -79,6 +81,7 @@ pub struct PackElements {
     pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
     pub interact: PoiInfo,
+    pub pack_edit: PackEdit,
     pub filter_query: CategoryFilterQuery,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
 }
@@ -98,6 +101,7 @@ impl PackElements {
                 self.packs_rx.restart_watching(&shared.packs.packs);
                 self.maps_rx.restart_watching(&shared.gameplay);
                 self.interact.init(shared);
+                self.pack_edit.init(shared);
             }
         }
         let Some(_shared) = &self.shared else { return };

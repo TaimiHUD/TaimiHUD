@@ -1064,3 +1064,10 @@ impl SharedPacks {
         }
     }
 }
+
+impl PathingController {
+    pub fn process_pack_lock(&mut self, path: PackPath) {
+        self.request_pack_loads(path.into());
+    }
+    pub fn process_pack_unlock(&mut self, path: PackPath) {}
+}
