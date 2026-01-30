@@ -204,7 +204,7 @@ impl Texture {
     /// *bytes* per pixel
     ///
     /// TODO: this is implemented by arcffi, defer to that once it's used more
-    fn format_bpp(format: dxgi::DXGI_FORMAT) -> usize {
+    pub(crate) fn format_bpp(format: dxgi::DXGI_FORMAT) -> usize {
         match DxgiFormat::try_from_d3d(format).map_err(|_| format) {
             Ok(DxgiFormat::R32G32B32A32Float) => 16,
             Ok(DxgiFormat::R32G32B32Float) => 12,
@@ -218,7 +218,7 @@ impl Texture {
         }
     }
 
-    fn texture_byte_size(&self) -> usize {
+    pub(crate) fn texture_byte_size(&self) -> usize {
         let bpp = Self::format_bpp(self.view.get_desc().Format);
         let [w, h] = self.dimensions;
         bpp * w as usize * h as usize
