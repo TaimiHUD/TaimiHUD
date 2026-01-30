@@ -58,13 +58,12 @@ pub use self::{
     },
     menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu, DrawPackAdvancedMenu},
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
-    interact::{PoiInfo, DrawPoiInfo},
+    interact::{PoiInfo, DrawPoiInfo, PoiInfoContext},
 };
 
 mod categories;
 mod menu;
-/// TODO: un-pub!
-pub(in super::super) mod interact;
+mod interact;
 mod toggles;
 
 #[derive(Debug, Default)]
@@ -169,7 +168,7 @@ impl PackElements {
             let mut next = None;
             while let Some(pack) = packs.next() {
                 let delay = match &pack.state.unloaded {
-                    Some(UnloadedReason::Gravestone) => false,
+                    Some(UnloadedReason::Gravestone) => continue,
                     _ if filtered.is_some() && pack.categories.filter_state.all_filtered() => true,
                     Some(UnloadedReason::Disabled | UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)) => true,
                     _ => false,
@@ -228,15 +227,14 @@ impl PackElements {
             },
         };
         let mut amt_hidden = 0;
+        let mut any_packs = false;
         let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered, &mut amt_hidden);
         for pack in packs {
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
                 _ => pack.context_menu = None,
             }
-            if matches!(pack.state.unloaded, Some(UnloadedReason::Gravestone)) {
-                continue
-            }
+            any_packs |= !matches!(pack.state.unloaded, Some(UnloadedReason::Gravestone | UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)));
             pack.draw(ui);
             if let Some(cat_path) = pack.context_menu {
                 let new_menu = (pack.state.pack_path(), cat_path);
@@ -262,6 +260,9 @@ impl PackElements {
             }
             ui.spacing();
             ui.table_next_column();
+        } else if !any_packs {
+            with_i18n!("packs-empty", |msg| ui.text_with_font(NexusLinkFont::Big, msg));
+            with_i18n!("packs-empty-notice", |notice| ui.wrap_text_with_font(NexusLinkFont::Ui, notice));
         }
 
         let (mut menu_pack, menu_cat) = match self.context_menu {
@@ -344,8 +345,7 @@ impl PackElement {
     {
         let title = (!title_visible).then_some(self.state.display_name()).flatten();
         if let Some(title) = title {
-            let _title_font = ui.push_font(NexusLinkFont::Big);
-            ui.text(title);
+            ui.text_with_font(NexusLinkFont::Big, title);
             ui.spacing();
         }
         let path = rt::relative_path(&self.state.info.path);

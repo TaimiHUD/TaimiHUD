@@ -11,10 +11,7 @@ use {
         Controller,
         ControllerEvent,
     },
-    crate::render::element::pack::{
-        interact::DrawPoiInfo,
-        PackVisibility,
-    },
+    crate::render::element::pack::PackVisibility,
     crate::controller::pathing::shared::interact::InteractMessage,
     std::collections::HashSet,
     taimi_pack::category::CategoryId,
