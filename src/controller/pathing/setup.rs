@@ -833,6 +833,7 @@ impl PathingController {
                     let mut bytes = 0usize;
                     let status = TEXTURES.lookup_with(key, |slot| {
                         let mut iunk = None::<IUnknown>;
+                        bytes = slot.diag_texture_byte_size();
                         let status = match slot {
                             TextureSlot::Loading => "loading",
                             TextureSlot::Reserved => "reserved",
@@ -843,23 +844,12 @@ impl PathingController {
                             },
                             TextureSlot::Loaded(tex) => {
                                 count = (Arc::strong_count(tex).saturating_sub(1), Arc::weak_count(tex));
-                                bytes = tex.texture.as_buffer().map(|b| b.size()).unwrap_or(0);
                                 iunk = Some(tex.view.clone().into_d3d().into());
                                 "loaded"
                             },
                             #[cfg(feature = "extension-nexus")]
                             TextureSlot::Nexus(tex) => {
-                                use taimi_d3d::dx11::buffer::TextureView2;
                                 let srv = Some(tex.resource.clone());
-                                if let Some(srv) = TextureView2::from_ref_opt(&srv) {
-                                    let tex = srv.get_resource();
-                                    bytes = tex
-                                        .as_ref()
-                                        .ok()
-                                        .and_then(|tex| tex.as_buffer())
-                                        .map(|buf| buf.size())
-                                        .unwrap_or(0);
-                                }
                                 iunk = srv.map(Into::into);
                                 "nexus"
                             },
@@ -885,7 +875,7 @@ impl PathingController {
                             if icount > 0 || strong > 0 || weak > 0 {
                                 let _ = write!(report, " irefs={icount}, strong={strong}, weak={weak}");
                             }
-                            writeln!(report);
+                            let _ = writeln!(report);
                         },
                     }
                     sz = sz.saturating_add(bytes);
