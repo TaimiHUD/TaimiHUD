@@ -2,7 +2,7 @@ use {
     super::TimerWindowState,
     crate::{
         built_info,
-        exports::runtime as rt,
+        exports::runtime::{self as rt, statistics},
         render::{
             element::prelude::*,
             machine::{RenderMachine, RenderSlot},
@@ -181,11 +181,13 @@ impl InfoTabState {
                 ui.table_next_column();
             }
         }
+        self.stats_table(ui);
         #[cfg(feature = "space")]
         self.space_info(ui, slot);
         if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
             ui.text(fl!("textures", count = tex_count));
         }
+        #[cfg(deleteme)]
         #[cfg(feature = "texture-loader")]
         if let Some(tex_count) = crate::resources::texture::STATS_TEXTURE_COUNT.get_any() {
             use crate::resources::texture;
@@ -203,6 +205,7 @@ impl InfoTabState {
                 ui.text(Self::size_frag(tex_size_cloned));
             }
         }
+        #[cfg(deleteme)]
         #[cfg(feature = "allocator")]
         if let Some(alloc_size) = crate::exports::runtime::allocator::STATS_ALLOC_SIZE.get_any() {
             let size = Self::size_frag(alloc_size);
@@ -210,6 +213,7 @@ impl InfoTabState {
         }
     }
 
+    #[cfg(deleteme)]
     #[cfg(any(feature = "allocator", feature = "texture-loader", feature = "space"))]
     fn size_frag(size: isize) -> impl ImStrExt + fmt::Display + Copy + Into<fluent::FluentValue<'static>> {
         // once we have a working formatter...
@@ -245,6 +249,38 @@ impl InfoTabState {
         im_fmt!(i18n: id => move size = size)
     }
 
+    /// TODO: TreeNode sections
+    pub fn stats_table(&self, ui: &Ui) {
+        if let Ok(stats) = statistics::StatsRef::registry().try_read() {
+            if stats.is_empty() {
+                return
+            }
+            with_i18n!("stats", |label| ui.text_with_font(NexusLinkFont::Big, label));
+            let _table = ui.begin_table("stats", 2);
+            let mut section_prev = 0usize;
+            for (desc, counter) in stats.iter() {
+                let value = match counter.read() {
+                    0 => continue,
+                    v => v,
+                };
+                let section = desc.section.as_ptr() as usize;
+                if section_prev != section {
+                    section_prev = section;
+                    ui.table_next_column();
+                    with_i18n!(desc.section, |label| ui.table_header(label));
+                    ui.table_next_column();
+                }
+                ui.indent();
+                ui.table_next_column();
+                let display = counter.unit.display_value(value);
+                with_i18n!(desc.name, |label| ui
+                    .display_with_font(&NexusLinkFont::Ui, &format_args!("{label}:")));
+                ui.table_next_column();
+                ui.display_with_font(&NexusLinkFont::Ui, &display);
+                ui.unindent();
+            }
+        }
+    }
     #[cfg(feature = "space")]
     pub fn space_info<'ui, U>(&self, ui: &mut U, (engine,): RenderSlot)
     where
@@ -314,26 +350,6 @@ impl InfoTabState {
                     }
                 }
             }
-        }
-
-        ui.text_with_font(NexusLinkFont::Ui, "Pathing Stats");
-        let pack_entity_total = pack::STATS_ENTITY_COUNT.count();
-        let pack_entity_draw = pack::STATS_ENTITY_DRAW.count();
-        let pack_entity_draw_map = pack::STATS_ENTITY_DRAW_MAP.count();
-        ui.text(im_fmt!("Drawn: {}", pack_entity_draw));
-        ui.text(im_fmt!("Mapped: {}", pack_entity_draw_map));
-        ui.text(im_fmt!("Total: {}", pack_entity_total));
-        if let Some(size) = pack::STATS_TRAIL_VERTEX_SIZE.get_any() {
-            let trail = fl!("trail");
-            let vertices = fl!("vertices");
-            let size = Self::size_frag(size);
-            let size = fl!("alloc-size", size = size);
-            ui.text(im_fmt!("{trail} {vertices} {size}"));
-        }
-        if let Some(size) = pack::STATS_POI_INSTANCE_SIZE.get_any() {
-            let size = Self::size_frag(size);
-            let size = fl!("alloc-size", size = size);
-            ui.text(im_fmt!("POI Instance Buffer {size}"));
         }
     }
 }
