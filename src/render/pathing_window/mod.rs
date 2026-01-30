@@ -12,10 +12,7 @@ use {
         Controller,
         ControllerEvent,
     },
-    crate::render::element::pack::{
-        interact::DrawPoiInfo,
-        PackVisibility,
-    },
+    crate::render::element::pack::PackVisibility,
     crate::controller::pathing::shared::interact::InteractMessage,
     crate::exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags, TreeNode, TreeNodeFlags, MouseButton},
     std::collections::HashSet,

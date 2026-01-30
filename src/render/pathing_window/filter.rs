@@ -19,11 +19,6 @@ use {
 pub struct PathingSearchState {
     pub buffer: String,
     matcher: Option<Regex>,
-    #[cfg(todo = "unnecessary")]
-    search_candidates: HashSet<String>,
-    /// TODO: BTreeSet<CategoryPath> instead?
-    #[cfg(deleteme)]
-    pub candidate_mask: BTreeMap<PackPath, BitSet>,
     pub flags: PathingSearchFlags,
 }
 
@@ -92,24 +87,6 @@ impl PathingSearchState {
         }
         query
     }
-
-    #[cfg(todo = "unused")]
-    pub fn matches_name(&self, name: &str) -> bool {
-        match &self.matcher {
-            Some(regex) => regex.is_match(name),
-            #[cfg(todo = "unnecessary")]
-            None if self.buffer.is_empty() => false,
-            None => name.contains(&self.buffer),
-        }
-    }
-
-    #[cfg(todo = "unused")]
-    pub fn matches_id(&self, full_id: &str) -> bool {
-        match self.buffer.is_empty() {
-            false => self.search_candidates.contains(full_id),
-            true => true,
-        }
-    }
 }
 
 impl Default for PathingSearchState {
@@ -117,10 +94,6 @@ impl Default for PathingSearchState {
         Self {
             buffer: Default::default(),
             matcher: Default::default(),
-            #[cfg(todo = "unnecessary")]
-            search_candidates: Default::default(),
-            #[cfg(deleteme)]
-            candidate_mask: Default::default(),
             flags: PathingSearchFlags::DEFAULT,
         }
     }
