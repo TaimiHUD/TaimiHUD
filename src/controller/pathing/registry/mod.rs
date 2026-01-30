@@ -50,7 +50,7 @@ pub use self::{
 mod active;
 mod namespace;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackInfo {
     pub format: PackFormat,
     pub roots: BTreeSet<PackRoot>,
@@ -61,18 +61,7 @@ pub struct PackInfo {
 impl PackInfo {
     /// TODO: deprecate this soon
     pub fn from_pack(pack: &Pack, format: PackFormat) -> Self {
-        let roots = pack
-            .categories
-            .root_categories
-            .iter()
-            .filter_map(|id| pack.categories.all_categories.get_full(id))
-            .map(|(i, _, cat)| {
-                PackRoot::from_category(
-                    CategoryPath::with_path(i as CategoryIndex),
-                    cat,
-                    Some(&pack.categories),
-                )
-            })
+        let roots = PackRoot::from_category_collection(&pack.categories)
             .collect();
 
         let trail_maps = pack.trails.iter().filter_map(|trail| trail.map_id);
@@ -82,21 +71,11 @@ impl PackInfo {
             .filter_map(|id| MapID::try_from(id).ok())
             .collect();
 
-        let mut categories = PackCategoryInfo::from_collection(&pack.categories);
-        let not_lonely = {
-            let pois = pack.pois.iter().map(|m| &m.category);
-            let trails = pack.trails.iter().map(|m| &m.category);
-            pois.chain(trails)
-                .filter_map(|c| pack.categories.all_categories.get_index_of(c.as_id()))
-                .map(|i| CategoryPath::with_path(i as CategoryIndex))
-        };
-        categories.fill_lonely(not_lonely);
-
         PackInfo {
             format,
             roots,
             maps,
-            categories: Arc::new(categories),
+            categories: Arc::new(PackCategoryInfo::from_pack(pack)),
         }
     }
 
@@ -228,7 +207,7 @@ type PackInfoHasher = FxHasher;
 #[cfg(todo)]
 type PackInfoHasher = impl Hasher + Clone + 'static;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackCategoryInfo {
     pub all: Box<[PackCategory]>,
     pub roots: Box<[CategoryIndex]>,
@@ -247,8 +226,49 @@ pub struct PackCategoryInfo {
     /// Currently this also includes category parents, but this may change.
     pub lonely: CategorySet,
 }
+/// XXX: lonely not checked...
+impl PartialEq<CategoryCollection> for PackCategoryInfo {
+    fn eq(&self, collection: &CategoryCollection) -> bool {
+        if collection.all_categories.len() != self.count() { return false }
+        let mut root_count = 0usize;
+        for root in collection.root_categories.iter() {
+            let Some(path) = collection.all_categories.get_index_of(root)
+                .map(|i| CategoryPath::with_path(i as CategoryIndex)) else { continue };
+            root_count += 1;
+            if !self.is_root(path) { return false }
+        }
+        if self.roots.len() != root_count { return false }
+        for ((_p, info, flags), (_, cat)) in self.all_flags().zip(collection.all_categories.iter()) {
+            let mask = CategoryFlags::HIDDEN | CategoryFlags::SEPARATOR | CategoryFlags::DISABLED;
+            if (flags & !CategoryFlags::ROOT) != cat.flags & mask { return false }
+            let mut pack_children = cat.child_ids().filter_map(|child_full_id|
+                collection.all_categories.get_index_of(child_full_id)
+                    .map(|i| CategoryPath::with_path(i as CategoryIndex))
+            ).fuse();
+            let firstborn: Option<CategoryPath> = info.child().map(CategoryPath::with_path);
+            if pack_children.next() != firstborn { return false }
+            let Some(firstborn) = firstborn else { continue };
+            for child_path in self.younger_siblings_of(firstborn) {
+                if Some(child_path) != pack_children.next() { return false }
+            }
+            if pack_children.next().is_some() { return false }
+        }
+        true
+    }
+}
+impl PartialEq<Pack> for PackCategoryInfo {
+    #[inline]
+    fn eq(&self, pack: &Pack) -> bool {
+        self.eq(&pack.categories)
+    }
+}
 
 impl PackCategoryInfo {
+    pub fn from_pack(pack: &Pack) -> Self {
+        let mut categories = Self::from_collection(&pack.categories);
+        categories.fill_lonely_from_pack(pack);
+        categories
+    }
     pub fn from_collection(collection: &CategoryCollection) -> Self {
         let all = PackCategory::build(collection);
         let roots = collection
@@ -340,6 +360,16 @@ impl PackCategoryInfo {
                 }
             }
         }
+    }
+    pub fn fill_lonely_from_pack(&mut self, pack: &Pack) {
+        let not_lonely = {
+            let pois = pack.pois.iter().map(|m| &m.category);
+            let trails = pack.trails.iter().map(|m| &m.category);
+            pois.chain(trails)
+                .filter_map(|c| pack.categories.all_categories.get_index_of(c.as_id()))
+                .map(|i| CategoryPath::with_path(i as CategoryIndex))
+        };
+        self.fill_lonely(not_lonely);
     }
 
     pub fn root_paths(&self) -> impl DoubleEndedIterator<Item = CategoryPath> + Clone + '_ {
@@ -794,6 +824,19 @@ pub struct PackRoot {
 }
 
 impl PackRoot {
+    pub fn from_category_collection(collection: &CategoryCollection) -> impl Iterator<Item = Self> + '_ {
+        collection
+            .root_categories
+            .iter()
+            .filter_map(|id| collection.all_categories.get_full(id))
+            .map(|(i, _, cat)| {
+                PackRoot::from_category(
+                    CategoryPath::with_path(i as CategoryIndex),
+                    cat,
+                    Some(collection),
+                )
+            })
+    }
     pub fn from_category(
         path: CategoryPath,
         category: &Category,

@@ -125,7 +125,7 @@ impl ComboInput {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PositionInput {
     pub position: Option<Vec3>,
     position_before_edit: Option<Vec3>,
@@ -158,9 +158,12 @@ impl PositionInput {
     }
     pub fn draw_take_current(&mut self, ui: &Ui) {
         if ui.button(&fl!("position-get")) {
-            if let Ok(ml) = rt::mumble_link_ptr() {
-                self.position = Some(Vec3::from_array(ml.read_avatar().position));
-            }
+            self.take_current();
+        }
+    }
+    pub fn take_current(&mut self) {
+        if let Ok(ml) = rt::mumble_link_ptr() {
+            self.position = Some(Vec3::from_array(ml.read_avatar().position));
         }
     }
     pub fn draw_edit_manual(&mut self, ui: &Ui, trigger: bool) {

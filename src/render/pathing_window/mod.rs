@@ -178,6 +178,23 @@ impl PathingWindowState {
 
             machine.pack_ui_state.draw_interact(ui);
         }
+        let draw_pe = tabs.as_ref().and_then(|_| ui.tab_item("editz"));
+        if let Some(_tab) = draw_pe {
+            let bookmark = ui.cursor_screen_pos();
+            ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
+            if machine.pack_ui_state.pack_edit.is_open() {
+                if ui.button("close") {
+                    machine.pack_ui_state.pack_edit.close();
+                }
+                ui.same_line();
+                if ui.button("refresh tex") {
+                    machine.pack_ui_state.pack_edit.refresh_textures();
+                }
+            }
+            ui.set_cursor_screen_pos(bookmark);
+
+            machine.pack_ui_state.draw_dynamic(ui);
+        }
         drop(tabs);
     }
     pub fn draw_categories_header(&mut self, ui: &Ui, machine: &mut RenderMachine) {

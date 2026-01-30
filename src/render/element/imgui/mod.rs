@@ -10,7 +10,7 @@ pub mod prelude {
     #![allow(unused_imports)]
     pub use super::{
         text::{UiText, UiTextWrite, UiFont, UiTextExt as _, NexusLinkFont},
-        imgui::{self, MouseButton}, Ui, AsUi, UiToken,
+        imgui::{self, MouseButton, Selectable}, Ui, AsUi, UiToken,
     };
     pub use crate::with_i18n;
 }
