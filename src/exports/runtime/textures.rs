@@ -587,6 +587,7 @@ impl TextureSlot {
         }
     }
 
+    #[cfg(feature = "texture-loader")]
     pub fn deactivate(&mut self, prune: bool) -> bool {
         let prev = match self {
             Self::Loading | Self::Reserved | Self::Unavailable => return false,
@@ -597,6 +598,7 @@ impl TextureSlot {
                 }
                 return true
             },
+            #[cfg(feature = "extension-nexus")]
             Self::Nexus(..) => None,
             Self::Loaded(t) => Some(Arc::downgrade(&*t)),
         }
@@ -607,6 +609,7 @@ impl TextureSlot {
         }
         true
     }
+    #[cfg(feature = "texture-loader")]
     pub fn insert_inactive(&mut self, prev: Weak<Texture>) -> &mut Weak<Texture> {
         *self = Self::Inactive(prev);
         match self {
@@ -614,6 +617,7 @@ impl TextureSlot {
             _ => unsafe { core::hint::unreachable_unchecked() },
         }
     }
+    #[cfg(feature = "texture-loader")]
     pub fn insert_loaded(&mut self, texture: Arc<Texture>) -> &mut Arc<Texture> {
         *self = Self::Loaded(texture);
         match self {
@@ -623,6 +627,20 @@ impl TextureSlot {
     }
     #[cfg(todo)]
     pub fn prune(&mut self) {}
+
+    pub fn diag_texture_byte_size(&self) -> usize {
+        match self {
+            Self::Loaded(tex) => tex.texture_byte_size(),
+            Self::Inactive(tex) if Weak::strong_count(tex) > 0 =>
+                Weak::upgrade(tex).map(|tex| tex.texture_byte_size()).unwrap_or(0),
+            Self::Nexus(tex) => {
+                use taimi_d3d::dx11::buffer::ShaderResourceView;
+                let bpp = Texture::format_bpp(ShaderResourceView::from_d3d_ref(&tex.resource).get_desc().Format);
+                bpp.saturating_mul(tex.width as usize).saturating_mul(tex.height as usize)
+            },
+            _ => 0,
+        }
+    }
 }
 
 #[cfg(feature = "extension-nexus")]
