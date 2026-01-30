@@ -717,9 +717,15 @@ impl RenderState {
                     _ => visibility,
                 });
             self.machine.pack_ui_state.pre_draw(pack_visibility);
+            let gameplay_map = self.machine.gameplay.gameplay_map();
+            self.machine
+                .pack_ui_state
+                .pack_edit
+                .pre_draw(visibility, gameplay_map);
             self.machine.pack_ui_state.interact.pre_draw(visibility);
             if interact_visibility.is_visible() {
                 let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
+                self.machine.pack_ui_state.pack_edit.env.latest_pos = player_pos;
                 let interact = &mut self.machine.pack_ui_state.interact;
                 if interact.wants_static {
                     let wants_all = interact.wants_static_all();
@@ -731,7 +737,7 @@ impl RenderState {
                             .update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
                     }
                 }
-                let player_pos = match self.machine.gameplay.gameplay_map() {
+                let player_pos = match gameplay_map {
                     Some(..) => player_pos,
                     None => None,
                 };
