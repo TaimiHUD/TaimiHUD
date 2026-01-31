@@ -1,6 +1,6 @@
 use crate::exports::runtime as rt;
 use super::{imgui, Ui, AsUi, RawCast, UiToken, UiTokenMut, UiTokenDyn};
-use glamour::{Point2, Vector2};
+use glamour::{Point2, Size2};
 use core::fmt::{self, Write};
 use std::io;
 use core::borrow::BorrowMut;
@@ -222,11 +222,11 @@ impl<'a, 'ui> UiTextWrite<'a, 'ui> {
         if s.is_empty() {
             return
         }
-        let mut spacingtoken = None;
+        let mut _spacingtoken = None;
         if let Some(next_start) = self.start_of_line.take() {
             match next_start {
                 s if s.x.is_infinite() => {
-                    spacingtoken = Some(self.ui.push_style_var(imgui::StyleVar::ItemSpacing([f32::EPSILON, 0.0])));
+                    _spacingtoken = Some(self.ui.push_style_var(imgui::StyleVar::ItemSpacing([f32::EPSILON, 0.0])));
                     self.ui.same_line();
                 },
                 s =>
@@ -239,7 +239,7 @@ impl<'a, 'ui> UiTextWrite<'a, 'ui> {
         let prev_start = can_resume.then(|| Point2::from_array(self.ui.cursor_pos()));
         self.ui.text(plain.unwrap_or(s));
         if let Some(prev_start) = prev_start {
-            self.start_of_line = Some(prev_start + Vector2::from_array(self.ui.item_rect_size()));
+            self.start_of_line = Some(prev_start + Size2::from_array(self.ui.item_rect_size()).with_height(0.0).to_vector());
         } else if !endln {
             self.start_of_line = Some(Point2::INFINITY);
         }
