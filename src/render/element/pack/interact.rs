@@ -710,6 +710,9 @@ impl PoiInfo {
             a.flags = (a.flags ^ sort_desc) & sorts;
             let mut b = b.sort_info(bid, sorts);
             b.flags = (b.flags ^ sort_desc) & sorts;
+            if sort_desc.contains(InteractSortFlags::DISTANCE) {
+                mem::swap(&mut a.dist, &mut b.dist);
+            }
             a.cmp(&b)
         });
         self.dirty_sort = false;
@@ -720,6 +723,7 @@ impl PoiInfo {
         for mid in gone {
             let mid = mid.as_ref();
             let Some(marker) = self.markers.get_mut(mid) else { continue };
+            marker.nearish = true;
             if mem::replace(&mut marker.nearby, false) {
                 self.dirty.insert(PoiInfoSorts::NEARBY);
             }
@@ -765,20 +769,17 @@ impl PoiInfo {
         }
     }
     pub fn iter_markers<'a>(&'a mut self) -> impl Iterator<Item = (MarkerId, Option<&'a mut PoiInfoMarker>)> + 'a {
-        let exclude_not = self.filters.to_sort_exclude_not() & !InteractSortFlags::DISTANCE;
-        let exclude = self.filters.to_sort_exclude();
-        let include_far = self.filters.contains(InteractFilterFlags::FAR);
+        let exclude = !self.filters;
         self.markers.iter_mut()
             .filter(move |(_id, marker)| {
-                let flags = marker.sort_flags();
-                if (!flags).intersects(exclude_not) | flags.intersects(exclude) { return false }
                 let too_far = match marker.has_dist() {
-                    _ if include_far => false,
+                    _ if !exclude.contains(InteractFilterFlags::FAR) => false,
                     true => marker.dist_dist >= PoiInfoMarker::DIST_DIST_FAR_FILTER,
                     false => marker.dist_dist > PoiInfoMarker::DIST_DIST_MODERATE,
                 };
-                if too_far { return false }
-                true
+                let flagged = marker.filter_flagged()
+                    .or_if(InteractFilterFlags::FAR, too_far);
+                !flagged.intersects(exclude)
             }).map(|(&id, marker)| (id, Some(marker)))
     }
     const DIST_DIST_THRESH: f32 = 8.0;
@@ -794,15 +795,13 @@ impl PoiInfo {
         self.last_pos = player_pos.unwrap_or(Point3::INFINITY);
 
         let markers = {
-            let exclude_not = self.filters.to_sort_exclude_not() & !InteractSortFlags::DISTANCE;
-            let exclude = self.filters.to_sort_exclude();
-            let include_far = self.filters.contains(InteractFilterFlags::FAR);
+            let exclude = !self.filters;
             self.markers.values_mut()
                 .filter(move |marker| {
-                    let flags = marker.sort_flags();
-                    if (!flags).intersects(exclude_not) | flags.intersects(exclude) { return false }
-                    if !marker.has_pos() | (!include_far & marker.dist_is_far()) { return false }
-                    true
+                    if !marker.has_pos() { return false }
+                    let flagged = marker.filter_flagged()
+                        .or_if(InteractFilterFlags::FAR, marker.dist_is_far());
+                    !flagged.intersects(exclude)
                 })
         };
         for e in markers {
@@ -891,7 +890,7 @@ impl PoiInfo {
             let interactive = pinfo.get_marker_attrs().map(|a| SpaceInteraction::interest_for_marker(a));
             let mut flags = InteractSortFlags::empty();
             let mut flags_populated = InteractSortFlags::empty();
-            let mut pos = Point3::ZERO.with_x(PoiInfoMarker::DIST_DIST_IRRELEVANT);
+            let mut pos = Point3::INFINITY;
             if let Some(spoi) = spoi {
                 flags.set(InteractSortFlags::VISIBLE | InteractSortFlags::ENABLED, spoi.visibility.is_visible());
                 flags_populated.insert(InteractSortFlags::DISTANCE | InteractSortFlags::VISIBLE | InteractSortFlags::ENABLED | InteractSortFlags::FILTERED);
@@ -950,13 +949,14 @@ impl PoiInfo {
                 true => Ok(interactive.intersects(PoiInfoSorts::INTERACTIVE_MASK)),
             };
             let is_blacklisted = {
-                let mut filterable = filterable;
+                let mut filterable = InteractFilterFlags::sort_as_bits(filterable);
                 if let Ok(interactive) = is_interactive {
-                    filterable.set(InteractFilterFlags::STATIC.as_sort_bits(), !interactive);
+                    filterable.set(InteractFilterFlags::STATIC, !interactive);
                 }
-                ((self.filters ^ InteractFilterFlags::SORT_INVERTED) & InteractFilterFlags::sort_as_bits(filterable)).intersects(InteractFilterFlags::SORT_MASK)
+                let whitelist = self.filters | InteractFilterFlags::FILTERED | InteractFilterFlags::FAR;
+                (!whitelist).intersects(filterable)
             };
-            let marker = match self.markers.entry(mid) {
+            let marker = match entry {
                 IndexEntry::Occupied(e) if is_blacklisted => {
                     e.shift_remove();
                     continue
@@ -964,11 +964,41 @@ impl PoiInfo {
                 IndexEntry::Occupied(e) => e.into_mut(),
                 IndexEntry::Vacant(_) if is_blacklisted =>
                     continue,
-                IndexEntry::Vacant(_) if !self.filters.contains(InteractFilterFlags::FAR) && !flags_populated.contains(PoiInfoSorts::DISTANCE) & !(pos.x < PoiInfoMarker::DIST_DIST_FAR_FILTER) =>
+                IndexEntry::Vacant(_) if !self.filters.contains(InteractFilterFlags::FAR) && !flags_populated.contains(PoiInfoSorts::DISTANCE) & !pos.x.is_infinite() & !(pos.x < PoiInfoMarker::DIST_DIST_FAR_FILTER) =>
                     continue,
                 IndexEntry::Vacant(e) => {
                     self.dirty_sort = true;
-                    e.insert(Default::default())
+                    let marker = e.insert(Default::default());
+
+                    marker.nearish = !filterable.contains(InteractFilterFlags::FAR.as_sort_bits());
+                    if filterable.contains(InteractFilterFlags::FAR.as_sort_bits()) {
+                        marker.dist_dist = PoiInfoMarker::DIST_DIST_FAR;
+                    } else if filterable.contains(InteractSortFlags::NEARBY) {
+                        marker.nearish = true;
+                    }
+                    if filterable.contains(InteractFilterFlags::FILTERED.as_sort_bits()) {
+                        marker.filtered = true;
+                        marker.visible = false;
+                    }
+                    marker.enabled = !filterable.contains(InteractFilterFlags::DISABLED.as_sort_bits());
+                    marker.filtered = filterable.contains(InteractFilterFlags::FILTERED.as_sort_bits());
+                    marker.visible = !marker.filtered & marker.enabled;
+                    marker.auto = auto;
+                    if flags_populated.contains(PoiInfoSorts::INTERACTIVE) {
+                        marker.interactive = interactive;
+                        marker.auto = auto;
+                    } else if filterable.contains(InteractFilterFlags::STATIC.as_sort_bits()) {
+                        marker.interactive = TriggerKind::empty();
+                    } else {
+                        #[cfg(todo)]
+                        if flags.contains(PoiInfoSorts::INTERACTIVE) {
+                            marker.auto = auto;
+                        }
+                        if interactive.is_empty() {
+                            marker.interactive = interactive;
+                        }
+                    }
+                    marker
                 },
             };
             let mut dirty_int = false;
@@ -1014,7 +1044,7 @@ impl PoiInfo {
             }
             if flags_populated.contains(PoiInfoSorts::ENABLED) {
                 let prev = mem::replace(&mut marker.enabled, flags.contains(PoiInfoSorts::ENABLED));
-                if prev != marker.visible {
+                if prev != marker.enabled {
                     self.dirty.insert(PoiInfoSorts::ENABLED);
                 }
             }
@@ -1023,11 +1053,21 @@ impl PoiInfo {
                 if !vec_eq(prev, marker.pos) {
                     self.dirty_pos = true;
                 }
-            } else if !pos.x.is_infinite() {
-                if !marker.has_dist() | !marker.has_pos() {
-                    let prev = mem::replace(&mut marker.dist_dist, pos.x);
+            } else if !marker.has_dist() | !marker.has_pos() {
+                let dist_dist = if !pos.x.is_infinite() {
+                    Some(pos.x)
+                } else if filterable.contains(InteractFilterFlags::FAR.as_sort_bits()) {
+                    Some(PoiInfoMarker::DIST_DIST_FAR)
+                } else if filterable.contains(InteractSortFlags::NEARBY) {
+                    Some(PoiInfoMarker::DIST_DIST_MODERATE)
+                } else { None };
+                if let Some(dist_dist) = dist_dist {
+                    let prev = mem::replace(&mut marker.dist_dist, dist_dist);
                     if prev != marker.dist_dist {
                         self.dirty.insert(PoiInfoSorts::DISTANCE);
+                        if !filterable.contains(InteractSortFlags::NEARBY) && marker.dist_dist.to_bits() == PoiInfoMarker::DIST_DIST_FAR.to_bits() {
+                            marker.nearish = false;
+                        }
                     }
                 }
             }
@@ -1156,7 +1196,10 @@ impl PoiInfo {
             max: LocalSpace::to2(range.max),
         };
         let mut farish = match self.filters.contains(InteractFilterFlags::FAR) {
-            true => Some(entities.entities.iter().map(|e| e.poi_path()).collect::<BTreeSet<_>>()),
+            true => Some(entities.entities.iter()
+                .map(|e| e.poi_path())
+                .collect::<BTreeSet<_>>()
+            ),
             false => None,
         };
         let query = box2aabb(range2);
@@ -1179,7 +1222,7 @@ impl PoiInfo {
                 None => {
                     filterable.insert(InteractFilterFlags::FAR.as_sort_bits());
                     filterable.remove(InteractSortFlags::NEARBY);
-                    Point3::ZERO.with_x(PoiInfoMarker::DIST_DIST_FAR)
+                    Point3::INFINITY
                 },
             };
             (mid, poi_path, cat_path, pos, interactive, filterable, (flags, populated))
@@ -1380,9 +1423,11 @@ impl PoiInfoMarker {
     pub fn has_pos(&self) -> bool {
         !self.pos.x.is_infinite()
     }
+    const BITS_MODERATE: u32 = Self::DIST_DIST_MODERATE.to_bits();
+    const BITS_FAR: u32 = Self::DIST_DIST_FAR.to_bits();
+    const BITS_IRRELEVANT: u32 = Self::DIST_DIST_IRRELEVANT.to_bits();
     pub fn has_dist(&self) -> bool {
-        let bits = self.dist_dist.to_bits();
-        (bits != Self::DIST_DIST_MODERATE.to_bits()) & (bits != Self::DIST_DIST_FAR.to_bits())
+        !matches!(self.dist_dist.to_bits(), Self::BITS_MODERATE | Self::BITS_FAR | Self::BITS_IRRELEVANT)
     }
     pub fn dist_is_far(&self) -> bool {
         let bits = self.dist_dist.to_bits();
@@ -1401,6 +1446,10 @@ impl PoiInfoMarker {
             self.has_pos().then_some(PoiInfoSorts::DISTANCE),
             PoiInfoSorts::interactive(self.interactive).get(),
         ].into_iter().map(|v| v.unwrap_or(PoiInfoSorts::empty())).collect()
+    }
+    pub fn filter_flagged(&self) -> InteractFilterFlags {
+        let mask = !InteractFilterFlags::FAR;
+        InteractFilterFlags::for_sort(self.sort_flags()) & mask
     }
     pub fn sort_info(&self, mid: &MarkerId, mask: PoiInfoSorts) -> PoiInfoSort {
         PoiInfoSort {
