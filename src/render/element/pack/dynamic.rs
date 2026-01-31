@@ -1,6 +1,10 @@
+use crate::controller::pathing::space::TrailGeometryRequests;
 use crate::util::PositionInput;
+use std::io::{self, Write, Seek};
+use std::fs;
 use std::borrow::Cow;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
+use taimi_meta::packs::SectionOfTrail;
 use crate::{controller::{pathing::{
     info::MapPackInfo, registry::{PackRoot, PackCategoryInfo, LoadedMarkerPath, LoaderBox, PackFormat, PackIndex, PackInfo, PackInfoSignature, PackPath, PackRegistryNs, SharedLoaderBox}, shared::{PathingShared, SharedMapPackLoaded, SharedMapPackState, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, state::LoadedMapPack, PathingEvent, UnloadedReason
 }, Controller}, settings::SourceKind, TEXTURES};
@@ -10,7 +14,6 @@ use glam::Vec4;
 use taimi_hoard::{str_opt, str_opt_ref};
 use relative_path::PathExt;
 use uuid::Uuid;
-use std::fs;
 use std::mem;
 use std::fmt;
 use taimi_sync::watched::Watched;
@@ -26,13 +29,14 @@ use taimi_meta::packs::{
     id::{MarkerId, MarkerIndex},
     CategoryPath,
     MarkerPath, CategoryIndex,
-    PoiIndex, TrailIndex,
+    PoiIndex, TrailIndex, TrailSectionIndex,
     MapIndex,
     PoiPath, TrailPath, TrailSectionPath,
 };
 use taimi_meta::coords::LocalSpace;
-use taimi_pack::{category::{id::{IdNameBox, FullIdRef, AsFullId}, Category, CategoryFlags, CategoryId}, loader::DirectoryLoader, Poi,
-    attributes::{string_into, MarkerAttributes},
+use taimi_pack::{category::{id::{IdNameBox, FullIdRef, AsFullId}, Category, CategoryFlags, CategoryId}, loader::DirectoryLoader, Poi, trail::{Trail, TrailSection, TrailHeader, TrailData},
+    attributes::{string_into, AttrString, MarkerAttributes},
+    trail::TrlPath,
 };
 use imgui::TreeNode;
 use taimi_pack::Pack;
@@ -140,6 +144,9 @@ impl PackEdit {
         shared.packs.packs.send_if_modified(|packs| {
             let Some(pack) = packs.lookup_mut(&self.pack_path) else { return false };
             // clobber with our dummy one
+            if pack.info.is_dead() {
+                pack.info = Arc::new(SharedPackInfo::new_unloaded(self.pack_path, self.root_dir.clone().into(), None));
+            }
             let info = Arc::make_mut(&mut pack.info);
             info.sig = self.info_sig;
             info.info = Some(pack_info);
@@ -157,6 +164,7 @@ impl PackEdit {
             pack.set_unloaded(reason);
             true
         });
+        PathingEvent::UnloadPack(self.pack_path, true).try_send();
     }
     fn update_loaded(&mut self) {
         let pack_arc = Arc::new(self.pack.pack.clone());
@@ -210,7 +218,7 @@ impl PackEdit {
         }
         self.env.pack_cat_id.push_str(".");
         self.env.pack_alloc_name.clear();
-        self.apply_attrs(&mut cat.marker_attributes);
+        self.env.apply_attrs(&mut cat.marker_attributes);
         self.cursor.category_path.path = 0;
         self.pack.pack.categories.root_categories.insert(cat.full_id.clone());
         self.pack.pack.categories.all_categories.insert(cat.full_id.clone(), cat);
@@ -226,36 +234,7 @@ impl PackEdit {
         }
         self.info_sig = PackInfoSignature::hash_with(|h| self.root_dir.hash(h));
     }
-    fn apply_attrs(&mut self, attrs: &mut MarkerAttributes) {
-        if let Some(value) = str_opt_ref(&self.env.tip_name) {
-            attrs.tip_name = Some(string_into(value));
-        }
-        self.env.tip_name.clear();
-    }
-    fn apply_render_attrs(&mut self, attrs: &mut MarkerAttributes) {
-        if self.env.colour != Vec4::ONE {
-            attrs.render_mut().tint = Some(self.env.colour);
-        }
-        self.env.colour = Vec4::ONE;
-    }
-    fn apply_poi_attrs(&mut self, attrs: &mut MarkerAttributes) {
-        if !self.env.tex_selected.is_empty() {
-            let tex = self.env.avail_textures.get(&self.env.tex_selected);
-            let file_path = tex
-                .and_then(|tex| (!tex.file_path.as_os_str().is_empty()).then_some(&tex.file_path))
-                .and_then(|file_path| file_path.relative_to(&self.root_dir).ok());
-            let attrkey = match file_path {
-                Some(p) => string_into(p.as_str()),
-                None => {
-                    log::warn!("TODO: copy texture file into {}", rt::relative_path(&self.root_dir).display());
-                    tex.and_then(|tex| tex.file_path.file_name())
-                        .map(|fname| string_into(fname.to_string_lossy()))
-                        .unwrap_or_else(|| string_into(&self.env.tex_selected[..]))
-                },
-            };
-            attrs.poi_mut().icon_file = Some(attrkey);
-        }
-    }
+    const CONTENT_DIR_MARKERS: &'static str = "content/markers";
     pub fn refresh_textures(&mut self) {
         let prev = mem::take(&mut self.env.avail_textures);
         let Some(shared) = self.env.shared.clone() else { return };
@@ -269,6 +248,58 @@ impl PackEdit {
         }
         // dropping this too early could invalidate weak handles maybe...
         drop(prev);
+    }
+    fn asset_file_path<P: ?Sized + AsRef<Path>>(&self, asset: &P) -> Option<PathBuf> {
+        matches!(self.pack.pack_info.format, PackFormat::TacoDir).then(|| self.root_dir.join(asset.as_ref()))
+    }
+    fn resolve_trl(&self, trl: Result<&TrlPath, TrailPath>) -> anyhow::Result<PathBuf> {
+        let trl = trl.or_else(|path| {
+            // TODO: read+copy from loader?
+            self.pack.pack.trails.get(path.path as usize).and_then(|trail| trail.trail_path.as_ref())
+                .ok_or(path)
+        }).ok();
+        match trl {
+            Some(trl) => self.asset_file_path(&trl.path[..])
+                .context("can't add file to zip"),
+            None => Err(
+                anyhow!("couldn't resolve trl path")
+            ),
+        }
+    }
+    fn write_to_trl(&self, trl: Result<&TrlPath, TrailPath>, trunc: bool, map_id: Option<i32>) -> anyhow::Result<fs::File> {
+        let fpath = self.resolve_trl(trl)?;
+        let op = match trunc {
+            true => "clearing",
+            false => "opening",
+        };
+        let context = || format!("{op} {}", rt::relative_path(&fpath).display());
+
+        let mut open = fs::OpenOptions::new();
+        let mut file = match trunc {
+            true => open.create(true).write(true).truncate(true),
+            #[cfg(todo)]
+            false => open.create_new(true),
+            #[cfg(todo)]
+            false => {
+                // bad idea if you want to rewind or check pos for header...
+                open.create(true).append(true)
+            },
+            false =>
+                open.create(true).write(true)
+        }.open(&fpath)
+        .with_context(context)?;
+        if let Some(map_id) = map_id {
+            let TODO = trunc;
+            let pos = match trunc {
+                true => Ok(0),
+                false =>
+                    file.seek(io::SeekFrom::End(0)),
+            };
+            if pos.ok() == Some(0) {
+                TrailHeader::with_map_id(map_id).write_header(&mut file)?;
+            }
+        }
+        Ok(file)
     }
 }
 impl fmt::Debug for PackEdit {
@@ -332,8 +363,10 @@ pub struct PackEditEnv {
     pub pack_cat_id: String,
     pub pack_cat_name: String,
     pub tip_name: String,
+    pub trl_name: String,
     pub colour: Vec4,
     pub tex_selected: String,
+    pub tex_selected_source: Option<MarkerId>,
     pub pos: PositionInput,
 }
 impl PackEditEnv {
@@ -341,15 +374,21 @@ impl PackEditEnv {
         let subresources = pack.info.shared_subresources();
         let Ok(subresources) = subresources.read() else { return };
         for (attr, key) in subresources.iter() {
-            let slot = TEXTURES.lookup_slot(key);
+            let slot = TEXTURES.lookup_with(key, |slot| match slot {
+                #[cfg(todo = "unnecessary")]
+                slot => slot.clone(),
+                _ => None,
+            }).flatten();
             let format = pack.info.info.as_ref().map(|i| i.format);
             let file_path = matches!(format, Some(PackFormat::TacoDir)).then(|| pack.info.path.join(&attr[..]));
             let file_path = match file_path {
                 Some(p) if !p.try_exists().unwrap_or(false) => None,
                 p => p,
             };
+            let source = MarkerPath::with_parts(pack.info.index, MarkerIndex::UNK);
             let tex = MarkerTexture {
-                source: MarkerTexture::empty_source(MarkerIndex::NS_UNK),
+                source: MarkerId::for_marker(source),
+                source_attr: Some(attr.clone()),
                 file_path: file_path.unwrap_or_default(),
                 slot: slot.unwrap_or(TextureSlot::Unavailable),
                 key: key.clone(),
@@ -390,6 +429,7 @@ impl PackEditEnv {
                 };
                 let tex = MarkerTexture {
                     source: MarkerId::for_marker(MarkerPath::with_parts(source, MarkerIndex::UNK)),
+                    source_attr: None,
                     file_path,
                     slot: TextureSlot::Reserved,
                     key: key[..].into(),
@@ -403,10 +443,109 @@ impl PackEditEnv {
             .map(CategoryId::with_full_id)
             .unwrap_or_else(|| CategoryId::with_full_id("mew"))
     }
+    fn apply_attrs(&mut self, attrs: &mut MarkerAttributes) {
+        if let Some(value) = str_opt_ref(&self.tip_name) {
+            attrs.tip_name = Some(string_into(value));
+        }
+        self.tip_name.clear();
+    }
+    fn apply_render_attrs(&mut self, attrs: &mut MarkerAttributes) {
+        if self.colour != Vec4::ONE {
+            attrs.render_mut().tint = Some(self.colour);
+        }
+        self.colour = Vec4::ONE;
+    }
+    fn tex_attr(&mut self, root_dir: &Path) -> Option<AttrString> {
+        let tex = self.avail_textures.get(str_opt_ref(&self.tex_selected)?);
+        let tex_source = tex.as_ref()
+            .and_then(|tex|
+                tex.source.marker_path::<PackPath>()
+                .and_then(|source| tex.source_attr.as_ref().map(|attr|
+                        (source, &attr[..])
+                    )
+                )
+            );
+        let file_path = tex
+            .and_then(|tex| (!tex.file_path.as_os_str().is_empty()).then_some(&tex.file_path))
+            .and_then(|file_path| file_path.relative_to(&root_dir).ok());
+        let attrkey = match (file_path, tex_source) {
+            (Some(p), _) => Some(string_into(p.as_str())),
+            (_, Some((source, attr))) => {
+                let loaded = self.shared.as_ref().and_then(|shared|
+                    shared.packs.packs.borrow().lookup_ref(&source.root)
+                        .map(|pack| pack.loaded.clone())
+                );
+                let loaded = loaded.as_ref().map(|l| l.borrow());
+                let mut loader = loaded.as_ref().and_then(|l| l.loader.as_ref()
+                    .map(|loader| loader.blocking_lock())
+                );
+                let context = || format!("copying {}/{attr}", source);
+                let asset = loader.as_mut().map(|loader| loader.load_asset_dyn(
+                        attr
+                    ).with_context(context));
+                match asset {
+                    Some(Ok(mut asset)) => {
+                        let new_asset = rt::log::error_ok(PackEditEnv::setup_asset(root_dir, &mut asset, attr));
+                        if let Some(new_asset) = &new_asset {
+                            self.tex_selected.clear();
+                            self.tex_selected.push_str(&new_asset[..]);
+                        }
+                        new_asset
+                    },
+                    Some(Err(e)) => {
+                        log::error!("{e:#}");
+                        None
+                    },
+                    None => None,
+                }
+            },
+            _ => {
+                log::warn!("TODO: copy texture file into {}", rt::relative_path(&root_dir).display());
+                tex.and_then(|tex| tex.file_path.file_name())
+                    .map(|fname| string_into(fname.to_string_lossy()))
+            },
+        };
+        Some(attrkey.unwrap_or_else(|| string_into(&self.tex_selected[..])))
+    }
+    fn apply_poi_attrs(&mut self, root_dir: &Path, attrs: &mut MarkerAttributes) {
+        if let Some(icon_file) = self.tex_attr(root_dir) {
+            attrs.poi_mut().icon_file = Some(icon_file);
+        }
+    }
+    fn apply_trail_attrs(&mut self, root_dir: &Path, attrs: &mut MarkerAttributes) {
+        if let Some(texture) = self.tex_attr(root_dir) {
+            attrs.trail_mut().texture = Some(texture);
+        } else {
+            attrs.trail_mut().texture = Some(string_into("taimi"));
+        }
+    }
+    fn setup_asset<R: io::Read>(root_dir: &Path, asset: &mut R, sourcename: &str) -> anyhow::Result<AttrString> {
+        let mut outpath = root_dir.join(PackEdit::CONTENT_DIR_MARKERS);
+        let _ = rt::log::warn_ok(fs::create_dir_all(&outpath));
+        outpath.push(Path::new(sourcename).file_name().unwrap_or(sourcename.as_ref()));
+        let outattr = || {
+            let path = Path::new(&outpath).relative_to(root_dir);
+            rt::log::error_ok(path)
+                .map(|p| Cow::Owned(p.as_str().into()))
+                .unwrap_or_else(|| outpath.to_string_lossy())
+        };
+        let mut out = match fs::File::create_new(&outpath) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                log::warn!("reusing {sourcename}: {e:#}");
+                return Ok(string_into(outattr()))
+            },
+            out => out?,
+        };
+        io::copy(asset, &mut out)
+            .map_err(Into::into)
+            .map(|_| outattr())
+        .map(string_into)
+    }
 }
 #[derive(Debug)]
 pub struct MarkerTexture {
     pub source: MarkerId,
+    pub source_attr: Option<AttrString>,
     pub slot: TextureSlot,
     pub key: TextureKey,
     pub file_path: PathBuf,
@@ -415,6 +554,7 @@ impl MarkerTexture {
     pub fn empty() -> Self {
         Self {
             source: Self::empty_source(MarkerIndex::NS_UNK),
+            source_attr: None,
             slot: TextureSlot::Reserved,
             key: Default::default(),
             file_path: Default::default(),
@@ -441,13 +581,22 @@ impl Default for MarkerTexture {
     }
 }
 
+enum TrlBoop {
+    Append,
+    Replace,
+    Snip,
+    Refresh,
+}
 pub struct DrawPe<'a, 's, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub state: &'s mut PackEdit,
     pub packs: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
     pub act_pack_alloc: Option<PackPath>,
-    pub act_new_poi: Option<()>,
     pub act_new_cat: Option<Category>,
+    pub act_new_poi: Option<()>,
+    pub act_new_trail: Option<()>,
+    pub act_trl_clear: Option<(Result<TrlPath, TrailPath>, i32)>,
+    pub act_trl_boop: Option<TrlBoop>,
 }
 impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
     pub fn new(ui: &'a Ui<'ui>,
@@ -459,11 +608,17 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             state,
             packs,
             act_pack_alloc: None,
-            act_new_poi: None,
             act_new_cat: None,
+            act_new_poi: None,
+            act_new_trail: None,
+            act_trl_clear: None,
+            act_trl_boop: None,
         }
     }
     pub fn draw(&mut self) {
+        if let Ok(ml) = rt::mumble_link_ptr() {
+            self.state.env.latest_map = MapIndex::new(ml.read_map_id());
+        }
         if self.state.pack_path.path == PackIndex::MAX {
             self.draw_alloc();
             return
@@ -497,7 +652,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                         sub_categories: Default::default(),
                         marker_attributes: Default::default(),
                     };
-                    self.state.apply_attrs(&mut cat.marker_attributes);
+                    self.state.env.apply_attrs(&mut cat.marker_attributes);
                     self.act_new_cat = Some(cat);
                     self.state.env.pack_cat_id.push_str(".");
                 }
@@ -574,11 +729,12 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             }
         }
         let mpath = self.state.cursor.id;
-        if let MarkerIndex::NS_UNK | MarkerIndex::NS_POI | MarkerIndex::NS_TRAIL = mpath.path.namespace() {
+        let mns = mpath.path.namespace();
+        if let MarkerIndex::NS_UNK | MarkerIndex::NS_POI | MarkerIndex::NS_TRAIL = mns {
             let _id = self.ui.push_id("markerpos");
-            self.state.env.pos.draw_display(self.ui, true);
+            self.state.env.pos.draw_display(self.ui, false);
             self.state.env.pos.draw_take_current(self.ui);
-            self.state.env.pos.draw_edit_manual(self.ui, true);
+            self.state.env.pos.draw_edit_manual(self.ui, false);
 
             let colourid = "markercolour";
             if let Some(_token) = self.ui.begin_popup(colourid) {
@@ -595,7 +751,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 self.ui.open_popup(colourid);
             }
         }
-        if let MarkerIndex::NS_UNK | MarkerIndex::NS_POI = mpath.path.namespace() {
+        if let MarkerIndex::NS_UNK | MarkerIndex::NS_POI = mns {
             let poi_path: Option<PoiPath> = mpath.try_to();
             let _id = self.ui.push_id("pepoi");
             let tex_selected = &self.state.env.tex_selected[..];
@@ -607,9 +763,6 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                     "poipoi"
                 };
                 if self.ui.button(label) {
-                    if self.state.env.pos.position.is_none() {
-                        self.state.env.pos.take_current();
-                    }
                     self.act_new_poi = Some(());
                 }
                 self.ui.same_line();
@@ -618,22 +771,47 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             self.ui.set_next_item_width(width);
             let texs = self.ui.begin_combo("##texs", str_opt_ref(tex_selected).unwrap_or("img"));
             if let Some(_token) = texs {
+                let width = self.ui.content_region_avail()[0];
+                self.ui.set_next_item_width(width);
                 let selected = self.state.env.avail_textures.get(tex_selected)
                     .map(|tex| tex.key.clone());
-                self.ui.input_text("##tex", &mut self.state.env.tex_selected)
+                self.ui.set_item_default_focus();
+                let manual_entry = self.ui.input_text("##tex", &mut self.state.env.tex_selected)
                     .auto_select_all(true)
+                    .enter_returns_true(true)
                     .hint("image path")
                     .build();
-                self.ui.set_item_default_focus();
+                if manual_entry {
+                    self.ui.close_current_popup();
+                }
                 let mut selection = None;
+                let mut selection_source = None;
                 for (key, tex) in self.state.env.avail_textures.iter() {
-                    if !tex.file_path.as_os_str().is_empty() {
-                        let selected = match &selected {
-                            Some(sel) if &sel[..] == &key[..] => true,
-                            _ => false,
+                    let selected = match &selected {
+                        Some(sel) if &sel[..] == &key[..] => true,
+                        _ => false,
+                    };
+                    let display = (!tex.file_path.as_os_str().is_empty()).then(||
+                        rt::relative_path(&tex.file_path).to_string_lossy()
+                    ).or_else(||
+                        tex.source_attr.as_ref().and_then(|s| str_opt(&s[..]))
+                            .map(Cow::Borrowed)
+                    ).unwrap_or(Cow::Borrowed(&key[..]));
+                    if Selectable::new(&display).selected(selected).build(self.ui) {
+                        selection = Some(&key[..]);
+                        selection_source = Some(tex.source);
+                    } else if self.ui.is_item_hovered() {
+                        let source_pack = match tex.source.marker_path::<PackPath>() {
+                            None => None,
+                            Some(p) if p.root == self.state.pack_path =>
+                                Some(self.state.root_dir.to_string_lossy()),
+                            Some(pack_path) =>
+                                self.state.env.shared.as_ref().and_then(|p| p.packs.packs.borrow()
+                                    .lookup_ref(&pack_path.root)
+                                    .map(|p| Cow::Owned(p.info.to_string()))),
                         };
-                        if Selectable::new(&rt::relative_path(&tex.file_path).to_string_lossy()).selected(selected).build(self.ui) {
-                            selection = Some(&key[..]);
+                        if let Some(source_pack) = source_pack {
+                            self.ui.tooltip_text(&source_pack);
                         }
                     }
                 }
@@ -643,6 +821,67 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 if let Some(selection) = selection {
                     self.state.env.tex_selected.clear();
                     self.state.env.tex_selected.push_str(selection);
+                    self.state.env.tex_selected_source = selection_source;
+                }
+            }
+            self.ui.same_line();
+            if self.ui.button("refresh") {
+                self.state.refresh_textures();
+            }
+        }
+        if let MarkerIndex::NS_UNK | MarkerIndex::NS_TRAIL = mns {
+            if mns == MarkerIndex::NS_UNK {
+                self.ui.separator();
+            }
+            let section_path = mpath.try_to::<SectionOfTrail>();
+            let trail_path: Option<TrailPath> = mpath.try_to();
+            let trail_root = trail_path.or(section_path.map(|p| p.root));
+            let _id = self.ui.push_id("petrail");
+            if let Some(_section_path) = section_path {
+                if self.ui.button("refresh") {
+                    self.act_trl_boop = Some(TrlBoop::Refresh);
+                }
+                self.ui.same_line();
+                if self.ui.button("boop") {
+                    self.act_trl_boop = Some(TrlBoop::Append);
+                }
+                self.ui.same_line();
+                if self.ui.button("reboop") {
+                    self.act_trl_boop = Some(TrlBoop::Replace);
+                }
+                self.ui.same_line();
+                if self.ui.button("snip") {
+                    self.act_trl_boop = Some(TrlBoop::Snip);
+                }
+                if self.ui.button("end") {
+                    self.state.cursor.id.path = MarkerIndex::UNK;
+                }
+            } else {
+                let label = "trailing";
+                let can_commit = !self.state.env.trl_name.is_empty() || trail_path.is_some();
+                let mut commit = match can_commit {
+                    true => self.ui.button("trailing"),
+                    false => {
+                        self.ui.text_disabled(label);
+                        false
+                    },
+                };
+                self.ui.same_line();
+                let width = self.ui.content_region_avail()[0] * 0.95;
+                self.ui.set_next_item_width(width);
+                commit |= self.ui.input_text("##trl", &mut self.state.env.trl_name).hint("trl")
+                    .chars_noblank(true)
+                    .enter_returns_true(true)
+                    .build();
+                if commit & can_commit {
+                    self.act_new_trail = Some(());
+                }
+            }
+            if let (Some(trail_path), Some(map_id)) = (trail_root, self.state.env.latest_map) {
+                if self.ui.button("clear TRL") {
+                    self.act_trl_clear = Some((Err(trail_path), map_id.get() as i32));
+                } else if self.ui.is_item_hovered() {
+                    self.ui.tooltip_text("CLICKING HERE WILL PROBABLY NUKE A TRL FILE FROM THE PACK");
                 }
             }
         }
@@ -651,17 +890,18 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
     }
     pub fn draw_alloc(&mut self) {
         let _id = self.ui.push_id("pe-alloc");
-        if self.ui.button("allocate new") {
+        let mut commit = self.ui.button("allocate new");
+        self.ui.same_line();
+        commit |= self.ui.input_text("##dir", &mut self.state.env.pack_alloc_name).hint("dir")
+            .chars_noblank(true)
+            .enter_returns_true(true)
+            .build();
+        if commit {
             if self.state.env.pack_alloc_name.is_empty() {
                 self.state.env.pack_alloc_name.push_str("packedit");
             }
             self.act_pack_alloc = Some(PackPath::with_path(PackIndex::MAX));
-        }
-        self.ui.same_line();
-        self.ui.input_text("##dir", &mut self.state.env.pack_alloc_name).hint("dir")
-            .chars_noblank(true)
-            .build();
-        if !self.state.env.pack_alloc_name.is_empty() {
+        } else if !self.state.env.pack_alloc_name.is_empty() {
             let width = self.ui.content_region_avail()[0] * 0.45;
             self.ui.set_next_item_width(width);
             self.ui.input_text("##packid", &mut self.state.env.pack_cat_id).hint("id")
@@ -706,34 +946,205 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let poi_path: Option<PoiPath> = self.state.cursor.id.try_to();
             self.state.cursor.id.path = MarkerIndex::UNK;
             let map_id = self.state.env.latest_map.map(|m| m.get() as i32);
-            let mut poi = Poi {
-                category: IdNameBox::new_cloned(self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize)
-                    .map(|(_, c)| &c.full_id)
-                    .or(self.state.pack.pack.categories.root_categories.get_index(0))
-                    .cloned()
-                    .unwrap_or_else(|| self.state.env.fallback_category_id())),
-                guid: Uuid::new_v4(),
-                map_id: map_id.unwrap_or(0),
-                position: match self.state.env.pos.position.take() {
-                    #[cfg(todo)]
-                    None => self.state.env.latest_pos.map(Point3::to_untyped),
-                    pos => pos.map(Point3::from_raw),
-                }.unwrap_or(Point3::ZERO),
-                attributes: MarkerAttributes::default(),
-                parent_path: None,
-            };
-            self.state.apply_attrs(&mut poi.attributes);
-            self.state.apply_render_attrs(&mut poi.attributes);
-            self.state.apply_poi_attrs(&mut poi.attributes);
-            self.state.pack.pack.pois.push(poi);
-            if let Some(map_id) = self.state.env.latest_map {
+            let mut poi = None;
+            let mut map_id = map_id;
+            if poi_path.is_none() && self.state.env.pos.position.is_none() {
+                self.state.env.pos.fill_current();
+            }
+            let position = match self.state.env.pos.position.take() {
+                #[cfg(todo)]
+                None => self.state.env.latest_pos.map(Point3::to_untyped),
+                pos => pos.map(Point3::from_raw),
+            }.unwrap_or(Point3::<f32>::ZERO);
+            {
+                let poi = if let Some(poi) = poi_path.and_then(|p| self.state.pack.pack.pois.get_mut(p.path as usize)) {
+                    poi.position = position;
+                    map_id = None;
+                    poi
+                } else {
+                    poi.insert(Poi {
+                        category: IdNameBox::new_cloned(self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize)
+                            .map(|(_, c)| &c.full_id)
+                            .or(self.state.pack.pack.categories.root_categories.get_index(0))
+                            .cloned()
+                            .unwrap_or_else(|| self.state.env.fallback_category_id())),
+                        guid: Uuid::new_v4(),
+                        map_id: map_id.unwrap_or(0),
+                        position,
+                        attributes: MarkerAttributes::default(),
+                        parent_path: None,
+                    })
+                };
+                self.state.env.apply_attrs(&mut poi.attributes);
+                self.state.env.apply_render_attrs(&mut poi.attributes);
+                self.state.env.apply_poi_attrs(&self.state.root_dir, &mut poi.attributes);
+            }
+            let added = poi.is_some();
+            if let Some(poi) = poi {
+                self.state.pack.pack.pois.push(poi);
+            }
+            if let Some(map_id) = map_id.and_then(|map_id| MapIndex::new(map_id as _)) {
                 self.state.pack.pack_info.maps.insert(map_id);
             }
             self.state.markers_dirty = true;
-            self.state.populate_info();
-            self.state.update_info();
+            if added {
+                self.state.populate_info();
+                self.state.update_info();
+            }
             self.state.update_loaded();
             self.state.update_gameplay();
+        }
+        if let Some(()) = self.act_new_trail.take() {
+            let trail_path: Option<TrailPath> = self.state.cursor.id.try_to();
+            self.state.cursor.id.path = MarkerIndex::UNK;
+            let mut map_id = self.state.env.latest_map.map(|m| m.get() as i32);
+            let mut trail = None;
+            {
+                let trl = str_opt_ref(&self.state.env.trl_name)
+                    .map(|p| TrlPath::new(string_into(p)));
+                    let existing = trail_path.and_then(|p| self.state.pack.pack.trails.get_mut(p.path as usize)
+                        .map(|trail| (p, trail)));
+                let mut open_sec = None;
+                let trail = if let Some((trail_path, trail)) = existing {
+                    self.state.cursor.id.path = trail_path.into();
+                    if let Some(trl) = trl {
+                        trail.trail_path = Some(trl);
+                    } else if let Some(trl) = &trail.trail_path {
+                        open_sec = Some((trail_path, trl.clone()));
+                    }
+                    map_id = None;
+                    trail
+                } else {
+                    let trail_path: SectionOfTrail = SectionOfTrail::with_parts(TrailPath::with_path(self.state.pack.pack.trails.len() as TrailIndex), TrailSectionPath::with_path(0 as TrailSectionIndex));
+                    self.state.cursor.id.path = trail_path.map_path(|p| p.path).into();
+                    trail.insert(Trail {
+                        category: IdNameBox::new_cloned(self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize)
+                            .map(|(_, c)| &c.full_id)
+                            .or(self.state.pack.pack.categories.root_categories.get_index(0))
+                            .cloned()
+                            .unwrap_or_else(|| self.state.env.fallback_category_id())),
+                        guid: Uuid::new_v4(),
+                        map_id,
+                        attributes: MarkerAttributes::default(),
+                        parent_path: None,
+                        trail_path: trl,
+                    })
+                };
+                self.state.env.apply_attrs(&mut trail.attributes);
+                self.state.env.apply_render_attrs(&mut trail.attributes);
+                self.state.env.apply_trail_attrs(&self.state.root_dir, &mut trail.attributes);
+                if let (Some(trl), Some(map_id)) = (trail.trail_path.clone(), map_id) {
+                    let trail_exists = self.state.resolve_trl(Ok(&trl))
+                        .and_then(|p| p.try_exists().context("trl exists"));
+                    if rt::log::warn_ok(trail_exists) == Some(false) {
+                        self.act_trl_clear = Some((Ok(trl), map_id));
+                    }
+                }
+                if let Some((trail_path, trl)) = open_sec {
+                    // TODO: determine from map state instead?
+                    let section_count = self.state.asset_file_path(&trl.path[..])
+                        .context("trl sec count")
+                        .and_then(|path| fs::File::open(path)
+                            .map_err(anyhow::Error::from)
+                        ).and_then(|mut f| match TrailData::read_from_trl(&mut f) {
+                            Err(e) /*if e.kind() == io::ErrorKind::UnexpectedEof*/ => Ok(Default::default()),
+                            res => res,
+                        })
+                        .map(|trl| trl.sections.len());
+                    if let Some(count) = rt::log::info_ok(section_count) {
+                        let sec_path: SectionOfTrail = trail_path.rel(TrailSectionPath::with_path(count.saturating_sub(1) as TrailIndex));
+                        self.state.cursor.id.path = sec_path.map_path(|p| p.path).into();
+                    }
+                }
+            }
+            if let Some(trail) = trail {
+                self.state.pack.pack.trails.push(trail);
+            }
+            if let Some(map_id) = map_id.and_then(|map_id| MapIndex::new(map_id as _)) {
+                self.state.pack.pack_info.maps.insert(map_id);
+            }
+        }
+        if let Some((trl, map_id)) = self.act_trl_clear.take() {
+            let trl_storage;
+            let trl = match trl {
+                Ok(trl) => {
+                    trl_storage = trl;
+                    Ok(&trl_storage)
+                },
+                Err(e) => Err(e),
+            };
+            let written = self.state.write_to_trl(trl, true, Some(map_id));
+            let _ = rt::log::error_ok(written);
+        }
+        while let Some(boop) = self.act_trl_boop.take() {
+            let map_id = self.state.env.latest_map.map(|m| m.get() as i32);
+            let trail_path = match self.state.cursor.id.path.namespace() {
+                MarkerIndex::NS_TRAIL => Some(self.state.cursor.id.path.index_trail_section_unchecked()),
+                _ => None,
+            }.context("trl cursor invalid");
+            match boop {
+                TrlBoop::Refresh => {
+                    self.state.markers_dirty = true;
+                    if true {
+                        self.state.populate_info();
+                        self.state.update_info();
+                    }
+                    self.state.update_loaded();
+                    self.state.update_gameplay();
+                    let trail_path: anyhow::Result<TrailPath> = trail_path.map(|(traili, _seci)|
+                        TrailPath::with_path(traili)
+                    );
+                    let res = trail_path.and_then(|trail_path| match map_id.and_then(|id| MapIndex::new(id as _)) {
+                        Some(map_id) => {
+                            let map_path = self.state.pack_path.rel(map_id);
+                            let trail_geo = self.state.env.shared.as_ref().map(|shared| TrailGeometryRequests::subscribed_to(&shared.space.trail_geometry));
+                            trail_geo.and_then(|geo| geo.request(map_path.rel(trail_path.path), false).ok())
+                                .context("trl refresh")
+                        },
+                        map_id => map_id.context("map required for refresh").map(drop),
+                    });
+                    rt::log::error_ok(res);
+                },
+                boop => {
+                    let trl = trail_path.and_then(|(traili, seci)| {
+                        let trail_path = TrailPath::with_path(traili);
+                        self.state.write_to_trl(Err(trail_path), false, map_id)
+                        .map(|trl| (trl, trail_path.rel(seci)))
+                    });
+                    let trl = rt::log::error_ok(trl);
+                    let next_point = match boop {
+                        TrlBoop::Snip => Some(None),
+                        TrlBoop::Replace | TrlBoop::Append => {
+                            self.state.env.pos.fill_current();
+                            match self.state.env.pos.position.take() {
+                                #[cfg(todo)]
+                                None => self.state.env.latest_pos.map(Point3::to_untyped),
+                                pos => pos.map(Point3::from_raw),
+                            }.map(|pos| Some(pos))
+                        },
+                        TrlBoop::Refresh => None,
+                    };
+                    if let Some((mut trl, trail_path)) = trl {
+                        if let Some(next_point) = next_point {
+                            let data = TrailSection::encode_record(next_point);
+                            let res = if let TrlBoop::Replace = boop {
+                                match trl.seek(io::SeekFrom::Current(-(TrailSection::POINT_SIZE as i64))) {
+                                    Ok(pos) if pos < TrailHeader::SIZE as u64 => {
+                                        log::warn!("you went too far, consider clearing!");
+                                        Ok(())
+                                    },
+                                    res => res.map(drop),
+                                }
+                            } else { Ok(()) };
+                            let res = res.and_then(|()| trl.write_all(&data));
+                            if rt::log::error_ok(res).is_some() {
+                                // see results immediately
+                                self.act_trl_boop = Some(TrlBoop::Refresh);
+                            }
+                        }
+                    }
+                },
+            }
         }
         if let Some(cat) = self.act_new_cat.take() {
             let parent = cat.full_id.parent().and_then(|pid| self.state.pack.pack.categories.all_categories.get_index_of(pid));

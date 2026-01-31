@@ -116,6 +116,8 @@ impl PathingWindowState {
             .build(ui, || {
                 let pathing_dir = crate::ADDON_DIR.join("pathing");
                 RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
+                ui.same_line();
+                ui.dummy([4.0; 2]);
                 self.draw_content(ui, machine, engine)
             });
         self.open = open;
@@ -185,10 +187,6 @@ impl PathingWindowState {
             if machine.pack_ui_state.pack_edit.is_open() {
                 if ui.button("close") {
                     machine.pack_ui_state.pack_edit.close();
-                }
-                ui.same_line();
-                if ui.button("refresh tex") {
-                    machine.pack_ui_state.pack_edit.refresh_textures();
                 }
             }
             ui.set_cursor_screen_pos(bookmark);

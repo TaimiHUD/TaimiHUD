@@ -166,6 +166,11 @@ impl PositionInput {
             self.position = Some(Vec3::from_array(ml.read_avatar().position));
         }
     }
+    pub fn fill_current(&mut self) {
+        if self.position.is_none() {
+            self.take_current();
+        }
+    }
     pub fn draw_edit_manual(&mut self, ui: &Ui, trigger: bool) {
         let button_text = match self.opened {
             true => fl!("set-manually-save"),
