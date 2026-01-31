@@ -1,5 +1,6 @@
 use crate::exports::runtime as rt;
 use super::{imgui, Ui, AsUi, RawCast, UiToken, UiTokenMut, UiTokenDyn};
+use glamour::{Point2, Vector2};
 use core::fmt::{self, Write};
 use std::io;
 use core::borrow::BorrowMut;
@@ -195,18 +196,25 @@ impl<'ui> UiFont<'ui> for imgui::FontId {
         }.push_font(self)
     }
 }
+impl<'ui> UiFont<'ui> for () {
+    type FontToken = ();
+    #[inline]
+    fn push_font(self, _: &Ui<'ui>) -> Self::FontToken {
+        ()
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct UiTextWrite<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
-    pub start_of_line: bool,
+    pub start_of_line: Option<Point2<f32>>,
 }
 impl<'a, 'ui> UiTextWrite<'a, 'ui> {
     #[inline(always)]
     pub const fn new(ui: &'a Ui<'ui>) -> Self {
         Self {
             ui,
-            start_of_line: true,
+            start_of_line: None,
         }
     }
     #[inline]
@@ -214,23 +222,38 @@ impl<'a, 'ui> UiTextWrite<'a, 'ui> {
         if s.is_empty() {
             return
         }
-        if !self.start_of_line {
-            self.ui.same_line();
+        let mut spacingtoken = None;
+        if let Some(next_start) = self.start_of_line.take() {
+            match next_start {
+                s if s.x.is_infinite() => {
+                    spacingtoken = Some(self.ui.push_style_var(imgui::StyleVar::ItemSpacing([f32::EPSILON, 0.0])));
+                    self.ui.same_line();
+                },
+                s =>
+                    self.ui.set_cursor_pos(s.to_array()),
+            }
         }
         let plain = s.strip_suffix("\n");
+        let endln = plain.is_some();
+        let can_resume = !endln && !s.as_bytes().contains(&b'\n');
+        let prev_start = can_resume.then(|| Point2::from_array(self.ui.cursor_pos()));
         self.ui.text(plain.unwrap_or(s));
-        self.start_of_line = plain.is_some();
+        if let Some(prev_start) = prev_start {
+            self.start_of_line = Some(prev_start + Vector2::from_array(self.ui.item_rect_size()));
+        } else if !endln {
+            self.start_of_line = Some(Point2::INFINITY);
+        }
     }
     pub fn end_line(&mut self) {
         match self.start_of_line {
-            true => self.ui.new_line(),
-            false => self.start_of_line = true,
+            None => self.ui.new_line(),
+            Some(..) => self.start_of_line = None,
         }
     }
     #[inline]
     pub fn draw_line(&mut self, s: &str) {
         self.ui.text(s);
-        self.start_of_line = true;
+        self.start_of_line = None;
     }
 }
 impl<'a, 'ui> fmt::Write for UiTextWrite<'a, 'ui> {

@@ -160,6 +160,12 @@ impl<'ui, T: UiTokenZst + UiToken + 'ui> From<Option<T>> for UiTokenDyn<'ui> {
         token.map(Self::new).unwrap_or(Self::empty())
     }
 }
+impl<'ui> From<()> for UiTokenDyn<'ui> {
+    #[inline]
+    fn from(token: ()) -> Self {
+        Self::new(token)
+    }
+}
 impl<'ui> UiToken for UiTokenDyn<'ui> {
     #[inline]
     #[cfg(todo = "unused")]
