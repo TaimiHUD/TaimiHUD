@@ -890,11 +890,17 @@ impl PoiInfo {
             let interactive = pinfo.get_marker_attrs().map(|a| SpaceInteraction::interest_for_marker(a));
             let mut flags = InteractSortFlags::empty();
             let mut flags_populated = InteractSortFlags::empty();
-            let mut pos = Point3::INFINITY;
+            let mut pos = Point3::ZERO.with_x(PoiInfoMarker::DIST_DIST_IRRELEVANT);
             if let Some(spoi) = spoi {
+                let has_pos = match spoi.position.x.is_infinite() || spoi.position.x.is_nan() || spoi.position.x.to_bits() == PoiInfoMarker::BITS_IRRELEVANT {
+                    false => InteractSortFlags::DISTANCE,
+                    _ => InteractSortFlags::EMPTY,
+                };
                 flags.set(InteractSortFlags::VISIBLE | InteractSortFlags::ENABLED, spoi.visibility.is_visible());
-                flags_populated.insert(InteractSortFlags::DISTANCE | InteractSortFlags::VISIBLE | InteractSortFlags::ENABLED | InteractSortFlags::FILTERED);
-                pos = spoi.position;
+                flags_populated.insert(has_pos | InteractSortFlags::VISIBLE | InteractSortFlags::ENABLED | InteractSortFlags::FILTERED);
+                if !has_pos.is_empty() {
+                    pos = spoi.position;
+                }
                 if !flags.contains(InteractSortFlags::VISIBLE) {
                     if !hidden | !spoi.visibility.intersects(VisibilityFlags::DEFAULT_TOGGLE) {
                         // can't really tell these two apart bleh
@@ -975,6 +981,8 @@ impl PoiInfo {
                         marker.dist_dist = PoiInfoMarker::DIST_DIST_FAR;
                     } else if filterable.contains(InteractSortFlags::NEARBY) {
                         marker.nearish = true;
+                    } else if !flags_populated.contains(PoiInfoSorts::DISTANCE) & !pos.x.is_infinite() {
+                        marker.dist_dist = pos.x;
                     }
                     if filterable.contains(InteractFilterFlags::FILTERED.as_sort_bits()) {
                         marker.filtered = true;
@@ -1054,12 +1062,10 @@ impl PoiInfo {
                     self.dirty_pos = true;
                 }
             } else if !marker.has_dist() | !marker.has_pos() {
-                let dist_dist = if !pos.x.is_infinite() {
-                    Some(pos.x)
-                } else if filterable.contains(InteractFilterFlags::FAR.as_sort_bits()) {
+                let dist_dist = if filterable.contains(InteractFilterFlags::FAR.as_sort_bits()) {
                     Some(PoiInfoMarker::DIST_DIST_FAR)
                 } else if filterable.contains(InteractSortFlags::NEARBY) {
-                    Some(PoiInfoMarker::DIST_DIST_MODERATE)
+                    (marker.dist_dist > PoiInfoMarker::DIST_DIST_MODERATE).then_some(PoiInfoMarker::DIST_DIST_MODERATE)
                 } else { None };
                 if let Some(dist_dist) = dist_dist {
                     let prev = mem::replace(&mut marker.dist_dist, dist_dist);
@@ -1096,17 +1102,31 @@ impl PoiInfo {
                 let query = box3aabb(range);
                 let filterable = InteractSortFlags::NEARBY;
                 let mut nearish = BTreeSet::new();
-                let updates = spacepacks.bvh_traverse_shapes(&query).map(|e| {
-                    let mid = e.id;
+                for e in spacepacks.bvh_traverse_shapes(&query) {
+                    match e.id.marker_path::<PackMapPath>() {
+                        #[cfg(todo)]
+                        Some(path) if path.root.path != map_id => continue,
+                        Some(path) if path.path.namespace() != MarkerIndex::NS_POI => continue,
+                        Some(..) => (),
+                        None => continue,
+                    }
+                    if let Some(marker) = self.markers.get_mut(&e.id) {
+                        let pos: Point3<LocalSpace> = MintConv::from_nalg(e.bounds.center());
+                        match pos {
+                            pos if pos.x.is_infinite() | pos.x.is_nan() => (),
+                            pos =>
+                                marker.pos = pos,
+                        }
+                    }
+                    nearish.insert(e.id);
+                    /*let mid = e.id;
                     let pos: Point3<LocalSpace> = MintConv::from_nalg(e.bounds.center());
                     let poi_path: PoiPath = PoiPath::with_path(PoiIndex::MAX);
                     let category_path: CategoryPath = CategoryPath::with_path(CategoryIndex::MAX);
                     let flags = InteractSortFlags::empty();
                     let flags_populated = InteractSortFlags::DISTANCE;
-                    nearish.insert(mid);
-                    (mid, poi_path, category_path, pos, (TriggerKind::empty(), false), filterable, (flags, flags_populated))
-                });
-                self.update_entities_of(&mut {updates});
+                    (mid, poi_path, category_path, pos, (TriggerKind::empty(), false), filterable, (flags, flags_populated))*/
+                }
                 if !nearish.is_empty() {
                     let updates = render.pack_data.iter().filter_map(|(_pack_path, pack)|
                         match &pack.map_info {
@@ -1215,11 +1235,11 @@ impl PoiInfo {
             let poi_path: PoiPath = PoiPath::with_path(PoiIndex::MAX);
             let cat_path: CategoryPath = CategoryPath::with_path(CategoryIndex::MAX);
             let pos = match pos {
-                Some(pos) => {
+                Some(pos) if !pos.x.is_infinite() && pos.x != IRRELEVANT_MID => {
                     populated.insert(PoiInfoSorts::DISTANCE);
                     pos
                 },
-                None => {
+                _ => {
                     filterable.insert(InteractFilterFlags::FAR.as_sort_bits());
                     filterable.remove(InteractSortFlags::NEARBY);
                     Point3::INFINITY
@@ -1410,7 +1430,14 @@ impl PoiInfoMarker {
         let (far, far_v) = (325.0f32, 250.0);
         Size3::new(far / 2.0, far / 2.0, far_v / 2.0)
     };
-    const DIST_DIST_FAR_FILTER: f32 = ((Self::DIST_FAR_FILTER_2.width * 2.0) as u64 - 1).pow(2) as f32;
+    const DIST_DIST_FAR_FILTER: f32 = {
+        let far_filter = ((Self::DIST_FAR_FILTER_2.width * 2.0) as u64 - 1).pow(2) as f32;
+        match far_filter {
+            f if f > Self::DIST_DIST_FAR =>
+                panic!("incorrectly calibrated distance filter"),
+            f => f,
+        }
+    };
 
     pub fn update_dist(&mut self, player_pos: Option<Point3<LocalSpace>>) {
         self.dist_dist = match player_pos {
@@ -1655,11 +1682,11 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                         let label = match (marker.nearby, marker.nearish, marker.dist_dist) {
                             _ if !render => "",
                             (true, _, _) => "<",
-                            (false, true, _) => "❓",
-                            (false, _, PoiInfoMarker::DIST_DIST_MODERATE) => "❓",
-                            (false, _, PoiInfoMarker::DIST_DIST_FAR) => ">",
-                            (false, _, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "",
-                            (false, _, _) => "×",
+                            (false, true, _) => "",
+                            (false, _, PoiInfoMarker::DIST_DIST_MODERATE) => "",
+                            (false, _, PoiInfoMarker::DIST_DIST_IRRELEVANT) => "❓",
+                            (false, _, dist) if dist >= PoiInfoMarker::DIST_DIST_FAR_FILTER => "×",
+                            (false, _, _) => "",
                         };
                         if !label.is_empty() {
                             ui.text(label)

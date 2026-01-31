@@ -183,13 +183,6 @@ impl InteractFilterFlags {
     pub const fn as_sort_bits(self) -> InteractSortFlags {
         InteractSortFlags::from_bits_retain(self.bits() & Self::SORT_FILTER.bits())
     }
-    /// blacklist anything that doesn't contain all of these flags
-    pub fn to_sort_exclude_not(self) -> InteractSortFlags {
-        ((!self) & (Self::STATIC | Self::DISABLED)).as_sort_bits()
-    }
-    pub fn to_sort_exclude(self) -> InteractSortFlags {
-        ((!self) & Self::FILTERED).as_sort_bits()
-    }
     pub fn is_static(flags: TriggerKind) -> Self {
         Self::for_sort(InteractSortFlags::interactive(flags))
     }
