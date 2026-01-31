@@ -174,7 +174,7 @@ impl InteractFilterFlags {
     pub const DEFAULT_UI: Self = Self::FILTERED;
 
     pub fn for_sort(flags: InteractSortFlags) -> Self {
-        Self::sort_as_bits(flags) ^ Self::SORT_INVERT_MASK
+        Self::sort_as_bits(flags) ^ Self::SORT_INVERTED
     }
     pub const fn sort_as_bits(flags: InteractSortFlags) -> Self {
         Self::from_bits_retain(flags.bits() & Self::SORT_MASK.bits())
@@ -183,15 +183,20 @@ impl InteractFilterFlags {
     pub const fn as_sort_bits(self) -> InteractSortFlags {
         InteractSortFlags::from_bits_retain(self.bits() & Self::SORT_FILTER.bits())
     }
-    /// blacklist anything that doesn't contain all of these flags
-    pub fn to_sort_exclude_not(self) -> InteractSortFlags {
-        ((!self) & (Self::STATIC | Self::DISABLED)).as_sort_bits()
-    }
-    pub fn to_sort_exclude(self) -> InteractSortFlags {
-        ((!self) & Self::FILTERED).as_sort_bits()
-    }
-    pub fn interactive(flags: TriggerKind) -> Self {
+    pub fn is_static(flags: TriggerKind) -> Self {
         Self::for_sort(InteractSortFlags::interactive(flags))
+    }
+    #[inline]
+    pub const fn and(self, cond: bool) -> Self {
+        let mask = match cond {
+            true => Self::all(),
+            false => Self::EMPTY,
+        };
+        self.intersection(mask)
+    }
+    #[inline(always)]
+    pub const fn or_if(self, flags: Self, cond: bool) -> Self {
+        Self::from_bits_retain(self.bits() | flags.and(cond).bits())
     }
     pub const fn get(self) -> Option<Self> {
         match self.is_empty() {
