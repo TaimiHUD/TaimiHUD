@@ -1,5 +1,9 @@
-pub use self::traits::{TaimiExtend, TaimiSet};
+pub use self::{
+    flatset::FlatSet,
+    traits::{TaimiExtend, TaimiSet},
+};
 
+pub mod flatset;
 pub mod lru;
 pub mod traits;
 
