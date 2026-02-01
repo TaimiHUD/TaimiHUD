@@ -184,7 +184,7 @@ impl PathingController {
             for path in dirty_packs {
                 let Some(shared_state) = shared_map.get_state_mut(path) else { continue };
                 if let Some(map) = maps.lookup_ref(&path) {
-                    updated |= shared_state.update_with_hidden(path, state, map);
+                    updated |= shared_state.update_with_hidden(path, state, map).unwrap_or(true);
                 }
             }
             updated
