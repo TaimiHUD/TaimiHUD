@@ -84,7 +84,7 @@ impl PackInfo {
                 !root.flags.is_separator(),
                 !root.flags.is_hidden(),
                 !root.flags.is_disabled(),
-                root.child_count,
+                root.direct_child_count,
                 &root.id,
             )
         })
@@ -213,8 +213,6 @@ pub struct PackCategoryInfo {
     pub hidden: CategorySet,
     /// \![keys::DefaultToggle]
     pub disabled: CategorySet,
-    /// [keys::CopyValue] is valid on [self.separators]
-    pub copyable: CategorySet,
     /// Categories that lack any marker children, toggling would be meaningless
     ///
     /// TODO: reconsider if this is useful
@@ -301,7 +299,7 @@ impl PackCategoryInfo {
             .values()
             .map(VisibilityFlags::from_pack_category)
             .collect();
-        let (separators, hidden, disabled, copyable) = collection
+        let (separators, hidden, disabled) = collection
             .all_categories
             .values()
             .enumerate()
@@ -311,15 +309,9 @@ impl PackCategoryInfo {
                     cat.is_separator().then_some(i),
                     cat.is_hidden().then_some(i),
                     (!cat.default_toggle()).then_some(i),
-                    cat.marker_attributes
-                        .interaction
-                        .as_ref()
-                        .map(|i| i.copy_value.is_some())
-                        .unwrap_or(false)
-                        .then_some(i),
                 )
             })
-            .unzip4_flatten();
+            .unzip3_flatten();
 
         Self {
             all: all.into_boxed_slice(),
@@ -328,7 +320,6 @@ impl PackCategoryInfo {
             separators,
             hidden,
             disabled,
-            copyable,
             lonely: Default::default(),
         }
     }
@@ -584,7 +575,6 @@ impl fmt::Debug for PackCategoryInfo {
         let tagged = [
             ("hidden", &self.hidden),
             ("disabled", &self.disabled),
-            ("copyable", &self.copyable),
             ("lonely", &self.lonely),
         ];
         for (name, cats) in tagged {
@@ -846,7 +836,7 @@ pub struct PackRoot {
     pub id: CategoryId,
     pub flags: CategoryFlags,
     pub display_name: Option<Arc<str>>,
-    pub child_count: usize,
+    pub direct_child_count: usize,
 }
 
 impl PackRoot {
@@ -855,15 +845,9 @@ impl PackRoot {
             .root_categories
             .iter()
             .filter_map(|id| collection.all_categories.get_full(id))
-            .map(|(i, _, cat)| {
-                PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat, Some(collection))
-            })
+            .map(|(i, _, cat)| PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat))
     }
-    pub fn from_category(
-        path: CategoryPath,
-        category: &Category,
-        collection: Option<&CategoryCollection>,
-    ) -> Self {
+    pub fn from_category(path: CategoryPath, category: &Category) -> Self {
         #[cfg(todo = "unnecessary")]
         if category.full_id != category.id {
             return None
@@ -876,14 +860,7 @@ impl PackRoot {
                 .clone()
                 .unwrap_or_else(|| category.display_name().into()),
             flags: category.flags,
-            child_count: match collection {
-                Some(c) => c
-                    .all_categories
-                    .values()
-                    .filter(|c| c.full_id.id_starts_with(&category.full_id))
-                    .count(),
-                None => category.sub_categories.len(),
-            },
+            direct_child_count: category.child_ids().count(),
         }
     }
 

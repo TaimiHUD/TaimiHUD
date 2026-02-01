@@ -783,7 +783,7 @@ impl PathingController {
                         root.path(),
                         lazyfmt::or_empty(root.display_name.as_ref()),
                         root.id,
-                        root.child_count,
+                        root.direct_child_count,
                         root.flags
                     );
                 }
