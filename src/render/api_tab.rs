@@ -70,7 +70,7 @@ impl ApiTabState {
             self.sync_save();
         }
         if let Some(account_state) = self.account_state.try_read_if_changed() {
-            log::debug!("ACC UPDATED: {account_state:?}");
+            log::trace!("ACC UPDATED: {account_state:?}");
             self.account_data_last_modified = account_state
                 .last_updated_achievements()
                 .map(|time| TimeZone::from_utc_datetime(&chrono::Local, &time.naive_utc()).to_rfc2822());

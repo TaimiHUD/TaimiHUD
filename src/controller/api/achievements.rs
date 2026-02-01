@@ -102,6 +102,7 @@ pub(super) mod serde_imp {
             taimi_api_client::model::achievements::AchievementId,
         };
         #[derive(Deserialize)]
+        #[serde(transparent)]
         pub(crate) struct AchievementApi(Vec<AchievementApiEntry>);
         #[derive(Deserialize)]
         struct AchievementApiEntry {
