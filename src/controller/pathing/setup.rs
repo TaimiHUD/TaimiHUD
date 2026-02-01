@@ -764,7 +764,7 @@ impl PathingController {
                 let cats = &info.categories;
                 let _ = writeln!(report, "\t{cats:?}");
                 for root in &info.roots {
-                    let _ = writeln!(report, "\t\t{} {} ({}): children={} {:?}", root.path(), lazyfmt::or_empty(root.display_name.as_ref()), root.id, root.child_count, root.flags);
+                    let _ = writeln!(report, "\t\t{} {} ({}): children={} {:?}", root.path(), lazyfmt::or_empty(root.display_name.as_ref()), root.id, root.direct_child_count, root.flags);
                 }
             } else {
                 let _ = writeln!(report, " nope");
