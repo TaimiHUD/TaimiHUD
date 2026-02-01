@@ -5,6 +5,7 @@ use {
     anyhow::{anyhow, Context},
     std::{io, sync::Weak, thread},
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
+    taimi_sync::arcs::weak_is_null,
 };
 use {
     nexus::imgui::TextureId,
@@ -173,7 +174,28 @@ impl TextureLoader {
         textures.get_key_value(key).map(|(k, i)| f(Some(k), i))
     }
     pub fn lookup_with<R, F: FnOnce(&TextureSlot) -> R>(&self, key: &str, f: F) -> Option<R> {
-        self.lookup_pair_with(key, |_k, i| f(i))
+        let mut attention = false;
+        let res = self.lookup_pair_with(key, |_k, i| {
+            attention = i.needs_attention();
+            f(i)
+        });
+        if attention {
+            let mut textures = self.textures.write().ok();
+            let tex = textures.as_mut().and_then(|textures| textures.get_mut(key));
+            let mut prune = false;
+            if let Some(tex) = tex {
+                if tex.try_activate().is_none() && matches!(tex, TextureSlot::Inactive(..)) {
+                    prune = true;
+                }
+            }
+            match (prune, textures) {
+                (true, Some(mut textures)) => {
+                    textures.remove(key);
+                },
+                _ => (),
+            }
+        }
+        res
     }
     /// `Some(None)` if texture isn't ready yet
     pub fn lookup_loaded(&self, key: &str) -> Option<Option<TextureSlot>> {
@@ -523,27 +545,27 @@ impl TextureSlot {
         }
     }
 
+    pub fn get_imgui_dims(&self) -> Option<[f32; 2]> {
+        match self {
+            #[cfg(feature = "extension-nexus")]
+            Self::Nexus(t) => Some(t.size()),
+            #[cfg(feature = "texture-loader")]
+            Self::Loaded(t) => {
+                let [w, h] = t.dimensions;
+                Some([w as f32, h as f32])
+            },
+            _ => None,
+        }
+    }
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
         let id = self
             .resource_view()
             .map(|resource| TextureId::new(resource.to_ref().as_raw() as usize));
         let id = id.unwrap_or(TextureId::new(0));
 
-        Some(match self {
-            #[cfg(todo)]
-            #[cfg(feature = "texture-loader")]
-            Self::Inactive(t) => match Weak::upgrade(t) {},
-            #[cfg(feature = "texture-loader")]
-            Self::Loaded(t) => ImguiTexture {
-                id,
-                size: {
-                    let [w, h] = t.dimensions;
-                    [w as f32, h as f32]
-                },
-            },
-            #[cfg(feature = "extension-nexus")]
-            Self::Nexus(t) => ImguiTexture { id, size: t.size() },
-            _ => return None,
+        self.get_imgui_dims().map(move |size| ImguiTexture {
+            id,
+            size,
         })
     }
 
@@ -567,6 +589,15 @@ impl TextureSlot {
             // maybe someday...
             //Self::Unloaded => true,
             Self::Reserved => true,
+            Self::Inactive(..) => true,
+            _ => false,
+        }
+    }
+    /// a texture resource is wanted for use,
+    /// but may need reactivation/refresh (or is a candidate for deactivation?)
+    pub fn needs_attention(&self) -> bool {
+        match self {
+            Self::Inactive(..) => true,
             _ => false,
         }
     }
@@ -591,10 +622,10 @@ impl TextureSlot {
     pub fn deactivate(&mut self, prune: bool) -> bool {
         let prev = match self {
             Self::Loading | Self::Reserved | Self::Unavailable => return false,
-            Self::Inactive(t) => {
+            Self::Inactive(_t) => {
                 #[cfg(todo = "unnecessary")]
-                if t.strong_count() > 0 {
-                    *t = Weak::new();
+                if _t.strong_count() > 0 {
+                    *_t = Weak::new();
                 }
                 return true
             },
@@ -623,6 +654,26 @@ impl TextureSlot {
         match self {
             Self::Loaded(texture) => texture,
             _ => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
+    #[cfg(feature = "texture-loader")]
+    pub fn try_activate(&mut self) -> Option<&mut Arc<Texture>> {
+        let tex = match self {
+            Self::Inactive(t) if weak_is_null(t) => None,
+            Self::Inactive(t) => Some(Weak::upgrade(&*t)),
+            _ => None,
+        };
+        match tex {
+            Some(Some(tex)) =>
+                Some(self.insert_loaded(tex)),
+            Some(None) => {
+                self.insert_inactive(Weak::new());
+                None
+            },
+            None => match self {
+                Self::Loaded(tex) => Some(tex),
+                _ => None,
+            },
         }
     }
     #[cfg(todo)]

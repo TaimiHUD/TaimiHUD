@@ -234,9 +234,11 @@ impl SharedPackInfo {
         let resourceid = match resource.len() {
             0..=24 => resource,
             _toolong => {
-                use std::hash::{DefaultHasher, Hash, Hasher};
-                // don't care sorry
-                let mut hasher = DefaultHasher::new();
+                use {
+                    std::hash::{Hash, Hasher},
+                    rustc_hash::FxHasher,
+                };
+                let mut hasher = FxHasher::with_seed(self.index.path as usize);
                 resource.hash(&mut hasher);
                 storage = format!("{:x}", hasher.finish());
                 &storage
