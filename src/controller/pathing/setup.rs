@@ -12,13 +12,14 @@ use {
         controller::runtime::WallInstant,
         exports::runtime::{self as rt, textures::TextureKey},
         settings::{Settings, SourceKind},
+        render::machine::{RenderTaskPriority, RenderMachine},
         TEXTURES,
     },
     anyhow::{anyhow, Context},
     futures::stream::{self, Stream, StreamExt},
     rustc_hash::FxHashMap,
     std::{
-        collections::{BTreeMap, BTreeSet},
+        collections::BTreeSet,
         future::Future,
         iter,
         path::Path,
@@ -129,19 +130,20 @@ impl PathingController {
         let packs = &mut self.packs;
         let map_info = &mut self.map_info;
         let reason = &reason;
+        let release = !matches!(reason, None | Some(UnloadedReason::Pending) | Some(UnloadedReason::Loading));
         let updates = paths.iter().map(move |path| {
             if let Some(pack) = packs.lookup_mut(&path) {
                 // TODO: check if sane to do so?
                 pack.unloaded = reason.clone();
             }
-            match reason {
-                None | Some(UnloadedReason::Pending) | Some(UnloadedReason::Loading) => (),
-                Some(..) => {
-                    map_info.map_info.retain(|p, _| p.root != path);
-                },
+            if release {
+                map_info.map_info.retain(|p, _| p.root != path);
             }
             (path, Err(reason.clone()))
         });
+        if release {
+            self.loader.shared.clear_maps_for_packs(&paths, true);
+        }
         self.loader.shared.packs.update_packs_loaded(&mut { updates });
         for path in &paths {
             self.cleanup_pack_subresources(path, reason.as_ref());
@@ -737,8 +739,8 @@ impl PathingController {
                 Ok(resources) if !resources.is_empty() => resources,
                 _ => continue,
             };
-            let keys = resources.values().collect::<BTreeSet<_>>();
-            self.loader.cleanup_pack_subresources_of(false, &keys);
+            let keys = resources.values().cloned().collect::<BTreeSet<_>>();
+            self.loader.cleanup_pack_subresources_of(false, keys);
         }
     }
     pub(super) fn debug_req_resource_report(&self, path: Option<PackPath>) {
@@ -805,7 +807,7 @@ impl PathingController {
                     let mut count = (0usize, 0usize);
                     let mut icount = 0u32;
                     let mut bytes = 0usize;
-                    let status = TEXTURES.lookup_with(key, |slot| {
+                    let status = TEXTURES.lookup_pair_with(key, |_, slot| {
                         let mut iunk = None::<IUnknown>;
                         bytes = slot.diag_texture_byte_size();
                         let status = match slot {
@@ -881,9 +883,17 @@ impl PackLoader {
             return
         }
         let keys = keys.map(|(_name, key)| key).collect::<BTreeSet<_>>();
-        self.cleanup_pack_subresources_of(cleanup, &keys);
+        self.cleanup_pack_subresources_of(cleanup, keys);
     }
-    pub(super) fn cleanup_pack_subresources_of(&self, cleanup: bool, keys: &dyn TaimiSet<TextureKey>) {
+    /// XXX: way too deep into a non-async call stack, but blocking locks would make tokio panic...
+    fn cleanup_pack_subresources_of(&self, cleanup: bool, keys: BTreeSet<TextureKey>) {
+        tokio::task::spawn(async move {
+            RenderMachine::schedule_task_async(Box::new(move |_state| {
+                Self::cleanup_pack_subresources_of_dyn(cleanup, &keys);
+            }), RenderTaskPriority::Normal).await;
+        });
+    }
+    fn cleanup_pack_subresources_of_dyn(cleanup: bool, keys: &dyn TaimiSet<TextureKey>) {
         TEXTURES.unload_textures_matching(cleanup, |key, _slot| keys.set_contains(key));
     }
 
