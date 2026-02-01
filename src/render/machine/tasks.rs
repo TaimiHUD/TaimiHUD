@@ -11,6 +11,8 @@ pub type RenderTaskQueue = VecDeque<RenderTask>;
 pub type RenderTask = Box<dyn FnOnce(&mut RenderState) + Send + 'static>;
 
 impl RenderMachine {
+    /// TODO: can't this be a std mutex? likely not held for any amount of time,
+    /// let alone across awaits...
     pub fn shared_task_queue() -> &'static Mutex<RenderTaskQueue> {
         static TASK_QUEUE: Mutex<RenderTaskQueue> = Mutex::const_new(VecDeque::new());
 
