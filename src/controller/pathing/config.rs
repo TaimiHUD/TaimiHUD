@@ -156,7 +156,7 @@ impl PathingController {
         }
         if dirty {
             let maps = self.maps.iter_pack_with_info(&self.map_info, path);
-            self.loader.update_map_states(true, true, &mut { maps });
+            self.loader.update_map_states(true, true, &mut { maps }, Some(&self.filter_state));
         }
     }
     pub(super) fn reload_config_for(&mut self, path: PackPath) {
@@ -600,7 +600,7 @@ impl PathingController {
         if publish {
             let maps = self.maps.iter_with_info(&self.map_info, None)
                 .filter(|(path, ..)| pack_path.map(|p| path.root == p).unwrap_or(true));
-            self.loader.update_map_states(true, true, &mut { maps });
+            self.loader.update_map_states(true, true, &mut { maps }, Some(&self.filter_state));
         }
     }
 }

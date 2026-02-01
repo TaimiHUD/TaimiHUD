@@ -475,6 +475,14 @@ impl Extend<Option<PackIndex>> for PackSet {
         }
     }
 }
+impl<T> TaimiSet<T> for PackSet where
+    T: Copy + AsPrimitive<PackIndex>,
+{
+    #[inline]
+    fn set_contains(&self, index: &T) -> bool {
+        self.contains_index(index.as_())
+    }
+}
 impl From<PackPath> for PackSet {
     fn from(path: PackPath) -> Self {
         let mut packs = Self::default();

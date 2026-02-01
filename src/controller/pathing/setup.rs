@@ -706,6 +706,7 @@ impl PathingController {
             true,
             info_dirty,
             &mut self.maps.iter_with_info(&self.map_info, map_id),
+            Some(&self.filter_state),
         );
         if let Some(map_id) = map_id {
             if dirty && !notified {
@@ -891,6 +892,7 @@ impl PackLoader {
         notify: bool,
         info_dirty: bool,
         maps: &mut dyn Iterator<Item = (PackMapPath, &LoadedMapPack, &Arc<MapPackInfo>)>,
+        filter_state: Option<&FilterState>,
     ) -> bool {
         let mut dirty = false;
         if let (_, Some(0)) = maps.size_hint() {
@@ -907,9 +909,8 @@ impl PackLoader {
                 let Some(shared_state) = shared_map.get_state_mut(path) else { continue };
                 dirty |= shared_state.update_static(map);
                 dirty |= shared_state.update_with_loaded(map);
-                #[cfg(todo)]
-                {
-                    dirty |= shared_state.update_with_hidden(path, &self.filter_state.hidden, map_pack);
+                if let Some(filter_state) = filter_state {
+                    dirty |= shared_state.update_with_hidden(path, &filter_state.hidden, map).unwrap_or(false);
                 }
             }
             notify && dirty

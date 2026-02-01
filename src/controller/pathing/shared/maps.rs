@@ -27,20 +27,18 @@ use {
         shared::LocDisplay,
     },
     glamour::Point3,
-    std::{cmp, ops, sync::Arc, iter, mem},
+    std::{cmp, ops, sync::Arc, mem},
     taimi_hoard::{
         collections::TaimiSet,
         iters::{IterExt as _, all_zipped},
         loc::{indexed::IndexedList, LocationMut, LocationRef, Locator},
     },
     taimi_meta::packs::{
-        id::{FromMarkerId1, MarkerId, MarkerIndex, MarkerIndexVariant, MarkerPath, PackMarkerNs},
+        id::{MarkerId, MarkerIndex, MarkerPath},
         CategoryIndex,
         CategoryPath,
         MapIndex,
-        PoiIndex,
         PoiPath,
-        TrailIndex,
         TrailPath,
         VisibilityFlags,
         TrailSectionIndex,
@@ -56,67 +54,6 @@ use {
     taimi_sync::arcs::ArcPtrCmp,
     std::fmt,
 };
-
-#[cfg(todo)]
-#[derive(Debug, Clone, Default)]
-pub struct SharedMaps {
-    pub map_info: BTreeMap<PackMapPath, SharedMapPackLoaded>,
-}
-#[cfg(todo)]
-impl SharedMaps {
-    pub const fn empty() -> Self {
-        Self { map_info: BTreeMap::new() }
-    }
-
-    /// controller internal use
-    pub(crate) fn update_prune_maps<C>(&mut self, keep: C) -> bool
-    where
-        C: TaimiSet<PackMapPath>,
-    {
-        let prev_len = self.map_info.len();
-        self.map_info.retain(|path, _| keep.set_contains(path));
-        self.map_info.len() != prev_len
-    }
-    /// controller internal use
-    pub(crate) fn update_prune_maps_for<C>(&mut self, keep: C) -> bool
-    where
-        C: TaimiSet<PackPath>,
-    {
-        let prev_len = self.map_info.len();
-        self.map_info.retain(|path, _| keep.set_contains(&path.root));
-        self.map_info.len() != prev_len
-    }
-
-    /// remove outdated info from a local cache
-    pub fn prune_map<P, T>(&self, maps: &mut BTreeMap<P, T>) -> bool
-    where
-        P: AsRef<PackMapPath> + Ord,
-    {
-        let prev_len = maps.len();
-        maps.retain(|path, _| self.map_info.contains_key(path.as_ref()));
-        maps.len() != prev_len
-    }
-    pub fn prune_map_of<P, T>(&self, maps: &mut BTreeMap<P, T>) -> bool
-    where
-        P: AsRef<PackPath> + Ord,
-    {
-        let prev_len = maps.len();
-        maps.retain(|path, _| {
-            let path = path.as_ref();
-            self.map_info.keys().any(|p| p.root == path)
-        });
-        maps.len() != prev_len
-    }
-    /// remove outdated info from a local cache
-    pub fn prune_set<P>(&self, maps: &mut BTreeSet<P>) -> bool
-    where
-        P: AsRef<PackMapPath> + Ord,
-    {
-        let prev_len = maps.len();
-        maps.retain(|path| self.map_info.contains_key(path.as_ref()));
-        maps.len() != prev_len
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct SharedGameplayMap {
@@ -340,8 +277,6 @@ pub struct SharedMapPackLoaded {
     pub info: Arc<MapPackInfo>,
     pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiInfo]>>,
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailInfo]>>,
-    #[cfg(todo)]
-    pub interactive_pois: Arc<[InteractivePoi]>,
     pub poi_guids: Arc<[Guid]>,
 }
 impl SharedMapPackLoaded {
@@ -349,8 +284,6 @@ impl SharedMapPackLoaded {
     pub fn with_info(path: PackMapPath, info: Arc<MapPackInfo>) -> Self {
         Self {
             path,
-            #[cfg(todo)]
-            interactive_pois: Default::default(),
             poi_guids: Default::default(),
             info,
             pois: Default::default(),
@@ -367,8 +300,6 @@ impl SharedMapPackLoaded {
     pub fn with_loaded(path: PackMapPath, info: Arc<MapPackInfo>, map_pack: &LoadedMapPack) -> Self {
         Self {
             path,
-            #[cfg(todo)]
-            interactive_pois: map_pack.interactive_pois.clone(),
             poi_guids: map_pack.poi_guids.clone(),
             info,
             pois: map_pack.pois.iter().map(|poi| poi.info().clone()).collect(),
@@ -380,10 +311,6 @@ impl SharedMapPackLoaded {
     }
     pub fn update_with(&mut self, map_pack: &LoadedMapPack) -> bool {
         let mut dirty = false;
-        #[cfg(todo)]
-        {
-            self.interactive_pois = map_pack.interactive_pois.clone();
-        }
         dirty |= ArcPtrCmp::from_mut(&mut self.poi_guids).clone_from_arc(&map_pack.poi_guids);
         if !all_zipped(
             |l, r| l.info().sig() == r.sig(),
@@ -486,10 +413,6 @@ pub struct SharedMapPackState {
     pub categories: Arc<[LoadedCategory]>,
     pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiShared]>>,
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailShared]>>,
-    #[cfg(todo)]
-    pub interactive_pois_nearby: Arc<BitVec>,
-    #[cfg(todo)]
-    pub interactive_poi_pois: Arc<[LoadedPoi]>,
     pub hidden_markers: Arc<[MarkerId]>,
 }
 
@@ -503,10 +426,6 @@ impl SharedMapPackState {
                 .iter()
                 .map(LoadedTrailShared::with_loaded)
                 .collect(),
-            #[cfg(todo)]
-            interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
-            #[cfg(todo)]
-            interactive_poi_pois: Self::interactive_pois_from(map_pack),
             hidden_markers: Default::default(),
         }
     }
@@ -519,11 +438,7 @@ impl SharedMapPackState {
                 .iter()
                 .map(LoadedTrailShared::with_loaded)
                 .collect(),
-            #[cfg(todo)]
-            interactive_pois_nearby: Arc::new(map_pack.interactive_pois_nearby.clone()),
-            #[cfg(todo)]
-            interactive_poi_pois: Self::interactive_pois_from(map_pack),
-            hidden_markers: Self::hidden_markers_from(path, state, map_pack),
+            hidden_markers: Self::hidden_markers_from(path, state, map_pack).cloned().collect(),
         }
     }
 
@@ -550,8 +465,6 @@ impl SharedMapPackState {
             .map(LoadedTrailShared::with_loaded)
             .collect();
         self.pois = map_pack.pois.iter().map(LoadedPoiShared::with_loaded).collect();
-        #[cfg(todo)]
-        interaction_pois_etc();
     }
     pub fn update_with_loaded(&mut self, map_pack: &LoadedMapPack) -> bool {
         let mut trails_dirty = self.trails.data.len() != map_pack.trails.len();
@@ -594,35 +507,25 @@ impl SharedMapPackState {
                 }
             }
         }
-        let dirty = trails_dirty | pois_dirty;
-
-        #[cfg(todo)]
-        {
-            let nearby_dirty = self.interactive_pois_nearby[..] != map_pack.interactive_pois_nearby[..];
-            if nearby_dirty {
-                self.interactive_pois_nearby = Arc::new(map_pack.interactive_pois_nearby.clone());
-            }
-            // TODO: check if changed?
-            let interactive_dirty = true;
-            if interactive_dirty {
-                self.interactive_poi_pois = Self::interactive_pois_from(map_pack);
-            }
-            let dirty = dirty | nearby_dirty | interactive_dirty;
-        }
-        dirty
+        trails_dirty | pois_dirty
     }
+    /// TODO: check if changed properly...
     pub fn update_with_hidden(
         &mut self,
         path: PackMapPath,
         state: &MarkerState,
         map_pack: &LoadedMapPack,
-    ) -> bool {
-        // TODO: check if changed?
-        let hidden_dirty = true;
+    ) -> Option<bool> {
+        let mut hidden_dirty = true;
         if hidden_dirty {
-            self.hidden_markers = Self::hidden_markers_from(path, state, map_pack);
+            let prev_len = self.hidden_markers.len();
+            self.hidden_markers = Self::hidden_markers_from(path, state, map_pack).cloned().collect();
+            hidden_dirty = prev_len != self.hidden_markers.len();
         }
-        hidden_dirty
+        match hidden_dirty {
+            false => None,
+            true => Some(true),
+        }
     }
 
     pub fn category_paths<'a, 'i>(
@@ -635,30 +538,17 @@ impl SharedMapPackState {
         info.categories().zip(self.categories.iter())
     }
 
-    #[cfg(todo)]
-    pub(crate) fn interactive_pois_from(map_pack: &LoadedMapPack) -> Arc<[LoadedPoi]> {
-        map_pack
-            .interactive_pois
-            .iter()
-            .map(|ipoi| {
-                map_pack
-                    .pois
-                    .get(ipoi.loaded_index().path as usize)
-                    .cloned()
-                    .unwrap_or(LoadedPoi::INVALID)
-            })
-            .collect()
-    }
-    fn hidden_markers_from(
+    fn hidden_markers_from<'a: 'b, 'b>(
         map_path: PackMapPath,
-        state: &MarkerState,
-        map_pack: &LoadedMapPack,
-    ) -> Arc<[MarkerId]> {
+        state: &'a MarkerState,
+        map_pack: &'b LoadedMapPack,
+    ) -> impl Iterator<Item = &'a MarkerId> + 'b {
         let pack_path = map_path.root;
+        let poi_guids = &map_pack.poi_guids;
         state
             .hidden
             .keys()
-            .filter(|id| match id {
+            .filter(move |id| match id {
                 id if id
                     .marker_path::<PackMapPath>()
                     .map(|path| path.root == map_path)
@@ -669,14 +559,18 @@ impl SharedMapPackState {
                     .map(|path| path.root == pack_path)
                     .unwrap_or(false) =>
                     true,
-                _ => map_pack.poi_guids.contains(Guid::from_uuid_ref(id)),
+                _ => poi_guids.contains(Guid::from_uuid_ref(id)),
             })
-            .cloned()
-            .collect()
     }
-    /// TODO: ensure sorted and binary search instead?
     pub fn is_hidden(&self, marker_ids: &[MarkerId]) -> bool {
-        self.hidden_markers.iter().any(|hidden| marker_ids.contains(hidden))
+        match marker_ids {
+            #[cfg(todo = "unnecessary")]
+            marker_ids => self.hidden_markers.iter().any(|hidden| marker_ids.contains(hidden)),
+            marker_ids => self.any_hidden(marker_ids),
+        }
+    }
+    pub fn any_hidden<'a, I: IntoIterator<Item = &'a MarkerId>>(&self, marker_ids: I) -> bool {
+        marker_ids.into_iter().any(|mid| self.hidden_markers[..].binary_search(mid).is_ok())
     }
 
     pub fn loaded_pois<'a>(
@@ -978,16 +872,6 @@ impl<'a> SharedMarkerRef<'a> {
         Some(unsafe {
             self.map_info.info.trail_path_unchecked(lpath)
         })
-    }
-    /// TODO
-    #[cfg(deleteme)]
-    pub fn poi_info(&self) -> Option<&()> {
-        self.poi_path().map(|_| &())
-    }
-    /// TODO
-    #[cfg(deleteme)]
-    pub fn trail_info(&self) -> Option<&()> {
-        self.trail_path().map(|_| &())
     }
     pub fn loaded_category(&self) -> Option<&'a LoadedCategory> {
         let lpath = self.loaded_category_path()?;
