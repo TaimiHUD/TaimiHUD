@@ -200,7 +200,7 @@ impl SpaceEntities {
 
     #[inline]
     fn is_residue(e: &BvhShape<SpaceEntity>, check_bvh: Option<&Bvh<f32, 3>>) -> bool {
-        e.is_invalid() && check_bvh.map(|bvh| e.is_bh_removed()/*e.is_bh_removed_from(bvh)*/).unwrap_or(true)
+        e.is_invalid() && check_bvh.map(|bvh| e.is_bh_removed_from(bvh)).unwrap_or(true)
     }
     /// number of unallocated entries at end of list
     pub fn trailing_residue(&self, check_bvh: Option<&Bvh<f32, 3>>) -> usize {
@@ -688,14 +688,7 @@ impl SpacePackCollection {
         }
     }
     fn invalidate_hidden(&mut self, hidden: &BTreeMap<MarkerId, usize>) {
-        let mut trails = BTreeSet::new();
-        for (&mid, &i) in hidden.iter() {
-            if let Some(path) = mid.marker_path::<PackMapPath>() {
-                if path.path.namespace() == MarkerIndex::NS_TRAIL {
-                    trails.insert(path.swap(path.path.trail_index_unchecked()));
-                    //continue
-                }
-            }
+        for (_mid, &i) in hidden.iter() {
             self.render_entities
                 .invalidate(self.loaded_packs.map_mut_as_slice(), i, true);
         }
@@ -919,7 +912,7 @@ impl EntityUpdateReport {
         &mut self,
         i: usize,
         e: &mut BvhShape<SpaceEntity>,
-        mut extra: Option<&mut SpaceEntityExtra>,
+        extra: Option<&mut SpaceEntityExtra>,
         pack_data: Option<(MarkerPath<PackMapPath>, &mut SpacePack)>,
         (maps, map_info, bvh): EntityRetainContext<'_>,
     ) -> bool {
@@ -944,9 +937,6 @@ impl EntityUpdateReport {
             log::debug!("TODO: {map_path} info missing for {}", e.id);
             return false
         };
-        let extra_fallback = true;
-        //let extra_fallback = false;
-        let extra_invalid = || extra.as_ref().map(|e| e.is_invalid() || (taimi_meta::spatial::IRRELEVANT_MID - e.position.x).abs() <= 0.001).unwrap_or(extra_fallback);
         let (vis, bounds) = match map_path.path.namespace() {
             MarkerIndex::NS_POI => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
@@ -975,39 +965,24 @@ impl EntityUpdateReport {
                     return false
                 }
                 let bounds = &lsection.bounds;
-                let bounds = match bounds {
-                    #[cfg(todo = "unnecessary")]
-                    bounds if ltrail.visibility.is_visible() && extra.as_ref().map(|e| e.position != bounds.center()).unwrap_or(true) => Some(*bounds),
-                    #[cfg(todo = "unnecessary")]
-                    bounds if ltrail.visibility.is_visible() && extra.as_ref().map(|e| e.position != bounds.center()).unwrap_or(true) => Some(*bounds),
-                    #[cfg(deleteme)]
-                    b /*if ltrail.visibility.is_visible()*/ => Some(*b),
-                    bounds => {
-                        let min_dirty = !vec_eq(bounds.min.to_array(), e.bounds.min.into());
-                        let max_dirty = !vec_eq(bounds.max.to_array(), e.bounds.max.into());
-                        (min_dirty || max_dirty).then_some(*bounds)
-                    },
+                let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
+                    || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
+                {
+                    Some(*bounds)
+                } else {
+                    None
                 };
                 (ltrail.visibility, bounds)
             },
             _ => return true,
         };
-        #[cfg(todo)]
         let activated = !e.is_bh_removed_from(bvh);
-        let activated = !e.is_bh_removed();
         if !vis.is_visible() {
             if activated {
                 self.hidden.insert(e.id.clone(), i);
             }
         } else if !activated {
             self.dirty.insert(e.id.clone(), i);
-        }
-        #[cfg(todo)]
-        if vis.is_visible() && extra_invalid() {
-            self.dirty.insert(e.id.clone(), i);
-            if let Some(extra) = &mut extra {
-                **extra = SpaceEntityExtra::invalid();
-            }
         }
         if let Some(bounds) = bounds {
             e.bounds = box3aabb(bounds);

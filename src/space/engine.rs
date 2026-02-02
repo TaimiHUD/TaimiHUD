@@ -549,9 +549,6 @@ impl Engine {
         if !self.packs.prepare(&self.render_backend.device, machine)? {
             return Ok(())
         }
-        if !self.packs.check_bvh() {
-            return Ok(())
-        }
 
         //self.packs.update();
 
