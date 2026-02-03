@@ -268,7 +268,7 @@ in {
             order = 1112;
             name = "release";
             "if" = condRelease;
-            uses.path = "softprops/action-gh-release@v1";
+            uses.path = "softprops/action-gh-release@v2";
             "with" = let
               pre_name = "format('{0} ({1}-nexus)', ${real_tag}, ${nexus_tag})";
             in {
