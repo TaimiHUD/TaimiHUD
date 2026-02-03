@@ -523,13 +523,13 @@ impl InteractReactor {
                 let mut now = || *now.get_or_insert_with(WallInstant::now_timestamp_system_checked);
                 let mut contexts = None;
                 let mut reset = None;
-                const SOME_WEEK: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
+                /// 16:00 UTC
+                const SOME_DAY: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
                 let until = match behaviour {
                     Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => {
                         if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour {
                             contexts = Some(HideContext::for_character(filter_state.character.name.clone()));
                         }
-                        const SOME_DAY: Timestamp = SOME_WEEK;
                         match now().timestamp() {
                             #[cfg(todo)]
                             now => Some(Either::Left(Timestamp::with_timestamp(
@@ -543,6 +543,8 @@ impl InteractReactor {
                         }
                     },
                     Behaviour::Blish(BlishBehaviour::ResetWeekly) => {
+                        /// sunday 23:30 UTC
+                        const SOME_WEEK: Timestamp = Timestamp::with_timestamp(SOME_DAY.timestamp() + Timestamp::HOUR.as_secs() * 8 - Timestamp::MINUTE.as_secs() * 30);
                         match now().timestamp() {
                             now => Some(Either::Right(Duration::from_secs({
                                 let delta = (SOME_WEEK.timestamp() as i64).wrapping_sub(now as i64);
