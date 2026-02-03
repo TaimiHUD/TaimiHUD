@@ -3,10 +3,10 @@ use {
     crate::{
         controller::pathing::{
             registry::{PoiMapPath, LoadedPoiPath, PackMapPath, LoadedMarkerPath},
-            shared::{interact::{empty_trigger_bvh, NearbyMarkers, PlayerPosition, SharedTriggerBvh, TriggerBvh, TRIGGER_DIMENSION}, PathingReceiver, InteractReceiver, PathingEnables},
+            shared::{interact::{empty_trigger_bvh, NearbyMarkers, PlayerPosition, SharedTriggerBvh, TRIGGER_DIMENSION}, PathingReceiver, InteractReceiver, PathingEnables},
             state::{
                 hidden::{AutoReset, HideContext},
-                interactive::{InteractionEvent, InteractionEventAction, InteractivePoi},
+                interactive::{InteractionEvent, InteractionEventAction},
                 filter::{self, FilterState, MarkerFilter},
                 LoadedPoi, LoadedMapPack,
                 LoadedMaps, LoadedMapInfo,
@@ -21,8 +21,8 @@ use {
         settings::{pathing::{TriggerKind, PathingSettings}, SettingsLock},
         Interruption,
     },
-    futures::future::{self, Either},
-    std::{cmp, collections::BinaryHeap, num::NonZero, sync::{Arc, LazyLock}, time::Duration},
+    futures::{future::{self, Either}, stream::StreamExt},
+    std::{cmp, collections::BinaryHeap, num::NonZero, sync::Arc, time::Duration},
     std::task::{Poll, Context},
     std::future::Future,
     taimi_meta::{
@@ -39,9 +39,8 @@ use {
     taimi_sync::arcs::ArcPtrCmp,
     glamour::{Contains, Point3, Point2},
     tokio::sync::RwLock,
-    tokio::sync::broadcast::{self, error::RecvError as BroadcastError},
-    tokio::pin,
-    std::fmt,
+    tokio_stream::wrappers::errors::BroadcastStreamRecvError as BroadcastError,
+    tokio::sync::broadcast,
 };
 
 #[derive(Debug, Clone)]
@@ -929,7 +928,7 @@ impl InteractReactor {
     }
     pub(super) const INTERACT_ACTION: InteractionEventAction = InteractionEventAction::Interact;
 
-    pub(super) fn poll_event(&mut self, cx: &mut Context, rx: &mut InteractReceiver) -> Poll<InteractMessage> {
+    fn poll_event_flag(&mut self, cx: &mut Context) -> Poll<InteractMessage> {
         if self.event_dirty_settings {
             self.event_dirty_settings = false;
             return Poll::Ready(InteractMessage::RefreshSettings)
@@ -942,16 +941,21 @@ impl InteractReactor {
             self.event_dirty_bvh_rebuild = false;
             return Poll::Ready(InteractMessage::BvhRebuild)
         }
+
+        Poll::Pending
+    }
+    pub(super) fn poll_event(&mut self, cx: &mut Context, rx: &mut InteractReceiver) -> Poll<InteractMessage> {
+        if let Poll::Ready(m) = self.poll_event_flag(cx) {
+            return Poll::Ready(m)
+        }
         for _ in 0..Self::EVENT_RX_RETRY {
-            let event_rx = rx.event_rx.recv();
-            pin!(event_rx);
-            match event_rx.poll(cx) {
-                Poll::Ready(Ok(e)) => return Poll::Ready(InteractMessage::Event(e)),
-                Poll::Ready(Err(BroadcastError::Lagged(amt))) => {
+            match rx.event_rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(e))) => return Poll::Ready(InteractMessage::Event(e)),
+                Poll::Ready(Some(Err(BroadcastError::Lagged(amt)))) => {
                     log::warn!("lagged behind by {amt} interactions");
                     // TODO: clear out queue if this recurs?
                 },
-                Poll::Ready(Err(BroadcastError::Closed)) | Poll::Pending => break,
+                Poll::Ready(None) | Poll::Pending => break,
             }
         }
         if let Some((auto, passive)) = self.interest_movement() {
@@ -1079,7 +1083,7 @@ impl InteractReactor {
         }
     }
     pub(super) fn exit(&mut self, rx: &mut InteractReceiver, _reason: Interruption) {
-        rx.event_rx = broadcast::Sender::new(1).subscribe();
+        rx.event_rx = broadcast::Sender::new(1).subscribe().into();
         self.map_interactions.clear();
     }
 }
