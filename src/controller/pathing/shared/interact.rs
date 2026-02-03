@@ -39,6 +39,7 @@ use {
         sync::{broadcast, RwLock},
         time::{Instant, Sleep},
     },
+    tokio_stream::wrappers::BroadcastStream,
 };
 
 pub use crate::controller::pathing::interact::{InteractMessage, SpaceInteraction};
@@ -67,7 +68,7 @@ impl InteractSender {
 #[derive(Debug)]
 pub struct InteractReceiver {
     pub event_tx: broadcast::Sender<InteractionEvent>,
-    pub event_rx: broadcast::Receiver<InteractionEvent>,
+    pub event_rx: BroadcastStream<InteractionEvent>,
     pub entities_tx: watched::Tx<SharedInteractEntities>,
     pub nearby_tx: watched::Tx<SharedNearbyMarkers>,
     pub player_pos: FollowPlayer,
@@ -76,7 +77,7 @@ pub struct InteractReceiver {
 impl InteractReceiver {
     pub fn new(tx: &InteractSender) -> Self {
         Self {
-            event_rx: tx.events.subscribe(),
+            event_rx: tx.events.subscribe().into(),
             event_tx: tx.events.clone(),
             entities_tx: tx.entities.clone(),
             nearby_tx: tx.nearby.clone(),
