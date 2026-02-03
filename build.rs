@@ -8,10 +8,14 @@ use {
 
 const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
 const FEATURE_NEXUS_CODEGEN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_CODEGEN";
+const FEATURE_NEXUS_EXTERN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_EXTERN";
+const FEATURE_NEXUS: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS";
 const FEATURE_UPDATES: &'static str = "CARGO_FEATURE_UPDATES";
 fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_BUILT}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_CODEGEN}");
+    println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_EXTERN}");
+    println!("cargo::rerun-if-env-changed={FEATURE_NEXUS}");
 
     #[cfg(feature = "built-info")]
     write_built_info();
@@ -33,6 +37,7 @@ const BUILT_ATTRS: &'static [&'static str] = &[
 const ADDON_TITLE: &'static str = "ADDON_TITLE";
 const ADDON_AUTHOR: &'static str = "ADDON_AUTHOR";
 const ADDON_VERSION: &'static str = "ADDON_VERSION";
+const ADDON_VERSION_NEXUS: &'static str = "ADDONAPI_VERSION";
 const ADDON_URL: &'static str = "ADDON_URL";
 
 fn apply_built_info() {
@@ -248,18 +253,49 @@ fn apply_built_info() {
 
         if version.pre.is_empty() {
             println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=z");
-        } else if let Some(rc) = version.pre.strip_prefix("rc.") {
-            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
+        } else {
+            let (mut major, mut minor, mut build, mut rev) = (
+                version.major as i16,
+                version.minor as i16,
+                version.patch as i16,
+                0i16,
+            );
+            if let Some(rc) = version.pre.strip_prefix("rc.") {
+                println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
+                if env::var_os(FEATURE_NEXUS).is_some() {
+                    match version.minor.checked_sub(1) {
+                        Some(m) => minor = m as i16,
+                        None => {
+                            major -= 1;
+                            minor = 99;
+                        },
+                    }
+                    let pre_rc = rc.split(".").next().unwrap_or(rc);
+                    let pre_rc = pre_rc.parse::<u16>().ok().unwrap_or(version.patch as u16);
+                    build = 900i16 + pre_rc as i16;
+                }
+            } else {
+                let prerev = version.pre.split(".").nth(1).map(str::parse::<u64>);
+                if let Some(Ok(pre)) = prerev {
+                    // TODO
+                    rev = -0x6c00i16 + pre as i16;
+                }
+            }
             if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() {
-                let (major, minor) = match version.minor.checked_sub(1) {
-                    Some(minor) => (version.major, minor),
-                    None => (version.major - 1, 99),
-                };
-                let pre_rc = rc.split(".").next().unwrap_or(rc);
-                let pre_rc = pre_rc.parse::<u16>().ok().unwrap_or(version.patch as u16);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_MAJOR={}", major);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_MINOR={}", minor);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_PATCH={}", 900 + pre_rc);
+                #[cfg(todo)]
+                if !is_rc {
+                    mem::swap(&mut build, &mut rev);
+                }
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_MAJOR={major}");
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_MINOR={minor}");
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_PATCH={build}");
+            }
+            if env::var_os(FEATURE_NEXUS_EXTERN).is_some() {
+                // TODO? mem::swap(&mut build, &mut rev);
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MAJOR={major}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MINOR={minor}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_BUILD={build}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_REVISION={rev}");
             }
         }
 
