@@ -523,18 +523,36 @@ impl InteractReactor {
                 let mut now = || *now.get_or_insert_with(WallInstant::now_timestamp_system_checked);
                 let mut contexts = None;
                 let mut reset = None;
+                /// 16:00 UTC
+                const SOME_DAY: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
                 let until = match behaviour {
-                    Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => Some(Either::Left(Timestamp::with_timestamp({
+                    Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => {
                         if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour {
                             contexts = Some(HideContext::for_character(filter_state.character.name.clone()));
                         }
-                        const SOME_DAY: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
-                        (SOME_DAY.timestamp() as i64).wrapping_sub(now().timestamp() as i64).wrapping_rem_euclid(Timestamp::DAY.as_secs() as i64)
-                    } as u64))),
-                    Behaviour::Blish(BlishBehaviour::ResetWeekly) => Some(Either::Left(Timestamp::with_timestamp({
-                        const SOME_WEEK: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
-                        (SOME_WEEK.timestamp() as i64).wrapping_sub(now().timestamp() as i64).wrapping_rem_euclid(Timestamp::WEEK.as_secs() as i64)
-                    } as u64))),
+                        match now().timestamp() {
+                            #[cfg(todo)]
+                            now => Some(Either::Left(Timestamp::with_timestamp(
+                                now.next_multiple_of(Timestamp::DAY.as_secs())
+                            ))),
+                            now => Some(Either::Right(Duration::from_secs({
+                                let delta = (SOME_DAY.timestamp() as i64).wrapping_sub(now as i64);
+                                let rem = delta.wrapping_rem_euclid(Timestamp::DAY.as_secs() as i64);
+                                rem as u64
+                            }))),
+                        }
+                    },
+                    Behaviour::Blish(BlishBehaviour::ResetWeekly) => {
+                        /// sunday 23:30 UTC
+                        const SOME_WEEK: Timestamp = Timestamp::with_timestamp(SOME_DAY.timestamp() + Timestamp::HOUR.as_secs() * 8 - Timestamp::MINUTE.as_secs() * 30);
+                        match now().timestamp() {
+                            now => Some(Either::Right(Duration::from_secs({
+                                let delta = (SOME_WEEK.timestamp() as i64).wrapping_sub(now as i64);
+                                let rem = delta.wrapping_rem_euclid(Timestamp::WEEK.as_secs() as i64);
+                                rem as u64
+                            }))),
+                        }
+                    },
                     Behaviour::Taco(TacoBehaviour::ResetDelay) => Some(Either::Right(keys::ResetLength(reset_delay).duration())),
                     Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Some(Either::Right(Duration::from_secs(0))),
                     Behaviour::Taco(TacoBehaviour::ResetPermanent) => {
