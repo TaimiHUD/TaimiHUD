@@ -193,7 +193,7 @@ impl ResolvedVersion {
             }
         }
         log::warn!("unsure of update url for {self}");
-        let req = GH_REPO_SRC.request_release_asset_browser(
+        let mut req = GH_REPO_SRC.request_release_asset_browser(
             match self.version_channel() {
                 #[cfg(todo = "unnecessary")]
                 None => None,
@@ -201,6 +201,7 @@ impl ResolvedVersion {
             },
             DLL_NAME,
         )?;
+        GitHubReleaseAsset::prepare_req_for_url(&mut req);
         let fallback_url = req.url().clone();
         if redir_ok {
             return Ok(fallback_url)
