@@ -707,7 +707,7 @@ impl RenderState {
                     if let Some(Ok(engine)) = &self.engine {
                         interact.update_static_render(&engine.packs);
                     }
-                    if (wants_all | interact.wants_static) && !self.machine.pack_ui_state.pack_state.is_empty() {
+                    if wants_all && !self.machine.pack_ui_state.pack_state.is_empty() {
                         interact.update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
                     }
                 }
