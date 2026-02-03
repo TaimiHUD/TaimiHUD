@@ -28,6 +28,8 @@ use {
     tokio::{runtime, time::timeout},
     url::Url,
 };
+#[cfg(feature = "extension-nexus")]
+use nexus::addon::AddonVersion as NexusVersion;
 
 pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
 pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
@@ -96,6 +98,21 @@ pub static CRATE_SEMVER_PARTS: LazyLock<VersionParts> = LazyLock::new(|| {
         pre,
         build,
     )
+});
+#[cfg(all(taimi_has = "version", feature = "extension-nexus"))]
+pub static CRATE_ADDONAPI_VERSION: LazyLock<NexusVersion> = LazyLock::new(|| {
+    let (major, minor, build, rev) = (
+        option_env!("ADDONAPI_VERSION_MAJOR").unwrap_or(env!("CARGO_PKG_VERSION_MAJOR")),
+        option_env!("ADDONAPI_VERSION_MINOR").unwrap_or(env!("CARGO_PKG_VERSION_MINOR")),
+        option_env!("ADDONAPI_VERSION_BUILD").unwrap_or(env!("CARGO_PKG_VERSION_PATCH")),
+        option_env!("ADDONAPI_VERSION_REVISION").unwrap_or("0"),
+    );
+    NexusVersion {
+        major: major.parse().unwrap_or_default(),
+        minor: minor.parse().unwrap_or_default(),
+        build: build.parse().unwrap_or_default(),
+        revision: rev.parse().unwrap_or_default(),
+    }
 });
 
 #[cfg(feature = "updates")]
