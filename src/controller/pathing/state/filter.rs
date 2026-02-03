@@ -172,6 +172,8 @@ impl AchievementState {
         if Arc::ptr_eq(&self.status, new) { return false }
 
         let prev_hash = mem::replace(&mut self.hash, Self::hash_state(new));
+        self.status = new.clone();
+
         prev_hash == 0 || prev_hash != self.hash
     }
 

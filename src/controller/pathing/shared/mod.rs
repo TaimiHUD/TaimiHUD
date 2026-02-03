@@ -95,15 +95,31 @@ impl PathingSender {
         let rx = PathingReceiver {
             shared: sender.shared.clone(),
             command: command_rx,
-            festivals: festivals.subscribe(),
-            achievements: achievements.subscribe(),
-            raids: raids.subscribe(),
+            festivals: {
+                let mut festivals = festivals.subscribe();
+                festivals.mark_changed();
+                festivals
+            },
+            achievements: {
+                let mut achievements = achievements.subscribe();
+                achievements.mark_changed();
+                achievements
+            },
+            raids: {
+                let mut raids = raids.subscribe();
+                raids.mark_changed();
+                raids
+            },
             gameplay: {
                 let mut gameplay = Watched::subscribe_to(gameplay);
                 gameplay.cached = Some(GameplayState::INITIAL);
                 gameplay
             },
-            mumble_identity: mumble_identity.subscribe(),
+            mumble_identity: {
+                let mut identity = mumble_identity.subscribe();
+                identity.mark_changed();
+                identity
+            },
             enables: Watched::subscribe_to(&sender.enables),
             load_throttle: {
                 let mut load_throttle = Watched::subscribe_to(&sender.load_throttle);
