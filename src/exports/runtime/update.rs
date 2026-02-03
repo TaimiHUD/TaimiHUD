@@ -36,6 +36,8 @@ pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
 pub const GIT_REF_RELEASE_PREFIX: &'static str = "refs/tags/v";
 pub const CHANNEL_DL_PREFIX: &'static str = "chan/";
 pub const CHANNEL_DEBUG: &'static str = "debug";
+pub const CHANNEL_ALPHA: &'static str = "alpha";
+pub const CHANNEL_BETA: &'static str = "beta";
 pub const CHANNEL_PRERELEASE: &'static str = "rc";
 pub const CHANNEL_RELEASE_NAME: &'static str = "release";
 pub const DLL_NAME: &'static str = "TaimiHUD.dll";
@@ -114,6 +116,11 @@ pub static CRATE_ADDONAPI_VERSION: LazyLock<NexusVersion> = LazyLock::new(|| {
         revision: rev.parse().unwrap_or_default(),
     }
 });
+#[cfg(all(taimi_has = "version", feature = "extension-nexus"))]
+pub fn addonapi_version() -> NexusVersion {
+    let version = OVERRIDE_VERSION.read().ok().map(|c| version_to_addonapi(&c));
+    version.unwrap_or_else(|| CRATE_ADDONAPI_VERSION.clone())
+}
 
 #[cfg(feature = "updates")]
 pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
@@ -627,4 +634,48 @@ fn version_channel(version: &Version) -> Option<&str> {
         version if !version.pre.is_empty() => version.pre.split(".").next(),
         _ => None,
     }
+}
+#[cfg(feature = "extension-nexus")]
+fn version_channel_parts(version: &Version) -> Option<(&str, u64)> {
+    if version.pre.is_empty() { return None }
+    let mut parts = version.pre.split(".");
+    let channel = parts.next()?;
+    let rev = match parts.next().map(|part| part.parse::<u64>()) {
+        Some(Ok(rev)) => rev,
+        _ => 0,
+    };
+    Some((channel, rev))
+}
+#[cfg(feature = "extension-nexus")]
+fn version_to_addonapi(version: &Version) -> NexusVersion {
+    let mut addonapi = NexusVersion {
+        major: version.major as i16,
+        minor: version.minor as i16,
+        build: version.patch as i16,
+        revision: 0,
+    };
+    match version_channel_parts(version) {
+        Some((self::CHANNEL_PRERELEASE, rc)) => {
+            addonapi.build = 900i16 + rc as i16;
+            if addonapi.minor == 0 {
+                addonapi.major -= 1;
+                addonapi.minor = 99;
+            } else {
+                addonapi.minor -= 1;
+            }
+        },
+        Some((channel, rc)) => {
+            let offset = match channel {
+                self::CHANNEL_ALPHA => 0x200i16,
+                self::CHANNEL_BETA => 0x1c0i16,
+                #[cfg(todo)]
+                self::CHANNEL_PRERELEASE => -0x80i16,
+                channel  =>
+                    0x6c00i16 - channel.as_bytes().get(0).map(|l| l.to_ascii_lowercase().saturating_sub(b'a') as i16 * 0x400).unwrap_or(0),
+            };
+            addonapi.revision = (offset + rc as i16).min(-2);
+        },
+        _ => (),
+    }
+    addonapi
 }

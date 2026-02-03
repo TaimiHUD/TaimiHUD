@@ -167,6 +167,9 @@ pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinitio
             }
         }
     }
+    if is_provider_nexus(&provider) {
+        ptr::write_volatile(&raw mut (*def).version, rt::update::addonapi_version());
+    }
     ptr::write_volatile(&raw mut (*def).provider, provider);
     ptr::write_volatile(&raw mut (*def).update_link, update_link);
 
