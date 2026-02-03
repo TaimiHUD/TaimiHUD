@@ -170,19 +170,19 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: .ci/artifacts/lib/TaimiHUD.dll
-        name: ${{ contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
-          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag &&
+        name: ${{ (contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
+          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag) &&
           format('{0} ({1}-nexus)', github.ref_name, contains(github.ref_name, '-')
           && steps.artifact-parse.outputs.release-nexus-tag != github.ref_name &&
           steps.artifact-parse.outputs.release-nexus-tag) || github.ref_name }}
         prerelease: ${{ contains(github.ref_name, '-') }}
-        tag_name: ${{ contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
-          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag ||
+        tag_name: ${{ (contains(github.ref_name, '-') && steps.artifact-parse.outputs.release-nexus-tag
+          != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag) ||
           github.ref_name }}
     - continue-on-error: true
       env:
-        RELEASE_REF: ${{ format('refs/tags/{0}', contains(github.ref_name, '-') &&
-          steps.artifact-parse.outputs.release-nexus-tag != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag
+        RELEASE_REF: ${{ format('refs/tags/{0}', (contains(github.ref_name, '-') &&
+          steps.artifact-parse.outputs.release-nexus-tag != github.ref_name && steps.artifact-parse.outputs.release-nexus-tag)
           || github.ref_name) }}
       id: release-describe
       if: (github.event_name == 'push') && (startsWith(github.ref, 'refs/tags/v'))

@@ -71,16 +71,7 @@ pub unsafe extern "system" fn nexus_get_init() -> Option<&'static AddonDefinitio
         def.flags = exports::FLAGS;
         def.api_version = nexus::AddonApi::VERSION;
         def.description = ADDON_DESC_C.as_ptr();
-        def.version = {
-            let (major, minor, build, ..) = *rt::update::CRATE_SEMVER_PARTS;
-            let revision = 0;
-            AddonVersion {
-                major: major as i16,
-                minor: minor as i16,
-                build: build as i16,
-                revision,
-            }
-        };
+        def.version = rt::update::CRATE_ADDONAPI_VERSION.clone();
     }
 
     // TODO: panic::catch_unwind for any of this?
