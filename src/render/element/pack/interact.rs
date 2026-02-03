@@ -832,8 +832,9 @@ impl PoiInfo {
             self.wants_entities |= entities_dirty;
         }
         let prev = match self.nearby.watch.has_changed() {
-            false => None,
-            true => Some(self.nearby.cached.clone()),
+            false if self.nearby.cached.is_some() =>
+                None,
+            _ => Some(self.nearby.cached.clone()),
         };
         let Some(nearby) = prev.as_ref().and_then(|_| self.nearby.try_read_update()) else { return };
         let mut prev = prev.flatten();
@@ -884,14 +885,14 @@ impl PoiInfo {
     }
     fn update_static_of_inner<'a>(
         &mut self,
-        updates: impl IntoIterator<Item = (MarkerId, PoiPath, &'a LoadedPoiInfo, Option<&'a LoadedPoiShared>, bool, InteractSortFlags)>,
+        updates: impl IntoIterator<Item = (MarkerId, PoiPath, &'a LoadedPoiInfo, Option<Option<&'a LoadedPoiShared>>, bool, InteractSortFlags)>,
     ) {
         let updates = updates.into_iter().map(|(mid, poi_path, pinfo, spoi, hidden, mut filterable)| {
             let interactive = pinfo.get_marker_attrs().map(|a| SpaceInteraction::interest_for_marker(a));
             let mut flags = InteractSortFlags::empty();
             let mut flags_populated = InteractSortFlags::empty();
             let mut pos = Point3::ZERO.with_x(PoiInfoMarker::DIST_DIST_IRRELEVANT);
-            if let Some(spoi) = spoi {
+            if let Some(Some(spoi)) = spoi {
                 let has_pos = match spoi.position.x.is_infinite() || spoi.position.x.is_nan() || spoi.position.x.to_bits() == PoiInfoMarker::BITS_IRRELEVANT {
                     false => InteractSortFlags::DISTANCE,
                     _ => InteractSortFlags::EMPTY,
@@ -909,7 +910,7 @@ impl PoiInfo {
                         flags_populated.remove(InteractSortFlags::ENABLED);
                     }
                 }
-            } else {
+            } else if spoi.is_some() {
                 filterable.insert((InteractFilterFlags::FAR | InteractFilterFlags::STATIC).as_sort_bits());
             }
             if hidden {
@@ -959,10 +960,11 @@ impl PoiInfo {
                 if let Ok(interactive) = is_interactive {
                     filterable.set(InteractFilterFlags::STATIC, !interactive);
                 }
-                let whitelist = self.filters | InteractFilterFlags::FILTERED | InteractFilterFlags::FAR;
+                let whitelist = self.filters /*| InteractFilterFlags::FILTERED | InteractFilterFlags::FAR*/;
                 (!whitelist).intersects(filterable)
             };
             let marker = match entry {
+                #[cfg(todo)]
                 IndexEntry::Occupied(e) if is_blacklisted => {
                     e.shift_remove();
                     continue
@@ -1143,7 +1145,7 @@ impl PoiInfo {
                             let is_hidden = lpoi.map(|lpoi| lpoi.is_hidden());
                             let lpoi = lpoi.map(|lpoi| lpoi.lpoi());
                             let poi_path = poi.poi_path();
-                            Some((mid, poi_path, poi.lpoi_info(), lpoi, is_hidden.unwrap_or(false), filterable))
+                            Some((mid, poi_path, poi.lpoi_info(), lpoi.map(Some), is_hidden.unwrap_or(false), filterable))
                         })
                     });
                     self.update_static_of_inner(updates);
@@ -1156,7 +1158,7 @@ impl PoiInfo {
                         None => None,
                     }
                 );
-                self.update_static_of(&mut {updates})
+                self.update_static_of(&mut {updates}, false)
             },
         }
     }
@@ -1165,9 +1167,9 @@ impl PoiInfo {
         let updates = packs.values().filter_map(|pack_state|
             pack_state.state.map_info.as_ref().map(|map_info| (map_info, None))
         );
-        self.update_static_of(&mut {updates})
+        self.update_static_of(&mut {updates}, false)
     }
-    pub fn update_static_of<'a>(&mut self, updates: &mut dyn Iterator<Item = (&'a SharedMapPackLoaded, Option<&'a SharedMapPackState>)>) {
+    pub fn update_static_of<'a>(&mut self, updates: &mut dyn Iterator<Item = (&'a SharedMapPackLoaded, Option<&'a SharedMapPackState>)>, reliable: bool) {
         let updates = updates.flat_map(move |(map_info, map)| {
             map_info.loaded_pois(map).map(move |poi| {
                 let mid = poi.as_marker().loaded_id();
@@ -1188,6 +1190,10 @@ impl PoiInfo {
                 let lpoi = poi.as_loaded();
                 let is_hidden = lpoi.map(|lpoi| lpoi.is_hidden());
                 let lpoi = lpoi.map(|lpoi| lpoi.lpoi());
+                let lpoi = match reliable {
+                    true => Some(lpoi),
+                    false => lpoi.map(Some),
+                };
                 let poi_path = poi.poi_path();
                 let filterable = InteractSortFlags::empty();
                 (mid, poi_path, poi.lpoi_info(), lpoi, is_hidden.unwrap_or(false), filterable)
@@ -1291,12 +1297,12 @@ impl PoiInfo {
                 false => {
                     let updates = maps.iter_state()
                         .map(|(_, map, map_info)| (map_info, Some(map)));
-                    self.update_static_of(&mut {updates})
+                    self.update_static_of(&mut {updates}, true)
                 },
                 true => {
                     let updates = maps.iter_loaded()
                         .map(|(_, map_info, map)| (map_info, map));
-                    self.update_static_of(&mut {updates})
+                    self.update_static_of(&mut {updates}, true)
                 },
             }
             #[cfg(todo)]
@@ -1568,6 +1574,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                 }
                 if self.state.filters.intersects(InteractFilterFlags::STATIC | InteractFilterFlags::DISABLED) {
                     self.state.wants_static = true;
+                    self.state.wants_maps = true;
                 }
             }
             ui.same_line();
@@ -1580,6 +1587,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
             if with_i18n!("disabled", |label| ui.checkbox_flags(&label, &mut self.state.filters, InteractFilterFlags::DISABLED)) {
                 if self.state.filters.contains(InteractFilterFlags::DISABLED) {
                     self.state.wants_static = true;
+                    self.state.wants_maps = true;
                 }
             }
             ui.same_line();
