@@ -62,7 +62,7 @@ pub use self::{
 };
 #[allow(unused_imports)]
 #[cfg(feature = "paths-interact")]
-pub use self::interact::{PoiInfo, DrawPoiInfo, PoiInfoContext};
+pub use self::interact::{ActDrawInteract, PoiInfo, DrawPoiInfo, PoiInfoContext};
 #[allow(unused_imports)]
 #[cfg(feature = "paths-edit")]
 pub use self::dynamic::{PackEdit, PackEditEnv, DrawPe, PackData};
