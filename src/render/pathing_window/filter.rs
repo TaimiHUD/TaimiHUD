@@ -169,7 +169,7 @@ impl PathingWindowState {
             };
             let choices = [None, Some(true), Some(false)];
             let max_width = choices.iter().map(|c| ui.calc_text_size(enable_id(*c))[0]).max_by(|a, b| a.partial_cmp(b).unwrap_or(cmp::Ordering::Less));
-            let enable = self.filter_state.enable_filter();
+            let enable = self.ui_state.filter.flags.enable_filter();
             let enable_combo = {
                 let preview = enable_id(enable);
                 ui.same_line();
@@ -184,11 +184,11 @@ impl PathingWindowState {
                 for choice in choices {
                     let selected = choice == enable;
                     if with_i18n!(enable_id(choice), |label| Selectable::new(label).selected(selected).build(ui)) {
-                        self.filter_state.set_enable_filter(choice);
+                        self.ui_state.filter.flags.set_enable_filter(choice);
                     }
                 }
             } else if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
-                self.filter_state.set_enable_filter(None);
+                self.ui_state.filter.flags.set_enable_filter(None);
             }
         }
         if ui.cursor_pos()[0] < ui.content_region_max()[0] * 0.65 {
@@ -205,7 +205,7 @@ impl PathingWindowState {
             }
             with_i18n!(filter_name, |name| ui.checkbox_flags(
                 name,
-                &mut self.filter_state,
+                &mut self.ui_state.filter.flags,
                 flag
             ));
         }

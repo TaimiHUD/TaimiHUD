@@ -149,7 +149,9 @@ pub struct Settings {
     pub primary_window_open: bool,
     #[serde(default)]
     pub timers_window_open: bool,
+    /// TODO: delete this field soon (migrate post-de or don't bother?)
     #[serde(default)]
+    #[deprecated]
     pub pathing_window_open: bool,
     #[serde(default)]
     pub markers_window_open: bool,
@@ -193,30 +195,37 @@ impl Settings {
     }
 
     pub fn set_window_state(&mut self, window: &str, state: Option<bool>) {
-        let Some(window_open) = self.get_window_state_mut(window) else {
+        let state = state.unwrap_or_else(|| !self.get_window_state(window).unwrap_or_default());
+        if self.update_window_state(window, state).is_err() {
             log::error!("unsupported window: {window}");
-            return
-        };
-
-        match state {
-            Some(s) => {
-                *window_open = s;
-            },
-            None => {
-                *window_open = !*window_open;
-            },
         }
     }
 
     /// consider an enum...
-    pub fn get_window_state_mut(&mut self, window: &str) -> Option<&mut bool> {
+    pub fn get_window_state(&self, window: &str) -> Option<bool> {
         Some(match window {
+            crate::WINDOW_PRIMARY => self.primary_window_open,
+            crate::WINDOW_TIMERS => self.timers_window_open,
+            crate::WINDOW_MARKERS => self.markers_window_open,
+            crate::WINDOW_PATHING => self.ui_state.pathing_window.read().window.open.is_active(),
+            _ => return None,
+        })
+    }
+    /// TODO: remove &mut from this once all windows move to a sync lock like pathing
+    pub fn update_window_state(&mut self, window: &str, open: bool) -> Result<(), ()> {
+        let dest = match window {
             crate::WINDOW_PRIMARY => &mut self.primary_window_open,
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
             crate::WINDOW_MARKERS => &mut self.markers_window_open,
-            crate::WINDOW_PATHING => &mut self.pathing_window_open,
-            _ => return None,
-        })
+            crate::WINDOW_PATHING => {
+                let pathing_window = &self.ui_state.pathing_window;
+                pathing_window.write_with(|pathing| pathing.window.open = open.into());
+                return Ok(())
+            },
+            _ => return Err(()),
+        };
+        *dest = open;
+        Ok(())
     }
 
     pub fn toggle_timer(&mut self, timer: String) -> bool {
@@ -529,7 +538,11 @@ impl Settings {
     }
 
     pub async fn start_save(&self) -> anyhow::Result<SettingsSave> {
-        self.ui_state.mark_clean();
+        #[cfg(todo)]
+        {
+            // just don't have enough control over external types .-.
+            self.ui_state.mark_clean();
+        }
         Ok((
             self.settings_path().await?,
             self.settings_str()?,
@@ -558,6 +571,7 @@ impl Settings {
 
     pub fn mark_dirty(&mut self) {
         self.dirty.store(true, Ordering::Relaxed);
+        self.ui_state.mark_clean();
     }
 
     pub fn is_dirty(&self) -> bool {
