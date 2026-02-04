@@ -45,10 +45,12 @@ use {
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
+    diag::{frame_log, FrameLog},
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
 
+mod diag;
 mod map;
 #[cfg(feature = "markers")]
 mod markers;
@@ -282,24 +284,10 @@ impl RenderMachine {
         rt::bindings::populate_bind_controls();
     }
     pub fn act_setup(&mut self) {
+        self.metrics_init();
+
         log::debug!("loading initial keybinds");
         rt::bindings::populate_bind_controls();
-        let sec = "stats-render";
-        let stats_counters = &[
-            (StatsRef::with_counter(&STATS_FRAME_TIME_SLICE, StatsUnit::Time), StatsDesc::new(
-                sec, "stats-render-time-slice",
-            ), true),
-            (StatsRef::with_counter(&STATS_FRAME_TIME_RENDER, StatsUnit::Time), StatsDesc::new(
-                sec, "stats-render-time",
-            ), true),
-            (StatsRef::with_counter(&STATS_FRAME_TIME_UI, StatsUnit::Time), StatsDesc::new(
-                sec, "stats-render-time-ui",
-            ), true),
-        ];
-        for &(counter, mut desc, detailed) in stats_counters {
-            desc.detailed = detailed;
-            counter.register(desc);
-        }
     }
 
     pub fn act_display_size(&mut self) {
@@ -368,15 +356,8 @@ impl RenderMachine {
         include_bytes!("../../../data/textures/logotype-glow-256.png");
 
     pub fn turn_render_pre(&mut self) {
-        self.metrics_switch = MetricsSwitch::read();
-        if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
-            if self.metrics_checkpoint.is_none() {
-                self.metrics_checkpoint = Some(Instant::now());
-            }
-            self.metrics_checkpoint_render = Some(Instant::now());
-        } else {
-            self.metrics_checkpoint = None;
-        }
+        self.metrics_pre();
+        self.metrics_pre_render();
 
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
@@ -494,26 +475,15 @@ impl RenderMachine {
         self.post_render();
     }
     fn post_render(&mut self) {
-        if let Some(checkpoint) = self.metrics_checkpoint_render.take() {
-            let amt = checkpoint.elapsed().as_micros() as u64;
-            STATS_FRAME_TIME_RENDER.reset(amt);
-            if let Some(checkpoint) = &self.metrics_checkpoint {
-                let total = checkpoint.elapsed().as_micros() as u64 / 0x20;
-                let amt = (amt / 0x20) as u32;
-                let slice = STATS_FRAME_TIME_SLICE.get() as usize as u64;
-                let num = (StatsUnit::frac_num(slice) as u32).saturating_add(amt);
-                STATS_FRAME_TIME_SLICE.reset(StatsUnit::frac(num as i32, total as u32));
-            }
-        }
+        self.metrics_post_render();
+        self.act_frame_log();
     }
 
     pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
     where
         U: ?Sized + super::element::im::ImDrawWindow<'ui>,
     {
-        if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
-            self.metrics_checkpoint_ui = Some(Instant::now());
-        }
+        self.metrics_pre_ui();
 
         let prev_display_size = *self.display_size_ref();
         let display_size = self.display_size_mut();
@@ -523,12 +493,7 @@ impl RenderMachine {
         }
     }
     pub fn post_ui(&mut self) {
-        if let Some(checkpoint) = self.metrics_checkpoint_ui.take() {
-            let amt = checkpoint.elapsed().as_micros() as u64;
-            STATS_FRAME_TIME_UI.reset(amt);
-            let amt = (amt / 0x20) as u32;
-            STATS_FRAME_TIME_SLICE.increment(amt);
-        }
+        self.metrics_post_ui();
     }
 
     #[inline]
@@ -553,7 +518,3 @@ bitflags::bitflags! {
 pub type RenderSlot<'r> = (&'r mut Option<anyhow::Result<crate::space::engine::Engine>>,);
 #[cfg(not(feature = "space"))]
 pub type RenderSlot<'r> = ();
-
-static STATS_FRAME_TIME_RENDER: StatsCounter = StatsCounter::DEFAULT;
-static STATS_FRAME_TIME_UI: StatsCounter = StatsCounter::DEFAULT;
-static STATS_FRAME_TIME_SLICE: StatsCounter = StatsCounter::DEFAULT;

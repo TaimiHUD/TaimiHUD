@@ -160,7 +160,7 @@ impl StatsUnit {
                     return write!(f, "{num}/{denom}")
                 } else {
                     let suffix = (denom == 100).then_some("%").unwrap_or("");
-                    return write!(f, "{}{suffix}", num as f64 / denom as f64)
+                    return write!(f, "{:.04}{suffix}", num as f64 / denom as f64)
                 }
             },
         })
@@ -189,6 +189,8 @@ bitflags::bitflags! {
     #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct MetricsSwitch: usize {
         const COLLECT = 0x01;
+        const FRAME_LOG = 0x02;
+        const FRAME_LOG_TRIGGER = 0x04;
     }
 }
 impl MetricsSwitch {
@@ -208,6 +210,6 @@ impl MetricsSwitch {
         Self::switch().fetch_or(self.bits(), MetricsCollectionState::SWITCH_ORDERING);
     }
     pub fn publish_clear(self) {
-        Self::switch().fetch_nand(self.bits(), MetricsCollectionState::SWITCH_ORDERING);
+        Self::switch().fetch_and((!self).bits(), MetricsCollectionState::SWITCH_ORDERING);
     }
 }

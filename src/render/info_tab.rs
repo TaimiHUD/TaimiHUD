@@ -261,6 +261,16 @@ impl InfoTabState {
                 } else if ui.is_item_hovered() {
                     ui.tooltip_text("toggle detailed metrics collection");
                 }
+                ui.same_line();
+                if ui.small_button("framelog") {
+                    MetricsSwitch::FRAME_LOG.publish_toggle();
+                }
+                if switch.contains(MetricsSwitch::FRAME_LOG) {
+                    ui.same_line();
+                    if ui.small_button("trigger") {
+                        MetricsSwitch::FRAME_LOG_TRIGGER.publish_set();
+                    }
+                }
             }
             let _table = ui.begin_table("stats", 2);
             let mut section_prev = 0usize;
