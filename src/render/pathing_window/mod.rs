@@ -37,6 +37,7 @@ pub struct PathingWindowState {
     search_focus_latch: bool,
     ui_state: Watched<UiState>,
     ui_state_pending: bool,
+    pub ui_tab_pending: Option<usize>,
 }
 
 impl PathingWindowState {
@@ -47,6 +48,7 @@ impl PathingWindowState {
             search_focus_latch: false,
             ui_state: Watched::empty_with(Default::default()),
             ui_state_pending: false,
+            ui_tab_pending: None,
         }
     }
 
@@ -126,7 +128,11 @@ impl PathingWindowState {
         let visible = window.is_some();
         if let Some(_token) = window {
             size = ui.window_size().into();
-            pos = (!ui.is_window_appearing()).then_some(ui.window_pos().into());
+            let appearing = ui.is_window_appearing();
+            if appearing && self.ui_tab_pending.is_none() {
+                self.ui_tab_pending = Some(self.ui_state.tab.index());
+            }
+            pos = (!appearing).then_some(ui.window_pos().into());
             #[cfg(todo = "unnecessary")]
             {
                 // XXX: imgui-rs abstracts this away from us and makes it impossible to discern .-.
@@ -157,12 +163,13 @@ impl PathingWindowState {
     }
     /// TODO: i18n and reconsider whether to even use tabs
     /// (edit should be a window anyway)
+    ///
+    /// XXX: beware https://github.com/ocornut/imgui/issues/6681 ?
     fn draw_tab<'ui, U>(&mut self, ui: &mut U, tab: usize) -> Option<UiTokenDyn<'ui>>
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let prev = self.ui_state.tab.selected(tab);
-        let mut opened = prev;
         let token = {
             let label = match tab {
                 #[cfg(feature = "paths-interact")]
@@ -171,9 +178,21 @@ impl PathingWindowState {
                 PathingWindowTab::INDEX_EDIT => "editz",
                 _ => "packz",
             };
-            ui.tab_item_with_opened(label, &mut opened)
+            let flags = match self.ui_tab_pending {
+                Some(i) if i == tab => {
+                    self.ui_tab_pending = None;
+                    imgui::TabItemFlags::SET_SELECTED
+                },
+                _ => imgui::TabItemFlags::empty(),
+            };
+            ui.tab_item_with_flags(label, None, flags)
         };
-        if !prev & opened {
+
+        if !prev & token.is_some() {
+            if ui.is_window_appearing() {
+                // first frame is wonky :<
+                return None
+            }
             self.ui_state.tab.focus(tab);
             self.ui_state_pending = true;
         }
@@ -213,7 +232,15 @@ impl PathingWindowState {
             match tab_index {
                 #[cfg(feature = "paths-interact")]
                 PathingWindowTab::INDEX_POIS => {
-                    machine.pack_ui_state.draw_interact(ui);
+                    let act = machine.pack_ui_state.draw_interact(ui);
+                    if act.navigate_packs {
+                        self.ui_tab_pending = Some(PathingWindowTab::INDEX_PACKS);
+                        #[cfg(deleteme)]
+                        {
+                            self.ui_state.tab.focus(PathingWindowTab::INDEX_PACKS);
+                            self.ui_state_pending = true;
+                        }
+                    }
                 },
                 #[cfg(feature = "paths-edit")]
                 PathingWindowTab::INDEX_EDIT => {
