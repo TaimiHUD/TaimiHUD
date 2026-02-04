@@ -506,7 +506,7 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         let window_id = format!("{window}-window");
         let Some(mut state) = settings.get_window_state(window) else { continue };
         if with_i18n!(&window_id, |msg| ui.checkbox(&msg, &mut state)) {
-            settings.update_window_state(window, state);
+            let _ = settings.update_window_state(window, state);
         }
         if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
             context_menu = Some(binding.control().unwrap_or(TaimiControls::WINDOW_PRIMARY));

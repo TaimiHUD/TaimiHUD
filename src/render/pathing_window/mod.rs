@@ -180,7 +180,6 @@ impl PathingWindowState {
         let bookmark_tl = ui.item_rect_min();
         let bookmark_br = ui.item_rect_max();
         let draw_content = rendered_err.is_none() || machine.pack_ui_state.any_loaded();
-        let mut tabs_dirty = false;
         let tabs = draw_content.then(|| {
             ui.tab_bar("packs")
         }).flatten();
@@ -222,7 +221,7 @@ impl PathingWindowState {
             #[cfg(feature = "paths-interact")]
             PathingWindowTab::INDEX_POIS => {
                 if ui.button("rebuild") {
-                    if let Some(pathing) = machine.pathing.as_ref() {
+                    if let Some(..) = machine.pathing.as_ref() {
                         PathingEvent::InteractControl(InteractMessage::RequestRebuild).try_send();
                     }
                 }
