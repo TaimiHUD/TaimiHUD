@@ -591,12 +591,12 @@ pub struct DrawPe<'a, 's, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub state: &'s mut PackEdit,
     pub packs: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
-    pub act_pack_alloc: Option<PackPath>,
-    pub act_new_cat: Option<Category>,
-    pub act_new_poi: Option<()>,
-    pub act_new_trail: Option<()>,
-    pub act_trl_clear: Option<(Result<TrlPath, TrailPath>, i32)>,
-    pub act_trl_boop: Option<TrlBoop>,
+    act_pack_alloc: Option<PackPath>,
+    act_new_cat: Option<Category>,
+    act_new_poi: Option<()>,
+    act_new_trail: Option<()>,
+    act_trl_clear: Option<(Result<TrlPath, TrailPath>, i32)>,
+    act_trl_boop: Option<TrlBoop>,
 }
 impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
     pub fn new(ui: &'a Ui<'ui>,
