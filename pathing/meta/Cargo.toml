@@ -18,7 +18,7 @@ default = [
 ]
 map-cache = [
   "serde",
-  #"gzip", # TODO
+  "gzip",
 ]
 nexus = [
   "dep:nexus",
@@ -42,6 +42,7 @@ serde = [
   "dep:serde_json",
   "glam/serde",
   "glamour/serde",
+  "taimi_hoard/serde",
 ]
 gzip = [
   "dep:async-compression",
@@ -52,11 +53,11 @@ gzip = [
 taimi_mumblelink = []
 
 [dependencies]
+taimi_hoard = { path = "../../rt/hoard", default-features = true }
 anyhow = "1"
 async-compression = { version = "0.4.29", optional = true }
 bitflags = { workspace = true }
 log = "0.4"
-tokio = { version = "1", default-features = false }
 glam = { workspace = true }
 glamour = { workspace = true }
 num-traits = { workspace = true }

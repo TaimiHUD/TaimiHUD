@@ -1,3 +1,5 @@
+#[deprecated]
+pub use taimi_hoard::vec::{vec32_bits as vec_bits, vec32_eq as vec_eq};
 use {
     crate::ui::MinimapPlacement,
     glamour::{
@@ -482,27 +484,6 @@ impl LocalSpace {
             local_player_pos_xz.to_vector(),
         )
     }
-}
-
-#[inline]
-pub const fn f32_bits<const N: usize>(f: [f32; N]) -> [u32; N] {
-    unsafe {
-        // XXX: transmute_unchecked is unstable...
-        core::mem::transmute_copy(&f)
-    }
-}
-#[inline]
-pub fn vec_bits<const N: usize, T>(f: T) -> [u32; N]
-where
-    T: Into<[f32; N]>,
-{
-    f32_bits(f.into())
-}
-pub fn vec_eq<const N: usize, T>(lhs: T, rhs: T) -> bool
-where
-    T: Into<[f32; N]>,
-{
-    vec_bits(lhs) == vec_bits(rhs)
 }
 
 pub fn transform2_cast<S2, D2, S, D>(trans: Transform2<S, D>) -> Transform2<S2, D2>
