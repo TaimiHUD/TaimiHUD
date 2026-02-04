@@ -1607,7 +1607,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
     }
 }
 impl super::PackElements {
-    pub fn draw_interact(&mut self, ui: &Ui) {
+    pub fn draw_interact(&mut self, ui: &Ui) -> ActDrawInteract {
         let mut draw = DrawPoiInfo::new(
             ui,
             &mut self.interact,
@@ -1635,6 +1635,7 @@ impl super::PackElements {
         if draw.state.context.is_some() == was_context && popup_drawn != was_context {
             draw.state.context = None;
         }
+        let mut post_draw = ActDrawInteract::default();
         if let Some((lpath, (cat_path, act))) = act_cat {
             let category_path = lpath.root.root.rel(cat_path.path);
             let pack = self.pack_state.lookup_mut(&category_path.root);
@@ -1646,11 +1647,17 @@ impl super::PackElements {
                             pack.categories.update_open(parent, open);
                         }
                     }
+                    post_draw.navigate_packs = true;
                     let _ = rt::send_alert(ui, "navigate over yourself, im sleepy");
                 },
                 (Some(..), act) => log::warn!("unexpected action {act:?}"),
                 (None, _) => (),
             }
         }
+        post_draw
     }
+}
+#[derive(Copy, Clone, Default)]
+pub struct ActDrawInteract {
+    pub navigate_packs: bool,
 }

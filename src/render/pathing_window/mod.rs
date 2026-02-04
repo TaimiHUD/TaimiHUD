@@ -192,7 +192,11 @@ impl PathingWindowState {
             match tab_index {
                 #[cfg(feature = "paths-interact")]
                 PathingWindowTab::INDEX_POIS => {
-                    machine.pack_ui_state.draw_interact(ui);
+                    let act = machine.pack_ui_state.draw_interact(ui);
+                    if act.navigate_packs {
+                        self.ui_state.tab.focus(PathingWindowTab::INDEX_PACKS);
+                        self.ui_state_pending = true;
+                    }
                 },
                 #[cfg(feature = "paths-edit")]
                 PathingWindowTab::INDEX_EDIT => {
