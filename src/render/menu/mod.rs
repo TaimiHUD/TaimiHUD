@@ -218,7 +218,7 @@ impl RenderState {
             None => (),
         }
 
-        let window_open = self.pathing_window.open;
+        let window_open = self.pathing_window.window_visibility().is_visible();
         let submenu_id = "context-popup-pathing";
         let mut submenu = Some(|ui: &mut U| {
             if pathing_enabled {

@@ -2,13 +2,21 @@ use {
     self::{
         pathing::{PathingFilterFlags, PathingSearchFlags},
         interact::{InteractSortFlags, InteractFilterFlags},
+        window::WindowState,
     },
     serde::{Deserialize, Serialize},
-    taimi_sync::watched,
+    taimi_sync::watched::Watcher,
+    taimi_hoard::is_false_ref,
+};
+pub use self::{
+    coords::UiVec2,
+    window::{AnchorPosition, WindowOpen},
 };
 
 pub mod pathing;
 pub mod interact;
+pub mod window;
+pub mod coords;
 
 pub type UiState = Render2DState;
 
@@ -22,13 +30,11 @@ pub struct Render2DState {
     #[cfg(todo)]
     #[serde(default, skip_serializing_if = "TimersWindowState::is_empty")]
     pub timers_window: watch::Sender<TimersWindowState>,
-    /// TODO: switch to [watched::Watcher]
     #[serde(
         default,
         skip_serializing_if = "Render2DState::is_empty_pathing",
-        with = "watched::serde_imp::Sender"
     )]
-    pub pathing_window: watched::Tx<PathingWindowState>,
+    pub pathing_window: Watcher<PathingWindowState>,
 }
 
 #[cfg(todo)]
@@ -47,9 +53,10 @@ pub struct TimersWindowState {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct PathingWindowState {
-    #[cfg(todo)]
-    #[serde(default, skip_serializing_if = "Render2DState::is_default_open")]
-    pub open: bool,
+    #[serde(default, skip_serializing_if = "WindowState::is_empty")]
+    pub window: WindowState,
+    #[serde(default, skip_serializing_if = "PathingWindowTab::is_empty")]
+    pub tab: PathingWindowTab,
     #[serde(default, skip_serializing_if = "PathingSearchState::is_empty")]
     pub search: PathingSearchState,
     #[serde(default, skip_serializing_if = "PathingFilterState::is_empty")]
@@ -58,9 +65,91 @@ pub struct PathingWindowState {
     pub interact_pois: InteractPoiState,
 }
 impl PathingWindowState {
+    pub const DEFAULT_SIZE: UiVec2 = UiVec2::new(300.0, 200.0);
+    pub fn window_size(&self) -> &UiVec2 {
+        self.window.size.get().unwrap_or(&Self::DEFAULT_SIZE)
+    }
+    pub fn set_window_size(&mut self, size: UiVec2) {
+        self.window.size = match size {
+            size if size == Self::DEFAULT_SIZE => None,
+            size => Some(size),
+        }.unwrap_or_default()
+    }
     pub fn is_empty(&self) -> bool {
-        let Self { search, filter, interact_pois } = self;
-        search.is_empty() & filter.is_empty() & interact_pois.is_empty()
+        let Self { tab, window, search, filter, interact_pois } = self;
+        (search.is_empty() & filter.is_empty() & tab.is_empty()) && interact_pois.is_empty() && window.is_empty()
+    }
+}
+#[derive(Deserialize, Serialize, Debug, Copy, Clone, Default, Eq, PartialOrd, Ord, Hash)]
+pub struct PathingWindowTab {
+    #[serde(default, skip_serializing_if = "is_false_ref")]
+    pub packs: bool,
+    #[serde(default, skip_serializing_if = "is_false_ref")]
+    pub pois: bool,
+    #[cfg(feature = "paths-edit")]
+    #[serde(skip)]
+    pub edit: bool,
+}
+impl PathingWindowTab {
+    pub const INDEX_PACKS: usize = 0;
+    pub const INDEX_POIS: usize = 1;
+    #[cfg(feature = "paths-edit")]
+    pub const INDEX_EDIT: usize = 2;
+
+    pub const fn index(&self) -> usize {
+        match self {
+            Self { packs: true, .. } => 0,
+            Self { pois: true, .. } => 1,
+            Self { edit: true, .. } => 2,
+            _ => 0,
+        }
+    }
+    pub fn selected(&self, index: usize) -> bool {
+        self.index() == index
+    }
+    pub fn focus(&mut self, index: usize) {
+        match index {
+            #[cfg(feature = "paths-edit")]
+            Self::INDEX_EDIT =>
+                *self = Self { edit: true, .. Default::default() },
+            Self::INDEX_POIS =>
+                *self = Self { pois: true, .. Default::default() },
+            _ =>
+                *self = Self { packs: true, .. Default::default() },
+        }
+    }
+    pub const fn selected_packs(&self) -> bool {
+        self.index() == Self::INDEX_PACKS
+    }
+    pub const fn selected_pois(&self) -> bool {
+        match self {
+            #[cfg(todo = "unnecessary")]
+            tab => tab.index() == Self::INDEX_POIS,
+            tab => tab.pois,
+        }
+    }
+    #[cfg(feature = "paths-edit")]
+    pub const fn selected_edit(&self) -> bool {
+        self.edit
+    }
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.index() == 0
+    }
+    pub fn focus_packs(&mut self) {
+        *self = Self { packs: true, .. Default::default() };
+    }
+    pub fn focus_pois(&mut self) {
+        *self = Self { pois: true, .. Default::default() };
+    }
+    #[cfg(feature = "paths-edit")]
+    pub fn focus_edit(&mut self) {
+        *self = Self { edit: true, .. Default::default() };
+    }
+}
+impl PartialEq for PathingWindowTab {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.index() == rhs.index()
     }
 }
 
@@ -150,22 +239,17 @@ impl Render2DState {
     fn is_default_open(v: &bool) -> bool {
         !*v
     }
-    fn is_empty_pathing(pathing: &watched::Tx<PathingWindowState>) -> bool {
-        pathing.borrow().is_empty()
-    }
-    #[cfg(todo)]
     fn is_empty_pathing(pathing: &Watcher<PathingWindowState>) -> bool {
         pathing.try_read().map(|w| w.is_empty()).unwrap_or(false)
     }
 
     pub fn is_dirty(&self) -> bool {
-        #[cfg(todo)]
-        if self.pathing_window.watch.has_changed() {
+        if self.pathing_window.has_changed() {
             return true
         }
         false
     }
-    pub fn mark_clean(&self) {
-        //self.pathing_window.watch.mark_unchanged);
+    pub fn mark_clean(&mut self) {
+        self.pathing_window.mark_unchanged();
     }
 }

@@ -114,9 +114,15 @@ paths = [
   "space",
   # this mostly works but so few packs care to use it...
   #"paths-schedule",
+  "paths-interact",
+  "paths-edit",
 ]
 paths-schedule = [
   "dep:croner",
+]
+paths-interact = [
+]
+paths-edit = [
 ]
 paths-lua = [
   "scripts-lua",
