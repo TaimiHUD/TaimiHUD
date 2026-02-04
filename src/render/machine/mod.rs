@@ -21,7 +21,12 @@ use {
     std::{ops::Range, sync::Arc},
 };
 use {
-    crate::{controller::Controller, exports::runtime as rt, render::RenderState, settings::Settings},
+    crate::{
+        controller::Controller,
+        exports::runtime::{self as rt, imgui, statistics::{StatsRef, StatsDesc, StatsUnit, MetricsSwitch, StatsCounter}},
+        render::RenderState,
+        settings::Settings,
+    },
     anyhow::Context,
     core::num::NonZero,
     glamour::{Angle, Point3, Size2, Vector2, Vector3},
@@ -104,6 +109,10 @@ pub struct RenderMachine {
     pub pathing: Option<Arc<PathingShared>>,
     #[cfg(feature = "paths")]
     pub pack_ui_state: PackElements,
+    pub metrics_switch: MetricsSwitch,
+    pub metrics_checkpoint: Option<Instant>,
+    pub metrics_checkpoint_render: Option<Instant>,
+    pub metrics_checkpoint_ui: Option<Instant>,
 }
 
 pub type RenderPositioning<S = LocalSpace> = (Point3<S>, Vector3<S>);
@@ -169,6 +178,10 @@ impl RenderMachine {
             pathing: None,
             #[cfg(feature = "paths")]
             pack_ui_state: PackElements::default(),
+            metrics_switch: Default::default(),
+            metrics_checkpoint: Default::default(),
+            metrics_checkpoint_render: Default::default(),
+            metrics_checkpoint_ui: Default::default(),
         }
     }
 
@@ -271,6 +284,22 @@ impl RenderMachine {
     pub fn act_setup(&mut self) {
         log::debug!("loading initial keybinds");
         rt::bindings::populate_bind_controls();
+        let sec = "stats-render";
+        let stats_counters = &[
+            (StatsRef::with_counter(&STATS_FRAME_TIME_SLICE, StatsUnit::Time), StatsDesc::new(
+                sec, "stats-render-time-slice",
+            ), true),
+            (StatsRef::with_counter(&STATS_FRAME_TIME_RENDER, StatsUnit::Time), StatsDesc::new(
+                sec, "stats-render-time",
+            ), true),
+            (StatsRef::with_counter(&STATS_FRAME_TIME_UI, StatsUnit::Time), StatsDesc::new(
+                sec, "stats-render-time-ui",
+            ), true),
+        ];
+        for &(counter, mut desc, detailed) in stats_counters {
+            desc.detailed = detailed;
+            counter.register(desc);
+        }
     }
 
     pub fn act_display_size(&mut self) {
@@ -339,6 +368,16 @@ impl RenderMachine {
         include_bytes!("../../../data/textures/logotype-glow-256.png");
 
     pub fn turn_render_pre(&mut self) {
+        self.metrics_switch = MetricsSwitch::read();
+        if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
+            if self.metrics_checkpoint.is_none() {
+                self.metrics_checkpoint = Some(Instant::now());
+            }
+            self.metrics_checkpoint_render = Some(Instant::now());
+        } else {
+            self.metrics_checkpoint = None;
+        }
+
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
             Controller::with_sender(|s| {
@@ -452,17 +491,43 @@ impl RenderMachine {
                 _ => (),
             }
         }
+        self.post_render();
+    }
+    fn post_render(&mut self) {
+        if let Some(checkpoint) = self.metrics_checkpoint_render.take() {
+            let amt = checkpoint.elapsed().as_micros() as u64;
+            STATS_FRAME_TIME_RENDER.reset(amt);
+            if let Some(checkpoint) = &self.metrics_checkpoint {
+                let total = checkpoint.elapsed().as_micros() as u64 / 0x20;
+                let amt = (amt / 0x20) as u32;
+                let slice = STATS_FRAME_TIME_SLICE.get() as usize as u64;
+                let num = (StatsUnit::frac_num(slice) as u32).saturating_add(amt);
+                STATS_FRAME_TIME_SLICE.reset(StatsUnit::frac(num as i32, total as u32));
+            }
+        }
     }
 
     pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
     where
         U: ?Sized + super::element::im::ImDrawWindow<'ui>,
     {
+        if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
+            self.metrics_checkpoint_ui = Some(Instant::now());
+        }
+
         let prev_display_size = *self.display_size_ref();
         let display_size = self.display_size_mut();
         *display_size = ui.im_io_display_size().0.cast();
         if !rt::vec_eq(*display_size, prev_display_size) {
             self.act_display_size();
+        }
+    }
+    pub fn post_ui(&mut self) {
+        if let Some(checkpoint) = self.metrics_checkpoint_ui.take() {
+            let amt = checkpoint.elapsed().as_micros() as u64;
+            STATS_FRAME_TIME_UI.reset(amt);
+            let amt = (amt / 0x20) as u32;
+            STATS_FRAME_TIME_SLICE.increment(amt);
         }
     }
 
@@ -488,3 +553,7 @@ bitflags::bitflags! {
 pub type RenderSlot<'r> = (&'r mut Option<anyhow::Result<crate::space::engine::Engine>>,);
 #[cfg(not(feature = "space"))]
 pub type RenderSlot<'r> = ();
+
+static STATS_FRAME_TIME_RENDER: StatsCounter = StatsCounter::DEFAULT;
+static STATS_FRAME_TIME_UI: StatsCounter = StatsCounter::DEFAULT;
+static STATS_FRAME_TIME_SLICE: StatsCounter = StatsCounter::DEFAULT;
