@@ -642,32 +642,21 @@ impl Engine {
 
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         let map_ctx = machine.is_map_visible();
-        let (
-            visible_space,
-            visible_map,
-            camera_source,
-            edge_feather_scale,
-            trail_y_offset,
-            trail_resolution,
-            trail_width,
-            (_obscured_alpha,),
-        ) = self.map_settings(|s| {
-            (
-                s.space.visible_space().then_some(s.space.distance_max()),
-                map_ctx.map(|ctx| s.space.visible_map(ctx)),
-                s.space.camera_source(),
-                s.space.edge_feather_scale(),
-                s.space.trail_y_offset(),
-                s.space.trail_resolution(),
-                s.space.trail_width(),
-                match () {
-                    #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.obscured_alpha(),),
-                    #[cfg(not(feature = "goggles"))]
-                    _ => ((),),
-                },
-            )
-        });
+        let (visible_space, visible_map, camera_source, edge_feather_scale, (_obscured_alpha,)) = self
+            .map_settings(|s| {
+                (
+                    s.space.visible_space().then_some(s.space.distance_max()),
+                    map_ctx.map(|ctx| s.space.visible_map(ctx)),
+                    s.space.camera_source(),
+                    s.space.edge_feather_scale(),
+                    match () {
+                        #[cfg(feature = "goggles")]
+                        _ => (s.space.goggles.obscured_alpha(),),
+                        #[cfg(not(feature = "goggles"))]
+                        _ => ((),),
+                    },
+                )
+            });
         let gameplay_prev = self.gameplay.get_mut().clone();
         if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);

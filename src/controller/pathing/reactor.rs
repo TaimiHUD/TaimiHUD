@@ -8,9 +8,12 @@ use {
     tokio::time::Instant,
 };
 
+#[cfg(feature = "paths-filter")]
 pub type ScheduledEvents = ScheduledStream<BTreeMap<Instant, PathingEvent>>;
+#[cfg(feature = "paths-filter")]
 pub type FilterExpiryMap = BTreeMap<MarkerId, Instant>;
 
+#[cfg(feature = "paths-filter")]
 impl PathingController {
     pub fn unexpire_at(
         scheduled: &mut ScheduledEvents,
@@ -89,6 +92,7 @@ impl PathingEvent {
             (_, Self::Nop) => (),
             (this @ Self::Nop, e) => *this = e,
             (Self::FanOut(events), Self::FanOut(mut e)) => events.append(&mut e),
+            #[cfg(feature = "paths-filter")]
             (Self::ResetMarkerIds(ids), Self::ResetMarkerIds(mut e)) => ids.append(&mut e),
             (Self::FanOut(events), e) => events.push(e),
             (this, that) => {
@@ -181,6 +185,7 @@ impl PathingEvent {
         match self {
             Self::Nop => true,
             Self::FanOut(e) => e.iter().all(Self::is_empty),
+            #[cfg(feature = "paths-filter")]
             Self::ResetMarkerIds(ids) => ids.iter().all(|id| id.is_empty()),
             _ => false,
         }

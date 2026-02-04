@@ -543,9 +543,9 @@ where
     for &binding in ArcSettings::VK_WINDOWS {
         let Some(window) = binding.window_name() else { continue };
         let window_id = format!("{window}-window");
-        let Some(state) = settings.get_window_state_mut(window) else { continue };
-        if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
-            // just mutating settings is enough?
+        let Some(mut state) = settings.get_window_state(window) else { continue };
+        if with_i18n!(&window_id, |msg| ui.checkbox(&msg, &mut state)) {
+            let _ = settings.update_window_state(window, state);
         }
         if ui.is_item_right_clicked() {
             context_menu = Some(binding.control().unwrap_or(TaimiControls::WINDOW_PRIMARY));
