@@ -821,6 +821,8 @@ impl RenderState {
         if !is_running {
             state.shutdown();
             lock.take();
+        } else {
+            state.machine.post_ui();
         }
     }
 
