@@ -38,12 +38,14 @@ pub use self::{
 };
 
 pub mod filter;
+#[cfg(feature = "paths-filter")]
 pub mod hidden;
+#[cfg(feature = "paths-interact")]
 pub mod interactive;
 mod map;
 mod poi;
 mod trail;
-pub(crate) mod visible;
+mod visible;
 
 /// [MapPackInfo] plus some metadata
 pub struct LoadedMapInfoStorage {

@@ -112,8 +112,17 @@ markers-edit = [
 
 paths = [
   "space",
+  "paths-interact",
+  "paths-edit",
+]
+paths-edit = [
+]
+paths-filter = [
   # this mostly works but so few packs care to use it...
   #"paths-schedule",
+]
+paths-interact = [
+  "paths-filter",
 ]
 paths-schedule = [
   "dep:croner",

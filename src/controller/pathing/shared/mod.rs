@@ -2,7 +2,6 @@
 pub use {
     self::{
         display::LocDisplay,
-        interact::{InteractReceiver, InteractSender, InteractShared},
         loader::{
             LoadReport,
             SharedLoaderPacksInfo,
@@ -61,7 +60,11 @@ use {
     tokio::sync::mpsc,
 };
 
+#[cfg(feature = "paths-interact")]
+pub use self::interact::{InteractReceiver, InteractSender, InteractShared};
+
 mod display;
+#[cfg(feature = "paths-interact")]
 pub mod interact;
 mod loader;
 mod maps;
@@ -126,6 +129,7 @@ impl PathingSender {
                 let _ = load_throttle.try_read_mut();
                 load_throttle
             },
+            #[cfg(feature = "paths-interact")]
             interact: InteractReceiver::new(&sender.shared.interact),
         };
 
@@ -145,6 +149,7 @@ pub struct PathingReceiver {
     pub raids: watched::Rx<Arc<RaidState>>,
     pub gameplay: Watched<GameplayState>,
     pub mumble_identity: watched::Rx<Option<MumbleIdentityUpdate>>,
+    #[cfg(feature = "paths-interact")]
     pub interact: InteractReceiver,
 }
 impl PathingReceiver {
@@ -192,6 +197,7 @@ pub struct PathingShared {
     pub gameplay: watched::Tx<SharedGameplayMap>,
     /// rendering
     pub space: SpacePackShared,
+    #[cfg(feature = "paths-interact")]
     pub interact: InteractShared,
 }
 impl PathingShared {
@@ -202,6 +208,7 @@ impl PathingShared {
             maps: watched::Tx::new(Default::default()),
             gameplay: watched::Tx::new(SharedGameplayMap::default()),
             space: SpacePackShared::new(),
+            #[cfg(feature = "paths-interact")]
             interact: InteractShared::new(),
         }
     }

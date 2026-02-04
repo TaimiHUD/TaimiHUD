@@ -8,9 +8,7 @@ use {
                 LoadedMarkerPath,
                 LoadedPoiPath,
                 PackIndex,
-                PackInfo,
                 PackMapPath,
-                PackPath,
                 PackRegistryNs,
                 PoiMapPath,
             },
@@ -29,18 +27,13 @@ use {
                 SharedGameplayMap,
                 SharedMapPackLoaded,
                 SharedMapPackState,
-                SpacePackShared,
             },
-            state::{
-                interactive::{BehaviourConfig, InteractionEvent, InteractionEventAction, InteractivePoi},
-                LoadedPoi,
-            },
+            state::interactive::{BehaviourConfig, InteractionEvent, InteractionEventAction},
             PathingEvent,
         },
         exports::runtime::{
             self as rt,
             imgui::{
-                Condition,
                 Id as UiId,
                 MouseButton,
                 Selectable,
@@ -49,45 +42,28 @@ use {
                 TableFlags,
                 TableSortDirection,
                 TableToken,
-                TreeNode,
-                TreeNodeFlags,
                 Ui,
             },
         },
         fl,
-        render::{machine::RenderMachine, PathingWindowState},
         settings::{
             pathing::TriggerKind,
             state::ui::interact::{InteractFilterFlags, InteractSortFlags},
             Settings,
         },
-        space::{engine::Engine, pack::PackRender, DrawSpace},
+        space::pack::PackRender,
         with_i18n,
         Controller,
     },
-    bitflags::bitflags,
-    bvh::bvh::Bvh,
     glamour::{Box2, Box3, Point2, Point3, Size2, Size3},
     indexmap::{map::Entry as IndexEntry, IndexMap},
     rustc_hash::FxBuildHasher,
-    std::{
-        borrow::Cow,
-        cell::{Cell, LazyCell},
-        cmp,
-        collections::BTreeSet,
-        mem,
-        sync::Arc,
-    },
-    taimi_hoard::{
-        iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationMut, LocationRef, Locator},
-        str_opt_ref,
-    },
+    std::{borrow::Cow, cell::LazyCell, cmp, collections::BTreeSet, mem, sync::Arc},
+    taimi_hoard::loc::{indexed::IndexedList, LocationMut, LocationRef, Locator},
     taimi_meta::{
         coords::{vec_eq, LocalSpace},
         packs::{
-            collections::PackSet,
-            id::{MarkerId, MarkerIndex, MarkerPath},
+            id::{MarkerId, MarkerIndex},
             CategoryIndex,
             CategoryPath,
             MapPath,
@@ -100,421 +76,13 @@ use {
     taimi_pack::attributes::{
         keys::{self, Guid},
         AttrString,
-        InteractionAttributes,
     },
     taimi_sync::{
         arcs::ArcPtrCmp,
-        watched::{self, Watched, Watcher},
+        watched::{Watched, Watcher},
     },
 };
 
-/// TODO: deleteme
-#[derive(Debug, Clone)]
-#[cfg(deleteme)]
-pub(in super::super::super) struct RenderInteractivePoi {
-    pub path: PoiPath,
-    pub category_path: CategoryPath,
-    pub map_path: PackMapPath,
-    pub loaded_index: PoiIndex,
-    pub guid: Option<Guid>,
-    pub visibility: VisibilityFlags,
-    pub category_visibility: VisibilityFlags,
-    pub position: Point3<DrawSpace>,
-    pub nearby: bool,
-    pub hidden: bool,
-}
-#[cfg(deleteme)]
-impl RenderInteractivePoi {
-    pub fn new(
-        map_path: PackMapPath,
-        category_path: CategoryPath,
-        path: PoiPath,
-        loaded_index: PoiIndex,
-        guid: Option<Guid>,
-        visibility: VisibilityFlags,
-        position: Point3<DrawSpace>,
-        (nearby, hidden): (bool, bool),
-    ) -> Self {
-        Self {
-            map_path,
-            category_path,
-            path,
-            loaded_index,
-            guid,
-            category_visibility: visibility.default_toggles(),
-            visibility,
-            position,
-            nearby,
-            hidden,
-        }
-    }
-
-    pub fn path(&self) -> PoiPath<PackPath> {
-        self.path.pivot(self.pack_path())
-    }
-    pub fn pack_path(&self) -> PackPath {
-        self.map_path.root
-    }
-    pub fn marker_path(&self) -> MarkerPath<PackPath> {
-        self.path().map_path(MarkerIndex::with_poi)
-    }
-    pub fn loaded_path(&self) -> PoiMapPath {
-        self.map_path.rel(self.loaded_index)
-    }
-    pub fn category_path(&self) -> CategoryPath<PackPath> {
-        self.category_path.pivot(self.pack_path())
-    }
-
-    pub fn is_disabled(&self) -> bool {
-        !self.category_visibility.is_visible() || (!self.visibility.is_visible() && !self.hidden)
-    }
-
-    pub fn action_trigger(&self, action: InteractionEventAction) -> InteractionEvent {
-        action_trigger(self.path, self.loaded_path(), action)
-    }
-    pub fn action_untrigger(&self) -> PathingEvent {
-        match self.guid.clone() {
-            Some(guid) => PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]),
-            None => PathingEvent::ResetMarkerPath(self.marker_path()),
-        }
-    }
-
-    pub fn draw_table_start<'u>(ui: &Ui<'u>, title_id: &str) -> Option<TableToken<'u>> {
-        let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-        let table_token = with_i18n!("toggle", |header_cat| with_i18n!(title_id, |header_title| ui
-            .begin_table_header_with_flags(
-                "ipois",
-                [
-                    TableColumnSetup {
-                        name: &header_title,
-                        flags: TableColumnFlags::WIDTH_STRETCH,
-                        init_width_or_weight: 0.0,
-                        user_id: UiId::Str("name"),
-                    },
-                    TableColumnSetup {
-                        name: &header_cat,
-                        flags: TableColumnFlags::WIDTH_FIXED,
-                        init_width_or_weight: 0.0,
-                        user_id: UiId::Str("toggle"),
-                    },
-                ],
-                table_flags
-            )));
-        ui.table_next_column();
-        table_token
-    }
-
-    pub fn draw(&self, ui: &Ui, interact: &InteractionAttributes, display_name: &str) -> bool {
-        let mut draw = DrawInteractivePoi {
-            ui,
-            rpoi: self,
-            interact,
-            display_name,
-            #[cfg(deleteme)]
-            act_selected_poi: None,
-            act_selected_poi_open: false,
-        };
-        draw.draw_poi_row();
-        draw.act_selected_poi_open
-    }
-}
-/// TODO: deleteme
-#[cfg(deleteme)]
-pub(in super::super::super) struct DrawInteractivePoi<'a, 'ui> {
-    pub ui: &'a Ui<'ui>,
-    pub rpoi: &'a RenderInteractivePoi,
-    pub interact: &'a InteractionAttributes,
-    pub display_name: &'a str,
-    pub act_selected_poi_open: bool,
-    #[cfg(deleteme)]
-    act_selected_poi: Option<PoiMapPath>,
-}
-#[cfg(deleteme)]
-impl<'a, 'u> DrawInteractivePoi<'a, 'u> {
-    /// TODO: SpaceInteraction::interest_for_marker if attrs exist
-    fn interest(&self) -> TriggerKind {
-        SpaceInteraction::interest_for(self.interact).0
-    }
-
-    pub(super) fn draw_poi_row(&mut self) {
-        let Self { ui, rpoi, .. } = *self;
-        let _id = ui.push_id(UiId::Int(
-            rpoi.path.path as i32 ^ (rpoi.pack_path().path as i32) << 28,
-        ));
-        let action = self.draw_poi_name().map(Err);
-
-        ui.table_next_column();
-
-        let action = action.or(match rpoi.hidden {
-            true => with_i18n!("trigger-untrigger", |label| ui.small_button(&label))
-                .then(|| Ok(rpoi.action_untrigger())),
-            false => with_i18n!("trigger-trigger", |label| ui.small_button(&label))
-                .then(|| Err(rpoi.action_trigger(InteractionEventAction::Trigger))),
-        });
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
-            #[cfg(deleteme)]
-            {
-                self.act_selected_poi = None;
-            }
-            self.act_selected_poi_open = true;
-        }
-        match action {
-            Some(Ok(action)) => action.try_send(),
-            Some(Err(action)) => {
-                Controller::with_sender(|s| {
-                    if let Some(s) = &s.pathing {
-                        let _ = s.shared.interact.events.send(action);
-                    }
-                });
-            },
-            None => (),
-        }
-
-        #[cfg(deleteme)]
-        if self.act_selected_poi_open {
-            let _ = self.act_selected_poi.get_or_insert_with(|| rpoi.loaded_path());
-        }
-    }
-    pub(super) fn draw_poi_name(&mut self) -> Option<InteractionEvent> {
-        let Self { ui, rpoi, display_name, .. } = *self;
-        let interest = self.interest();
-        let path = rpoi.path;
-        let marker_path = rpoi.marker_path();
-        let display_name_storage;
-        let display_name = str_opt_ref(display_name);
-        let display_name = match display_name {
-            Some(name) => name,
-            None => {
-                if let Some(guid) = &rpoi.guid {
-                    display_name_storage = guid.to_string();
-                } else {
-                    display_name_storage = format!("#{}", path.path);
-                }
-                &display_name_storage[..]
-            },
-        };
-
-        let mut action = None;
-        let mut visible_title = display_name;
-        let wrapped = match display_name {
-            n if n.len() <= 48 => false,
-            n if ui.calc_text_size(n)[0] > ui.content_region_avail()[0] * 0.8 => true,
-            _ => false,
-        };
-        if wrapped {
-            ui.text_wrapped(display_name);
-
-            let TODO = ();
-            #[cfg(todo)]
-            {
-                Self::draw_title_text_truncate(ui, display_name);
-                visible_title = Self::NAME_TEMPLATE;
-            }
-        } else {
-            ui.text(display_name);
-        }
-        let hover = ui.is_item_hovered();
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
-            #[cfg(deleteme)]
-            {
-                self.act_selected_poi = None;
-            }
-            self.act_selected_poi_open = true;
-        }
-        let mut same_line = wrapped;
-        let mut same_line = || {
-            let thresh = match same_line {
-                true => 0.90,
-                false => 0.935,
-            };
-            let width = ui.content_region_max()[0];
-            let used = ui.item_rect_max()[0] - ui.window_pos()[0];
-            let cramped = used / width > thresh;
-            if cramped {
-                ui.text(" ");
-                same_line = false;
-            }
-            ui.same_line();
-        };
-
-        if rpoi.is_disabled() {
-            same_line();
-            with_i18n!("disabled", |msg| ui.text_disabled(&msg));
-        }
-
-        if interest.contains(TriggerKind::RESET) {
-            same_line();
-            if ui.small_button("reset") {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::RESET)));
-                #[cfg(todo)]
-                if let Some(r) = &ipoi.reset {
-                    PathingEvent::GuidReset(r.guid.iter().cloned().collect()).try_send();
-                }
-            }
-        }
-        for (trigger, showhide_action) in interest.show_hide_actions() {
-            same_line();
-            if ui.small_button(showhide_action.to_string()) {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(trigger)));
-                #[cfg(todo)]
-                {
-                    let cat_path = showhide.category().pivot(rpoi.pack_path());
-                    PathingEvent::CategorySetToggle(cat_path, showhide.action.tristate()).try_send();
-                }
-            }
-        }
-        if interest.contains(TriggerKind::BEHAVIOUR) {
-            same_line();
-            if with_i18n!("trigger-behaviour", |label| ui.small_button(&label)) {
-                //PathingEvent::DismissMarker(poi_path, std::time::Duration::from_secs(5)).try_send();
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::BEHAVIOUR)));
-            }
-            if ui.is_item_hovered() {
-                ui.tooltip(|| {
-                    let mode = self
-                        .interact
-                        .behaviour()
-                        .map(|b| b.value())
-                        .unwrap_or(keys::TacoBehaviour::ResetInstance.value());
-                    // TODO: idk how to do a select case is our fluent too old?
-                    with_i18n!(&format!("dismiss-behaviour-{}", mode), |label| ui.text(label));
-                });
-            }
-        }
-        if interest.contains(TriggerKind::COPY) {
-            same_line();
-            if with_i18n!("trigger-copy", |label| ui.small_button(&label)) {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::COPY)));
-            }
-            if ui.is_item_hovered() {
-                let TODO = ();
-                #[cfg(todo)]
-                {
-                    if let Some(copy_value) = self.interact.copy_value() {
-                        Self::draw_tooltip(ui, display_name, || {
-                            let copy_message = self.interact.copy_message().unwrap_or("");
-                            Self::draw_tooltip_copyable(ui, visible_title, copy_value, copy_message);
-                        });
-                    }
-                }
-            }
-        }
-        if interest.contains(TriggerKind::INFO) {
-            same_line();
-            if ui.small_button("read") {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::INFO)));
-            }
-            if ui.is_item_hovered() {
-                if let Some(info) = self.interact.info() {
-                    ui.tooltip_text(info);
-                    #[cfg(todo)]
-                    {
-                        Self::draw_tooltip(ui, display_name, || {
-                            ui.text_wrapped(&info.message[..]);
-                        });
-                    }
-                }
-            }
-        }
-        if interest.contains(TriggerKind::BOUNCE) {
-            same_line();
-            if ui.small_button("anim") {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::BOUNCE)));
-            }
-        }
-        if interest.contains(TriggerKind::SCRIPT) {
-            same_line();
-            if ui.small_button("script") {
-                action = Some(rpoi.action_trigger(InteractionEventAction::Manual(TriggerKind::SCRIPT)));
-            }
-        }
-
-        #[cfg(todo)]
-        {
-            let pack_loader_data = &self.pack_loader_data;
-            let tip = &*self.category_tips.entry(marker_path).or_insert_with(|| {
-                let packs = pack_loader_data.as_ref().map(|d| d.borrow());
-                let packs = packs.as_ref().map(|d| &**d);
-                Self::get_marker_tip(packs, pack_info, marker_path)
-            });
-            match tip.as_ref().map(|(title, _)| &title[..]) {
-                Some(title) if !title.is_empty() && !display_name.starts_with(title) => {
-                    ui.text_wrapped(title);
-                    visible_title = title;
-                },
-                _ => {
-                    #[cfg(todo)]
-                    let info_text = Self::marker_info(pack_loader_data, &mut self.cache_info, pack_info, marker_path);
-                    let info_text = ipoi.info.as_ref().map(|i| &i.message.0[..]);
-                    if let Some(info_text) = info_text {
-                        Self::draw_title_text_truncate(ui, info_text);
-                    }
-                },
-            }
-        }
-        #[cfg(todo)]
-        if hover {
-            let display_name = display_name.to_owned();
-            let visible_title = visible_title.to_owned();
-            let display_name = &display_name[..];
-            let category_names = &self.category_names;
-            Self::draw_tooltip(ui, &display_name, || {
-                let mut visible_title = &visible_title[..];
-                if wrapped {
-                    ui.text_wrapped(display_name);
-                    visible_title = &display_name;
-                }
-
-                let mut cat_name = category_names.get(&rpoi.marker_path());
-
-                if let Some((title, desc)) = tip {
-                    let mut visible_title = visible_title;
-
-                    let mut cat_redundant = false;
-                    if let Some(Some(cat_name)) = &cat_name {
-                        if cat_name.starts_with(&title[..]) {
-                            visible_title = &cat_name[..];
-                            cat_redundant = true;
-                        } else if title.starts_with(&cat_name[..]) {
-                            cat_redundant = true;
-                        }
-                    }
-
-                    Self::draw_tooltip_category(ui, visible_title, title, desc);
-
-                    if cat_redundant {
-                        let _ = cat_name.take();
-                    }
-                }
-
-                if let Some(Some(cat_name)) = &cat_name {
-                    if !display_name.starts_with(&cat_name[..]) {
-                        ui.text_wrapped(cat_name);
-                    }
-                }
-
-                #[cfg(todo)]
-                let info_text = Self::marker_info(pack_loader_data, &mut self.cache_info, pack_info, marker_path);
-                let info_text = ipoi.info.as_ref().map(|i| &i.message.0[..]);
-                if let Some(info_text) = info_text {
-                    ui.text_wrapped(info_text);
-                }
-
-                if let Some(copy) = ipoi.copy.as_ref() {
-                    let copy_value = &copy.value.0[..];
-                    let copy_message = copy.message.as_ref().map(|m| &m.0[..]).unwrap_or("");
-                    Self::draw_tooltip_copyable(ui, display_name, copy_value, copy_message);
-                }
-
-                if let Some(guid) = &rpoi.guid {
-                    ui.text(guid.to_string());
-                }
-            });
-        }
-
-        action
-    }
-}
 pub struct DrawMenuPoi<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub hidden: bool,
@@ -614,7 +182,7 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
         } else if self.act_guid_copy {
             if let Some(guid) = guid {
                 let guid = guid.to_string();
-                with_i18n!("copied", |copied| rt::send_alert(
+                let _ = with_i18n!("copied", |copied| rt::send_alert(
                     self.ui,
                     &format!("{copied}: {guid}")
                 ));
@@ -624,8 +192,6 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
     }
 }
 
-#[deprecated]
-type PoiInfoSorts = InteractSortFlags;
 #[derive(Debug)]
 pub struct PoiInfoContext {
     pub path: PoiPath,
@@ -694,7 +260,7 @@ pub struct PoiInfo {
     #[cfg(todo)]
     pub open_interest: BTreeSet<MarkerId>,
     pub markers: IndexMap<MarkerId, PoiInfoMarker, FxBuildHasher>,
-    pub dirty: PoiInfoSorts,
+    pub dirty: InteractSortFlags,
     pub dirty_sort: bool,
     pub dirty_pos: bool,
     pub last_pos: Point3<LocalSpace>,
@@ -709,7 +275,7 @@ impl Default for PoiInfo {
             #[cfg(todo)]
             open_interest: Default::default(),
             markers: Default::default(),
-            dirty: PoiInfoSorts::empty(),
+            dirty: InteractSortFlags::empty(),
             dirty_sort: Default::default(),
             dirty_pos: Default::default(),
             wants_static: false,
@@ -728,13 +294,13 @@ impl PoiInfo {
     pub fn is_dirty(&self) -> bool {
         self.dirty_sort | !self.dirty.is_empty()
     }
-    pub fn prepare_sort(&mut self, sorts: PoiInfoSorts) -> bool {
-        for flag in PoiInfoSorts::all() {
+    pub fn prepare_sort(&mut self, sorts: InteractSortFlags) -> bool {
+        for flag in InteractSortFlags::all() {
             self.dirty_sort |= self.dirty.set_replace(flag, false) & sorts.contains(flag);
         }
         self.dirty_sort
     }
-    pub fn apply_sort(&mut self, sorts: PoiInfoSorts, sort_desc: PoiInfoSorts) {
+    pub fn apply_sort(&mut self, sorts: InteractSortFlags, sort_desc: InteractSortFlags) {
         self.markers.sort_by(|aid, a, bid, b| {
             let mut a = a.sort_info(aid, sorts);
             a.flags = (a.flags ^ sort_desc) & sorts;
@@ -756,7 +322,7 @@ impl PoiInfo {
             let Some(marker) = self.markers.get_mut(mid) else { continue };
             marker.nearish = true;
             if mem::replace(&mut marker.nearby, false) {
-                self.dirty.insert(PoiInfoSorts::NEARBY);
+                self.dirty.insert(InteractSortFlags::NEARBY);
             }
         }
     }
@@ -777,7 +343,7 @@ impl PoiInfo {
                     }
                     e.nearish = true;
                     if !mem::replace(&mut e.nearby, true) {
-                        self.dirty.insert(PoiInfoSorts::NEARBY);
+                        self.dirty.insert(InteractSortFlags::NEARBY);
                     }
                 },
                 IndexEntry::Vacant(e) => {
@@ -795,7 +361,7 @@ impl PoiInfo {
     pub fn clear_nearby(&mut self) {
         for marker in self.markers.values_mut() {
             if mem::replace(&mut marker.nearby, false) {
-                self.dirty.insert(PoiInfoSorts::NEARBY);
+                self.dirty.insert(InteractSortFlags::NEARBY);
             }
         }
     }
@@ -844,7 +410,7 @@ impl PoiInfo {
             e.update_dist(player_pos);
         }
         self.dirty_pos = false;
-        self.dirty.insert(PoiInfoSorts::DISTANCE);
+        self.dirty.insert(InteractSortFlags::DISTANCE);
     }
 
     pub fn init(&mut self, pathing: &Arc<PathingShared>) {
@@ -985,8 +551,8 @@ impl PoiInfo {
                         #[cfg(todo = "unnecessary")]
                         {
                             flags.set(
-                                PoiInfoSorts::INTERACTIVE,
-                                i.0.intersects(PoiInfoSorts::INTERACTIVE_MASK),
+                                InteractSortFlags::INTERACTIVE,
+                                i.0.intersects(InteractSortFlags::INTERACTIVE_MASK),
                             );
                         }
                         i
@@ -1045,7 +611,7 @@ impl PoiInfo {
             #[cfg(todo)]
             let lidx = mid.get_marker_index();
             let entry = self.markers.entry(mid);
-            let is_interactive = match flags_populated.contains(PoiInfoSorts::INTERACTIVE) {
+            let is_interactive = match flags_populated.contains(InteractSortFlags::INTERACTIVE) {
                 false
                     if match &entry {
                         IndexEntry::Occupied(e) =>
@@ -1053,12 +619,12 @@ impl PoiInfo {
                         _ => false,
                     } =>
                     Ok(true),
-                false if interactive.intersects(PoiInfoSorts::INTERACTIVE_MASK) => Err(Some(true)),
+                false if interactive.intersects(InteractSortFlags::INTERACTIVE_MASK) => Err(Some(true)),
                 false if filterable.contains(InteractFilterFlags::STATIC.as_sort_bits()) => Ok(false),
                 false => Err(None),
                 #[cfg(todo = "unnecessary")]
-                true if flags.contains(PoiInfoSorts::INTERACTIVE) => Some(true),
-                true => Ok(interactive.intersects(PoiInfoSorts::INTERACTIVE_MASK)),
+                true if flags.contains(InteractSortFlags::INTERACTIVE) => Some(true),
+                true => Ok(interactive.intersects(InteractSortFlags::INTERACTIVE_MASK)),
             };
             let is_blacklisted = {
                 let mut filterable = InteractFilterFlags::sort_as_bits(filterable);
@@ -1078,7 +644,7 @@ impl PoiInfo {
                 IndexEntry::Vacant(_) if is_blacklisted => continue,
                 IndexEntry::Vacant(_)
                     if !self.filters.contains(InteractFilterFlags::FAR)
-                        && !flags_populated.contains(PoiInfoSorts::DISTANCE)
+                        && !flags_populated.contains(InteractSortFlags::DISTANCE)
                             & !pos.x.is_infinite()
                             & !(pos.x < PoiInfoMarker::DIST_DIST_FAR_FILTER) =>
                     continue,
@@ -1091,7 +657,8 @@ impl PoiInfo {
                         marker.dist_dist = PoiInfoMarker::DIST_DIST_FAR;
                     } else if filterable.contains(InteractSortFlags::NEARBY) {
                         marker.nearish = true;
-                    } else if !flags_populated.contains(PoiInfoSorts::DISTANCE) & !pos.x.is_infinite() {
+                    } else if !flags_populated.contains(InteractSortFlags::DISTANCE) & !pos.x.is_infinite()
+                    {
                         marker.dist_dist = pos.x;
                     }
                     if filterable.contains(InteractFilterFlags::FILTERED.as_sort_bits()) {
@@ -1102,14 +669,14 @@ impl PoiInfo {
                     marker.filtered = filterable.contains(InteractFilterFlags::FILTERED.as_sort_bits());
                     marker.visible = !marker.filtered & marker.enabled;
                     marker.auto = auto;
-                    if flags_populated.contains(PoiInfoSorts::INTERACTIVE) {
+                    if flags_populated.contains(InteractSortFlags::INTERACTIVE) {
                         marker.interactive = interactive;
                         marker.auto = auto;
                     } else if filterable.contains(InteractFilterFlags::STATIC.as_sort_bits()) {
                         marker.interactive = TriggerKind::empty();
                     } else {
                         #[cfg(todo)]
-                        if flags.contains(PoiInfoSorts::INTERACTIVE) {
+                        if flags.contains(InteractSortFlags::INTERACTIVE) {
                             marker.auto = auto;
                         }
                         if interactive.is_empty() {
@@ -1120,11 +687,11 @@ impl PoiInfo {
                 },
             };
             let mut dirty_int = false;
-            if flags_populated.contains(PoiInfoSorts::INTERACTIVE) {
+            if flags_populated.contains(InteractSortFlags::INTERACTIVE) {
                 let prev = mem::replace(&mut marker.interactive, interactive);
                 dirty_int |= prev != marker.interactive;
             }
-            if (flags | flags_populated).contains(PoiInfoSorts::INTERACTIVE) {
+            if (flags | flags_populated).contains(InteractSortFlags::INTERACTIVE) {
                 let assume_auto = false;
                 let auto = match auto {
                     true if auto_config
@@ -1137,7 +704,7 @@ impl PoiInfo {
                 dirty_int |= prev != marker.auto;
             }
             if dirty_int {
-                self.dirty.insert(PoiInfoSorts::INTERACTIVE);
+                self.dirty.insert(InteractSortFlags::INTERACTIVE);
             }
             let nearish = match filterable.contains(InteractSortFlags::NEARBY) {
                 true => Some(true),
@@ -1147,7 +714,7 @@ impl PoiInfo {
             if let Some(nearish) = nearish {
                 let _prev = mem::replace(&mut marker.nearish, nearish);
                 if !_prev {
-                    self.dirty.insert(PoiInfoSorts::DISTANCE);
+                    self.dirty.insert(InteractSortFlags::DISTANCE);
                 }
             }
             if poi_path.path != PoiIndex::MAX {
@@ -1156,19 +723,19 @@ impl PoiInfo {
             if category_path.path != CategoryIndex::MAX {
                 marker.category_path = category_path;
             }
-            if flags_populated.contains(PoiInfoSorts::VISIBLE) {
-                let prev = mem::replace(&mut marker.visible, flags.contains(PoiInfoSorts::VISIBLE));
+            if flags_populated.contains(InteractSortFlags::VISIBLE) {
+                let prev = mem::replace(&mut marker.visible, flags.contains(InteractSortFlags::VISIBLE));
                 if prev != marker.visible {
-                    self.dirty.insert(PoiInfoSorts::VISIBLE);
+                    self.dirty.insert(InteractSortFlags::VISIBLE);
                 }
             }
-            if flags_populated.contains(PoiInfoSorts::ENABLED) {
-                let prev = mem::replace(&mut marker.enabled, flags.contains(PoiInfoSorts::ENABLED));
+            if flags_populated.contains(InteractSortFlags::ENABLED) {
+                let prev = mem::replace(&mut marker.enabled, flags.contains(InteractSortFlags::ENABLED));
                 if prev != marker.enabled {
-                    self.dirty.insert(PoiInfoSorts::ENABLED);
+                    self.dirty.insert(InteractSortFlags::ENABLED);
                 }
             }
-            if flags_populated.contains(PoiInfoSorts::DISTANCE) {
+            if flags_populated.contains(InteractSortFlags::DISTANCE) {
                 let prev = mem::replace(&mut marker.pos, pos);
                 if !vec_eq(prev, marker.pos) {
                     self.dirty_pos = true;
@@ -1185,7 +752,7 @@ impl PoiInfo {
                 if let Some(dist_dist) = dist_dist {
                     let prev = mem::replace(&mut marker.dist_dist, dist_dist);
                     if prev != marker.dist_dist {
-                        self.dirty.insert(PoiInfoSorts::DISTANCE);
+                        self.dirty.insert(InteractSortFlags::DISTANCE);
                         if !filterable.contains(InteractSortFlags::NEARBY)
                             && marker.dist_dist.to_bits() == PoiInfoMarker::DIST_DIST_FAR.to_bits()
                         {
@@ -1194,10 +761,10 @@ impl PoiInfo {
                     }
                 }
             }
-            if flags_populated.contains(PoiInfoSorts::FILTERED) {
-                let prev = mem::replace(&mut marker.filtered, flags.contains(PoiInfoSorts::FILTERED));
+            if flags_populated.contains(InteractSortFlags::FILTERED) {
+                let prev = mem::replace(&mut marker.filtered, flags.contains(InteractSortFlags::FILTERED));
                 if prev != marker.filtered {
-                    self.dirty.insert(PoiInfoSorts::FILTERED);
+                    self.dirty.insert(InteractSortFlags::FILTERED);
                 }
             }
         }
@@ -1311,7 +878,7 @@ impl PoiInfo {
                 #[cfg(todo)]
                 let interactive = pinfo
                     .get_marker_attrs()
-                    .map(|i| SpaceInteraction::interaction_is(i, PoiInfoSorts::INTERACTIVE_MASK))
+                    .map(|i| SpaceInteraction::interaction_is(i, InteractSortFlags::INTERACTIVE_MASK))
                     .unwrap_or(false);
                 #[cfg(todo)]
                 let marker = match self.markers.entry(mid) {
@@ -1391,13 +958,13 @@ impl PoiInfo {
             // we know it's interactive, just not how much... so fill this with a falsehood as long as we don't claim it's populated
             let interactive = (TriggerKind::BEHAVIOUR, auto);
             // TODO: ENABLED?
-            let mut populated = PoiInfoSorts::empty();
-            let flags = PoiInfoSorts::empty();
+            let mut populated = InteractSortFlags::empty();
+            let flags = InteractSortFlags::empty();
             let poi_path: PoiPath = PoiPath::with_path(PoiIndex::MAX);
             let cat_path: CategoryPath = CategoryPath::with_path(CategoryIndex::MAX);
             let pos = match pos {
                 Some(pos) if !pos.x.is_infinite() && pos.x != IRRELEVANT_MID => {
-                    populated.insert(PoiInfoSorts::DISTANCE);
+                    populated.insert(InteractSortFlags::DISTANCE);
                     pos
                 },
                 _ => {
@@ -1487,7 +1054,7 @@ impl PoiInfo {
                     {
                         let prev = mem::replace(&mut marker.interactive, interest);
                         if prev != marker.interactive {
-                            dirty.insert(PoiInfoSorts::INTERACTIVE);
+                            dirty.insert(InteractSortFlags::INTERACTIVE);
                         }
                     }
 
@@ -1495,11 +1062,11 @@ impl PoiInfo {
 
                     let prev = mem::replace(&mut marker.visible, lpoi.visibility.is_visible());
                     if prev != marker.visible {
-                        dirty.insert(PoiInfoSorts::VISIBLE);
+                        dirty.insert(InteractSortFlags::VISIBLE);
                     }
                     let prev = mem::replace(&mut marker.filtered, poi.is_hidden());
                     if prev != marker.filtered {
-                        dirty.insert(PoiInfoSorts::FILTERED);
+                        dirty.insert(InteractSortFlags::FILTERED);
                     }
                     true
                 } else if let Some(_map_info) = maps.get_info_for(map_path.root) {
@@ -1567,7 +1134,7 @@ impl PoiInfo {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct PoiInfoSort {
     pub dist: u32,
-    pub flags: PoiInfoSorts,
+    pub flags: InteractSortFlags,
     pub pack_path: PackMapPath,
     pub index: MarkerIndex,
 }
@@ -1645,32 +1212,32 @@ impl PoiInfoMarker {
         (bits == Self::DIST_DIST_FAR.to_bits()) | (bits == Self::DIST_DIST_IRRELEVANT.to_bits())
     }
 
-    pub fn sort_flags(&self) -> PoiInfoSorts {
+    pub fn sort_flags(&self) -> InteractSortFlags {
         [
-            self.nearby.then_some(PoiInfoSorts::NEARBY),
-            (self.visible & !self.filtered).then_some(PoiInfoSorts::VISIBLE),
-            self.filtered.then_some(PoiInfoSorts::FILTERED),
-            self.enabled.then_some(PoiInfoSorts::ENABLED),
+            self.nearby.then_some(InteractSortFlags::NEARBY),
+            (self.visible & !self.filtered).then_some(InteractSortFlags::VISIBLE),
+            self.filtered.then_some(InteractSortFlags::FILTERED),
+            self.enabled.then_some(InteractSortFlags::ENABLED),
             #[cfg(todo = "unnecessary")]
-            self.has_dist().then_some(PoiInfoSorts::DISTANCE),
+            self.has_dist().then_some(InteractSortFlags::DISTANCE),
             #[cfg(todo = "unnecessary")]
-            self.has_pos().then_some(PoiInfoSorts::DISTANCE),
-            PoiInfoSorts::interactive(self.interactive).get(),
+            self.has_pos().then_some(InteractSortFlags::DISTANCE),
+            InteractSortFlags::interactive(self.interactive).get(),
         ]
         .into_iter()
-        .map(|v| v.unwrap_or(PoiInfoSorts::empty()))
+        .map(|v| v.unwrap_or(InteractSortFlags::empty()))
         .collect()
     }
     pub fn filter_flagged(&self) -> InteractFilterFlags {
         let mask = !InteractFilterFlags::FAR;
         InteractFilterFlags::for_sort(self.sort_flags()) & mask
     }
-    pub fn sort_info(&self, mid: &MarkerId, mask: PoiInfoSorts) -> PoiInfoSort {
+    pub fn sort_info(&self, mid: &MarkerId, mask: InteractSortFlags) -> PoiInfoSort {
         PoiInfoSort {
             flags: self.sort_flags(),
             pack_path: mid.get_marker_pack_map_path(),
             index: mid.get_marker_index(),
-            dist: match mask.contains(PoiInfoSorts::DISTANCE) {
+            dist: match mask.contains(InteractSortFlags::DISTANCE) {
                 false => 0,
                 true => (self.dist_dist as u32).saturating_mul(32),
                 #[cfg(todo = "unnecessary")]
@@ -1804,25 +1371,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
             self.state.since_rendered = 0;
             self.update_sort();
             self.draw_nearby();
-            #[cfg(deleteme)]
-            {
-                let id = "pois-other";
-                let other = with_i18n!(id, |label| TreeNode::new(id)
-                    .flags(TreeNodeFlags::SPAN_FULL_WIDTH)
-                    .label::<&str, _>(&label)
-                    .tree_push_on_open(false)
-                    .opened(false, Condition::Appearing)
-                    .leaf(false)
-                    .push(ui));
-                if let Some(_node) = other {
-                    self.draw_nearby_other();
-                }
-            }
         }
-        #[cfg(deleteme)]
-        let table = RenderInteractivePoi::draw_table_start(ui, "pois-map");
-        #[cfg(deleteme)]
-        if let Some(_table) = table {}
     }
     pub fn draw_nearby(&mut self) {
         let mut map_id_token = (None, None);
@@ -1916,7 +1465,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                     },
                     3 => {
                         let mut trigger = false;
-                        let interactive = marker.interactive & PoiInfoSorts::INTERACTIVE_MASK;
+                        let interactive = marker.interactive & InteractSortFlags::INTERACTIVE_MASK;
                         let interest = marker.interactive;
                         let label = match interactive.is_empty() {
                             _ if !render => continue,
@@ -2070,7 +1619,8 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                     Some(attrs) => (attrs.tip_name(), attrs.tip_description()),
                     None => (None, None),
                 };
-                if poi_tip.is_some() | poi_desc.is_some() {
+                let poi_has_tooltip = poi_tip.is_some() | poi_desc.is_some();
+                if poi_has_tooltip {
                     ui.tooltip(|| {
                         if let Some(name) = poi_tip {
                             ui.text(name);
@@ -2173,15 +1723,15 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
         let sorting = self.ui.table_sort_specs_mut();
         let should_sort = sorting.as_ref().map(|s| s.should_sort());
         if should_sort.unwrap_or(false) || self.state.is_dirty() {
-            let mut sort_desc = PoiInfoSorts::empty();
-            let mut sorts = PoiInfoSorts::empty();
+            let mut sort_desc = InteractSortFlags::empty();
+            let mut sorts = InteractSortFlags::empty();
             if let Some(sorting) = &sorting {
                 let specs = sorting.specs();
                 let cols = [
-                    (Self::HEADER_TITLE, PoiInfoSorts::DISTANCE),
-                    (Self::HEADER_NEARBY, PoiInfoSorts::NEARBY),
-                    (Self::HEADER_HIDDEN, PoiInfoSorts::VISIBLE),
-                    (Self::HEADER_INTERACT, PoiInfoSorts::INTERACTIVE),
+                    (Self::HEADER_TITLE, InteractSortFlags::DISTANCE),
+                    (Self::HEADER_NEARBY, InteractSortFlags::NEARBY),
+                    (Self::HEADER_HIDDEN, InteractSortFlags::VISIBLE),
+                    (Self::HEADER_INTERACT, InteractSortFlags::INTERACTIVE),
                 ];
                 for spec in specs.iter() {
                     let Some(&(_id, flag)) = cols.get(spec.column_idx() as usize) else {
@@ -2203,7 +1753,7 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                     }
                 }
             } else {
-                sorts = PoiInfoSorts::DEFAULT_UI
+                sorts = InteractSortFlags::DEFAULT_UI
             };
             if self.state.prepare_sort(sorts) | should_sort.unwrap_or(false) {
                 self.state.apply_sort(sorts, sort_desc)

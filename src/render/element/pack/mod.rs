@@ -20,6 +20,7 @@ use {
         },
         exports::runtime as rt,
         render::element::prelude::*,
+        settings::state::ui::WindowOpen,
     },
     std::{
         fmt::Write,
@@ -39,6 +40,12 @@ use {
 };
 
 #[allow(unused_imports)]
+#[cfg(feature = "paths-edit")]
+pub use self::dynamic::{DrawPe, PackData, PackEdit, PackEditEnv};
+#[allow(unused_imports)]
+#[cfg(feature = "paths-interact")]
+pub use self::interact::{DrawPoiInfo, PoiInfo, PoiInfoContext};
+#[allow(unused_imports)]
 pub use self::{
     categories::{
         CategoryAction,
@@ -56,8 +63,6 @@ pub use self::{
         DrawPackUnloaded,
         PackCategoryMaskState,
     },
-    dynamic::{DrawPe, PackData, PackEdit, PackEditEnv},
-    interact::{DrawPoiInfo, PoiInfo, PoiInfoContext},
     menu::{
         DrawCategoryCollectionMenu,
         DrawCategoryContextMenu,
@@ -69,7 +74,9 @@ pub use self::{
 };
 
 mod categories;
+#[cfg(feature = "paths-edit")]
 mod dynamic;
+#[cfg(feature = "paths-interact")]
 mod interact;
 mod menu;
 mod toggles;
@@ -80,7 +87,9 @@ pub struct PackElements {
     pub packs_rx: Watcher<SharedLoaderPacksInfo>,
     pub maps_rx: Watcher<SharedGameplayMap>,
     pub pack_state: PackVecOf<PackElement>,
+    #[cfg(feature = "paths-interact")]
     pub interact: PoiInfo,
+    #[cfg(feature = "paths-edit")]
     pub pack_edit: PackEdit,
     pub filter_query: CategoryFilterQuery,
     pub context_menu: Option<(PackPath, Option<CategoryPath>)>,
@@ -100,8 +109,14 @@ impl PackElements {
             if let Some(shared) = &self.shared {
                 self.packs_rx.restart_watching(&shared.packs.packs);
                 self.maps_rx.restart_watching(&shared.gameplay);
-                self.interact.init(shared);
-                self.pack_edit.init(shared);
+                #[cfg(feature = "paths-interact")]
+                {
+                    self.interact.init(shared);
+                }
+                #[cfg(feature = "paths-edit")]
+                {
+                    self.pack_edit.init(shared);
+                }
             }
         }
         let Some(_shared) = &self.shared else { return };
@@ -144,12 +159,17 @@ impl PackElements {
                     pack_state.state.map_info = None;
                 }
             }
-            self.interact.wants_maps = true;
+            #[cfg(feature = "paths-interact")]
+            {
+                self.interact.wants_maps = true;
+            }
         }
+        #[cfg(feature = "paths-interact")]
         let interact_vis = match visibility {
             vis @ PackVisibility::Closed => vis,
             _ => self.interact.visibility(),
         };
+        #[cfg(feature = "paths-interact")]
         if interact_vis.is_visible() {
             self.interact.rx_nearby();
             if self.interact.wants_maps() {
@@ -660,6 +680,19 @@ impl PackVisibility {
             false => Self::Closed,
         }
     }
+    pub fn visible_or_pending(visible: bool) -> Self {
+        match visible {
+            true => Self::Visible,
+            false => Self::Pending,
+        }
+    }
+    pub fn within(self, parent: Self) -> Self {
+        match (self, parent) {
+            (PackVisibility::Visible, vis) | (vis, PackVisibility::Visible) => vis,
+            (vis, PackVisibility::Offset) => vis.min(PackVisibility::Pending),
+            _ => PackVisibility::Closed,
+        }
+    }
 
     #[inline]
     pub fn is_visible(&self) -> bool {
@@ -668,6 +701,15 @@ impl PackVisibility {
     #[inline]
     pub fn is_closed(&self) -> bool {
         matches!(self, Self::Closed)
+    }
+}
+impl From<WindowOpen> for PackVisibility {
+    fn from(open: WindowOpen) -> Self {
+        match open {
+            WindowOpen::Open => Self::Visible,
+            WindowOpen::Closed => Self::Closed,
+            WindowOpen::Collapsed => Self::Pending,
+        }
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

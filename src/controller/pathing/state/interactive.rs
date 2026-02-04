@@ -1,220 +1,16 @@
 use {
-    crate::{
-        controller::pathing::{info::MapPackInfo, registry::PackMapPath, state::LoadedPoi, PackSpace},
-        settings::pathing::TriggerKind,
-    },
-    glamour::Point3,
-    taimi_hoard::loc::Locator,
-    taimi_meta::packs::{CategoryIndex, CategoryPath, PoiIndex, PoiPath},
-    taimi_pack::{
-        attributes::{
-            keys::{self, ShowHideAction},
-            ScriptAttributes,
-        },
-        Pack,
-    },
+    crate::{controller::pathing::registry::PoiMapPath, settings::pathing::TriggerKind},
+    taimi_meta::packs::PoiPath,
+    taimi_pack::attributes::keys,
 };
 
-#[derive(Debug, Clone, Default)]
-pub struct InteractivePoi {
-    index: PoiIndex,
-    pub trigger: TriggerConfig,
-    #[cfg(todo)]
-    pub info_trigger: Option<TriggerConfig>,
-    pub behaviour: Option<BehaviourConfig>,
-    pub info: Option<InfoConfig>,
-    pub copy: Option<CopyConfig>,
-    pub show: Option<ShowHideConfig>,
-    pub hide: Option<ShowHideConfig>,
-    pub toggle: Option<ShowHideConfig>,
-    pub reset: Option<ResetConfig>,
-    pub bounce: Option<BounceConfig>,
-    pub script: Option<ScriptConfig>,
-}
-
-impl InteractivePoi {
-    pub const INVALID: Self = Self {
-        index: PoiIndex::MAX,
-        trigger: TriggerConfig {
-            auto: false,
-            radius: keys::TriggerRange(f32::NAN),
-        },
-        behaviour: None,
-        info: None,
-        copy: None,
-        show: None,
-        hide: None,
-        toggle: None,
-        reset: None,
-        bounce: None,
-        script: None,
-    };
-
-    pub fn from_pack(index: PoiIndex, path: PoiPath, pack: &Pack) -> Self {
-        let Some(poi) = pack.pois.get(path.path as usize) else { return Self::INVALID };
-        let attrs = &poi.attributes;
-        let interaction = attrs.interaction();
-
-        let trigger = TriggerConfig {
-            auto: interaction.auto_trigger.unwrap_or_default(),
-            radius: interaction
-                .info_range
-                .map(keys::TriggerRange::from)
-                .unwrap_or_default()
-                .into(),
-        };
-        let behaviour = interaction
-            .taco_behavior
-            .as_ref()
-            .map(|behaviour| BehaviourConfig {
-                mode: behaviour.clone().into(),
-                #[cfg(deleteme)]
-                invert: interaction.invert_behavior.unwrap_or_default(),
-                reset_delay: interaction.reset_length.map(Into::into).unwrap_or_default(),
-            });
-        let behaviour = match behaviour {
-            Some(behaviour) if behaviour.is_empty() => None,
-            behaviour => behaviour,
-        };
-        let info = interaction
-            .info
-            .as_ref()
-            .map(|info| InfoConfig { message: info.clone().into() });
-        let copy = interaction.copy_value.as_ref().map(|value| CopyConfig {
-            value: value.clone().into(),
-            message: interaction.copy_message.clone().map(Into::into),
-        });
-        let show = interaction
-            .show_category
-            .as_ref()
-            .and_then(|cat| pack.categories.all_categories.get_index_of(cat.as_id()))
-            .map(|cat| ShowHideConfig {
-                category_index: cat as CategoryIndex,
-                action: ShowHideAction::Show,
-            });
-        let hide = interaction
-            .hide_category
-            .as_ref()
-            .and_then(|cat| pack.categories.all_categories.get_index_of(cat.as_id()))
-            .map(|cat| ShowHideConfig {
-                category_index: cat as CategoryIndex,
-                action: ShowHideAction::Hide,
-            });
-        let toggle = interaction
-            .toggle_category
-            .as_ref()
-            .and_then(|cat| pack.categories.all_categories.get_index_of(cat.as_id()))
-            .map(|cat| ShowHideConfig {
-                category_index: cat as CategoryIndex,
-                action: ShowHideAction::Toggle,
-            });
-        let reset = interaction
-            .reset_guids
-            .as_ref()
-            .map(|guids| ResetConfig { guid: guids.iter().copied().collect() });
-        let bounce = interaction
-            .bounce_behavior
-            .as_ref()
-            .map(|behaviour| BounceConfig {
-                behaviour: behaviour.clone().into(),
-                delay: interaction.bounce_delay.map(Into::into).unwrap_or_default(),
-                duration: interaction.bounce_duration.map(Into::into).unwrap_or_default(),
-                height: interaction.bounce_height.map(Into::into).unwrap_or_default(),
-            });
-        let script = attrs
-            .script
-            .as_ref()
-            .map(|a| ScriptConfig::from_script_attributes(a));
-        let script = match script {
-            Some(script) if script.is_empty() => None,
-            script => script,
-        };
-        Self {
-            index,
-            trigger,
-            behaviour,
-            info,
-            copy,
-            show,
-            hide,
-            toggle,
-            reset,
-            bounce,
-            script,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self { index: PoiIndex::MAX, .. } => true,
-            Self {
-                trigger: TriggerConfig { auto: false, .. },
-                behaviour: None,
-                info: None,
-                copy: None,
-                show: None,
-                hide: None,
-                toggle: None,
-                reset: None,
-                bounce: None,
-                script: None,
-                index: _,
-            } => true,
-            _ => false,
-        }
-    }
-
-    pub fn path(&self, info: &MapPackInfo) -> Option<PoiPath> {
-        info.pois().nth(self.index as usize)
-    }
-    /// Careful, not a [PoiPath]!
-    pub fn loaded_index(&self) -> Locator<(), PoiIndex> {
-        Locator::with_path(self.index)
-    }
-    pub fn loaded_poi<'a>(&self, pois: &'a [LoadedPoi]) -> Option<&'a LoadedPoi> {
-        pois.get(self.index as usize)
-    }
-    pub fn loaded_poi_mut<'a>(&self, pois: &'a mut [LoadedPoi]) -> Option<&'a mut LoadedPoi> {
-        pois.get_mut(self.index as usize)
-    }
-
-    /// Requires passive monitoring, usually related to [TriggerConfig::auto]
-    ///
-    /// An interaction that might show an unobtrusive notification like [InfoConfig]
-    /// counts as well, even if it won't trigger automatically
-    pub fn is_passive(&self) -> bool {
-        self.trigger.auto || self.info.is_some() || self.copy.is_some()
-    }
-
-    pub fn is_nearby(&self, poi_pos: Point3<PackSpace>, player_pos: Point3<PackSpace>) -> Option<f32> {
-        self.trigger.is_nearby(poi_pos, player_pos)
-    }
-
-    pub fn show_hide(&self) -> impl Iterator<Item = &ShowHideConfig> + Clone + '_ {
-        self.show
-            .as_ref()
-            .into_iter()
-            .chain(self.hide.as_ref())
-            .chain(self.toggle.as_ref())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InfoConfig {
-    pub message: keys::Info,
-}
-
-#[derive(Debug, Clone)]
-pub struct CopyConfig {
-    pub value: keys::CopyValue,
-    pub message: Option<keys::CopyMessage>,
-}
-
+#[cfg(todo)]
 #[derive(Debug, Clone)]
 pub struct ShowHideConfig {
     pub category_index: CategoryIndex,
     pub action: ShowHideAction,
 }
+#[cfg(todo)]
 impl ShowHideConfig {
     pub fn category(&self) -> CategoryPath {
         CategoryPath::with_path(self.category_index)
@@ -222,12 +18,7 @@ impl ShowHideConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct ResetConfig {
-    pub guid: keys::ResetGuid,
-}
-
-#[derive(Debug, Clone)]
-/// TODO
+#[cfg(todo)]
 pub struct BounceConfig {
     pub behaviour: keys::Bounce,
     pub delay: keys::BounceDelay,
@@ -238,36 +29,26 @@ pub struct BounceConfig {
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct BehaviourConfig {
     pub mode: keys::Behaviour,
-    #[cfg(deleteme)]
-    pub invert: bool,
     pub reset_delay: keys::ResetLength,
 }
 impl BehaviourConfig {
     pub fn new<M: Into<keys::Behaviour>>(mode: M) -> Self {
         Self {
             mode: mode.into(),
-            #[cfg(deleteme)]
-            invert: false,
             reset_delay: Default::default(),
         }
     }
     pub fn is_empty(&self) -> bool {
         match self {
             Self { mode, .. } if !mode.is_empty() => false,
-            #[cfg(deleteme)]
-            Self { invert: true, .. } => false,
-            Self {
-                mode: _,
-                reset_delay: _,
-                #[cfg(deleteme)]
-                    invert: _,
-            } => true,
+            Self { mode: _, reset_delay: _ } => true,
         }
     }
 }
 
 /// TODO
 #[derive(Debug, Clone)]
+#[cfg(todo)]
 pub struct ScriptConfig {
     pub tick: Option<keys::Script>,
     pub focus: Option<keys::Script>,
@@ -275,6 +56,7 @@ pub struct ScriptConfig {
     pub filter: Option<keys::Script>,
     pub once: Option<keys::Script>,
 }
+#[cfg(todo)]
 impl ScriptConfig {
     pub fn from_script_attributes(attrs: &ScriptAttributes) -> Self {
         Self {
@@ -300,46 +82,20 @@ impl ScriptConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct TriggerConfig {
-    pub radius: keys::TriggerRange,
-    pub auto: bool,
-}
-impl TriggerConfig {
-    pub const INVALID: Self = Self {
-        auto: false,
-        radius: keys::TriggerRange(f32::NAN),
-    };
-
-    pub fn new(radius: keys::TriggerRange, auto: bool) -> Self {
-        Self { radius, auto }
-    }
-
-    pub fn radius_squared(&self) -> f32 {
-        self.radius.0.powi(2)
-    }
-
-    pub fn is_nearby(&self, poi_pos: Point3<PackSpace>, player_pos: Point3<PackSpace>) -> Option<f32> {
-        let distdist = poi_pos.distance_squared(player_pos);
-        let thresh = self.radius_squared();
-        (thresh >= distdist).then_some(distdist)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum InteractionEvent {
     Nearby {
         path: PoiPath,
-        loaded_path: Locator<PackMapPath, PoiIndex>,
+        loaded_path: PoiMapPath,
     },
     Gone {
         path: PoiPath,
-        loaded_path: Locator<PackMapPath, PoiIndex>,
+        loaded_path: PoiMapPath,
     },
     Interact {
         action: InteractionEventAction,
         path: PoiPath,
-        loaded_path: Locator<PackMapPath, PoiIndex>,
+        loaded_path: PoiMapPath,
     },
 }
 
@@ -362,7 +118,3 @@ impl InteractionEventAction {
         }
     }
 }
-
-/// TODO: Arc around this for sharing?
-pub type TriggerBounds =
-    taimi_meta::spatial::BvhEntities<taimi_meta::spatial::BvhShape<taimi_meta::spatial::TriggerBoundsInfo>>;

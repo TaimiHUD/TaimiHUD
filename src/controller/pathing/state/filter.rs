@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
-            pathing::{registry::PackInfoSignature, state::hidden::MarkerState},
+            pathing::registry::PackInfoSignature,
         },
         exports::runtime as rt,
         render::machine::MumbleIdentityUpdate,
@@ -29,6 +29,9 @@ use {
     croner::errors::CronError,
     std::{fmt, time::Duration},
 };
+
+#[cfg(feature = "paths-filter")]
+use crate::controller::pathing::state::hidden::MarkerState;
 
 pub const FILTER_HIDDEN: Option<bool> = Some(false);
 pub const FILTER_ALLOWED: Option<bool> = None;
@@ -381,15 +384,18 @@ pub trait MarkerFilter {
     fn is_visible(&self, state: &Self::State) -> FilterAllow;
 }
 
+#[cfg(feature = "paths-filter")]
 #[derive(Debug, Copy, Clone)]
 pub struct GroupConfig {
     pub guid: Guid,
     pub inverted: bool,
 }
+#[cfg(feature = "paths-filter")]
 impl GroupConfig {
     pub const EMPTY: Self = Self { guid: Guid::EMPTY, inverted: false };
 }
 /// lazy hack .-.
+#[cfg(feature = "paths-filter")]
 impl MarkerFilter for GroupConfig {
     type State = FilterState;
 
@@ -701,7 +707,10 @@ pub struct FilterState {
     pub avatar: AvatarMetadata,
     #[cfg(feature = "paths-schedule")]
     pub schedule: ScheduleState,
+    #[cfg(feature = "paths-filter")]
     pub hidden: MarkerState,
+    #[cfg(not(feature = "paths-filter"))]
+    pub(crate) hidden: (),
 }
 
 pub type FilterStateFilter = Arc<dyn MarkerFilterState>;
@@ -846,19 +855,23 @@ impl MapFilters {
             .min()
     }
 }
+#[cfg(todo)]
 #[derive(Clone, Default)]
 pub struct FilterStateExtras {
     pub achievements: Option<Arc<AchievementConfig>>,
+    #[cfg(feature = "paths-filter")]
     pub group: Option<GroupConfig>,
     #[cfg(feature = "paths-schedule")]
     pub schedule: Option<Arc<ScheduleConfig>>,
 }
+#[cfg(todo)]
 impl FilterStateExtras {
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
                 achievements: None,
-                group: None,
+                #[cfg(feature = "paths-filter")]
+                    group: None,
                 #[cfg(feature = "paths-schedule")]
                     schedule: None,
             } => true,

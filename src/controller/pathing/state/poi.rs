@@ -83,10 +83,12 @@ impl LoadedPoi {
     /// TODO: might want ability to override later, in which case make sure
     /// [Self::get_interaction_attrs] is adjusted to match!
     #[inline]
+    #[cfg(feature = "paths-interact")]
     pub fn interaction_attrs(&self) -> &InteractionAttributes {
         self.info().interaction_attrs()
     }
     #[inline]
+    #[cfg(feature = "paths-interact")]
     pub fn get_interaction_attrs(&self) -> Option<&InteractionAttributes> {
         self.info().get_interaction_attrs().map(|i| &**i)
     }

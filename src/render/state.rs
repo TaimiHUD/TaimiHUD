@@ -708,41 +708,52 @@ impl RenderState {
         {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
-            let visibility = self.pathing_window.visibility();
-            let interact_visibility = self.machine.pack_ui_state.interact.visibility().min(visibility);
-            let pack_visibility =
-                PackVisibility::visible(self.pathing_menu_open).max(match interact_visibility {
-                    // if poi tab open, packs aren't!
-                    PackVisibility::Visible => visibility.min(PackVisibility::Pending),
-                    _ => visibility,
-                });
+            let visibility = self.pathing_window.window_visibility();
+            let pack_visibility = self
+                .pathing_window
+                .packs_visibility()
+                .max(PackVisibility::visible(self.pathing_menu_open))
+                .within(visibility);
             self.machine.pack_ui_state.pre_draw(pack_visibility);
+            #[cfg(any(feature = "paths-edit", feature = "paths-interact"))]
             let gameplay_map = self.machine.gameplay.gameplay_map();
-            self.machine
-                .pack_ui_state
-                .pack_edit
-                .pre_draw(visibility, gameplay_map);
-            self.machine.pack_ui_state.interact.pre_draw(visibility);
-            if interact_visibility.is_visible() {
-                let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
-                self.machine.pack_ui_state.pack_edit.env.latest_pos = player_pos;
-                let interact = &mut self.machine.pack_ui_state.interact;
-                if interact.wants_static {
-                    let wants_all = interact.wants_static_all();
-                    if let Some(Ok(engine)) = &self.engine {
-                        interact.update_static_render(&engine.packs);
+            #[cfg(feature = "paths-edit")]
+            {
+                let edit_vis = self.pathing_window.edit_visibility();
+                self.machine
+                    .pack_ui_state
+                    .pack_edit
+                    .pre_draw(edit_vis.within(visibility), gameplay_map);
+            }
+            #[cfg(feature = "paths-interact")]
+            {
+                let interact_visibility = self.pathing_window.pois_visibility().within(visibility);
+                self.machine
+                    .pack_ui_state
+                    .interact
+                    .pre_draw(visibility.within(visibility));
+                if interact_visibility.is_visible() {
+                    let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
+                    self.machine.pack_ui_state.pack_edit.env.latest_pos = player_pos;
+                    let interact = &mut self.machine.pack_ui_state.interact;
+                    if interact.wants_static {
+                        let wants_all = interact.wants_static_all();
+                        if let Some(Ok(engine)) = &self.engine {
+                            interact.update_static_render(&engine.packs);
+                        }
+                        if wants_all && !self.machine.pack_ui_state.pack_state.is_empty() {
+                            interact.update_static_ui(
+                                &self.machine.pack_ui_state.pack_state.map_ref_as_slice(),
+                            );
+                        }
                     }
-                    if wants_all && !self.machine.pack_ui_state.pack_state.is_empty() {
-                        interact
-                            .update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
+                    let player_pos = match gameplay_map {
+                        Some(..) => player_pos,
+                        None => None,
+                    };
+                    if interact.wants_pos(player_pos) {
+                        interact.update_dist(player_pos);
                     }
-                }
-                let player_pos = match gameplay_map {
-                    Some(..) => player_pos,
-                    None => None,
-                };
-                if interact.wants_pos(player_pos) {
-                    interact.update_dist(player_pos);
                 }
             }
             self.pathing_window.pre_draw(&mut self.machine);
