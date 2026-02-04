@@ -11,7 +11,7 @@ use {
         UiAction,
     },
     crate::{
-        controller::pathing::{PathingEvent, InteractMessage},
+        controller::pathing::PathingEvent,
         exports::runtime::imgui::{MenuItem, MenuToken, MouseButton, Selectable, StyleVar, Ui},
         with_i18n,
     },
@@ -20,6 +20,8 @@ use {
     glamour::Rect,
     taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath},
 };
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::InteractMessage;
 
 impl<'a, 'u> super::DrawCategoryToggle<'a, 'u> {
     fn prepare_menu(&self) -> DrawCategoryMenu<'a, 'u> {
@@ -257,9 +259,11 @@ impl super::PackElements {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
         }
         ui.separator();
+        #[cfg(feature = "paths-interact")]
         if MenuItem::new("rebuild interact").build(ui) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RequestRebuild));
         }
+        #[cfg(feature = "paths-interact")]
         if MenuItem::new("rebuild interact (bvh only)").build(ui) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::BvhRebuild));
         }
@@ -280,6 +284,7 @@ impl super::PackElements {
             act_pathing = Some(PathingEvent::RequestResourceRelease { pack_path: None });
         }
         #[cfg(todo = "unnecessary")]
+        #[cfg(feature = "paths-interact")]
         if MenuItem::new("reload interact settings").build(ui) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RefreshSettings));
         }

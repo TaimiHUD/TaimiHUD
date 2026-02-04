@@ -1,16 +1,15 @@
 use std::{collections::BTreeSet, mem, num::NonZero, hash::Hash, sync::{Arc, LazyLock}};
 use std::marker::PhantomData;
 use crate::{
-    controller::pathing::{
-        state::hidden::MarkerState,
-        registry::PackInfoSignature,
-    },
+    controller::pathing::registry::PackInfoSignature,
     controller::api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
     render::machine::MumbleIdentityUpdate,
     exports::runtime as rt,
 };
 use taimi_meta::packs::{MapIndex, MarkerId};
 use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes, Festivals};
+#[cfg(feature = "paths-filter")]
+use crate::controller::pathing::state::hidden::MarkerState;
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
@@ -326,11 +325,13 @@ pub trait MarkerFilter {
     fn is_visible(&self, state: &Self::State) -> FilterAllow;
 }
 
+#[cfg(feature = "paths-filter")]
 #[derive(Debug, Copy, Clone)]
 pub struct GroupConfig {
     pub guid: Guid,
     pub inverted: bool,
 }
+#[cfg(feature = "paths-filter")]
 impl GroupConfig {
     pub const EMPTY: Self = Self {
         guid: Guid::EMPTY,
@@ -338,6 +339,7 @@ impl GroupConfig {
     };
 }
 /// lazy hack .-.
+#[cfg(feature = "paths-filter")]
 impl MarkerFilter for GroupConfig {
     type State = FilterState;
 
@@ -649,7 +651,10 @@ pub struct FilterState {
     pub avatar: AvatarMetadata,
     #[cfg(feature = "paths-schedule")]
     pub schedule: ScheduleState,
+    #[cfg(feature = "paths-filter")]
     pub hidden: MarkerState,
+    #[cfg(not(feature = "paths-filter"))]
+    pub(crate) hidden: (),
 }
 
 pub type FilterStateFilter = Arc<dyn MarkerFilterState>;
@@ -767,18 +772,22 @@ impl MapFilters {
             .min()
     }
 }
+#[cfg(todo)]
 #[derive(Clone, Default)]
 pub struct FilterStateExtras {
     pub achievements: Option<Arc<AchievementConfig>>,
+    #[cfg(feature = "paths-filter")]
     pub group: Option<GroupConfig>,
     #[cfg(feature = "paths-schedule")]
     pub schedule: Option<Arc<ScheduleConfig>>,
 }
+#[cfg(todo)]
 impl FilterStateExtras {
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
                 achievements: None,
+                #[cfg(feature = "paths-filter")]
                 group: None,
                 #[cfg(feature = "paths-schedule")]
                 schedule: None,

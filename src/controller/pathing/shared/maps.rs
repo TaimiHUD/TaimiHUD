@@ -21,7 +21,6 @@ use {
         },
         space::DrawSpace,
         state::{
-            hidden::MarkerState,
             LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail,
         },
         shared::LocDisplay,
@@ -54,6 +53,10 @@ use {
     taimi_sync::arcs::ArcPtrCmp,
     std::fmt,
 };
+#[cfg(feature = "paths-filter")]
+use crate::controller::pathing::state::hidden::MarkerState;
+#[cfg(not(feature = "paths-filter"))]
+type MarkerState = ();
 
 #[derive(Debug, Clone, Default)]
 pub struct SharedGameplayMap {
@@ -413,6 +416,7 @@ pub struct SharedMapPackState {
     pub categories: Arc<[LoadedCategory]>,
     pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Arc<[LoadedPoiShared]>>,
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Arc<[LoadedTrailShared]>>,
+    #[cfg(feature = "paths-filter")]
     pub hidden_markers: Arc<[MarkerId]>,
 }
 
@@ -426,6 +430,7 @@ impl SharedMapPackState {
                 .iter()
                 .map(LoadedTrailShared::with_loaded)
                 .collect(),
+            #[cfg(feature = "paths-filter")]
             hidden_markers: Default::default(),
         }
     }
@@ -438,6 +443,7 @@ impl SharedMapPackState {
                 .iter()
                 .map(LoadedTrailShared::with_loaded)
                 .collect(),
+            #[cfg(feature = "paths-filter")]
             hidden_markers: Self::hidden_markers_from(path, state, map_pack).cloned().collect(),
         }
     }
@@ -510,6 +516,7 @@ impl SharedMapPackState {
         trails_dirty | pois_dirty
     }
     /// TODO: check if changed properly...
+    #[cfg(feature = "paths-filter")]
     pub fn update_with_hidden(
         &mut self,
         path: PackMapPath,
@@ -538,6 +545,7 @@ impl SharedMapPackState {
         info.categories().zip(self.categories.iter())
     }
 
+    #[cfg(feature = "paths-filter")]
     fn hidden_markers_from<'a: 'b, 'b>(
         map_path: PackMapPath,
         state: &'a MarkerState,
@@ -562,6 +570,7 @@ impl SharedMapPackState {
                 _ => poi_guids.contains(Guid::from_uuid_ref(id)),
             })
     }
+    #[cfg(feature = "paths-filter")]
     pub fn is_hidden(&self, marker_ids: &[MarkerId]) -> bool {
         match marker_ids {
             #[cfg(todo = "unnecessary")]
@@ -569,6 +578,7 @@ impl SharedMapPackState {
             marker_ids => self.any_hidden(marker_ids),
         }
     }
+    #[cfg(feature = "paths-filter")]
     pub fn any_hidden<'a, I: IntoIterator<Item = &'a MarkerId>>(&self, marker_ids: I) -> bool {
         marker_ids.into_iter().any(|mid| self.hidden_markers[..].binary_search(mid).is_ok())
     }
@@ -918,6 +928,7 @@ impl<'a> SharedMarkerRef<'a> {
         self.marker_info().map(|info| info.attrs())
             .unwrap_or(&info::EMPTY_RENDER_ATTRS)
     }
+    #[cfg(feature = "paths-interact")]
     pub fn interaction_attrs(&self) -> &'a Arc<InteractionAttributes> {
         self.marker_info().and_then(|info| info.get_interaction_attrs())
             .unwrap_or(&info::EMPTY_INTERACTION_ATTRS)
@@ -1129,6 +1140,7 @@ impl<'a> LoadedPoiRef<'a> {
     pub fn guid(&self) -> Option<&'a Guid> {
         self.marker.marker.map_info.poi_guid_by_index(self.marker.loaded_index())
     }
+    #[cfg(feature = "paths-filter")]
     pub fn is_hidden(&self) -> bool {
         let guid = self.guid();
         let has_guid = guid.is_some();

@@ -2,7 +2,7 @@ use {
     crate::{
         controller::{
             api::ApiController,
-            pathing::{InteractMessage, PathingController, PathingEnables, PathingEvent},
+            pathing::{PathingController, PathingEnables, PathingEvent},
             Controller,
         },
         fl,
@@ -32,6 +32,8 @@ use {
     taimi_pack::attributes::Festival,
     taimi_sync::watched::Watched,
 };
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::InteractMessage;
 
 #[cfg(feature = "goggles")]
 use crate::space::engine::{Engine, SpaceEvent};
@@ -485,7 +487,10 @@ impl PathingConfig {
             if ui.is_item_hovered() {
                 with_i18n!("pathing-config-api-bypass-notice", |msg| ui.tooltip_text(&msg));
             }
-            self.draw_interaction_opts(ui);
+            #[cfg(feature = "paths-interact")]
+            {
+                self.draw_interaction_opts(ui);
+            }
 
             let festivals_tree = with_i18n!("pathing-config-festivals", |label| TreeNode::new(&label)
                 .flags(TreeNodeFlags::FRAMED)
@@ -702,6 +707,7 @@ impl PathingConfig {
         }
     }
 
+    #[cfg(feature = "paths-interact")]
     fn draw_interaction_opts(&mut self, ui: &Ui) {
         let settings = Self::get_pathing(|s| (s.trigger_enable, s.trigger_allow_auto, s.trigger_allow_interact));
         let Some((

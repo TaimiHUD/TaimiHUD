@@ -4,22 +4,19 @@ use {
         fl,
         render::{machine::RenderMachine, PathingConfig, RenderState},
         settings::{
-            state::ui::{pathing::PathingFilterFlags, AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
+            state::ui::{AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
             Settings,
         },
         space::engine::Engine,
         with_i18n,
-        Controller,
-        ControllerEvent,
     },
     crate::render::element::pack::PackVisibility,
-    crate::controller::pathing::shared::interact::InteractMessage,
-    crate::exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags, TreeNode, TreeNodeFlags, MouseButton},
-    std::collections::HashSet,
-    taimi_pack::category::CategoryId,
+    crate::exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags},
     taimi_sync::watched::Watched,
     std::mem,
 };
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::shared::interact::InteractMessage;
 
 pub use self::filter::PathingSearchState;
 
@@ -347,6 +344,7 @@ impl PathingWindowState {
     pub fn packs_visibility(&self) -> PackVisibility {
         PackVisibility::visible_or_pending(self.ui_state.tab.selected_packs())
     }
+    #[cfg(feature = "paths-interact")]
     pub fn pois_visibility(&self) -> PackVisibility {
         PackVisibility::visible_or_pending(self.ui_state.tab.selected_pois())
     }

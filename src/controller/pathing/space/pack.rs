@@ -754,7 +754,7 @@ impl SpacePackCollection {
     }
     /// we're in too deep :<
     ///
-    /// https://github.com/svenstaro/bvh/issues/136
+    /// <https://github.com/svenstaro/bvh/issues/136>
     fn bvh_depth(bvh: &Bvh<f32, 3>) -> Result<usize, ()> {
         let mut iter_limit: usize = bvh.nodes.len();
         let depth = 0;
