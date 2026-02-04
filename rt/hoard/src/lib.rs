@@ -11,6 +11,7 @@ pub mod lazyfmt;
 pub mod loc;
 pub mod paths;
 pub mod statistics;
+pub mod vec;
 
 pub fn str_opt_ref<S: ?Sized + AsRef<str>>(s: &S) -> Option<&str> {
     str_opt(s).map(|s| s.as_ref())
