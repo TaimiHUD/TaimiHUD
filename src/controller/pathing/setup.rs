@@ -3,13 +3,12 @@ use {
         controller::pathing::{
             info::MapPackInfo,
             registry::{PackActivateContext, PackInfo, PackLoader, SharedLoaderBox, UnloadedReason},
-            shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks, HiddenGuids},
+            shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded, SharedPacks},
             state::{filter::FilterState, LoadedMapInfoStorage, LoadedMapPack, LoadedPackInfo},
             PathingController,
             PathingEvent,
             PathingReceiver,
         },
-        controller::runtime::WallInstant,
         exports::runtime::{self as rt, textures::TextureKey},
         settings::{Settings, SourceKind},
         render::machine::{RenderTaskPriority, RenderMachine},
@@ -26,7 +25,6 @@ use {
         sync::Arc,
     },
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
-    taimi_hoard::time::Timestamp,
     taimi_meta::{
         packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
         ui::GameplayState,
@@ -40,6 +38,18 @@ use {
     },
     taimi_hoard::collections::TaimiSet,
 };
+#[cfg(feature = "paths-filter")]
+use {
+    crate::controller::{
+        pathing::shared::HiddenGuids,
+        runtime::WallInstant,
+    },
+    taimi_hoard::time::Timestamp,
+};
+#[cfg(feature = "paths-filter")]
+type HiddenCtx<'a> = Option<(&'a HiddenGuids, Timestamp)>;
+#[cfg(not(feature = "paths-filter"))]
+type HiddenCtx<'a> = Option<&'a ()>;
 
 impl PathingController {
     pub(super) fn process_pack_activate(&mut self, path: PackPath) {
@@ -317,10 +327,16 @@ impl PathingController {
         let probably_loading = matches!(gameplay, GameplayState::Intermission { next_map_id: None, .. });
         if probably_loading {
             self.maps.prune(Some(&self.map_info));
-            let now = WallInstant::now_timestamp_system_checked();
-            Self::prune_hidden_guids_settings(&now);
+            #[cfg(feature = "paths-interact")]
+            {
+                let now = WallInstant::now_timestamp_system_checked();
+                Self::prune_hidden_guids_settings(&now);
+            }
         }
-        self.interact.handle_map_suspend(&mut self.rx, gameplay);
+        #[cfg(feature = "paths-interact")]
+        {
+            self.interact.handle_map_suspend(&mut self.rx, gameplay);
+        }
     }
     pub(super) fn handle_map_leave(&mut self) {
         self.map_info.age_tick(None);
@@ -328,8 +344,11 @@ impl PathingController {
         self.maps.age_tick(None);
         self.maps.prune(Some(&self.map_info));
         // TODO: shared map update to None ig
-        self.filter_state.hidden.reset_map_leave();
-        self.interact.handle_map_leave(&mut self.rx);
+        #[cfg(feature = "paths-interact")]
+        {
+            self.filter_state.hidden.reset_map_leave();
+            self.interact.handle_map_leave(&mut self.rx);
+        }
     }
     pub(super) fn handle_map_enter(&mut self, map_id: MapIndex) {
         self.map_info.age_tick(Some(map_id));
@@ -340,10 +359,14 @@ impl PathingController {
         let map_packs = self.packs.on_map(map_id).map(|(p, _)| p).collect::<PackSet>();
         self.map_info.prune(Some(&self.packs));
         self.maps.prune(Some(&self.map_info));
+        #[cfg(feature = "paths-filter")]
         let hidden_guids = Self::clone_hidden_guids();
+        #[cfg(feature = "paths-filter")]
         let hidden_ctx = hidden_guids.as_ref().map(|h|
             (&**h, WallInstant::now_timestamp_mono())
         );
+        #[cfg(not(feature = "paths-filter"))]
+        let hidden_ctx = None;
         let mut shared_map_dirty = self.loader.shared.update_map_id(Some(map_id), false);
         for path in &map_packs {
             let map_path = path.rel(map_id);
@@ -364,6 +387,7 @@ impl PathingController {
                 },
             };
         }
+        #[cfg(feature = "paths-filter")]
         if let Some((_, now)) = hidden_ctx {
             if self.filter_state.hidden.reset_expired(&now) {
                 #[cfg(todo = "unnecessary")]
@@ -379,16 +403,21 @@ impl PathingController {
         }
         self.packs.age_tick(Some(&self.map_info), false);
         self.request_pack_loads(need_load);
-        self.interact.handle_map_enter(&mut self.rx, &self.maps, &self.map_info, map_id);
+        #[cfg(feature = "paths-interact")]
+        {
+            self.interact.handle_map_enter(&mut self.rx, &self.maps, &self.map_info, map_id);
+        }
     }
     pub(super) fn prepare_for_pack_map(
         &mut self,
         map_path: PackMapPath,
         notify: bool,
-        hidden_ctx: Option<(&HiddenGuids, Timestamp)>,
+        _hidden_ctx: HiddenCtx<'_>,
     ) -> Result<bool, ()> {
+        #[cfg(feature = "paths-filter")]
         let hidden_guids;
-        let (now, hidden_guids) = match hidden_ctx {
+        #[cfg(feature = "paths-filter")]
+        let (now, hidden_guids) = match _hidden_ctx {
             Some((hidden, now)) => (Some(now), Some(hidden)),
             None => {
                 hidden_guids = Self::clone_hidden_guids();
@@ -427,9 +456,12 @@ impl PathingController {
         let (dirty, map, map_info) = if let Some((info, map, map_info, data)) = info {
             match Self::init_map_for_pack(map_path, info, data, map, map_info) {
                 Ok(dirty) => {
+                    #[cfg(feature = "paths-filter")]
                     let vis_dirty = hidden_guids.as_ref().map(|guids|
                         Self::populate_hidden_guids_for_map(&mut self.filter_state, guids, map, map_info, now)
                     );
+                    #[cfg(not(feature = "paths-filter"))]
+                    let vis_dirty = None;
                     Self::continue_map_for_pack(&self.rx, &self.filter_state, map_path, info, data, map, map_info, (dirty, vis_dirty))
                         .map(|dirty| dirty | vis_dirty.unwrap_or(false))
                 },
@@ -919,6 +951,7 @@ impl PackLoader {
                 let Some(shared_state) = shared_map.get_state_mut(path) else { continue };
                 dirty |= shared_state.update_static(map);
                 dirty |= shared_state.update_with_loaded(map);
+                #[cfg(feature = "paths-interact")]
                 if let Some(filter_state) = filter_state {
                     dirty |= shared_state.update_with_hidden(path, &filter_state.hidden, map).unwrap_or(false);
                 }

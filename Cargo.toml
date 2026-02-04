@@ -111,18 +111,20 @@ markers-edit = [
 ]
 
 paths = [
-  "space",
-  # this mostly works but so few packs care to use it...
-  #"paths-schedule",
   "paths-interact",
   "paths-edit",
 ]
-paths-schedule = [
-  "dep:croner",
+paths-edit = [
+]
+paths-filter = [
+  # this mostly works but so few packs care to use it...
+  #"paths-schedule",
 ]
 paths-interact = [
+  "paths-filter",
 ]
-paths-edit = [
+paths-schedule = [
+  "dep:croner",
 ]
 paths-lua = [
   "scripts-lua",

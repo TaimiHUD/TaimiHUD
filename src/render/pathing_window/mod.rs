@@ -3,21 +3,18 @@ use {
         controller::pathing::PathingEvent,
         render::{element::prelude::*, machine::RenderMachine, PathingConfig, RenderState},
         settings::{
-            state::ui::{pathing::PathingFilterFlags, AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
+            state::ui::{AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
             Settings,
         },
         space::engine::Engine,
         with_i18n,
-        Controller,
-        ControllerEvent,
     },
     crate::render::element::pack::PackVisibility,
-    crate::controller::pathing::shared::interact::InteractMessage,
-    std::collections::HashSet,
-    taimi_pack::category::CategoryId,
     taimi_sync::watched::Watched,
     std::mem,
 };
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::shared::interact::InteractMessage;
 
 pub use self::filter::PathingSearchState;
 
@@ -425,6 +422,7 @@ impl PathingWindowState {
     pub fn packs_visibility(&self) -> PackVisibility {
         PackVisibility::visible_or_pending(self.ui_state.tab.selected_packs())
     }
+    #[cfg(feature = "paths-interact")]
     pub fn pois_visibility(&self) -> PackVisibility {
         PackVisibility::visible_or_pending(self.ui_state.tab.selected_pois())
     }

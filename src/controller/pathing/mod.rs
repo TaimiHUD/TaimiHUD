@@ -5,7 +5,6 @@ use {
         registry::{PackLoader, PackMapPath, LoadedMarkerPath},
         space::{SpaceContext, SpacePackShared},
         state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
-        interact::InteractReactor,
     },
     crate::{
         controller::{
@@ -24,7 +23,7 @@ use {
                 CONTROLS,
             },
         },
-        settings::{pathing::PathingSettings, Settings, SettingsLock},
+        settings::SettingsLock,
         space::{engine::SpaceEvent, Engine},
         Interruption,
         InterruptionSignal,
@@ -35,7 +34,7 @@ use {
         stream,
         StreamExt,
     },
-    std::{collections::{BTreeMap, VecDeque}, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
+    std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
     strum_macros::Display,
     taimi_hoard::{
         loc::LocationRef,
@@ -57,26 +56,31 @@ use {
     taimi_pack::attributes::{AttrString, Festivals},
     taimi_meta::packs::MapIndex,
     taimi_sync::watched,
-    tokio::{select, sync::Semaphore, task::{AbortHandle, JoinSet}},
+    tokio::{select, sync::Semaphore, task::JoinSet},
     tokio_util::sync::ReusableBoxFuture,
 };
+#[cfg(feature = "paths-interact")]
+use self::interact::InteractReactor;
+#[cfg(feature = "scripts")]
+use crate::controller::script;
 
 #[allow(unused_imports)]
 pub use self::{
     config::PackConfig,
-    interact::InteractMessage,
     festivals::FestivalFixup,
     registry::{LoaderBox, UnloadedReason},
     shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
     state::VisibilityFlagsExt,
 };
-#[cfg(feature = "scripts")]
-use crate::controller::script;
+#[cfg(feature = "paths-interact")]
+pub use self::interact::InteractMessage;
 
 mod config;
 mod festivals;
+#[cfg(feature = "paths-filter")]
 mod filter;
 pub mod info;
+#[cfg(feature = "paths-interact")]
 mod interact;
 pub mod reactor;
 pub mod registry;
@@ -113,9 +117,12 @@ pub(crate) enum PathingEvent {
     /// act upon a batch of changes to [shared::SharedPackLoad::config]
     CategoryEnableCommit(PackPath, CategorySet),
     /// taco guid reset
+    #[cfg(feature = "paths-filter")]
     ResetMarkerIds(Vec<MarkerId>),
     /// same as id
+    #[cfg(feature = "paths-filter")]
     ResetMarkerPath(MarkerPath<PackPath>),
+    #[cfg(feature = "paths-interact")]
     DismissMarker {
         path: MarkerPath,
         loaded_path: LoadedMarkerPath<PackMapPath>,
@@ -123,17 +130,20 @@ pub(crate) enum PathingEvent {
         contexts: Vec<state::hidden::HideContext>,
         reset: Option<state::hidden::AutoReset>,
     },
+    #[cfg(feature = "paths-interact")]
     TriggerMarkerCopy {
         path: MarkerPath,
         loaded_path: LoadedMarkerPath<PackMapPath>,
         value: AttrString,
         message: Option<AttrString>,
     },
+    #[cfg(feature = "paths-interact")]
     TriggerMarkerInfo {
         path: MarkerPath,
         loaded_path: LoadedMarkerPath<PackMapPath>,
         message: AttrString,
     },
+    #[cfg(feature = "paths-interact")]
     #[strum(to_string = "InteractControl {0}")]
     InteractControl(interact::InteractMessage),
     ToggleKatRender,
@@ -148,6 +158,7 @@ pub(crate) enum PathingEvent {
     #[cfg(todo = "unused")]
     SpawnTask(PathingTaskBox),
     #[cfg(todo = "unused")]
+    #[cfg(feature = "paths-filter")]
     Scheduled(WallInstant, Vec<Self>),
     FanOut(Vec<PathingEvent>),
     Exit(Interruption),
@@ -165,6 +176,7 @@ pub(crate) struct PathingController {
     loader: Arc<PackLoader>,
     rx: PathingReceiver,
     tasks: JoinSet<anyhow::Result<PathingEvent>>,
+    #[cfg(feature = "paths-filter")]
     scheduled_events: reactor::ScheduledEvents,
     controls: ControlsReceiver,
     keybinds: TaimiReceiver,
@@ -175,12 +187,16 @@ pub(crate) struct PathingController {
     maps: LoadedMaps,
     space: SpaceContext,
     filter_state: state::filter::FilterState,
-    /// TODO: replace this with a watcher or something
+    /// replace this with a real signal or something?
     filter_state_signal: Option<bool>,
+    #[cfg(feature = "paths-filter")]
     filter_expiry: reactor::FilterExpiryMap,
+    #[cfg(feature = "paths-filter")]
     filter_next_schedule: ReusableBoxFuture<'static, ()>,
     /// whether `filter_next_schedule` indicates dirty state after
+    #[cfg(feature = "paths-filter")]
     filter_next_schedule_dirty: bool,
+    #[cfg(feature = "paths-interact")]
     interact: InteractReactor,
     // watchers...
     pack_configs: watched::WatchStreamBox<PackPath, shared::SharedPackConfig>,
@@ -204,6 +220,7 @@ impl PathingController {
             controls: CONTROLS.subscribe_controls(),
             keybinds: CONTROLS.subscribe_taimi(),
             tasks: Default::default(),
+            #[cfg(feature = "paths-filter")]
             scheduled_events: Default::default(),
             settings,
             active: true,
@@ -214,12 +231,16 @@ impl PathingController {
             pack_configs_sig: PackPath::default(),
             filter_state: Default::default(),
             filter_state_signal: None,
+            #[cfg(feature = "paths-filter")]
             filter_expiry: Default::default(),
+            #[cfg(feature = "paths-filter")]
             filter_next_schedule: ReusableBoxFuture::new(future::pending()),
             // would rather avoid touching these APIs until main async loop, extra allocation is acceptable
             #[cfg(todo = "unnecessary")]
             filter_next_schedule: ReusableBoxFuture::new(WallInstant::big_sleep()),
+            #[cfg(feature = "paths-filter")]
             filter_next_schedule_dirty: true,
+            #[cfg(feature = "paths-interact")]
             interact: Default::default(),
         }
     }
@@ -250,6 +271,18 @@ impl PathingController {
             .rx
             .load_throttle
             .get_mut().clone();
+        let (scheduled_events, filter_next_schedule) = match () {
+            #[cfg(feature = "paths-filter")]
+            _ => (self.scheduled_events.infinite_mut().next(), &mut self.filter_next_schedule),
+            #[cfg(not(feature = "paths-filter"))]
+            _ => (future::pending::<Option<((), ())>>(), future::pending::<()>()),
+        };
+        let interact_rx = match () {
+            #[cfg(feature = "paths-interact")]
+            _ => self.interact.with_rx(&mut self.rx.interact),
+            #[cfg(not(feature = "paths-interact"))]
+            _ => future::pending::<()>(),
+        };
         select! {
             e = self.rx.command.recv() => {
                 let res = match e {
@@ -289,10 +322,14 @@ impl PathingController {
                     self.pack_configs = self.loader.shared.watch_config_changes(Either::Right(additions..));
                 }
                 let map_id = gameplay_prev.gameplay_map();
+                #[cfg(feature = "paths-filter")]
                 let hidden_guids = (map_id.is_some() && !packs_dirty.is_empty())
                     .then(Self::clone_hidden_guids)
                     .flatten();
+                #[cfg(feature = "paths-filter")]
                 let hidden_ctx = hidden_guids.as_ref().map(|h| (&**h, WallInstant::now_timestamp_mono()));
+                #[cfg(not(feature = "paths-filter"))]
+                let hidden_ctx = None;
                 for path in &packs_dirty {
                     if let Some(map_path) = map_id.map(|map| path.rel(map)) {
                         if let Some(pack) = self.packs.lookup_ref(&map_path.root) {
@@ -337,17 +374,21 @@ impl PathingController {
                 },
                 Err(e) => crate::log_join_error("pathing", e),
             },
-            Some((_when, m)) = self.scheduled_events.infinite_mut().next() => {
-                return self.handle_message(m).await
+            Some((_when, _m)) = scheduled_events => {
+                #[cfg(feature = "paths-filter")]
+                return self.handle_message(_m).await
             },
-            _ = &mut self.filter_next_schedule => {
-                // self.update_filter_state_schedule(ctx);
-                self.filter_next_schedule.set(WallInstant::soon(Self::SCHEDULE_TIMEOUT).to_future());
-                match self.filter_next_schedule_dirty {
-                    true => self.filter_state_signal = Some(true),
-                    false => {
-                        self.filter_state_signal.get_or_insert(false);
-                    },
+            _ = filter_next_schedule => {
+                #[cfg(feature = "paths-filter")]
+                {
+                    // self.update_filter_state_schedule(ctx);
+                    self.filter_next_schedule.set(WallInstant::soon(Self::SCHEDULE_TIMEOUT).to_future());
+                    match self.filter_next_schedule_dirty {
+                        true => self.filter_state_signal = Some(true),
+                        false => {
+                            self.filter_state_signal.get_or_insert(false);
+                        },
+                    }
                 }
             },
             _ = self.rx.festivals.changed() => {
@@ -378,17 +419,24 @@ impl PathingController {
             },
             _ = future::ready(()), if self.filter_state_signal.is_some() && gameplay_prev.gameplay_map().is_some() => {
                 let mut dirty = self.filter_state_signal.take().unwrap_or(false);
-                self.filter_next_schedule_dirty = false;
-                let now = WallInstant::now_timestamp_mono();
-                dirty |= self.update_filter_state(Some(now));
+                #[cfg(feature = "paths-filter")]
+                {
+                    self.filter_next_schedule_dirty = false;
+                    let now = WallInstant::now_timestamp_mono();
+                    dirty |= self.update_filter_hidden_state(Some(now));
+                }
+                dirty |= self.update_filter_state();
                 if dirty {
                     self.update_loaded_visibility(!Self::ALLOW_INCOMPLETE_VIS_UPDATE);
                 }
             },
-            event = self.interact.with_rx(&mut self.rx.interact) => {
-                let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
-                let followup = self.interact.process_event(&mut self.rx, cx, event).await;
-                self.process_or_spawn_message(followup).await;
+            _event = interact_rx => {
+                #[cfg(feature = "paths-interact")]
+                {
+                    let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
+                    let followup = self.interact.process_event(&mut self.rx, cx, _event).await;
+                    self.process_or_spawn_message(followup).await;
+                }
             },
             trail_reqs = SpaceContext::recv_trail_requests(&mut self.space.trail_geometry, &self.space.inflight) => {
                 for trail in trail_reqs {
@@ -434,9 +482,15 @@ impl PathingController {
         for handle in self.filter_expiry.values() {
             handle.abort();
         }
-        self.filter_expiry.clear();
+        #[cfg(feature = "paths-filter")]
+        {
+            self.filter_expiry.clear();
+        }
         self.tasks.abort_all();
-        self.interact.exit(&mut self.rx.interact, reason);
+        #[cfg(feature = "paths-interact")]
+        {
+            self.interact.exit(&mut self.rx.interact, reason);
+        }
 
         match reason {
             Interruption::Abort => return Ok(()),
@@ -456,9 +510,13 @@ impl PathingController {
             async move {
                 let mut enable_flags = enables.read().clone();
                 let settings = settings.read().await;
-                let (load_simultaneous, interact_config) = match settings.pathing.as_ref() {
-                    Some(p) => (p.load_simultaneous, Some(interact::InteractSettings::from_settings(p))),
-                    None => (None, None),
+                let load_simultaneous = settings.pathing.as_ref()
+                    .and_then(|p| p.load_simultaneous);
+                let interact_config = match &settings.pathing {
+                    #[cfg(feature = "paths-interact")]
+                    p => p.as_ref().map(|p| interact::InteractSettings::from_settings(p)),
+                    #[cfg(not(feature = "paths-interact"))]
+                    _ => None::<()>,
                 };
                 enable_flags.set(PathingEnables::KATRENDER, settings.enable_katrender);
                 #[cfg(feature = "paths-lua")]
@@ -483,8 +541,9 @@ impl PathingController {
         let preload = self.preload_all();
         let ((), get_settings) = tokio::join!(preload, get_settings);
 
-        let (settings_interact_config,) = get_settings;
-        if let Some(config) = settings_interact_config {
+        let (_settings_interact_config,) = get_settings;
+        #[cfg(feature = "paths-interact")]
+        if let Some(config) = _settings_interact_config {
             self.interact.config = config;
             self.interact.enables = self.rx.enables();
         }
@@ -638,16 +697,22 @@ impl PathingController {
             CategoryEnableCommit(pack_path, cats) => {
                 self.category_commit_vis(pack_path, &mut cats.into_paths()).await
             },
+            #[cfg(feature = "paths-filter")]
             ResetMarkerIds(ids) =>
                 self.process_filter_clear_ids(ids),
+            #[cfg(feature = "paths-filter")]
             ResetMarkerPath(path) =>
                 self.process_filter_clear_path(path),
+            #[cfg(feature = "paths-interact")]
             TriggerMarkerCopy { path, loaded_path, value, message } =>
                 self.process_marker_copy(path, loaded_path, value, message).await,
+            #[cfg(feature = "paths-interact")]
             TriggerMarkerInfo { path, loaded_path, message } =>
                 self.process_marker_info(path, loaded_path, message).await,
+            #[cfg(feature = "paths-interact")]
             DismissMarker { path, loaded_path, until, contexts, reset } =>
                 self.process_marker_dismiss(path, loaded_path, until, contexts, reset),
+            #[cfg(feature = "paths-interact")]
             InteractControl(msg) => {
                 let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
                 let followup = self.interact.process_event(&mut self.rx, cx, msg).await;
@@ -679,6 +744,7 @@ impl PathingController {
                 self.tasks.spawn(task);
             },
             #[cfg(todo = "unused")]
+            #[cfg(feature = "paths-filter")]
             Scheduled(when, events) => {
                 self.scheduled_events.schedule_append(when.instant, events);
             },
@@ -733,8 +799,9 @@ impl PathingController {
     }
 
     pub(crate) async fn handle_presses(&mut self, state: GameControls, changed: GameControls) {
-        let pressed = state & changed;
-        if pressed.contains(GameControl::Miscellaneous_Interact) {
+        let _pressed = state & changed;
+        #[cfg(feature = "paths-interact")]
+        if _pressed.contains(GameControl::Miscellaneous_Interact) {
             if let Some(map_id) = self.filter_press_gameplay(GameControl::Miscellaneous_Interact) {
                 self.handle_press_interact(map_id).await;
             }
@@ -748,6 +815,7 @@ impl PathingController {
     /// ignore if not in-game or textbox has focus etc
     ///
     /// TODO: might still be possible to use if bound to a mouse button maybe?
+    #[cfg(feature = "paths-interact")]
     fn filter_press_gameplay(&mut self, control: GameControl) -> Option<MapIndex> {
         let ml = match () {
             #[cfg(todo = "unnecessary")]
@@ -761,6 +829,7 @@ impl PathingController {
             (!is_text_input).then_some(map_id)
         })
     }
+    #[cfg(feature = "paths-interact")]
     pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
         let interact_ctx = (&self.map_info, &self.maps, map_id, &self.filter_state);
         if self.rx.interact.try_throttle_press() {
@@ -803,7 +872,10 @@ impl PathingController {
         let maps = (&self.map_info, &self.maps);
         if dirty || aggressive {
             self.space.collect_garbage(maps, map_id, aggressive);
-            self.interact.collect_garbage(&mut self.rx, maps, map_id, aggressive).await;
+            #[cfg(feature = "paths-interact")]
+            {
+                self.interact.collect_garbage(&mut self.rx, maps, map_id, aggressive).await;
+            }
         }
     }
 
@@ -832,6 +904,7 @@ impl PathingController {
         match msg {
             e @ (PathingEvent::Nop | PathingEvent::Exit(..) | PathingEvent::FanOut(..)) =>
                 self.spawn_message(e),
+            #[cfg(feature = "paths-interact")]
             e @ PathingEvent::InteractControl(..) =>
                 self.spawn_message(e),
             event => self.process_message(event).await,
@@ -840,7 +913,9 @@ impl PathingController {
     fn spawn_message(&mut self, msg: PathingEvent) {
         match msg {
             PathingEvent::Nop => (),
+            #[cfg(feature = "paths-interact")]
             PathingEvent::InteractControl(interact::InteractMessage::Nop) => (),
+            #[cfg(feature = "paths-interact")]
             e @ PathingEvent::InteractControl(..) => {
                 // TODO: deleteme
                 self.tasks.spawn(async move {

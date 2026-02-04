@@ -376,7 +376,7 @@ impl PathingController {
                 )
             });
         let mut dirty = false;
-        for (marker_path, lpath, category_index, visibility, filters, guid) in pois.chain(trails) {
+        for (_marker_path, _lpath, category_index, visibility, filters, _guid) in pois.chain(trails) {
             let prev = *visibility & VisibilityFlags::TOGGLES;
             *visibility = visibility.restore_default_toggles();
             let cat_vis = map_info
@@ -398,18 +398,20 @@ impl PathingController {
                 },
                 _ => (),
             }
+            #[cfg(feature = "paths-filter")]
             let guid_filter_state = match filter_state {
                 _ if !visibility.is_visible() => None,
                 Some(filter_state) if filter_state.hidden.is_empty() => None,
                 f => f,
             };
+            #[cfg(feature = "paths-filter")]
             if let Some(filter_state) = guid_filter_state {
                 let inverted = filters.as_ref().map(|f| f.invert_behavior()).unwrap_or(false);
                 // TODO: use GroupConfig properly here and move most of this into a method!
-                let marker_path: MarkerPath<PackPath> = MarkerPath::with_parts(lpath.root.root, marker_path.path);
+                let marker_path: MarkerPath<PackPath> = MarkerPath::with_parts(_lpath.root.root, _marker_path.path);
                 let marker_id = MarkerId::for_marker(marker_path);
-                let lmarker_id = MarkerId::for_marker(lpath);
-                let guid_id = guid.as_ref().and_then(|guid| (!guid.0.is_nil()).then_some(MarkerId::from_uuid_ref(&guid.0)));
+                let lmarker_id = MarkerId::for_marker(_lpath);
+                let guid_id = _guid.as_ref().and_then(|guid| (!guid.0.is_nil()).then_some(MarkerId::from_uuid_ref(&guid.0)));
                 let marker_ids: [Option<&MarkerId>; 3] = [
                     Some(&marker_id),
                     Some(&lmarker_id),
@@ -500,12 +502,15 @@ impl PathingController {
         filter::FilterConfig::filters_is_empty(filters)
     }
     /// interested in retaining full attrs in memory
-    fn marker_wants_attrs(ispoi: bool, attrs: &MarkerAttributes) -> bool {
+    fn marker_wants_attrs(_ispoi: bool, attrs: &MarkerAttributes) -> bool {
         let can_filter = attrs.filters.as_ref().map(|f| Self::can_filter(f)).unwrap_or(false);
         if can_filter { return true }
 
-        let can_interact = ispoi && attrs.interaction.as_ref().map(|i| Self::can_interact(i)).unwrap_or(false);
-        if can_interact { return true }
+        #[cfg(feature = "paths-interact")]
+        {
+            let can_interact = _ispoi && attrs.interaction.as_ref().map(|i| Self::can_interact(i)).unwrap_or(false);
+            if can_interact { return true }
+        }
 
         false
     }
@@ -553,6 +558,15 @@ impl PathingController {
 
         Engine::try_send(SpaceEvent::SettingsDirty);
         set
+    }
+
+    pub(super) fn update_filter_state(&mut self) -> bool {
+        let mut dirty = false;
+        if let Ok(ml) = rt::mumble_link_ptr() {
+            dirty |= self.filter_state.map.update_from_mumblelink_context(&ml);
+            dirty |= self.filter_state.avatar.update_from_mumblelink_context(&ml);
+        }
+        dirty
     }
 
     pub async fn debug_req_config_vis(&mut self, pack_path: Option<PackPath>, partial: bool, publish: Option<bool>) {

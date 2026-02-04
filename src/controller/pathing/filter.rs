@@ -5,14 +5,13 @@ use {
             state::{
                 hidden::{AutoReset, HideContext},
                 filter::FilterState,
-                LoadedMaps, LoadedMapInfo, LoadedMapPack,
+                LoadedMapPack,
             },
             info::MapPackInfo,
             shared::HiddenGuids,
-            PathingController, PathingEvent,
+            PathingController,
         },
         controller::runtime::WallInstant,
-        exports::runtime as rt,
         settings::state::SaveState,
     },
     taimi_meta::packs::{
@@ -24,14 +23,12 @@ use {
     futures::future::Either,
     std::iter,
     std::sync::Arc,
-    std::collections::BTreeMap,
     std::time::Duration,
     taimi_pack::attributes::keys::Guid,
-    taimi_meta::packs::MapIndex,
-    tokio::task::AbortHandle,
 };
 
 impl PathingController {
+    #[cfg(feature = "paths-interact")]
     pub(super) fn filter_dismiss_poi(&mut self, lpath: LoadedPoiPath<PackMapPath>, expiry: Option<Either<Timestamp, Duration>>, hide_contexts: Vec<HideContext>, reset: Option<AutoReset>) {
         let map_path = lpath.root;
         let lpoi_path: LoadedPoiPath = lpath.unscope();
@@ -100,13 +97,9 @@ impl PathingController {
     }
 
     /// TODO: maintain interest list of states that are actually relevant to loaded marker filters
-    pub fn update_filter_state(&mut self, now: Option<Timestamp>) -> bool {
+    pub fn update_filter_hidden_state(&mut self, now: Option<Timestamp>) -> bool {
         let mut dirty = false;
-        if let Ok(ml) = rt::mumble_link_ptr() {
-            dirty |= self.filter_state.map.update_from_mumblelink_context(&ml);
-            dirty |= self.filter_state.avatar.update_from_mumblelink_context(&ml);
-            // TODO: self.filter_state.character.update_from_mumblelink(ml);
-        }
+        #[cfg(feature = "paths-filter")]
         if let Some(now) = now {
             dirty |= self.filter_state.hidden.reset_expired(&now);
         }
@@ -165,7 +158,6 @@ impl PathingController {
         self.schedule_filter_state(when);
     }
 
-    #[doc(alias = "mark_hidden_dirty")]
     pub fn update_shared_hidden(&self, dirty_packs: Option<&mut dyn Iterator<Item = PackMapPath>>) {
         let mut all_packs;
         let dirty_packs = match dirty_packs {
@@ -191,33 +183,13 @@ impl PathingController {
         });
     }
 
-    #[inline]
-    #[cfg(deleteme)]
-    pub(super) fn unexpire_at(filter_expiry: &mut BTreeMap<MarkerId, AbortHandle>, item: &MarkerId) -> bool {
-        if let Some(handle) = filter_expiry.remove(item) {
-            handle.abort();
-            true
-        } else {
-            false
-        }
-    }
     pub(super) fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
         Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, item.as_ref())
-    }
-    #[cfg(deleteme)]
-    pub(super) fn expire_at(&mut self, item: MarkerId, expiry: WallInstant) {
-        let handle = self.tasks.spawn(async move {
-            let _ = expiry.to_future().await;
-            Ok(PathingEvent::ResetMarkerIds(vec![item]))
-        });
-        // TODO: there's probably an entry replace api for this...
-        self.unexpire(&item);
-        self.filter_expiry.insert(item, handle);
     }
     pub(super) const SCHEDULE_TIMEOUT: Duration = Duration::from_secs(Timestamp::HOUR.as_secs() * 12);
 }
 
-/// [PathingEvent::ResetMarkerIds] and [PathingEvent::ResetMarkerPath]
+/// [ResetMarkerIds](super::PathingEvent::ResetMarkerIds) and [ResetMarkerPath](super::PathingEvent::ResetMarkerPath)
 impl PathingController {
     pub(super) fn process_filter_clear_ids(&mut self, ids: Vec<MarkerId>) {
         self.filter_clear_save_ids(&mut ids.iter());
