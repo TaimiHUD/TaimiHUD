@@ -5,7 +5,13 @@ pub use taimi_hoard::statistics::Counter;
 pub use taimi_hoard::statistics::Dummy as Counter;
 use {
     core::{fmt, time::Duration},
-    std::{collections::BTreeMap, sync::RwLock},
+    std::{
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering as AtomicOrdering},
+            RwLock,
+        },
+    },
     taimi_hoard::lazyfmt,
 };
 
@@ -13,10 +19,11 @@ use {
 pub struct StatsDesc {
     pub section: &'static str,
     pub name: &'static str,
+    pub detailed: bool,
 }
 impl StatsDesc {
     pub const fn new(section: &'static str, name: &'static str) -> Self {
-        Self { section, name }
+        Self { section, name, detailed: false }
     }
 }
 pub type StatsRegistry = RwLock<BTreeMap<StatsDesc, StatsRef>>;
@@ -93,13 +100,26 @@ impl StatsUnit {
         let denom = (value >> 32) as u32;
         (num as i32, denom)
     }
+    pub fn frac_num(value: u64) -> i32 {
+        value as u32 as i32
+    }
     pub fn frac_inc_denom(value: u64, amt: u32) -> u64 {
         value.saturating_add((amt as u64) << 32)
     }
+    pub fn frac_inc(value: u64, amt: u32) -> u64 {
+        value.saturating_add(amt as u64)
+    }
     pub fn frac_inc_num(value: u64, amt: i32) -> u64 {
         let num = value as u32 as i32;
+        Self::frac_set_num(value, num.saturating_add(amt) as u32)
+    }
+    pub fn frac_set_num(value: u64, num: u32) -> u64 {
         let denom = value & !(u32::MAX as u64);
-        denom | (num.saturating_add(amt)) as u64
+        denom | num as u64
+    }
+    pub fn frac_set_denom(value: u64, denom: u32) -> u64 {
+        let num = value as u32;
+        ((denom as u64) << 32) | num as u64
     }
     pub fn time(span: Duration) -> u64 {
         span.as_micros() as u64
@@ -135,14 +155,63 @@ impl StatsUnit {
                 let num = value as u32;
                 let denom = (value >> 32) as u32;
                 let num = num as i32;
-                if denom <= 2 {
-                    let num = num as i32;
-                    return write!(f, "{num}/{denom}")
-                } else {
-                    let suffix = (denom == 100).then_some("%").unwrap_or("");
-                    return write!(f, "{}{suffix}", num as f64 / denom as f64)
+                match denom {
+                    denom if denom <= 2 => {
+                        let num = num as i32;
+                        write!(f, "{num}/{denom}")
+                    },
+                    denom if denom % 100 == 0 =>
+                        return write!(f, "{:.04}%", num as f64 * 100.0 / denom as f64),
+                    denom => return write!(f, "{:.04}", num as f64 / denom as f64),
                 }
             },
         })
+    }
+}
+
+#[derive(Debug)]
+pub struct MetricsCollectionState {
+    pub switch: AtomicUsize,
+}
+impl MetricsCollectionState {
+    pub const SWITCH_ORDERING: AtomicOrdering = AtomicOrdering::Relaxed;
+
+    pub const fn new() -> Self {
+        Self {
+            switch: AtomicUsize::new(MetricsSwitch::DEFAULT.bits()),
+        }
+    }
+    pub const fn config() -> &'static Self {
+        static CONFIG: MetricsCollectionState = MetricsCollectionState::new();
+        &CONFIG
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct MetricsSwitch: usize {
+        const COLLECT = 0x01;
+        const FRAME_LOG = 0x02;
+        const FRAME_LOG_TRIGGER = 0x04;
+    }
+}
+impl MetricsSwitch {
+    pub const DEFAULT: Self = Self::empty();
+
+    pub const fn switch() -> &'static AtomicUsize {
+        &MetricsCollectionState::config().switch
+    }
+
+    pub fn read() -> Self {
+        Self::from_bits_retain(Self::switch().load(MetricsCollectionState::SWITCH_ORDERING))
+    }
+    pub fn publish_toggle(self) {
+        Self::switch().fetch_xor(self.bits(), MetricsCollectionState::SWITCH_ORDERING);
+    }
+    pub fn publish_set(self) {
+        Self::switch().fetch_or(self.bits(), MetricsCollectionState::SWITCH_ORDERING);
+    }
+    pub fn publish_clear(self) {
+        Self::switch().fetch_and((!self).bits(), MetricsCollectionState::SWITCH_ORDERING);
     }
 }

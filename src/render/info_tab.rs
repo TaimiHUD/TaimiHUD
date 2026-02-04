@@ -2,11 +2,11 @@ use {
     super::TimerWindowState,
     crate::{
         built_info,
-        exports::runtime::{self as rt, statistics},
-        render::{
-            element::prelude::*,
-            machine::{RenderMachine, RenderSlot},
+        exports::runtime::{
+            self as rt,
+            statistics::{MetricsSwitch, StatsRef},
         },
+        render::{element::prelude::*, machine::RenderMachine},
         Controller,
         ControllerEvent,
         TEXTURES,
@@ -251,14 +251,43 @@ impl InfoTabState {
 
     /// TODO: TreeNode sections
     pub fn stats_table(&self, ui: &Ui) {
-        if let Ok(stats) = statistics::StatsRef::registry().try_read() {
+        if let Ok(stats) = StatsRef::registry().try_read() {
             if stats.is_empty() {
                 return
             }
+            let switch = MetricsSwitch::read();
+            let detailed = switch.contains(MetricsSwitch::COLLECT);
             with_i18n!("stats", |label| ui.text_with_font(NexusLinkFont::Big, label));
+            {
+                ui.same_line();
+                ui.dummy([4.0; 2]);
+                ui.same_line();
+                let label = match detailed {
+                    true => "disable",
+                    false => "enable",
+                };
+                if with_i18n!(label, |label| ui.small_button(&label)) {
+                    MetricsSwitch::COLLECT.publish_toggle();
+                } else if ui.is_item_hovered() {
+                    ui.tooltip_text("toggle detailed metrics collection");
+                }
+                ui.same_line();
+                if ui.small_button("framelog") {
+                    MetricsSwitch::FRAME_LOG.publish_toggle();
+                }
+                if switch.contains(MetricsSwitch::FRAME_LOG) {
+                    ui.same_line();
+                    if ui.small_button("trigger") {
+                        MetricsSwitch::FRAME_LOG_TRIGGER.publish_set();
+                    }
+                }
+            }
             let _table = ui.begin_table("stats", 2);
             let mut section_prev = 0usize;
             for (desc, counter) in stats.iter() {
+                if desc.detailed & !detailed {
+                    continue
+                }
                 let value = match counter.read() {
                     0 => continue,
                     v => v,

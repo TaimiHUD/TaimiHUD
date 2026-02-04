@@ -21,7 +21,12 @@ use {
     std::{ops::Range, sync::Arc},
 };
 use {
-    crate::{controller::Controller, exports::runtime as rt, render::RenderState, settings::Settings},
+    crate::{
+        controller::Controller,
+        exports::runtime::{self as rt, imgui, statistics::MetricsSwitch},
+        render::RenderState,
+        settings::Settings,
+    },
     anyhow::Context,
     core::num::NonZero,
     glamour::{Angle, Point3, Size2, Vector2, Vector3},
@@ -40,10 +45,12 @@ use {
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
+    diag::{frame_log, FrameLog},
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
 
+mod diag;
 mod map;
 #[cfg(feature = "markers")]
 mod markers;
@@ -104,6 +111,10 @@ pub struct RenderMachine {
     pub pathing: Option<Arc<PathingShared>>,
     #[cfg(feature = "paths")]
     pub pack_ui_state: PackElements,
+    pub metrics_switch: MetricsSwitch,
+    pub metrics_checkpoint: Option<Instant>,
+    pub metrics_checkpoint_render: Option<Instant>,
+    pub metrics_checkpoint_ui: Option<Instant>,
 }
 
 pub type RenderPositioning<S = LocalSpace> = (Point3<S>, Vector3<S>);
@@ -169,6 +180,10 @@ impl RenderMachine {
             pathing: None,
             #[cfg(feature = "paths")]
             pack_ui_state: PackElements::default(),
+            metrics_switch: Default::default(),
+            metrics_checkpoint: Default::default(),
+            metrics_checkpoint_render: Default::default(),
+            metrics_checkpoint_ui: Default::default(),
         }
     }
 
@@ -269,6 +284,8 @@ impl RenderMachine {
         rt::bindings::populate_bind_controls();
     }
     pub fn act_setup(&mut self) {
+        self.metrics_init();
+
         log::debug!("loading initial keybinds");
         rt::bindings::populate_bind_controls();
     }
@@ -339,6 +356,9 @@ impl RenderMachine {
         include_bytes!("../../../data/textures/logotype-glow-256.png");
 
     pub fn turn_render_pre(&mut self) {
+        self.metrics_pre();
+        self.metrics_pre_render();
+
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
             Controller::with_sender(|s| {
@@ -457,18 +477,28 @@ impl RenderMachine {
                 _ => (),
             }
         }
+        self.post_render();
+    }
+    fn post_render(&mut self) {
+        self.metrics_post_render();
+        self.act_frame_log();
     }
 
     pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
     where
         U: ?Sized + super::element::im::ImDrawWindow<'ui>,
     {
+        self.metrics_pre_ui();
+
         let prev_display_size = *self.display_size_ref();
         let display_size = self.display_size_mut();
         *display_size = ui.im_io_display_size().0.cast();
         if !rt::vec_eq(*display_size, prev_display_size) {
             self.act_display_size();
         }
+    }
+    pub fn post_ui(&mut self) {
+        self.metrics_post_ui();
     }
 
     #[inline]
