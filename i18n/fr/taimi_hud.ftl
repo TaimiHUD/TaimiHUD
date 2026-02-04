@@ -26,13 +26,13 @@ ask = Demander
 always = Toujours
 never = Jamais
 auto-update = Mise à jour automatique
-unset = Désactiver #TODO: context?
+# unset = Désactiver #NOTE: unused?
 add = Ajouter
 create-arg = Créer nouveau { $arg }
 not-create-arg = Utiliser { $arg } existant
 description = Description
 location = Emplacement: { $path }
-data = Donnée #TODO: context?
+data = Donnée
 object = Objet
 files = Fichiers
 clear = Effacer
@@ -64,8 +64,8 @@ expand-all = Tout développer
 filetype = Type du Fichier
 filename = Nom du Fichier
 collapse-all = Tout réduire
-active = Actif #TODO: should this be woke?
-inactive = Inactif #TODO: should this be woke?
+active = Actif.ve
+inactive = Inactif.ve
 enable = Activer
 cancel = Annuler
 default = Défaut
@@ -84,14 +84,14 @@ map-id-wrong = ID de Carte incorrect.
 no-positions = Pas de position de marqueur fournie.
 validation-fail = Validation failed due to:
 filename-empty = Pas de nom de fichier fourni.
-count = Compte #TODO: context?
+# count = Compte #NOTE: unused?
 actions = Actions
 module = Module
 unspecified = Non spécifié
 
 ## Addon
 
-addon = Addon #TODO: keep it english or use module?
+addon = Add-on
 primary-window-toggle = Activer/Désactiver Fenêtre Taimi
 context-menu-primary = { menu }
 timer-window-toggle = Activer/Désactiver Fenêtre Minuteur
@@ -114,25 +114,25 @@ imgui-notice = Vous pouvez Ctrl+Clic gauche sur les curseurs, ou autre, pour dir
 context-click-notice = Clic droit pour plus d'options
 dpi-scaling = Échelle DPI
 dpi-notice = Veiller à ce que ceci corresponde à la valeur "{dpi-scaling}" dans les options graphiques du jeu afin que les éléments de la carte s'affichent correctement.
-marker-trigger = Marker set position trigger behaviour
-marker-condition = Behaviour condition
+marker-trigger = Comportement du déclencheur à la position de l'ensemble de marqueurs
+marker-condition = Condition du déclenchement
 autoplace-warning = Si vous n'avez pas RTAPI d'installé, nous ne pourront pas vérifier si vous êtes commandant ou juste lieutenant.
 nexus-quick-access = Icônes d'accès rapide
 icon-style = Style d'icônes
 icon-style-plain = Simple
 icon-style-scanlines-1 = Lignes de balayage
-preferred-loader = Loader Preference
-preferred-updater = Update Host Preference
+preferred-loader = Préférence du chargeur
+preferred-updater = Update Host Preference #TODO
 gh-api-token = Token d'API GitHub
-gh-api-token-notice = Rate limit errors when updating datasources may be avoided by configuring a personalized token - only provide if you understand the implications of doing so!
+gh-api-token-notice = Les erreurs liées aux limites de requêtes ("Rate Limit") lors de la mise à jour des sources de données peuvent être évitées en configurant un jeton personel - ne le faites que si vous comprenez les implications de cette action !
 language = Langue
 addonbinds = Raccourcis
 gamebinds = Raccourcis clavier du jeu
 keybind = Raccourci clavier
 gamebind-notice = Configurez les raccourcis ici pour qu'ils correspondent aux raccourcis du jeu. La détection des raccourcis du jeu peut être automatique si arcdps-unofficial-extras est installé.
 precise-markers = Marqueurs précis
-
-## Windows
+bind = Associer
+press-key = appuyez sur une touche
 
 primary-window = TaimiHUD
 timers-window = Minuteurs de combat de boss #TODO: is this correct
@@ -147,8 +147,9 @@ marker-window = { markers-window }
 addon-uninstall-modal-title = Désinstaller { $source } ?
 addon-uninstall-modal-button = Désinstaller
 addon-uninstall-modal-description = Attention! Ceci supprimera le dossier et tout son contenu.
-delete-markerset-warning = Please be careful! This will delete the marker set entry within the file.
-overwrite-markerset = Please be careful! This will overwrite the marker set entry within the file.
+delete-markerset-warning = Attention! Ceci supprimera l'entrée du marqueur dans le fichier.
+overwrite-markerset = Attention! Ceci remplacera l'entrée du marqueur dans le fichier.
+
 ## Openable
 
 open-button = Ouvrir { $kind }
@@ -169,7 +170,7 @@ checked-for-updates-last = Dernière vérification des mises à jour: { $time }
 reload-data-sources = Rafraichîr les sources de données
 reload-data-sources-tooltip = Rechargez les éléments à partir des sources de données actuellement installées. Utile si vous les avez modifiés !
 
-remote = Distant #TODO: terminology git uses but seems weird in context
+remote = Distant
 update-status = Status de mise à jour
 version-installed = Version installée: { $version }
 version-not-installed = Pas installé
@@ -236,7 +237,7 @@ screen-header = (XY) Écran
 marker-not-on-screen = Pas sur l'écran
 select-a-marker = Veuillez sélectionner un marqueur à configurer!
 marker-filetype-explanation = There are three kinds of markers file, there is the kind that
-  comes with the BlishHUD Commander's Markers module (integrated), there is the kind that they use to ship Community Markers and then there is my own format, which takes the per marker set format and makes it a single file per marker set.
+  comes with the BlishHUD Commander's Markers module (integrated), there is the kind that they use to ship Community Markers and then there is my own format, which takes the per marker set format and makes it a single file per marker set. #TODO
 no-markers-for-map = Pas de marqueurs trouvés pour la carte actuelle.
 cant-place-markers = Impossible à placer
 autoplacement-disable = Désactiver placement automatique
@@ -251,24 +252,24 @@ do-nothing = Ne rien faire
 
 ## Markers window
 clear-markers = { clear } { markers }
-clear-spent-autoplace = Reset spent auto-placement
+clear-spent-autoplace = Reset spent auto-placement #TODO
 
 ## Edit markers window
 
 edit-markers = Créer/modifier marqueurs
 set-map-id = Définir ID de carte à (sur?) la carte actuelle
 current-squad-markers = marqueurs d'escouade actuels
-take-squad-markers = Take from { current-squad-markers }
-cannot-take-squad-markers = Cannot take from { current-squad-markers }; pas dans une escouade. #TODO
-rt-api-required-squad-markers = { rt-api-required-base } taking squad marker locations automatically.
+take-squad-markers = Prendre de { current-squad-markers }
+cannot-take-squad-markers = Impossible de prendre de { current-squad-markers }; pas dans une escouade.
+rt-api-required-squad-markers = { rt-api-required-base } prendre les positions des marqueurs automatiquement.
 no-position = Pas de position fournie.
-trigger = Déclencheur: { $position } #TODO: context?
+trigger = Déclencheur: { $position }
 position-plain = { $position }
 position-get = Récupérer { position } actuelle
 set-manually = Définir manuellement
 manual-position = { position } manuelle
 set-manually-save = { save } { position } manuelle
-trigger-explanation = A trigger for a marker set is a 15m radius sphere with its centre at the trigger location.
+trigger-explanation = Un déclencheur pour un ensemble de marqueurs est une sphère d'un rayon de 15m avec comme centre la position du déclencheur.
 
 ## Timer tab
 
@@ -287,20 +288,20 @@ reset-timers = { reset } { timers }
 
 pathing = Pathing
 trail = Trail #TODO: there are so many translations of this... Chemin, Traînée, Tracé, chemin balisé, trajet
-poi = POI/PI #TODO: this is never ever named like that in french.
+poi = POI
 space = KatRender
 reload-packs = Rafraîchir
-unload-packs = Unload All
-filter-options = Filter Options
-searchbar-clear = Clear the search bar and results.
+unload-packs = Tout décharger
+filter-options = Options de filtrage
+searchbar-clear = Effacher la barre de recherche et les résultats.
 show-filter = Afficher les options de filtrage
 hide-filter = Cacher les options de filtrage
 current-map = Carte actuelle
-ignore-root = Ignore root state
-ignore-leaf = Ignore leaf state
-ignore-branch = Ignore branch state
+ignore-root = Ignore root state #TODO
+ignore-leaf = Ignore leaf state #TODO
+ignore-branch = Ignore branch state #TODO
 show-hidden = Afficher cachés
-show-all = Tout afficher #TODO: Afficher tout?
+show-all = Tout afficher
 #off-map = Elsewhere
 ignore-whitespace = Ignorer espaces
 case-insensitive = Ignorer la casse
@@ -331,16 +332,16 @@ pathing-config-map-open = Fwoom
 pathing-config-camera-source = Source de Données Caméra
 pathing-config-advanced = Paramètres avancés
 pathing-config-trail-notice = Les paramètres de génération des chemins peuvent nécessiter un changement ou un rechargement de la carte pour prendre effet, et peuvent ne pas fonctionner comme prévu.
-pathing-config-trail-y-offset = Vertical Offset
-pathing-config-trail-resolution = Trail Resolution
-pathing-config-trail-width = Base Width
-pathing-config-goggles = X-ray Goggles Experiment
+pathing-config-trail-y-offset = Décalage Vertical
+pathing-config-trail-resolution = Résolution des { trail }
+pathing-config-trail-width = Largeur de base
+pathing-config-goggles = Expérience Lunettes Rayons X
 pathing-config-goggles-notice = Ceci nécessite de configurer l'échantillonage du rendu sur Native dans les Options graphiques.
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (actif)
 pathing-config-reset-notice = Clic-droit sur n'importe quel curseur pour rétablir sa valeur par défaut.
 pathing-config-edge-feather-scale = échelle de lissage des bords
-pathing-config-corner-boudary-scale = échelle de délimitation d'angle
+pathing-config-corner-boundary-scale = échelle de délimitation d'angle
 pathing-notice-space = {space} est requis (for pathing functionality). #TODO: HOW
 pathing-notice-mumblelink = si vous remarquez des ralentissements dans le jeu, essayez de modifier le paramètre Synchronisation verticale dans les paramètres graphiques du jeu
 pathing-notice-rtapi-missing = RTAPI est un addon séparé qui doit être installé via Nexus
@@ -352,7 +353,7 @@ rtapi = Nexus RealTime API
 
 render-unload = Activer Rendu
 render-reload = Recharger Rendu
-render-notice-gameplay = Load in to the game to get started
+render-notice-gameplay = Chargez dans le jeu pour commencer #TODO: not sure about this one
 render-notice-gameplay-initial = Choisissez un personnage pour commencer
 render-notice-error = Erreur! Consultez le fichier journal dans le dossier de Nexus ou Taimi pour plus de détails
 packs-empty = Pas de fichiers chargés.

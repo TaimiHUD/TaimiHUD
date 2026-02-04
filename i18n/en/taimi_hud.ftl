@@ -131,6 +131,8 @@ gamebinds = Game Bindings
 keybind = Keybind
 gamebind-notice = Set these to match your Controls settings in-game. These may be automatically detected when arcdps-unofficial-extras is installed.
 precise-markers = Precise Markers
+bind = Bind
+press-key = press a key
 
 ## Windows
 
@@ -340,7 +342,7 @@ pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
 pathing-config-reset-notice = Right-click any slider below to restore its default setting.
 pathing-config-edge-feather-scale = edge feather scale
-pathing-config-corner-boudary-scale = corner boundary scale
+pathing-config-corner-boundary-scale = corner boundary scale
 pathing-notice-space = {space} is required for pathing functionality.
 pathing-notice-mumblelink = if you experience stuttering, try changing Vertical Sync under the in-game graphical settings
 pathing-notice-rtapi-missing = RTAPI is a separate addon that must be installed via Nexus

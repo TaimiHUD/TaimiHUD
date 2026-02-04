@@ -24,6 +24,7 @@ use {
     },
     anyhow::Context,
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
+    std::borrow::Cow,
     strum::IntoEnumIterator,
     tokio::sync::watch,
 };
@@ -437,7 +438,7 @@ impl ConfigUpdateState {
             fl!("auto-update"),
             &mut index,
             &UpdatePreference::OPTIONS,
-            |option| option.as_str().into(),
+            |option| with_i18n(option.as_str().to_lowercase().as_str(), |msg| msg.to_string()).into(),
         );
         let mut new_pref = None;
         if auto_update {

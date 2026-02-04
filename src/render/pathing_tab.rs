@@ -385,15 +385,21 @@ impl PathingConfig {
         ) {
             Self::set_pathing(|s| s.space.player_overlap_threshold = value);
         }
-        if let Some(value) =
-            Self::slider_opt_setting(ui, "edge feather scale", edge_feather_scale, (0.001f32, 5.0))
-        {
+        if let Some(value) = Self::slider_opt_setting(
+            ui,
+            &fl!("pathing-config-edge-feather-scale"),
+            edge_feather_scale,
+            (0.001f32, 5.0),
+        ) {
             Self::set_pathing(|s| s.space.edge_feather_scale = value);
         }
         #[cfg(feature = "goggles")]
-        if let Some(value) =
-            Self::slider_opt_setting_or_min(ui, fl!("corner-boundary-scale"), edge_scale, (0.1f32, 5.0))
-        {
+        if let Some(value) = Self::slider_opt_setting_or_min(
+            ui,
+            &fl!("pathing-config-corner-boundary-scale"),
+            edge_scale,
+            (0.1f32, 5.0),
+        ) {
             let mut edge_scale = value;
             Self::set_pathing(|s| {
                 s.space.goggles.edge_scale = value;
