@@ -516,35 +516,6 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<D
         OFF as u32
     }
 }
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
-    for Option<BufferOf<D, OFF>>
-{
-    fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
-        D3dContextBindableVertexBuffer::vertex_buffer_ptr(&self.as_ref())
-    }
-    fn vertex_buffer_stride(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_stride(&self.as_ref())
-    }
-    fn vertex_buffer_offset(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_offset(&self.as_ref())
-    }
-}
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
-    for Option<&'_ BufferOf<D, OFF>>
-{
-    fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
-        self.map(D3dContextBindableVertexBuffer::vertex_buffer_ptr)
-            .unwrap_or(ptr::null_mut())
-    }
-    fn vertex_buffer_stride(&self) -> u32 {
-        //self.map(D3dContextBindableVertexBuffer::vertex_buffer_stride).unwrap_or(0)
-        D::stride() as u32
-    }
-    fn vertex_buffer_offset(&self) -> u32 {
-        //self.map(D3dContextBindableVertexBuffer::vertex_buffer_offset).unwrap_or(0)
-        OFF as u32
-    }
-}
 impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for BufferOf<D, OFF> {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_one_vertex(self, device_context, slot)
