@@ -529,6 +529,122 @@ macro_rules! impl_d3d {
             }
         )?
     };
+    (impl$({$($imp:tt)*})? D3dStateSnapshot<$d3dc:ty>
+        for [$ty:ty; N]
+    ; $($rest:tt)*) => {
+        impl$(<$($imp)*>)? $crate::state::D3dStateSnapshot<$d3dc> for $ty where
+            $d3dc: $crate::device::D3dContext,
+            [$ty; 1]: $crate::state::D3dStateSnapshot<$d3dc>,
+        {
+            #[inline]
+            fn empty_state(device: &<$d3dc as $crate::device::D3dContext>::IDevice) -> anyhow::Result<Self> {
+                <[$ty; 1] as D3dStateSnapshot<$d3dc>>::empty_state(device).map(|[s]| s)
+            }
+            #[inline]
+            fn snapshot_state(context: &$d3dc) -> Self {
+                let [s] = <[$ty; 1] as D3dStateSnapshot<$d3dc>>::snapshot_state(context);
+                s
+            }
+        }
+        $crate::macros::impl_d3d! {
+            impl$({$($imp)*})? D3dState<$d3dc> for [$ty; N];
+            $($rest)*
+        }
+    };
+    (impl$({$($imp:tt)*})? D3dStateSnapshot<$d3dc:ty>
+        for [$ty:ty; 1]
+    ; $($($rest:tt)+)?) => {
+    };
+    (impl$({$($imp:tt)*})? D3dStateSnapshot<$d3dc:ty>
+        for $ty:ty
+    ; $($($rest:tt)+)?) => {
+        // TODO?
+        $crate::macros::impl_d3d! {
+            impl$({$($imp)*})? D3dState<$d3dc> for $ty;
+            $($($rest)*)?
+        }
+    };
+    (impl$({$($imp:tt)*})? D3dState<$d3dc:ty>
+        for [$ty:ty; N]
+    ; $($($rest:tt)+)?) => {
+        impl$(<$($imp)*>)? $crate::state::D3dState<$d3dc> for $ty where
+            $d3dc: $crate::device::D3dContext,
+            [$ty]: $crate::state::D3dState<$d3dc>,
+        {
+            #[inline]
+            fn restore_state(&self, context: &$d3dc) {
+                let s = ::core::slice::from_ref(self);
+                $crate::state::D3dState::<$d3dc>::restore_state(s, context)
+            }
+        }
+        impl$(<$($imp)*>)? $crate::state::D3dState<$d3dc> for Vec<$ty> where
+            $d3dc: $crate::device::D3dContext,
+            [$ty]: $crate::state::D3dState<$d3dc>,
+        {
+            #[inline]
+            fn restore_state(&self, context: &$d3dc) {
+                $crate::state::D3dState::<$d3dc>::restore_state(&self[..], context)
+            }
+        }
+        $(
+            $crate::macros::impl_d3d! {
+                $($rest)*
+            }
+        )?
+    };
+    (impl$({$($imp:tt)*})? D3dState<$d3dc:ty>
+        for [$ty:ty]
+    ; $($($rest:tt)+)?) => {
+        impl<$($($imp)*,)? const N: usize> $crate::state::D3dState<$d3dc> for [$ty; N] where
+            $d3dc: $crate::device::D3dContext,
+            [$ty]: $crate::state::D3dState<$d3dc>,
+        {
+            #[inline]
+            fn restore_state(&self, context: &$d3dc) {
+                <[$ty] as $crate::state::D3dState<$d3dc>>::restore_state(&self[..], context)
+            }
+        }
+        $(
+            $crate::macros::impl_d3d! {
+                $($rest)*
+            }
+        )?
+    };
+    (impl$({$($imp:tt)*})? D3dState<$d3dc:ty>
+        for $ty:ty
+        $(where{$($where_:tt)*})?
+    ; $($($rest:tt)+)?) => {
+        impl<$($($imp)*)?> $crate::state::D3dState<$d3dc> for $ty where
+            $d3dc: $crate::device::D3dContext,
+            $ty: $crate::device::D3dContextBindable<$d3dc>,
+            $($($where_)*)?
+        {
+            #[inline]
+            fn restore_state(&self, context: &$d3dc) {
+                <$ty as $crate::device::D3dContextBindable<$d3dc>>::set(self, context)
+            }
+        }
+        $(
+            $crate::macros::impl_d3d! {
+                $($rest)*
+            }
+        )?
+    };
+    (impl$({$($imp:tt)*})? D3dStateMut<$d3dc:ty>
+        for $($rest:tt)+
+    ) => {
+        $crate::macros::impl_d3d! {
+            impl$({$($imp)*})? D3dStateSnapshot<$d3dc> for $($rest)*
+        }
+        $crate::macros::impl_d3d! {
+            @impl$({$($imp)*})? D3dStateMut<$d3dc> for $($rest)*
+        }
+    };
+    (@impl$({$($imp:tt)*})? D3dStateMut<$d3dc:ty>
+        for $($rest:tt)*
+    ) => {
+        // TODO...
+    };
     (impl bitflags for $(
         $(#[$meta:meta])*
         $vis:vis struct $flags:ident: $ty:path{$repr:ty} {

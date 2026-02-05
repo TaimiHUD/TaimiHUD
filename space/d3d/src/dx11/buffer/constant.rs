@@ -4,6 +4,7 @@ use {
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
         },
+        state::D3dStateSnapshot,
         D3dContextBindable,
         D3dContextBindableSlot,
     },
@@ -265,6 +266,39 @@ impl AsRef<ConstantBufferP> for ConstantBufferV {
 impl AsRef<ConstantBufferV> for ConstantBufferP {
     fn as_ref(&self) -> &ConstantBufferV {
         unsafe { mem::transmute(self) }
+    }
+}
+
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ConstantBufferV>; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferV::new_snapshot::<N>(context, 0)
+    }
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ConstantBufferP>; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferP::new_snapshot::<N>(context, 0)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferV>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferV::new_snapshot_vec(context, 0..ConstantBufferV::MAX_COUNT as u32)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferP>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferP::new_snapshot_vec(context, 0..ConstantBufferP::MAX_COUNT as u32)
     }
 }
 
