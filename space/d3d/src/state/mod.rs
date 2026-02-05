@@ -91,3 +91,36 @@ where
 impl_d3d! {
     impl{D3DC, B} D3dState<D3DC> for BufferState<B>;
 }
+
+pub trait D3dContextStateExt: D3dContext {
+    #[inline]
+    fn get_snapshot<'c, S>(&'c self) -> D3dStateToken<'c, S, Self> where
+        S: D3dState<Self> + D3dStateSnapshot<Self>,
+    {
+        D3dStateToken::new_snapshot(self)
+    }
+    #[inline]
+    fn get_snapshot_buffers<'c, S>(&'c self) -> D3dStateToken<'c, BufferState<S>, Self> where
+        S: D3dStateSnapshot<Self>,
+        BufferState<S>: D3dState<Self>,
+    {
+        BufferState::new(0, S::snapshot_state(self))
+            .to_state_token(self.to_ref())
+    }
+}
+impl<D3DC: D3dContext> D3dContextStateExt for D3DC {}
+pub trait D3dStateExt<D3DC: D3dContext>: D3dState<D3DC> {
+    #[inline]
+    fn to_state_token<'c>(self, context: InterfaceRef<'c, D3DC>) -> D3dStateToken<'c, Self, D3DC> where
+        Self: Sized,
+    {
+        D3dStateToken {
+            context: Some(context),
+            state: self,
+        }
+    }
+}
+impl<T, D3DC: D3dContext> D3dStateExt<D3DC> for T where
+    T: D3dState<D3DC>,
+{
+}

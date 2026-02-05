@@ -28,6 +28,8 @@ pub use {
             ID3D11ShaderResourceView,
             ID3D11View,
             ShaderResourceView,
+            ShaderResourceViewP,
+            ShaderResourceViewV,
             TextureView2,
             View,
             D3D11_SHADER_RESOURCE_VIEW_DESC,

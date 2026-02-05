@@ -36,6 +36,16 @@ impl D3dContextBindable<Dx11Context> for ShaderV {
         }
     }
 }
+impl D3dContextBindable<Dx11Context> for Option<ShaderV> {
+    fn set(&self, context: &Dx11Context) {
+        match self {
+            Some(shader) => shader.set(context),
+            None => unsafe {
+                context.VSSetShader(None, None);
+            },
+        }
+    }
+}
 
 impl_d3d! {
     impl{D3DC} D3dState<D3DC> for ShaderV;

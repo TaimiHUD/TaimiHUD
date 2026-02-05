@@ -7,6 +7,7 @@ use {
         },
         state::D3dStateSnapshot,
         D3dContextBindableSlot,
+        D3dContextBindable,
     },
     std::{ffi, mem, slice},
 };
@@ -21,7 +22,7 @@ pub struct VertexBuffer {
 }
 
 impl VertexBuffer {
-    pub const SLOT_COUNT: usize = Buffer::VERTEX_SLOT_COUNT;
+    pub const MAX_COUNT: usize = Buffer::VERTEX_SLOT_COUNT;
 
     pub unsafe fn with_parts<B>(buffer: B, stride: usize, count: usize, offset: usize) -> Self
     where
@@ -152,6 +153,16 @@ impl D3dContextBindableSlot<Dx11Context> for VertexBuffer {
         Buffer::set_one_vertex(self, device_context, slot)
     }
 }
+impl D3dContextBindableSlot<Dx11Context> for Option<VertexBuffer> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_one_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for Option<&'_ VertexBuffer> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_one_vertex(self, device_context, slot)
+    }
+}
 impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [&'_ VertexBuffer; N] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
@@ -160,6 +171,21 @@ impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [&'_ VertexBuffer; 
 impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [VertexBuffer; N] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<&'_ VertexBuffer>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<VertexBuffer>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<VertexBuffer>; VertexBuffer::MAX_COUNT] {
+    fn set(&self, device_context: &Dx11Context) {
+        Buffer::set_all_vertex(self, device_context, 0)
     }
 }
 
@@ -176,7 +202,7 @@ impl D3dStateSnapshot<Dx11Context> for Vec<Option<VertexBuffer>> {
         Ok(Vec::new())
     }
     fn snapshot_state(context: &Dx11Context) -> Self {
-        VertexBuffer::new_snapshot_vec(context, 0..VertexBuffer::SLOT_COUNT as u32)
+        VertexBuffer::new_snapshot_vec(context, 0..VertexBuffer::MAX_COUNT as u32)
     }
 }
 

@@ -6,6 +6,7 @@ use {
         },
         state::D3dStateSnapshot,
         D3dContextBindableSlot,
+        D3dContextBindable,
     },
     std::{mem, slice},
 };
@@ -21,7 +22,7 @@ impl_d3d! {
 }
 
 impl ConstantBufferV {
-    pub const SLOT_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
+    pub const MAX_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
 
     pub const fn from_buffer(buffer: Buffer) -> Self {
         Self { buffer }
@@ -121,7 +122,7 @@ impl_d3d! {
 }
 
 impl ConstantBufferP {
-    pub const SLOT_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
+    pub const MAX_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
 
     pub const fn from_buffer(buffer: Buffer) -> Self {
         Self { buffer }
@@ -198,9 +199,24 @@ impl D3dContextBindableSlot<Dx11Context> for ConstantBufferV {
         Buffer::set_all_constant_vertex(self, device_context, slot)
     }
 }
+impl D3dContextBindableSlot<Dx11Context> for Option<ConstantBufferV> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_constant_vertex(self, device_context, slot)
+    }
+}
 impl D3dContextBindableSlot<Dx11Context> for [ConstantBufferV] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_constant_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<ConstantBufferV>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_constant_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<ConstantBufferV>; ConstantBufferV::MAX_COUNT] {
+    fn set(&self, device_context: &Dx11Context) {
+        Buffer::set_all_constant_vertex(self, device_context, 0)
     }
 }
 
@@ -209,9 +225,24 @@ impl D3dContextBindableSlot<Dx11Context> for ConstantBufferP {
         Buffer::set_all_constant_pixel(self, device_context, slot)
     }
 }
+impl D3dContextBindableSlot<Dx11Context> for Option<ConstantBufferP> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_constant_pixel(self, device_context, slot)
+    }
+}
 impl D3dContextBindableSlot<Dx11Context> for [ConstantBufferP] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_constant_pixel(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<ConstantBufferP>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_constant_pixel(self, device_context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<ConstantBufferP>; ConstantBufferP::MAX_COUNT] {
+    fn set(&self, device_context: &Dx11Context) {
+        Buffer::set_all_constant_pixel(self, device_context, 0)
     }
 }
 
@@ -257,7 +288,7 @@ impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferV>> {
         Ok(Vec::new())
     }
     fn snapshot_state(context: &Dx11Context) -> Self {
-        ConstantBufferV::new_snapshot_vec(context, 0..ConstantBufferV::SLOT_COUNT as u32)
+        ConstantBufferV::new_snapshot_vec(context, 0..ConstantBufferV::MAX_COUNT as u32)
     }
 }
 impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferP>> {
@@ -265,7 +296,7 @@ impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferP>> {
         Ok(Vec::new())
     }
     fn snapshot_state(context: &Dx11Context) -> Self {
-        ConstantBufferP::new_snapshot_vec(context, 0..ConstantBufferP::SLOT_COUNT as u32)
+        ConstantBufferP::new_snapshot_vec(context, 0..ConstantBufferP::MAX_COUNT as u32)
     }
 }
 

@@ -88,7 +88,7 @@ impl<B> OMBlendState<B> {
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
     where
-        B: From<Option<ID3D11BlendState>>,
+        B: From<Option<BlendState>>,
     {
         let mut state = None;
         let mut factor = BlendState::DEFAULT_FACTOR.to_array();
@@ -96,6 +96,7 @@ impl<B> OMBlendState<B> {
         unsafe { context.OMGetBlendState(Some(&mut state), Some(&mut factor), Some(&mut sample_mask)) }
         let factor = Vec4::from_array(factor);
         //let factor = (factor != Self::DEFAULT_FACTOR).then(factor);
+        let state = state.map(BlendState::from_d3d);
         Self::new(state.into(), Some(factor), Some(sample_mask))
     }
 
@@ -134,7 +135,7 @@ impl_d3d! {
 }
 impl<B> D3dStateSnapshot<Dx11Context> for OMBlendState<B>
 where
-    B: From<Option<ID3D11BlendState>>,
+    B: From<Option<BlendState>>,
 {
     fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
         Ok(Self::with_state(None))

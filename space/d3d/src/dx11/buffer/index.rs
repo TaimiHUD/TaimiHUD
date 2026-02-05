@@ -139,8 +139,14 @@ impl D3dContextBindable<Dx11Context> for IndexBuffer {
     }
 }
 impl D3dContextBindable<Dx11Context> for Option<IndexBuffer> {
+    #[inline]
     fn set(&self, device_context: &Dx11Context) {
-        match self {
+        self.as_ref().set(device_context)
+    }
+}
+impl D3dContextBindable<Dx11Context> for Option<&'_ IndexBuffer> {
+    fn set(&self, device_context: &Dx11Context) {
+        match *self {
             Some(buffer) => buffer.set(device_context),
             None => unsafe {
                 device_context.IASetIndexBuffer(None, IndexBuffer::FORMAT_32, 0);

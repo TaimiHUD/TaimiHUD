@@ -15,7 +15,7 @@ pub mod prelude {
         crate::{
             blob::Blob,
             buffer::{dxgi::DxgiFormat, D3dBufferData, D3dContextBindableVertexBuffer as _},
-            state::{D3dState as _, D3dStateToken},
+            state::{D3dState as _, D3dStateExt as _, D3dContextStateExt as _, D3dStateToken},
             D3dContext,
             D3dContextBindable as _,
             D3dContextBindableSlot as _,

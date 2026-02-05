@@ -96,6 +96,16 @@ impl D3dContextBindable<Dx11Context> for InputLayout {
         }
     }
 }
+impl D3dContextBindable<Dx11Context> for Option<InputLayout> {
+    fn set(&self, context: &Dx11Context) {
+        match self {
+            Some(layout) => layout.set(context),
+            None => unsafe {
+                context.IASetInputLayout(None);
+            },
+        }
+    }
+}
 
 impl_d3d! {
     impl{D3DC} D3dState<D3DC> for InputLayout;

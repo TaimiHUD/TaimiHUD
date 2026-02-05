@@ -98,13 +98,14 @@ impl<S> OMDepthState<S> {
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
     where
-        S: From<Option<ID3D11DepthStencilState>>,
+        S: From<Option<DepthState>>,
     {
         let mut state = None;
         let mut stencil_ref = 0;
         unsafe {
             context.OMGetDepthStencilState(Some(&mut state), Some(&mut stencil_ref));
         }
+        let state = state.map(DepthState::from_d3d);
 
         Self::with_state(state, stencil_ref)
     }
@@ -128,11 +129,11 @@ impl_d3d! {
 }
 impl<S> D3dStateSnapshot<Dx11Context> for OMDepthState<S>
 where
-    S: From<Option<ID3D11DepthStencilState>>
+    S: From<Option<DepthState>>
 {
     #[inline]
     fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
-        let state: S = None::<ID3D11DepthStencilState>.into();
+        let state: S = None::<DepthState>.into();
         Ok(Self::with_state(state, 0))
     }
 

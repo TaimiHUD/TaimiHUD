@@ -69,6 +69,16 @@ impl D3dContextBindable<Dx11Context> for RasterizerState {
         }
     }
 }
+impl D3dContextBindable<Dx11Context> for Option<RasterizerState> {
+    fn set(&self, context: &Dx11Context) {
+        match self {
+            Some(state) => state.set(context),
+            None => unsafe {
+                context.RSSetState(None);
+            },
+        }
+    }
+}
 
 impl_d3d! {
     impl{D3DC} D3dState<D3DC> for RasterizerState;
@@ -100,13 +110,14 @@ impl<V, D> RenderTargetViews<V, D> {
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
     where
-        V: Default + AsMut<[Option<ID3D11RenderTargetView>]>,
+        V: Default + AsMut<[Option<RenderTargetView>]>,
         D: From<d3d11::ID3D11DepthStencilView>,
     {
         let mut views = V::default();
         let mut depth_view = None;
         unsafe {
-            context.OMGetRenderTargets(Some(views.as_mut()), Some(&mut depth_view));
+            let views = RenderTargetView::slice_as_raw_mut(views.as_mut());
+            context.OMGetRenderTargets(Some(views), Some(&mut depth_view));
         }
         Self {
             views,
@@ -139,9 +150,9 @@ impl<V, D> RenderTargetViews<V, D> {
 
     pub fn views_mut(&mut self) -> &mut [Option<ID3D11RenderTargetView>]
     where
-        V: AsMut<[Option<ID3D11RenderTargetView>]>,
+        V: AsMut<[Option<RenderTargetView>]>,
     {
-        self.views.as_mut()
+        RenderTargetView::slice_as_raw_mut(self.views.as_mut())
     }
 
     pub fn clear_colour<C: Into<Vec4>>(&self, context: &Dx11Context, colour: C)
@@ -197,7 +208,7 @@ impl_d3d! {
     impl{D3DC, V, D} D3dState<D3DC> for RenderTargetViews<V, D>;
 }
 impl<V, D> D3dStateSnapshot<Dx11Context> for RenderTargetViews<V, D> where
-    V: ID3D11ResourceOf<ID3D11RenderTargetView> + Default + AsMut<[Option<ID3D11RenderTargetView>]>,
+    V: ID3D11ResourceOf<ID3D11RenderTargetView> + Default + AsMut<[Option<RenderTargetView>]>,
     D: AsRef<DepthView> + From<d3d11::ID3D11DepthStencilView>,
 {
     #[inline]
@@ -228,6 +239,11 @@ impl RenderTargetView {
             .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
             .context("CreateRenderTargetView")
             .map(Into::into)
+    }
+    pub fn slice_as_raw_mut(views: &mut [Option<Self>]) -> &mut [Option<ID3D11RenderTargetView>] {
+        unsafe {
+            mem::transmute(views)
+        }
     }
 }
 

@@ -304,8 +304,10 @@ impl Buffer {
         }
     }
 
-    pub fn set_all_vertex<B>(buffers: &[B], device_context: &Dx11Context, slot: u32)
+    pub fn set_all_vertex<B, I>(buffers: I, device_context: &Dx11Context, slot: u32)
     where
+        I: IntoIterator<Item = B>,
+        I::IntoIter: ExactSizeIterator,
         B: D3dContextBindableVertexBuffer<Dx11Context>,
     {
         let mut bufs = [ptr::null_mut(); Self::SET_VERTEX_LIMIT];
@@ -314,7 +316,9 @@ impl Buffer {
         let mut bufs_storage;
         let mut strides_storage;
         let mut offsets_storage;
-        let (bufs, strides, offsets) = match buffers.len() {
+        let buffers = buffers.into_iter();
+        let buflen = buffers.len();
+        let (bufs, strides, offsets) = match buflen {
             count if count <= Self::SET_VERTEX_LIMIT => (&mut bufs[..], &mut strides[..], &mut offsets[..]),
             count => {
                 log::info!("binding {count} vertex buffer slots, consider reducing!");
@@ -329,7 +333,7 @@ impl Buffer {
             },
         };
         let outputs = bufs.iter_mut().zip(strides.iter_mut()).zip(offsets.iter_mut());
-        for (buffer, ((ptr, stride), offset)) in buffers.iter().zip(outputs) {
+        for (buffer, ((ptr, stride), offset)) in buffers.into_iter().zip(outputs) {
             *ptr = buffer.vertex_buffer_ptr();
             *stride = buffer.vertex_buffer_stride();
             *offset = buffer.vertex_buffer_offset();
@@ -337,7 +341,7 @@ impl Buffer {
         unsafe {
             device_context.IASetVertexBuffers(
                 slot,
-                buffers.len() as u32,
+                buflen as u32,
                 Some(bufs.as_ptr() as *const Option<ID3D11Buffer>),
                 Some(strides.as_ptr()),
                 Some(offsets.as_ptr()),
