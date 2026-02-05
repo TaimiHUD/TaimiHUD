@@ -150,7 +150,7 @@ impl TimersController {
         }
     }
 
-    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) -> bool {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::TIMER_RESET) {
             CONTROLS.notify_handled(TaimiControls::TIMER_RESET);
@@ -158,10 +158,11 @@ impl TimersController {
         }
         let triggers = changed & TaimiControls::TIMER_TRIGGERS;
         for trigger in triggers {
-            CONTROLS.notify_handled(trigger);
+            //CONTROLS.notify_handled(trigger);
             let idx = trigger.index() - TaimiControls::TIMER_TRIGGER_0.index();
             self.timer_key_trigger_idx(idx.into(), !state.intersects(trigger))
         }
+        !triggers.is_empty()
     }
 
     pub(crate) async fn reload(&mut self, settings: SettingsLock, rt_sender: RtSender) {

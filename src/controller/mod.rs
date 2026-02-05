@@ -307,7 +307,15 @@ impl Controller {
         }
 
         #[cfg(feature = "timers")]
-        self.timers.handle_keybinds(state, changed).await;
+        {
+            if self.timers.handle_keybinds(state, changed).await {
+                // timer key was pressed and may influence machine state,
+                // but could be missed if released before a normal tick update!
+                if let Some(playpos) = self.player_position() {
+                    self.timers.handle_position(playpos).await;
+                }
+            }
+        }
         #[cfg(feature = "space")]
         self.pathing.handle_keybinds(state, changed).await;
     }
