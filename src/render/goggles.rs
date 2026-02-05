@@ -59,6 +59,23 @@ pub fn options_ui_lenses(ui: &imgui::Ui) {
                 },
             }
         }
+        thread_local! {
+            static BUF: std::cell::RefCell<String> = std::cell::RefCell::default();
+        }
+        BUF.with_borrow_mut(|buf| {
+            if ui.input_text("ferret", buf).enter_returns_true(true).build() {
+                let f = if let Some(rest) = buf.strip_prefix("0x") {
+                    u64::from_str_radix(rest, 16).ok()
+                } else {
+                    buf.parse().ok()
+                };
+                if let Some(f) = f {
+                    goggles::ferret(f)
+                } else {
+                    log::warn!("ferret invalid");
+                }
+            }
+        });
     }
 }
 
