@@ -26,10 +26,10 @@ unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableVertexBuffer<D3DC>>
         D3dContextBindableVertexBuffer::vertex_buffer_ptr(*self)
     }
     fn vertex_buffer_stride(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_offset(*self)
+        D3dContextBindableVertexBuffer::vertex_buffer_stride(*self)
     }
     fn vertex_buffer_offset(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_stride(*self)
+        D3dContextBindableVertexBuffer::vertex_buffer_offset(*self)
     }
     unsafe fn vertex_buffer_buffer(
         &self,
