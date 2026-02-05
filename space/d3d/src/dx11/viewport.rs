@@ -1,5 +1,9 @@
 use {
-    crate::{dx11::prelude::*, D3dContextBindable},
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
     num_traits::AsPrimitive,
     std::{mem, ops, slice},
 };
@@ -178,6 +182,7 @@ impl Viewport {
     pub fn rect(&self) -> Rect<f32> {
         Rect::new(self.top_left(), self.size2())
     }
+
     pub fn size2(&self) -> Size2<f32> {
         Size2::new(self.viewport.Width, self.viewport.Height)
     }
@@ -307,5 +312,35 @@ impl D3dContextBindable<Dx11Context> for [Viewport] {
     fn set(&self, context: &Dx11Context) {
         let viewports = Viewport::slice_as_raw(self);
         Viewport::bind_set(context, viewports)
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dStateSnapshot<D3DC> for [Viewport; N];
+    impl{D3DC} D3dState<D3DC> for [Viewport];
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Viewport; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([Viewport::EMPTY; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        Viewport::new_snapshot::<N>(context)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Viewport> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        Viewport::new_snapshot_vec(context)
+    }
+}
+impl D3dState<Dx11Context> for [Viewport] {
+    fn restore_state(&self, context: &Dx11Context) {
+        match self {
+            viewports => Viewport::slice_truncate(viewports).set(context),
+            #[cfg(todo)]
+            viewports => viewports.set(context),
+        }
     }
 }
