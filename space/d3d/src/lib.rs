@@ -28,6 +28,8 @@ pub mod prelude {
             },
         },
     };
+    #[cfg(todo)]
+    pub(crate) use crate::{state::{D3dState, D3dStateSnapshot}, device::{D3dContext, D3dContextBindable, D3dContextBindableSlot}};
     #[allow(unused_imports)]
     pub(crate) use {
         crate::{impl_d3d, D3dInterfacePtr},

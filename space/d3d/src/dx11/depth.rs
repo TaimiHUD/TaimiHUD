@@ -15,6 +15,7 @@ use crate::{
         buffer::{self, Resource, Texture2, D3D11_TEXTURE2D_DESC},
         prelude::*,
     },
+    state::D3dStateSnapshot,
     D3dContextBindable,
 };
 
@@ -118,6 +119,26 @@ where
         unsafe {
             context.OMSetDepthStencilState(state.as_ref(), self.stencil_ref);
         }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC, S} D3dState<D3DC> for OMDepthState<S>;
+    impl{D3DC, S} D3dStateSnapshot<D3DC> for [OMDepthState<S>; 1];
+}
+impl<S> D3dStateSnapshot<Dx11Context> for OMDepthState<S>
+where
+    S: From<Option<ID3D11DepthStencilState>>
+{
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        let state: S = None::<ID3D11DepthStencilState>.into();
+        Ok(Self::with_state(state, 0))
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        Self::new_snapshot(context)
     }
 }
 

@@ -3677,6 +3677,7 @@ dependencies = [
  "glamour",
  "indexmap",
  "log",
+ "num-traits",
  "relative-path",
  "serde",
  "windows 0.61.1",

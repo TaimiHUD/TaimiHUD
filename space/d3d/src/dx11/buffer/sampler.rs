@@ -4,7 +4,7 @@ pub use crate::dx11::d3d11::{
     D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_MODE,
 };
-use crate::{dx11::prelude::*, state::D3dState, D3dContextBindableSlot};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindableSlot, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11SamplerState;
@@ -56,22 +56,34 @@ impl SamplerState {
         Self { state }
     }
 
-    pub fn new_snapshot(context: &Dx11Context) -> [Option<Self>; Self::MAX_COUNT] {
-        Self::new_snapshot_from::<{ Self::MAX_COUNT }>(context, 0)
+    pub fn new_snapshot_full(context: &Dx11Context) -> [Option<Self>; Self::MAX_COUNT] {
+        Self::new_snapshot::<{ Self::MAX_COUNT }>(context, 0)
     }
-
-    pub fn new_snapshot_from<const N: usize /*= Self::MAX_COUNT*/>(
+    pub fn new_snapshot_vec(
+        context: &Dx11Context,
+        slot: ops::Range<u32>,
+    ) -> Vec<Option<Self>> {
+        let mut states = vec![None::<Self>; slot.len()];
+        Self::new_snapshot_in(context, slot.start, &mut states[..]);
+        states
+    }
+    pub fn new_snapshot<const N: usize /*= Self::MAX_COUNT*/>(
         context: &Dx11Context,
         slot: u32,
     ) -> [Option<Self>; N] {
         let mut states = [const { None::<Self> }; N];
-        let count = (states.len()).saturating_sub(slot as usize);
-        unsafe {
-            let states: &mut [Option<Self>] = states.get_unchecked_mut(..count);
-            let states: &mut [Option<ID3D11SamplerState>] = mem::transmute(states);
-            context.PSGetSamplers(slot, Some(states));
-        }
+        Self::new_snapshot_in(context, slot, &mut states);
         states
+    }
+    pub fn new_snapshot_in<'s>(
+        context: &Dx11Context,
+        slot: u32,
+        out: &'s mut [Option<Self>],
+    ) {
+        unsafe {
+            let out: &'s mut [Option<ID3D11SamplerState>] = mem::transmute(out);
+            context.PSGetSamplers(slot, Some(out));
+        }
     }
 
     pub fn bind_set<S>(context: &Dx11Context, slot: u32, states: S)
@@ -102,20 +114,35 @@ impl D3dContextBindableSlot<Dx11Context> for [Option<SamplerState>] {
         SamplerState::bind_set(context, slot, self)
     }
 }
+impl D3dContextBindable<Dx11Context> for [Option<SamplerState>; SamplerState::MAX_COUNT] {
+    fn set(&self, context: &Dx11Context) {
+        SamplerState::bind_set(context, 0, self)
+    }
+}
 
-impl<const N: usize> D3dState<Dx11Context> for [Option<SamplerState>; N] {
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for [Option<SamplerState>; SamplerState::MAX_COUNT];
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<SamplerState>; N] {
     fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
         Ok([const { None }; N])
     }
 
     fn snapshot_state(context: &Dx11Context) -> Self {
-        SamplerState::new_snapshot_from::<N>(context, 0)
+        SamplerState::new_snapshot::<N>(context, 0)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<SamplerState>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
     }
 
-    fn restore_state(&self, context: &Dx11Context) {
-        self.set(context, 0);
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        SamplerState::new_snapshot_vec(context, 0..SamplerState::MAX_COUNT as u32)
     }
-
+}
+#[cfg(todo)]
+impl<const N: usize> D3dStateMut<Dx11Context> for [Option<SamplerState>; N] {
     fn discard_state_mut(&mut self) {
         *self = [const { None }; N];
     }

@@ -8,7 +8,7 @@ pub use crate::dx11::d3d11::{
 use crate::{
     device::{D3dContext, D3dContextBindable},
     dx11::{device::ID3D11Device, prelude::*},
-    state::PrimitiveTopology,
+    state::{D3dStateSnapshot, PrimitiveTopology},
 };
 
 impl D3dContext for ID3D11DeviceContext {
@@ -59,5 +59,15 @@ impl_d3d! {
 impl D3dContextBindable<Dx11Context> for PrimitiveTopology {
     fn set(&self, device_context: &Dx11Context) {
         unsafe { device_context.IASetPrimitiveTopology(self.d3d()) }
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for PrimitiveTopology {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Self::Undefined)
+    }
+    fn snapshot_state(device_context: &Dx11Context) -> Self {
+        Self::from_d3d(unsafe {
+            device_context.IAGetPrimitiveTopology()
+        })
     }
 }

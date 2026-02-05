@@ -1,5 +1,5 @@
 pub use crate::dx11::d3d11::ID3D11PixelShader;
-use crate::{dx11::prelude::*, D3dContextBindable};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11PixelShader;
@@ -34,5 +34,18 @@ impl D3dContextBindable<Dx11Context> for ShaderP {
         unsafe {
             context.PSSetShader(&self.shader, None);
         }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for ShaderP;
+    impl{D3DC} D3dState<D3DC> for Option<ShaderP>;
+}
+impl D3dStateSnapshot<Dx11Context> for Option<ShaderP> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(None)
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ShaderP::new_snapshot(context)
     }
 }

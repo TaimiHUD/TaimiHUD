@@ -1,6 +1,7 @@
 use {
-    crate::{dx11::prelude::*, D3dContextBindable},
-    std::{mem, slice},
+    crate::{dx11::prelude::*, state::{D3dState, D3dStateSnapshot}, D3dContextBindable},
+    std::{mem, slice, ops},
+    num_traits::AsPrimitive,
 };
 
 pub use crate::dx11::d3d11::D3D11_VIEWPORT;
@@ -32,7 +33,7 @@ impl Viewport {
         unsafe { mem::transmute(viewport) }
     }
 
-    pub fn new_snapshot<const N: usize>(context: &Dx11Context) -> [Viewport; N] {
+    pub fn new_snapshot<const N: usize>(context: &Dx11Context) -> [Self; N] {
         let mut viewports = [D3D11_VIEWPORT::default(); N];
         let mut viewport_count = viewports.len() as _;
         unsafe {
@@ -40,9 +41,57 @@ impl Viewport {
         }
         Self::array_from_raw(viewports)
     }
+    /// TODO: unclear if null arg is required to get full/untruncated count or not
+    pub fn new_snapshot_vec(context: &Dx11Context) -> Vec<Self> {
+        let initial_len = 8.min(Self::MAX_VIEWPORTS);
+        let mut viewports = Vec::<D3D11_VIEWPORT>::with_capacity(initial_len);
+        let mut viewport_count = 0;
+        for _ in 0..2 {
+            unsafe {
+                let uninit = viewports.spare_capacity_mut();
+                let capacity = uninit.len() as u32;
+                viewport_count = capacity;
+                context.RSGetViewports(&mut viewport_count, Some(uninit.as_mut_ptr() as *mut D3D11_VIEWPORT));
+                match viewport_count {
+                    #[cfg(todo)]
+                    viewport_count if viewport_count == capacity => {
+                        // docs are unclear, so double-check?
+                        viewports.reserve_exact(Self::snapshot_count(context) as usize);
+                        viewport_count = Self::snapshot_count(context) as u32;
+                    }
+                    #[cfg(debug_assertions)]
+                    viewport_count if viewport_count == capacity => {
+                        // double-check that it doesn't truncate to our len...
+                        debug_assert_eq!(Self::snapshot_count(context), viewport_count as usize);
+                    },
+                    _ => (),
+                }
+                if viewport_count > capacity {
+                    viewport_count = capacity;
+                    viewports.reserve_exact(viewport_count as usize);
+                } else {
+                    break
+                }
+            }
+        }
+        unsafe {
+            viewports.set_len(viewport_count as usize);
+            Self::vec_from_raw(viewports)
+        }
+    }
+    pub fn snapshot_count(context: &Dx11Context) -> usize {
+        let mut viewport_count = 0u32;
+        unsafe {
+            context.RSGetViewports(&mut viewport_count, None);
+        }
+        viewport_count as usize
+    }
 
     /// Aligned to top-left origin (0, 0, 0)
-    pub const fn with_size<U: Unit<Scalar = f32>>(size: Size3<U>) -> Self {
+    pub fn with_size<U: Unit>(size: Size3<U>) -> Self where
+        U::Scalar: AsPrimitive<f32>,
+    {
+        let size = size.as_::<f32>();
         Self::with_viewport(D3D11_VIEWPORT {
             Width: size.width,
             Height: size.height,
@@ -53,16 +102,18 @@ impl Viewport {
 
     pub fn with_bounds<U: Unit>(bounds: Box3<U>) -> Self
     where
-        U::Scalar: Into<f32>,
+        U::Scalar: AsPrimitive<f32>,
     {
-        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate()).size();
+        let top_left = bounds.min.with_y(bounds.max.y).as_::<f32>();
+        let bottom_right_z = AsPrimitive::as_(bounds.max.z);
+        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate()).size().as_::<f32>();
         let viewport = D3D11_VIEWPORT {
-            TopLeftX: bounds.min.x.into(),
-            TopLeftY: bounds.max.y.into(),
-            Width: size.width.into(),
-            Height: size.height.into(),
-            MinDepth: bounds.min.z.into(),
-            MaxDepth: bounds.max.z.into(),
+            TopLeftX: top_left.x,
+            TopLeftY: top_left.y,
+            Width: size.width,
+            Height: size.height,
+            MinDepth: top_left.z,
+            MaxDepth: bottom_right_z,
         };
         Self { viewport }
     }
@@ -70,9 +121,26 @@ impl Viewport {
     pub fn is_empty(&self) -> bool {
         *self == Viewport::EMPTY
     }
-
+    pub fn box2(&self) -> Box2<f32> {
+        let min = Point2::new(self.viewport.TopLeftX, self.viewport.TopLeftY + self.viewport.Height);
+        let max = Point2::new(self.viewport.TopLeftX + self.viewport.Width, self.viewport.TopLeftY);
+        Box2::new(min, max)
+    }
+    pub fn box3(&self) -> Box3<f32> {
+        let bounds = self.box2();
+        Box3::new(
+            bounds.min.extend(self.viewport.MinDepth),
+            bounds.max.extend(self.viewport.MaxDepth),
+        )
+    }
     pub fn size2(&self) -> Size2<f32> {
         Size2::new(self.viewport.Width, self.viewport.Height)
+    }
+    pub fn depth_range(&self) -> ops::RangeInclusive<f32> {
+        self.viewport.MinDepth..=self.viewport.MaxDepth
+    }
+    pub fn size3(&self) -> Size3<f32> {
+        self.size2().extend(self.viewport.MaxDepth - self.viewport.MinDepth)
     }
 
     pub fn slice_truncate(viewports: &[Self]) -> &[Self] {
@@ -97,6 +165,11 @@ impl Viewport {
     }
     pub fn array_from_raw<const N: usize>(viewports: [D3D11_VIEWPORT; N]) -> [Self; N] {
         unsafe { mem::transmute_copy(&viewports) }
+    }
+    pub fn vec_from_raw(viewports: Vec<D3D11_VIEWPORT>) -> Vec<Self> {
+        unsafe {
+            mem::transmute(viewports)
+        }
     }
 
     pub fn bind_set<V: AsRef<[D3D11_VIEWPORT]>>(context: &Dx11Context, viewports: V) {
@@ -143,6 +216,37 @@ impl From<Viewport> for D3D11_VIEWPORT {
         viewport.viewport
     }
 }
+impl<U: Unit> From<Size3<U>> for Viewport where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Size3<U>) -> Self {
+        Self::with_size(viewport)
+    }
+}
+impl<U: Unit> From<Box3<U>> for Viewport where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Box3<U>) -> Self {
+        Self::with_bounds(viewport)
+    }
+}
+impl<U: Unit> From<Size2<U>> for Viewport where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Size2<U>) -> Self {
+        Self::with_size(viewport.extend(num_traits::One::one()))
+    }
+}
+impl<U: Unit> From<Box2<U>> for Viewport where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Box2<U>) -> Self {
+        Self::with_bounds(Box3::new(
+            viewport.min.extend(num_traits::Zero::zero()),
+            viewport.max.extend(num_traits::One::one()),
+        ))
+    }
+}
 
 impl D3dContextBindable<Dx11Context> for Viewport {
     fn set(&self, context: &Dx11Context) {
@@ -153,5 +257,35 @@ impl D3dContextBindable<Dx11Context> for [Viewport] {
     fn set(&self, context: &Dx11Context) {
         let viewports = Viewport::slice_as_raw(self);
         Viewport::bind_set(context, viewports)
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dStateSnapshot<D3DC> for [Viewport; N];
+    impl{D3DC} D3dState<D3DC> for [Viewport];
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Viewport; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([Viewport::EMPTY; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        Viewport::new_snapshot::<N>(context)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Viewport> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        Viewport::new_snapshot_vec(context)
+    }
+}
+impl D3dState<Dx11Context> for [Viewport] {
+    fn restore_state(&self, context: &Dx11Context) {
+        match self {
+            viewports => Viewport::slice_truncate(viewports).set(context),
+            #[cfg(todo)]
+            viewports => viewports.set(context),
+        }
     }
 }

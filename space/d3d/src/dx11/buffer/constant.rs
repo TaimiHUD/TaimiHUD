@@ -4,6 +4,7 @@ use {
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
         },
+        state::D3dStateSnapshot,
         D3dContextBindableSlot,
     },
     std::{mem, slice},
@@ -20,6 +21,8 @@ impl_d3d! {
 }
 
 impl ConstantBufferV {
+    pub const SLOT_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
+
     pub const fn from_buffer(buffer: Buffer) -> Self {
         Self { buffer }
     }
@@ -66,12 +69,23 @@ impl ConstantBufferV {
         Buffer::desc_for::<D, _, _>(len, BindFlags::CONSTANT, flags)
     }
 
+    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V) where
+        V: AsMut<[Option<Self>]>,
+    {
+        let out = out.as_mut();
+        unsafe {
+            let out = mem::transmute::<&'v mut [Option<Self>], &'v mut [Option<Dx11Buffer>]>(out);
+            context.VSGetConstantBuffers(slot, Some(out));
+        }
+    }
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
-        unsafe {
-            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
-            context.VSGetConstantBuffers(slot, Some(buffers));
-        }
+        Self::new_snapshot_in(context, slot, &mut buffers);
+        buffers
+    }
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+        let mut buffers = vec![const { None::<Self> }; slot.len()];
+        Self::new_snapshot_in(context, slot.start, &mut buffers[..]);
         buffers
     }
 
@@ -84,6 +98,15 @@ impl ConstantBufferV {
 
     pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
         unsafe { self.buffer.update_all_unchecked(device_context, data, 0) }
+    }
+
+    #[inline]
+    pub fn slice_as_buffer_mut(buffers: &mut [Option<Self>]) -> &mut [Option<Buffer>] {
+        unsafe { mem::transmute(buffers) }
+    }
+    #[inline]
+    pub fn slice_from_buffer_mut(buffers: &mut [Option<Buffer>]) -> &mut [Option<Self>] {
+        unsafe { mem::transmute(buffers) }
     }
 }
 
@@ -98,6 +121,8 @@ impl_d3d! {
 }
 
 impl ConstantBufferP {
+    pub const SLOT_COUNT: usize = Buffer::CONSTANT_SLOT_COUNT;
+
     pub const fn from_buffer(buffer: Buffer) -> Self {
         Self { buffer }
     }
@@ -130,12 +155,23 @@ impl ConstantBufferP {
         ConstantBufferV::desc_for::<D>(len, flags)
     }
 
+    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V) where
+        V: AsMut<[Option<Self>]>,
+    {
+        let out = out.as_mut();
+        unsafe {
+            let out = mem::transmute::<&'v mut [Option<Self>], &'v mut [Option<Dx11Buffer>]>(out);
+            context.PSGetConstantBuffers(slot, Some(out));
+        }
+    }
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
         let mut buffers = [const { None::<Self> }; N];
-        unsafe {
-            let buffers = &mut *(&mut buffers[..] as *mut [Option<Self>] as *mut [Option<Dx11Buffer>]);
-            context.PSGetConstantBuffers(slot, Some(buffers));
-        }
+        Self::new_snapshot_in(context, slot, &mut buffers);
+        buffers
+    }
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+        let mut buffers = vec![const { None::<Self> }; slot.len()];
+        Self::new_snapshot_in(context, slot.start, &mut buffers[..]);
         buffers
     }
 
@@ -145,6 +181,15 @@ impl ConstantBufferP {
 
     pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
         ConstantBufferV::from_buffer_ref(self.as_ref()).update_all::<D>(device_context, data)
+    }
+
+    #[inline]
+    pub fn slice_as_buffer_mut(buffers: &mut [Option<Self>]) -> &mut [Option<Buffer>] {
+        unsafe { mem::transmute(buffers) }
+    }
+    #[inline]
+    pub fn slice_from_buffer_mut(buffers: &mut [Option<Buffer>]) -> &mut [Option<Self>] {
+        unsafe { mem::transmute(buffers) }
     }
 }
 
@@ -188,6 +233,39 @@ impl AsRef<ConstantBufferP> for ConstantBufferV {
 impl AsRef<ConstantBufferV> for ConstantBufferP {
     fn as_ref(&self) -> &ConstantBufferV {
         unsafe { mem::transmute(self) }
+    }
+}
+
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ConstantBufferV>; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferV::new_snapshot::<N>(context, 0)
+    }
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ConstantBufferP>; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferP::new_snapshot::<N>(context, 0)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferV>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferV::new_snapshot_vec(context, 0..ConstantBufferV::SLOT_COUNT as u32)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ConstantBufferP>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ConstantBufferP::new_snapshot_vec(context, 0..ConstantBufferP::SLOT_COUNT as u32)
     }
 }
 

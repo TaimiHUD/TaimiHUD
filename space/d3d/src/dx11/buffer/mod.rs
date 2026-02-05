@@ -1,5 +1,6 @@
 mod buffer;
 mod constant;
+mod index;
 mod resource;
 mod sampler;
 mod texture2;
@@ -10,6 +11,7 @@ pub use {
     self::{
         buffer::{Buffer, BufferOf, ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA},
         constant::{ConstantBufferP, ConstantBufferV},
+        index::{D3d11ContextBindableIndexBuffer, IndexBuffer},
         resource::{ID3D11Resource, Resource, ResourceDimension, D3D11_RESOURCE_DIMENSION},
         sampler::{
             Filter,
