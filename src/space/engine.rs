@@ -15,6 +15,7 @@ use {
         },
         timer::{PhaseState, TimerFile, TimerMarker},
         exports::runtime::statistics::{StatsUnit, StatsRef, StatsDesc},
+        exports::runtime as rt,
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
@@ -133,6 +134,8 @@ pub struct Engine {
 
     pub packs: PackRender,
 
+    pub drawing: bool,
+
     settings: Option<PathingSettings>,
 }
 
@@ -201,6 +204,7 @@ impl Engine {
             associated_entities: Default::default(),
             phase_states: Default::default(),
             packs,
+            drawing: false,
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
@@ -497,28 +501,7 @@ impl Engine {
         todo!("this is supposed to terminate a phase when there are no more markers, ideally we should actually make something that finds the latest timestamp between sounds, directions, markers, alerts etc");
     }
 
-    pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
-        let map_ctx = machine.is_map_visible();
-        let (
-            visible_space,
-            visible_map,
-            camera_source,
-            edge_feather_scale,
-            (_obscured_alpha,),
-        ) = self.map_settings(|s| {
-            (
-                s.space.visible_space().then_some(s.space.distance_max()),
-                map_ctx.map(|ctx| s.space.visible_map(ctx)),
-                s.space.camera_source(),
-                s.space.edge_feather_scale(),
-                match () {
-                    #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.obscured_alpha(),),
-                    #[cfg(not(feature = "goggles"))]
-                    _ => ((),),
-                },
-            )
-        });
+    pub fn prepare(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         let gameplay_prev = self.gameplay.get_mut().clone();
         if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);
@@ -541,14 +524,91 @@ impl Engine {
         }
         self.schedule.run(&mut self.world);
 
-        let device_context =
-            unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
-
-        if !self.packs.prepare(&self.render_backend.device, machine)? {
-            return Ok(())
-        }
+        self.drawing = self.packs.prepare(&self.render_backend.device, machine)?;
 
         //self.packs.update();
+        Ok(())
+    }
+    /// TODO: anything related to frame-to-frame buffer setup (camera-dependent data mainly) goes here
+    pub fn prepare_frame(&mut self, _machine: &mut RenderMachine, _device_context: &Dx11Context) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
+        self.prepare(machine)?;
+        if self.drawing {
+            if super::goggles::FerretResource::get_ferret_draw() {
+                // SKIP!
+super::goggles::FerretResource::set_ferret_drawn(false);
+                return Ok(())
+            }
+            let device_context =
+                unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
+
+            self.prepare_frame(machine, &device_context)?;
+            self.draw(machine, &device_context, false);
+        }
+        Ok(())
+    }
+    pub fn render_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
+        if !self.drawing { return }
+
+        let prep = self.prepare_frame(machine, &device_context);
+        if rt::log::error_ok(prep).is_none() { return }
+
+        self.draw_carefully(machine, &device_context);
+    }
+    pub fn draw_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
+        use taimi_d3d::dx11;
+
+        unsafe {
+            device_context.Flush();
+        }
+        let _state_blend = device_context.get_snapshot::<dx11::OMBlendState<Option<dx11::BlendState>>>();
+        let _state_depth = device_context.get_snapshot::<dx11::OMDepthState>();
+        let _state_raster = device_context.get_snapshot::<Option<dx11::RasterizerState>>();
+        let _shaderp = device_context.get_snapshot::<Option<dx11::ShaderP>>();
+        let _shaderv = device_context.get_snapshot::<Option<dx11::ShaderV>>();
+        let _shaderlayout = device_context.get_snapshot::<Option<dx11::shader::InputLayout>>();
+        let _rendertarget = device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 2]>>();
+        let _viewport = device_context.get_snapshot::<Vec<dx11::Viewport>>();
+        let _scissor = device_context.get_snapshot::<Vec<dx11::ScissorRect>>();
+        #[cfg(todo = "unnecessary")]
+        let _index = device_context.get_snapshot::<Option<dx11::IndexBuffer>>();
+        let _cbufferv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ConstantBufferV>>>();
+        let _cbufferp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ConstantBufferP>>>();
+        let _samplers = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::SamplerState>>>();
+        let _vbuffer = device_context.get_snapshot_buffers::<Vec<Option<dx11::VertexBuffer>>>();
+        let _srvp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewP>>>();
+        #[cfg(todo = "unnecessary")]
+        let _srvv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewV>>>();
+        self.draw(machine, device_context, true);
+        unsafe {
+            device_context.Flush();
+        }
+    }
+    pub fn draw(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, inherit: bool) {
+        let map_ctx = machine.is_map_visible();
+        let (
+            visible_space,
+            visible_map,
+            camera_source,
+            edge_feather_scale,
+            (_obscured_alpha,),
+        ) = self.map_settings(|s| {
+            (
+                s.space.visible_space().then_some(s.space.distance_max()),
+                map_ctx.map(|ctx| s.space.visible_map(ctx)),
+                s.space.camera_source(),
+                s.space.edge_feather_scale(),
+                match () {
+                    #[cfg(feature = "goggles")]
+                    _ => (s.space.goggles.obscured_alpha(),),
+                    #[cfg(not(feature = "goggles"))]
+                    _ => ((),),
+                },
+            )
+        });
 
         let render_map = match visible_map {
             Some(true) =>
@@ -578,7 +638,7 @@ impl Engine {
                 .sampler_state
                 .set(&device_context, texture_trail_slot);
             self.render_backend.blend_state.set(&device_context);
-            self.render_backend.depth_handler.setup(&device_context);
+            self.render_backend.depth_handler.setup(&device_context, inherit);
             self.render_backend.viewport.set(&device_context);
         }
 
@@ -644,7 +704,7 @@ impl Engine {
 
                 backend.perspective_handler.update_map_cb(&device_context);
 
-                backend.depth_handler.setup_map(&device_context);
+                backend.depth_handler.setup_map(&device_context, inherit);
                 backend
                     .perspective_handler
                     .set_map_cb(&device_context, perspective_slot);
@@ -683,7 +743,7 @@ impl Engine {
             let backend = &mut self.render_backend;
             backend
                 .depth_handler
-                .setup_depth_write(&device_context, Some(depth_fill));
+                .setup_depth_write(&device_context, Some(depth_fill), inherit);
 
             if let Some((shader, layout)) = backend.shaders.vertex.get("mask") {
                 layout.set(&device_context);
@@ -708,7 +768,7 @@ impl Engine {
 
             self.render_backend
                 .depth_handler
-                .setup_depth_write(&device_context, None);
+                .setup_depth_write(&device_context, None, inherit);
         }
 
         if is_rendering {
@@ -868,8 +928,6 @@ impl Engine {
                 _ => (),
             }
         }
-
-        Ok(())
     }
 
     pub fn sender() -> Option<Sender<SpaceEvent>> {

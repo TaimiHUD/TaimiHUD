@@ -22,14 +22,18 @@ use {
             ID3D11DeviceContext,
             ID3D11DepthStencilState,
             ID3D11Buffer,
+            ID3D11Resource,
             ID3D11DeviceContext_Vtbl,
             ID3D11RenderTargetView,
             D3D11_COMPARISON_LESS,
             D3D11_COMPARISON_LESS_EQUAL,
             D3D11_DEPTH_WRITE_MASK_ZERO,
             D3D11_VIEWPORT,
+            D3D11_BOX,
         },
     },
+    taimi_d3d::dx11::buffer::ResourceDimension,
+    //taimi_d3d::prelude::*,
 };
 
 #[cfg(feature = "space")]
@@ -40,6 +44,7 @@ pub type Lenses = BTreeMap<usize, LensClass>;
 pub struct Goggles {
     pub set_targets: GenericDetour<SetTargets>,
     pub release_depth_view: Option<GenericDetour<Release>>,
+    pub update_subresource: GenericDetour<UpdateSubresource>,
     pub set_depth_state: GenericDetour<SetDepthState>,
     pub clear_depth: GenericDetour<ClearDepth>,
     pub set_buffers: GenericDetour<SetBuffers>,
@@ -60,6 +65,7 @@ type SetBuffers = unsafe extern "system" fn(
 );
 type ClearDepth = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>, flags: u32, depth: f32, fill_value: u8);
 type Release = unsafe extern "system" fn(this: InterfaceRef<'static, IUnknown>) -> u32;
+type UpdateSubresource = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, resource: InterfaceRef<'static, ID3D11Resource>, subresource: u32, dst_box: *const D3D11_BOX, data: *const c_void, src_row_pitch: u32, src_depth_pitch: u32);
 
 pub(crate) static LENS_PTR: AtomicPtr<ID3D11DepthStencilView> = AtomicPtr::new(ptr::null_mut());
 pub(crate) static GOGGLES: OnceLock<Goggles> = OnceLock::new();
@@ -129,8 +135,26 @@ unsafe extern "system" fn taimi_set_depth_state(
     if frame_log!(::is_game()) {
         frame_log!(;"D3D11DeviceContext::OMSetDepthStencilState({this:?}, {state:?}, {stencil_ref:?})");
     }
+    let mut trigger = false;
     if let Some(state) = state {
-        if state.as_raw() as usize == get_ferret() as usize { return }
+        if state.as_raw() as usize == FerretResource::get_buffer_ferret() as usize { trigger = true; }
+    }
+    if trigger {
+        if FerretResource::get_ferret_draw() {
+            if !frame_log!(::is_taimi()) && !FerretResource::get_ferret_drawn() {
+                FerretResource::set_ferret_drawn(true);
+                let mut state = crate::render::RenderState::lock();
+                if let Some(state) = &mut *state {
+                    if let Some(Ok(engine)) = &mut state.engine {
+                        engine.render_carefully(&mut state.machine, &this);
+                    }
+                }
+                drop(state);
+                //log::debug!("careful'd");
+            }
+        } else {
+            return
+        }
     }
     match GOGGLES.get() {
         Some(orig) => orig.set_depth_state.call(this, state, stencil_ref),
@@ -254,26 +278,133 @@ unsafe extern "system" fn taimi_set_targets(
         }
     }
 
+    if count > 0 {
+        let mut trigger = false;
+        if let Some(v) = depth_view {
+        if v.as_raw() as usize == FerretResource::get_buffer_ferret() as usize { trigger = true; }
+        }
+        if let Some(v) = *views_ptr {
+            if v.as_raw() as usize == FerretResource::get_buffer_ferret() as usize { trigger = true; }
+        }
+        if trigger {
+            if let Some(v) = *views_ptr {
+                if FerretResource::get_ferret_draw() {
+                    if !frame_log!(::is_taimi()) && !FerretResource::get_ferret_drawn() {
+                        FerretResource::set_ferret_drawn(true);
+                        let mut state = crate::render::RenderState::lock();
+                        if let Some(state) = &mut *state {
+                            if let Some(Ok(engine)) = &mut state.engine {
+                                engine.render_carefully(&mut state.machine, &this);
+                            }
+                        }
+                        drop(state);
+                        //log::debug!("careful'd");
+                    }
+                } else {
+                    this.ClearRenderTargetView(v, &[0.5, 0.7, 0.2, 0.5]);
+                }
+            }
+        }
+    }
     match GOGGLES.get() {
         Some(orig) => orig.set_targets.call(this, count, views_ptr, depth_view),
         None => {
             log::warn!("set_targets in place without original?");
         },
     };
-    if count > 0 {
-        let mut trigger = false;
-        if let Some(v) = depth_view {
-        if v.as_raw() as usize == get_ferret() as usize { trigger = true; }
+}
+unsafe extern "system" fn taimi_update_subresource(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    resource: InterfaceRef<'static, ID3D11Resource>,
+    subresource: u32,
+    dst_box: *const D3D11_BOX, data: *const c_void, src_row_pitch: u32, src_depth_pitch: u32,
+) {
+    let r = taimi_d3d::dx11::Resource::from_d3d_ref(&resource);
+    let mut buffer = None;
+    let mut datasize = 0;
+    match !frame_log!(::is_taimi()) {
+        false => (),
+        true if subresource != 0 => (),
+        true if !dst_box.is_null() => (),
+        true if data.is_null() => (),
+        true if src_depth_pitch != 0 && src_depth_pitch != src_row_pitch => (),
+        true if r.get_type_d3d() != ResourceDimension::BUFFER => (),
+        true => {
+            let b = taimi_d3d::dx11::buffer::Buffer::from_d3d_ref(&*(r.as_d3d() as *const ID3D11Resource as *const ID3D11Buffer));
+            let desc = b.desc();
+            let binds = taimi_d3d::dx11::buffer::BindFlags::CONSTANT.bits()
+                /*| taimi_d3d::dx11::buffer::BindFlags::VERTEX.0*/;
+            if (desc.BindFlags & binds) != 0 {
+                buffer = Some(b);
+                datasize = match src_row_pitch {
+                    0 => desc.ByteWidth as u32,
+                    pitch => pitch,
+                };
+                if datasize % 4 != 0 {
+                    buffer = None;
+                }
+                #[cfg(todo)]
+                if !FerretResource::get_size_range().contains(datasize) {
+                    buffer = None;
+                }
+            }
+        },
+    }
+    if buffer.is_some() {
+        frame_log!("D3D11DeviceContext::UpdateSubresource({:p}, {:p}[{:#x}])", resource.as_raw(), data, datasize);
+        if datasize >= 0x10000 || !FerretResource::get_size_range().contains(&(datasize as u16)) {
+            buffer = None;
         }
-        if let Some(v) = *views_ptr {
-            if v.as_raw() as usize == get_ferret() as usize { trigger = true; }
+    }
+    if !frame_log!(::is_enabled()) {
+        buffer = None;
+    }
+    if let Some(..) = buffer {
+        let data = core::slice::from_raw_parts(data as *const u32, (datasize / 4) as usize);
+        let mut haystack = data;
+        let gran = FerretResource::get_granularity() as usize;
+        let persp = FerretResource::get_perspective();
+        let mut pmatch = None;
+        while !haystack.is_empty() && pmatch.is_none() {
+            if persp.matches_pre(haystack) {
+                let offset = haystack.as_ptr().offset_from(data.as_ptr()) as usize;
+                frame_log!(;"- pre-persp match @{offset:#x}?");
+                if persp.matches(haystack) {
+                    pmatch = Some(haystack);
+                }
+            }
+            haystack = haystack.get(gran..).unwrap_or(&[]);
         }
-        if trigger {
-            if let Some(v) = *views_ptr {
-                this.ClearRenderTargetView(v, &[0.5, 0.7, 0.2, 0.5]);
+        if let Some(haystack) = pmatch {
+            // TODO: print prior too
+            let offset = haystack.as_ptr().offset_from(data.as_ptr()) as usize;
+            frame_log!(;"- actual match offset={offset:#x}");
+            #[cfg(todo)]
+            if persp.is_empty() {
+                log::debug!("empty matcher btw");
+            }
+            let trailing = offset.checked_sub(16).map(|off| core::iter::once_with(move || {
+                frame_log!(;"preceding 16 bytes:");
+                data.get_unchecked(off..offset)
+            })).into_iter().flatten();
+            let chunks = haystack.chunks(4).take(16)
+                .chain(trailing);
+            for chunk in chunks {
+                use core::fmt::Write;
+                let mut line = String::new();
+                for &v in chunk {
+                    let _ = write!(&mut line, "  {:4.03}", f32::from_bits(v));
+                }
+                frame_log!(;"\t::{line}");
             }
         }
     }
+    match GOGGLES.get() {
+        Some(orig) => orig.update_subresource.call(this, resource, subresource, dst_box, data, src_row_pitch, src_depth_pitch),
+        None => {
+            log::warn!("update_subresource in place without original?");
+        },
+    };
 }
 
 unsafe extern "system" fn taimi_release_depth_view(this: InterfaceRef<'static, IUnknown>) -> u32 {
@@ -359,6 +490,10 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
         vtable.OMSetRenderTargets;
     let set_targets: SetTargets = unsafe { transmute(set_targets) };
 
+    let update_subresource: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, *const D3D11_BOX, *const c_void, u32, u32) =
+        vtable.UpdateSubresource;
+    let update_subresource: UpdateSubresource = unsafe { transmute(update_subresource) };
+
     let release_depth_view: unsafe extern "system" fn(*mut c_void) -> u32 =
         crate::space::dx11::DepthHandler::depth_stencil_view_vtbl()
             .map(|vtbl| vtbl.base__.base__.base__.Release)
@@ -371,6 +506,7 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
             clear_depth: GenericDetour::new(clear_depth, taimi_clear_depth)?,
             set_buffers: GenericDetour::new(set_buffers, taimi_set_buffers)?,
             set_targets: GenericDetour::new(set_targets, taimi_set_targets)?,
+            update_subresource: GenericDetour::new(update_subresource, taimi_update_subresource)?,
             release_depth_view: Some(GenericDetour::new(release_depth_view, taimi_release_depth_view)?),
         }
     };
@@ -390,6 +526,7 @@ pub fn enable() -> anyhow::Result<()> {
         orig.clear_depth.enable()?;
         orig.set_buffers.enable()?;
         orig.set_depth_state.enable()?;
+        orig.update_subresource.enable()?;
     }
 
     Ok(())
@@ -416,6 +553,9 @@ pub fn disable() -> anyhow::Result<()> {
             res = Err(e.into());
         }
         if let Err(e) = orig.set_buffers.disable() {
+            res = Err(e.into());
+        }
+        if let Err(e) = orig.update_subresource.disable() {
             res = Err(e.into());
         }
     }
@@ -486,14 +626,172 @@ pub fn classify_space_lens(engine: &Engine) {
     }
 }
 
-static FERRET: sync_unsafe_cell::SyncUnsafeCell<u64> = sync_unsafe_cell::SyncUnsafeCell::new(0);
 pub fn ferret(value: u64) {
-    unsafe {
-        ptr::write_volatile(FERRET.get(), value)
+    FerretResource::set_buffer_ferret(value)
+}
+
+use core::ops;
+use bitvec::array::BitArray;
+use bitvec::order::Lsb0;
+
+pub struct FerretResource {
+    pub size_range: ops::Range<u16>,
+    pub perspective: PerspectiveFerret,
+    pub granularity: u8,
+    pub buffer_ferret: u64,
+    pub ferret_draw: bool,
+    pub ferret_drawn: bool,
+}
+impl FerretResource {
+    pub const DEFAULT: Self = Self {
+        perspective: PerspectiveFerret::EMPTY,
+        granularity: Self::DEFAULT_GRANULARITY,
+        size_range: 0u16..0u16,
+        buffer_ferret: 0,
+        ferret_draw: false,
+        ferret_drawn: true,
+    };
+    const DEFAULT_GRANULARITY: u8 = 4;
+    pub fn get() -> *mut Self {
+        static FERRET: sync_unsafe_cell::SyncUnsafeCell<FerretResource> = sync_unsafe_cell::SyncUnsafeCell::new(FerretResource::DEFAULT);
+        FERRET.get()
+    }
+    pub fn get_buffer_ferret() -> u64 {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).buffer_ferret)
+        }
+    }
+    pub fn set_buffer_ferret(v: u64) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).buffer_ferret, v)
+        }
+    }
+    pub fn get_ferret_draw() -> bool {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).ferret_draw)
+        }
+    }
+    pub fn get_ferret_drawn() -> bool {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).ferret_drawn)
+        }
+    }
+    pub fn set_ferret_drawn(v: bool) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).ferret_drawn, v)
+        }
+    }
+    pub fn set_ferret_draw(v: bool) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).ferret_draw, v)
+        }
+    }
+    pub fn get_granularity() -> u8 {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).granularity)
+        }.max(1)
+    }
+    pub fn set_granularity(v: u8) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).granularity, v)
+        }
+    }
+    pub fn get_perspective() -> PerspectiveFerret {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).perspective)
+        }
+    }
+    pub fn set_perspective(v: PerspectiveFerret) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).perspective, v)
+        }
+    }
+    pub fn set_size_range(v: ops::Range<u16>) {
+        unsafe {
+            ptr::write_volatile(&raw mut (*Self::get()).size_range, v)
+        }
+    }
+    pub fn get_size_range() -> ops::Range<u16> {
+        unsafe {
+            ptr::read_volatile(&raw const (*Self::get()).size_range)
+        }
     }
 }
-fn get_ferret() -> u64 {
-    unsafe {
-        ptr::read_volatile(FERRET.get())
+pub struct PerspectiveFerret {
+    pub expected_w: f32,
+    pub expected_h: f32,
+}
+impl PerspectiveFerret {
+    pub const EMPTY: Self = Self {
+        expected_w: 0.0,
+        expected_h: 0.0,
+    };
+    pub fn new(fov_y: f32, aspect_ratio: f32) -> Self {
+        let mut ferret = Self::EMPTY;
+        ferret.set_expected_perspective(fov_y, aspect_ratio);
+        ferret
+    }
+    const ZERO32: u32 = 0.0f32.to_bits();
+    const ONE32: u32 = 1.0f32.to_bits();
+    pub const fn is_empty(&self) -> bool {
+        self.expected_h.to_bits() == Self::ZERO32
+    }
+
+    pub fn set_expected_perspective(&mut self, fov_y: f32, aspect_ratio: f32) {
+        let fov = 0.5 * fov_y;
+        let fov_sin = fov.sin();
+        let fov_cos = fov.cos();
+        self.expected_h = fov_cos / fov_sin;
+        self.expected_w = self.expected_h / aspect_ratio;
+    }
+    const M4_LEN32: usize = 4 * 4;
+    /// column-major
+    const M4_PERSP_MASK: BitArray<[u32; 1], Lsb0> = bitvec::bitarr![
+        const u32, Lsb0;
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 1, 0,
+    ];
+    /// 1.0 @ (2,2)
+    const M4_PERSP_ONE: usize = 8;
+    const M4_PERSP_EPSILON: f32 = 0.05;
+    pub fn matches_pre(&self, data: &[u32]) -> bool {
+        if data.len() < Self::M4_LEN32 { return false }
+        let mut nonzero = false;
+        let checks = Self::M4_PERSP_MASK.iter().zip(data)
+            .filter_map(|(mask, &v)| match *mask {
+                false => Some(v),
+                true => {
+                    if v != Self::ZERO32 {
+                        nonzero = true;
+                    }
+                    None
+                },
+            });
+        for (i, v) in checks.enumerate() {
+            let expected = match i {
+                Self::M4_PERSP_ONE => Self::ONE32,
+                _ => Self::ZERO32,
+            };
+            if v != expected { return false }
+        }
+        nonzero
+    }
+    /// post-filter used after checking [Self::matches_pre]
+    pub unsafe fn matches(&self, data: &[u32]) -> bool {
+        if self.is_empty() {
+            return true
+        }
+        let exp = [self.expected_w, self.expected_h];
+        let checks = Self::M4_PERSP_MASK.iter_ones()
+            .map(|i| f32::from_bits(*unsafe { data.get_unchecked(i) })).zip(exp);
+        for (v, e) in checks {
+            let delta = (v - e).abs();
+            if delta > Self::M4_PERSP_EPSILON {
+                return false
+            }
+        }
+        true
     }
 }
