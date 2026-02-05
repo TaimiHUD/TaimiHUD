@@ -102,12 +102,15 @@ impl FrameLog {
         }
     }
     pub fn is_enabled() -> bool {
-        !Self::is_taimi() && MetricsSwitch::read().contains(MetricsSwitch::FRAME_LOG)
+        MetricsSwitch::read().contains(MetricsSwitch::FRAME_LOG)
     }
     pub fn is_taimi() -> bool {
         unsafe {
             ptr::read_volatile(Self::is_taimi_flag().get())
         }
+    }
+    pub fn is_game() -> bool {
+        !Self::is_taimi() && Self::is_enabled()
     }
     pub fn is_taimi_set(is_taimi: bool) {
         unsafe {
@@ -154,12 +157,12 @@ macro_rules! frame_log {
     (::$f:ident($($args:tt)*)) => {
         $crate::render::machine::FrameLog::$f($($args)*)
     };
-    (log; $($log:tt)*) => {
+    (; $($log:tt)*) => {
         ::log::debug! { logger: $crate::render::machine::RenderMachine::frame_log(), $($log)* }
     };
     ($($log:tt)*) => {
         if $crate::render::machine::FrameLog::is_enabled() {
-            $crate::render::machine::frame_log! { log; $($log)* }
+            $crate::render::machine::frame_log! {; $($log)* }
         }
     };
 }
