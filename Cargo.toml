@@ -73,7 +73,7 @@ space = [
   "paths",
   "goggles",
   "space-list",
-  #"space-ecs",
+  "space-ecs",
   "dep:taimi_meta",
   "taimi_meta/spatial",
   "dep:taimi_pack",

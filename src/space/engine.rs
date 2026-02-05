@@ -44,6 +44,8 @@ use {
         timer::RotationType,
     },
     std::path::PathBuf,
+    glam::{Mat4, Vec3Swizzles, Vec4},
+    itertools::Itertools as _,
 };
 
 #[cfg(feature = "goggles")]
@@ -97,14 +99,14 @@ fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Mark
     let now = Instant::now();
     for (entity, marker, mut render) in &mut query {
         if now > marker.marker.end(marker.start) {
-            log::info!(
+            log::trace!(
                 "Entity {} reached end after {}, despawning.",
                 entity,
                 marker.marker.duration
             );
             commands.entity(entity).despawn();
         } else if now > marker.marker.start(marker.start) && render.disabled {
-            log::info!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
+            log::trace!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
             render.disabled = false;
         }
     }
@@ -158,12 +160,14 @@ impl Engine {
             .trail_expansion = TrailScale::DIRTY;
 
         #[cfg(feature = "space-ecs")]
+        let model_files;
+        #[cfg(feature = "space-ecs")]
         let object_kinds = {
             let models_dir = crate::ADDON_DIR.join("models");
             let object_descs =
                 ObjectLoader::load_desc(&models_dir).context("Failed to load model descriptors")?;
             log::debug!("{:?}", object_descs);
-            let model_files =
+            model_files =
                 ObjFile::load(&models_dir, &object_descs).context("Failed to load model object")?;
 
             let object_kinds =
@@ -345,7 +349,7 @@ impl Engine {
                     },
                 ));
                 let id = entity.id();
-                log::debug!(
+                log::trace!(
                     "Creating entity {id} at {} from timer {} markers, phase {}",
                     marker.position,
                     phase_state.timer.name(),
@@ -360,7 +364,7 @@ impl Engine {
     pub fn remove_phase(&mut self, timer: Arc<TimerFile>) -> anyhow::Result<()> {
         if let Some(entry) = self.associated_entities.remove(&timer.name.clone()) {
             entry.iter().for_each(|entity| {
-                log::debug!("Despawning {entity} from timer {} markers", timer.name());
+                log::trace!("Despawning {entity} from timer {} markers", timer.name());
                 self.world.despawn(*entity);
             });
         }
@@ -713,46 +717,6 @@ impl Engine {
                 .set(&device_context, perspective_slot);
         }
 
-        #[cfg(feature = "space-ecs")]
-        let mut query = self.world.query::<(&mut Render, &Position)>();
-        #[cfg(feature = "space-ecs")]
-        for (_k, c) in &query.iter(&self.world).chunk_by(|(r, _p)| r.backing.name.clone()) {
-            let mut itery = c.into_iter();
-            let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
-            let (r, p) = slice;
-            if !r.disabled {
-                let rot = match r.rotation {
-                    RotationType::Billboard => {
-                        let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
-                        let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
-                        y
-                        //Mat4::IDENTITY
-                    },
-                    _ => Mat4::IDENTITY,
-                };
-                let ibd: Vec<_> = vec![slice]
-                    .into_iter()
-                    .chain(itery)
-                    .map(|(_r, p)| {
-                        //  r.backing.render.metadata.model_matrix *
-                        let affy =
-                            Mat4::from_translation(p.0) * rot * r.backing.render.metadata.model_matrix;
-                        InstanceBufferData {
-                            world: affy,
-                            //world_position: affy.translation,
-                            colour: Vec3::new(1.0, 1.0, 1.0),
-                        }
-                    })
-                    .collect();
-                r.backing.set_and_draw(
-                    perspective_slot,
-                    &self.render_backend.device,
-                    &device_context,
-                    &ibd,
-                )?;
-            }
-        }
-
         if let Some((camera, ref _depth, ref cull)) = render_world {
             let (
                 overlap_threshold,
@@ -832,6 +796,51 @@ impl Engine {
 
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
+            }
+        }
+
+        #[cfg(feature = "space-ecs")]
+        let mut query = self.world.query::<(&mut Render, &Position)>();
+        #[cfg(feature = "space-ecs")]
+        for (_k, c) in &query.iter(&self.world).chunk_by(|(r, _p)| r.backing.name.clone()) {
+            let mut itery = c.into_iter();
+            let Some(slice) = rt::log::warn_ok(itery.next().context("empty slice!")) else {
+                continue
+            };
+            let (r, p) = slice;
+            if !r.disabled {
+                let rot = match r.rotation {
+                    RotationType::Billboard => {
+                        if let Some((pos, ..)) = machine.get_player_pos() {
+                            let mark2d = (p.0.xz() - pos.xz().to_raw()).to_angle();
+                            Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d)
+                        } else {
+                            Mat4::IDENTITY
+                        };
+                        self.render_backend.perspective_handler.constant_buffer_data.billboard
+                    },
+                    _ => Mat4::IDENTITY,
+                };
+                let ibd: Vec<_> = vec![slice]
+                    .into_iter()
+                    .chain(itery)
+                    .map(|(_r, p)| {
+                        //  r.backing.render.metadata.model_matrix *
+                        let affy =
+                            Mat4::from_translation(p.0) * rot * r.backing.render.metadata.model_matrix;
+                        super::dx11::InstanceBufferData {
+                            world: affy,
+                            //world_position: affy.translation,
+                            colour: Vec4::ONE,
+                        }
+                    })
+                    .collect();
+                r.backing.set_and_draw(
+                    perspective_slot,
+                    &self.render_backend.device,
+                    &device_context,
+                    &ibd,
+                );
             }
         }
 
