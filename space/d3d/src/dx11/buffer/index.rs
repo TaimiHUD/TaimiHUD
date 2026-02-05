@@ -6,6 +6,7 @@ use {
             prelude::*,
         },
         dxgi::DXGI_FORMAT,
+        state::D3dStateSnapshot,
         D3dContextBindable,
     },
     std::{ffi, mem},
@@ -142,6 +143,19 @@ impl D3dContextBindable<Dx11Context> for Option<&'_ IndexBuffer> {
                 device_context.IASetIndexBuffer(None, IndexBuffer::FORMAT_32, 0);
             },
         }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for IndexBuffer;
+    impl{D3DC} D3dState<D3DC> for Option<IndexBuffer>;
+}
+impl D3dStateSnapshot<Dx11Context> for Option<IndexBuffer> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(None)
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        IndexBuffer::new_snapshot(context)
     }
 }
 

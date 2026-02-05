@@ -5,6 +5,7 @@ use {
             prelude::*,
         },
         shader::ShaderKind,
+        state::D3dStateSnapshot,
         D3dContextBindable,
         D3dContextBindableSlot,
     },
@@ -291,6 +292,34 @@ impl D3dContextBindable<Dx11Context> for [Option<ShaderResourceViewP>; ShaderRes
         ShaderResourceView::bind_set_pixel(self, context, 0)
     }
 }
+impl_d3d! {
+    //impl{D3DC} D3dState<D3DC> for ShaderResourceViewP;
+    impl{D3DC} D3dState<D3DC> for [Option<ShaderResourceViewP>; ShaderResourceView::MAX_SLOTS];
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ShaderResourceViewP>> {
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ShaderResourceViewP::new_snapshot_vec(context, 0..ShaderResourceView::MAX_SLOTS as u32)
+    }
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ShaderResourceViewP>; N] {
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        let mut snapshot = [const { None }; N];
+        ShaderResourceViewP::new_snapshot_in(context, 0, &mut snapshot);
+        snapshot
+    }
+}
 
 impl AsRef<View> for ID3D11ShaderResourceView {
     #[inline]
@@ -376,6 +405,34 @@ impl D3dContextBindable<Dx11Context> for [Option<ShaderResourceViewV>; ShaderRes
     #[inline]
     fn set(&self, context: &Dx11Context) {
         ShaderResourceView::bind_set_vertex(self, context, 0)
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for [Option<ShaderResourceViewV>; ShaderResourceView::MAX_SLOTS];
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<ShaderResourceViewV>> {
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ShaderResourceViewV::new_snapshot_vec(context, 0..ShaderResourceView::MAX_SLOTS as u32)
+    }
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<ShaderResourceViewV>; N] {
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        let mut snapshot = [const { None }; N];
+        ShaderResourceViewV::new_snapshot_in(context, 0, &mut snapshot);
+        snapshot
     }
 }
 

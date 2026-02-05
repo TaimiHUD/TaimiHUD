@@ -4,7 +4,7 @@ pub use crate::dx11::d3d11::{
     D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_MODE,
 };
-use crate::{dx11::prelude::*, D3dContextBindable, D3dContextBindableSlot};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable, D3dContextBindableSlot};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11SamplerState;
@@ -107,27 +107,35 @@ impl D3dContextBindableSlot<Dx11Context> for [Option<SamplerState>] {
         SamplerState::bind_set(context, slot, self)
     }
 }
-
-impl D3dContextBindable<Dx11Context> for [Option<SamplerState>; SamplerState::MAX_COUNT] {
+impl<const N: usize> D3dContextBindable<Dx11Context> for [Option<SamplerState>; N] {
     fn set(&self, context: &Dx11Context) {
         SamplerState::bind_set(context, 0, self)
     }
 }
 
-#[cfg(todo)]
-impl<const N: usize> D3dState<Dx11Context> for [Option<SamplerState>; N] {
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for [Option<SamplerState>; SamplerState::MAX_COUNT];
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<SamplerState>; N] {
     fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
         Ok([const { None }; N])
     }
 
     fn snapshot_state(context: &Dx11Context) -> Self {
-        SamplerState::new_snapshot_from::<N>(context, 0)
+        SamplerState::new_snapshot::<N>(context, 0)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<SamplerState>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
     }
 
-    fn restore_state(&self, context: &Dx11Context) {
-        self.set(context, 0);
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        SamplerState::new_snapshot_vec(context, 0..SamplerState::MAX_COUNT as u32)
     }
-
+}
+#[cfg(todo)]
+impl<const N: usize> D3dStateMut<Dx11Context> for [Option<SamplerState>; N] {
     fn discard_state_mut(&mut self) {
         *self = [const { None }; N];
     }

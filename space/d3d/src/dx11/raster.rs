@@ -13,6 +13,7 @@ use crate::{
         depth::{ClearFlags, DepthView},
         prelude::*,
     },
+    state::D3dStateSnapshot,
     D3dContextBindable,
 };
 
@@ -77,6 +78,23 @@ impl D3dContextBindable<Dx11Context> for Option<RasterizerState> {
                 context.RSSetState(None);
             },
         }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for RasterizerState;
+    impl{D3DC} D3dState<D3DC> for Option<RasterizerState>;
+    impl{D3DC} D3dStateSnapshot<D3DC> for [Option<RasterizerState>; 1];
+}
+impl D3dStateSnapshot<Dx11Context> for Option<RasterizerState> {
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(None)
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        RasterizerState::new_snapshot(context).ok()
     }
 }
 
@@ -182,6 +200,25 @@ where
 {
     fn set(&self, context: &Dx11Context) {
         Self::bind_set(context, &self.views, self.depth.as_ref())
+    }
+}
+
+impl_d3d! {
+    impl{D3DC, V, D} D3dState<D3DC> for RenderTargetViews<V, D>;
+}
+impl<V, D> D3dStateSnapshot<Dx11Context> for RenderTargetViews<V, D>
+where
+    V: ID3D11ResourceOf<ID3D11RenderTargetView> + Default + AsMut<[Option<RenderTargetView>]>,
+    D: AsRef<DepthView> + From<d3d11::ID3D11DepthStencilView>,
+{
+    #[inline]
+    fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Self::with_views(V::default(), None))
+    }
+
+    #[inline]
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        RenderTargetViews::new_snapshot(context)
     }
 }
 

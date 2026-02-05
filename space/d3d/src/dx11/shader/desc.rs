@@ -1,5 +1,5 @@
 use {
-    crate::{dx11::prelude::*, D3dContextBindable},
+    crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable},
     std::ffi::CStr,
 };
 
@@ -94,6 +94,29 @@ impl D3dContextBindable<Dx11Context> for InputLayout {
         unsafe {
             context.IASetInputLayout(&self.layout);
         }
+    }
+}
+impl D3dContextBindable<Dx11Context> for Option<InputLayout> {
+    fn set(&self, context: &Dx11Context) {
+        match self {
+            Some(layout) => layout.set(context),
+            None => unsafe {
+                context.IASetInputLayout(None);
+            },
+        }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for InputLayout;
+    impl{D3DC} D3dState<D3DC> for Option<InputLayout>;
+}
+impl D3dStateSnapshot<Dx11Context> for Option<InputLayout> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(None)
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        InputLayout::new_snapshot(context).ok()
     }
 }
 

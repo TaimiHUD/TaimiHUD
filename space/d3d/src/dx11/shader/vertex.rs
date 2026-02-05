@@ -1,5 +1,5 @@
 pub use crate::dx11::d3d11::ID3D11VertexShader;
-use crate::{dx11::prelude::*, D3dContextBindable};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11VertexShader;
@@ -34,5 +34,28 @@ impl D3dContextBindable<Dx11Context> for ShaderV {
         unsafe {
             context.VSSetShader(&self.shader, None);
         }
+    }
+}
+impl D3dContextBindable<Dx11Context> for Option<ShaderV> {
+    fn set(&self, context: &Dx11Context) {
+        match self {
+            Some(shader) => shader.set(context),
+            None => unsafe {
+                context.VSSetShader(None, None);
+            },
+        }
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dState<D3DC> for ShaderV;
+    impl{D3DC} D3dState<D3DC> for Option<ShaderV>;
+}
+impl D3dStateSnapshot<Dx11Context> for Option<ShaderV> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(None)
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ShaderV::new_snapshot(context)
     }
 }

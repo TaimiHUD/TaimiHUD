@@ -1,6 +1,10 @@
 pub use windows::Win32::Foundation::RECT;
 use {
-    crate::{dx11::prelude::*, D3dContextBindable},
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
     glamour::{Box2, Point2, Rect, Size2, Unit},
     num_traits::AsPrimitive,
     std::{mem, slice},
@@ -233,5 +237,41 @@ impl D3dContextBindable<Dx11Context> for [ScissorRect] {
     fn set(&self, context: &Dx11Context) {
         let scissors = ScissorRect::slice_as_raw(self);
         ScissorRect::bind_set(context, scissors)
+    }
+}
+
+impl_d3d! {
+    impl{D3DC} D3dStateSnapshot<D3DC> for [ScissorRect; N];
+    impl{D3DC} D3dState<D3DC> for [ScissorRect];
+}
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [ScissorRect; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([ScissorRect::EMPTY; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ScissorRect::new_snapshot::<N>(context)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<ScissorRect> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        ScissorRect::new_snapshot_vec(context)
+    }
+}
+impl D3dState<Dx11Context> for [ScissorRect] {
+    fn restore_state(&self, context: &Dx11Context) {
+        match self {
+            scissor => ScissorRect::slice_truncate(scissor).set(context),
+            #[cfg(todo)]
+            scissor => scissor.set(context),
+        }
+    }
+    #[cfg(todo)]
+    fn discard_state_mut(&mut self) {
+        for rect in self {
+            *rect = ScissorRect::EMPTY;
+        }
     }
 }

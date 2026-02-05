@@ -5,7 +5,7 @@ pub use crate::dx11::d3d11::{
     D3D11_BLEND_OP,
     D3D11_RENDER_TARGET_BLEND_DESC,
 };
-use crate::{dx11::prelude::*, state::D3dState, D3dContextBindable};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11BlendState;
@@ -148,10 +148,12 @@ where
     }
 }
 
-impl<B> D3dState<Dx11Context> for OMBlendState<B>
+impl_d3d! {
+    impl{B, D3DC} D3dState<D3DC> for OMBlendState<B>;
+}
+impl<B> D3dStateSnapshot<Dx11Context> for OMBlendState<B>
 where
     B: From<Option<BlendState>>,
-    Self: D3dContextBindable<Dx11Context>,
 {
     fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
         Ok(Self::with_state(None))
@@ -160,11 +162,14 @@ where
     fn snapshot_state(context: &Dx11Context) -> Self {
         Self::new_snapshot(context)
     }
-
-    fn restore_state(&self, context: &Dx11Context) {
-        self.set(context);
-    }
-
+}
+#[cfg(todo)]
+impl<B> D3dStateMut<Dx11Context> for OMBlendState<B>
+where
+    B: From<Option<ID3D11BlendState>>,
+    Self: D3dContextBindable<Dx11Context>,
+{
+    #[cfg(todo)]
     fn discard_state_mut(&mut self) {
         self.sample_mask.take();
         self.state = None.into();

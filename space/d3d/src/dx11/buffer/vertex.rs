@@ -5,6 +5,7 @@ use {
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
         },
+        state::D3dStateSnapshot,
         D3dContextBindable,
         D3dContextBindableSlot,
     },
@@ -206,6 +207,23 @@ impl D3dContextBindableSlot<Dx11Context> for [Option<VertexBuffer>] {
 impl D3dContextBindable<Dx11Context> for [Option<VertexBuffer>; VertexBuffer::MAX_COUNT] {
     fn set(&self, device_context: &Dx11Context) {
         Buffer::set_all_vertex(self, device_context, 0)
+    }
+}
+
+impl<const N: usize> D3dStateSnapshot<Dx11Context> for [Option<VertexBuffer>; N] {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok([const { None }; N])
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        VertexBuffer::new_snapshot::<N>(context, 0)
+    }
+}
+impl D3dStateSnapshot<Dx11Context> for Vec<Option<VertexBuffer>> {
+    fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {
+        Ok(Vec::new())
+    }
+    fn snapshot_state(context: &Dx11Context) -> Self {
+        VertexBuffer::new_snapshot_vec(context, 0..VertexBuffer::MAX_COUNT as u32)
     }
 }
 
