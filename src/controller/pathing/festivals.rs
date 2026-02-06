@@ -201,7 +201,7 @@ impl FestivalWindow {
             Festival::Wintersday,
             FestivalWindow::with_timestamp(1765296000, 1767376800),
         ),
-        // Lunar New Year 2026: 2026-02-03 — 2026-02-24 (a guess atm)
+        // Lunar New Year 2026: 2026-02-03 — 2026-02-24
         (
             Festival::LunarNewYear,
             FestivalWindow::with_timestamp(1770134400, 1771959600),
