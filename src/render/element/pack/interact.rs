@@ -1648,7 +1648,7 @@ impl super::PackElements {
                         }
                     }
                     post_draw.navigate_packs = true;
-                    let _ = rt::send_alert(ui, "navigate over yourself, im sleepy");
+                    let _ = rt::send_alert(ui, "scroll yourself, im sleepy");
                 },
                 (Some(..), act) => log::warn!("unexpected action {act:?}"),
                 (None, _) => (),
