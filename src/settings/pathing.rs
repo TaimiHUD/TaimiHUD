@@ -1,25 +1,30 @@
 use {
     crate::{controller::Controller, settings::Settings},
     bitflags::bitflags,
+    rustc_hash::FxHashSet,
     serde::{de::DeserializeSeed, Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, num::NonZero, str::FromStr, sync::Arc},
     strum::{IntoStaticStr, VariantArray},
     taimi_hoard::flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
 };
-#[cfg(feature = "space")]
+#[cfg(feature = "paths")]
 use {
+    std::borrow::Cow,
     taimi_hoard::time::Timestamp,
-    taimi_meta::ui::MapContext,
+    taimi_meta::{packs::VisibilityFlags, ui::MapContext},
     taimi_pack::attributes::{
         keys::{Guid, ShowHideAction},
         Festival,
         Festivals,
     },
+    taimi_pack::category::id::{AsFullId, CategoryId, FullIdRef, IdCmpRelaxed},
 };
-#[cfg(not(feature = "space"))]
+#[cfg(not(feature = "paths"))]
 type Timestamp = u64;
-#[cfg(not(feature = "space"))]
+#[cfg(not(feature = "paths"))]
 type Guid = String;
+#[cfg(not(feature = "paths"))]
+type CategoryId = String;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PathingSettings {
@@ -66,11 +71,11 @@ impl PathingSettings {
     #[cfg(feature = "paths")]
     pub const DEFAULT_LOAD_SIMULTANEOUS: usize = 4;
 
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn get_festival_preference(&self, festival: Festival) -> Option<FestivalPreference> {
         self.festival_filter.get(festival.as_str()).copied()
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn festival_preferences(&self) -> (Festivals, Festivals) {
         Festival::ALL
             .iter()
@@ -81,7 +86,7 @@ impl PathingSettings {
             })
             .unzip()
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn set_festival_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
         let festival_filter = self.festival_filter_mut();
         match pref {
@@ -102,7 +107,7 @@ impl PathingSettings {
             }
         });
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {
         Arc::make_mut(&mut self.festival_filter)
     }
@@ -116,7 +121,7 @@ impl PathingSettings {
         self.load_simultaneous = Some(v);
     }
 }
-#[cfg(feature = "space")]
+#[cfg(feature = "paths")]
 impl Settings {
     pub fn pathing_state_update(&mut self, path: String, state: bool) {
         if self.disabled_paths.contains(&path) && state {
@@ -334,7 +339,7 @@ impl SpaceSettings {
     pub fn visible_worldmap(&self) -> bool {
         self.visible_map_world.unwrap_or(Self::DEFAULT_VISIBLE_MAP)
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn visible_map(&self, ctx: MapContext) -> bool {
         match ctx {
             MapContext::Global => self.visible_worldmap(),
@@ -345,7 +350,7 @@ impl SpaceSettings {
         self.map_open.unwrap_or(Self::DEFAULT_MAP_OPEN)
     }
 
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn trail_textured_map(&self, ctx: MapContext) -> bool {
         match ctx {
             MapContext::Global => self.trail_textured_worldmap(),
@@ -404,14 +409,14 @@ impl SpaceSettings {
     pub fn poi_alpha_minimap(&self) -> f32 {
         self.map_poi_alpha_mini.unwrap_or(Self::DEFAULT_POI_MAP_ALPHA)
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn trail_alpha_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.trail_alpha_worldmap(),
             MapContext::Minimap => self.trail_alpha_minimap(),
         }
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn poi_alpha_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.poi_alpha_worldmap(),
@@ -428,7 +433,7 @@ impl SpaceSettings {
     pub fn poi_scale_minimap(&self) -> f32 {
         self.scale_poi_mini.unwrap_or(Self::DEFAULT_POI_SCALE_MAP)
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn poi_scale_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.poi_scale_worldmap(),
@@ -445,7 +450,7 @@ impl SpaceSettings {
     pub fn trail_scale_minimap(&self) -> f32 {
         self.scale_trail_mini.unwrap_or(Self::DEFAULT_TRAIL_SCALE_MAP)
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn trail_scale_map(&self, ctx: MapContext) -> f32 {
         match ctx {
             MapContext::Global => self.trail_scale_worldmap(),
@@ -731,7 +736,7 @@ impl TriggerKind {
         *enable == Self::settings_default_enable()
     }
 
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub const fn show_hide_action(&self) -> Option<ShowHideAction> {
         match *self {
             Self::SHOW => Some(ShowHideAction::Show),
@@ -794,13 +799,20 @@ pub struct PathingSave {
     pub hidden_guid_expiry: Arc<HiddenGuids>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub per_account: BTreeMap<String, PathingAccountSave>,
+    #[serde(default, skip_serializing_if = "PathingCategories::is_empty")]
+    pub categories: PathingCategories,
 }
 impl PathingSave {
     pub fn is_empty(&self) -> bool {
         match self {
             Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() => false,
             Self { per_account, .. } if !Self::is_per_account_empty(per_account) => false,
-            Self { hidden_guid_expiry: _, per_account: _ } => true,
+            Self { categories, .. } if !categories.is_empty() => false,
+            Self {
+                categories: _,
+                hidden_guid_expiry: _,
+                per_account: _,
+            } => true,
         }
     }
 
@@ -814,7 +826,8 @@ impl PathingSave {
         per_account.values().all(|a| a.is_empty())
     }
 }
-#[cfg(feature = "space")]
+
+#[cfg(feature = "paths-filter")]
 impl PathingSave {
     pub fn hidden_guid_expiry_mut(&mut self) -> &mut BTreeMap<Guid, Timestamp> {
         Arc::make_mut(&mut self.hidden_guid_expiry)
@@ -858,6 +871,70 @@ impl PathingAccountSave {
                 #[cfg(todo)]
                     achievements: _,
             } => true,
+        }
+    }
+}
+
+/// TODO: per-mode toggles
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PathingCategories {
+    pub toggles: FxHashSet<IdCmpRelaxed<CategoryId>>,
+    #[cfg(todo)]
+    pub deviations: FxHashMap<CategoryId, VisibilityFlags>,
+}
+impl PathingCategories {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self { toggles, .. } if !toggles.is_empty() => false,
+            Self { toggles: _ } => true,
+        }
+    }
+}
+#[cfg(feature = "paths")]
+impl PathingCategories {
+    pub fn visibility_deviations_for<'a, 'r>(
+        &'a self,
+        root: &'r FullIdRef,
+    ) -> impl Iterator<Item = (&'a CategoryId, VisibilityFlags)> + 'r
+    where
+        'a: 'r,
+    {
+        let root = IdCmpRelaxed::with_ref(root);
+        #[cfg(todo)]
+        let deviations = self.deviations.iter();
+        self.toggles
+            .iter()
+            .filter(move |id| id.id_starts_with(root))
+            .map(|id| (&id.id, VisibilityFlags::TOGGLE))
+    }
+    pub fn visibility_deviation(&self, id: &FullIdRef) -> VisibilityFlags {
+        let id = IdCmpRelaxed::with_ref(id);
+        #[cfg(todo)]
+        if let Some(deviations) = self.deviations.get(id) {
+            return *deviations
+        }
+        VisibilityFlags::visible(self.toggles.contains(id))
+    }
+    pub fn set_visibility_deviation<'i, I>(&mut self, id: I, deviation: VisibilityFlags)
+    where
+        I: Into<Cow<'i, FullIdRef>>,
+    {
+        let id = id.into();
+        #[cfg(todo)]
+        if !dev.intersects(!VisibilityFlags::TOGGLE) {
+            self.deviations.remove(&id);
+        }
+        match deviation {
+            VisibilityFlags::TOGGLE => {
+                self.toggles.insert(id.into_owned().into());
+            },
+            _ => {
+                self.toggles.remove(IdCmpRelaxed::with_ref(&*id));
+                #[cfg(todo)]
+                if !deviation.is_empty() {
+                    self.deviations.insert(id.into_owned().into(), deviation);
+                }
+            },
         }
     }
 }
