@@ -96,7 +96,7 @@ impl PackConfig {
             for (id, dev) in save.categories.visibility_deviations_for(root) {
                 #[cfg(todo = "unnecessary")]
                 if vis.is_empty() { continue }
-                let cat_path = pack.categories.all_categories.get_index_of(root)
+                let cat_path = pack.categories.all_categories.get_index_of(id)
                     .map(|idx| CategoryPath::with_path(idx as CategoryIndex));
                 let Some(cat_path) = cat_path else { continue };
                 self.set_visibility_deviation(cat_path, dev);
@@ -325,20 +325,18 @@ impl PathingController {
         let mut settings = loader.settings.write().await;
         Self::category_commit_vis_write(&mut settings, pack, &mut dirty_cats.into_iter())
     }
+    /// two locks scary..?
     fn category_commit_vis_write(settings: &mut Settings, pack: &Pack, dirty_cats: &mut dyn Iterator<Item = (CategoryPath, VisibilityFlags, bool)>) {
-        let mut save_dirty = false;
-        for (path, vis_dev, vis_state) in dirty_cats {
-            let Some(full_id) = Self::get_category_id_in(pack, path) else { continue };
-            settings.pathing_state_update(full_id.to_string(), vis_state);
-            SaveState::try_write_with(|save| {
+        SaveState::try_write_with(|save| {
+            let mut save_dirty = false;
+            for (path, vis_dev, vis_state) in dirty_cats {
+                let Some(full_id) = Self::get_category_id_in(pack, path) else { continue };
+                settings.pathing_state_update(full_id.to_string(), vis_state);
                 save.pathing_mut().categories.set_visibility_deviation(full_id, vis_dev);
                 save_dirty = true;
-                false
-            });
-        }
-        if save_dirty {
-            SaveState::try_write_with(|_| true);
-        }
+            }
+            save_dirty
+        });
     }
     fn get_category_id_in(pack: &Pack, cat_path: CategoryPath) -> Option<&CategoryId> {
         let full_id = pack
