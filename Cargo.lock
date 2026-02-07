@@ -229,7 +229,7 @@ dependencies = [
 [[package]]
 name = "arcffi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
 dependencies = [
  "windows 0.60.0",
  "windows 0.61.1",
@@ -243,7 +243,7 @@ dependencies = [
 [[package]]
 name = "arcloader-mumblelink"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
 dependencies = [
  "arcffi",
  "gw2_mumble 0.2.5",
@@ -960,7 +960,7 @@ checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 [[package]]
 name = "dpsapi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
 dependencies = [
  "arcdps 0.16.0",
  "arcffi",
@@ -973,7 +973,7 @@ dependencies = [
 [[package]]
 name = "dyload"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#710a5ca14c25057a30c7ab70cb25cd0f92702382"
+source = "git+https://github.com/arcnmx/arcloader#4221b29316bed2181b03d1b1e6f6f9c8a052d3c7"
 dependencies = [
  "arcffi",
  "windows 0.60.0",

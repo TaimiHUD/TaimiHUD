@@ -72,7 +72,7 @@ where
         }
     }
     fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_u64(self)
+        deserializer.deserialize_any(self)
     }
     fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         let mut flags = F::empty();
@@ -92,6 +92,7 @@ where
         Ok(flags)
     }
 }
+/// can the others not be used as a hint :<
 #[cfg(feature = "serde")]
 impl<'de, F> DeserializeSeed<'de> for &'_ BitFlagDe<F>
 where
@@ -99,7 +100,7 @@ where
 {
     type Value = F;
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_u64(self)
+        deserializer.deserialize_any(self)
     }
 }
 #[cfg(feature = "serde")]
