@@ -2,6 +2,7 @@ struct VSInput
 {
     float3 position: POSITION;
     float2 tex: TEXCOORD0;
+    float3 vcolour: COLOR0;
     float3 normal: NORMAL;
     column_major matrix Model: MODEL;
     float4 colour: COLOUR;
@@ -48,7 +49,7 @@ VSOutput VSMain(VSInput input)
     float scaleTex = Expand.w - 1.0;
     output.tex = float2(input.tex.x, input.tex.y + isTrail * (input.tex.y * scaleTex + Expand.z));
 
-    output.colour = input.colour;
+    output.colour = input.colour * float4(input.vcolour, 1.0);
 
     return output;
 }

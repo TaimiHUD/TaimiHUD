@@ -52,10 +52,16 @@ impl GitHubReleaseAsset {
     pub const STATE_UPLOADED: &'static str = "uploaded";
     pub const REDIR_LIMIT: usize = 3;
 
+    /// github will expect the token in follow-up requests apparently
+    pub fn prepare_req_for_url(req: &mut Request) {
+        req.headers_mut().remove(header::AUTHORIZATION);
+    }
+
     pub async fn download_url(&self) -> anyhow::Result<Url> {
         #[cfg(todo = "unnecessary")]
         let req = self.request_browser().unwrap_or_else(|| self.request_content());
-        let req = self.request_content();
+        let mut req = self.request_content();
+        Self::prepare_req_for_url(&mut req);
         match source::get_location_for(req, Self::REDIR_LIMIT).await {
             Err(e) => match self.browser_download_url.clone() {
                 Some(url) => {
