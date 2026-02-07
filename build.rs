@@ -263,16 +263,21 @@ fn apply_built_info() {
             if let Some(rc) = version.pre.strip_prefix("rc.") {
                 println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
                 if env::var_os(FEATURE_NEXUS).is_some() {
-                    match version.minor.checked_sub(1) {
-                        Some(m) => minor = m as i16,
-                        None => {
-                            major -= 1;
-                            minor = 99;
-                        },
-                    }
                     let pre_rc = rc.split(".").next().unwrap_or(rc);
                     let pre_rc = pre_rc.parse::<u16>().ok().unwrap_or(version.patch as u16);
-                    build = 900i16 + pre_rc as i16;
+                    rev = 900i16 + pre_rc as i16;
+                    if let Some(p) = version.patch.checked_sub(1) {
+                        build = p as i16;
+                    } else {
+                        build = 999;
+                        match version.minor.checked_sub(1) {
+                            Some(m) => minor = m as i16,
+                            None => {
+                                major -= 1;
+                                minor = 99;
+                            },
+                        }
+                    }
                 }
             } else {
                 let prerev = version.pre.split(".").nth(1).map(str::parse::<u64>);
@@ -282,16 +287,21 @@ fn apply_built_info() {
                 }
             }
             if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() {
-                #[cfg(todo)]
-                if !is_rc {
-                    mem::swap(&mut build, &mut rev);
-                }
+                let build = match rev {
+                    0 => build,
+                    rev if rev < 0 => build,
+                    rev => {
+                        if build != 999 || version.patch != 0 {
+                            println!("cargo::warning=nexus-codegen can't emit non-zero build revision for {version}");
+                        }
+                        rev
+                    },
+                };
                 println!("cargo::rustc-env=CARGO_PKG_VERSION_MAJOR={major}");
                 println!("cargo::rustc-env=CARGO_PKG_VERSION_MINOR={minor}");
                 println!("cargo::rustc-env=CARGO_PKG_VERSION_PATCH={build}");
             }
             if env::var_os(FEATURE_NEXUS_EXTERN).is_some() {
-                // TODO? mem::swap(&mut build, &mut rev);
                 println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MAJOR={major}");
                 println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MINOR={minor}");
                 println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_BUILD={build}");

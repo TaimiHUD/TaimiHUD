@@ -490,26 +490,56 @@ impl ResolvedVersion {
     }
 
     /// nexus tags require the 0.0.0.0 version scheme
-    fn gloss_over_nexus_version(v: &str) -> &str {
-        if v.as_bytes().iter().filter(|&&c| c == b'.').count() == 3 {
-            v.strip_suffix(".0")
-        } else {
-            None
+    fn gloss_over_nexus_version(v: &str) -> (&str, Option<i16>) {
+        let mut rev = None;
+        for (i, seg) in v.split('.').enumerate() {
+            match i {
+                2 if seg.as_bytes().contains(&b'-') => (),
+                0..=2 => continue,
+                3 => match seg.parse::<u16>() {
+                    Ok(b) => {
+                        let offset = unsafe { seg.as_ptr().offset_from(v.as_ptr()) - 1 } as usize;
+                        rev = Some((offset, b as i16));
+                        continue
+                    },
+                    Err(..) => (),
+                },
+                _ => (),
+            }
+            // not a plain next tag if it reaches this point...
+            rev = None;
+            break
         }
-        .unwrap_or(v)
+        match rev {
+            None => (v, None),
+            Some((offset, rev)) => (unsafe { v.get_unchecked(..offset) }, Some(rev)),
+        }
     }
 
     fn parse_version(v: &str) -> Result<Version, semver::Error> {
-        let v = Self::gloss_over_nexus_version(v);
+        let (v, rev) = Self::gloss_over_nexus_version(v);
         let mut v: Version = v.parse()?;
-        if let Some(rc) = v.patch.checked_sub(900) {
-            v.minor += 1;
-            if v.pre.is_empty() {
-                v.patch = 0;
+        match rev {
+            None | Some(0) =>
+                if let Some(rc) = v.patch.checked_sub(900) {
+                    v.minor += 1;
+                    if v.pre.is_empty() {
+                        v.patch = 0;
+                        v.pre = semver::Prerelease::new(&format!("{CHANNEL_PRERELEASE}.{rc}"))
+                            .unwrap_or_default()
+                    } else {
+                        v.patch = rc;
+                    }
+                },
+            Some(rev @ 900..=999) => {
+                v.patch += 1;
+                let rc = rev - 900;
                 v.pre = semver::Prerelease::new(&format!("{CHANNEL_PRERELEASE}.{rc}")).unwrap_or_default()
-            } else {
-                v.patch = rc;
-            }
+            },
+            Some(_rev) => {
+                // TODO: there's some meaning here...
+                v.pre = semver::Prerelease::new("aaa").unwrap_or_default()
+            },
         }
         Ok(v)
     }
