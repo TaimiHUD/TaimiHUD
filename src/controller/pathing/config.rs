@@ -11,7 +11,7 @@ use {
             PathingEvent,
         },
         exports::runtime as rt,
-        settings::{Settings, PathingSettings},
+        settings::{pathing::PathingSave, state::SaveState, Settings, PathingSettings},
         space::{engine::SpaceEvent, Engine},
     },
     taimi_sync::arcs::ArcLazyMut,
@@ -36,7 +36,7 @@ use {
         },
         ui::MapContext,
     },
-    taimi_pack::{attributes::{MarkerAttributes, FilterAttributes}, category::id::{AsFullId, IdNameBox}, Pack},
+    taimi_pack::{attributes::{MarkerAttributes, FilterAttributes}, category::id::{AsFullId, IdNameBox, CategoryId}, Pack},
     taimi_sync::watched::watch,
 };
 
@@ -51,13 +51,14 @@ pub struct PackConfig {
 }
 
 impl PackConfig {
+    /// TODO: inherit overrides too?
     pub fn fill_settings(
         &mut self,
         pack: &Pack,
-        pathing: &PathingSettings,
-        disabled_paths: &HashSet<String>,
+        save: &PathingSave,
+        legacy_disabled_paths: &HashSet<String>,
     ) {
-        for id in disabled_paths {
+        for id in legacy_disabled_paths {
             let id = &id[..];
             let Some((i, _id, cat)) = pack.categories.all_categories.get_full(id) else {
                 continue
@@ -71,8 +72,6 @@ impl PackConfig {
             }
         }
         #[cfg(todo)]
-        let disabled_compat = pathing.disabled_compat;
-        let disabled_compat = true;
         if disabled_compat {
             let disabled_cats = pack
                 .categories
@@ -82,7 +81,7 @@ impl PackConfig {
                 .filter(|(_, (_, cat))| !cat.default_toggle());
             for (i, (full_id, _disabled_cat)) in disabled_cats {
                 let path = CategoryPath::with_path(i as CategoryIndex);
-                if !disabled_paths.contains(&full_id.id_to_str()[..]) {
+                if !legacy_disabled_paths.contains(&full_id.id_to_str()[..]) {
                     let mut vis = self
                         .category_visibility
                         .get(&path)
@@ -93,7 +92,16 @@ impl PackConfig {
                 }
             }
         }
-        // TODO: new per-flag settings and override list
+        for root in &pack.categories.root_categories {
+            for (id, dev) in save.categories.visibility_deviations_for(root) {
+                #[cfg(todo = "unnecessary")]
+                if vis.is_empty() { continue }
+                let cat_path = pack.categories.all_categories.get_index_of(root)
+                    .map(|idx| CategoryPath::with_path(idx as CategoryIndex));
+                let Some(cat_path) = cat_path else { continue };
+                self.set_visibility_deviation(cat_path, dev);
+            }
+        }
     }
 
     /// Indicates a configuration that deviates from the defaults (XOR)
@@ -182,7 +190,7 @@ impl PathingController {
         loader: &Arc<PackLoader>,
         path: CategoryPath<PackPath>,
         state: Option<bool>,
-    ) -> Option<(CategoryPath, bool)> {
+    ) -> Option<(CategoryPath, VisibilityFlags, bool)> {
         // TODO: rethink whether controller wants to use loader like this or not?
         let pack_info = loader.pack_info(path.root);
         let categories = pack_info.as_ref().and_then(|pack_info| pack_info.category_info());
@@ -208,13 +216,15 @@ impl PathingController {
             true
         });
 
-        changed.then_some((path.unscope(), cat_vis ^ state))
+        let dev = VisibilityFlags::visible(state);
+        let out = cat_vis ^ state;
+        changed.then_some((path.unscope(), dev, out))
     }
-    async fn handle_toggle_post(&mut self, pack_path: PackPath, cat_vis: (CategoryPath, bool)) {
+    async fn handle_toggle_post(&mut self, pack_path: PackPath, cat_vis: (CategoryPath, VisibilityFlags, bool)) {
         self.category_commit_vis_post(pack_path, iter::once(cat_vis)).await
     }
     async fn category_commit_vis_post<C>(&mut self, pack_path: PackPath, dirty_cats: C) where
-        C: IntoIterator<Item = (CategoryPath, bool)> + Send + 'static,
+        C: IntoIterator<Item = (CategoryPath, VisibilityFlags, bool)> + Send + 'static,
     {
         if let Some(pack) = self.loader.get_pack_loaded_data(pack_path) {
             Self::category_commit_vis_save(&self.loader, &pack, dirty_cats).await
@@ -291,14 +301,14 @@ impl PathingController {
                     let default = !categories.disabled.contains(path);
                     let vis = config.config.visibility_deviation_for(path);
                     let state = vis.is_visible() ^ default;
-                    (path, state)
+                    (path, vis, state)
                 })
                 .collect::<Vec<_>>()
         };
         Some(self.category_commit_vis_post(pack_path, changes))
     }
     async fn category_commit_vis_task<C>(loader: Arc<PackLoader>, pack_path: PackPath, dirty_cats: C) -> anyhow::Result<PathingEvent> where
-        C: IntoIterator<Item = (CategoryPath, bool)> + Send,
+        C: IntoIterator<Item = (CategoryPath, VisibilityFlags, bool)> + Send,
     {
         #[cfg(todo)]
         if dirty_cats.is_empty() {
@@ -310,24 +320,36 @@ impl PathingController {
         Ok(PathingEvent::Nop)
     }
     async fn category_commit_vis_save<C>(loader: &PackLoader, pack: &Pack, dirty_cats: C) where
-        C: IntoIterator<Item = (CategoryPath, bool)> + Send,
+        C: IntoIterator<Item = (CategoryPath, VisibilityFlags, bool)> + Send,
     {
         let mut settings = loader.settings.write().await;
         Self::category_commit_vis_write(&mut settings, pack, &mut dirty_cats.into_iter())
     }
-    fn category_commit_vis_write(settings: &mut Settings, pack: &Pack, dirty_cats: &mut dyn Iterator<Item = (CategoryPath, bool)>) {
-        for (path, vis_state) in dirty_cats {
-            let full_id = pack
-                .categories
-                .all_categories
-                .get_index(path.path as usize)
-                .map(|(_id, cat)| cat.full_id.clone());
-            if let Some(full_id) = full_id {
-                settings.pathing_state_update(full_id.to_string(), vis_state);
-            } else {
-                log::warn!("{path} not found for toggle state update");
-            }
+    fn category_commit_vis_write(settings: &mut Settings, pack: &Pack, dirty_cats: &mut dyn Iterator<Item = (CategoryPath, VisibilityFlags, bool)>) {
+        let mut save_dirty = false;
+        for (path, vis_dev, vis_state) in dirty_cats {
+            let Some(full_id) = Self::get_category_id_in(pack, path) else { continue };
+            settings.pathing_state_update(full_id.to_string(), vis_state);
+            SaveState::try_write_with(|save| {
+                save.pathing_mut().categories.set_visibility_deviation(full_id, vis_dev);
+                save_dirty = true;
+                false
+            });
         }
+        if save_dirty {
+            SaveState::try_write_with(|_| true);
+        }
+    }
+    fn get_category_id_in(pack: &Pack, cat_path: CategoryPath) -> Option<&CategoryId> {
+        let full_id = pack
+            .categories
+            .all_categories
+            .get_index(cat_path.path as usize)
+            .map(|(_id, cat)| &cat.full_id);
+        if full_id.is_none() {
+            log::warn!("{cat_path} not found for toggle state update");
+        }
+        full_id
     }
     pub(super) fn update_loaded_visibility_inner(
         path: PackMapPath,
