@@ -11,7 +11,7 @@ use {
             Controller,
         },
         exports::runtime as rt,
-        settings::{PathingSettings, SettingsLock},
+        settings::{state::SaveState, PathingSettings, SettingsLock},
     },
     anyhow::{anyhow, Context},
     std::{
@@ -104,8 +104,12 @@ impl PackActivateContext {
                     _prev => manager.settings.try_read().ok(),
                 };
                 let config = settings.map(|settings| {
+                    let legacy_disabled_paths: Arc<_> = settings.disabled_paths.clone();
+                    drop(settings);
                     let mut config = PackConfig::default();
-                    config.fill_settings(&pack, &settings.pathing(), &settings.disabled_paths);
+                    SaveState::read_with(|save| {
+                        config.fill_settings(&pack, &save.pathing(), &legacy_disabled_paths)
+                    });
                     config
                 });
                 Ok(PackActivateLoaded { pack, loader, info, config })

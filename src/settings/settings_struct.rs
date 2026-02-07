@@ -182,6 +182,7 @@ pub struct Settings {
     pub quick_access_style: IconStyle,
     #[serde(default)]
     pub marker_autoplace: MarkerAutoPlaceSettings,
+    /// deprecated
     #[serde(default)]
     pub disabled_paths: Arc<HashSet<String>>,
     #[serde(default)]
