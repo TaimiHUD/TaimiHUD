@@ -1,7 +1,7 @@
 ## Common
 
 join-discord = Join our Discord
-discord-link = "https://discord.gg/dKpaphTMGS"
+discord-link = "https://discord.gg/FycK2nZKQT"
 having-issues = If you're having issues with TaimiHUD, feel free to reach out on our Discord or by GitHub issues!
 height = Height
 font = Font
