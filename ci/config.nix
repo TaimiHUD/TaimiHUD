@@ -114,19 +114,30 @@ with lib; let
     rcTag = {
       inherit (tag) success;
       major =
-        if tag.minor > 0
+        if tag.minor > 0 || tag.patch > 0
         then tag.major
         else tag.major - 1;
       minor =
-        if tag.minor > 0
-        then tag.minor - 1
+        if tag.minor > 0 || tag.patch > 0
+        then
+          tag.minor
+          - (
+            if tag.patch > 0
+            then 0
+            else 1
+          )
         else 99;
       # TODO: make this revision instead and set patch to 99?
       patch =
         if nexusBackend == "codegen"
         then 900 + tag.revision
-        else tag.patch;
-      revision = 0;
+        else if tag.patch > 0
+        then tag.patch - 1
+        else 999;
+      revision =
+        if nexusBackend == "extern"
+        then 900 + tag.revision
+        else 0;
     };
     preTag = {
       inherit (tag) success major minor patch;
