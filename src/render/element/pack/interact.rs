@@ -1464,20 +1464,20 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
         title_id: &str,
     ) -> Option<TableToken<'u>> {
         let table_flags =
-            TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS | TableFlags::SORTABLE | TableFlags::SORT_MULTI | TableFlags::SORT_TRISTATE;
+            TableFlags::RESIZABLE | TableFlags::SIZING_STRETCH_SAME | TableFlags::ROW_BG | TableFlags::BORDERS | TableFlags::SORTABLE | TableFlags::SORT_MULTI | TableFlags::SORT_TRISTATE;
         let table_token = ui.begin_table_with_flags(title_id, 4, table_flags);
         if let Some(..) = &table_token {
             let cols = [
-                (Self::HEADER_TITLE, TableColumnFlags::WIDTH_STRETCH | TableColumnFlags::NO_REORDER | TableColumnFlags::NO_HIDE | TableColumnFlags::DEFAULT_SORT, 2.0),
-                (Self::HEADER_NEARBY, TableColumnFlags::WIDTH_STRETCH /*| TableColumnFlags::DEFAULT_SORT*/, 0.5),
+                (Self::HEADER_TITLE, TableColumnFlags::NO_REORDER | TableColumnFlags::NO_HIDE | TableColumnFlags::DEFAULT_SORT, 2.0),
+                (Self::HEADER_NEARBY, TableColumnFlags::empty() /*| TableColumnFlags::DEFAULT_SORT*/, 0.5),
                 (Self::HEADER_HIDDEN, TableColumnFlags::DEFAULT_SORT, 1.5),
                 (Self::HEADER_INTERACT, TableColumnFlags::DEFAULT_SORT /*| TableColumnFlags::PREFER_SORT_DESCENDING*/, 1.0),
             ];
-            for (i, (id, flags, weight)) in cols.into_iter().enumerate() {
+            for (id, flags, weight) in cols.into_iter() {
                 with_i18n!(id, |header| ui.table_setup_column_with(TableColumnSetup {
                     name: &header,
                     flags,
-                    init_width_or_weight: 0.0,
+                    init_width_or_weight: weight,
                     user_id: UiId::Ptr(id.as_ptr() as *const _),
                 }));
                 #[cfg(todo = "unnecessary")]
