@@ -53,7 +53,15 @@ impl InfoTabState {
 
         let wrap_limit = if let Some(Some(logo)) = TEXTURES.lookup_imgui(RenderMachine::TEXTURE_LOGO_KEY) {
             const MIN_LOGO_WIDTH: f32 = 128.0;
-            const LOGO_UV1: Vec2 = Vec2::new(1.0, 0.5);
+            const LOGO_UV1: Vec2 = {
+                let keytype = RenderMachine::TEXTURE_LOGO_KEY.as_bytes();
+                let typeoff = keytype.len() - 7;
+                let key = [keytype[typeoff], keytype[typeoff + 1], keytype[typeoff + 2]];
+                match key {
+                    [b'g', b'l', b'o'] => Vec2::new(1.0, 0.65),
+                    _ => Vec2::new(1.0, 0.5),
+                }
+            };
             let heading_right = ui.item_rect_max()[0];
             let cursor_restore = Vec2::from_array(ui.cursor_screen_pos());
             let avail = Vec2::from_array(ui.content_region_avail());
@@ -75,8 +83,14 @@ impl InfoTabState {
                     _ => cursor_restore.with_x(right_align),
                 };
                 ui.set_cursor_screen_pos(logo_pos.to_array());
+                let logo_tint = match () {
+                    _ => StyleColor::ButtonHovered,
+                    #[cfg(todo)]
+                    _ => StyleColor::TextDisabled,
+                };
                 Image::new(logo.id, size.to_array())
                     .uv1(LOGO_UV1.to_array())
+                    .tint_col(ui.style_color(logo_tint))
                     .build(ui);
                 let wrap_y = ui.item_rect_max()[1];
                 ui.set_cursor_screen_pos(cursor_restore.to_array());

@@ -338,9 +338,14 @@ impl RenderMachine {
         }
     }
 
+    #[cfg(todo)]
     pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_lines256";
+    #[cfg(todo)]
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
         include_bytes!("../../../data/textures/logotype-lines-256.png");
+    pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_glow256";
+    pub const TEXTURE_LOGO_BIN: &'static [u8] =
+        include_bytes!("../../../data/textures/logotype-glow-256.png");
 
     pub fn turn_render_pre(&mut self) {
         self.metrics_pre();
