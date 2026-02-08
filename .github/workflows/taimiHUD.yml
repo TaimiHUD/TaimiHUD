@@ -156,12 +156,13 @@ jobs:
         path: .ci/artifacts/lib/TaimiHUD*.dll
     - id: artifact-parse
       name: artifact parse
-      run: "NEXUS_TAG_NAME=$(cat .ci/artifacts/share/taimi/release.nexus.tag)\necho\
-        \ \"release-nexus-tag=$NEXUS_TAG_NAME\" >> $GITHUB_OUTPUT\nif [[ -n $NEXUS_TAG_NAME\
-        \ && $NEXUS_TAG_NAME != \"${{ github.ref_name }}\" ]]; then\n  git fetch origin\
-        \ \"refs/tags/$NEXUS_TAG_NAME\" || true\n  git fetch -f origin \"refs/tags/${{\
-        \ github.ref_name }}\" || true\n  git tag -f \"$NEXUS_TAG_NAME\" \"${{ github.ref\
-        \ }}\" &&\n  git push -f origin \"$NEXUS_TAG_NAME\" || true\nfi\n"
+      run: "NEXUS_TAG_NAME=$(cat .ci/artifacts/share/taimi/release.nexus.tag)\nif\
+        \ [[ \"${{ github.ref_type }}\" = \"tag\" ]]; then\n  git fetch -f origin\
+        \ tag \"${{ github.ref_name }}\" || true\nfi\necho \"release-nexus-tag=$NEXUS_TAG_NAME\"\
+        \ >> $GITHUB_OUTPUT\nif [[ -n $NEXUS_TAG_NAME && $NEXUS_TAG_NAME != \"${{\
+        \ github.ref_name }}\" ]]; then\n  git fetch -f origin tag \"$NEXUS_TAG_NAME\"\
+        \ || true\n  git tag -f \"$NEXUS_TAG_NAME\" \"${{ github.ref }}\" &&\n  git\
+        \ push -f origin \"$NEXUS_TAG_NAME\" || true\nfi\n"
       shell: bash
     - id: release-upload
       if: (github.event_name == 'push') && (startsWith(github.ref, 'refs/tags/v'))
