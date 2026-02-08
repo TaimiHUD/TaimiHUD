@@ -104,7 +104,7 @@ impl MapPackInfo {
                 false
             }
         };
-        let mut active_pois = pack
+        let active_pois = pack
             .pois
             .iter()
             .enumerate()
@@ -113,7 +113,7 @@ impl MapPackInfo {
         let pois = BitSet::collect_sorted(active_pois);
         // TODO: use some sort of space-efficient encoding like RLE for these masks
         // even just an initial offset or vec of bit group lengths (pos/neg for 0 vs 1) would help?
-        let mut active_trails = pack
+        let active_trails = pack
             .trails
             .iter()
             .enumerate()

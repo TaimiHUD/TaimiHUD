@@ -13,21 +13,7 @@ use {
     crate::{
         controller::{
             pathing::{
-                info::MapPackInfo,
-                registry::{
-                    LoadedCategoryIndex,
-                    LoadedCategoryNs,
-                    PackCategory,
-                    PackCategoryInfo,
-                    PackInfoSignature,
-                    PackMapPath,
-                    PackRoot,
-                    UnloadedReason,
-                },
-                shared::SharedMapPackLoaded,
-                state::LoadedCategory,
-                PackConfig,
-                PathingController,
+                registry::{PackCategory, PackCategoryInfo, PackInfoSignature, PackRoot, UnloadedReason},
                 PathingEvent,
                 VisibilityFlagsExt as _,
             },
@@ -37,22 +23,9 @@ use {
         render::element::prelude::*,
         settings::state::ui::pathing::PathingFilterFlags,
     },
-    std::{collections::BTreeMap, iter, mem, sync::Arc},
-    taimi_hoard::{
-        flags::BitSet,
-        iters::{tree::DfsPre, IterExt as _},
-        loc::{indexed::IndexedList, LocationRef},
-        str_opt,
-        str_opt_ref,
-    },
-    taimi_meta::packs::{
-        collections::CategorySet,
-        CategoryIndex,
-        CategoryPath,
-        MapIndex,
-        PackPath,
-        VisibilityFlags,
-    },
+    std::{collections::BTreeMap, iter, sync::Arc},
+    taimi_hoard::{flags::BitSet, iters::tree::DfsPre, loc::LocationRef, str_opt, str_opt_ref},
+    taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, VisibilityFlags},
     taimi_pack::{
         attributes::InteractionAttributes,
         category::{id::AsFullId, Category, CategoryFlags, CategoryId},
@@ -926,8 +899,8 @@ where
         DrawCategoryToggle {
             ui: self.ui,
             info,
-            pack_path: self.pack.pack_path(),
-            category_path: path,
+            #[cfg(todo)]
+            category_path: path.pivot(self.pack.pack_path()),
             flags: self.pack.category_flags(path),
             toggle_state: vis,
             open_state: self.state.open_mask.contains(path),
@@ -1545,21 +1518,6 @@ impl CategoryCollectionState {
             .map(|p| open_mask.contains(p) || Self::is_path_open_menu(open_menu, p));
         direct_parent_open.unwrap_or(true)
     }
-    #[cfg(deleteme)]
-    fn has_filter_flags(&self) -> bool {
-        (self.filter_flags ^ PathingFilterFlags::FILTERS_INVERTED)
-            .intersects(PathingFilterFlags::FILTERS_ALL)
-    }
-    #[cfg(deleteme)]
-    pub fn has_filters(&self) -> bool {
-        if self.has_filter_flags() {
-            return true
-        }
-        if self.filter.is_searching() {
-            return true
-        }
-        false
-    }
     pub fn iter_whitelisted<'a>(
         &'a self,
         pack: &'a PackElementState,
@@ -1567,139 +1525,8 @@ impl CategoryCollectionState {
         let category_info = pack.info.info.as_ref().map(|i| &*i.categories);
         self.filter_state.iter_categories(category_info)
     }
-    pub fn category_is_whitelisted(&self, pack: &PackElementState, path: CategoryPath) -> bool {
+    pub fn category_is_whitelisted(&self, _pack: &PackElementState, path: CategoryPath) -> bool {
         self.filter_state.visible_category(path)
-    }
-    #[cfg(deleteme)]
-    pub fn iter_whitelisted<'a>(
-        &'a self,
-        pack: &'a PackElementState,
-    ) -> impl Iterator<Item = CategoryPath> + 'a {
-        let filter = &self.filter;
-        let filter_flags = self.filter_flags;
-        let cats = pack.info.category_info().map(|(c, ..)| c);
-
-        let config_filters =
-            (filter_flags ^ PathingFilterFlags::FILTERS_CONFIG) & PathingFilterFlags::FILTERS_CONFIG;
-        let config_filter = match config_filters {
-            PathingFilterFlags::EMPTY => None,
-            PathingFilterFlags::Enabled => Some(Some(false)),
-            PathingFilterFlags::Disabled => Some(Some(true)),
-            _ => Some(None),
-        };
-        let config = config_filter.and_then(|_| pack.config.cached.as_ref());
-        let config_filter = config_filter.flatten();
-
-        let mut search = (filter.is_searching()).then_some(filter);
-
-        let loaded = filter_flags
-            .contains(PathingFilterFlags::CurrentMap)
-            .then_some(pack.map_info.as_ref())
-            .flatten()
-            .map(|map_info| map_info.info.categories());
-
-        let (b0, b1, b2) = if let Some(loaded) = loaded {
-            (Some(loaded), None, None)
-        } else if let Some(search) = search.take() {
-            (None, Some(search.category_matches()), None)
-        } else if let Some(cats) = cats {
-            (None, None, Some(cats.all().paths()))
-        } else {
-            (None, None, None)
-        };
-        let baseline = b0
-            .into_iter()
-            .flatten()
-            .chain(b1.into_iter().flatten())
-            .chain(b2.into_iter().flatten());
-
-        baseline.filter(move |&path| {
-            let mut default_toggle = true;
-            let mut is_root = false;
-            let mut is_branch = false;
-            let mut is_lonely = false;
-            if let Some(cats) = cats {
-                if !filter_flags.contains(PathingFilterFlags::ShowHidden) && cats.hidden.contains(path) {
-                    return false
-                }
-                default_toggle = cats.disabled.contains(path);
-                is_root = cats.is_root(path);
-                is_lonely = cats.lonely.contains(path);
-                is_branch = cats.info_of(path).and_then(|cat| cat.child()).is_some();
-            }
-            if let Some(search) = search {
-                if !search.matches_category(path) {
-                    return false
-                }
-            }
-            if let Some(config) = config {
-                match config_filter {
-                    #[cfg(todo = "unnecessary")]
-                    None => return false,
-                    _ if is_root => (),
-                    Some(false) if !is_branch => (),
-                    Some(true) if is_branch => (),
-                    Some(filter) => {
-                        let state =
-                            default_toggle ^ config.config.visibility_deviation_for(path).is_visible();
-                        if state == filter {
-                            return false
-                        }
-                    },
-                    _ => (),
-                }
-            }
-            true
-        })
-    }
-    #[cfg(deleteme)]
-    pub fn category_is_whitelisted(&self, pack: &PackElementState, path: CategoryPath) -> bool {
-        let cats = pack.info.category_info().map(|(c, ..)| c);
-
-        let mut default_toggle = true;
-        if let Some(cats) = cats {
-            if !self.filter_flags.contains(PathingFilterFlags::ShowHidden) && cats.hidden.contains(path) {
-                return false
-            }
-            default_toggle = cats.disabled.contains(path);
-        }
-
-        if self.filter.is_searching() {
-            if !self.filter.matches_category(path) {
-                return false
-            }
-        }
-
-        if self.filter_flags.contains(PathingFilterFlags::CurrentMap) {
-            if self.category_is_loaded(pack, path) != Some(true) {
-                return false
-            }
-        }
-
-        let config_filters =
-            (self.filter_flags ^ PathingFilterFlags::FILTERS_CONFIG) & PathingFilterFlags::FILTERS_CONFIG;
-        let config_filter = match config_filters {
-            PathingFilterFlags::EMPTY => None,
-            PathingFilterFlags::Enabled => Some(Some(false)),
-            PathingFilterFlags::Disabled => Some(Some(true)),
-            _ => Some(None),
-        };
-        let config = config_filter.and_then(|_| pack.config.cached.as_ref());
-        if let Some(config) = config {
-            match config_filter {
-                #[cfg(todo = "unnecessary")]
-                None | Some(None) => return false,
-                Some(Some(filter)) => {
-                    let state = default_toggle ^ config.config.visibility_deviation_for(path).is_visible();
-                    if state == filter {
-                        return false
-                    }
-                },
-                _ => (),
-            }
-        }
-
-        true
     }
     pub(crate) fn category_is_loaded(&self, pack: &PackElementState, path: CategoryPath) -> Option<bool> {
         pack.map_info

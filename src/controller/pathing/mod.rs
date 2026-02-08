@@ -7,11 +7,7 @@ use {
         state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
     },
     crate::{
-        controller::{
-            api::{AchievementState, RaidState},
-            runtime::WallInstant,
-            Controller,
-        },
+        controller::{runtime::WallInstant, Controller},
         exports::runtime::{
             self as rt,
             bindings::{
@@ -86,6 +82,7 @@ pub mod shared;
 pub mod space;
 pub mod state;
 
+#[cfg(todo = "unused")]
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
 #[derive(Debug, Display, Default)]
@@ -327,6 +324,7 @@ impl PathingController {
                     let pack_count = packs.end_path();
                     // XXX: avoid two locks please?
                     let config_sigs = packs.values().map(|p| p.config.borrow().info_sig);
+                    #[cfg(todo = "unnecessary")]
                     let info_sigs = packs.values().map(|p| p.info.sig);
                     let configs_dirty = self.packs.sigs_dirty(config_sigs);
                     (pack_count, packs_dirty, configs_dirty)
@@ -891,7 +889,7 @@ impl PathingController {
     ///
     /// TODO: might still be possible to use if bound to a mouse button maybe?
     #[cfg(feature = "paths-interact")]
-    fn filter_press_gameplay(&mut self, control: GameControl) -> Option<MapIndex> {
+    fn filter_press_gameplay(&mut self, _control: GameControl) -> Option<MapIndex> {
         let ml = match () {
             #[cfg(todo = "unnecessary")]
             _ => rt::mumble_link_ptr().ok(),

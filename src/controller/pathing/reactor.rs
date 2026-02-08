@@ -149,6 +149,7 @@ impl PathingEvent {
         .into_iter()
         .flatten()
     }
+    #[cfg(todo = "unused")]
     pub(super) fn iter_shallow(&self) -> impl Iterator<Item = &Self> {
         match self {
             Self::FanOut(e) => &e[..],
@@ -158,6 +159,7 @@ impl PathingEvent {
         .iter()
     }
     /// WARNING: recursive/heapy :<
+    #[cfg(todo = "unused")]
     pub fn iter(&self) -> impl Iterator<Item = &Self> {
         let recurse = matches!(self, Self::FanOut(..));
         self.iter_shallow().flat_map(move |e| match recurse {
