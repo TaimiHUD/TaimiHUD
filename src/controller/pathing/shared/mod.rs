@@ -48,7 +48,6 @@ use {
             api::{AchievementState, FestivalState, RaidState},
             pathing::{
                 registry::{PackLoader, PackPath},
-                ExternalFilterState,
                 PathingEvent,
             },
         },
@@ -164,6 +163,7 @@ impl PathingReceiver {
 
     /// TODO: with_filter_state borrowing variant to avoid clone?
     /// lock should be fine to hold...
+    #[cfg(todo = "unused")]
     pub(super) fn get_filter_state(&self) -> ExternalFilterState {
         let festivals = self.festivals.borrow().get();
         let bypass = self.enables().contains(PathingEnables::API_BYPASS);

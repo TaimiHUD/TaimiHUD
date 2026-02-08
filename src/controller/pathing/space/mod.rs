@@ -29,7 +29,7 @@ use {
         collections::{btree_map, BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
     },
-    glam::{Vec4, Vec3},
+    glam::Vec3,
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},

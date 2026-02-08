@@ -130,7 +130,7 @@ impl PackElements {
         if let Some(maps) = self.maps_rx.try_read_if_changed() {
             if let Some(..) = maps.map_id {
                 let maps_iter = self.pack_state.values_mut().zip(maps.iter());
-                for (pack_state, (path, map_info, _map)) in maps_iter {
+                for (pack_state, (_path, map_info, _map)) in maps_iter {
                     let dest = &mut pack_state.state.map_info;
                     let mut dirty = dest.is_some() != map_info.is_some();
                     match (dest, map_info) {
@@ -760,6 +760,7 @@ impl PackAction {
         self.clobber(path, dest)
     }
     pub(crate) fn as_pathing_message(self, path: PackPath) -> Option<PathingEvent> {
+        #[allow(unreachable_patterns)]
         match self {
             Self::Cat { path: Some(cat_path), action } => return action.as_pathing_message(cat_path, path),
             Self::Cat { path: None, action } => action.as_pack_message(path),

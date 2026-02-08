@@ -15,7 +15,6 @@ use {
         TEXTURES,
     },
     anyhow::Context,
-    bitvec::vec::BitVec,
     glam::{vec2, vec3, EulerRot, Mat4, Quat, Vec3, Vec3Swizzles, Vec4},
     glamour::{Box3, Point3, Vector2},
     std::{
@@ -448,6 +447,7 @@ impl PoiRender {
         ]) }
     }
 
+    /// TODO: texture manager should handle cleanup explcitly...
     #[inline]
     pub fn cleanup_background(mut self) {
         mem::forget(self.icon.take());

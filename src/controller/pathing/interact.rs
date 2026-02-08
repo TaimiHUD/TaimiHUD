@@ -488,7 +488,7 @@ impl InteractReactor {
             }
         }
         let script = lpoi.info().get_marker_attrs().and_then(|m| m.script.as_ref());
-        if let Some(script) = script {
+        if let Some(_script) = script {
             let allowed = allowed.contains(TriggerKind::SCRIPT);
             *took_action.get_or_insert_default() |= allowed;
             if allowed {
@@ -497,7 +497,7 @@ impl InteractReactor {
                 log::info!("{blocked} script");
             }
         }
-        if let Some(bounce) = attrs.bounce_behavior {
+        if let Some(_bounce) = attrs.bounce_behavior {
             if allowed.contains(TriggerKind::BOUNCE) {
                 log::debug!("TODO: interact bounce anim");
             } else {
@@ -811,18 +811,6 @@ impl InteractReactor {
                 nearby.append_take_from(&mut incoming_move);
                 true
             });
-            #[cfg(deleteme)]
-            {
-                ctx.shared.gameplay.send_if_modified(|shared_map| {
-                    for (path, nearby, events) in nearby_changes {
-                        all_events.extend(events);
-                        let Some(shared_state) = shared_map.get_state_mut(*path) else { continue };
-                        shared_state.interactive_pois_nearby = nearby;
-                        dirty |= true;
-                    }
-                    false
-                });
-            }
             for e in nearby_changes {
                 let _ = rx.event_tx.send(e);
             }
@@ -896,7 +884,7 @@ impl InteractReactor {
             // (maybe on a different keybind though?)
             return res
         }
-        for cmp::Reverse((_sort, CmpIgnore((lpath, lpoi, map, map_info, interest_avail)))) in nearby_pois {
+        for cmp::Reverse((_sort, CmpIgnore((lpath, lpoi, map, map_info, _interest_avail)))) in nearby_pois {
             let Some(path) = map_info.poi_path(lpath.unscope()) else {
                 log::warn!("{lpath} unknown?");
                 continue
@@ -928,7 +916,7 @@ impl InteractReactor {
     }
     pub(super) const INTERACT_ACTION: InteractionEventAction = InteractionEventAction::Interact;
 
-    fn poll_event_flag(&mut self, cx: &mut Context) -> Poll<InteractMessage> {
+    fn poll_event_flag(&mut self, _cx: &mut Context) -> Poll<InteractMessage> {
         if self.event_dirty_settings {
             self.event_dirty_settings = false;
             return Poll::Ready(InteractMessage::RefreshSettings)
@@ -1090,13 +1078,6 @@ impl InteractReactor {
 impl Default for InteractReactor {
     fn default() -> Self { Self::new() }
 }
-#[cfg(todo)]
-impl Future for InteractReactor {
-    type Output = InteractMessage;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        self.get_mut().poll_event_fallback(cx)
-    }
-}
 #[derive(Debug, strum::Display)]
 pub enum InteractMessage {
     Nop,
@@ -1162,7 +1143,7 @@ impl PathingController {
         log::debug!("TODO: marker info {}", &message[..]);
         self.spawn_alert(message[..].into(), Duration::from_secs(7));
     }
-    pub(super) fn process_marker_dismiss(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, until: Option<Either<Timestamp, Duration>>, contexts: Vec<HideContext>, reset: Option<AutoReset>) {
+    pub(super) fn process_marker_dismiss(&mut self, _path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, until: Option<Either<Timestamp, Duration>>, contexts: Vec<HideContext>, reset: Option<AutoReset>) {
         if let MarkerIndex::NS_POI = loaded_path.path.namespace() {
             let lpoi_path: LoadedPoiPath = LoadedPoiPath::with_path(loaded_path.path.index_poi_unchecked());
             self.filter_dismiss_poi(lpoi_path.pivot(loaded_path.root), until, contexts, reset);

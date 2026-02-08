@@ -5,13 +5,12 @@ use {
             registry::{LoadedMarkerPath, LoadedCategoryNs, LoadedCategoryIndex, LoadedCategoryPath, PackCategoryInfo, PackLoader, PackMapPath, PackPath},
             shared::{SharedPackConfig, LocDisplay},
             state::{filter::{self, FilterState}, LoadedCategory, LoadedMapPack},
-            ExternalFilterState,
             PathingController,
             VisibilityFlagsExt,
             PathingEvent,
         },
         exports::runtime as rt,
-        settings::{pathing::PathingSave, state::SaveState, Settings, PathingSettings},
+        settings::{pathing::PathingSave, state::SaveState, Settings},
         space::{engine::SpaceEvent, Engine},
     },
     taimi_sync::arcs::ArcLazyMut,
@@ -36,7 +35,7 @@ use {
         },
         ui::MapContext,
     },
-    taimi_pack::{attributes::{MarkerAttributes, FilterAttributes}, category::id::{AsFullId, IdNameBox, CategoryId}, Pack},
+    taimi_pack::{attributes::{MarkerAttributes, FilterAttributes}, category::id::{IdNameBox, CategoryId}, Pack},
     taimi_sync::watched::watch,
 };
 
@@ -454,9 +453,6 @@ impl PathingController {
     pub(super) fn update_loaded_visibility_for(&mut self, pack_path: PackPath) -> bool {
         let map_id = self.gameplay_map();
         #[cfg(todo)]
-        let hidden_guids =
-            SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
-        #[cfg(todo)]
         let filter_state = &self.filter_state;
         let mut dirty = false;
         for (path, map_pack, map_info) in self.maps.iter_pack_mut_with_info(&self.map_info, pack_path) {
@@ -472,9 +468,6 @@ impl PathingController {
     /// required!!
     pub(super) fn update_loaded_visibility(&mut self, all: bool) -> bool {
         let map_id = self.gameplay_map();
-        #[cfg(todo)]
-        let hidden_guids =
-            SaveState::read_with(|s| s.pathing_state.as_ref().map(|p| p.hidden_guid_expiry.clone()));
         let mut dirty = false;
         let update_map_id = match (map_id, all) {
             (None, false) => return dirty,
@@ -493,37 +486,12 @@ impl PathingController {
         }
         dirty
     }
-    fn is_filtered(filters: &FilterAttributes, external: &ExternalFilterState) -> bool {
-        let (festivals, clears, achievements) = external;
-        if let Some(id) = filters.achievement_id {
-            let completed = filters
-                .achievement_bit
-                .and_then(|bit| achievements.is_bit_complete(id as _, bit as _))
-                .unwrap_or_else(|| achievements.is_complete(id as _));
-            if completed {
-                return true
-            }
-        }
-        if let Some(raids) = &filters.raids {
-            let completed = !raids.is_empty() && raids.iter().all(|r| clears.contains(r));
-            if completed {
-                return true
-            }
-        }
-        if let Some(f) = &filters.festivals {
-            if !f.is_empty() && !f.intersects(*festivals) {
-                return true
-            }
-        }
-        false
-    }
-    /// deleteme
     pub(super) fn can_filter(filters: &FilterAttributes) -> bool {
         filter::FilterConfig::filters_is_empty(filters)
     }
     /// interested in retaining full attrs in memory
     fn marker_wants_attrs(_ispoi: bool, attrs: &MarkerAttributes) -> bool {
-        let can_filter = attrs.filters.as_ref().map(|f| Self::can_filter(f)).unwrap_or(false);
+        let can_filter = attrs.filters.as_ref().map(|f| !filter::FilterConfig::filters_is_empty(f)).unwrap_or(false);
         if can_filter { return true }
 
         #[cfg(feature = "paths-interact")]

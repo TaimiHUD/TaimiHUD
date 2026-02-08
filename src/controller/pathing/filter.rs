@@ -109,6 +109,7 @@ impl PathingController {
         }
         dirty
     }
+    #[cfg(feature = "paths-schedule")]
     pub fn filter_state_next_schedule(&mut self, _now: Option<Timestamp>) -> Option<Timestamp> {
         #[cfg(feature = "paths-schedule")]
         let next_scheduled = {
@@ -141,6 +142,7 @@ impl PathingController {
             next_expire,
         ].into_iter().flatten().min()
     }
+    #[cfg(feature = "paths-schedule")]
     pub fn schedule_filter_state(&mut self, when: Option<Timestamp>) {
         let next = match when {
             Some(next) => {
@@ -153,6 +155,7 @@ impl PathingController {
         };
         self.filter_next_schedule.set(next.to_future());
     }
+    #[cfg(feature = "paths-schedule")]
     pub fn reschedule_filter_state(&mut self, now: Option<Timestamp>) {
         let when = self.filter_state_next_schedule(now);
         self.schedule_filter_state(when);
@@ -183,6 +186,7 @@ impl PathingController {
         });
     }
 
+    #[cfg(todo = "unused")]
     pub(super) fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
         Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, item.as_ref())
     }

@@ -3,8 +3,6 @@ use {
     taimi_hoard::loc::{
         indexed::IndexedList,
         locator_ns,
-        LocationMut,
-        LocationRef,
         Locator,
         NamespacePivotFrom,
         NamespacePivotTo,
