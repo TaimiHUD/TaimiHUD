@@ -11,13 +11,6 @@ use {
     taimi_hoard::iters::IterExt as _,
 };
 
-#[cfg(todo)]
-use crate::controller::pathing::{
-    filter::MapFilters,
-    state::interactive::InteractivePoi,
-    taimi_pack::attributes::keys::Guid,
-};
-
 #[derive(Debug, Clone)]
 pub struct LoadedMapPack {
     pub map_id: MapIndex,
@@ -25,10 +18,6 @@ pub struct LoadedMapPack {
     pub used: RecentlyUsed,
     pub pois: Box<[LoadedPoi]>,
     pub poi_guids: Arc<[Guid]>,
-    #[cfg(todo)]
-    pub interactive_pois: Arc<[InteractivePoi]>,
-    #[cfg(todo)]
-    pub interactive_pois_nearby: BitVec,
     pub trails: Box<[LoadedTrail]>,
     pub trail_guids: Box<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
@@ -42,17 +31,11 @@ impl LoadedMapPack {
             map_id,
             info_sig: PackInfoSignature::EMPTY,
             used: RecentlyUsed::DEFAULT,
-            #[cfg(todo)]
-            interactive_pois: Default::default(),
-            #[cfg(todo)]
-            interactive_pois_nearby: Default::default(),
             pois: Default::default(),
             poi_guids: Default::default(),
             trails: Default::default(),
             trail_guids: Default::default(),
             categories: Default::default(),
-            #[cfg(todo)]
-            filters: Default::default(),
         }
     }
 
@@ -67,13 +50,6 @@ impl LoadedMapPack {
                     .unwrap_or_default()
             })
             .collect();
-        #[cfg(todo)]
-        let interactive_pois = info
-            .pois()
-            .enumerate()
-            .map(|(i, path)| InteractivePoi::from_pack(i as PoiIndex, path, pack))
-            .filter(|ipoi| !ipoi.is_empty())
-            .collect();
         let trails = info
             .trails()
             .map(|path| LoadedTrail::from_pack(path, pack))
@@ -87,31 +63,19 @@ impl LoadedMapPack {
                     .unwrap_or_default()
             })
             .collect();
-        #[cfg(todo)]
-        let filters = MapFilters::from_pack(info, active);
 
         let loaded = Self {
             map_id,
             info_sig: info.info_sig.clone(),
-            #[cfg(todo)]
-            interactive_pois_nearby: BitVec::new(),
-            #[cfg(todo)]
-            interactive_pois,
             pois,
             poi_guids,
             trails,
             trail_guids,
             #[cfg(todo)]
-            filters,
+            filters: MapFilters::from_pack(info, active),
             categories: Default::default(),
             used: RecentlyUsed::DEFAULT,
         };
-        #[cfg(todo)]
-        {
-            loaded
-                .interactive_pois_nearby
-                .reserve_exact(loaded.interactive_pois.len());
-        }
 
         loaded
     }

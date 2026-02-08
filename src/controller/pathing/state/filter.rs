@@ -742,7 +742,7 @@ impl AsRef<FilterState> for FilterState {
     fn as_ref(&self) -> &FilterState { self }
 }
 
-/// TODO: this could probably be a field on map state once cleaned up...
+/// TODO: this could probably be a field on LoadedMapPack once cleaned up...
 #[cfg(todo)]
 #[derive(Debug, Clone, Default)]
 pub struct MapFilters {
