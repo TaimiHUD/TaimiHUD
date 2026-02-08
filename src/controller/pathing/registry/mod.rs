@@ -31,9 +31,8 @@ use {
     },
     taimi_pack::{
         category::{
-            id::{AsFullId, CategoryId},
+            id::CategoryId,
             Category,
-            CategoryFlagSet,
             CategoryFlags,
         },
         pack::CategoryCollection,
@@ -838,7 +837,7 @@ impl PackRoot {
             index: path.path,
             id: category.full_id.clone(),
             display_name: category.display_name.clone(),
-            flags: category.flags,
+            flags: category.flags | CategoryFlags::ROOT,
             direct_child_count: category.child_ids().count(),
         }
     }

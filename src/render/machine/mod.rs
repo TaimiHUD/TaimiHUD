@@ -21,7 +21,7 @@ use {
 use {
     crate::{
         controller::Controller,
-        exports::runtime::{self as rt, imgui, statistics::{StatsRef, StatsDesc, StatsUnit, MetricsSwitch, StatsCounter}},
+        exports::runtime::{self as rt, imgui, statistics::MetricsSwitch},
         render::RenderState,
         settings::Settings,
     },

@@ -191,8 +191,8 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
 pub struct DrawCategoryToggle<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub info: &'a CategoryInfo,
-    pub pack_path: PackPath,
-    pub category_path: CategoryPath,
+    #[cfg(todo)]
+    pub category_path: CategoryPath<PackPath>,
     pub flags: CategoryFlags,
     pub toggle_state: VisibilityFlags,
     pub open_state: bool,
@@ -224,10 +224,6 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
         } else if has_toggle {
             header.end_toggle_prefix();
         }
-        #[cfg(todo = "unnecessary")]
-        if let Some(state) = toggle_act {
-            self.act_toggle(Some(state));
-        }
         if let Some(state) = toggle_act {
             self.toggle_state.set(VisibilityFlags::TOGGLE, state);
         }
@@ -252,10 +248,6 @@ impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
             Some(act) => Some(act),
         };
         (act, header_token)
-    }
-    #[cfg(todo = "unnecessary")]
-    fn act_toggle(&self, state: Option<bool>) {
-        PathingEvent::CategoryToggle(self.pack_path, self.category_path, state).try_send();
     }
 
     pub(super) fn prepare_header(&self) -> DrawCategoryHeader<'a, 'u> {
@@ -346,17 +338,6 @@ impl<'u> DecorateCategoryHeader<'_, 'u> {
         let tooltip = show_tip.then_some(self.info.tooltip());
         if let Some(Some(tooltip)) = tooltip {
             act = Some(UiAction::Hovered);
-            #[cfg(deleteme)]
-            {
-                DrawCategoryTooltip {
-                    ui: self.ui,
-                    info: self.info,
-                    include_copyable: false,
-                    display_name_visible: true,
-                    tooltip,
-                }
-                .draw();
-            }
         }
         act
     }
@@ -408,7 +389,7 @@ impl super::PackElements {
             };
             let cats = apply_filters.then_some(pack.state.info.category_info())
                 .flatten();
-            if let Some((cats, _)) = cats {
+            if let Some(..) = cats {
                 let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
                 for cat in cats.iter_of::<CategoryPath>() {
                     pack.categories.open_mask.remove_at(cat);

@@ -1,10 +1,7 @@
 use std::num::NonZero;
 use std::sync::Arc;
 use std::collections::BTreeMap;
-use crate::controller::pathing::state::{
-    filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter},
-    LoadedMaps,
-};
+use crate::controller::pathing::state::filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter};
 use crate::controller::pathing::shared::HiddenGuids;
 use taimi_meta::packs::{MapIndex, MarkerId};
 use taimi_hoard::time::Timestamp;
@@ -63,13 +60,6 @@ impl MarkerState {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.hidden.is_empty()
-    }
-
-    #[cfg(deleteme)]
-    pub fn expire_at_timestamp(&mut self, id: impl Into<MarkerId>, expiry_timestamp: u64, now: &SystemTime, now_mono: &Instant) {
-        let id = id.into();
-        let entry = self.hidden.entry(id).or_insert(HiddenMarker::global(AutoReset::Never));
-        entry.reset = AutoReset::expiry_with_timestamp(expiry_timestamp, now, now_mono);
     }
 
     pub fn reset_expired(&mut self, now: &Timestamp) -> bool {
@@ -175,19 +165,6 @@ pub enum AutoReset {
 impl AutoReset {
     pub const fn expire_at_timestamp(expiry: Timestamp) -> Self {
         Self::Expiry { expiry }
-    }
-    #[cfg(deleteme)]
-    pub fn expiry_with_timestamp(expiry_timestamp: u64, now: &SystemTime, now_mono: &Instant) -> Self {
-        #[cfg(todo = "unnecessary")]
-        let Some(expiry) = SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(expiry_timestamp)) else {
-            return Self::Never
-        };
-        let offset = now.duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-        let remaining = expiry_timestamp.saturating_sub(offset.as_secs());
-        now_mono.checked_add(Duration::from_secs(remaining))
-            .map(Self::expire_at_mono)
-            .unwrap_or(Self::Never)
     }
 }
 

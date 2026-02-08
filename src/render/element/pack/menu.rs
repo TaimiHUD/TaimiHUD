@@ -272,10 +272,10 @@ impl super::PackElements {
             act_pathing = Some(PathingEvent::CollectGarbage { tick: 1, aggressive: false });
         }
         if MenuItem::new("collect garbage timidly").build(ui) {
-            act_pathing = Some(PathingEvent::CollectGarbage { tick: 0, aggressive: false });
+            act_pathing = Some(PathingEvent::COLLECT_GARBAGE_PRUNE_ONLY);
         }
         if MenuItem::new("collect garbage aggressively").build(ui) {
-            act_pathing = Some(PathingEvent::CollectGarbage { tick: 0, aggressive: true });
+            act_pathing = Some(PathingEvent::COLLECT_GARBAGE_NOW);
         }
         if MenuItem::new("report resources").build(ui) {
             act_pathing = Some(PathingEvent::RequestResourceReport { pack_path: None });
