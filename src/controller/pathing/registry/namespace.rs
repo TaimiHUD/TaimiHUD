@@ -1,14 +1,6 @@
 pub use taimi_meta::packs::{PackIndex, PackMapPath, PackPath, PackRegistryNs};
 use {
-    taimi_hoard::loc::{
-        indexed::IndexedList,
-        locator_ns,
-        LocationMut,
-        LocationRef,
-        Locator,
-        NamespacePivotFrom,
-        NamespacePivotTo,
-    },
+    taimi_hoard::loc::{indexed::IndexedList, locator_ns, Locator, NamespacePivotFrom, NamespacePivotTo},
     taimi_meta::packs::{
         self,
         id::{MarkerIndex, MarkerPath, PackMarkerNs},

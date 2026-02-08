@@ -468,7 +468,6 @@ impl PathingController {
                         &self.filter_state,
                         map_path,
                         info,
-                        data,
                         map,
                         map_info,
                         (dirty, vis_dirty),
@@ -514,7 +513,6 @@ impl PathingController {
         filter_state: &FilterState,
         map_path: PackMapPath,
         (pack_info, info): (&PackInfo, &SharedPackInfo),
-        data: Option<&Pack>,
         map: &mut LoadedMapPack,
         map_info: &mut LoadedMapInfoStorage,
         (mut dirty, vis_dirty): (bool, Option<bool>),
@@ -1094,8 +1092,10 @@ impl SharedPacks {
 }
 
 impl PathingController {
+    /// TODO
     pub fn process_pack_lock(&mut self, path: PackPath) {
         self.request_pack_loads(path.into());
     }
+    /// TODO
     pub fn process_pack_unlock(&mut self, path: PackPath) {}
 }

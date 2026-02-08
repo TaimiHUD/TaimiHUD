@@ -30,9 +30,8 @@ impl VisibilityFlagsExt for VisibilityFlags {
         flags.set_from_category_flags(category.flags);
         flags
     }
-    /// TODO: if [PackRoot] survives, give it a [CategoryFlags] field
     fn from_pack_root(root: &PackRoot) -> Self {
-        Self::TOGGLES
+        Self::from_category_flags(root.flags)
     }
     fn from_attributes(marker_attributes: &MarkerAttributes) -> Self {
         let mut flags = Self::empty();

@@ -32,7 +32,7 @@ use {
     },
     anyhow::{anyhow, Context},
     futures::future::{Either, Future},
-    glam::{Vec3, Vec4},
+    glam::Vec3,
     std::{
         collections::{btree_map, BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
