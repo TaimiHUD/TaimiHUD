@@ -1,3 +1,5 @@
+#[cfg(feature = "extension-nexus")]
+use nexus::addon::AddonVersion as NexusVersion;
 #[cfg(feature = "updates")]
 use semver::Version;
 use {
@@ -28,8 +30,6 @@ use {
     tokio::{runtime, time::timeout},
     url::Url,
 };
-#[cfg(feature = "extension-nexus")]
-use nexus::addon::AddonVersion as NexusVersion;
 
 pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
 pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
@@ -638,7 +638,9 @@ fn version_channel(version: &Version) -> Option<&str> {
 }
 #[cfg(feature = "extension-nexus")]
 fn version_channel_parts(version: &Version) -> Option<(&str, u64)> {
-    if version.pre.is_empty() { return None }
+    if version.pre.is_empty() {
+        return None
+    }
     let mut parts = version.pre.split(".");
     let channel = parts.next()?;
     let rev = match parts.next().map(|part| part.parse::<u64>()) {
@@ -671,8 +673,13 @@ fn version_to_addonapi(version: &Version) -> NexusVersion {
                 self::CHANNEL_BETA => 0x1c0i16,
                 #[cfg(todo)]
                 self::CHANNEL_PRERELEASE => -0x80i16,
-                channel  =>
-                    0x6c00i16 - channel.as_bytes().get(0).map(|l| l.to_ascii_lowercase().saturating_sub(b'a') as i16 * 0x400).unwrap_or(0),
+                channel =>
+                    0x6c00i16
+                        - channel
+                            .as_bytes()
+                            .get(0)
+                            .map(|l| l.to_ascii_lowercase().saturating_sub(b'a') as i16 * 0x400)
+                            .unwrap_or(0),
             };
             addonapi.revision = (offset + rc as i16).min(-2);
         },

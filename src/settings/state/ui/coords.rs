@@ -1,7 +1,9 @@
-use glam::Vec2;
-use core::{ops, cmp};
-use serde::{Serialize, Deserialize};
-use taimi_hoard::vec::{vec32_eq, vec32_ibits};
+use {
+    core::{cmp, ops},
+    glam::Vec2,
+    serde::{Deserialize, Serialize},
+    taimi_hoard::vec::{vec32_eq, vec32_ibits},
+};
 
 pub struct UiSpace;
 impl glamour::Unit for UiSpace {
@@ -54,9 +56,13 @@ impl UiVec2 {
     }
 
     #[inline]
-    pub const fn x(&self) -> f32 { self.vec2.x }
+    pub const fn x(&self) -> f32 {
+        self.vec2.x
+    }
     #[inline]
-    pub const fn y(&self) -> f32 { self.vec2.y }
+    pub const fn y(&self) -> f32 {
+        self.vec2.y
+    }
 }
 impl ops::MulAssign<Self> for UiVec2 {
     #[inline]
@@ -86,7 +92,8 @@ impl ops::Mul<Vec2> for UiVec2 {
         Self::with_vec2(self.vec2 * rhs)
     }
 }
-impl<T: glamour::Unit> ops::Mul<glamour::Vector2<T>> for UiVec2 where
+impl<T: glamour::Unit> ops::Mul<glamour::Vector2<T>> for UiVec2
+where
     glamour::Vector2<T>: ops::Mul<Vec2>,
 {
     type Output = <glamour::Vector2<T> as ops::Mul<Vec2>>::Output;
@@ -149,31 +156,45 @@ impl PartialEq for UiVec2 {
 impl Eq for UiVec2 {}
 impl From<UiVec2> for Vec2 {
     #[inline]
-    fn from(pos: UiVec2) -> Self { pos.vec2 }
+    fn from(pos: UiVec2) -> Self {
+        pos.vec2
+    }
 }
 impl From<&'_ UiVec2> for Vec2 {
     #[inline]
-    fn from(pos: &UiVec2) -> Self { pos.vec2 }
+    fn from(pos: &UiVec2) -> Self {
+        pos.vec2
+    }
 }
 impl<T: glamour::Unit<Scalar = f32>> From<UiVec2> for glamour::Vector2<T> {
     #[inline]
-    fn from(pos: UiVec2) -> Self { glamour::Vector2::from_raw(pos.vec2) }
+    fn from(pos: UiVec2) -> Self {
+        glamour::Vector2::from_raw(pos.vec2)
+    }
 }
 impl From<UiVec2> for [f32; 2] {
     #[inline]
-    fn from(pos: UiVec2) -> Self { pos.vec2.into() }
+    fn from(pos: UiVec2) -> Self {
+        pos.vec2.into()
+    }
 }
 impl From<&'_ UiVec2> for [f32; 2] {
     #[inline]
-    fn from(pos: &UiVec2) -> Self { pos.vec2.into() }
+    fn from(pos: &UiVec2) -> Self {
+        pos.vec2.into()
+    }
 }
 impl From<[f32; 2]> for UiVec2 {
     #[inline]
-    fn from(pos: [f32; 2]) -> Self { Self::with_vec2(Vec2::from_array(pos)) }
+    fn from(pos: [f32; 2]) -> Self {
+        Self::with_vec2(Vec2::from_array(pos))
+    }
 }
 impl From<Vec2> for UiVec2 {
     #[inline]
-    fn from(pos: Vec2) -> Self { Self::with_vec2(pos) }
+    fn from(pos: Vec2) -> Self {
+        Self::with_vec2(pos)
+    }
 }
 impl Default for UiVec2 {
     #[inline]

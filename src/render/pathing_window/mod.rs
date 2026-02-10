@@ -1,24 +1,29 @@
 use {
     crate::{
         controller::pathing::PathingEvent,
+        exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags},
         fl,
-        render::{machine::RenderMachine, PathingConfig, RenderState},
+        render::{element::pack::PackVisibility, machine::RenderMachine, PathingConfig, RenderState},
         settings::{
-            state::ui::{AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
+            state::ui::{
+                AnchorPosition,
+                PathingWindowState as UiState,
+                PathingWindowTab,
+                UiVec2,
+                WindowOpen,
+            },
             Settings,
         },
         space::engine::Engine,
         with_i18n,
     },
-    crate::render::element::pack::PackVisibility,
-    crate::exports::runtime::imgui::{self, ChildWindow, Condition, TableFlags, Ui, Window, WindowFlags},
-    taimi_sync::watched::Watched,
     std::mem,
+    taimi_sync::watched::Watched,
 };
-#[cfg(feature = "paths-interact")]
-use crate::controller::pathing::shared::interact::InteractMessage;
 
 pub use self::filter::PathingSearchState;
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::shared::interact::InteractMessage;
 
 mod filter;
 mod menu;
@@ -47,7 +52,8 @@ impl PathingWindowState {
     pub fn pre_render(&mut self) {
         if !self.ui_state.is_watching() {
             if let Some(settings) = Settings::try_read() {
-                self.ui_state.restart_watching(settings.ui_state.pathing_window.sender());
+                self.ui_state
+                    .restart_watching(settings.ui_state.pathing_window.sender());
             }
         };
         if let Some(ui_state) = self.ui_state.try_read_if_changed() {
@@ -102,7 +108,10 @@ impl PathingWindowState {
                 AnchorPosition::Centre
             },
         };
-        let has_pos = pos.is_some().then_some(Condition::Once).unwrap_or(Condition::Never);
+        let has_pos = pos
+            .is_some()
+            .then_some(Condition::Once)
+            .unwrap_or(Condition::Never);
         let visible = Window::new(fl!("pathing-window"))
             .size(size.into(), Condition::Appearing)
             .collapsed(open.is_collapsed(), Condition::Once)
@@ -127,7 +136,8 @@ impl PathingWindowState {
                 ui.same_line();
                 ui.dummy([4.0; 2]);
                 self.draw_content(ui, machine, engine)
-            }).is_some();
+            })
+            .is_some();
         let open = match opened {
             true if !visible => WindowOpen::Collapsed,
             open => WindowOpen::new(open),
@@ -135,7 +145,8 @@ impl PathingWindowState {
         let ui_state = &mut *self.ui_state;
         if let Some(pos) = pos {
             ui_state.window.position_abs = pos;
-            ui_state.window.position_rel = ui_state.window.position_abs / UiVec2::from(ui.io().display_size);
+            ui_state.window.position_rel =
+                ui_state.window.position_abs / UiVec2::from(ui.io().display_size);
             ui_state.set_window_size(size);
         }
         let open_prev = mem::replace(&mut ui_state.window.open, open);
@@ -199,11 +210,11 @@ impl PathingWindowState {
         let bookmark_tl = ui.item_rect_min();
         let bookmark_br = ui.item_rect_max();
         let draw_content = rendered_err.is_none() || machine.pack_ui_state.any_loaded();
-        let tabs = draw_content.then(|| {
-            ui.tab_bar("packs")
-        }).flatten();
+        let tabs = draw_content.then(|| ui.tab_bar("packs")).flatten();
         for &tab_index in Self::TABS {
-            let Some(_draw_tab) = tabs.as_ref().and_then(|_| self.draw_tab(ui, tab_index)) else { continue };
+            let Some(_draw_tab) = tabs.as_ref().and_then(|_| self.draw_tab(ui, tab_index)) else {
+                continue
+            };
             if let Some(e) = rendered_err.take() {
                 PathingConfig::draw_space_error(ui, machine, e.flatten());
             }
@@ -242,21 +253,19 @@ impl PathingWindowState {
         ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
         match self.ui_state.tab.index() {
             #[cfg(feature = "paths-interact")]
-            PathingWindowTab::INDEX_POIS => {
+            PathingWindowTab::INDEX_POIS =>
                 if ui.button("rebuild") {
                     if let Some(..) = machine.pathing.as_ref() {
                         PathingEvent::InteractControl(InteractMessage::RequestRebuild).try_send();
                     }
-                }
-            },
+                },
             #[cfg(feature = "paths-edit")]
-            PathingWindowTab::INDEX_EDIT => {
+            PathingWindowTab::INDEX_EDIT =>
                 if machine.pack_ui_state.pack_edit.is_open() {
                     if ui.button("close") {
                         machine.pack_ui_state.pack_edit.close();
                     }
-                }
-            },
+                },
             _ => {
                 self.draw_categories_header(ui, machine);
             },
@@ -286,7 +295,9 @@ impl PathingWindowState {
             if machine.pack_ui_state.can_expand() {
                 ui.same_line();
                 if ui.button(&fl!("expand-all")) {
-                    machine.pack_ui_state.act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
+                    machine
+                        .pack_ui_state
+                        .act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
                 }
             }
         }
@@ -295,7 +306,9 @@ impl PathingWindowState {
                 ui.same_line();
             }
             if ui.button(&fl!("collapse-all")) {
-                machine.pack_ui_state.act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
+                machine
+                    .pack_ui_state
+                    .act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
             }
             drawn = true;
         }
@@ -350,11 +363,13 @@ impl PathingWindowState {
         if query_dirty || filter_dirty {
             self.ui_state_pending |= ui_state.search.flags != self.search_state.flags;
             ui_state.search.flags = self.search_state.flags;
-            machine.pack_ui_state.filter_query.set_flags(ui_state.filter.flags);
+            machine
+                .pack_ui_state
+                .filter_query
+                .set_flags(ui_state.filter.flags);
             match self.search_state.query_str() {
                 Some(Some(query)) if !query.is_empty() && search_dirty != Some(true) => (),
-                Some(query) =>
-                    ui_state.search.query = query.cloned().unwrap_or_default(),
+                Some(query) => ui_state.search.query = query.cloned().unwrap_or_default(),
                 _ => (),
             }
         }

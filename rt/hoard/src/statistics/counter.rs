@@ -1,5 +1,7 @@
-use std::sync::atomic::{AtomicIsize, Ordering};
-use num_traits::AsPrimitive;
+use {
+    num_traits::AsPrimitive,
+    std::sync::atomic::{AtomicIsize, Ordering},
+};
 
 #[derive(Debug)]
 pub struct Counter {

@@ -1,18 +1,28 @@
-use core::fmt;
-use core::ptr;
-use core::mem;
-use self::text::UiTextExt as _;
+use {
+    self::text::UiTextExt as _,
+    core::{fmt, mem, ptr},
+};
+
 #[allow(unused_imports)]
-pub use crate::exports::runtime::imgui::{self, internal::{RawCast, RawWrapper}, Ui};
+pub use crate::exports::runtime::imgui::{
+    self,
+    internal::{RawCast, RawWrapper},
+    Ui,
+};
 
 pub mod text;
 pub mod prelude {
     #![allow(unused_imports)]
-    pub use super::{
-        text::{UiText, UiTextWrite, UiFont, UiTextExt as _, NexusLinkFont},
-        imgui::{self, MouseButton, Selectable}, Ui, AsUi, UiToken,
+    pub use {
+        super::{
+            imgui::{self, MouseButton, Selectable},
+            text::{NexusLinkFont, UiFont, UiText, UiTextExt as _, UiTextWrite},
+            AsUi,
+            Ui,
+            UiToken,
+        },
+        crate::with_i18n,
     };
-    pub use crate::with_i18n;
 }
 
 pub trait AsUi<'ui> {
@@ -20,7 +30,8 @@ pub trait AsUi<'ui> {
     unsafe fn immortal_ui<'a>(&'a self) -> &'ui Ui<'ui> {
         mem::transmute(self.ui())
     }
-    fn push_token_font<N>(&self, font: N) -> UiTokenDyn<'ui> where
+    fn push_token_font<N>(&self, font: N) -> UiTokenDyn<'ui>
+    where
         N: text::UiFont<'ui>,
         N::FontToken: Into<UiTokenDyn<'ui>>,
     {
@@ -29,21 +40,29 @@ pub trait AsUi<'ui> {
 }
 impl<'ui> AsUi<'ui> for Ui<'ui> {
     #[inline(always)]
-    fn ui(&self) -> &Ui<'ui> { self }
+    fn ui(&self) -> &Ui<'ui> {
+        self
+    }
 }
 impl<'ui, U: ?Sized + AsUi<'ui>> AsUi<'ui> for &'_ U {
     #[inline(always)]
-    fn ui(&self) -> &Ui<'ui> { AsUi::ui(*self) }
+    fn ui(&self) -> &Ui<'ui> {
+        AsUi::ui(*self)
+    }
 }
 
 pub trait UiToken {
     #[inline]
     #[cfg(todo = "unused")]
-    fn token_empty(&self) -> bool { false }
+    fn token_empty(&self) -> bool {
+        false
+    }
     #[inline]
     unsafe fn token_pop_mut_unchecked(&mut self);
 
-    fn token_pop(self) where Self: Sized;
+    fn token_pop(self)
+    where
+        Self: Sized;
 }
 pub trait UiTokenMut: UiToken {
     fn token_pop_mut(&mut self);
@@ -55,7 +74,12 @@ impl<T: UiToken> UiToken for Option<T> {
         self.as_ref().map(UiToken::token_empty).unwrap_or(true)
     }
     #[inline]
-    fn token_pop(self) where Self: Sized { drop(self) }
+    fn token_pop(self)
+    where
+        Self: Sized,
+    {
+        drop(self)
+    }
     #[inline]
     unsafe fn token_pop_mut_unchecked(&mut self) {
         self.take().unwrap_unchecked().token_pop()
@@ -66,9 +90,7 @@ pub struct UiTokenCell<'a> {
     token: Option<&'a mut dyn UiToken>,
 }
 impl<'a> UiTokenCell<'a> {
-    pub const EMPTY: Self = Self {
-        token: None,
-    };
+    pub const EMPTY: Self = Self { token: None };
     #[inline(always)]
     pub unsafe fn with_dyn(token: &'a mut dyn UiToken) -> Self {
         Self::with_token(Some(token))
@@ -78,7 +100,9 @@ impl<'a> UiTokenCell<'a> {
         Self { token }
     }
     #[inline]
-    pub fn is_empty(&self) -> bool { self.token.is_none() }
+    pub fn is_empty(&self) -> bool {
+        self.token.is_none()
+    }
 
     #[inline]
     pub fn token(&self) -> Option<&dyn UiToken> {
@@ -108,9 +132,7 @@ impl UiToken for UiTokenCell<'_> {
     #[inline]
     fn token_pop(mut self) {
         if let Some(token) = self.token.take() {
-            unsafe {
-                token.token_pop_mut_unchecked()
-            }
+            unsafe { token.token_pop_mut_unchecked() }
         }
     }
     #[inline]
@@ -133,9 +155,7 @@ impl<'ui> UiTokenDyn<'ui> {
     pub fn new<T: UiTokenZst + UiToken + 'ui>(token: T) -> Self {
         debug_assert_eq!(mem::size_of::<T>(), 0);
         mem::forget(token);
-        unsafe {
-            Self::materialize::<T>()
-        }
+        unsafe { Self::materialize::<T>() }
     }
     #[inline(always)]
     pub unsafe fn materialize<T: UiTokenZst + 'ui>() -> Self {
@@ -183,9 +203,7 @@ impl<'ui> UiToken for UiTokenDyn<'ui> {
 }
 impl<'ui> Drop for UiTokenDyn<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            self.token.token_pop_mut_unchecked()
-        }
+        unsafe { self.token.token_pop_mut_unchecked() }
     }
 }
 impl<T: UiToken> UiTokenMut for Option<T> {
@@ -199,7 +217,10 @@ impl<T: UiToken> UiTokenMut for Option<T> {
 unsafe trait UiTokenZst: UiToken + Sized {
     unsafe fn materialize_mut<'a>() -> &'a mut Self;
     #[inline(always)]
-    unsafe fn materialize_dyn<'a>() -> &'a mut dyn UiToken where Self: 'a {
+    unsafe fn materialize_dyn<'a>() -> &'a mut dyn UiToken
+    where
+        Self: 'a,
+    {
         Self::materialize_mut() as &mut dyn UiToken
     }
 }
@@ -210,9 +231,13 @@ impl UiToken for imgui::FontStackToken<'_> {
         false
     }
     #[inline]
-    fn token_pop(self) { self.pop() }
+    fn token_pop(self) {
+        self.pop()
+    }
     #[inline]
-    unsafe fn token_pop_mut_unchecked(&mut self) { ptr::drop_in_place(self) }
+    unsafe fn token_pop_mut_unchecked(&mut self) {
+        ptr::drop_in_place(self)
+    }
 }
 unsafe impl<'ui> UiTokenZst for imgui::FontStackToken<'ui> {
     #[inline(always)]

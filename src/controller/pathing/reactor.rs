@@ -1,13 +1,12 @@
-use super::{PathingController, PathingEvent};
-use taimi_sync::scheduled::ScheduledStream;
-use crate::controller::runtime::WallInstant;
-use tokio::time::Instant;
-use taimi_meta::{
-    packs::id::MarkerId,
-    ui::MapContext,
+use {
+    super::{PathingController, PathingEvent},
+    crate::controller::runtime::WallInstant,
+    core::{iter, mem, slice},
+    std::collections::BTreeMap,
+    taimi_meta::{packs::id::MarkerId, ui::MapContext},
+    taimi_sync::scheduled::ScheduledStream,
+    tokio::time::Instant,
 };
-use std::collections::BTreeMap;
-use core::{slice, mem, iter};
 
 #[cfg(feature = "paths-filter")]
 pub type ScheduledEvents = ScheduledStream<BTreeMap<Instant, PathingEvent>>;
@@ -16,13 +15,20 @@ pub type FilterExpiryMap = BTreeMap<MarkerId, Instant>;
 
 #[cfg(feature = "paths-filter")]
 impl PathingController {
-    pub fn unexpire_at(scheduled: &mut ScheduledEvents, filter_expiry: &mut FilterExpiryMap, item: &MarkerId) -> bool {
+    pub fn unexpire_at(
+        scheduled: &mut ScheduledEvents,
+        filter_expiry: &mut FilterExpiryMap,
+        item: &MarkerId,
+    ) -> bool {
         let Some(when) = filter_expiry.remove(item) else { return false };
         scheduled.cancel_if(&when, |events| {
-            let ids = events.iter_mut().filter_map(|e| match e {
-                PathingEvent::ResetMarkerIds(ids) => Some(ids.iter_mut()),
-                _ => None,
-            }).flatten();
+            let ids = events
+                .iter_mut()
+                .filter_map(|e| match e {
+                    PathingEvent::ResetMarkerIds(ids) => Some(ids.iter_mut()),
+                    _ => None,
+                })
+                .flatten();
             for id in ids {
                 *id = MarkerId::EMPTY;
             }
@@ -31,16 +37,15 @@ impl PathingController {
         true
     }
     #[cfg(todo)]
-    pub fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {
-    }
+    pub fn unexpire(&mut self, item: impl AsRef<MarkerId>) -> bool {}
     pub fn unexpire_if_not(&mut self, item: &MarkerId, maybe_when: Instant) -> Option<bool> {
         let when = match self.filter_expiry.get(item) {
-            Some(when) if *when == maybe_when =>
-                return None,
+            Some(when) if *when == maybe_when => return None,
             when => when.copied(),
         };
 
-        let res = when.map(|_when| Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, item));
+        let res =
+            when.map(|_when| Self::unexpire_at(&mut self.scheduled_events, &mut self.filter_expiry, item));
         Some(res == Some(true))
     }
     /// TODO: move to filter.rs? (and related?)
@@ -78,16 +83,11 @@ impl PathingEvent {
     pub fn push(&mut self, e: Self) {
         match (self, e) {
             (_, Self::Nop) => (),
-            (this @ Self::Nop, e) =>
-                *this = e,
-            (Self::FanOut(events), Self::FanOut(mut e)) =>
-                events.append(&mut e),
+            (this @ Self::Nop, e) => *this = e,
+            (Self::FanOut(events), Self::FanOut(mut e)) => events.append(&mut e),
             #[cfg(feature = "paths-filter")]
-            (Self::ResetMarkerIds(ids), Self::ResetMarkerIds(mut e)) => {
-                ids.append(&mut e)
-            },
-            (Self::FanOut(events), e) =>
-                events.push(e),
+            (Self::ResetMarkerIds(ids), Self::ResetMarkerIds(mut e)) => ids.append(&mut e),
+            (Self::FanOut(events), e) => events.push(e),
             (this, that) => {
                 let prev = mem::replace(this, Self::Nop);
                 *this = Self::FanOut(match that {
@@ -104,9 +104,7 @@ impl PathingEvent {
         match self {
             Self::FanOut(e) => match e.len() {
                 0 => Self::Nop,
-                1 => unsafe {
-                    e.into_iter().next().unwrap_unchecked()
-                },
+                1 => unsafe { e.into_iter().next().unwrap_unchecked() },
                 #[cfg(todo)]
                 _ if e.iter().all(|e| matches!(e, Self::ResetMarkerIds(..))) => join_all_iguess,
                 _ => Self::FanOut(e),
@@ -130,9 +128,7 @@ impl PathingEvent {
                     is_empty
                 }) {}
             },
-            Self::ResetMarkerIds(ids) => {
-                while let Some(..) = ids.pop_if(|id| id.is_empty()) {}
-            },
+            Self::ResetMarkerIds(ids) => while let Some(..) = ids.pop_if(|id| id.is_empty()) {},
             _ => (),
         }
     }
@@ -142,7 +138,9 @@ impl PathingEvent {
             Self::FanOut(e) => Some(e),
             Self::Nop => None,
             e => Some(vec![e]),
-        }.into_iter().flatten()
+        }
+        .into_iter()
+        .flatten()
     }
     #[cfg(todo = "unused")]
     pub(super) fn iter_shallow(&self) -> impl Iterator<Item = &Self> {
@@ -150,33 +148,33 @@ impl PathingEvent {
             Self::FanOut(e) => &e[..],
             Self::Nop => &[],
             e => slice::from_ref(e),
-        }.iter()
+        }
+        .iter()
     }
     /// WARNING: recursive/heapy :<
     #[cfg(todo = "unused")]
     pub fn iter(&self) -> impl Iterator<Item = &Self> {
         let recurse = matches!(self, Self::FanOut(..));
-        self.iter_shallow()
-            .flat_map(move |e| match recurse {
-                true => Box::new(e.iter()) as Box<dyn Iterator<Item = &Self>>,
-                false => Box::new(iter::once(e)) as Box<_>,
-            })
+        self.iter_shallow().flat_map(move |e| match recurse {
+            true => Box::new(e.iter()) as Box<dyn Iterator<Item = &Self>>,
+            false => Box::new(iter::once(e)) as Box<_>,
+        })
     }
     pub(super) fn iter_mut_shallow(&mut self) -> impl Iterator<Item = &mut Self> {
         match self {
             Self::FanOut(e) => &mut e[..],
             Self::Nop => &mut [],
             e => slice::from_mut(e),
-        }.iter_mut()
+        }
+        .iter_mut()
     }
     /// WARNING: recursive/heapy :<
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Self> {
         let recurse = matches!(self, Self::FanOut(..));
-        self.iter_mut_shallow()
-            .flat_map(move |e| match recurse {
-                true => Box::new(e.iter_mut()) as Box<dyn Iterator<Item = &mut Self>>,
-                false => Box::new(iter::once(e)) as Box<_>,
-            })
+        self.iter_mut_shallow().flat_map(move |e| match recurse {
+            true => Box::new(e.iter_mut()) as Box<dyn Iterator<Item = &mut Self>>,
+            false => Box::new(iter::once(e)) as Box<_>,
+        })
     }
     pub fn is_empty(&self) -> bool {
         match self {
@@ -208,11 +206,10 @@ impl IntoIterator for PathingEvent {
 
     fn into_iter(self) -> Self::IntoIter {
         let recurse = matches!(self, Self::FanOut(..));
-        let iter = self.into_iter_shallow()
-            .flat_map(move |e| match recurse {
-                true => Box::new(e.into_iter()) as Box<dyn Iterator<Item = Self>>,
-                false => Box::new(iter::once(e)) as Box<_>,
-            });
+        let iter = self.into_iter_shallow().flat_map(move |e| match recurse {
+            true => Box::new(e.into_iter()) as Box<dyn Iterator<Item = Self>>,
+            false => Box::new(iter::once(e)) as Box<_>,
+        });
         Box::new(iter) as Box<_>
     }
 }

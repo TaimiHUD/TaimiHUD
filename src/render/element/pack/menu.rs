@@ -15,11 +15,12 @@ use {
         exports::runtime::imgui::{MenuItem, MenuToken, MouseButton, Selectable, StyleVar, Ui},
         with_i18n,
     },
-    std::borrow::Cow,
     glam::Vec2,
     glamour::Rect,
+    std::borrow::Cow,
     taimi_meta::packs::{CategoryIndex, CategoryPath, PackPath},
 };
+
 #[cfg(feature = "paths-interact")]
 use crate::controller::pathing::InteractMessage;
 
@@ -149,7 +150,10 @@ impl super::PackElement {
         self.act_post_draw(ui, act_cat, act_pack, false);
     }
     pub fn draw_menu_advanced(&self, ui: &Ui) {
-        let display_name = self.state.display_name().map(Cow::Borrowed)
+        let display_name = self
+            .state
+            .display_name()
+            .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Owned(self.state.info.to_string()));
         let menu = ui.begin_menu(&display_name);
         if let Some(_menu) = menu {
@@ -238,13 +242,25 @@ impl super::PackElements {
         }
         ui.separator();
         if MenuItem::new("refresh vis").build(ui) {
-            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: false, notify: None });
+            act_pathing = Some(PathingEvent::RequestRebuildVis {
+                pack_path: None,
+                partial: false,
+                notify: None,
+            });
         }
         if MenuItem::new("rebuild vis (force)").build(ui) {
-            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: false, notify: Some(true) });
+            act_pathing = Some(PathingEvent::RequestRebuildVis {
+                pack_path: None,
+                partial: false,
+                notify: Some(true),
+            });
         }
         if MenuItem::new("rebuild vis (partial)").build(ui) {
-            act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: None, partial: true, notify: Some(true) });
+            act_pathing = Some(PathingEvent::RequestRebuildVis {
+                pack_path: None,
+                partial: true,
+                notify: Some(true),
+            });
         }
         if MenuItem::new("rebuild space").build(ui) {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: None, bvh: None });
@@ -253,10 +269,12 @@ impl super::PackElements {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(true) });
         }
         if MenuItem::new("rebuild space (bvh only)").build(ui) {
-            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(false), bvh: Some(true) });
+            act_pathing =
+                Some(PathingEvent::RequestRebuildSpace { entities: Some(false), bvh: Some(true) });
         }
         if MenuItem::new("nuke space bvh").build(ui) {
-            act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
+            act_pathing =
+                Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
         }
         ui.separator();
         #[cfg(feature = "paths-interact")]
@@ -782,10 +800,18 @@ impl<'a, 'u> DrawPackAdvancedMenu<'a, 'u> {
     pub fn draw(&mut self) {
         let ui = self.ui;
         if MenuItem::new("rebuild vis").build(ui) {
-            self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: false, notify: Some(true) });
+            self.act_pathing = Some(PathingEvent::RequestRebuildVis {
+                pack_path: Some(self.path),
+                partial: false,
+                notify: Some(true),
+            });
         }
         if MenuItem::new("rebuild vis (partial)").build(ui) {
-            self.act_pathing = Some(PathingEvent::RequestRebuildVis { pack_path: Some(self.path), partial: true, notify: None });
+            self.act_pathing = Some(PathingEvent::RequestRebuildVis {
+                pack_path: Some(self.path),
+                partial: true,
+                notify: None,
+            });
         }
         ui.separator();
         if MenuItem::new("report resources").build(ui) {

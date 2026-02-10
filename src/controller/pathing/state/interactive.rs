@@ -1,10 +1,7 @@
 use {
-    crate::{
-        controller::pathing::registry::PoiMapPath,
-        settings::pathing::TriggerKind,
-    },
-    taimi_pack::attributes::keys,
+    crate::{controller::pathing::registry::PoiMapPath, settings::pathing::TriggerKind},
     taimi_meta::packs::PoiPath,
+    taimi_pack::attributes::keys,
 };
 
 #[cfg(todo)]
@@ -43,13 +40,8 @@ impl BehaviourConfig {
     }
     pub fn is_empty(&self) -> bool {
         match self {
-            Self { mode, .. } if !mode.is_empty() =>
-                false,
-            Self {
-                mode: _,
-                reset_delay: _,
-            } =>
-                true,
+            Self { mode, .. } if !mode.is_empty() => false,
+            Self { mode: _, reset_delay: _ } => true,
         }
     }
 }
@@ -84,8 +76,7 @@ impl ScriptConfig {
                 trigger: None,
                 filter: None,
                 once: None,
-            } =>
-                true,
+            } => true,
             _ => false,
         }
     }
@@ -121,8 +112,7 @@ impl InteractionEventAction {
     /// Natural in-game events require extra processing for it to act reasonable
     pub fn is_natural(&self) -> bool {
         match self {
-            Self::Interact | Self::AutoTrigger =>
-                true,
+            Self::Interact | Self::AutoTrigger => true,
             // anything triggered intentionally (via UI usually) is fair game
             Self::Trigger | Self::Manual(..) | Self::Dismiss(..) => false,
         }

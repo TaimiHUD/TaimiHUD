@@ -28,7 +28,11 @@ impl LoadedMarkerInfo {
             attrs: Either::Left(EMPTY_RENDER_ATTRS.clone()),
         }
     }
-    pub(crate) fn with_marker_attrs(category_path: CategoryPath, attrs: &MarkerAttributes, keep_attrs: bool) -> Self {
+    pub(crate) fn with_marker_attrs(
+        category_path: CategoryPath,
+        attrs: &MarkerAttributes,
+        keep_attrs: bool,
+    ) -> Self {
         Self {
             category_path,
             attrs: match keep_attrs {
@@ -153,7 +157,9 @@ impl LoadedTrailInfo {
         Self { marker_info, trl: None }
     }
     #[inline(always)]
-    pub fn marker_info(&self) -> &LoadedMarkerInfo { &self.marker_info }
+    pub fn marker_info(&self) -> &LoadedMarkerInfo {
+        &self.marker_info
+    }
 }
 impl ops::Deref for LoadedTrailInfo {
     type Target = LoadedMarkerInfo;
@@ -187,7 +193,9 @@ impl LoadedPoiInfo {
         Self { marker_info }
     }
     #[inline(always)]
-    pub fn marker_info(&self) -> &LoadedMarkerInfo { &self.marker_info }
+    pub fn marker_info(&self) -> &LoadedMarkerInfo {
+        &self.marker_info
+    }
 }
 impl ops::Deref for LoadedPoiInfo {
     type Target = LoadedMarkerInfo;

@@ -1,7 +1,7 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-use core::cmp::Ordering;
-use core::{mem, num::NonZero};
+use {
+    core::{cmp::Ordering, mem, num::NonZero},
+    std::{collections::VecDeque, sync::Arc},
+};
 
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -11,36 +11,30 @@ pub struct FlatSet<T> {
 impl<T> FlatSet<T> {
     #[inline]
     pub const fn new() -> Self {
-        unsafe {
-            Self::with_storage_sorted(VecDeque::new())
-        }
+        unsafe { Self::with_storage_sorted(VecDeque::new()) }
     }
     /// TODO: whether sortedness is "trusted" is in the air atm
     #[inline(always)]
     pub const unsafe fn with_storage_sorted(storage: VecDeque<T>) -> Self {
-        Self {
-            storage,
-        }
+        Self { storage }
     }
 
     #[inline]
     pub fn with_capacity(amt: usize) -> Self {
-        unsafe {
-            Self::with_storage_sorted(VecDeque::with_capacity(amt))
-        }
+        unsafe { Self::with_storage_sorted(VecDeque::with_capacity(amt)) }
     }
     #[inline]
     pub fn with_item(value: T) -> Self {
-        unsafe {
-            Self::with_storage_sorted(vec![value].into())
-        }
+        unsafe { Self::with_storage_sorted(vec![value].into()) }
     }
     pub fn with_item_opt(value: Option<T>) -> Self {
         value.map(Self::with_item).unwrap_or_else(Self::new)
     }
 
     #[inline]
-    pub fn into_vec(self) -> Vec<T> { self.storage.into() }
+    pub fn into_vec(self) -> Vec<T> {
+        self.storage.into()
+    }
     pub fn into_arc(self) -> Arc<[T]> {
         match self.storage {
             #[cfg(todo = "unnecessary")]
@@ -57,16 +51,22 @@ impl<T> FlatSet<T> {
     }
 
     #[inline]
-    pub fn into_storage(self) -> VecDeque<T> { self.storage }
+    pub fn into_storage(self) -> VecDeque<T> {
+        self.storage
+    }
     #[inline]
-    pub fn storage(&self) -> &VecDeque<T> { &self.storage }
+    pub fn storage(&self) -> &VecDeque<T> {
+        &self.storage
+    }
     #[inline]
     pub fn iter(&self) -> <&VecDeque<T> as IntoIterator>::IntoIter {
         self.storage.iter()
     }
     /// modifications that may change sort order are a bad idea
     #[inline(always)]
-    pub unsafe fn storage_mut(&mut self) -> &mut VecDeque<T> { &mut self.storage }
+    pub unsafe fn storage_mut(&mut self) -> &mut VecDeque<T> {
+        &mut self.storage
+    }
     /// beware [Self::storage_mut]
     #[inline(always)]
     pub unsafe fn iter_mut(&mut self) -> <&mut VecDeque<T> as IntoIterator>::IntoIter {
@@ -87,16 +87,16 @@ impl<T> FlatSet<T> {
         Self::with_storage_sorted(iter.into_iter().collect())
     }
 }
-impl<T> FlatSet<T> where
+impl<T> FlatSet<T>
+where
     T: Ord,
 {
     pub fn try_with_storage(storage: &mut VecDeque<T>) -> Result<Self, UnsortedError> {
         UnsortedError::check_iter(storage.iter())
-            .map(move |_| unsafe {
-                Self::with_storage_sorted(mem::take(storage))
-            })
+            .map(move |_| unsafe { Self::with_storage_sorted(mem::take(storage)) })
     }
-    pub fn from_vec<V>(vec: V) -> Self where
+    pub fn from_vec<V>(vec: V) -> Self
+    where
         V: Into<VecDeque<T>>,
     {
         let mut storage = vec.into();
@@ -104,16 +104,15 @@ impl<T> FlatSet<T> where
             Ok(set) => set,
             Err(until) => {
                 let mut remaining = storage.split_off(until.index());
-                let mut set = unsafe {
-                    Self::with_storage_sorted(storage)
-                };
+                let mut set = unsafe { Self::with_storage_sorted(storage) };
                 set.append_from_vecdeque(&mut remaining);
                 set
             },
         }
     }
     #[inline]
-    pub unsafe fn from_vec_sorted<V>(vec: V) -> Self where
+    pub unsafe fn from_vec_sorted<V>(vec: V) -> Self
+    where
         V: Into<VecDeque<T>>,
     {
         Self::with_storage_sorted(vec.into())
@@ -164,50 +163,48 @@ impl<T> FlatSet<T> {
     }
 
     /// TODO: fn find()?
-    pub fn index_of<Q>(&mut self, value: &Q) -> Option<usize> where
+    pub fn index_of<Q>(&mut self, value: &Q) -> Option<usize>
+    where
         T: PartialOrd<Q> + PartialEq<Q>,
     {
-        let index = self.storage.partition_point(
-            move |s| s < value
-        );
+        let index = self.storage.partition_point(move |s| s < value);
         match self.at(index) {
             Some(item) if item == value => Some(index),
-            _ => None
+            _ => None,
         }
     }
     /// TODO: reimpl? also does upstream impl do an extra unnecessary check on back.first()?
-    pub fn binary_search_by<F>(&self, f: F) -> (Option<NonZero<usize>>, Ordering) where
+    pub fn binary_search_by<F>(&self, f: F) -> (Option<NonZero<usize>>, Ordering)
+    where
         F: FnMut(&T) -> Ordering,
     {
         match self.storage.binary_search_by(f) {
-            Err(i) if i == self.storage.len() =>
-                (None, Ordering::Less),
-            cmp @ (Ok(i) | Err(i)) =>
-                (NonZero::new(i), match cmp {
-                    Ok(..) => Ordering::Equal,
-                    Err(..) => Ordering::Greater,
-                }),
+            Err(i) if i == self.storage.len() => (None, Ordering::Less),
+            cmp @ (Ok(i) | Err(i)) => (NonZero::new(i), match cmp {
+                Ok(..) => Ordering::Equal,
+                Err(..) => Ordering::Greater,
+            }),
         }
     }
     /// TODO: reimpl?
     /// TODO: `Result<Result<bool, NonZero<usize>>, ()>`?
-    fn binary_search_for_insert<F>(&self, mut f: F) -> (Option<NonZero<usize>>, Ordering) where
+    fn binary_search_for_insert<F>(&self, mut f: F) -> (Option<NonZero<usize>>, Ordering)
+    where
         F: FnMut(&T) -> Ordering,
     {
         match self.storage.back().map(&mut f) {
             Some(Ordering::Greater) => self.binary_search_by(f),
             Some(Ordering::Less) | None => (None, Ordering::Less),
             Some(cmp @ Ordering::Equal) => {
-                let last_index = unsafe {
-                    NonZero::new_unchecked(self.storage.len().unchecked_sub(1))
-                };
+                let last_index = unsafe { NonZero::new_unchecked(self.storage.len().unchecked_sub(1)) };
                 (Some(last_index), cmp)
             },
         }
     }
     /// TODO: Borrow<Q>?
     #[inline]
-    pub fn contains<Q>(&mut self, value: &Q) -> bool where
+    pub fn contains<Q>(&mut self, value: &Q) -> bool
+    where
         T: PartialOrd<Q> + PartialEq<Q>,
     {
         self.index_of(value).is_some()
@@ -221,15 +218,15 @@ impl<T> FlatSet<T> {
     pub fn remove_at(&mut self, index: usize) -> Option<T> {
         self.storage.remove(index)
     }
-    pub fn remove<Q>(&mut self, value: &Q) -> Option<T> where
+    pub fn remove<Q>(&mut self, value: &Q) -> Option<T>
+    where
         T: PartialOrd<Q> + PartialEq<Q>,
     {
-        self.index_of(value).and_then(|index|
-            self.remove_at(index)
-        )
+        self.index_of(value).and_then(|index| self.remove_at(index))
     }
 }
-impl<T> Extend<T> for FlatSet<T> where
+impl<T> Extend<T> for FlatSet<T>
+where
     T: Ord,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
@@ -238,7 +235,8 @@ impl<T> Extend<T> for FlatSet<T> where
         }
     }
 }
-impl<T> FromIterator<T> for FlatSet<T> where
+impl<T> FromIterator<T> for FlatSet<T>
+where
     T: Ord,
 {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
@@ -265,33 +263,25 @@ impl<'a, T> IntoIterator for &'a FlatSet<T> {
 impl<T> From<std::collections::BTreeSet<T>> for FlatSet<T> {
     #[inline]
     fn from(set: std::collections::BTreeSet<T>) -> Self {
-        unsafe {
-            Self::collect_sorted(set)
-        }
+        unsafe { Self::collect_sorted(set) }
     }
 }
 impl<T, V> From<std::collections::BTreeMap<T, V>> for FlatSet<T> {
     #[inline]
     fn from(set: std::collections::BTreeMap<T, V>) -> Self {
-        unsafe {
-            Self::collect_sorted(set.into_keys())
-        }
+        unsafe { Self::collect_sorted(set.into_keys()) }
     }
 }
 impl<T: Clone> From<&'_ std::collections::BTreeSet<T>> for FlatSet<T> {
     #[inline]
     fn from(set: &std::collections::BTreeSet<T>) -> Self {
-        unsafe {
-            Self::collect_sorted(set.iter().cloned())
-        }
+        unsafe { Self::collect_sorted(set.iter().cloned()) }
     }
 }
 impl<T: Clone, V> From<&'_ std::collections::BTreeMap<T, V>> for FlatSet<T> {
     #[inline]
     fn from(set: &std::collections::BTreeMap<T, V>) -> Self {
-        unsafe {
-            Self::collect_sorted(set.keys().cloned())
-        }
+        unsafe { Self::collect_sorted(set.keys().cloned()) }
     }
 }
 impl<T> Default for FlatSet<T> {
@@ -306,14 +296,18 @@ pub struct UnsortedError {
 }
 impl UnsortedError {
     #[inline(always)]
-    pub const fn with_index(index: NonZero<usize>) -> Self { Self { index } }
+    pub const fn with_index(index: NonZero<usize>) -> Self {
+        Self { index }
+    }
 
-    pub fn check_iter<I: IntoIterator>(iter: I) -> Result<usize, Self> where
+    pub fn check_iter<I: IntoIterator>(iter: I) -> Result<usize, Self>
+    where
         I::Item: PartialOrd,
     {
         Self::check_with(iter, |prev, _i, next| *prev <= *next)
     }
-    pub fn check_with<I: IntoIterator, C>(iter: I, mut cmp: C) -> Result<usize, Self> where
+    pub fn check_with<I: IntoIterator, C>(iter: I, mut cmp: C) -> Result<usize, Self>
+    where
         C: FnMut(&mut I::Item, usize, &mut I::Item) -> bool,
     {
         let mut iter = iter.into_iter().enumerate();
@@ -336,8 +330,6 @@ impl UnsortedError {
         self.index.get()
     }
     pub fn prior_index(&self) -> usize {
-        unsafe {
-            self.index.get().unchecked_sub(1)
-        }
+        unsafe { self.index.get().unchecked_sub(1) }
     }
 }

@@ -1,17 +1,13 @@
 use {
     super::PathingWindowState,
     crate::{
-        exports::runtime::imgui::{self, Ui, Selectable},
+        exports::runtime::imgui::{self, Selectable, Ui},
+        render::{element::pack::CategorySearchQuery, machine::RenderMachine},
         settings::state::ui::pathing::{PathingFilterFlags, PathingSearchFlags},
-        render::{
-            machine::RenderMachine,
-            element::pack::{CategorySearchQuery},
-        },
         with_i18n,
     },
-    std::borrow::Cow,
-    std::cmp,
     regex::{Regex, RegexBuilder},
+    std::{borrow::Cow, cmp},
     taimi_hoard::str_opt,
 };
 
@@ -37,7 +33,8 @@ impl PathingSearchState {
 
     pub fn query_str(&self) -> Option<Option<&String>> {
         match str_opt(&self.buffer) {
-            Some(..) if self.flags.contains(PathingSearchFlags::PATTERN_REGEX) && self.matcher.is_none() =>
+            Some(..)
+                if self.flags.contains(PathingSearchFlags::PATTERN_REGEX) && self.matcher.is_none() =>
                 None,
             query => Some(query),
         }
@@ -51,7 +48,7 @@ impl PathingSearchState {
         self.matcher = {
             let escape = !self.flags.contains(PathingSearchFlags::PATTERN_REGEX);
             let pattern = match escape {
-                true =>  Cow::Owned(regex::escape(&self.buffer)),
+                true => Cow::Owned(regex::escape(&self.buffer)),
                 false => Cow::Borrowed(&self.buffer[..]),
             };
             let matcher = RegexBuilder::new(&pattern)
@@ -60,10 +57,9 @@ impl PathingSearchState {
                 .build();
             match &matcher {
                 Err(e) if partial && !escape =>
-                    // regex pattern may be incomplete, so leave prior matcher there for now
+                // regex pattern may be incomplete, so leave prior matcher there for now
                     return false,
-                Err(e) =>
-                    log::warn!("search filter failure: {e:#}"),
+                Err(e) => log::warn!("search filter failure: {e:#}"),
                 _ => (),
             }
             matcher.ok()
@@ -129,7 +125,8 @@ impl PathingWindowState {
         if !self.search_state.buffer.is_empty() || self.search_focus_latch {
             let options = {
                 ui.same_line();
-                let options_changed = with_i18n!("options", |label| ui.checkbox(&label, &mut self.search_show_options));
+                let options_changed = with_i18n!("options", |label| ui
+                    .checkbox(&label, &mut self.search_show_options));
                 if options_changed && !self.search_show_options {
                     self.search_focus_latch = false;
                 }
@@ -138,7 +135,11 @@ impl PathingWindowState {
             let advanced = options;
             let search_flags = match options {
                 false => PathingSearchFlags::empty(),
-                true => PathingSearchFlags::USER | advanced.then_some(PathingSearchFlags::ADVANCED).unwrap_or(PathingSearchFlags::empty()),
+                true =>
+                    PathingSearchFlags::USER
+                        | advanced
+                            .then_some(PathingSearchFlags::ADVANCED)
+                            .unwrap_or(PathingSearchFlags::empty()),
             };
             let search_flags = search_flags
                 .iter()
@@ -168,7 +169,10 @@ impl PathingWindowState {
                 Some(false) => "disabled",
             };
             let choices = [None, Some(true), Some(false)];
-            let max_width = choices.iter().map(|c| ui.calc_text_size(enable_id(*c))[0]).max_by(|a, b| a.partial_cmp(b).unwrap_or(cmp::Ordering::Less));
+            let max_width = choices
+                .iter()
+                .map(|c| ui.calc_text_size(enable_id(*c))[0])
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(cmp::Ordering::Less));
             let enable = self.ui_state.filter.flags.enable_filter();
             let enable_combo = {
                 let preview = enable_id(enable);
@@ -183,7 +187,10 @@ impl PathingWindowState {
             if let Some(_token) = enable_combo {
                 for choice in choices {
                     let selected = choice == enable;
-                    if with_i18n!(enable_id(choice), |label| Selectable::new(label).selected(selected).build(ui)) {
+                    if with_i18n!(enable_id(choice), |label| Selectable::new(label)
+                        .selected(selected)
+                        .build(ui))
+                    {
                         self.ui_state.filter.flags.set_enable_filter(choice);
                     }
                 }

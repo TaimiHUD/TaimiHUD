@@ -129,7 +129,7 @@ impl_d3d! {
 }
 impl<S> D3dStateSnapshot<Dx11Context> for OMDepthState<S>
 where
-    S: From<Option<DepthState>>
+    S: From<Option<DepthState>>,
 {
     #[inline]
     fn empty_state(_device: &Dx11Device) -> anyhow::Result<Self> {

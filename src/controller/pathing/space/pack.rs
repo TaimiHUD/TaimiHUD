@@ -20,7 +20,7 @@ use {
         ops,
     },
     taimi_hoard::{
-        collections::{TaimiSet as _, slice_offset_from},
+        collections::{slice_offset_from, TaimiSet as _},
         flags::BitSet,
         iters::IterExt as _,
         loc::{indexed::IndexedList, LocationMut, LocationRef},
@@ -377,7 +377,9 @@ impl SpaceEntities {
                     pack_data.mark_unpopulated(path.path);
                 },
                 false =>
-                    if !pack_data.unpopulate(path.path) { return },
+                    if !pack_data.unpopulate(path.path) {
+                        return
+                    },
             }
         }
         e.value = SpaceEntity::invalid();
@@ -704,13 +706,13 @@ impl SpacePackCollection {
         maps: &LoadedMaps,
     ) -> Result<BTreeMap<MarkerId, usize>, ()> {
         let mut expired = BTreeMap::new();
-        let Some(map_id) = self.map_id else {
-            return Ok(expired)
-        };
+        let Some(map_id) = self.map_id else { return Ok(expired) };
         let mut expired_packs = PackSet::default();
         let mut any_remain = false;
         for (pack_path, pack) in self.loaded_packs.iter() {
-            if !pack.any_populated() { continue }
+            if !pack.any_populated() {
+                continue
+            }
             match maps.set_contains(&pack_path.rel(map_id)) {
                 true => any_remain = true,
                 false => {
@@ -721,7 +723,9 @@ impl SpacePackCollection {
         if expired_packs.is_empty() {
             return Ok(expired)
         }
-        if !any_remain { return Err(()) }
+        if !any_remain {
+            return Err(())
+        }
 
         for (i, e) in self.render_entities.entities.iter().enumerate() {
             if e.is_invalid() {
@@ -759,10 +763,17 @@ impl SpacePackCollection {
         let mut iter_limit: usize = bvh.nodes.len();
         let depth = 0;
         #[cfg(todo = "unnecessary")]
-        if bvh.nodes.is_empty() { return Ok(depth) }
+        if bvh.nodes.is_empty() {
+            return Ok(depth)
+        }
         Self::bvh_depth_inner(bvh, &mut iter_limit, 0, depth)
     }
-    fn bvh_depth_inner(bvh: &Bvh<f32, 3>, iter_limit: &mut usize, mut idx: usize, mut depth: usize) -> Result<usize, ()> {
+    fn bvh_depth_inner(
+        bvh: &Bvh<f32, 3>,
+        iter_limit: &mut usize,
+        mut idx: usize,
+        mut depth: usize,
+    ) -> Result<usize, ()> {
         use bvh::bvh::BvhNode;
         let mut max_l = depth;
         loop {
@@ -775,7 +786,9 @@ impl SpacePackCollection {
             match bvh.nodes.get(idx) {
                 None => return Err(()),
                 #[cfg(todo)]
-                Some(BvhNode::Leaf { parent_index: _, .. } | BvhNode::Node { parent_index: _, .. }) if parent_index != parent => return Err(()),
+                Some(BvhNode::Leaf { parent_index: _, .. } | BvhNode::Node { parent_index: _, .. })
+                    if parent_index != parent =>
+                    return Err(()),
                 Some(&BvhNode::Leaf { .. }) => break,
                 #[cfg(todo)]
                 Some(BvhNode::Node { child_l_index: 0, .. } | BvhNode::Node { child_r_index: 0, .. }) => break,
@@ -783,7 +796,9 @@ impl SpacePackCollection {
                     log::info!("BUG? bvh root ref");
                     return Err(())
                 },
-                Some(BvhNode::Node { child_l_index: child, .. } | BvhNode::Node { child_r_index: child, .. }) if *child == idx => return Err(()),
+                Some(
+                    BvhNode::Node { child_l_index: child, .. } | BvhNode::Node { child_r_index: child, .. },
+                ) if *child == idx => return Err(()),
                 Some(&BvhNode::Node { child_l_index, child_r_index, .. }) => {
                     idx = child_r_index;
                     let depth_l = Self::bvh_depth_inner(bvh, iter_limit, child_l_index, depth)?;
@@ -794,10 +809,7 @@ impl SpacePackCollection {
         Ok(depth.max(max_l))
     }
 
-    pub(super) fn invalidate_entities(
-        &mut self,
-        expired: &mut dyn Iterator<Item = (MarkerId, usize)>,
-    ) {
+    pub(super) fn invalidate_entities(&mut self, expired: &mut dyn Iterator<Item = (MarkerId, usize)>) {
         for (_mid, i) in expired {
             self.render_entities
                 .invalidate(self.loaded_packs.map_mut_as_slice(), i, false);

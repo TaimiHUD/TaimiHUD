@@ -398,9 +398,11 @@ impl RenderMachine {
         }
 
         let gameplay_transition = gameplay_change.and_then(|gameplay| match gameplay {
-            GameplayState::Intermission { next_map_id: map_id @ Some(..), prev_map_id, .. } if map_id == prev_map_id => {
-                self.gameplay.commit_intermission()
-            },
+            GameplayState::Intermission {
+                next_map_id: map_id @ Some(..),
+                prev_map_id,
+                ..
+            } if map_id == prev_map_id => self.gameplay.commit_intermission(),
             GameplayState::Intermission { next_map_id: map_id, .. } => {
                 //self.map.calibration.clear_map();
                 self.gameplay.commit_loading(map_id)
@@ -449,11 +451,14 @@ impl RenderMachine {
             if let Err(e) = &res {
                 log::error!("{e:#}");
             }
-            let signal_engine = |active: bool| Controller::with_sender(|s| if let Some(s) = s.pathing.as_ref() {
-                s.enables.send_modify(|enables|
-                    enables.set(PathingEnables::ENGINE, active)
-                )
-            });
+            let signal_engine = |active: bool| {
+                Controller::with_sender(|s| {
+                    if let Some(s) = s.pathing.as_ref() {
+                        s.enables
+                            .send_modify(|enables| enables.set(PathingEnables::ENGINE, active))
+                    }
+                })
+            };
             match res {
                 Err(e) if init => {
                     signal_engine(false);

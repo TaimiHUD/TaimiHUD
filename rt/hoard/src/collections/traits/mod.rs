@@ -1,14 +1,22 @@
 pub use self::{
     collection::TaimiCollection,
-    extend::TaimiExtend,
     dict::{TaimiDict, TaimiDictMut, TaimiDictStorage},
+    extend::TaimiExtend,
+    seq::{
+        TaimiSeq,
+        TaimiSeqGet,
+        TaimiSeqIndex,
+        TaimiSeqIndexMut,
+        TaimiSeqKey,
+        TaimiSeqMut,
+        TaimiSeqStorage,
+    },
     set::TaimiSet,
-    seq::{TaimiSeq, TaimiSeqMut, TaimiSeqIndex, TaimiSeqIndexMut, TaimiSeqGet, TaimiSeqKey, TaimiSeqStorage},
 };
-mod extend;
-mod set;
-mod seq;
 mod dict;
+mod extend;
+mod seq;
+mod set;
 
 mod collection {
     use std::{

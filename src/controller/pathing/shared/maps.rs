@@ -3,10 +3,10 @@ use {
     crate::controller::pathing::{
         info::{self, LoadedMarkerInfo, LoadedPoiInfo, LoadedTrailInfo, MapPackInfo},
         registry::{
-            LoadedMarkerPath,
             LoadedCategoryIndex,
             LoadedCategoryNs,
             LoadedCategoryPath,
+            LoadedMarkerPath,
             LoadedPoiIndex,
             LoadedPoiNs,
             LoadedPoiPath,
@@ -19,17 +19,15 @@ use {
             PoiMapPath,
             TrailMapPath,
         },
-        space::DrawSpace,
-        state::{
-            LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail,
-        },
         shared::LocDisplay,
+        space::DrawSpace,
+        state::{LoadedCategory, LoadedMapPack, LoadedPoi, LoadedTrail},
     },
     glamour::Point3,
-    std::{cmp, ops, sync::Arc, mem},
+    std::{cmp, fmt, mem, ops, sync::Arc},
     taimi_hoard::{
         collections::TaimiSet,
-        iters::{IterExt as _, all_zipped},
+        iters::{all_zipped, IterExt as _},
         loc::{indexed::IndexedList, LocationMut, LocationRef, Locator},
     },
     taimi_meta::packs::{
@@ -39,20 +37,20 @@ use {
         MapIndex,
         PoiPath,
         TrailPath,
-        VisibilityFlags,
         TrailSectionIndex,
+        VisibilityFlags,
     },
     taimi_pack::attributes::{
         keys::Guid,
+        FilterAttributes,
+        InteractionAttributes,
         PoiAttributes,
         RenderAttributes,
-        InteractionAttributes,
-        FilterAttributes,
         TrailAttributes,
     },
     taimi_sync::arcs::ArcPtrCmp,
-    std::fmt,
 };
+
 #[cfg(feature = "paths-filter")]
 use crate::controller::pathing::state::hidden::MarkerState;
 #[cfg(not(feature = "paths-filter"))]
@@ -248,19 +246,14 @@ impl SharedGameplayMap {
             map_info
                 .loaded_pois(map)
                 .map(|poi| poi.into_marker())
-                .chain(
-                    map_info
-                        .loaded_trails(map)
-                        .map(|poi| poi.into_marker())
-                )
+                .chain(map_info.loaded_trails(map).map(|poi| poi.into_marker()))
         })
     }
     pub fn iter_markers_loaded(&self) -> impl Iterator<Item = LoadedMarkerRef<'_>> {
         self.iter_state().flat_map(move |(_map_path, map, map_info)| {
-            map.loaded_pois(map_info).lazy_map(LoadedMarkerRef::Poi)
-                .chain(
-                    map.loaded_trails(map_info).lazy_map(LoadedMarkerRef::Trail)
-                )
+            map.loaded_pois(map_info)
+                .lazy_map(LoadedMarkerRef::Poi)
+                .chain(map.loaded_trails(map_info).lazy_map(LoadedMarkerRef::Trail))
         })
     }
 
@@ -349,39 +342,39 @@ impl SharedMapPackLoaded {
             })
     }
     pub fn poi_guid_by_index<'a>(&'a self, path: LoadedPoiPath) -> Option<&'a Guid> {
-        match self.info.poi_guid_filter(self.info.loaded_pois()).enumerate().find(|(_, (p, _))| *p >= path) {
-            Some((i, (p, _))) if p == path =>
-                self.poi_guids.get(i),
+        match self
+            .info
+            .poi_guid_filter(self.info.loaded_pois())
+            .enumerate()
+            .find(|(_, (p, _))| *p >= path)
+        {
+            Some((i, (p, _))) if p == path => self.poi_guids.get(i),
             _ => None,
         }
     }
     pub fn poi_guid_by_path<'a>(&'a self, path: PoiPath) -> Option<&'a Guid> {
-        match self.info.poi_guid_filter(self.info.loaded_pois()).enumerate().find(|(_, (_, p))| *p >= path) {
-            Some((i, (_, p))) if p == path =>
-                self.poi_guids.get(i),
+        match self
+            .info
+            .poi_guid_filter(self.info.loaded_pois())
+            .enumerate()
+            .find(|(_, (_, p))| *p >= path)
+        {
+            Some((i, (_, p))) if p == path => self.poi_guids.get(i),
             _ => None,
         }
     }
 
-    pub fn pois_iter<'a>(
-        &'a self,
-    ) -> impl DoubleEndedIterator<Item = SharedPoiRef<'a>> {
+    pub fn pois_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = SharedPoiRef<'a>> {
         self.pois().paths().lazy_map(|loaded_path| unsafe {
             let loaded_index = loaded_path.pivot_to();
-            SharedPoiRef::new_unchecked(
-                SharedMarkerRef::from_parts_unchecked(self, None, loaded_index)
-            )
+            SharedPoiRef::new_unchecked(SharedMarkerRef::from_parts_unchecked(self, None, loaded_index))
         })
     }
-    pub fn trails_iter<'a>(
-        &'a self,
-    ) -> impl DoubleEndedIterator<Item = SharedTrailRef<'a>> {
+    pub fn trails_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = SharedTrailRef<'a>> {
         self.trails().paths().lazy_map(|loaded_path| unsafe {
             let loaded_index = loaded_path.pivot_to();
-                SharedTrailRef::new_unchecked(
-                    SharedMarkerRef::from_parts_unchecked(self, None, loaded_index)
-                )
-            })
+            SharedTrailRef::new_unchecked(SharedMarkerRef::from_parts_unchecked(self, None, loaded_index))
+        })
     }
     pub fn loaded_pois<'a>(
         &'a self,
@@ -389,7 +382,9 @@ impl SharedMapPackLoaded {
     ) -> impl DoubleEndedIterator<Item = SharedPoiRef<'a>> {
         let amt = map.map(|map| map.pois().len()).unwrap_or(0);
         self.pois_iter().lazy_map(move |mut shared| {
-            shared.marker.map = ((shared.loaded_index().path as usize) < amt).then_some(map).flatten();
+            shared.marker.map = ((shared.loaded_index().path as usize) < amt)
+                .then_some(map)
+                .flatten();
             shared
         })
     }
@@ -399,7 +394,9 @@ impl SharedMapPackLoaded {
     ) -> impl DoubleEndedIterator<Item = SharedTrailRef<'a>> {
         let amt = map.map(|map| map.trails().len()).unwrap_or(0);
         self.trails_iter().lazy_map(move |mut shared| {
-            shared.marker.map = ((shared.loaded_index().path as usize) < amt).then_some(map).flatten();
+            shared.marker.map = ((shared.loaded_index().path as usize) < amt)
+                .then_some(map)
+                .flatten();
             shared
         })
     }
@@ -444,7 +441,9 @@ impl SharedMapPackState {
                 .map(LoadedTrailShared::with_loaded)
                 .collect(),
             #[cfg(feature = "paths-filter")]
-            hidden_markers: Self::hidden_markers_from(path, state, map_pack).cloned().collect(),
+            hidden_markers: Self::hidden_markers_from(path, state, map_pack)
+                .cloned()
+                .collect(),
         }
     }
 
@@ -526,7 +525,9 @@ impl SharedMapPackState {
         let mut hidden_dirty = true;
         if hidden_dirty {
             let prev_len = self.hidden_markers.len();
-            self.hidden_markers = Self::hidden_markers_from(path, state, map_pack).cloned().collect();
+            self.hidden_markers = Self::hidden_markers_from(path, state, map_pack)
+                .cloned()
+                .collect();
             hidden_dirty = prev_len != self.hidden_markers.len();
         }
         match hidden_dirty {
@@ -553,34 +554,36 @@ impl SharedMapPackState {
     ) -> impl Iterator<Item = &'a MarkerId> + 'b {
         let pack_path = map_path.root;
         let poi_guids = &map_pack.poi_guids;
-        state
-            .hidden
-            .keys()
-            .filter(move |id| match id {
-                id if id
-                    .marker_path::<PackMapPath>()
-                    .map(|path| path.root == map_path)
-                    .unwrap_or(false) =>
-                    true,
-                id if id
-                    .marker_path::<PackPath>()
-                    .map(|path| path.root == pack_path)
-                    .unwrap_or(false) =>
-                    true,
-                _ => poi_guids.contains(Guid::from_uuid_ref(id)),
-            })
+        state.hidden.keys().filter(move |id| match id {
+            id if id
+                .marker_path::<PackMapPath>()
+                .map(|path| path.root == map_path)
+                .unwrap_or(false) =>
+                true,
+            id if id
+                .marker_path::<PackPath>()
+                .map(|path| path.root == pack_path)
+                .unwrap_or(false) =>
+                true,
+            _ => poi_guids.contains(Guid::from_uuid_ref(id)),
+        })
     }
     #[cfg(feature = "paths-filter")]
     pub fn is_hidden(&self, marker_ids: &[MarkerId]) -> bool {
         match marker_ids {
             #[cfg(todo = "unnecessary")]
-            marker_ids => self.hidden_markers.iter().any(|hidden| marker_ids.contains(hidden)),
+            marker_ids => self
+                .hidden_markers
+                .iter()
+                .any(|hidden| marker_ids.contains(hidden)),
             marker_ids => self.any_hidden(marker_ids),
         }
     }
     #[cfg(feature = "paths-filter")]
     pub fn any_hidden<'a, I: IntoIterator<Item = &'a MarkerId>>(&self, marker_ids: I) -> bool {
-        marker_ids.into_iter().any(|mid| self.hidden_markers[..].binary_search(mid).is_ok())
+        marker_ids
+            .into_iter()
+            .any(|mid| self.hidden_markers[..].binary_search(mid).is_ok())
     }
 
     pub fn loaded_pois<'a>(
@@ -724,48 +727,82 @@ pub struct SharedMarkerRef<'a> {
 }
 impl<'a> SharedMarkerRef<'a> {
     /// TODO
-    pub fn from_path(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, path: MarkerPath<PackPath>) -> Option<Self> {
+    pub fn from_path(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        path: MarkerPath<PackPath>,
+    ) -> Option<Self> {
         let loaded_path: Option<MarkerPath> = match path {
-            path if path.root != map_info.path.root =>
-                None,
+            path if path.root != map_info.path.root => None,
             path => Some(path.unscope()),
-        }.and_then(|path| map_info.marker_index(path));
+        }
+        .and_then(|path| map_info.marker_index(path));
         loaded_path.and_then(|loaded_path| match map {
             #[cfg(todo)]
-            None => Some(unsafe {
-                Self::from_parts_unchecked(map_info, map, loaded_path)
-            }),
+            None => Some(unsafe { Self::from_parts_unchecked(map_info, map, loaded_path) }),
             map => Self::from_parts(map_info, map, loaded_path),
         })
     }
     /// only check map
     ///
     /// TODO
-    pub unsafe fn from_loaded_path_unchecked(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, loaded_path: LoadedMarkerPath) -> Option<Self> {
+    pub unsafe fn from_loaded_path_unchecked(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        loaded_path: LoadedMarkerPath,
+    ) -> Option<Self> {
         Self::from_parts(map_info, map, loaded_path)
     }
-    pub fn from_loaded_id(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, loaded_id: MarkerId) -> Option<Self> {
-        loaded_id.marker_path().and_then(|loaded_path|
-            Self::from_loaded_path(map_info, map, loaded_path)
-        )
+    pub fn from_loaded_id(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        loaded_id: MarkerId,
+    ) -> Option<Self> {
+        loaded_id
+            .marker_path()
+            .and_then(|loaded_path| Self::from_loaded_path(map_info, map, loaded_path))
     }
-    pub fn from_loaded_path(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, loaded_path: LoadedMarkerPath<PackMapPath>) -> Option<Self> {
-        if map_info.path != loaded_path.root { return None }
+    pub fn from_loaded_path(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        loaded_path: LoadedMarkerPath<PackMapPath>,
+    ) -> Option<Self> {
+        if map_info.path != loaded_path.root {
+            return None
+        }
         Self::from_parts(map_info, map, loaded_path.unscope())
     }
-    pub fn from_parts(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, loaded_index: LoadedMarkerPath) -> Option<Self> {
+    pub fn from_parts(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        loaded_index: LoadedMarkerPath,
+    ) -> Option<Self> {
         let mut trail_section = TrailSectionIndex::MAX;
         let (idx, len_info, len_map) = match loaded_index.path.namespace() {
-            MarkerIndex::NS_CAT => (loaded_index.path.index_category_unchecked() as usize, map_info.categories().count(), map.map(|map| map.categories().len())),
-            MarkerIndex::NS_POI => (loaded_index.path.index_poi_unchecked() as usize, map_info.pois().len(), map.map(|map| map.pois().len())),
+            MarkerIndex::NS_CAT => (
+                loaded_index.path.index_category_unchecked() as usize,
+                map_info.categories().count(),
+                map.map(|map| map.categories().len()),
+            ),
+            MarkerIndex::NS_POI => (
+                loaded_index.path.index_poi_unchecked() as usize,
+                map_info.pois().len(),
+                map.map(|map| map.pois().len()),
+            ),
             MarkerIndex::NS_TRAIL => {
-                let (i, seci) = loaded_index.path.index_trail_section_unchecked(); 
+                let (i, seci) = loaded_index.path.index_trail_section_unchecked();
                 trail_section = seci;
-                (i as usize, map_info.trails().len(), map.map(|map| map.trails().len()))
+                (
+                    i as usize,
+                    map_info.trails().len(),
+                    map.map(|map| map.trails().len()),
+                )
             },
             _ => return None,
         };
-        if idx >= len_info { return None }
+        if idx >= len_info {
+            return None
+        }
         let map = match len_map {
             Some(len_map) if idx >= len_map => {
                 log::debug!("DELETEME: {loaded_index} map state expected");
@@ -776,17 +813,15 @@ impl<'a> SharedMarkerRef<'a> {
         if trail_section != TrailSectionIndex::MAX {
             // TODO bleh
         }
-        Some(unsafe {
-            Self::from_parts_unchecked(map_info, map, loaded_index)
-        })
+        Some(unsafe { Self::from_parts_unchecked(map_info, map, loaded_index) })
     }
     #[inline]
-    pub const unsafe fn from_parts_unchecked(map_info: &'a SharedMapPackLoaded, map: Option<&'a SharedMapPackState>, loaded_index: LoadedMarkerPath) -> Self {
-        Self {
-            map_info,
-            map,
-            loaded_index,
-        }
+    pub const unsafe fn from_parts_unchecked(
+        map_info: &'a SharedMapPackLoaded,
+        map: Option<&'a SharedMapPackState>,
+        loaded_index: LoadedMarkerPath,
+    ) -> Self {
+        Self { map_info, map, loaded_index }
     }
 
     #[inline]
@@ -819,15 +854,12 @@ impl<'a> SharedMarkerRef<'a> {
     }
     #[inline]
     pub fn loaded_path(&self) -> LoadedMarkerPath<PackMapPath> {
-        self.loaded_index()
-            .pivot(self.map_path())
+        self.loaded_index().pivot(self.map_path())
     }
     /// as opposed to [Self::loaded_index]
     #[inline]
     pub fn marker_index(&self) -> MarkerPath {
-        unsafe {
-            self.map_info.info.marker_path_unchecked(self.loaded_index())
-        }
+        unsafe { self.map_info.info.marker_path_unchecked(self.loaded_index()) }
     }
     /// as opposed to [Self::loaded_path]
     pub fn path(&self) -> MarkerPath<PackPath> {
@@ -839,18 +871,16 @@ impl<'a> SharedMarkerRef<'a> {
     }
 
     pub fn loaded_category_path(&self) -> Option<LoadedCategoryPath> {
-        (self.loaded_index().path.namespace() == MarkerIndex::NS_CAT).then_some(
-            self.loaded_category_path_unchecked()
-        )
+        (self.loaded_index().path.namespace() == MarkerIndex::NS_CAT)
+            .then_some(self.loaded_category_path_unchecked())
     }
     #[inline(always)]
     fn loaded_category_path_unchecked(&self) -> LoadedCategoryPath {
         LoadedPoiPath::with_path(self.loaded_index().path.index_category_unchecked())
     }
     pub fn loaded_poi_path(&self) -> Option<LoadedPoiPath> {
-        (self.loaded_index().path.namespace() == MarkerIndex::NS_POI).then_some(
-            self.loaded_poi_path_unchecked()
-        )
+        (self.loaded_index().path.namespace() == MarkerIndex::NS_POI)
+            .then_some(self.loaded_poi_path_unchecked())
     }
     #[inline(always)]
     fn loaded_poi_path_unchecked(&self) -> LoadedPoiPath {
@@ -858,20 +888,15 @@ impl<'a> SharedMarkerRef<'a> {
     }
     pub fn category_path(&self) -> Option<CategoryPath> {
         let lpath = self.loaded_category_path()?;
-        Some(unsafe {
-            self.map_info.info.category_path_unchecked(lpath)
-        })
+        Some(unsafe { self.map_info.info.category_path_unchecked(lpath) })
     }
     pub fn poi_path(&self) -> Option<PoiPath> {
         let lpath = self.loaded_poi_path()?;
-        Some(unsafe {
-            self.map_info.info.poi_path_unchecked(lpath)
-        })
+        Some(unsafe { self.map_info.info.poi_path_unchecked(lpath) })
     }
     pub fn loaded_trail_path(&self) -> Option<LoadedTrailPath> {
-        (self.loaded_index().path.namespace() == MarkerIndex::NS_TRAIL).then_some(
-            self.loaded_trail_path_unchecked()
-        )
+        (self.loaded_index().path.namespace() == MarkerIndex::NS_TRAIL)
+            .then_some(self.loaded_trail_path_unchecked())
     }
     #[inline(always)]
     fn loaded_trail_path_unchecked(&self) -> LoadedTrailPath {
@@ -879,39 +904,29 @@ impl<'a> SharedMarkerRef<'a> {
     }
     pub fn trail_path(&self) -> Option<TrailPath> {
         let lpath = self.loaded_trail_path()?;
-        Some(unsafe {
-            self.map_info.info.trail_path_unchecked(lpath)
-        })
+        Some(unsafe { self.map_info.info.trail_path_unchecked(lpath) })
     }
     pub fn loaded_category(&self) -> Option<&'a LoadedCategory> {
         let lpath = self.loaded_category_path()?;
-        self.map().map(|map| unsafe {
-            map.categories().index_unchecked(lpath)
-        })
+        self.map()
+            .map(|map| unsafe { map.categories().index_unchecked(lpath) })
     }
     pub fn loaded_poi_info(&self) -> Option<&'a LoadedPoiInfo> {
         let lpath = self.loaded_poi_path()?;
-        Some(unsafe {
-            self.map_info.pois().index_unchecked(lpath)
-        })
+        Some(unsafe { self.map_info.pois().index_unchecked(lpath) })
     }
     pub fn loaded_trail_info(&self) -> Option<&'a LoadedTrailInfo> {
         let lpath = self.loaded_trail_path()?;
-        Some(unsafe {
-            self.map_info.trails().index_unchecked(lpath)
-        })
+        Some(unsafe { self.map_info.trails().index_unchecked(lpath) })
     }
     pub fn loaded_poi(&self) -> Option<&'a LoadedPoiShared> {
         let lpath = self.loaded_poi_path()?;
-        self.map().map(|map| unsafe {
-            map.pois().index_unchecked(lpath)
-        })
+        self.map().map(|map| unsafe { map.pois().index_unchecked(lpath) })
     }
     pub fn loaded_trail(&self) -> Option<&'a LoadedTrailShared> {
         let lpath = self.loaded_trail_path()?;
-        self.map().map(move |map| unsafe {
-            map.trails().index_unchecked(lpath)
-        })
+        self.map()
+            .map(move |map| unsafe { map.trails().index_unchecked(lpath) })
     }
 
     /// TODO: categories please!
@@ -925,17 +940,20 @@ impl<'a> SharedMarkerRef<'a> {
         }
     }
     pub fn render_attrs(&self) -> &'a Arc<RenderAttributes> {
-        self.marker_info().map(|info| info.attrs())
+        self.marker_info()
+            .map(|info| info.attrs())
             .unwrap_or(&info::EMPTY_RENDER_ATTRS)
     }
     #[cfg(feature = "paths-interact")]
     pub fn interaction_attrs(&self) -> &'a Arc<InteractionAttributes> {
-        self.marker_info().and_then(|info| info.get_interaction_attrs())
+        self.marker_info()
+            .and_then(|info| info.get_interaction_attrs())
             .unwrap_or(&info::EMPTY_INTERACTION_ATTRS)
     }
     #[inline]
     pub fn filter_attrs(&self) -> &'a FilterAttributes {
-        self.marker_info().and_then(|info| info.get_filter_attrs())
+        self.marker_info()
+            .and_then(|info| info.get_filter_attrs())
             .map(|a| &**a)
             .unwrap_or(&info::EMPTY_FILTER_ATTRS)
     }
@@ -1011,9 +1029,7 @@ impl<'a> SharedPoiRef<'a> {
         #[cfg(todo = "unnecessary")]
         let _ = marker.render_attrs().poi.as_ref()?;
         match marker.loaded_poi_path() {
-            Some(..) =>  Some(unsafe {
-                Self::new_unchecked(marker)
-            }),
+            Some(..) => Some(unsafe { Self::new_unchecked(marker) }),
             None => None,
         }
     }
@@ -1040,9 +1056,7 @@ impl<'a> SharedPoiRef<'a> {
     }
     #[inline]
     pub fn poi_path(&self) -> PoiPath {
-        unsafe {
-            self.map_info().info.poi_path_unchecked(self.loaded_index())
-        }
+        unsafe { self.map_info().info.poi_path_unchecked(self.loaded_index()) }
     }
     #[cfg(todo)]
     pub fn poi_info(&self) -> &SharedPoiInfo {
@@ -1055,9 +1069,7 @@ impl<'a> SharedPoiRef<'a> {
     }
     #[inline]
     pub fn lpoi_info(&self) -> &'a LoadedPoiInfo {
-        unsafe {
-            self.map_info().pois().index_unchecked(self.loaded_index())
-        }
+        unsafe { self.map_info().pois().index_unchecked(self.loaded_index()) }
     }
     pub fn lpoi(&self) -> Option<&'a LoadedPoiShared> {
         self.map().map(|_map| unsafe {
@@ -1126,19 +1138,18 @@ impl<'a> LoadedPoiRef<'a> {
     }
     #[inline(always)]
     pub fn map(&self) -> &'a SharedMapPackState {
-        unsafe {
-            self.marker.marker.map_unchecked()
-        }
+        unsafe { self.marker.marker.map_unchecked() }
     }
     #[inline]
     pub fn lpoi(&self) -> &'a LoadedPoiShared {
-        unsafe {
-            self.map().pois().index_unchecked(self.loaded_index())
-        }
+        unsafe { self.map().pois().index_unchecked(self.loaded_index()) }
     }
 
     pub fn guid(&self) -> Option<&'a Guid> {
-        self.marker.marker.map_info.poi_guid_by_index(self.marker.loaded_index())
+        self.marker
+            .marker
+            .map_info
+            .poi_guid_by_index(self.marker.loaded_index())
     }
     #[cfg(feature = "paths-filter")]
     pub fn is_hidden(&self) -> bool {
@@ -1177,9 +1188,7 @@ impl<'a> SharedTrailRef<'a> {
         #[cfg(todo = "unnecessary")]
         let _ = marker.render_attrs().trail.as_ref()?;
         match marker.loaded_trail_path() {
-            Some(..) =>  Some(unsafe {
-                Self::new_unchecked(marker)
-            }),
+            Some(..) => Some(unsafe { Self::new_unchecked(marker) }),
             None => None,
         }
     }
@@ -1206,9 +1215,7 @@ impl<'a> SharedTrailRef<'a> {
     }
     #[inline]
     pub fn trail_path(&self) -> TrailPath {
-        unsafe {
-            self.map_info().info.trail_path_unchecked(self.loaded_index())
-        }
+        unsafe { self.map_info().info.trail_path_unchecked(self.loaded_index()) }
     }
     #[cfg(todo)]
     pub fn trail_info(&self) -> &SharedTrailInfo {
@@ -1220,9 +1227,7 @@ impl<'a> SharedTrailRef<'a> {
     }
     #[inline]
     pub fn ltrail_info(&self) -> &'a LoadedTrailInfo {
-        unsafe {
-            self.map_info().trails().index_unchecked(self.loaded_index())
-        }
+        unsafe { self.map_info().trails().index_unchecked(self.loaded_index()) }
     }
     pub fn ltrail(&self) -> Option<&'a LoadedTrailShared> {
         self.map().map(|_map| unsafe {
@@ -1291,16 +1296,12 @@ impl<'a> LoadedTrailRef<'a> {
     }
     #[inline(always)]
     pub fn map(&self) -> &'a SharedMapPackState {
-        unsafe {
-            self.marker.marker.map_unchecked()
-        }
+        unsafe { self.marker.marker.map_unchecked() }
     }
 
     #[inline]
     pub fn ltrail(&self) -> &'a LoadedTrailShared {
-        unsafe {
-            self.map().trails().index_unchecked(self.loaded_index())
-        }
+        unsafe { self.map().trails().index_unchecked(self.loaded_index()) }
     }
     #[inline]
     pub fn trail_attrs(&self) -> &'a Box<TrailAttributes> {

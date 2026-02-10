@@ -8,24 +8,26 @@ use {
             MapIndex,
             PackIndex,
             PackPath,
+            PackPoiNs,
             PackRegistryNs,
-            PoiPath, PoiIndex,
+            PackTrailNs,
+            PoiIndex,
+            PoiPath,
             TrailIndex,
             TrailPath,
-            PackPoiNs,
-            PackTrailNs,
         },
     },
     core::iter,
+    num_traits::AsPrimitive,
     std::collections::{btree_set, BTreeSet},
     taimi_hoard::{
         collections::TaimiSet,
-        iters::IterExt as _,
         flags::set::{self as bitset, BitSet},
+        iters::IterExt as _,
         loc::{LocationGet, Locator, NamespacePivotFrom, NamespaceTryConvTo},
     },
-    num_traits::AsPrimitive,
 };
+
 pub use super::visible::VisibilityFlagSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -124,7 +126,8 @@ impl CategorySet {
     pub fn iter<'a>(&'a self) -> <&'a Self as IntoIterator>::IntoIter {
         IntoIterator::into_iter(self)
     }
-    pub fn into_iter<T>(self) -> impl DoubleEndedIterator<Item = T> where
+    pub fn into_iter<T>(self) -> impl DoubleEndedIterator<Item = T>
+    where
         T: Copy + 'static,
         CategoryIndex: AsPrimitive<T>,
     {
@@ -170,7 +173,8 @@ impl<T: AsPrimitive<CategoryIndex>> Extend<T> for CategorySet {
     }
 }
 
-impl<T> TaimiSet<T> for CategorySet where
+impl<T> TaimiSet<T> for CategorySet
+where
     T: Copy + AsPrimitive<CategoryIndex>,
 {
     #[inline]
@@ -191,19 +195,22 @@ pub struct MarkerSet<PN = PackPoiNs, TN = PackTrailNs> {
     pub pois: BTreeSet<PoiPath<PN>>,
     pub trails: BTreeSet<TrailPath<TN>>,
 }
-impl<PN, TN> MarkerSet<PN, TN> where
+impl<PN, TN> MarkerSet<PN, TN>
+where
     PN: Ord + Default,
     TN: Ord + Default,
 {
     /// TODO: doesn't check ns :<
     #[inline]
-    pub fn contains_marker_unchecked<N, I>(&self, path: Locator<N, I>) -> bool where
+    pub fn contains_marker_unchecked<N, I>(&self, path: Locator<N, I>) -> bool
+    where
         PackMarkerNs: NamespacePivotFrom<N, I, NsPivotFromPath = MarkerIndex>,
     {
         let path = PackMarkerNs::loc_pivot_from(path);
         self.contains_index(path.path)
     }
-    pub fn contains_index<I>(&self, marker: I) -> bool where
+    pub fn contains_index<I>(&self, marker: I) -> bool
+    where
         I: Into<MarkerIndex>,
         PN: Default,
         TN: Default,
@@ -221,7 +228,8 @@ impl<PN, TN> MarkerSet<PN, TN> where
             _ => false,
         }
     }
-    pub fn insert_index<I>(&mut self, marker: I) -> bool where
+    pub fn insert_index<I>(&mut self, marker: I) -> bool
+    where
         I: Into<MarkerIndex>,
     {
         let marker = marker.into();
@@ -238,12 +246,14 @@ impl<PN, TN> MarkerSet<PN, TN> where
         }
     }
 }
-impl<PN, TN> MarkerSet<PN, TN> where
+impl<PN, TN> MarkerSet<PN, TN>
+where
     PN: Ord,
     TN: Ord,
 {
     #[inline]
-    pub fn contains_path<N, I>(&self, path: Locator<N, I>) -> bool where
+    pub fn contains_path<N, I>(&self, path: Locator<N, I>) -> bool
+    where
         N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
         N: NamespaceTryConvTo<I, TrailPath<TN>>,
         I: Clone,
@@ -257,7 +267,8 @@ impl<PN, TN> MarkerSet<PN, TN> where
         }
     }
     #[inline]
-    pub fn insert_path<N, I>(&mut self, path: Locator<N, I>) -> bool where
+    pub fn insert_path<N, I>(&mut self, path: Locator<N, I>) -> bool
+    where
         N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
         N: NamespaceTryConvTo<I, TrailPath<TN>>,
         I: Clone,
@@ -271,7 +282,8 @@ impl<PN, TN> MarkerSet<PN, TN> where
         }
     }
 }
-impl<PN, TN> MarkerSet<PN, TN> where
+impl<PN, TN> MarkerSet<PN, TN>
+where
     PN: Ord,
 {
     #[inline]
@@ -283,7 +295,8 @@ impl<PN, TN> MarkerSet<PN, TN> where
         self.pois.insert(path)
     }
 }
-impl<PN, TN> MarkerSet<PN, TN> where
+impl<PN, TN> MarkerSet<PN, TN>
+where
     TN: Ord,
 {
     #[inline]
@@ -295,7 +308,8 @@ impl<PN, TN> MarkerSet<PN, TN> where
         self.trails.insert(path)
     }
 }
-impl<PN, TN, N, I> TaimiSet<Locator<N, I>> for MarkerSet<PN, TN> where
+impl<PN, TN, N, I> TaimiSet<Locator<N, I>> for MarkerSet<PN, TN>
+where
     PN: Ord,
     TN: Ord,
     N: NamespaceTryConvTo<I, PoiPath<PN>> + Clone,
@@ -316,13 +330,23 @@ impl<PN, TN> MarkerSet<PN, TN> {
 
     pub fn iter_index<N>(&self) -> impl DoubleEndedIterator<Item = MarkerIndex> + '_ {
         let pois = self.pois.iter().lazy_map(|poi| MarkerIndex::with_poi(poi.path));
-        let trails = self.trails.iter().lazy_map(|trail| MarkerIndex::with_trail(trail.path));
+        let trails = self
+            .trails
+            .iter()
+            .lazy_map(|trail| MarkerIndex::with_trail(trail.path));
         pois.chain(trails)
     }
 
-    pub fn iter_paths<'a, N>(&'a self) -> impl DoubleEndedIterator<Item = Locator<N, <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath>> + 'a where
+    pub fn iter_paths<'a, N>(
+        &'a self,
+    ) -> impl DoubleEndedIterator<Item = Locator<N, <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath>> + 'a
+    where
         N: NamespacePivotFrom<PN, PoiIndex> + 'a,
-        N: NamespacePivotFrom<TN, TrailIndex, NsPivotFromPath = <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath>,
+        N: NamespacePivotFrom<
+            TN,
+            TrailIndex,
+            NsPivotFromPath = <N as NamespacePivotFrom<PN, PoiIndex>>::NsPivotFromPath,
+        >,
         PN: Clone,
         TN: Clone,
     {
@@ -345,7 +369,8 @@ impl<PN, TN> Default for MarkerSet<PN, TN> {
         }
     }
 }
-impl<PN, TN, M> FromIterator<M> for MarkerSet<PN, TN> where
+impl<PN, TN, M> FromIterator<M> for MarkerSet<PN, TN>
+where
     Self: Extend<M>,
 {
     fn from_iter<I: IntoIterator<Item = M>>(iter: I) -> Self {
@@ -354,7 +379,8 @@ impl<PN, TN, M> FromIterator<M> for MarkerSet<PN, TN> where
         set
     }
 }
-impl<PN, TN, N, P> Extend<Locator<N, P>> for MarkerSet<PN, TN> where
+impl<PN, TN, N, P> Extend<Locator<N, P>> for MarkerSet<PN, TN>
+where
     N: NamespaceTryConvTo<P, PoiPath<PN>> + Clone,
     N: NamespaceTryConvTo<P, TrailPath<TN>>,
     P: Clone,
@@ -475,7 +501,8 @@ impl Extend<Option<PackIndex>> for PackSet {
         }
     }
 }
-impl<T> TaimiSet<T> for PackSet where
+impl<T> TaimiSet<T> for PackSet
+where
     T: Copy + AsPrimitive<PackIndex>,
 {
     #[inline]

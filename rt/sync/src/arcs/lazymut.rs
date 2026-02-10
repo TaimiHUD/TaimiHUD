@@ -1,8 +1,10 @@
-use std::sync::Arc;
-use std::borrow::{Borrow, BorrowMut};
-use core::ptr::NonNull;
-use core::mem;
-use core::ops;
+use {
+    core::{mem, ops, ptr::NonNull},
+    std::{
+        borrow::{Borrow, BorrowMut},
+        sync::Arc,
+    },
+};
 
 pub use self::ArcMutRef as ArcLazyMut;
 #[cfg(todo = "unnecessary")]
@@ -31,9 +33,7 @@ impl<'a, T: ?Sized> ArcLazyMut<'a, T> {
     }
     pub fn with_mut(arc: &'a mut Arc<T>) -> Option<Self> {
         let is_mut = Arc::get_mut(arc).is_some();
-        is_mut.then(move || unsafe {
-            Self::with_mut_unchecked(arc)
-        })
+        is_mut.then(move || unsafe { Self::with_mut_unchecked(arc) })
     }
     #[inline]
     pub fn arc_ptr(&self) -> NonNull<Arc<T>> {
@@ -41,11 +41,7 @@ impl<'a, T: ?Sized> ArcLazyMut<'a, T> {
     }
     #[inline]
     pub fn get_ptr(&self) -> NonNull<T> {
-        unsafe {
-            NonNull::new_unchecked(
-                Arc::as_ptr(&*self.arc.as_ptr()) as *mut T
-            )
-        }
+        unsafe { NonNull::new_unchecked(Arc::as_ptr(&*self.arc.as_ptr()) as *mut T) }
     }
     #[cfg(todo = "unnecessary")]
     pub fn get_ptr(&self) -> NonNull<T> {
@@ -57,13 +53,12 @@ impl<'a, T: ?Sized> ArcLazyMut<'a, T> {
             }
         }
     }
-    pub fn make_mut(&mut self) -> &mut T where
+    pub fn make_mut(&mut self) -> &mut T
+    where
         T: Clone,
     {
         match self.owned {
-            ArcLazyMutState::Mut => unsafe {
-                self.get_mut_unchecked()
-            },
+            ArcLazyMutState::Mut => unsafe { self.get_mut_unchecked() },
             owned @ ArcLazyMutState::Arc => unsafe {
                 let arc = &mut *self.arc.as_ptr();
                 let inner = Arc::make_mut(arc);
@@ -73,19 +68,13 @@ impl<'a, T: ?Sized> ArcLazyMut<'a, T> {
         }
     }
     pub fn get_ref(&self) -> &T {
-        unsafe {
-            mem::transmute(self.get_ptr())
-        }
+        unsafe { mem::transmute(self.get_ptr()) }
     }
     pub fn get_mut(&mut self) -> Option<&mut T> {
         match self.owned {
-            ArcLazyMutState::Mut => Some(unsafe {
-                self.get_mut_unchecked()
-            }),
+            ArcLazyMutState::Mut => Some(unsafe { self.get_mut_unchecked() }),
             ArcLazyMutState::Arc => {
-                let inner = unsafe {
-                    Arc::get_mut(&mut *self.arc.as_ptr())
-                };
+                let inner = unsafe { Arc::get_mut(&mut *self.arc.as_ptr()) };
                 self.owned = ArcLazyMutState::Mut;
                 inner
             },
@@ -130,15 +119,11 @@ impl<T: ?Sized> ArcMut<T> {
     }
     #[inline]
     pub const fn from_ref(arc: &Arc<T>) -> &Self {
-        unsafe {
-            mem::transmute(arc)
-        }
+        unsafe { mem::transmute(arc) }
     }
     #[inline]
     pub fn from_mut(arc: &mut Arc<T>) -> &mut Self {
-        unsafe {
-            mem::transmute(arc)
-        }
+        unsafe { mem::transmute(arc) }
     }
     #[inline]
     pub fn into_inner(self) -> Arc<T> {
@@ -157,7 +142,8 @@ impl<T: ?Sized> ArcMut<T> {
         &*self.arc
     }
     #[inline]
-    pub fn make_mut(&mut self) -> &mut T where
+    pub fn make_mut(&mut self) -> &mut T
+    where
         T: Clone,
     {
         Arc::make_mut(&mut self.arc)
@@ -190,37 +176,28 @@ pub struct ArcMutRef<'a, T: ?Sized> {
 impl<'a, T: ?Sized> ArcMutRef<'a, T> {
     #[inline]
     pub fn new(arc: &'a mut Arc<T>) -> Self {
-        Self {
-            owned: ArcLazyMutState::Arc,
-            arc,
-        }
+        Self { owned: ArcLazyMutState::Arc, arc }
     }
     pub unsafe fn with_mut_unchecked(arc: &'a mut Arc<T>) -> Self {
-        Self {
-            owned: ArcLazyMutState::Mut,
-            arc,
-        }
+        Self { owned: ArcLazyMutState::Mut, arc }
     }
     pub fn with_mut(arc: &'a mut Arc<T>) -> Option<Self> {
         let is_mut = Arc::get_mut(arc).is_some();
-        is_mut.then(move || unsafe {
-            Self::with_mut_unchecked(arc)
-        })
+        is_mut.then(move || unsafe { Self::with_mut_unchecked(arc) })
     }
     #[inline]
-    pub fn by_ref<'b>(&'b mut self) -> ArcMutRef<'b, T> where
+    pub fn by_ref<'b>(&'b mut self) -> ArcMutRef<'b, T>
+    where
         'a: 'b,
     {
-        ArcMutRef {
-            owned: self.owned,
-            arc: &mut *self.arc,
-        }
+        ArcMutRef { owned: self.owned, arc: &mut *self.arc }
     }
-    pub fn make_mut(&mut self) -> &mut T where T: ArcMakeMut {
+    pub fn make_mut(&mut self) -> &mut T
+    where
+        T: ArcMakeMut,
+    {
         match self.owned {
-            ArcLazyMutState::Mut => unsafe {
-                self.get_mut_unchecked()
-            },
+            ArcLazyMutState::Mut => unsafe { self.get_mut_unchecked() },
             ArcLazyMutState::Arc => {
                 let inner = ArcMakeMut::arc_make_mut(&mut self.arc);
                 self.owned = ArcLazyMutState::Mut;
@@ -230,17 +207,11 @@ impl<'a, T: ?Sized> ArcMutRef<'a, T> {
     }
     #[inline]
     pub fn arc_ptr(&self) -> NonNull<Arc<T>> {
-        unsafe {
-            NonNull::new_unchecked(&*self.arc as *const Arc<T> as *mut Arc<T>)
-        }
+        unsafe { NonNull::new_unchecked(&*self.arc as *const Arc<T> as *mut Arc<T>) }
     }
     #[inline]
     pub fn get_ptr(&self) -> NonNull<T> {
-        unsafe {
-            NonNull::new_unchecked(
-                Arc::as_ptr(&self.arc) as *mut T
-            )
-        }
+        unsafe { NonNull::new_unchecked(Arc::as_ptr(&self.arc) as *mut T) }
     }
     #[inline]
     pub fn get_ref(&self) -> &T {
@@ -248,9 +219,7 @@ impl<'a, T: ?Sized> ArcMutRef<'a, T> {
     }
     pub fn get_mut(&mut self) -> Option<&mut T> {
         match self.owned {
-            ArcLazyMutState::Mut => Some(unsafe {
-                self.get_mut_unchecked()
-            }),
+            ArcLazyMutState::Mut => Some(unsafe { self.get_mut_unchecked() }),
             ArcLazyMutState::Arc => {
                 let inner = Arc::get_mut(&mut self.arc);
                 self.owned = ArcLazyMutState::Mut;
@@ -290,7 +259,8 @@ impl<'a, T: ?Sized> From<&'a mut Arc<T>> for ArcMutRef<'a, T> {
         Self::new(arc)
     }
 }
-impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for ArcMutRef<'a, T> where
+impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for ArcMutRef<'a, T>
+where
     Arc<T>: Borrow<U>,
 {
     #[inline]
@@ -298,7 +268,8 @@ impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for ArcMutRef<'a, T> where
         Borrow::borrow(&*self.arc)
     }
 }
-impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ ArcMutRef<'a, T> where
+impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ ArcMutRef<'a, T>
+where
     Arc<T>: Borrow<U>,
 {
     #[inline]
@@ -306,7 +277,8 @@ impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ ArcMutRef<'a, T> where
         Borrow::borrow(&*self.arc)
     }
 }
-impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ mut ArcMutRef<'a, T> where
+impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ mut ArcMutRef<'a, T>
+where
     Arc<T>: Borrow<U>,
 {
     #[inline]
@@ -315,7 +287,8 @@ impl<'a, T: ?Sized, U: ?Sized> Borrow<U> for &'_ mut ArcMutRef<'a, T> where
     }
 }
 #[cfg(todo)]
-impl<'a, T: ArcMakeMut, U: ?Sized> BorrowMut<U> for ArcMutRef<'a, T> where
+impl<'a, T: ArcMakeMut, U: ?Sized> BorrowMut<U> for ArcMutRef<'a, T>
+where
     T: AsMut<U>,
 {
     #[inline]
@@ -335,7 +308,8 @@ impl<'a, T: ?Sized + ArcMakeMut> BorrowMut<T> for &'_ mut ArcMutRef<'a, T> {
         self.make_mut()
     }
 }
-impl<'a, T: ?Sized, U: ?Sized> AsRef<U> for ArcMutRef<'a, T> where
+impl<'a, T: ?Sized, U: ?Sized> AsRef<U> for ArcMutRef<'a, T>
+where
     Arc<T>: AsRef<U>,
 {
     #[inline]
@@ -343,7 +317,8 @@ impl<'a, T: ?Sized, U: ?Sized> AsRef<U> for ArcMutRef<'a, T> where
         AsRef::as_ref(&*self.arc)
     }
 }
-impl<'a, T: ?Sized + ArcMakeMut, U: ?Sized> AsMut<U> for ArcMutRef<'a, T> where
+impl<'a, T: ?Sized + ArcMakeMut, U: ?Sized> AsMut<U> for ArcMutRef<'a, T>
+where
     T: AsMut<U>,
 {
     #[inline]
@@ -376,5 +351,4 @@ impl<T: Clone> ArcMakeMut for [T] {
     }
 }
 #[cfg(todo)]
-impl<T: CloneToUninit> ArcMakeMut for T {
-}
+impl<T: CloneToUninit> ArcMakeMut for T {}

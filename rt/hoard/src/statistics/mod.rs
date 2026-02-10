@@ -1,9 +1,7 @@
 //! "performance" counters
 
-use core::marker::PhantomData;
-use num_traits::AsPrimitive;
-
 pub use {self::counter::Counter, core::sync::atomic::Ordering};
+use {core::marker::PhantomData, num_traits::AsPrimitive};
 
 pub mod allocator;
 mod counter;
@@ -24,25 +22,29 @@ impl Dummy {
     }
 
     #[inline(always)]
-    pub fn increment_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, _f: F) -> A where
+    pub fn increment_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, _f: F) -> A
+    where
         usize: AsPrimitive<A>,
     {
         0.as_()
     }
     #[inline(always)]
-    pub fn decrement_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, _f: F) -> A where
+    pub fn decrement_by<A: AsPrimitive<usize>, F: FnOnce() -> A>(&self, _f: F) -> A
+    where
         usize: AsPrimitive<A>,
     {
         0.as_()
     }
     #[inline(always)]
-    pub fn adjust_by<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, _f: F) -> A where
+    pub fn adjust_by<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, _f: F) -> A
+    where
         isize: AsPrimitive<A>,
     {
         0.as_()
     }
     #[inline(always)]
-    pub fn reset_with<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, _f: F) -> A where
+    pub fn reset_with<A: AsPrimitive<isize>, F: FnOnce() -> A>(&self, _f: F) -> A
+    where
         isize: AsPrimitive<A>,
     {
         0.as_()

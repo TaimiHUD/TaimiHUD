@@ -5,8 +5,8 @@ use {
             prelude::*,
         },
         state::D3dStateSnapshot,
-        D3dContextBindableSlot,
         D3dContextBindable,
+        D3dContextBindableSlot,
     },
     std::{mem, slice},
 };
@@ -70,7 +70,8 @@ impl ConstantBufferV {
         Buffer::desc_for::<D, _, _>(len, BindFlags::CONSTANT, flags)
     }
 
-    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V) where
+    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V)
+    where
         V: AsMut<[Option<Self>]>,
     {
         let out = out.as_mut();
@@ -156,7 +157,8 @@ impl ConstantBufferP {
         ConstantBufferV::desc_for::<D>(len, flags)
     }
 
-    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V) where
+    pub fn new_snapshot_in<'v, V: ?Sized>(context: &Dx11Context, slot: u32, out: &'v mut V)
+    where
         V: AsMut<[Option<Self>]>,
     {
         let out = out.as_mut();

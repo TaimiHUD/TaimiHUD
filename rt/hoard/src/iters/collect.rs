@@ -10,14 +10,16 @@ impl<T> FlatCollect<T> {
         inner
     }
 
-    pub fn flatten_into<I>(dest: &mut T, iter: I) where
+    pub fn flatten_into<I>(dest: &mut T, iter: I)
+    where
         I: IntoIterator,
         I::Item: IntoIterator,
         T: Extend<<I::Item as IntoIterator>::Item>,
     {
         dest.extend(iter.into_iter().flatten())
     }
-    pub fn collect_from<I>(iter: I) -> T where
+    pub fn collect_from<I>(iter: I) -> T
+    where
         I: IntoIterator,
         I::Item: IntoIterator,
         T: Default + Extend<<I::Item as IntoIterator>::Item>,
@@ -27,7 +29,8 @@ impl<T> FlatCollect<T> {
         dest
     }
 }
-impl<T, E> Extend<E> for FlatCollect<T> where
+impl<T, E> Extend<E> for FlatCollect<T>
+where
     E: IntoIterator,
     T: Extend<E::Item>,
 {
@@ -36,7 +39,8 @@ impl<T, E> Extend<E> for FlatCollect<T> where
         Self::flatten_into(&mut self.0, iter)
     }
 }
-impl<T, E> FromIterator<E> for FlatCollect<T> where
+impl<T, E> FromIterator<E> for FlatCollect<T>
+where
     E: IntoIterator,
     T: FromIterator<E::Item>,
 {

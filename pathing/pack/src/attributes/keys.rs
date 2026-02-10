@@ -6,10 +6,10 @@ use {
     std::{
         borrow::{Borrow, Cow},
         convert::Infallible,
-        num::NonZero,
         fmt,
         io,
         mem,
+        num::NonZero,
         ops,
         slice,
         str::FromStr,
@@ -461,18 +461,14 @@ impl Specializations {
     #[inline]
     pub fn from_attrlist(v: &AttrList<i32>) -> &Self {
         let list: &Box<[i32]> = &**v;
-        unsafe {
-            mem::transmute(list)
-        }
+        unsafe { mem::transmute(list) }
     }
 }
 impl MapTypes {
     #[inline]
     pub fn from_attrlist(v: &AttrList<super::MapType>) -> &Self {
         let list: &Box<[super::MapType]> = &**v;
-        unsafe {
-            mem::transmute(list)
-        }
+        unsafe { mem::transmute(list) }
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -482,9 +478,7 @@ pub struct Raid(pub String);
 impl Raid {
     #[inline]
     pub fn from_ref(v: &String) -> &Self {
-        unsafe {
-            mem::transmute(v)
-        }
+        unsafe { mem::transmute(v) }
     }
 }
 impl FromStr for Raid {
@@ -541,9 +535,7 @@ impl Raids {
     #[inline]
     pub fn from_attrlist(v: &AttrList<String>) -> &Self {
         let list: &Box<[String]> = &**v;
-        unsafe {
-            mem::transmute(list)
-        }
+        unsafe { mem::transmute(list) }
     }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

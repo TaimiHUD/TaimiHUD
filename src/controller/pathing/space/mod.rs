@@ -11,7 +11,14 @@ use {
                     SharedPackInfo,
                     TrailGeometrySections,
                 },
-                state::{LoadedMapPack, LoadedMapInfo, LoadedMaps, LoadedTrail, LoadedTrailGeometry, LoadedTrailSection},
+                state::{
+                    LoadedMapInfo,
+                    LoadedMapPack,
+                    LoadedMaps,
+                    LoadedTrail,
+                    LoadedTrailGeometry,
+                    LoadedTrailSection,
+                },
                 PathingController,
                 PathingEvent,
             },
@@ -25,17 +32,17 @@ use {
     },
     anyhow::{anyhow, Context},
     futures::future::{Either, Future},
+    glam::Vec3,
     std::{
         collections::{btree_map, BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
     },
-    glam::Vec3,
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},
+        MapIndex,
         PackMapPath,
         PackPath,
-        MapIndex,
     },
     taimi_pack::{
         attributes::AttrString,
@@ -127,7 +134,12 @@ impl SpaceContext {
         }
     }
 
-    pub(super) fn collect_garbage(&mut self, (map_info, maps): (&LoadedMapInfo, &LoadedMaps), map_id: Option<MapIndex>, _aggressive: bool) {
+    pub(super) fn collect_garbage(
+        &mut self,
+        (map_info, maps): (&LoadedMapInfo, &LoadedMaps),
+        map_id: Option<MapIndex>,
+        _aggressive: bool,
+    ) {
         let packs_map_id = self.packs.map_id;
         let map_dirty = packs_map_id != map_id;
 
@@ -148,8 +160,7 @@ impl SpaceContext {
                         // XXX: may not be necessary if rx is dirty immediately after anyway...
                         packs.invalidate_entities(&mut expired.into_iter())
                     },
-                    None =>
-                        packs.clear(),
+                    None => packs.clear(),
                 }
             }
         }
@@ -359,7 +370,12 @@ impl PathingController {
         let y_offset = params.y_offset_for(y_sig);
         Controller::try_run_blocking("calculating vertices", move || {
             Ok(LoadedTrail::vertices_with_data(
-                &trl, &params, scale, is_wall, y_offset, colour.into(),
+                &trl,
+                &params,
+                scale,
+                is_wall,
+                y_offset,
+                colour.into(),
             ))
         })
     }
@@ -585,7 +601,11 @@ impl PathingController {
             Self::space_publish_packs(&self.loader, packs, None);
         }
     }
-    fn space_publish_packs(loader: &PackLoader, packs: Option<&Arc<SpacePackCollection>>, notify: Option<bool>) -> bool {
+    fn space_publish_packs(
+        loader: &PackLoader,
+        packs: Option<&Arc<SpacePackCollection>>,
+        notify: Option<bool>,
+    ) -> bool {
         let new_copy = packs.cloned();
         let mut dirty = false;
         loader.shared.space.collection.send_if_modified(|shared| {

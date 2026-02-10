@@ -1,7 +1,7 @@
 pub use self::{collect::FlatCollect, macros::impl_iter_wrap, mapfn::LazyMapFn};
 
-mod macros;
 mod collect;
+mod macros;
 mod mapfn;
 pub mod tree;
 
@@ -12,13 +12,15 @@ pub trait IterExt: Sized + Iterator {
         LazyMapFn::new(map, self)
     }
     #[inline]
-    fn lazy_clone<'a, I: 'a>(self) -> LazyMapFn<Self, impl Fn(&'a I) -> I> where
+    fn lazy_clone<'a, I: 'a>(self) -> LazyMapFn<Self, impl Fn(&'a I) -> I>
+    where
         Self: Iterator<Item = &'a I>,
         I: Clone,
     {
         self.lazy_map(I::clone)
     }
-    fn unzip_flatten<FromA, FromB, A, B>(self) -> (FromA, FromB) where
+    fn unzip_flatten<FromA, FromB, A, B>(self) -> (FromA, FromB)
+    where
         Self: Iterator<Item = (A, B)>,
         A: IntoIterator,
         B: IntoIterator,
@@ -28,7 +30,8 @@ pub trait IterExt: Sized + Iterator {
         let (FlatCollect(a), FlatCollect(b)) = self.unzip();
         (a, b)
     }
-    fn unzip3_flatten<FromA, FromB, FromC, A, B, C>(self) -> (FromA, FromB, FromC) where
+    fn unzip3_flatten<FromA, FromB, FromC, A, B, C>(self) -> (FromA, FromB, FromC)
+    where
         Self: Iterator<Item = (A, B, C)>,
         A: IntoIterator,
         B: IntoIterator,
@@ -40,7 +43,8 @@ pub trait IterExt: Sized + Iterator {
         let (FlatCollect(a), FlatCollect(b), FlatCollect(c)) = self.collect();
         (a, b, c)
     }
-    fn unzip4_flatten<FromA, FromB, FromC, FromD, A, B, C, D>(self) -> (FromA, FromB, FromC, FromD) where
+    fn unzip4_flatten<FromA, FromB, FromC, FromD, A, B, C, D>(self) -> (FromA, FromB, FromC, FromD)
+    where
         Self: Iterator<Item = (A, B, C, D)>,
         A: IntoIterator,
         B: IntoIterator,

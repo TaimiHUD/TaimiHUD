@@ -254,13 +254,17 @@ fn apply_built_info() {
         if version.pre.is_empty() {
             println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=z");
         } else {
-            let (mut major, mut minor, mut build, mut rev) = (version.major as i16, version.minor as i16, version.patch as i16, 0i16);
+            let (mut major, mut minor, mut build, mut rev) = (
+                version.major as i16,
+                version.minor as i16,
+                version.patch as i16,
+                0i16,
+            );
             if let Some(rc) = version.pre.strip_prefix("rc.") {
                 println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
                 if env::var_os(FEATURE_NEXUS).is_some() {
                     match version.minor.checked_sub(1) {
-                        Some(m) =>
-                            minor = m as i16,
+                        Some(m) => minor = m as i16,
                         None => {
                             major -= 1;
                             minor = 99;
@@ -271,8 +275,7 @@ fn apply_built_info() {
                     build = 900i16 + pre_rc as i16;
                 }
             } else {
-                let prerev = version.pre.split(".").nth(1)
-                    .map(str::parse::<u64>);
+                let prerev = version.pre.split(".").nth(1).map(str::parse::<u64>);
                 if let Some(Ok(pre)) = prerev {
                     // TODO
                     rev = -0x6c00i16 + pre as i16;

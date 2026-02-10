@@ -1,3 +1,8 @@
+#[cfg(feature = "paths-filter")]
+use {
+    crate::controller::{pathing::shared::HiddenGuids, runtime::WallInstant},
+    taimi_hoard::time::Timestamp,
+};
 use {
     crate::{
         controller::pathing::{
@@ -10,21 +15,18 @@ use {
             PathingReceiver,
         },
         exports::runtime::{self as rt, textures::TextureKey},
+        render::machine::{RenderMachine, RenderTaskPriority},
         settings::{Settings, SourceKind},
-        render::machine::{RenderTaskPriority, RenderMachine},
         TEXTURES,
     },
     anyhow::{anyhow, Context},
     futures::stream::{self, Stream, StreamExt},
     rustc_hash::FxHashMap,
-    std::{
-        collections::BTreeSet,
-        future::Future,
-        iter,
-        path::Path,
-        sync::Arc,
+    std::{collections::BTreeSet, future::Future, iter, path::Path, sync::Arc},
+    taimi_hoard::{
+        collections::TaimiSet,
+        loc::{LocationMut, LocationRef, Locator},
     },
-    taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::{
         packs::{collections::PackSet, MapIndex, PackMapPath, PackPath},
         ui::GameplayState,
@@ -36,15 +38,6 @@ use {
         task::JoinSet,
         time::{timeout, Duration},
     },
-    taimi_hoard::collections::TaimiSet,
-};
-#[cfg(feature = "paths-filter")]
-use {
-    crate::controller::{
-        pathing::shared::HiddenGuids,
-        runtime::WallInstant,
-    },
-    taimi_hoard::time::Timestamp,
 };
 #[cfg(feature = "paths-filter")]
 type HiddenCtx<'a> = Option<(&'a HiddenGuids, Timestamp)>;
@@ -140,7 +133,10 @@ impl PathingController {
         let packs = &mut self.packs;
         let map_info = &mut self.map_info;
         let reason = &reason;
-        let release = !matches!(reason, None | Some(UnloadedReason::Pending) | Some(UnloadedReason::Loading));
+        let release = !matches!(
+            reason,
+            None | Some(UnloadedReason::Pending) | Some(UnloadedReason::Loading)
+        );
         let updates = paths.iter().map(move |path| {
             if let Some(pack) = packs.lookup_mut(&path) {
                 // TODO: check if sane to do so?
@@ -161,9 +157,7 @@ impl PathingController {
         self.maps.prune(Some(&self.map_info));
     }
     pub(super) fn pack_unload_unused(&mut self) -> PackSet {
-        let unused_packs = self.packs.expired_packs()
-            .map(|(p, _)| p)
-            .collect::<PackSet>();
+        let unused_packs = self.packs.expired_packs().map(|(p, _)| p).collect::<PackSet>();
         self.pack_unload(None, &mut unused_packs.iter());
         unused_packs
     }
@@ -362,9 +356,9 @@ impl PathingController {
         #[cfg(feature = "paths-filter")]
         let hidden_guids = Self::clone_hidden_guids();
         #[cfg(feature = "paths-filter")]
-        let hidden_ctx = hidden_guids.as_ref().map(|h|
-            (&**h, WallInstant::now_timestamp_mono())
-        );
+        let hidden_ctx = hidden_guids
+            .as_ref()
+            .map(|h| (&**h, WallInstant::now_timestamp_mono()));
         #[cfg(not(feature = "paths-filter"))]
         let hidden_ctx = None;
         let mut shared_map_dirty = self.loader.shared.update_map_id(Some(map_id), false);
@@ -374,11 +368,11 @@ impl PathingController {
                 Ok(dirty) => dirty,
                 Err(()) => match self.packs.lookup_ref(&path) {
                     _ if !self.rx.is_katrender_enabled() =>
-                        // would check is_online but could still be starting up?
+                    // would check is_online but could still be starting up?
                         continue,
                     Some(LoadedPackInfo { unloaded: Some(reason), .. })
                         if !reason.can_reactivate(false) =>
-                            continue,
+                        continue,
                     Some(LoadedPackInfo { unloaded: None | Some(..), .. }) => {
                         need_load.insert(path);
                         continue
@@ -405,7 +399,8 @@ impl PathingController {
         self.request_pack_loads(need_load);
         #[cfg(feature = "paths-interact")]
         {
-            self.interact.handle_map_enter(&mut self.rx, &self.maps, &self.map_info, map_id);
+            self.interact
+                .handle_map_enter(&mut self.rx, &self.maps, &self.map_info, map_id);
         }
     }
     pub(super) fn prepare_for_pack_map(
@@ -457,16 +452,31 @@ impl PathingController {
             match Self::init_map_for_pack(map_path, info, data, map, map_info) {
                 Ok(dirty) => {
                     #[cfg(feature = "paths-filter")]
-                    let vis_dirty = hidden_guids.as_ref().map(|guids|
-                        Self::populate_hidden_guids_for_map(&mut self.filter_state, guids, map, map_info, now)
-                    );
+                    let vis_dirty = hidden_guids.as_ref().map(|guids| {
+                        Self::populate_hidden_guids_for_map(
+                            &mut self.filter_state,
+                            guids,
+                            map,
+                            map_info,
+                            now,
+                        )
+                    });
                     #[cfg(not(feature = "paths-filter"))]
                     let vis_dirty = None;
-                    Self::continue_map_for_pack(&self.rx, &self.filter_state, map_path, info, map, map_info, (dirty, vis_dirty))
-                        .map(|dirty| dirty | vis_dirty.unwrap_or(false))
+                    Self::continue_map_for_pack(
+                        &self.rx,
+                        &self.filter_state,
+                        map_path,
+                        info,
+                        map,
+                        map_info,
+                        (dirty, vis_dirty),
+                    )
+                    .map(|dirty| dirty | vis_dirty.unwrap_or(false))
                 },
                 d => d,
-            }.map(move |dirty| (dirty, map, map_info))
+            }
+            .map(move |dirty| (dirty, map, map_info))
         } else {
             Err(())
         }?;
@@ -546,12 +556,7 @@ impl PathingController {
             }
         };
         if vis_dirty {
-            dirty |= Self::update_loaded_visibility_inner(
-                map_path,
-                map,
-                &*map_info,
-                Some(filter_state),
-            );
+            dirty |= Self::update_loaded_visibility_inner(map_path, map, &*map_info, Some(filter_state));
         }
 
         Ok(dirty)
@@ -775,10 +780,12 @@ impl PathingController {
         }
     }
     pub(super) fn debug_req_resource_report(&self, path: Option<PackPath>) {
-        use core::fmt::Write;
-        use taimi_hoard::lazyfmt;
-        use crate::exports::runtime::textures::TextureSlot;
-        use windows::core::{Interface, IUnknown};
+        use {
+            crate::exports::runtime::textures::TextureSlot,
+            core::fmt::Write,
+            taimi_hoard::lazyfmt,
+            windows::core::{IUnknown, Interface},
+        };
 
         let pack = path.map(|path| self.packs.lookup_ref(&path));
         let rest = pack.is_none().then_some(self.packs.packs.values());
@@ -795,12 +802,22 @@ impl PathingController {
                 let cats = &info.categories;
                 let _ = writeln!(report, "\t{cats:?}");
                 for root in &info.roots {
-                    let _ = writeln!(report, "\t\t{} {} ({}): children={} {:?}", root.path(), lazyfmt::or_empty(root.display_name.as_ref()), root.id, root.direct_child_count, root.flags);
+                    let _ = writeln!(
+                        report,
+                        "\t\t{} {} ({}): children={} {:?}",
+                        root.path(),
+                        lazyfmt::or_empty(root.display_name.as_ref()),
+                        root.id,
+                        root.direct_child_count,
+                        root.flags
+                    );
                 }
             } else {
                 let _ = writeln!(report, " nope");
             }
-            let map_info = self.map_info.iter(None)
+            let map_info = self
+                .map_info
+                .iter(None)
                 .filter(|(p, _)| p.root == pack.info.index);
             for (map_path, map_info) in map_info {
                 let map = self.maps.lookup_ref(&map_path);
@@ -808,9 +825,15 @@ impl PathingController {
                     Some(..) => "loaded",
                     None => "cached",
                 };
-                let _ = writeln!(report, "\tmap#{} {status}{}; {} pois, ({}/{}) trails, {} cats age={}",
+                let _ = writeln!(
+                    report,
+                    "\tmap#{} {status}{}; {} pois, ({}/{}) trails, {} cats age={}",
                     map_path.path,
-                    lazyfmt::or_empty(map.map(|map| lazyfmt::MaybeFmt::new(|f| write!(f, "(age={})", map.used.generation)))),
+                    lazyfmt::or_empty(map.map(|map| lazyfmt::MaybeFmt::new(|f| write!(
+                        f,
+                        "(age={})",
+                        map.used.generation
+                    )))),
                     map_info.poi_count(),
                     map_info.trail_info.len(),
                     map_info.trail_count(),
@@ -818,12 +841,14 @@ impl PathingController {
                     map_info.used.generation,
                 );
                 if let Some(map) = map {
-                    let _ = writeln!(report, "\t\t{} pois(guid={}), {} trails(guid={}), {} cats",
-                    map.pois.len(),
-                    map.poi_guids.len(),
-                    map.trails.len(),
-                    map.trail_guids.len(),
-                    map.categories.len(),
+                    let _ = writeln!(
+                        report,
+                        "\t\t{} pois(guid={}), {} trails(guid={}), {} cats",
+                        map.pois.len(),
+                        map.poi_guids.len(),
+                        map.trails.len(),
+                        map.trail_guids.len(),
+                        map.categories.len(),
                     );
                 }
             }
@@ -861,12 +886,12 @@ impl PathingController {
                                 "nexus"
                             },
                         };
-                        icount = iunk.map(|iunk| {
-                            let rel = iunk.vtable().Release;
-                            unsafe {
-                                rel(iunk.into_raw())
-                            }
-                        }).unwrap_or(0);
+                        icount = iunk
+                            .map(|iunk| {
+                                let rel = iunk.vtable().Release;
+                                unsafe { rel(iunk.into_raw()) }
+                            })
+                            .unwrap_or(0);
                         status
                     });
                     match status {
@@ -919,9 +944,13 @@ impl PackLoader {
     /// XXX: way too deep into a non-async call stack, but blocking locks would make tokio panic...
     fn cleanup_pack_subresources_of(&self, cleanup: bool, keys: BTreeSet<TextureKey>) {
         tokio::task::spawn(async move {
-            RenderMachine::schedule_task_async(Box::new(move |_state| {
-                Self::cleanup_pack_subresources_of_dyn(cleanup, &keys);
-            }), RenderTaskPriority::Normal).await;
+            RenderMachine::schedule_task_async(
+                Box::new(move |_state| {
+                    Self::cleanup_pack_subresources_of_dyn(cleanup, &keys);
+                }),
+                RenderTaskPriority::Normal,
+            )
+            .await;
         });
     }
     fn cleanup_pack_subresources_of_dyn(cleanup: bool, keys: &dyn TaimiSet<TextureKey>) {
@@ -952,7 +981,9 @@ impl PackLoader {
                 dirty |= shared_state.update_with_loaded(map);
                 #[cfg(feature = "paths-interact")]
                 if let Some(filter_state) = filter_state {
-                    dirty |= shared_state.update_with_hidden(path, &filter_state.hidden, map).unwrap_or(false);
+                    dirty |= shared_state
+                        .update_with_hidden(path, &filter_state.hidden, map)
+                        .unwrap_or(false);
                 }
             }
             notify && dirty
@@ -1066,6 +1097,5 @@ impl PathingController {
         self.request_pack_loads(path.into());
     }
     /// TODO
-    pub fn process_pack_unlock(&mut self, path: PackPath) {
-    }
+    pub fn process_pack_unlock(&mut self, path: PackPath) {}
 }

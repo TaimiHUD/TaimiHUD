@@ -5,13 +5,13 @@ use {
                 registry::{PackInfoSignature, PackVecOf, UnloadedReason},
                 shared::{
                     PathingShared,
+                    SharedGameplayMap,
                     SharedLoaderPacksInfo,
+                    SharedMapPackLoaded,
                     SharedPackConfig,
                     SharedPackInfo,
                     SharedPackLoad,
                     SharedPackLoaded,
-                    SharedMapPackLoaded,
-                    SharedGameplayMap,
                 },
                 PathingController,
                 PathingEvent,
@@ -29,7 +29,7 @@ use {
         sync::{Arc, Weak},
     },
     taimi_hoard::{loc::LocationMut, str_opt, str_opt_ref},
-    taimi_meta::packs::{CategoryIndex, CategoryPath, PackIndex, PackPath, MapIndex},
+    taimi_meta::packs::{CategoryIndex, CategoryPath, MapIndex, PackIndex, PackPath},
     taimi_pack::{
         attributes::{self, AttrString, MarkerAttributes},
         Pack,
@@ -41,39 +41,45 @@ use {
 };
 
 #[allow(unused_imports)]
+#[cfg(feature = "paths-edit")]
+pub use self::dynamic::{DrawPe, PackData, PackEdit, PackEditEnv};
+#[allow(unused_imports)]
+#[cfg(feature = "paths-interact")]
+pub use self::interact::{ActDrawInteract, DrawPoiInfo, PoiInfo, PoiInfoContext};
+#[allow(unused_imports)]
 pub use self::{
     categories::{
         CategoryAction,
         CategoryActionSlot,
         CategoryCollectionState,
+        CategoryEnableFilterState,
+        CategoryFilterQuery,
         CategoryInfo,
+        CategorySearchFilter,
+        CategorySearchQuery,
         DrawCategoryCollection,
         DrawCategoryCollectionTree,
         DrawCategoryHeader,
         DrawCategoryTooltip,
         DrawPackUnloaded,
-        CategorySearchFilter,
-        CategoryEnableFilterState,
         PackCategoryMaskState,
-        CategorySearchQuery,
-        CategoryFilterQuery,
     },
-    menu::{DrawCategoryCollectionMenu, DrawCategoryContextMenu, DrawCategoryMenu, DrawPackContextMenu, DrawPackAdvancedMenu},
+    menu::{
+        DrawCategoryCollectionMenu,
+        DrawCategoryContextMenu,
+        DrawCategoryMenu,
+        DrawPackAdvancedMenu,
+        DrawPackContextMenu,
+    },
     toggles::{DecorateCategoryHeader, DrawCategoryToggle, DrawPackRoots},
 };
-#[allow(unused_imports)]
-#[cfg(feature = "paths-interact")]
-pub use self::interact::{ActDrawInteract, PoiInfo, DrawPoiInfo, PoiInfoContext};
-#[allow(unused_imports)]
-#[cfg(feature = "paths-edit")]
-pub use self::dynamic::{PackEdit, PackEditEnv, DrawPe, PackData};
 
 mod categories;
 #[cfg(feature = "paths-edit")]
 mod dynamic;
-mod menu;
 #[cfg(feature = "paths-interact")]
 mod interact;
+mod menu;
 mod toggles;
 
 #[derive(Debug, Default)]
@@ -179,7 +185,13 @@ impl PackElements {
         }
     }
     /// TODO: binary heap with real sort key
-    fn iter_packs_draw<'a, 'u, 'ui>(ui: &'u Ui<'ui>, pack_state: &'a mut PackVecOf<PackElement>, filtered: Option<bool>, amt_hidden: &'a mut usize) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui where
+    fn iter_packs_draw<'a, 'u, 'ui>(
+        ui: &'u Ui<'ui>,
+        pack_state: &'a mut PackVecOf<PackElement>,
+        filtered: Option<bool>,
+        amt_hidden: &'a mut usize,
+    ) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui
+    where
         'u: 'ui,
         'a: 'u,
     {
@@ -194,14 +206,17 @@ impl PackElements {
                 let delay = match &pack.state.unloaded {
                     Some(UnloadedReason::Gravestone) => continue,
                     _ if filtered.is_some() && pack.categories.filter_state.all_filtered() => true,
-                    Some(UnloadedReason::Disabled | UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)) => true,
+                    Some(
+                        UnloadedReason::Disabled
+                        | UnloadedReason::UnknownFormat
+                        | UnloadedReason::LoadingFailed(..),
+                    ) => true,
                     _ => false,
                 };
                 match delay {
                     true if filtered.is_some() && pack.categories.filter_state.any_visible() =>
                         delayed.push(pack),
-                    true =>
-                        unloaded.push(pack),
+                    true => unloaded.push(pack),
                     false => {
                         next = Some(pack);
                         sep = Some(false);
@@ -218,7 +233,8 @@ impl PackElements {
                     delayed_sep = true;
                 }
                 delayed
-            }).or_else(|| {
+            })
+            .or_else(|| {
                 let matching = matches!(filtered, Some(true));
                 match sep {
                     _ if unloaded.is_empty() => (),
@@ -256,7 +272,14 @@ impl PackElements {
                 Some((path, _)) if path == pack.state.pack_path() => (),
                 _ => pack.context_menu = None,
             }
-            any_packs |= !matches!(pack.state.unloaded, Some(UnloadedReason::Gravestone | UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)));
+            any_packs |= !matches!(
+                pack.state.unloaded,
+                Some(
+                    UnloadedReason::Gravestone
+                        | UnloadedReason::UnknownFormat
+                        | UnloadedReason::LoadingFailed(..)
+                )
+            );
             pack.draw(ui);
             if let Some(cat_path) = pack.context_menu {
                 let new_menu = (pack.state.pack_path(), cat_path);
@@ -284,7 +307,8 @@ impl PackElements {
             ui.table_next_column();
         } else if !any_packs {
             with_i18n!("packs-empty", |msg| ui.text_with_font(NexusLinkFont::Big, msg));
-            with_i18n!("packs-empty-notice", |notice| ui.wrap_text_with_font(NexusLinkFont::Ui, notice));
+            with_i18n!("packs-empty-notice", |notice| ui
+                .wrap_text_with_font(NexusLinkFont::Ui, notice));
         }
 
         let (mut menu_pack, menu_cat) = match self.context_menu {

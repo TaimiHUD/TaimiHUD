@@ -1,21 +1,37 @@
-use std::{collections::BTreeSet, mem, num::NonZero, hash::Hash, sync::{Arc, LazyLock}};
-use std::marker::PhantomData;
-use crate::{
-    controller::pathing::registry::PackInfoSignature,
-    controller::api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
-    render::machine::MumbleIdentityUpdate,
-    exports::runtime as rt,
+use {
+    crate::{
+        controller::{
+            api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
+            pathing::registry::PackInfoSignature,
+        },
+        exports::runtime as rt,
+        render::machine::MumbleIdentityUpdate,
+    },
+    std::{
+        collections::BTreeSet,
+        hash::Hash,
+        marker::PhantomData,
+        mem,
+        num::NonZero,
+        sync::{Arc, LazyLock},
+    },
+    taimi_meta::packs::{MapIndex, MarkerId},
+    taimi_pack::attributes::{
+        self as attr,
+        keys::{self, Guid},
+        Festivals,
+        FilterAttributes,
+    },
 };
-use taimi_meta::packs::{MapIndex, MarkerId};
-use taimi_pack::attributes::{self as attr, keys::{self, Guid}, FilterAttributes, Festivals};
-#[cfg(feature = "paths-filter")]
-use crate::controller::pathing::state::hidden::MarkerState;
 #[cfg(feature = "paths-schedule")]
 use {
     chrono::{DateTime, TimeDelta},
     croner::errors::CronError,
     std::{fmt, time::Duration},
 };
+
+#[cfg(feature = "paths-filter")]
+use crate::controller::pathing::state::hidden::MarkerState;
 
 pub const FILTER_HIDDEN: Option<bool> = Some(false);
 pub const FILTER_ALLOWED: Option<bool> = None;
@@ -34,7 +50,9 @@ pub struct FilterConfig {
 impl FilterConfig {
     pub fn from_attributes(filters: FilterAttributes) -> Self {
         #[cfg(todo = "unnecessary")]
-        if Self::filters_is_empty(&filters) { return None }
+        if Self::filters_is_empty(&filters) {
+            return None
+        }
         #[cfg(feature = "paths-schedule")]
         let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(&filters)).flatten();
         Self {
@@ -48,16 +66,34 @@ impl FilterConfig {
         Self::filters_is_empty(&self.filters)
     }
     pub(crate) fn filters_is_empty(filters: &FilterAttributes) -> bool {
-        if !filters.festivals().is_empty() { return false }
-        if !filters.mounts().is_empty() { return false }
-        if !filters.professions().is_empty() { return false }
-        if !filters.races().is_empty() { return false }
-        if !filters.specializations().is_empty() { return false }
-        if !filters.map_types().is_empty() { return false }
+        if !filters.festivals().is_empty() {
+            return false
+        }
+        if !filters.mounts().is_empty() {
+            return false
+        }
+        if !filters.professions().is_empty() {
+            return false
+        }
+        if !filters.races().is_empty() {
+            return false
+        }
+        if !filters.specializations().is_empty() {
+            return false
+        }
+        if !filters.map_types().is_empty() {
+            return false
+        }
         #[cfg(feature = "paths-schedule")]
-        if !filters.schedule().is_empty() { return false }
-        if !filters.raids().is_empty() { return false }
-        if !filters.achievement_id().is_none() { return false }
+        if !filters.schedule().is_empty() {
+            return false
+        }
+        if !filters.raids().is_empty() {
+            return false
+        }
+        if !filters.achievement_id().is_none() {
+            return false
+        }
         true
     }
     fn filters_achievement(filters: &FilterAttributes) -> Option<AchievementConfig> {
@@ -68,7 +104,10 @@ impl FilterConfig {
     }
     /// may not include full functionality of [FilterConfig] that requires
     /// pre-processing (atm this means cron schedule and achievementid)
-    fn filters_from<'a, S: 'a>(filters: &'a FilterAttributes) -> impl Iterator<Item = &'a (dyn MarkerFilter<State = S> + 'a)> where
+    fn filters_from<'a, S: 'a>(
+        filters: &'a FilterAttributes,
+    ) -> impl Iterator<Item = &'a (dyn MarkerFilter<State = S> + 'a)>
+    where
         S: AsRef<Festivals>,
         S: AsRef<AvatarMetadata>,
         S: AsRef<CharacterMetadata>,
@@ -77,34 +116,42 @@ impl FilterConfig {
         //S: AsRef<AchievementState>,
     {
         IntoIterator::into_iter([
-            filters.festivals.as_ref()
-                .map(FilterFor::<_, S>::dyn_from_ref),
-            filters.mounts.as_ref()
-                .map(FilterFor::<_, S>::dyn_from_ref),
-            filters.professions.as_ref()
-                .map(FilterFor::<_, S>::dyn_from_ref),
-            filters.races.as_ref()
-                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.festivals.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
+            filters.mounts.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
+            filters.professions.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
+            filters.races.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
             //(!specializations.is_empty()).then_some(specializations).map(FilterFor::<_, S>::dyn_from_ref),
             //(!map_types.is_empty()).then_some(map_types).map(FilterFor::<_, S>::dyn_from_ref),
-            filters.specializations.as_ref().map(keys::Specializations::from_attrlist)
+            filters
+                .specializations
+                .as_ref()
+                .map(keys::Specializations::from_attrlist)
                 .map(FilterFor::<_, S>::dyn_from_ref),
-            filters.map_types.as_ref().map(keys::MapTypes::from_attrlist)
+            filters
+                .map_types
+                .as_ref()
+                .map(keys::MapTypes::from_attrlist)
                 .map(FilterFor::<_, S>::dyn_from_ref),
-            filters.raids.as_ref().map(keys::Raids::from_attrlist)
+            filters
+                .raids
+                .as_ref()
+                .map(keys::Raids::from_attrlist)
                 .map(FilterFor::<_, S>::dyn_from_ref),
             //(!raids.is_empty()).then_some(raids).map(FilterFor::<_, S>::dyn_from_ref),
             #[cfg(todo)]
-            filters.achievement_id().map(|id| AchievementConfig {
-                id,
-                bit: filters.achievement_bit(),
-            }),
-        ]).flatten()
+            filters
+                .achievement_id()
+                .map(|id| AchievementConfig { id, bit: filters.achievement_bit() }),
+        ])
+        .flatten()
     }
     pub fn filters_is_visible(filters: &FilterAttributes, state: &FilterState) -> FilterAllow {
         let achievement = Self::filters_achievement(filters);
-        let mut filters = Self::filters_from::<FilterState>(filters)
-            .chain(achievement.as_ref().map(FilterFor::<_, FilterState>::dyn_from_ref));
+        let mut filters = Self::filters_from::<FilterState>(filters).chain(
+            achievement
+                .as_ref()
+                .map(FilterFor::<_, FilterState>::dyn_from_ref),
+        );
 
         match filters.all(|f| f.is_visible(state) != FILTER_HIDDEN) {
             true => FILTER_ALLOWED,
@@ -125,7 +172,8 @@ pub struct RaidState {
     pub completed: BTreeSet<keys::Raid>,
 }
 impl RaidState {
-    pub fn new<I>(completed: I) -> Self where
+    pub fn new<I>(completed: I) -> Self
+    where
         I: IntoIterator,
         I::Item: Into<keys::Raid>,
     {
@@ -138,7 +186,9 @@ impl RaidState {
         let mut dirty = false;
         self.completed.retain(|raid| {
             let keep = raids.contains(raid);
-            if !keep { dirty = true; }
+            if !keep {
+                dirty = true;
+            }
             keep
         });
 
@@ -168,7 +218,9 @@ impl AchievementState {
     }
 
     pub fn update_with(&mut self, new: &SharedAchievementState) -> bool {
-        if Arc::ptr_eq(&self.status, new) { return false }
+        if Arc::ptr_eq(&self.status, new) {
+            return false
+        }
 
         let prev_hash = mem::replace(&mut self.hash, Self::hash_state(new));
         self.status = new.clone();
@@ -177,9 +229,7 @@ impl AchievementState {
     }
 
     fn hash_state(status: &ApiAchievementState) -> u32 {
-        PackInfoSignature::hash_with(|h| {
-            status.hash(h)
-        }).hash
+        PackInfoSignature::hash_with(|h| status.hash(h)).hash
     }
 }
 #[derive(Debug, Clone)]
@@ -223,13 +273,15 @@ pub type ScheduleTimezone = chrono::Utc;
 #[cfg(feature = "paths-schedule")]
 impl ScheduleConfig {
     pub fn from_attributes(attrs: &FilterAttributes) -> Result<Option<Self>, CronError> {
-        let Some(schedule) = attrs.schedule.as_ref() else {
-            return Ok(None)
-        };
+        let Some(schedule) = attrs.schedule.as_ref() else { return Ok(None) };
 
         let schedule = Self {
             pattern: schedule.parse()?,
-            duration: attrs.schedule_duration.clone().map(Into::into).unwrap_or_default(),
+            duration: attrs
+                .schedule_duration
+                .clone()
+                .map(Into::into)
+                .unwrap_or_default(),
         };
         Ok(Some(schedule))
     }
@@ -251,9 +303,13 @@ impl ScheduleConfig {
         Some(self.duration.0 - seconds as f32)
     }
 
-    pub fn next_schedule_change(&self, now: &DateTime<ScheduleTimezone>) -> Option<DateTime<ScheduleTimezone>> {
+    pub fn next_schedule_change(
+        &self,
+        now: &DateTime<ScheduleTimezone>,
+    ) -> Option<DateTime<ScheduleTimezone>> {
         let start = self.pattern.find_previous_occurrence(now, true).ok()?;
-        let end = TimeDelta::from_std(self.duration()).ok()
+        let end = TimeDelta::from_std(self.duration())
+            .ok()
             .and_then(|duration| start.checked_add_signed(duration))?;
         if now < &end {
             return Some(end)
@@ -266,19 +322,22 @@ impl ScheduleConfig {
         let start = self.pattern.find_previous_occurrence(now, true).ok()?;
         Some(now.signed_duration_since(start))
     }
-    pub fn latest_end<T>(&self, now: T) -> Result<DateTime<ScheduleTimezone>, CronError> where
+    pub fn latest_end<T>(&self, now: T) -> Result<DateTime<ScheduleTimezone>, CronError>
+    where
         T: Into<DateTime<ScheduleTimezone>>,
     {
         let start = self.latest_start(now)?;
         Ok(start + self.duration())
     }
 
-    pub fn latest_start<T>(&self, point: T) -> Result<DateTime<ScheduleTimezone>, CronError> where
+    pub fn latest_start<T>(&self, point: T) -> Result<DateTime<ScheduleTimezone>, CronError>
+    where
         T: Into<DateTime<ScheduleTimezone>>,
     {
         self.pattern.find_previous_occurrence(&point.into(), true)
     }
-    pub fn next_start<T>(&self, point: T) -> Result<DateTime<ScheduleTimezone>, CronError> where
+    pub fn next_start<T>(&self, point: T) -> Result<DateTime<ScheduleTimezone>, CronError>
+    where
         T: Into<DateTime<ScheduleTimezone>>,
     {
         self.pattern.find_next_occurrence(&point.into(), false)
@@ -333,10 +392,7 @@ pub struct GroupConfig {
 }
 #[cfg(feature = "paths-filter")]
 impl GroupConfig {
-    pub const EMPTY: Self = Self {
-        guid: Guid::EMPTY,
-        inverted: false,
-    };
+    pub const EMPTY: Self = Self { guid: Guid::EMPTY, inverted: false };
 }
 /// lazy hack .-.
 #[cfg(feature = "paths-filter")]
@@ -378,10 +434,8 @@ impl MarkerFilter for HiddenForMap {
     type State = MapMetadata;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
         match *self {
-            Self { map, .. } if Some(map) != state.map_id =>
-                FILTER_ALLOWED,
-            Self { shard: Some(shard), .. } if shard.get() != state.shard_id =>
-                FILTER_ALLOWED,
+            Self { map, .. } if Some(map) != state.map_id => FILTER_ALLOWED,
+            Self { shard: Some(shard), .. } if shard.get() != state.shard_id => FILTER_ALLOWED,
             _ => FILTER_HIDDEN,
         }
     }
@@ -423,8 +477,7 @@ impl MarkerFilter for attr::Festivals {
     type State = Festivals;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
         match (*self).into_iter().find(|&flag| state.contains(flag)) {
-            None if !self.is_empty() =>
-                FILTER_HIDDEN,
+            None if !self.is_empty() => FILTER_HIDDEN,
             _ => FILTER_ALLOWED,
         }
     }
@@ -441,7 +494,9 @@ impl MarkerFilter for attr::Mount {
 impl MarkerFilter for attr::Mounts {
     type State = <attr::Mount as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        if self.is_empty() { return FILTER_ALLOWED }
+        if self.is_empty() {
+            return FILTER_ALLOWED
+        }
         match state.mount().map(|m| self.get(m)) {
             Some(true) => FILTER_ALLOWED,
             None | Some(false) => FILTER_HIDDEN,
@@ -466,7 +521,9 @@ impl MarkerFilter for attr::Profession {
 impl MarkerFilter for attr::Professions {
     type State = <attr::Profession as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        if self.is_empty() { return FILTER_ALLOWED }
+        if self.is_empty() {
+            return FILTER_ALLOWED
+        }
         match state.prof.map(|p| self.get(p)) {
             Some(true) => FILTER_ALLOWED,
             None | Some(false) => FILTER_HIDDEN,
@@ -491,7 +548,9 @@ impl MarkerFilter for attr::Race {
 impl MarkerFilter for attr::Races {
     type State = <attr::Race as MarkerFilter>::State;
     fn is_visible(&self, state: &Self::State) -> FilterAllow {
-        if self.is_empty() { return FILTER_ALLOWED }
+        if self.is_empty() {
+            return FILTER_ALLOWED
+        }
         match state.race.map(|r| self.get(r)) {
             Some(true) => FILTER_ALLOWED,
             None | Some(false) => FILTER_HIDDEN,
@@ -567,9 +626,7 @@ impl AvatarMetadata {
     /// TODO: forces use of gw2_mumble enum, bad idea!
     pub fn from_mumblelink_context(ml: &rt::MumblePtr) -> Self {
         let mount = NonZero::new(ml.read_mount_index() as u8);
-        Self {
-            mount,
-        }
+        Self { mount }
     }
     pub fn update_from_mumblelink_context(&mut self, ml: &rt::MumblePtr) -> bool {
         let Self { mount: prev_mount } = *self;
@@ -630,8 +687,7 @@ impl CharacterMetadata {
         dirty |= prev_prof != self.prof;
         let prev_spec = mem::replace(&mut self.spec, NonZero::new(id.specialization));
         dirty |= prev_spec != self.spec;
-        let name_len = id.name.iter().position(|&c| c == 0)
-            .unwrap_or(id.name.len());
+        let name_len = id.name.iter().position(|&c| c == 0).unwrap_or(id.name.len());
         let name = unsafe { id.name.get_unchecked(..name_len) };
         if self.name.len() != name_len || name != &self.name[..] {
             self.name = name.into();
@@ -661,7 +717,8 @@ pub type FilterStateFilter = Arc<dyn MarkerFilterState>;
 pub trait MarkerFilterState: Send + Sync + 'static {
     fn is_filter_visible(&self, state: &FilterState) -> FilterAllow;
 }
-impl<T> MarkerFilterState for T where
+impl<T> MarkerFilterState for T
+where
     T: MarkerFilter + Send + Sync + 'static,
     FilterState: AsRef<<T as MarkerFilter>::State>,
 {
@@ -672,7 +729,8 @@ impl<T> MarkerFilterState for T where
 #[cfg(todo)]
 pub type FilterStateFilter = Arc<dyn MarkerFilter<State = FilterState>>;
 #[cfg(todo)]
-impl<T> MarkerFilterState for T where
+impl<T> MarkerFilterState for T
+where
     T: MarkerFilter<State = FilterState>,
 {
     // TODO: equality/dedupe checks?
@@ -687,24 +745,26 @@ pub struct FilterFor<T: ?Sized, S: ?Sized = FilterState> {
 }
 impl<T: ?Sized, S: ?Sized> FilterFor<T, S> {
     #[inline]
-    pub const fn new(filter: T) -> Self where T: Sized {
-        Self {
-            _state: PhantomData,
-            filter,
-        }
+    pub const fn new(filter: T) -> Self
+    where
+        T: Sized,
+    {
+        Self { _state: PhantomData, filter }
     }
     #[inline]
     pub const fn from_ref(filter: &T) -> &Self {
         unsafe { mem::transmute(filter) }
     }
-    pub fn dyn_from_ref<'a>(filter: &'a T) -> &'a (dyn MarkerFilter<State = S> + 'a) where
+    pub fn dyn_from_ref<'a>(filter: &'a T) -> &'a (dyn MarkerFilter<State = S> + 'a)
+    where
         T: Sized + 'a,
         Self: MarkerFilter<State = S>,
     {
         Self::from_ref(filter)
     }
 }
-impl<T: ?Sized, S: ?Sized> MarkerFilter for FilterFor<T, S> where
+impl<T: ?Sized, S: ?Sized> MarkerFilter for FilterFor<T, S>
+where
     T: MarkerFilter,
     S: AsRef<<T as MarkerFilter>::State>,
 {
@@ -714,32 +774,50 @@ impl<T: ?Sized, S: ?Sized> MarkerFilter for FilterFor<T, S> where
     }
 }
 impl AsRef<AchievementState> for FilterState {
-    fn as_ref(&self) -> &AchievementState { &self.achievements }
+    fn as_ref(&self) -> &AchievementState {
+        &self.achievements
+    }
 }
 impl AsRef<RaidState> for FilterState {
-    fn as_ref(&self) -> &RaidState { &self.raids }
+    fn as_ref(&self) -> &RaidState {
+        &self.raids
+    }
 }
 #[cfg(feature = "paths-schedule")]
 impl AsRef<ScheduleState> for FilterState {
-    fn as_ref(&self) -> &ScheduleState { &self.schedule }
+    fn as_ref(&self) -> &ScheduleState {
+        &self.schedule
+    }
 }
 impl AsRef<Festivals> for FilterState {
-    fn as_ref(&self) -> &Festivals { &self.festival }
+    fn as_ref(&self) -> &Festivals {
+        &self.festival
+    }
 }
 impl AsRef<MapMetadata> for FilterState {
-    fn as_ref(&self) -> &MapMetadata { &self.map }
+    fn as_ref(&self) -> &MapMetadata {
+        &self.map
+    }
 }
 impl AsRef<CharacterMetadata> for FilterState {
-    fn as_ref(&self) -> &CharacterMetadata { &self.character }
+    fn as_ref(&self) -> &CharacterMetadata {
+        &self.character
+    }
 }
 impl AsRef<AvatarMetadata> for FilterState {
-    fn as_ref(&self) -> &AvatarMetadata { &self.avatar }
+    fn as_ref(&self) -> &AvatarMetadata {
+        &self.avatar
+    }
 }
 impl AsRef<()> for FilterState {
-    fn as_ref(&self) -> &() { &() }
+    fn as_ref(&self) -> &() {
+        &()
+    }
 }
 impl AsRef<FilterState> for FilterState {
-    fn as_ref(&self) -> &FilterState { self }
+    fn as_ref(&self) -> &FilterState {
+        self
+    }
 }
 
 /// TODO: this could probably be a field on LoadedMapPack once cleaned up...
@@ -756,7 +834,8 @@ pub struct MapFilters {
 
 #[cfg(todo)]
 impl MapFilters {
-    pub fn group_filter_for<I>(&self, path: &I, guid: &Guid) -> Option<GroupConfig> where
+    pub fn group_filter_for<I>(&self, path: &I, guid: &Guid) -> Option<GroupConfig>
+    where
         MarkerSet: TaimiSet<I>,
     {
         (!guid.is_empty()).then(move || GroupConfig {
@@ -766,8 +845,12 @@ impl MapFilters {
     }
 
     #[cfg(feature = "paths-schedule")]
-    pub fn next_schedule_event(&mut self, now: &DateTime<ScheduleTimezone>) -> Option<DateTime<ScheduleTimezone>> {
-        self.schedules.iter()
+    pub fn next_schedule_event(
+        &mut self,
+        now: &DateTime<ScheduleTimezone>,
+    ) -> Option<DateTime<ScheduleTimezone>> {
+        self.schedules
+            .iter()
             .filter_map(|(_, schedule)| schedule.next_schedule_change(now))
             .min()
     }
@@ -788,9 +871,9 @@ impl FilterStateExtras {
             Self {
                 achievements: None,
                 #[cfg(feature = "paths-filter")]
-                group: None,
+                    group: None,
                 #[cfg(feature = "paths-schedule")]
-                schedule: None,
+                    schedule: None,
             } => true,
             _ => false,
         }
@@ -804,39 +887,52 @@ pub struct FilterStateFilters {
 #[cfg(todo)]
 impl FilterStateFilters {
     pub fn from_attributes(filters: &FilterAttributes) -> (Self, FilterStateExtras) {
-        let achievements = AchievementConfig::from_attributes(filters)
-            .map(Arc::new);
+        let achievements = AchievementConfig::from_attributes(filters).map(Arc::new);
         #[cfg(feature = "paths-schedule")]
-        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(filters)).flatten()
+        let schedule = rt::log::warn_ok(ScheduleConfig::from_attributes(filters))
+            .flatten()
             .map(Arc::new);
-        let festivals = filters.festivals.clone()
+        let festivals = filters
+            .festivals
+            .clone()
             .and_then(|f| match f.is_empty() {
                 false => Some(f),
                 true => None,
             })
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let mounts = filters.mounts.clone().map(keys::Mounts)
+        let mounts = filters
+            .mounts
+            .clone()
+            .map(keys::Mounts)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let races = filters.races.clone().map(keys::Races)
+        let races = filters
+            .races
+            .clone()
+            .map(keys::Races)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let professions = filters.professions.clone().map(keys::Professions)
+        let professions = filters
+            .professions
+            .clone()
+            .map(keys::Professions)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let specializations = filters.specializations.as_ref()
+        let specializations = filters
+            .specializations
+            .as_ref()
             .map(|s| s.iter().map(|&s| keys::Specialization(s as u32)).collect())
             .map(keys::Specializations)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
-        let raids = filters.raids.as_ref()
+        let raids = filters
+            .raids
+            .as_ref()
             .map(|s| s.iter().cloned().map(keys::Raid).collect())
             .map(keys::Raids)
             .map(|f| Arc::new(f) as Arc<dyn MarkerFilterState>);
         let group = match filters.invert_behavior {
-            Some(true) => Some(GroupConfig {
-                inverted: true,
-                .. GroupConfig::EMPTY
-            }),
+            Some(true) => Some(GroupConfig { inverted: true, ..GroupConfig::EMPTY }),
             _ => None,
         };
-        let filters = festivals.into_iter()
+        let filters = festivals
+            .into_iter()
             .chain(mounts)
             .chain(races)
             .chain(professions)

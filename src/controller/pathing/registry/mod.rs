@@ -30,11 +30,7 @@ use {
         },
     },
     taimi_pack::{
-        category::{
-            id::CategoryId,
-            Category,
-            CategoryFlags,
-        },
+        category::{id::CategoryId, Category, CategoryFlags},
         pack::CategoryCollection,
         Pack,
     },
@@ -60,8 +56,7 @@ pub struct PackInfo {
 impl PackInfo {
     /// TODO: deprecate this soon
     pub fn from_pack(pack: &Pack, format: PackFormat) -> Self {
-        let roots = PackRoot::from_category_collection(&pack.categories)
-            .collect();
+        let roots = PackRoot::from_category_collection(&pack.categories).collect();
 
         let trail_maps = pack.trails.iter().filter_map(|trail| trail.map_id);
         let poi_maps = pack.pois.iter().map(|poi| poi.map_id);
@@ -117,9 +112,7 @@ impl PackInfoSignature {
 
     /// [Self::hashpart_info] with [Self::hasher()]
     pub fn from_info(info: &PackInfo) -> Self {
-        Self::hash_with(|state|
-            Self::hashpart_info(state, info)
-        )
+        Self::hash_with(|state| Self::hashpart_info(state, info))
     }
 
     #[inline]
@@ -159,9 +152,7 @@ impl PackInfoSignature {
                 hash as u32
             },
             #[cfg(not(target_pointer_width = "32"))]
-            hash => {
-                hash.rotate_left(Self::REMAINING_ROTATION) as u32
-            },
+            hash => hash.rotate_left(Self::REMAINING_ROTATION) as u32,
         }
     }
     /// for [Self::hasher_finish_u32]
@@ -226,29 +217,53 @@ pub struct PackCategoryInfo {
 /// XXX: lonely not checked...
 impl PartialEq<CategoryCollection> for PackCategoryInfo {
     fn eq(&self, collection: &CategoryCollection) -> bool {
-        if collection.all_categories.len() != self.count() { return false }
+        if collection.all_categories.len() != self.count() {
+            return false
+        }
         let mut root_count = 0usize;
         for root in collection.root_categories.iter() {
-            let Some(path) = collection.all_categories.get_index_of(root)
-                .map(|i| CategoryPath::with_path(i as CategoryIndex)) else { continue };
+            let Some(path) = collection
+                .all_categories
+                .get_index_of(root)
+                .map(|i| CategoryPath::with_path(i as CategoryIndex))
+            else {
+                continue
+            };
             root_count += 1;
-            if !self.is_root(path) { return false }
+            if !self.is_root(path) {
+                return false
+            }
         }
-        if self.roots.len() != root_count { return false }
+        if self.roots.len() != root_count {
+            return false
+        }
         for ((_p, info, flags), (_, cat)) in self.all_flags().zip(collection.all_categories.iter()) {
             let mask = CategoryFlags::HIDDEN | CategoryFlags::SEPARATOR | CategoryFlags::DISABLED;
-            if (flags & !CategoryFlags::ROOT) != cat.flags & mask { return false }
-            let mut pack_children = cat.child_ids().filter_map(|child_full_id|
-                collection.all_categories.get_index_of(child_full_id)
-                    .map(|i| CategoryPath::with_path(i as CategoryIndex))
-            ).fuse();
+            if (flags & !CategoryFlags::ROOT) != cat.flags & mask {
+                return false
+            }
+            let mut pack_children = cat
+                .child_ids()
+                .filter_map(|child_full_id| {
+                    collection
+                        .all_categories
+                        .get_index_of(child_full_id)
+                        .map(|i| CategoryPath::with_path(i as CategoryIndex))
+                })
+                .fuse();
             let firstborn: Option<CategoryPath> = info.child().map(CategoryPath::with_path);
-            if pack_children.next() != firstborn { return false }
+            if pack_children.next() != firstborn {
+                return false
+            }
             let Some(firstborn) = firstborn else { continue };
             for child_path in self.younger_siblings_of(firstborn) {
-                if Some(child_path) != pack_children.next() { return false }
+                if Some(child_path) != pack_children.next() {
+                    return false
+                }
             }
-            if pack_children.next().is_some() { return false }
+            if pack_children.next().is_some() {
+                return false
+            }
         }
         true
     }
@@ -515,7 +530,9 @@ impl PackCategoryInfo {
         IndexedList::from_ref(&self.all)
     }
 
-    pub fn all_flags(&self) -> impl DoubleEndedIterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
+    pub fn all_flags(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (CategoryPath, &PackCategory, CategoryFlags)> + Clone {
         self.all().iter().lazy_map(|(path, cat)| {
             let mut flag = CategoryFlags::empty();
             if cat.parent().is_none() {
@@ -549,8 +566,7 @@ impl PackCategoryInfo {
 impl fmt::Debug for PackCategoryInfo {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut f = f.debug_struct("PackCategoryInfo");
-        f.field("count", &self.all.len())
-            .field("roots", &&self.roots[..]);
+        f.field("count", &self.all.len()).field("roots", &&self.roots[..]);
         let tagged = [
             ("hidden", &self.hidden),
             ("disabled", &self.disabled),
@@ -791,13 +807,19 @@ impl tree::DfsPre for DescendentIter<'_> {
     }
 }
 impl tree::PeekableTreeTraversal<tree::PreOrder> for DescendentIter<'_> {
-    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> where Self::Item: Clone {
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>>
+    where
+        Self::Item: Clone,
+    {
         self.peek_next().map(|(path, _d)| Cow::Owned(path))
     }
     fn peek_depth(&mut self) -> Option<usize> {
         self.peek_next().map(|(_path, depth)| depth)
     }
-    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)> where Self::Item: Clone {
+    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)>
+    where
+        Self::Item: Clone,
+    {
         self.peek_next().map(|(p, d)| (Cow::Owned(p), d))
     }
 }
@@ -818,17 +840,9 @@ impl PackRoot {
             .root_categories
             .iter()
             .filter_map(|id| collection.all_categories.get_full(id))
-            .map(|(i, _, cat)| {
-                PackRoot::from_category(
-                    CategoryPath::with_path(i as CategoryIndex),
-                    cat,
-                )
-            })
+            .map(|(i, _, cat)| PackRoot::from_category(CategoryPath::with_path(i as CategoryIndex), cat))
     }
-    pub fn from_category(
-        path: CategoryPath,
-        category: &Category,
-    ) -> Self {
+    pub fn from_category(path: CategoryPath, category: &Category) -> Self {
         #[cfg(todo = "unnecessary")]
         if category.full_id != category.id {
             return None

@@ -1,46 +1,75 @@
 use {
-    bvh::{aabb, bvh::Bvh, bounding_hierarchy::BHShape},
     crate::{
-        controller::pathing::{
-            registry::{PoiMapPath, LoadedPoiPath, PackMapPath, LoadedMarkerPath},
-            shared::{interact::{empty_trigger_bvh, NearbyMarkers, PlayerPosition, SharedTriggerBvh, TRIGGER_DIMENSION}, PathingReceiver, InteractReceiver, PathingEnables},
-            state::{
-                hidden::{AutoReset, HideContext},
-                interactive::{InteractionEvent, InteractionEventAction},
-                filter::{self, FilterState, MarkerFilter},
-                LoadedPoi, LoadedMapPack,
-                LoadedMaps, LoadedMapInfo,
+        controller::{
+            pathing::{
+                info::MapPackInfo,
+                registry::{LoadedMarkerPath, LoadedPoiPath, PackMapPath, PoiMapPath},
+                shared::{
+                    interact::{
+                        empty_trigger_bvh,
+                        NearbyMarkers,
+                        PlayerPosition,
+                        SharedTriggerBvh,
+                        TRIGGER_DIMENSION,
+                    },
+                    InteractReceiver,
+                    LocDisplay,
+                    PathingEnables,
+                    PathingReceiver,
+                },
+                state::{
+                    filter::{self, FilterState, MarkerFilter},
+                    hidden::{AutoReset, HideContext},
+                    interactive::{InteractionEvent, InteractionEventAction},
+                    LoadedMapInfo,
+                    LoadedMapPack,
+                    LoadedMaps,
+                    LoadedPoi,
+                },
+                PathingController,
+                PathingEvent,
             },
-            shared::LocDisplay,
-            info::MapPackInfo,
-            PathingController, PathingEvent,
+            runtime::WallInstant,
+            Controller,
         },
-        controller::{runtime::WallInstant, Controller},
         exports::runtime as rt,
         render::{RenderEvent, RenderState},
-        settings::{pathing::{TriggerKind, PathingSettings}, SettingsLock},
+        settings::{
+            pathing::{PathingSettings, TriggerKind},
+            SettingsLock,
+        },
         Interruption,
     },
-    futures::{future::{self, Either}, stream::StreamExt},
-    std::{cmp, collections::BinaryHeap, num::NonZero, sync::Arc, time::Duration},
-    std::task::{Poll, Context},
-    std::future::Future,
+    bvh::{aabb, bounding_hierarchy::BHShape, bvh::Bvh},
+    futures::{
+        future::{self, Either},
+        stream::StreamExt,
+    },
+    glamour::{Contains, Point2, Point3},
+    std::{
+        cmp,
+        collections::BinaryHeap,
+        future::Future,
+        num::NonZero,
+        sync::Arc,
+        task::{Context, Poll},
+        time::Duration,
+    },
+    taimi_hoard::{cmp::CmpIgnore, flags::BitSet, loc::LocationRef, time::Timestamp},
     taimi_meta::{
         coords::LocalSpace,
-        packs::{id::{MarkerId, MarkerIndex, MarkerPath}, MapIndex, PoiPath},
-        spatial::{MintConv, BvhShape, TriggerBoundsInfo},
+        packs::{
+            id::{MarkerId, MarkerIndex, MarkerPath},
+            MapIndex,
+            PoiPath,
+        },
+        spatial::{BvhShape, MintConv, TriggerBoundsInfo},
         ui::gameplay::GameplayState,
     },
     taimi_pack::attributes::{keys, AttrString, InteractionAttributes, MarkerAttributes},
-    taimi_hoard::loc::LocationRef,
-    taimi_hoard::flags::BitSet,
-    taimi_hoard::cmp::CmpIgnore,
-    taimi_hoard::time::Timestamp,
     taimi_sync::arcs::ArcPtrCmp,
-    glamour::{Contains, Point3, Point2},
-    tokio::sync::RwLock,
+    tokio::sync::{broadcast, RwLock},
     tokio_stream::wrappers::errors::BroadcastStreamRecvError as BroadcastError,
-    tokio::sync::broadcast,
 };
 
 #[derive(Debug, Clone)]
@@ -76,7 +105,8 @@ impl SpaceInteraction {
         self.is_auto() || attrs.info().is_some() || attrs.copy_value().is_some()
     }
     /// may display an unintrusive popup or notification, even if not allowed to auto-trigger
-    pub const PASSIVE_NEARBY: TriggerKind = TriggerKind::from_bits_retain(TriggerKind::INFO.bits() | TriggerKind::COPY.bits());
+    pub const PASSIVE_NEARBY: TriggerKind =
+        TriggerKind::from_bits_retain(TriggerKind::INFO.bits() | TriggerKind::COPY.bits());
 
     pub fn dist_dist(&self, point: &Point3<LocalSpace>) -> f32 {
         self.bounds.position.distance_squared(*point)
@@ -88,9 +118,9 @@ impl SpaceInteraction {
         let dist_dist = self.dist_dist(point);
         (dist_dist <= self.radius_radius).then_some(dist_dist)
     }
-    pub fn point_query(pos: Point3<LocalSpace>) -> impl aabb::IntersectsAabb<f32, {TRIGGER_DIMENSION}> {
+    pub fn point_query(pos: Point3<LocalSpace>) -> impl aabb::IntersectsAabb<f32, { TRIGGER_DIMENSION }> {
         let pos2 = LocalSpace::to2(pos);
-        let point: nalgebra::Point<f32, {TRIGGER_DIMENSION}> = pos2.into_nalg();
+        let point: nalgebra::Point<f32, { TRIGGER_DIMENSION }> = pos2.into_nalg();
         point
     }
     /// TODO: this probably obsoletes [Self::point_query_postprocess_filter],
@@ -126,7 +156,9 @@ impl SpaceInteraction {
     }
 
     pub fn poi_interest(poi: &LoadedPoi) -> (TriggerKind, bool) {
-        let Some(attrs) = poi.get_interaction_attrs() else { return (TriggerKind::empty(), false) };
+        let Some(attrs) = poi.get_interaction_attrs() else {
+            return (TriggerKind::empty(), false)
+        };
 
         let (mut interest, auto) = Self::interest_for(attrs);
         let script = poi.info().get_marker_attrs().map(|m| m.script.is_some());
@@ -138,7 +170,7 @@ impl SpaceInteraction {
     pub fn interest_for_marker(attrs: &MarkerAttributes) -> (TriggerKind, bool) {
         let (mut interest, auto) = match attrs.interaction.as_ref() {
             Some(i) => Self::interest_for(i),
-            None => (TriggerKind::empty(), false)
+            None => (TriggerKind::empty(), false),
         };
         if attrs.script.is_some() {
             interest.insert(TriggerKind::SCRIPT);
@@ -178,7 +210,9 @@ impl SpaceInteraction {
         (interest, attrs.auto_trigger())
     }
     pub fn is_interactive(poi: &LoadedPoi) -> bool {
-        !poi.get_interaction_attrs().map(|i| Self::interaction_is_empty(i)).unwrap_or(true)
+        !poi.get_interaction_attrs()
+            .map(|i| Self::interaction_is_empty(i))
+            .unwrap_or(true)
     }
     pub fn interaction_is(i: &InteractionAttributes, mask: TriggerKind) -> bool {
         Self::interest_for(i).0.intersects(mask)
@@ -189,21 +223,40 @@ impl SpaceInteraction {
     /// short-circuiting version, do we care?
     #[cfg(todo)]
     fn interaction_is_empty(i: &InteractionAttributes) -> bool {
-        if i.info.is_some() { return false }
-        if i.bounce_behavior.is_some() { return false }
-        if i.copy_value.is_some() { return false }
-        if i.reset_guids.is_some() { return false }
-        if i.toggle_category.is_some() { return false }
-        if i.show_category.is_some() { return false }
-        if i.hide_category.is_some() { return false }
-        if i.taco_behavior.is_some() { return false }
+        if i.info.is_some() {
+            return false
+        }
+        if i.bounce_behavior.is_some() {
+            return false
+        }
+        if i.copy_value.is_some() {
+            return false
+        }
+        if i.reset_guids.is_some() {
+            return false
+        }
+        if i.toggle_category.is_some() {
+            return false
+        }
+        if i.show_category.is_some() {
+            return false
+        }
+        if i.hide_category.is_some() {
+            return false
+        }
+        if i.taco_behavior.is_some() {
+            return false
+        }
         #[cfg(todo)]
-        if i.auto_trigger() { return false }
+        if i.auto_trigger() {
+            return false
+        }
 
         true
     }
 }
-impl<const D: usize> aabb::Bounded<f32, D> for SpaceInteraction where
+impl<const D: usize> aabb::Bounded<f32, D> for SpaceInteraction
+where
     TriggerBoundsInfo: aabb::Bounded<f32, D>,
 {
     fn aabb(&self) -> aabb::Aabb<f32, D> {
@@ -256,20 +309,20 @@ impl MapInteractState {
         let mut interest_auto = self.interest_auto;
         let mut interest_nearby = self.interest_nearby;
         for (map_path, map, _map_info) in maps.iter_with_info(map_info, Some(map_id)) {
-            let pois = map.lpois().iter()
-                .filter_map(|(lpath, poi)| {
-                    let (interest, auto) = SpaceInteraction::poi_interest(poi);
-                    interest_nearby.insert(interest);
-                    if auto {
-                        interest_auto.insert(interest & TriggerKind::AUTO_TRIGGER_MASK);
-                    }
-                    match interest.is_empty() {
-                        true => None,
-                        false => Some(
-                            BvhShape::new(SpaceInteraction::with_poi(map_path.rel(lpath.path), poi))
-                        ),
-                    }
-                });
+            let pois = map.lpois().iter().filter_map(|(lpath, poi)| {
+                let (interest, auto) = SpaceInteraction::poi_interest(poi);
+                interest_nearby.insert(interest);
+                if auto {
+                    interest_auto.insert(interest & TriggerKind::AUTO_TRIGGER_MASK);
+                }
+                match interest.is_empty() {
+                    true => None,
+                    false => Some(BvhShape::new(SpaceInteraction::with_poi(
+                        map_path.rel(lpath.path),
+                        poi,
+                    ))),
+                }
+            });
             self.entities.extend(pois);
         }
         self.trigger_bvh_dirty = !self.entities.is_empty();
@@ -281,9 +334,15 @@ impl MapInteractState {
     /// TODO: waiting on mutex is unnecessary if you just replace it with a new one if a try_lock fails...
     pub async fn rebuild_trigger_bvh(&mut self) {
         #[cfg(todo = "unnecessary")]
-        if !self.trigger_bvh_dirty { return }
+        if !self.trigger_bvh_dirty {
+            return
+        }
         #[cfg(todo = "unnecessary")]
-        if self.entities.is_empty() { self.trigger_bvh = empty_trigger_bvh().clone(); self.trigger_bvh_dirty = false; return }
+        if self.entities.is_empty() {
+            self.trigger_bvh = empty_trigger_bvh().clone();
+            self.trigger_bvh_dirty = false;
+            return
+        }
 
         self.ensure_bvh_rw();
 
@@ -295,18 +354,18 @@ impl MapInteractState {
                 trigger_bvh.nodes.shrink_to_fit();
                 Ok(shapes)
             }
-        }).await;
+        })
+        .await;
         match rt::log::error_ok(res) {
             None => {
                 // what do now..?
                 self.trigger_bvh = empty_trigger_bvh().clone();
             },
-            Some(shapes) => {
+            Some(shapes) =>
                 for (dest, shape) in self.entities.iter_mut().zip(&shapes) {
-                    let bh_index = BHShape::<f32, {TRIGGER_DIMENSION}>::bh_node_index(shape);
-                    BHShape::<f32, {TRIGGER_DIMENSION}>::set_bh_node_index(dest, bh_index);
-                }
-            },
+                    let bh_index = BHShape::<f32, { TRIGGER_DIMENSION }>::bh_node_index(shape);
+                    BHShape::<f32, { TRIGGER_DIMENSION }>::set_bh_node_index(dest, bh_index);
+                },
         };
 
         self.trigger_bvh_dirty = false;
@@ -384,7 +443,13 @@ impl InteractReactor {
             event_dirty_entities: false,
         }
     }
-    pub(super) fn handle_map_enter(&mut self, rx: &mut PathingReceiver, _maps: &LoadedMaps, _map_info: &LoadedMapInfo, _map_id: MapIndex) {
+    pub(super) fn handle_map_enter(
+        &mut self,
+        rx: &mut PathingReceiver,
+        _maps: &LoadedMaps,
+        _map_info: &LoadedMapInfo,
+        _map_id: MapIndex,
+    ) {
         if rx.interact.player_pos.ml.is_none() {
             // some initial setup...
             rx.interact.player_pos.set_ml(rt::mumble_link_ptr().ok());
@@ -408,8 +473,9 @@ impl InteractReactor {
     }
     pub(super) fn handle_map_suspend(&mut self, rx: &mut PathingReceiver, gameplay: &GameplayState) {
         let (reentering_urgent, next_map_id, prev_map_id) = match *gameplay {
-            GameplayState::Intermission { next_map_id, prev_map_id, .. } => (false, next_map_id, prev_map_id),
-            GameplayState::Gameplay { map_id }  => (true, map_id, None),
+            GameplayState::Intermission { next_map_id, prev_map_id, .. } =>
+                (false, next_map_id, prev_map_id),
+            GameplayState::Gameplay { map_id } => (true, map_id, None),
         };
         let maybe_cinematic = !reentering_urgent && next_map_id.is_some() && next_map_id == prev_map_id;
         if !maybe_cinematic {
@@ -472,7 +538,11 @@ impl InteractReactor {
                 let cat = show_hide.category().pivot(loaded_path.root.root);
                 let cat = id.clone();
                 // TODO: spawn instead to ensure it arrives?
-                events.push(PathingEvent::CategoryEnableById(loaded_path.root.root, cat, show_hide.tristate()));
+                events.push(PathingEvent::CategoryEnableById(
+                    loaded_path.root.root,
+                    cat,
+                    show_hide.tristate(),
+                ));
             } else {
                 log::info!("{blocked} {}", show_hide);
             }
@@ -481,7 +551,10 @@ impl InteractReactor {
             let allowed = allowed.contains(TriggerKind::RESET);
             *took_action.get_or_insert_default() |= allowed;
             if allowed {
-                let ids = reset.iter().map(|guid| MarkerId::from_uuid_ref(guid.as_ref()).clone()).collect();
+                let ids = reset
+                    .iter()
+                    .map(|guid| MarkerId::from_uuid_ref(guid.as_ref()).clone())
+                    .collect();
                 events.push(PathingEvent::ResetMarkerIds(ids));
             } else {
                 log::info!("{blocked} reset");
@@ -517,22 +590,25 @@ impl InteractReactor {
             if allowed.contains(TriggerKind::BEHAVIOUR) && organic {
                 const MANY_WEEKS: Duration = Duration::from_secs(Timestamp::WEEK.as_secs() * 52);
 
-                use taimi_pack::attributes::keys::{Behaviour, TacoBehaviour, BlishBehaviour};
+                use taimi_pack::attributes::keys::{Behaviour, BlishBehaviour, TacoBehaviour};
                 let mut now = None;
                 let mut now = || *now.get_or_insert_with(WallInstant::now_timestamp_system_checked);
                 let mut contexts = None;
                 let mut reset = None;
                 /// 16:00 UTC
-                const SOME_DAY: Timestamp = Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
+                const SOME_DAY: Timestamp =
+                    Timestamp::with_timestamp(1754265600 - MANY_WEEKS.as_secs() * 13);
                 let until = match behaviour {
-                    Behaviour::Taco(TacoBehaviour::ResetDaily) | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => {
+                    Behaviour::Taco(TacoBehaviour::ResetDaily)
+                    | Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) => {
                         if let Behaviour::Taco(TacoBehaviour::ResetDailyPerCharacter) = behaviour {
-                            contexts = Some(HideContext::for_character(filter_state.character.name.clone()));
+                            contexts =
+                                Some(HideContext::for_character(filter_state.character.name.clone()));
                         }
                         match now().timestamp() {
                             #[cfg(todo)]
                             now => Some(Either::Left(Timestamp::with_timestamp(
-                                now.next_multiple_of(Timestamp::DAY.as_secs())
+                                now.next_multiple_of(Timestamp::DAY.as_secs()),
                             ))),
                             now => Some(Either::Right(Duration::from_secs({
                                 let delta = (SOME_DAY.timestamp() as i64).wrapping_sub(now as i64);
@@ -543,7 +619,10 @@ impl InteractReactor {
                     },
                     Behaviour::Blish(BlishBehaviour::ResetWeekly) => {
                         /// sunday 23:30 UTC
-                        const SOME_WEEK: Timestamp = Timestamp::with_timestamp(SOME_DAY.timestamp() + Timestamp::HOUR.as_secs() * 8 - Timestamp::MINUTE.as_secs() * 30);
+                        const SOME_WEEK: Timestamp = Timestamp::with_timestamp(
+                            SOME_DAY.timestamp() + Timestamp::HOUR.as_secs() * 8
+                                - Timestamp::MINUTE.as_secs() * 30,
+                        );
                         match now().timestamp() {
                             now => Some(Either::Right(Duration::from_secs({
                                 let delta = (SOME_WEEK.timestamp() as i64).wrapping_sub(now as i64);
@@ -552,8 +631,10 @@ impl InteractReactor {
                             }))),
                         }
                     },
-                    Behaviour::Taco(TacoBehaviour::ResetDelay) => Some(Either::Right(keys::ResetLength(reset_delay).duration())),
-                    Behaviour::Taco(TacoBehaviour::AlwaysVisible) => Some(Either::Right(Duration::from_secs(0))),
+                    Behaviour::Taco(TacoBehaviour::ResetDelay) =>
+                        Some(Either::Right(keys::ResetLength(reset_delay).duration())),
+                    Behaviour::Taco(TacoBehaviour::AlwaysVisible) =>
+                        Some(Either::Right(Duration::from_secs(0))),
                     Behaviour::Taco(TacoBehaviour::ResetPermanent) => {
                         reset = Some(AutoReset::Never);
                         None
@@ -564,7 +645,10 @@ impl InteractReactor {
                         None
                     },
                     Behaviour::Taco(TacoBehaviour::ResetInstance) => {
-                        contexts = Some(HideContext::for_map(loaded_path.root.path, NonZero::new(filter_state.map.shard_id)));
+                        contexts = Some(HideContext::for_map(
+                            loaded_path.root.path,
+                            NonZero::new(filter_state.map.shard_id),
+                        ));
                         None
                     },
                     Behaviour::Taco(behaviour) => {
@@ -611,8 +695,10 @@ impl InteractReactor {
             }
             let lmarker_path = loaded_path.map_path(MarkerIndex::with_poi);
             let marker_path = loaded_path.root.root.rel(MarkerIndex::from(path));
-            let ids = guid.map(|guid| MarkerId::from_uuid_ref(guid.as_ref()).clone())
-                .into_iter().chain([
+            let ids = guid
+                .map(|guid| MarkerId::from_uuid_ref(guid.as_ref()).clone())
+                .into_iter()
+                .chain([
                     MarkerId::for_marker(lmarker_path),
                     MarkerId::for_marker(marker_path),
                 ]);
@@ -630,8 +716,7 @@ impl InteractReactor {
         };
         match action {
             InteractionEventAction::Trigger => TriggerKind::all(),
-            InteractionEventAction::Dismiss(..) =>
-                TriggerKind::DISMISS,
+            InteractionEventAction::Dismiss(..) => TriggerKind::DISMISS,
             InteractionEventAction::Manual(mask) => *mask,
             action if action.is_natural() && is_filtered() => {
                 let display = match lpoi {
@@ -657,7 +742,11 @@ impl InteractReactor {
         map_info: &'_ LoadedMapInfo,
         maps: &'a LoadedMaps,
     ) -> Option<(
-        PoiPath, LoadedPoiPath<PackMapPath>, &'a LoadedPoi, Option<&'a keys::Guid>, InteractionEventAction,
+        PoiPath,
+        LoadedPoiPath<PackMapPath>,
+        &'a LoadedPoi,
+        Option<&'a keys::Guid>,
+        InteractionEventAction,
     )> {
         match event {
             &InteractionEvent::Nearby { path, loaded_path } => {
@@ -671,11 +760,7 @@ impl InteractReactor {
                     allow if allow.is_empty() => false,
                     allow => SpaceInteraction::interest_for(attrs).0.intersects(allow),
                 };
-                let action = if act_auto {
-                    Some(InteractionEventAction::AutoTrigger)
-                } else {
-                    None
-                };
+                let action = if act_auto { Some(InteractionEventAction::AutoTrigger) } else { None };
                 action.map(|action| (path, loaded_path, lpoi, guid, action))
             },
             &InteractionEvent::Interact { ref action, path, loaded_path } => {
@@ -696,11 +781,11 @@ impl InteractReactor {
         event: InteractionEvent,
     ) -> PathingEvent {
         match event {
-            InteractionEvent::Gone { path, loaded_path } => {
-                self.process_gone(filter_state, map_info, maps, (path, loaded_path))
-            },
+            InteractionEvent::Gone { path, loaded_path } =>
+                self.process_gone(filter_state, map_info, maps, (path, loaded_path)),
             ref event @ (InteractionEvent::Nearby { .. } | InteractionEvent::Interact { .. }) => {
-                let Some((path, lpath, lpoi, guid, action)) = self.prepare_action(&event, map_info, maps) else {
+                let Some((path, lpath, lpoi, guid, action)) = self.prepare_action(&event, map_info, maps)
+                else {
                     return PathingEvent::Nop
                 };
                 let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
@@ -728,7 +813,9 @@ impl InteractReactor {
         if let Some(guid) = guid {
             // TODO: does ResetMarkerPath already fan this out and make this unnecessary? could be an or...
             if self.handle_interaction_end(filter_state, guid.0.as_ref()) {
-                msg.push(PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(guid.into())]));
+                msg.push(PathingEvent::ResetMarkerIds(vec![MarkerId::with_uuid(
+                    guid.into(),
+                )]));
             }
         }
 
@@ -741,8 +828,7 @@ impl InteractReactor {
         };
         match hidden.reset {
             AutoReset::Distance => (),
-            AutoReset::Never | AutoReset::Expiry { .. } | AutoReset::MapChange =>
-                return false,
+            AutoReset::Never | AutoReset::Expiry { .. } | AutoReset::MapChange => return false,
         }
 
         true
@@ -759,7 +845,9 @@ impl InteractReactor {
         maps: &'a LoadedMaps,
         pos: PlayerPosition,
     ) -> PathingEvent {
-        let Some(map_id) = self.map_interactions.map_id() else { return PathingEvent::Nop };
+        let Some(map_id) = self.map_interactions.map_id() else {
+            return PathingEvent::Nop
+        };
         let nearby = rx.nearby_tx.borrow().clone();
 
         let trigger_bvh = self.map_interactions.trigger_bvh.read().await;
@@ -789,20 +877,19 @@ impl InteractReactor {
         drop(trigger_bvh);
         let has_changes = !outgoing.is_empty() || !incoming.is_empty();
         // anything left in outgoing is no longer in range...
-        let gone = outgoing.iter_pois()
+        let gone = outgoing
+            .iter_pois()
             //.filter_map(|lpath| Self::lookup_lpoi_path(map_info, lpath))
-            .map(|(loaded_path, path)| InteractionEvent::Gone {
-                path,
-                loaded_path,
-            });
+            .map(|(loaded_path, path)| InteractionEvent::Gone { path, loaded_path });
         let mut incoming_move = incoming.clone();
-        let incoming = incoming.iter_pois()
-            .filter(|(lpath, _)| Self::lookup_lpoi_at(map_info, maps, *lpath)
-                .map(|(lpoi, ..)| lpoi.visibility.is_visible()).unwrap_or(false)
-            ).map(|(loaded_path, path)| InteractionEvent::Nearby {
-                path,
-                loaded_path,
-            });
+        let incoming = incoming
+            .iter_pois()
+            .filter(|(lpath, _)| {
+                Self::lookup_lpoi_at(map_info, maps, *lpath)
+                    .map(|(lpoi, ..)| lpoi.visibility.is_visible())
+                    .unwrap_or(false)
+            })
+            .map(|(loaded_path, path)| InteractionEvent::Nearby { path, loaded_path });
         let nearby_changes = gone.chain(incoming);
         if has_changes {
             rx.nearby_tx.send_if_modified(|nearby| {
@@ -818,11 +905,15 @@ impl InteractReactor {
         PathingEvent::Nop
     }
     fn lookup_lpoi_path(map_info: &LoadedMapInfo, lpath: PoiMapPath) -> Option<(PoiMapPath, PoiPath)> {
-        map_info.lookup_ref(&lpath.root).and_then(|i|
-            i.poi_path(lpath.unscope()).map(|path| (lpath, path))
-        )
+        map_info
+            .lookup_ref(&lpath.root)
+            .and_then(|i| i.poi_path(lpath.unscope()).map(|path| (lpath, path)))
     }
-    fn lookup_lpoi_at<'a, 'i>(map_info: &'i LoadedMapInfo, maps: &'a LoadedMaps, lpath: PoiMapPath) -> Option<(&'a LoadedPoi, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
+    fn lookup_lpoi_at<'a, 'i>(
+        map_info: &'i LoadedMapInfo,
+        maps: &'a LoadedMaps,
+        lpath: PoiMapPath,
+    ) -> Option<(&'a LoadedPoi, &'a LoadedMapPack, &'i Arc<MapPackInfo>)> {
         maps.lookup_with_info(map_info, &lpath.root).and_then(|(m, i)| {
             let li: LoadedPoiPath = lpath.unscope();
             m.lpois().lookup_ref(&li).map(|lpoi| (lpoi, m, i))
@@ -841,18 +932,18 @@ impl InteractReactor {
 
         let trigger_bvh = self.map_interactions.trigger_bvh.read().await;
         let query = SpaceInteraction::point_query(pos);
-        let inrange = trigger_bvh.traverse_iterator(&query, &self.map_interactions.entities[..])
-            .filter_map(|e| e.value.dist_dist_inrange(&pos)
-                .map(|dist| (e, dist))
-            );
+        let inrange = trigger_bvh
+            .traverse_iterator(&query, &self.map_interactions.entities[..])
+            .filter_map(|e| e.value.dist_dist_inrange(&pos).map(|dist| (e, dist)));
         for (entity, dist_dist) in inrange {
             let id = entity.value.poi_path();
-            let Some((lpoi, map, map_info)) = Self::lookup_lpoi_at(map_info, maps, id) else { continue };
+            let Some((lpoi, map, map_info)) = Self::lookup_lpoi_at(map_info, maps, id) else {
+                continue
+            };
             if !lpoi.visibility.is_visible() {
                 continue
             }
-            let nearby_discrete = (dist_dist * 1_000_000.0)
-                .min(0x40000000u32 as f32) as u32;
+            let nearby_discrete = (dist_dist * 1_000_000.0).min(0x40000000u32 as f32) as u32;
             let prev_nearby = nearby.contains_loaded_poi(id);
             let auto_trigger = entity.value.bounds.is_auto();
             let attrs = lpoi.interaction_attrs();
@@ -871,11 +962,13 @@ impl InteractReactor {
             let boring = interest_avail & interest_boring == interest_boring;
             let interesting = !(interest_avail & self.config.trigger_allow_interact).is_empty();
             let sort_id = (
-                !interesting, boring, nearby_discrete, auto_trigger, auto_triggered,
+                !interesting,
+                boring,
+                nearby_discrete,
+                auto_trigger,
+                auto_triggered,
             );
-            let data = CmpIgnore(
-                (id, lpoi, map, map_info, interest_avail)
-            );
+            let data = CmpIgnore((id, lpoi, map, map_info, interest_avail));
             nearby_pois.push(cmp::Reverse((sort_id, data)));
         }
         drop(trigger_bvh);
@@ -891,11 +984,8 @@ impl InteractReactor {
             };
             let guid = map.poi_guid_by_index(map_info, lpath.unscope());
             #[cfg(todo = "unnecessary")]
-            let _ = rx.event_tx.send(InteractionEvent::Interact {
-                action,
-                path,
-                loaded_path,
-            });
+            let _ = rx.event_tx
+                .send(InteractionEvent::Interact { action, path, loaded_path });
             let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
             if !allowed.is_empty() {
                 let interact = self.process_interaction(filter_state, (path, lpath, lpoi), action, allowed);
@@ -932,7 +1022,11 @@ impl InteractReactor {
 
         Poll::Pending
     }
-    pub(super) fn poll_event(&mut self, cx: &mut Context, rx: &mut InteractReceiver) -> Poll<InteractMessage> {
+    pub(super) fn poll_event(
+        &mut self,
+        cx: &mut Context,
+        rx: &mut InteractReceiver,
+    ) -> Poll<InteractMessage> {
         if let Poll::Ready(m) = self.poll_event_flag(cx) {
             return Poll::Ready(m)
         }
@@ -960,32 +1054,45 @@ impl InteractReactor {
     }
     fn get_interest_movement(&self) -> Option<(bool, bool)> {
         let has_pois = self.map_interactions.interest_nearby & self.config.trigger_allow_interact;
-        let needs_auto = self.map_interactions.interest_auto.intersects(self.config.trigger_allow_auto);
+        let needs_auto = self
+            .map_interactions
+            .interest_auto
+            .intersects(self.config.trigger_allow_auto);
         let passive_monitor = has_pois.intersects(SpaceInteraction::PASSIVE_NEARBY);
         (!has_pois.is_empty()).then_some((needs_auto, passive_monitor))
     }
     /// whether we need to check frequently for nearby auto-trigger POIs
     pub fn interest_movement(&self) -> Option<(bool, bool)> {
         let (auto, passive) = self.get_interest_movement()?;
-        if !self.enables.contains(PathingEnables::KATRENDER | PathingEnables::ENGINE) {
+        if !self
+            .enables
+            .contains(PathingEnables::KATRENDER | PathingEnables::ENGINE)
+        {
             Some((false, passive))
         } else {
             Some((auto, passive))
         }
     }
-    pub(super) fn with_rx<'a>(&'a mut self, rx: &'a mut InteractReceiver) -> impl Future<Output = InteractMessage> + 'a {
+    pub(super) fn with_rx<'a>(
+        &'a mut self,
+        rx: &'a mut InteractReceiver,
+    ) -> impl Future<Output = InteractMessage> + 'a {
         future::poll_fn(move |cx| self.poll_event(cx, rx))
     }
     const EVENT_RX_RETRY: usize = 2;
     pub(super) async fn process_event(
         &mut self,
         rx: &mut PathingReceiver,
-        (maps, map_info, filter_state, settings): (&LoadedMaps, &LoadedMapInfo, &FilterState, &SettingsLock),
+        (maps, map_info, filter_state, settings): (
+            &LoadedMaps,
+            &LoadedMapInfo,
+            &FilterState,
+            &SettingsLock,
+        ),
         msg: InteractMessage,
     ) -> PathingEvent {
         match msg {
-            InteractMessage::Nop =>
-                PathingEvent::Nop,
+            InteractMessage::Nop => PathingEvent::Nop,
             InteractMessage::RefreshSettings => {
                 self.reload_config(rx, settings).await;
                 PathingEvent::Nop
@@ -1007,7 +1114,8 @@ impl InteractReactor {
                     // TODO: spawn/bg this thanks
                     self.map_interactions.rebuild_trigger_bvh().await;
                     rx.interact.entities_tx.send_if_modified(|shared| {
-                        let _ptr_dirty = ArcPtrCmp::from_mut(&mut shared.trigger_bvh).clone_from_arc(&self.map_interactions.trigger_bvh);
+                        let _ptr_dirty = ArcPtrCmp::from_mut(&mut shared.trigger_bvh)
+                            .clone_from_arc(&self.map_interactions.trigger_bvh);
                         shared.entities.clone_from(&self.map_interactions.entities);
                         // XXX: notify anyway in case watcher is used to cache data? idk
                         true
@@ -1015,9 +1123,7 @@ impl InteractReactor {
                 }
                 PathingEvent::Nop
             },
-            InteractMessage::Event(event) => {
-                self.process_interact(filter_state, map_info, maps, event)
-            },
+            InteractMessage::Event(event) => self.process_interact(filter_state, map_info, maps, event),
             InteractMessage::PlayerMoved(pos) => {
                 let res = self.process_movement(&mut rx.interact, map_info, maps, pos).await;
                 rx.interact.player_pos.readjust_now();
@@ -1031,7 +1137,8 @@ impl InteractReactor {
                             events.append(&mut more);
                         },
                         m => {
-                            let process = self.process_event(rx, (maps, map_info, filter_state, settings), m);
+                            let process =
+                                self.process_event(rx, (maps, map_info, filter_state, settings), m);
                             let process = Box::pin(process).await;
                             out.push(process);
                         },
@@ -1045,29 +1152,29 @@ impl InteractReactor {
             },
         }
     }
-    pub(super) async fn reload_config(
-        &mut self,
-        rx: &mut PathingReceiver,
-        settings: &SettingsLock,
-    ) {
+    pub(super) async fn reload_config(&mut self, rx: &mut PathingReceiver, settings: &SettingsLock) {
         let settings = settings.read().await;
         let pathing = settings.pathing();
 
         self.config = InteractSettings::from_settings(&pathing);
         self.enables = rx.enables();
     }
-    pub(super) async fn collect_garbage(&mut self, _rx: &mut PathingReceiver, (_map_info, _maps): (&LoadedMapInfo, &LoadedMaps), map_id: Option<MapIndex>, aggressive: bool) {
+    pub(super) async fn collect_garbage(
+        &mut self,
+        _rx: &mut PathingReceiver,
+        (_map_info, _maps): (&LoadedMapInfo, &LoadedMaps),
+        map_id: Option<MapIndex>,
+        aggressive: bool,
+    ) {
         let interact_map_id = self.map_interactions.map_id();
         let map_dirty = interact_map_id != map_id;
         match (map_dirty, aggressive) {
             (false, false) => (),
-            (true, false) =>
-                self.map_interactions.clear_active(),
+            (true, false) => self.map_interactions.clear_active(),
             (false, true) if interact_map_id.is_some() => {
                 self.map_interactions.shrink_to_fit();
             },
-            (_, true) =>
-                self.map_interactions.clear(),
+            (_, true) => self.map_interactions.clear(),
         }
     }
     pub(super) fn exit(&mut self, rx: &mut InteractReceiver, _reason: Interruption) {
@@ -1076,7 +1183,9 @@ impl InteractReactor {
     }
 }
 impl Default for InteractReactor {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 #[derive(Debug, strum::Display)]
 pub enum InteractMessage {
@@ -1092,14 +1201,11 @@ pub enum InteractMessage {
 impl InteractMessage {
     pub fn join(self, e: Self) -> Self {
         Self::FanOut(match (self, e) {
-            (Self::Nop, e) | (e, Self::Nop) =>
-                return e,
+            (Self::Nop, e) | (e, Self::Nop) => return e,
             (Self::FanOut(mut events), e) => {
                 match e {
-                    Self::FanOut(e) =>
-                        events.extend(e),
-                    e =>
-                        events.push(e),
+                    Self::FanOut(e) => events.extend(e),
+                    e => events.push(e),
                 }
                 events
             },
@@ -1107,8 +1213,7 @@ impl InteractMessage {
                 trailing.insert(0, e);
                 trailing
             },
-            (e0, e1) =>
-                vec![e0, e1],
+            (e0, e1) => vec![e0, e1],
         })
     }
 
@@ -1124,14 +1229,22 @@ impl PathingController {
         true
     }
 
-    pub(super) async fn process_marker_copy(&mut self, _path: MarkerPath, _loaded_path: LoadedMarkerPath<PackMapPath>, value: AttrString, message: Option<AttrString>) {
-        use crate::with_i18n;
-        use taimi_hoard::lazyfmt;
+    pub(super) async fn process_marker_copy(
+        &mut self,
+        _path: MarkerPath,
+        _loaded_path: LoadedMarkerPath<PackMapPath>,
+        value: AttrString,
+        message: Option<AttrString>,
+    ) {
+        use {crate::with_i18n, taimi_hoard::lazyfmt};
 
         let value = &value[..];
         RenderState::try_send(RenderEvent::SendToClipboard(value.into()));
         let message = message.as_ref().map(|m| &m[..]);
-        let alert = lazyfmt::fmt_or(message, lazyfmt::MaybeFmt::new(|f| with_i18n!("copied", |copied| f.write_str(&copied))));
+        let alert = lazyfmt::fmt_or(
+            message,
+            lazyfmt::MaybeFmt::new(|f| with_i18n!("copied", |copied| f.write_str(&copied))),
+        );
         let alert = format!("{alert}\n\n\"{value}\"");
         let delay = match message.is_some() {
             true => Duration::from_secs(6),
@@ -1139,11 +1252,23 @@ impl PathingController {
         };
         self.spawn_alert(alert, delay);
     }
-    pub(super) async fn process_marker_info(&mut self, path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, message: AttrString) {
+    pub(super) async fn process_marker_info(
+        &mut self,
+        path: MarkerPath,
+        loaded_path: LoadedMarkerPath<PackMapPath>,
+        message: AttrString,
+    ) {
         log::debug!("TODO: marker info {}", &message[..]);
         self.spawn_alert(message[..].into(), Duration::from_secs(7));
     }
-    pub(super) fn process_marker_dismiss(&mut self, _path: MarkerPath, loaded_path: LoadedMarkerPath<PackMapPath>, until: Option<Either<Timestamp, Duration>>, contexts: Vec<HideContext>, reset: Option<AutoReset>) {
+    pub(super) fn process_marker_dismiss(
+        &mut self,
+        _path: MarkerPath,
+        loaded_path: LoadedMarkerPath<PackMapPath>,
+        until: Option<Either<Timestamp, Duration>>,
+        contexts: Vec<HideContext>,
+        reset: Option<AutoReset>,
+    ) {
         if let MarkerIndex::NS_POI = loaded_path.path.namespace() {
             let lpoi_path: LoadedPoiPath = LoadedPoiPath::with_path(loaded_path.path.index_poi_unchecked());
             self.filter_dismiss_poi(lpoi_path.pivot(loaded_path.root), until, contexts, reset);
@@ -1162,30 +1287,31 @@ impl PathingController {
         self.tasks.spawn(async move {
             let lock = PATHING_ALERT_HACK.lock().await;
             let alert = crate::timer::TextAlert {
-                    timer: crate::timer::TimerFile {
-                            icon: Default::default(),
-                            map_id: Default::default(),
-                            reset: crate::timer::TimerTrigger {
-                                    require_entry: false,
-                                    require_combat: false,
-                                    require_departure: false,
-                                    require_out_of_combat: false,
-                                    radius: None,
-                                    antipode: None,
-                                    position: None,
-                                    key_bind: None,
-                                    kind: crate::timer::TimerTriggerType::Key,
-                            },
-                            phases: Default::default(),
-                            author: Default::default(),
-                            description: Default::default(),
-                            name: Default::default(),
-                            category: Default::default(),
-                            id: Default::default(),
-                            path: None,
-                            association: None,
-                    }.into(),
-                    message: message.into(),
+                timer: crate::timer::TimerFile {
+                    icon: Default::default(),
+                    map_id: Default::default(),
+                    reset: crate::timer::TimerTrigger {
+                        require_entry: false,
+                        require_combat: false,
+                        require_departure: false,
+                        require_out_of_combat: false,
+                        radius: None,
+                        antipode: None,
+                        position: None,
+                        key_bind: None,
+                        kind: crate::timer::TimerTriggerType::Key,
+                    },
+                    phases: Default::default(),
+                    author: Default::default(),
+                    description: Default::default(),
+                    name: Default::default(),
+                    category: Default::default(),
+                    id: Default::default(),
+                    path: None,
+                    association: None,
+                }
+                .into(),
+                message: message.into(),
             };
             let timer = alert.timer.clone();
             crate::render::RenderState::try_send(crate::render::RenderEvent::AlertStart(alert));
@@ -1203,7 +1329,11 @@ pub struct InteractSettings {
 }
 impl InteractSettings {
     pub fn from_settings(settings: &PathingSettings) -> Self {
-        let PathingSettings { trigger_allow_auto, trigger_allow_interact, .. } = *settings;
+        let PathingSettings {
+            trigger_allow_auto,
+            trigger_allow_interact,
+            ..
+        } = *settings;
         Self {
             trigger_allow_auto,
             trigger_allow_interact,

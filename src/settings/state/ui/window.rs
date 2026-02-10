@@ -1,9 +1,12 @@
 use {
+    super::coords::{UiPoint, UiVec2},
     core::ops,
-    serde::{ser, de, Deserialize, Serialize},
-    taimi_hoard::{vec::{vec32_eq, vec32_ibits}, is_default},
     glam::Vec2,
-    super::coords::{UiVec2, UiPoint},
+    serde::{de, ser, Deserialize, Serialize},
+    taimi_hoard::{
+        is_default,
+        vec::{vec32_eq, vec32_ibits},
+    },
 };
 
 #[derive(Debug, Clone, Default, PartialOrd, Ord, PartialEq, Eq, Deserialize, Serialize)]
@@ -79,8 +82,7 @@ impl WindowOpen {
 
     pub fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Open | Self::Closed =>
-                bool::from(*self).serialize(serializer),
+            Self::Open | Self::Closed => bool::from(*self).serialize(serializer),
             _ => ser::Serialize::serialize(self, serializer),
         }
     }
@@ -162,14 +164,21 @@ impl AnchorPosition {
     }
 
     #[inline]
-    pub const fn x(&self) -> f32 { self.anchor.x() }
+    pub const fn x(&self) -> f32 {
+        self.anchor.x()
+    }
     #[inline]
-    pub const fn y(&self) -> f32 { self.anchor.y() }
+    pub const fn y(&self) -> f32 {
+        self.anchor.y()
+    }
 
     #[inline]
-    pub const fn is_default(&self) -> bool { self.anchor.is_zero() }
+    pub const fn is_default(&self) -> bool {
+        self.anchor.is_zero()
+    }
 }
-impl<T: glamour::Unit> ops::Mul<glamour::Vector2<T>> for AnchorPosition where
+impl<T: glamour::Unit> ops::Mul<glamour::Vector2<T>> for AnchorPosition
+where
     glamour::Vector2<T>: ops::Mul<Vec2>,
 {
     type Output = <glamour::Vector2<T> as ops::Mul<Vec2>>::Output;
@@ -177,7 +186,8 @@ impl<T: glamour::Unit> ops::Mul<glamour::Vector2<T>> for AnchorPosition where
         rhs * self.anchor.vec2
     }
 }
-impl<T: glamour::Unit> ops::Mul<glamour::Size2<T>> for AnchorPosition where
+impl<T: glamour::Unit> ops::Mul<glamour::Size2<T>> for AnchorPosition
+where
     glamour::Vector2<T>: ops::Mul<Vec2>,
 {
     type Output = <glamour::Vector2<T> as ops::Mul<Vec2>>::Output;
@@ -185,7 +195,8 @@ impl<T: glamour::Unit> ops::Mul<glamour::Size2<T>> for AnchorPosition where
         self * rhs.to_vector()
     }
 }
-impl<T: glamour::Unit> ops::Mul<glamour::Box2<T>> for AnchorPosition where
+impl<T: glamour::Unit> ops::Mul<glamour::Box2<T>> for AnchorPosition
+where
     glamour::Vector2<T>: ops::Mul<Vec2>,
     glamour::Point2<T>: ops::Add<<glamour::Vector2<T> as ops::Mul<Vec2>>::Output>,
 {
@@ -194,7 +205,8 @@ impl<T: glamour::Unit> ops::Mul<glamour::Box2<T>> for AnchorPosition where
         self * rhs.to_rect()
     }
 }
-impl<T: glamour::Unit> ops::Mul<glamour::Rect<T>> for AnchorPosition where
+impl<T: glamour::Unit> ops::Mul<glamour::Rect<T>> for AnchorPosition
+where
     glamour::Vector2<T>: ops::Mul<Vec2>,
     glamour::Point2<T>: ops::Add<<glamour::Vector2<T> as ops::Mul<Vec2>>::Output>,
 {
@@ -205,19 +217,27 @@ impl<T: glamour::Unit> ops::Mul<glamour::Rect<T>> for AnchorPosition where
 }
 impl From<AnchorPosition> for UiVec2 {
     #[inline]
-    fn from(pos: AnchorPosition) -> Self { pos.anchor }
+    fn from(pos: AnchorPosition) -> Self {
+        pos.anchor
+    }
 }
 impl From<AnchorPosition> for Vec2 {
     #[inline]
-    fn from(pos: AnchorPosition) -> Self { pos.anchor.into() }
+    fn from(pos: AnchorPosition) -> Self {
+        pos.anchor.into()
+    }
 }
 impl<T: glamour::Unit<Scalar = f32>> From<AnchorPosition> for glamour::Vector2<T> {
     #[inline]
-    fn from(pos: AnchorPosition) -> Self { pos.anchor.into() }
+    fn from(pos: AnchorPosition) -> Self {
+        pos.anchor.into()
+    }
 }
 impl From<AnchorPosition> for [f32; 2] {
     #[inline]
-    fn from(pos: AnchorPosition) -> Self { pos.anchor.into() }
+    fn from(pos: AnchorPosition) -> Self {
+        pos.anchor.into()
+    }
 }
 impl Default for AnchorPosition {
     #[inline]

@@ -624,7 +624,8 @@ pub trait LocationMut<N, L>: LocationRef<N, L> {
     fn lookup_mut<'a>(&'a mut self, loc: &Locator<N, L>) -> Option<&'a mut Self::LookupRef>;
 }
 
-impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ T where
+impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ T
+where
     T: LocationGet<N, L>,
 {
     type LookupGet = <T as LocationGet<N, L>>::LookupGet;
@@ -633,7 +634,8 @@ impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ T where
         T::lookup_get(*self, loc)
     }
 }
-impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ T where
+impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ T
+where
     T: LocationRef<N, L>,
 {
     type LookupRef = <T as LocationRef<N, L>>::LookupRef;
@@ -642,7 +644,8 @@ impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ T where
         T::lookup_ref(*self, loc)
     }
 }
-impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ mut T where
+impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ mut T
+where
     T: LocationGet<N, L>,
 {
     type LookupGet = <T as LocationGet<N, L>>::LookupGet;
@@ -651,7 +654,8 @@ impl<N, L, T: ?Sized> LocationGet<N, L> for &'_ mut T where
         T::lookup_get(self, loc)
     }
 }
-impl<N, L, T: ?Sized> LocationMut<N, L> for &'_ mut T where
+impl<N, L, T: ?Sized> LocationMut<N, L> for &'_ mut T
+where
     T: LocationMut<N, L>,
 {
     #[inline]
@@ -659,7 +663,8 @@ impl<N, L, T: ?Sized> LocationMut<N, L> for &'_ mut T where
         T::lookup_mut(*self, loc)
     }
 }
-impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ mut T where
+impl<N, L, T: ?Sized> LocationRef<N, L> for &'_ mut T
+where
     T: LocationRef<N, L>,
 {
     type LookupRef = <T as LocationRef<N, L>>::LookupRef;

@@ -1,11 +1,14 @@
-use {
-    crate::{state::{D3dState, D3dStateSnapshot}, dx11::prelude::*, D3dContextBindable},
-    std::{mem, slice},
-    glamour::{Size2, Box2, Point2, Rect, Unit},
-    num_traits::AsPrimitive,
-};
-
 pub use windows::Win32::Foundation::RECT;
+use {
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
+    glamour::{Box2, Point2, Rect, Size2, Unit},
+    num_traits::AsPrimitive,
+    std::{mem, slice},
+};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 #[repr(transparent)]
@@ -17,12 +20,7 @@ impl ScissorRect {
     pub const MAX_SCISSORS: usize =
         d3d11::D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE as usize;
 
-    pub const EMPTY: Self = Self::with_rect(RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    });
+    pub const EMPTY: Self = Self::with_rect(RECT { left: 0, top: 0, right: 0, bottom: 0 });
 
     pub const fn with_rect(rect: RECT) -> Self {
         Self { rect }
@@ -67,7 +65,7 @@ impl ScissorRect {
                         // docs are unclear, so double-check?
                         scissors.reserve_exact(Self::snapshot_count(context) as usize);
                         scissor_count = Self::snapshot_count(context) as u32;
-                    }
+                    },
                     #[cfg(debug_assertions)]
                     scissor_count if scissor_count == capacity => {
                         // double-check that it doesn't truncate to our len...
@@ -90,13 +88,15 @@ impl ScissorRect {
     }
 
     /// Aligned to top-left origin (0, 0, 0)
-    pub fn with_size<U: Unit>(size: Size2<U>) -> Self where
+    pub fn with_size<U: Unit>(size: Size2<U>) -> Self
+    where
         U::Scalar: AsPrimitive<i32>,
     {
         Self::with_bounds(Box2::new(glamour::Point2::ZERO, size.to_vector().to_point()))
     }
 
-    pub fn with_bounds<U: Unit>(rect: Box2<U>) -> Self where
+    pub fn with_bounds<U: Unit>(rect: Box2<U>) -> Self
+    where
         U::Scalar: AsPrimitive<i32>,
     {
         let rect = rect.as_::<i32>();
@@ -107,13 +107,11 @@ impl ScissorRect {
             bottom: rect.max.y,
         })
     }
-    pub fn with_bounds_rect<U: Unit>(rect: Rect<U>) -> Self where
+    pub fn with_bounds_rect<U: Unit>(rect: Rect<U>) -> Self
+    where
         U::Scalar: AsPrimitive<i32>,
     {
-        let rect = Rect::<i32>::new(
-            rect.origin.as_(),
-            rect.size.as_(),
-        );
+        let rect = Rect::<i32>::new(rect.origin.as_(), rect.size.as_());
         Self::with_bounds(rect.to_box2())
     }
 
@@ -158,9 +156,7 @@ impl ScissorRect {
         unsafe { mem::transmute_copy(&scissors) }
     }
     pub fn vec_from_raw(scissors: Vec<RECT>) -> Vec<Self> {
-        unsafe {
-            mem::transmute(scissors)
-        }
+        unsafe { mem::transmute(scissors) }
     }
 
     pub fn bind_set<V: AsRef<[RECT]>>(context: &Dx11Context, scissors: V) {
@@ -207,21 +203,24 @@ impl From<ScissorRect> for RECT {
         scissor.rect
     }
 }
-impl<U: Unit> From<Rect<U>> for ScissorRect where
+impl<U: Unit> From<Rect<U>> for ScissorRect
+where
     U::Scalar: AsPrimitive<i32>,
 {
     fn from(scissor: Rect<U>) -> Self {
         Self::with_bounds_rect(scissor)
     }
 }
-impl<U: Unit> From<Box2<U>> for ScissorRect where
+impl<U: Unit> From<Box2<U>> for ScissorRect
+where
     U::Scalar: AsPrimitive<i32>,
 {
     fn from(scissor: Box2<U>) -> Self {
         Self::with_bounds(scissor)
     }
 }
-impl<U: Unit> From<Size2<U>> for ScissorRect where
+impl<U: Unit> From<Size2<U>> for ScissorRect
+where
     U::Scalar: AsPrimitive<i32>,
 {
     fn from(scissor: Size2<U>) -> Self {

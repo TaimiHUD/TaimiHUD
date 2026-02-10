@@ -193,7 +193,12 @@ impl From<GameplayState> for NexusGameState {
         match state {
             GameplayState::Intermission { initial: true, .. } => NexusGameState::CharacterSelection,
             #[cfg(todo)]
-            GameplayState::Intermission { initial: false, prev_map_id: Some(prev), next_map_id: Some(next), .. } if prev == next => NexusGameState::Cinematic,
+            GameplayState::Intermission {
+                initial: false,
+                prev_map_id: Some(prev),
+                next_map_id: Some(next),
+                ..
+            } if prev == next => NexusGameState::Cinematic,
             GameplayState::Intermission { initial: false, .. } => NexusGameState::LoadingScreen,
             GameplayState::Gameplay { .. } => NexusGameState::Gameplay,
         }

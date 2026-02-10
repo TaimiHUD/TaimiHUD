@@ -145,25 +145,32 @@ pub fn with_i18n<R, F>(message_id: &str, f: F) -> R
 where
     F: FnOnce(Cow<str>) -> R,
 {
-    use {core::cell::RefCell, fluent_syntax::ast::{PatternElement, Expression, InlineExpression, Identifier, Pattern}};
+    use {
+        core::cell::RefCell,
+        fluent_syntax::ast::{Expression, Identifier, InlineExpression, Pattern, PatternElement},
+    };
     /// try to unwrap single-expression values that are either string literals
     /// or refer to an alias which might be
     ///
     /// TODO: could resolve simple variable references too for one-input patterns,
     /// but that's unlikely to be useful at all...
     #[inline]
-    fn resolve_simple_pattern<S>(pat: &Pattern<S>, depth_limit: usize) -> Option<Result<&S, &Identifier<S>>> {
+    fn resolve_simple_pattern<S>(
+        pat: &Pattern<S>,
+        depth_limit: usize,
+    ) -> Option<Result<&S, &Identifier<S>>> {
         match &pat.elements[..] {
             &[ref e] => resolve_simple_pattern_elem(e, depth_limit),
             _ => None,
         }
     }
-    fn resolve_simple_pattern_elem<S>(e: &PatternElement<S>, depth_limit: usize) -> Option<Result<&S, &Identifier<S>>> {
+    fn resolve_simple_pattern_elem<S>(
+        e: &PatternElement<S>,
+        depth_limit: usize,
+    ) -> Option<Result<&S, &Identifier<S>>> {
         match e {
             PatternElement::TextElement { value: one } => Some(Ok(one)),
-            PatternElement::Placeable {
-                expression,
-            } => resolve_simple_expr(expression, depth_limit),
+            PatternElement::Placeable { expression } => resolve_simple_expr(expression, depth_limit),
         }
     }
     #[inline]
@@ -173,59 +180,66 @@ where
             _ => None,
         }
     }
-    fn resolve_simple_expr_inline<S>(e: &InlineExpression<S>, depth_limit: usize) -> Option<Result<&S, &Identifier<S>>> {
+    fn resolve_simple_expr_inline<S>(
+        e: &InlineExpression<S>,
+        depth_limit: usize,
+    ) -> Option<Result<&S, &Identifier<S>>> {
         match e {
-            InlineExpression::Placeable {
-                expression,
-            } => depth_limit.checked_sub(1)
+            InlineExpression::Placeable { expression } => depth_limit
+                .checked_sub(1)
                 .and_then(|l| resolve_simple_expr(expression, l)),
-            InlineExpression::MessageReference { id, attribute: None } =>
-                Some(Err(id)),
+            InlineExpression::MessageReference { id, attribute: None } => Some(Err(id)),
             InlineExpression::StringLiteral { value } => Some(Ok(value)),
             _ => None,
         }
     }
-    fn resolve_simple_pattern_str<'a>(pat: &Pattern<&'a str>, depth_limit: usize) -> Option<Result<&'a str, Identifier<&'a str>>> {
+    fn resolve_simple_pattern_str<'a>(
+        pat: &Pattern<&'a str>,
+        depth_limit: usize,
+    ) -> Option<Result<&'a str, Identifier<&'a str>>> {
         match pat.elements.is_empty() {
             true => Some(Ok("")),
-            _ => resolve_simple_pattern(pat, depth_limit)
-                .map(|m| m.copied().map_err(|e| e.clone())),
+            _ => resolve_simple_pattern(pat, depth_limit).map(|m| m.copied().map_err(|e| e.clone())),
         }
     }
     /// TODO: unclear if `with_fluent_message` is reentrant or not
-    fn resolve_simple_message<R, F: FnOnce(&str) -> R>(message_id: &str, depth_limit: usize, f: F) -> Option<Option<R>> {
+    fn resolve_simple_message<R, F: FnOnce(&str) -> R>(
+        message_id: &str,
+        depth_limit: usize,
+        f: F,
+    ) -> Option<Option<R>> {
         // XXX: why does this not take an FnOnce...
         let f = RefCell::new(Some(f));
-        LANGUAGE_LOADER.with_fluent_message(message_id, |m| {
-            let res = match m.value().and_then(|m| resolve_simple_pattern_str(m, depth_limit)) {
-                Some(Ok(lit)) => {
-                    let f = f.try_borrow_mut().ok().and_then(|mut f| f.take());
-                    Some(f.map(|f| f(lit)))
-                },
-                Some(Err(indirect)) => match depth_limit.checked_sub(1) {
-                    None =>
-                        Some(None),
-                    Some(depth_limit) => {
+        LANGUAGE_LOADER
+            .with_fluent_message(message_id, |m| {
+                let res = match m.value().and_then(|m| resolve_simple_pattern_str(m, depth_limit)) {
+                    Some(Ok(lit)) => {
                         let f = f.try_borrow_mut().ok().and_then(|mut f| f.take());
-                        match f {
-                            Some(f) =>
-                                resolve_simple_message(indirect.name, depth_limit, f),
-                            None => Some(None),
-                        }
+                        Some(f.map(|f| f(lit)))
                     },
-                },
-                None =>
-                    Some(None),
-            };
-            res
-        }).flatten()
+                    Some(Err(indirect)) => match depth_limit.checked_sub(1) {
+                        None => Some(None),
+                        Some(depth_limit) => {
+                            let f = f.try_borrow_mut().ok().and_then(|mut f| f.take());
+                            match f {
+                                Some(f) => resolve_simple_message(indirect.name, depth_limit, f),
+                                None => Some(None),
+                            }
+                        },
+                    },
+                    None => Some(None),
+                };
+                res
+            })
+            .flatten()
     }
     const DEPTH_LIMIT: usize = 3;
 
     let mut f = Some(f);
     let res = resolve_simple_message(message_id, DEPTH_LIMIT, |msg| {
         f.take().map(|f| f(Cow::Borrowed(msg)))
-    }).map(Option::flatten);
+    })
+    .map(Option::flatten);
     match (res, f.take()) {
         (Some(Some(r)), _) => r,
         (Some(None), Some(f)) => f(LANGUAGE_LOADER.get(message_id).into()),

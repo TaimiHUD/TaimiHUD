@@ -1,16 +1,13 @@
 use {
     crate::{
         exports::runtime::{self as rt, bindings::GameBinds},
-        settings::{
-            pathing::PathingSave,
-            state::save_state_backup,
-        },
+        settings::{pathing::PathingSave, state::save_state_backup},
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{borrow::Cow, fs, io, path::Path, sync::LazyLock},
-    tokio::time,
     taimi_sync::watched,
+    tokio::time,
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -61,8 +58,12 @@ impl SaveState {
         match self {
             Self { game_binds, .. } if !game_binds.is_empty() => false,
             Self { pathing_state: Some(pathing), .. } if !pathing.is_empty() => false,
-            Self { game_binds: _, pathing_state: _, api_auto_update: false } => true,
-            _ => false
+            Self {
+                game_binds: _,
+                pathing_state: _,
+                api_auto_update: false,
+            } => true,
+            _ => false,
         }
     }
 

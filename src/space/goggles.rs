@@ -18,10 +18,10 @@ use {
     windows::{
         core::{IUnknown, Interface, InterfaceRef},
         Win32::Graphics::Direct3D11::{
+            ID3D11Buffer,
+            ID3D11DepthStencilState,
             ID3D11DepthStencilView,
             ID3D11DeviceContext,
-            ID3D11DepthStencilState,
-            ID3D11Buffer,
             ID3D11DeviceContext_Vtbl,
             ID3D11RenderTargetView,
             D3D11_COMPARISON_LESS,
@@ -45,7 +45,11 @@ pub struct Goggles {
     pub set_buffers: GenericDetour<SetBuffers>,
 }
 
-type SetDepthState = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, buffer: Option<InterfaceRef<'static, ID3D11DepthStencilState>>, u32);
+type SetDepthState = unsafe extern "system" fn(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    buffer: Option<InterfaceRef<'static, ID3D11DepthStencilState>>,
+    u32,
+);
 type SetTargets = unsafe extern "system" fn(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
     count: u32,
@@ -58,7 +62,13 @@ type SetBuffers = unsafe extern "system" fn(
     count: u32,
     buffers: *const Option<InterfaceRef<'static, ID3D11Buffer>>,
 );
-type ClearDepth = unsafe extern "system" fn(this: InterfaceRef<'static, ID3D11DeviceContext>, view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>, flags: u32, depth: f32, fill_value: u8);
+type ClearDepth = unsafe extern "system" fn(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
+    flags: u32,
+    depth: f32,
+    fill_value: u8,
+);
 type Release = unsafe extern "system" fn(this: InterfaceRef<'static, IUnknown>) -> u32;
 
 pub(crate) static LENS_PTR: AtomicPtr<ID3D11DepthStencilView> = AtomicPtr::new(ptr::null_mut());
@@ -130,7 +140,9 @@ unsafe extern "system" fn taimi_set_depth_state(
         frame_log!(;"D3D11DeviceContext::OMSetDepthStencilState({this:?}, {state:?}, {stencil_ref:?})");
     }
     if let Some(state) = state {
-        if state.as_raw() as usize == get_ferret() as usize { return }
+        if state.as_raw() as usize == get_ferret() as usize {
+            return
+        }
     }
     match GOGGLES.get() {
         Some(orig) => orig.set_depth_state.call(this, state, stencil_ref),
@@ -263,10 +275,14 @@ unsafe extern "system" fn taimi_set_targets(
     if count > 0 {
         let mut trigger = false;
         if let Some(v) = depth_view {
-        if v.as_raw() as usize == get_ferret() as usize { trigger = true; }
+            if v.as_raw() as usize == get_ferret() as usize {
+                trigger = true;
+            }
         }
         if let Some(v) = *views_ptr {
-            if v.as_raw() as usize == get_ferret() as usize { trigger = true; }
+            if v.as_raw() as usize == get_ferret() as usize {
+                trigger = true;
+            }
         }
         if trigger {
             if let Some(v) = *views_ptr {
@@ -345,10 +361,12 @@ unsafe extern "system" fn taimi_clear_depth(
 
 // TODO: pass ID3D11DepthStencilView_Vtbl .-.
 pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
-    let set_depth_state: unsafe extern "system" fn (*mut c_void, *mut c_void, u32) = vtable.OMSetDepthStencilState;
+    let set_depth_state: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) =
+        vtable.OMSetDepthStencilState;
     let set_depth_state: SetDepthState = unsafe { transmute(set_depth_state) };
 
-    let clear_depth: unsafe extern "system" fn (*mut c_void, *mut c_void, u32, f32, u8) = vtable.ClearDepthStencilView;
+    let clear_depth: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, f32, u8) =
+        vtable.ClearDepthStencilView;
     let clear_depth: ClearDepth = unsafe { transmute(clear_depth) };
 
     let set_buffers: unsafe extern "system" fn(*mut c_void, u32, u32, *const *mut c_void) =
@@ -488,12 +506,8 @@ pub fn classify_space_lens(engine: &Engine) {
 
 static FERRET: sync_unsafe_cell::SyncUnsafeCell<u64> = sync_unsafe_cell::SyncUnsafeCell::new(0);
 pub fn ferret(value: u64) {
-    unsafe {
-        ptr::write_volatile(FERRET.get(), value)
-    }
+    unsafe { ptr::write_volatile(FERRET.get(), value) }
 }
 fn get_ferret() -> u64 {
-    unsafe {
-        ptr::read_volatile(FERRET.get())
-    }
+    unsafe { ptr::read_volatile(FERRET.get()) }
 }

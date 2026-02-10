@@ -1,22 +1,23 @@
 use {
     self::{
+        interact::{InteractFilterFlags, InteractSortFlags},
         pathing::{PathingFilterFlags, PathingSearchFlags},
-        interact::{InteractSortFlags, InteractFilterFlags},
         window::WindowState,
     },
     serde::{Deserialize, Serialize},
-    taimi_sync::watched::Watcher,
     taimi_hoard::is_false_ref,
+    taimi_sync::watched::Watcher,
 };
+
 pub use self::{
     coords::UiVec2,
     window::{AnchorPosition, WindowOpen},
 };
 
-pub mod pathing;
-pub mod interact;
-pub mod window;
 pub mod coords;
+pub mod interact;
+pub mod pathing;
+pub mod window;
 
 pub type UiState = Render2DState;
 
@@ -30,10 +31,7 @@ pub struct Render2DState {
     #[cfg(todo)]
     #[serde(default, skip_serializing_if = "TimersWindowState::is_empty")]
     pub timers_window: watch::Sender<TimersWindowState>,
-    #[serde(
-        default,
-        skip_serializing_if = "Render2DState::is_empty_pathing",
-    )]
+    #[serde(default, skip_serializing_if = "Render2DState::is_empty_pathing")]
     pub pathing_window: Watcher<PathingWindowState>,
 }
 
@@ -73,11 +71,20 @@ impl PathingWindowState {
         self.window.size = match size {
             size if size == Self::DEFAULT_SIZE => None,
             size => Some(size),
-        }.unwrap_or_default()
+        }
+        .unwrap_or_default()
     }
     pub fn is_empty(&self) -> bool {
-        let Self { tab, window, search, filter, interact_pois } = self;
-        (search.is_empty() & filter.is_empty() & tab.is_empty()) && interact_pois.is_empty() && window.is_empty()
+        let Self {
+            tab,
+            window,
+            search,
+            filter,
+            interact_pois,
+        } = self;
+        (search.is_empty() & filter.is_empty() & tab.is_empty())
+            && interact_pois.is_empty()
+            && window.is_empty()
     }
 }
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Default, Eq, PartialOrd, Ord, Hash)]
@@ -110,12 +117,9 @@ impl PathingWindowTab {
     pub fn focus(&mut self, index: usize) {
         match index {
             #[cfg(feature = "paths-edit")]
-            Self::INDEX_EDIT =>
-                *self = Self { edit: true, .. Default::default() },
-            Self::INDEX_POIS =>
-                *self = Self { pois: true, .. Default::default() },
-            _ =>
-                *self = Self { packs: true, .. Default::default() },
+            Self::INDEX_EDIT => *self = Self { edit: true, ..Default::default() },
+            Self::INDEX_POIS => *self = Self { pois: true, ..Default::default() },
+            _ => *self = Self { packs: true, ..Default::default() },
         }
     }
     pub const fn selected_packs(&self) -> bool {
@@ -137,14 +141,14 @@ impl PathingWindowTab {
         self.index() == 0
     }
     pub fn focus_packs(&mut self) {
-        *self = Self { packs: true, .. Default::default() };
+        *self = Self { packs: true, ..Default::default() };
     }
     pub fn focus_pois(&mut self) {
-        *self = Self { pois: true, .. Default::default() };
+        *self = Self { pois: true, ..Default::default() };
     }
     #[cfg(feature = "paths-edit")]
     pub fn focus_edit(&mut self) {
-        *self = Self { edit: true, .. Default::default() };
+        *self = Self { edit: true, ..Default::default() };
     }
 }
 impl PartialEq for PathingWindowTab {
@@ -197,16 +201,32 @@ impl PathingFilterState {
 /// TODO: sort order too (but maybe let imgui persist it for us and serde(skip))?
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct InteractPoiState {
-    #[serde(default = "InteractFilterFlags::settings_default", skip_serializing_if = "InteractFilterFlags::is_settings_default")]
+    #[serde(
+        default = "InteractFilterFlags::settings_default",
+        skip_serializing_if = "InteractFilterFlags::is_settings_default"
+    )]
     pub flags: InteractFilterFlags,
-    #[serde(default = "InteractSortFlags::settings_default", skip_serializing_if = "InteractSortFlags::is_settings_default")]
+    #[serde(
+        default = "InteractSortFlags::settings_default",
+        skip_serializing_if = "InteractSortFlags::is_settings_default"
+    )]
     pub sort: InteractSortFlags,
-    #[serde(default = "InteractSortFlags::settings_default_descending", skip_serializing_if = "InteractSortFlags::is_settings_default_descending")]
+    #[serde(
+        default = "InteractSortFlags::settings_default_descending",
+        skip_serializing_if = "InteractSortFlags::is_settings_default_descending"
+    )]
     pub sort_desc: InteractSortFlags,
 }
 impl InteractPoiState {
     pub fn is_empty(&self) -> bool {
-        let Self { flags: InteractFilterFlags::DEFAULT_UI, sort: InteractSortFlags::DEFAULT_UI, sort_desc: InteractSortFlags::DEFAULT_UI_DESC } = self else { return false };
+        let Self {
+            flags: InteractFilterFlags::DEFAULT_UI,
+            sort: InteractSortFlags::DEFAULT_UI,
+            sort_desc: InteractSortFlags::DEFAULT_UI_DESC,
+        } = self
+        else {
+            return false
+        };
         true
     }
 }

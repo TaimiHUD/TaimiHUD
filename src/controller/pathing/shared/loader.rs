@@ -235,8 +235,8 @@ impl SharedPackInfo {
             0..=24 => resource,
             _toolong => {
                 use {
-                    std::hash::{Hash, Hasher},
                     rustc_hash::FxHasher,
+                    std::hash::{Hash, Hasher},
                 };
                 let mut hasher = FxHasher::with_seed(self.index.path as usize);
                 resource.hash(&mut hasher);

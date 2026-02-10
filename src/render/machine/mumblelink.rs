@@ -288,7 +288,10 @@ impl RenderMachine {
                     #[cfg(todo)]
                     let map_id = NonZero::new(rt::mumble_link_ptr().ok().and_then(|ml| ml.read_map_id()));
                     let map_id = map_id.or(prev_map_id);
-                    gameplay_change = Some(GameplayState::new_loading(map_id.unwrap_or_default(), prev_map_id.unwrap_or_default()));
+                    gameplay_change = Some(GameplayState::new_loading(
+                        map_id.unwrap_or_default(),
+                        prev_map_id.unwrap_or_default(),
+                    ));
                 }
                 self.mumblelink_frame_skip = self.mumblelink_frame_skip.saturating_add(1);
                 None

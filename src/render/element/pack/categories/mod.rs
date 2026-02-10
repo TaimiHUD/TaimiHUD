@@ -34,23 +34,27 @@ use {
             },
         },
         render::RenderState,
-        with_i18n,
         settings::state::ui::pathing::PathingFilterFlags,
+        with_i18n,
     },
     std::{collections::BTreeMap, iter, sync::Arc},
-    taimi_hoard::{flags::BitSet, loc::LocationRef,
-        iters::tree::DfsPre,
-        str_opt, str_opt_ref,
-    },
+    taimi_hoard::{flags::BitSet, iters::tree::DfsPre, loc::LocationRef, str_opt, str_opt_ref},
     taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, VisibilityFlags},
     taimi_pack::{
         attributes::InteractionAttributes,
         category::{id::AsFullId, Category, CategoryFlags, CategoryId},
     },
 };
+
 pub use self::{
     action::{CategoryAction, CategoryActionSlot},
-    filter::{CategorySearchFilter, CategoryEnableFilterState, PackCategoryMaskState, CategoryFilterQuery, CategorySearchQuery},
+    filter::{
+        CategoryEnableFilterState,
+        CategoryFilterQuery,
+        CategorySearchFilter,
+        CategorySearchQuery,
+        PackCategoryMaskState,
+    },
 };
 
 mod action;
@@ -91,12 +95,11 @@ impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
         if self.is_decorative {
             match self.is_leaf {
                 Some(true) => selected = true,
-                Some(false) => {
+                Some(false) =>
                     if self.filter_selected.is_none() && !framed {
                     } else {
                         bullet = true;
-                    }
-                },
+                    },
                 None => {
                     // needs to stand out more among branches too..?
                     // TODO: less necessary once checkboxes become left-aligned
@@ -114,8 +117,7 @@ impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
             Some(false) => framed ^= true,
             Some(true) if !selected => selected = true,
             Some(true) if !bullet && leaf => bullet = true,
-            Some(true) =>
-                framed ^= true,
+            Some(true) => framed ^= true,
         }
         let header_name;
         if framed && leaf {
@@ -140,8 +142,7 @@ impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
         }
         let tree_token = unbuilt.push(self.ui);
         let action = match (self.open_cond, self.open, &tree_token) {
-            (Condition::Always, open, token) if !leaf && open != token.is_some() =>
-                Some(UiAction::Primary),
+            (Condition::Always, open, token) if !leaf && open != token.is_some() => Some(UiAction::Primary),
             _ if self.ui.is_item_clicked_with_button(MouseButton::Right) => Some(UiAction::RIGHT_CLICK),
             #[cfg(todo)]
             _ if !framed && self.ui.is_item_clicked() => Some(UiAction::Primary),
@@ -653,7 +654,9 @@ impl super::PackElement {
     #[cfg(todo)]
     pub(super) fn apply_search_filter<F: CategorySearchFilter>(&mut self, filter: &mut F) {
         let pack_data = self.state.activate_pack_data().ok();
-        self.categories.filter_state.update_search_candidates(self.state.pack_path(), pack_data, filter)
+        self.categories
+            .filter_state
+            .update_search_candidates(self.state.pack_path(), pack_data, filter)
     }
     fn apply_search_filter(&mut self, filter: Option<()>) {
         let clear_mask = match (&self.categories.filter_state.search_candidates, filter) {
@@ -792,16 +795,21 @@ impl<'a, 'u> DrawCategoryCollection<'a, 'u> {
             None => cats.map(|cats| cats.lonely.contains(path)).unwrap_or(false),
         };
         let mut filter_whitelisted = None;
-        let mut filter_whitelisted = || *filter_whitelisted.get_or_insert_with(|| self.state.filter_state.contains_category(path));
+        let mut filter_whitelisted =
+            || *filter_whitelisted.get_or_insert_with(|| self.state.filter_state.contains_category(path));
         let filter_selected = match self.state.filter_state.is_active() {
             false => None,
             true => match (pseudo_root, self.state.filter_state.all_filtered()) {
                 (Some(..), true) => Some(false),
                 (None, true) => None,
-                (pseudo_root, false) if self.state.filter_state.is_matching() => match self.state.filter_state.matches_category(path) {
-                    false if pseudo_root.is_some() && self.state.filter_state.search_candidates.is_none() => None,
-                    matches => Some(matches),
-                },
+                (pseudo_root, false) if self.state.filter_state.is_matching() =>
+                    match self.state.filter_state.matches_category(path) {
+                        false
+                            if pseudo_root.is_some()
+                                && self.state.filter_state.search_candidates.is_none() =>
+                            None,
+                        matches => Some(matches),
+                    },
                 (pseudo_root, false) if pseudo_root.is_none() || is_lonely => match filter_whitelisted() {
                     false => Some(false),
                     true => None,
@@ -900,11 +908,15 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
         }
     }
 
-    pub fn draw_root_then<R, F: FnOnce(&mut Self) -> R>(&mut self, path: CategoryPath, pseudo_root: bool, f: F) -> Option<R> {
+    pub fn draw_root_then<R, F: FnOnce(&mut Self) -> R>(
+        &mut self,
+        path: CategoryPath,
+        pseudo_root: bool,
+        f: F,
+    ) -> Option<R> {
         self.push_and_draw(path, Some(pseudo_root));
 
-        let res = self.node_contents_visible()
-            .then(|| f(self));
+        let res = self.node_contents_visible().then(|| f(self));
 
         while let Some(..) = self.pop_to(path) {}
 
@@ -962,7 +974,10 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                     }
                 } else {
                     {
-                        let _padding = self.draw.ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                        let _padding = self
+                            .draw
+                            .ui
+                            .push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
                         //self.draw.ui.spacing();
                         self.draw.ui.dummy([1.0, 1.0]);
                     }
@@ -980,7 +995,13 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                 let drawn = self.draw_one(cat_path).map(|drawn| drawn.is_some());
                 if drawn.is_some() {
                     pending_row = true;
-                    if !self.draw.state.filter_state.flags.contains(PathingFilterFlags::ShowHidden) {
+                    if !self
+                        .draw
+                        .state
+                        .filter_state
+                        .flags
+                        .contains(PathingFilterFlags::ShowHidden)
+                    {
                         // at least one child rendered, so don't complain anymore
                         if let Some(filtered) = children_filtered.iter_mut().nth_back(1) {
                             *filtered = usize::MAX;
@@ -1001,7 +1022,12 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
             self.draw.ui.table_next_column();
         }
     }
-    fn pop_amt_from(&mut self, children_filtered: &mut Vec<usize>, path: CategoryPath, popping: usize) -> bool {
+    fn pop_amt_from(
+        &mut self,
+        children_filtered: &mut Vec<usize>,
+        path: CategoryPath,
+        popping: usize,
+    ) -> bool {
         for _ in 0..=popping {
             let was_open = self.node_contents_visible();
             let child_path = self.pop_to(path);
@@ -1026,7 +1052,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                     } else {
                         self.draw.ui.spacing();
                     }
-                }
+                },
                 _ => (),
             }
             if child_path.is_none() {
@@ -1035,7 +1061,11 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
         }
         true
     }
-    pub fn draw_children(&mut self, root_path: Option<CategoryPath>, cat_iter: &mut dyn DfsPre<Item = CategoryPath>) {
+    pub fn draw_children(
+        &mut self,
+        root_path: Option<CategoryPath>,
+        cat_iter: &mut dyn DfsPre<Item = CategoryPath>,
+    ) {
         let mut start_depth = None;
         let mut prev_depth: Option<usize> = None;
         let mut prev_closed = None;
@@ -1045,9 +1075,7 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
                 Some(true) => cat_iter.node_next_sibling(),
                 _ => cat_iter.next().map(Ok),
             };
-            let Some(Ok(cat_path) | Err(cat_path)) = next else {
-                break
-            };
+            let Some(Ok(cat_path) | Err(cat_path)) = next else { break };
 
             let depth = cat_iter.node_depth();
             if start_depth.is_none() {
@@ -1079,10 +1107,10 @@ impl<'a, 'u> DrawCategoryCollectionTree<'a, 'u> {
             prev_closed = drawn.map(|d| d.is_none());
         }
         match root_path {
-            Some(root_path) => while let Some(..) = self.pop_to(root_path) {
-            },
+            Some(root_path) => while let Some(..) = self.pop_to(root_path) {},
             None => {
-                let rem_depth = start_depth.and_then(|start| prev_depth.and_then(|prev| prev.checked_sub(start)));
+                let rem_depth =
+                    start_depth.and_then(|start| prev_depth.and_then(|prev| prev.checked_sub(start)));
                 if let Some(rem) = rem_depth {
                     for _ in 0..=rem {
                         let popped = match root_path {
@@ -1237,14 +1265,15 @@ impl CategoryCollectionState {
             self.filter_state.update_hidden(category_info);
         }
         let category_info = category_info.map(|cats| &**cats);
-        let loaded_map_info = self.filter_state.flags.contains(PathingFilterFlags::CurrentMap)
+        let loaded_map_info = self
+            .filter_state
+            .flags
+            .contains(PathingFilterFlags::CurrentMap)
             .then_some(pack.map_info.as_ref());
         if pack_damage.map.is_some() || self.filter_state.is_dirty_loaded(loaded_map_info) {
             match loaded_map_info {
-                Some(map_info) =>
-                    self.filter_state.update_loaded(category_info, map_info),
-                _ =>
-                    self.filter_state.clear_loaded(),
+                Some(map_info) => self.filter_state.update_loaded(category_info, map_info),
+                _ => self.filter_state.clear_loaded(),
             }
             filter_dirty |= !self.filter_state.is_dirty_loaded(loaded_map_info);
         }
@@ -1252,8 +1281,9 @@ impl CategoryCollectionState {
         let enable_filter = self.filter_state.flags.enable_filter();
         if self.filter_state.is_dirty_enable(enable_filter) {
             match enable_filter {
-                Some(enable) =>
-                    self.filter_state.update_enable(pack_config, category_info, enable),
+                Some(enable) => self
+                    .filter_state
+                    .update_enable(pack_config, category_info, enable),
                 _ => self.filter_state.clear_enable(),
             }
             filter_dirty |= !self.filter_state.is_dirty_enable(enable_filter);
@@ -1266,7 +1296,8 @@ impl CategoryCollectionState {
                         _ => None,
                     };
                     let filtered_enabled = match enable_filter {
-                        Some(en) if en != matches!(pack.unloaded, Some(UnloadedReason::Disabled)) => Some(en),
+                        Some(en) if en != matches!(pack.unloaded, Some(UnloadedReason::Disabled)) =>
+                            Some(en),
                         Some(false) if pack.unloaded.is_some() => Some(false),
                         _ => None,
                     };
@@ -1279,9 +1310,13 @@ impl CategoryCollectionState {
                         _ => Some(None),
                     };
                     if let Some(pack_data) = pack_data {
-                        let pack_data = pack_data.as_ref()
-                            .map(|pd| pd.as_ref().map(|pd| &**pd));
-                        self.filter_state.update_search_candidates(pack.pack_path(), category_info, pack_data, query)
+                        let pack_data = pack_data.as_ref().map(|pd| pd.as_ref().map(|pd| &**pd));
+                        self.filter_state.update_search_candidates(
+                            pack.pack_path(),
+                            category_info,
+                            pack_data,
+                            query,
+                        )
                     }
                 },
                 None => self.filter_state.clear_search_candidates(),
@@ -1400,7 +1435,10 @@ impl CategoryCollectionState {
             .map(|p| open_mask.contains(p) || Self::is_path_open_menu(open_menu, p));
         direct_parent_open.unwrap_or(true)
     }
-    pub fn iter_whitelisted<'a>(&'a self, pack: &'a PackElementState) -> impl Iterator<Item = CategoryPath> + 'a {
+    pub fn iter_whitelisted<'a>(
+        &'a self,
+        pack: &'a PackElementState,
+    ) -> impl Iterator<Item = CategoryPath> + 'a {
         let category_info = pack.info.info.as_ref().map(|i| &*i.categories);
         self.filter_state.iter_categories(category_info)
     }
@@ -1408,9 +1446,9 @@ impl CategoryCollectionState {
         self.filter_state.visible_category(path)
     }
     pub(crate) fn category_is_loaded(&self, pack: &PackElementState, path: CategoryPath) -> Option<bool> {
-        pack.map_info.as_ref().map(|map_info|
-            map_info.info.category_index(path).is_some()
-        )
+        pack.map_info
+            .as_ref()
+            .map(|map_info| map_info.info.category_index(path).is_some())
     }
 
     pub fn update_open(&mut self, path: CategoryPath, open: Option<bool>) {
@@ -1423,8 +1461,7 @@ impl CategoryCollectionState {
         };
         if let Some(open) = open {
             self.open_mask.insert_at_if(path, open);
-            if open && self.filter_state.is_active() {
-            }
+            if open && self.filter_state.is_active() {}
         }
     }
 }

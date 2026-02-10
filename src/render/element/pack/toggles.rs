@@ -17,13 +17,13 @@ use {
     },
     crate::{
         controller::pathing::registry::UnloadedReason,
-        exports::runtime::imgui::{self, StyleVar, Condition, TreeNodeToken, Ui},
+        exports::runtime::imgui::{self, Condition, StyleVar, TreeNodeToken, Ui},
         settings::state::ui::pathing::PathingFilterFlags,
         with_i18n,
     },
+    taimi_hoard::flags::BitSet,
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
-    taimi_hoard::flags::BitSet,
 };
 
 pub struct DrawPackRoots<'a, 'ui> {
@@ -170,13 +170,16 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             is_header: true,
             button_interact: None,
             allow_overlap: true,
-            filter_selected: self.categories.as_ref().and_then(|c| match c.filter_state.is_active() {
-                false => None,
-                true => match c.filter_state.all_filtered() {
-                    true => Some(false),
+            filter_selected: self
+                .categories
+                .as_ref()
+                .and_then(|c| match c.filter_state.is_active() {
                     false => None,
-                },
-            }),
+                    true => match c.filter_state.all_filtered() {
+                        true => Some(false),
+                        false => None,
+                    },
+                }),
         }
     }
 
@@ -200,7 +203,7 @@ pub struct DrawCategoryToggle<'a, 'ui> {
     pub is_copyable: bool,
     pub has_children: bool,
     pub pseudo_root: bool,
-    pub filter_selected: Option<bool>
+    pub filter_selected: Option<bool>,
 }
 impl<'a, 'u> DrawCategoryToggle<'a, 'u> {
     /// TODO: return CategoryAction .-.
@@ -371,9 +374,7 @@ impl super::PackElements {
                 if apply_filters {
                     // TODO: go one level up? only open parents with at least one whitelisted child!
                     let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
-                    pack.categories.open_mask.extend(
-                        cats.iter_of::<CategoryPath>()
-                    );
+                    pack.categories.open_mask.extend(cats.iter_of::<CategoryPath>());
                 } else {
                     pack.categories.open_mask.flags.fill(true);
                     pack.categories.open_mask.extend_for(cats.count(), true);
@@ -387,15 +388,13 @@ impl super::PackElements {
                 false => pack.categories.filter_state.is_active() && pack.categories.open_mask.any(),
                 true => false,
             };
-            let cats = apply_filters.then_some(pack.state.info.category_info())
-                .flatten();
+            let cats = apply_filters.then_some(pack.state.info.category_info()).flatten();
             if let Some(..) = cats {
                 let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
                 for cat in cats.iter_of::<CategoryPath>() {
                     pack.categories.open_mask.remove_at(cat);
 
-                    let new_len = pack.categories.open_mask.last_one()
-                        .map(|i| i + 1).unwrap_or(0);
+                    let new_len = pack.categories.open_mask.last_one().map(|i| i + 1).unwrap_or(0);
                     pack.categories.open_mask.truncate(new_len);
                 }
             } else {
@@ -408,16 +407,24 @@ impl PackElement {
     pub fn draw(&mut self, ui: &Ui) {
         let mut roots = self.prepare_draw(ui);
         roots.draw();
-        let DrawPackRoots { act_cat, act_pack, unfilter_interest, .. } = roots;
+        let DrawPackRoots {
+            act_cat, act_pack, unfilter_interest, ..
+        } = roots;
         self.act_post_draw(ui, act_cat, act_pack, true);
         if let Some(interest) = unfilter_interest {
             if let Some(cats) = self.state.info.info.as_ref().map(|i| &i.categories) {
-                let hide = self.categories.filter_state.flags.contains(PathingFilterFlags::ShowHidden);
+                let hide = self
+                    .categories
+                    .filter_state
+                    .flags
+                    .contains(PathingFilterFlags::ShowHidden);
                 let filter = move |path: &CategoryPath| match hide {
                     false => !cats.hidden.contains(*path),
                     true => true,
                 };
-                self.categories.filter_state.extend_interest(cats.children_of(interest).filter(filter));
+                self.categories
+                    .filter_state
+                    .extend_interest(cats.children_of(interest).filter(filter));
             }
         }
     }

@@ -67,12 +67,10 @@ impl IndexBuffer {
         };
         let format = Self::format_for::<D>()?;
         let offset = match offset {
-            offset if offset > data.len() =>
-                anyhow::bail!("index buffer offset out of bounds"),
+            offset if offset > data.len() => anyhow::bail!("index buffer offset out of bounds"),
             offset => offset * D::stride(),
         };
-        Buffer::new_with_desc(device, &desc, init)
-            .map(|b| unsafe { Self::with_parts(b, format, offset) })
+        Buffer::new_with_desc(device, &desc, init).map(|b| unsafe { Self::with_parts(b, format, offset) })
     }
 
     pub fn new<D: D3dBufferData>(
@@ -82,8 +80,7 @@ impl IndexBuffer {
     ) -> anyhow::Result<Self> {
         let format = Self::format_for::<D>()?;
         let desc = Self::desc_for::<D>(count, flags);
-        Buffer::new_with_desc::<D>(device, &desc, None)
-            .map(|b| unsafe { Self::with_parts(b, format, 0) })
+        Buffer::new_with_desc::<D>(device, &desc, None).map(|b| unsafe { Self::with_parts(b, format, 0) })
     }
     pub fn format_for<D: D3dBufferData>() -> anyhow::Result<DXGI_FORMAT> {
         Ok(match D::stride() {
@@ -102,11 +99,7 @@ impl IndexBuffer {
             let mut out = None;
             let mut format = DXGI_FORMAT::default();
             let mut offset = 0u32;
-            context.IAGetIndexBuffer(
-                Some(&mut out),
-                Some(&mut format),
-                Some(&mut offset),
-            );
+            context.IAGetIndexBuffer(Some(&mut out), Some(&mut format), Some(&mut offset));
 
             out.map(|buffer| Self::with_parts(buffer, format, offset as usize))
         }
@@ -133,9 +126,7 @@ unsafe impl D3dContextBindableIndexBuffer<Dx11Context> for IndexBuffer {
 
 impl D3dContextBindable<Dx11Context> for IndexBuffer {
     fn set(&self, device_context: &Dx11Context) {
-        unsafe {
-            device_context.IASetIndexBuffer(&self.buffer, self.format, self.offset)
-        }
+        unsafe { device_context.IASetIndexBuffer(&self.buffer, self.format, self.offset) }
     }
 }
 impl D3dContextBindable<Dx11Context> for Option<IndexBuffer> {

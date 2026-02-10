@@ -20,7 +20,7 @@ use {
         iters::IterExt as _,
         loc::{indexed, LocationGet, LocationMut, LocationRef, Locator},
     },
-    core::{iter, hash, marker::PhantomData, mem, ops},
+    core::{hash, iter, marker::PhantomData, mem, ops},
     num_traits::AsPrimitive,
 };
 pub type BitsOrder = BitsLsb;
@@ -179,7 +179,8 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
         self.flags.shrink_to_fit();
     }
 
-    pub fn extend_sorted<L, I>(&mut self, iter: I) where
+    pub fn extend_sorted<L, I>(&mut self, iter: I)
+    where
         I: IntoIterator<Item = L>,
         I::IntoIter: DoubleEndedIterator,
         L: AsPrimitive<usize>,
@@ -205,7 +206,8 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
             }
         }
     }
-    pub fn collect_sorted<L, I>(iter: I) -> Self where
+    pub fn collect_sorted<L, I>(iter: I) -> Self
+    where
         I: IntoIterator<Item = L>,
         I::IntoIter: DoubleEndedIterator,
         L: AsPrimitive<usize>,
@@ -277,9 +279,7 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
     pub fn invert_index_range(&mut self, range: ops::Range<usize>) {
         debug_assert!(range.end >= range.start);
         self.extend_to_size(range.end, false);
-        unsafe {
-            self.invert_index_range_unchecked(range)
-        }
+        unsafe { self.invert_index_range_unchecked(range) }
     }
 
     pub fn bitvec_iter_of<N, L>(self) -> BitSetVecIter<N, L, T, O>
@@ -297,11 +297,10 @@ impl<T: BitStore, O: BitOrder> BitSet<BitVec<T, O>, T, O> {
 }
 pub type BitSetVecIter<N, L, T = usize, O = BitsOrder> = iter::FilterMap<
     indexed::LocatorEnumerateAsRel<N, L, bitvec::vec::IntoIter<T, O>>,
-    fn((Locator<N, L>, bool)) -> Option<Locator<N, L>>
+    fn((Locator<N, L>, bool)) -> Option<Locator<N, L>>,
 >;
-pub type BitSetIterOf<'a, L, T = usize, O = BitsOrder> = crate::iters::LazyMapFn<
-    bitslice::IterOnes<'a, T, O>, fn(usize) -> L
->;
+pub type BitSetIterOf<'a, L, T = usize, O = BitsOrder> =
+    crate::iters::LazyMapFn<bitslice::IterOnes<'a, T, O>, fn(usize) -> L>;
 pub type BitSetEnum<'a, N, L, T = usize, O = BitsOrder> =
     indexed::LocatorEnumerateAsRel<N, L, bitslice::Iter<'a, T, O>>;
 pub type BitSetEnumMut<'a, N, L, T = usize, O = BitsOrder> =
@@ -418,9 +417,7 @@ where
             None => return Err(()),
             Some(..) => (),
         }
-        Ok(unsafe {
-            self.invert_index_range_unchecked(range)
-        })
+        Ok(unsafe { self.invert_index_range_unchecked(range) })
     }
     #[inline]
     pub unsafe fn invert_index_range_unchecked(&mut self, range: ops::Range<usize>) {
@@ -554,10 +551,7 @@ pub struct FlagSet<F: BitFlagForSet, V: ?Sized = BitVec<<F as BitFlagForSet>::Re
 impl<F: BitFlagForSet, V> FlagSet<F, V> {
     #[inline]
     pub const fn with_set(flags: BitSet<V, <F as BitFlagForSet>::Repr>) -> Self {
-        Self {
-            flags,
-            _values: PhantomData,
-        }
+        Self { flags, _values: PhantomData }
     }
     #[inline]
     pub const fn new(flags: V) -> Self {
@@ -759,9 +753,7 @@ where
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         let len = self.len();
-        let iter = (0..len).lazy_map(move |i| unsafe {
-            self.get_unchecked(i)
-        });
+        let iter = (0..len).lazy_map(move |i| unsafe { self.get_unchecked(i) });
         Box::new(iter)
     }
 }

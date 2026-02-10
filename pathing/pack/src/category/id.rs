@@ -1,7 +1,7 @@
 use std::{
     borrow::{Borrow, Cow, ToOwned},
-    convert::TryFrom,
     cmp,
+    convert::TryFrom,
     fmt,
     hash,
     iter,
@@ -12,8 +12,9 @@ use std::{
     str,
     sync::Arc,
 };
+
 #[cfg(feature = "serde")]
-use ::serde::{Serialize, Deserialize};
+use ::serde::{Deserialize, Serialize};
 
 pub const SEP_CHAR: char = '.';
 pub const SEP_STR: &'static str = ".";
@@ -518,7 +519,8 @@ where
         }
     }
 }
-impl<T: AsRef<IdStr>> TryFrom<Cow<'_, str>> for CategoryId<T> where
+impl<T: AsRef<IdStr>> TryFrom<Cow<'_, str>> for CategoryId<T>
+where
     for<'a> T: From<&'a str>,
 {
     type Error = anyhow::Error;
@@ -527,7 +529,8 @@ impl<T: AsRef<IdStr>> TryFrom<Cow<'_, str>> for CategoryId<T> where
         Self::try_with_full_id(&id[..]).ok_or_else(|| anyhow::Error::msg(Self::WITH_FULL_ID_ERR))
     }
 }
-impl<'a, T: ?Sized> From<&'a CategoryId<T>> for Cow<'a, FullIdRef> where
+impl<'a, T: ?Sized> From<&'a CategoryId<T>> for Cow<'a, FullIdRef>
+where
     T: AsFullId + AsRef<IdNameBox> + AsRef<IdStr>,
 {
     #[inline]
@@ -539,7 +542,8 @@ impl<'a, T: ?Sized> From<&'a CategoryId<T>> for Cow<'a, FullIdRef> where
         }
     }
 }
-impl<'a, T> From<CategoryId<T>> for Cow<'a, FullIdRef> where
+impl<'a, T> From<CategoryId<T>> for Cow<'a, FullIdRef>
+where
     T: AsFullId + AsRef<IdNameBox> + AsRef<IdStr>,
 {
     #[inline]
@@ -939,23 +943,27 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
     }
 
     #[inline]
-    pub fn id_ref<U: ?Sized>(&self) -> &IdCmpRelaxed<U> where
+    pub fn id_ref<U: ?Sized>(&self) -> &IdCmpRelaxed<U>
+    where
         T: AsRef<U>,
     {
         IdCmpRelaxed::with_ref(self.id.as_ref())
     }
     #[inline]
-    pub fn id_mut<U: ?Sized>(&mut self) -> &mut IdCmpRelaxed<U> where
+    pub fn id_mut<U: ?Sized>(&mut self) -> &mut IdCmpRelaxed<U>
+    where
         T: AsMut<U>,
     {
         IdCmpRelaxed::with_mut(self.id.as_mut())
     }
-    pub fn as_canon_id(&self) -> Option<&FullIdRef> where
+    pub fn as_canon_id(&self) -> Option<&FullIdRef>
+    where
         T: AsRef<FullIdRef> + AsFullId,
     {
         self.is_canon().then_some(self.id.as_ref())
     }
-    pub fn to_id_box(&self) -> Cow<'_, FullIdRef> where
+    pub fn to_id_box(&self) -> Cow<'_, FullIdRef>
+    where
         T: AsRef<FullIdRef> + AsFullId,
     {
         let id = self.id_ref();
@@ -964,7 +972,8 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
             false => Cow::Owned(IdNameBox::new_cloned(id)),
         }
     }
-    pub fn cow_from<'a>(id: Cow<'a, T>) -> Cow<'a, Self> where
+    pub fn cow_from<'a>(id: Cow<'a, T>) -> Cow<'a, Self>
+    where
         T: ToOwned,
         Self: ToOwned,
         <T as ToOwned>::Owned: Into<<Self as ToOwned>::Owned>,
@@ -974,7 +983,8 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
             Cow::Owned(id) => Cow::Owned(id.into()),
         }
     }
-    pub fn cow_into<'a>(id: Cow<'a, Self>) -> Cow<'a, T> where
+    pub fn cow_into<'a>(id: Cow<'a, Self>) -> Cow<'a, T>
+    where
         T: ToOwned,
         Self: ToOwned,
         <Self as ToOwned>::Owned: Into<<T as ToOwned>::Owned>,
@@ -986,7 +996,8 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
             Cow::Owned(id) => Cow::Owned(id.into()),
         }
     }
-    pub fn cow_of_into<'a, U: ?Sized>(id: Cow<'a, Self>) -> Cow<'a, U> where
+    pub fn cow_of_into<'a, U: ?Sized>(id: Cow<'a, Self>) -> Cow<'a, U>
+    where
         T: AsRef<U>,
         U: ToOwned,
         Self: ToOwned,
@@ -1006,7 +1017,9 @@ impl<T: ?Sized + AsFullId> IdCmpRelaxed<T> {
     pub fn is_canon(&self) -> bool {
         self.id.segments().into_iter().all(|seg| {
             let seg = seg.as_ref();
-            seg.as_str().bytes().all(|c| !c.is_ascii_uppercase() /*&& c.is_ascii()*/)
+            seg.as_str()
+                .bytes()
+                .all(|c| !c.is_ascii_uppercase() /*&& c.is_ascii()*/)
         })
     }
 
@@ -1069,7 +1082,9 @@ impl<T: ?Sized + AsFullId> AsFullId for IdCmpRelaxed<T> {
     }
     fn id_starts_with(&self, prefix: impl AsRef<FullIdRef>) -> bool {
         #[cfg(todo)]
-        if is_id::<T>() { self.id_ref().starts_with(prefix) }
+        if is_id::<T>() {
+            self.id_ref().starts_with(prefix)
+        }
         self.starts_with(prefix.as_ref())
     }
 }
@@ -1146,7 +1161,8 @@ impl Borrow<IdCmpRelaxed<FullIdRef>> for IdCmpRelaxed<IdNameBox> {
         IdCmpRelaxed::with_ref(self.id.borrow())
     }
 }
-impl<U: ?Sized, T: ?Sized> AsRef<U> for IdCmpRelaxed<T> where
+impl<U: ?Sized, T: ?Sized> AsRef<U> for IdCmpRelaxed<T>
+where
     T: AsRef<U>,
 {
     fn as_ref(&self) -> &U {
@@ -1197,37 +1213,40 @@ impl ToOwned for IdCmpRelaxed<IdNameSeg> {
 
 #[cfg(feature = "serde")]
 pub mod serde {
-    use super::{CategoryId, IdStr, FullIdRef};
-    use serde::{ser, de};
-    use std::borrow::Cow;
+    use {
+        super::{CategoryId, FullIdRef, IdStr},
+        serde::{de, ser},
+        std::borrow::Cow,
+    };
 
     impl<T: ?Sized + AsRef<IdStr>> ser::Serialize for CategoryId<T> {
         fn serialize<S: ser::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
             self.as_str().serialize(s)
         }
     }
-    impl<'de, T: AsRef<IdStr>> de::Deserialize<'de> for CategoryId<T> where
+    impl<'de, T: AsRef<IdStr>> de::Deserialize<'de> for CategoryId<T>
+    where
         Self: TryFrom<Cow<'de, str>>,
     {
         fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
             <Cow<str> as de::Deserialize>::deserialize(d)
-                .and_then(|id| Self::try_from(id)
-                    .map_err(|_| de::Error::custom(Self::WITH_FULL_ID_ERR))
-                )
+                .and_then(|id| Self::try_from(id).map_err(|_| de::Error::custom(Self::WITH_FULL_ID_ERR)))
         }
     }
     pub fn deserialize_cow<'de, D: de::Deserializer<'de>>(d: D) -> Result<Cow<'de, FullIdRef>, D::Error> where
     {
-        <Cow<str> as de::Deserialize>::deserialize(d)
-            .map(|id| FullIdRef::from_str_cow(&id))
+        <Cow<str> as de::Deserialize>::deserialize(d).map(|id| FullIdRef::from_str_cow(&id))
     }
 
     pub mod relaxed {
-        use serde::{ser, de};
-        use super::super::{IdCmpRelaxed, IdStr, FullIdRef};
-        use std::borrow::Cow;
+        use {
+            super::super::{FullIdRef, IdCmpRelaxed, IdStr},
+            serde::{de, ser},
+            std::borrow::Cow,
+        };
 
-        pub fn serialize<T, S>(id: &T, s: S) -> Result<S::Ok, S::Error> where
+        pub fn serialize<T, S>(id: &T, s: S) -> Result<S::Ok, S::Error>
+        where
             S: ser::Serializer,
             T: ?Sized + AsRef<IdStr>,
         {
@@ -1237,7 +1256,8 @@ pub mod serde {
                 None => ser::Serialize::serialize(&format_args!("{id}"), s),
             }
         }
-        pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error> where
+        pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+        where
             T: AsRef<IdStr> + From<Cow<'de, FullIdRef>>,
             D: de::Deserializer<'de>,
         {

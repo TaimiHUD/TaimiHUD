@@ -471,12 +471,10 @@ impl InteractionAttributes {
     }
 
     pub fn trigger_range(&self) -> f32 {
-        self.info_range
-            .unwrap_or(keys::TriggerRange::DEFAULT.into())
+        self.info_range.unwrap_or(keys::TriggerRange::DEFAULT.into())
     }
     pub fn auto_trigger(&self) -> bool {
-        self.auto_trigger
-            .unwrap_or(keys::AutoTrigger::DEFAULT.into())
+        self.auto_trigger.unwrap_or(keys::AutoTrigger::DEFAULT.into())
     }
     pub fn info(&self) -> Option<&str> {
         self.info.as_ref().map(|i| &i[..])
@@ -485,7 +483,9 @@ impl InteractionAttributes {
         self.copy_value.as_ref().map(|s| &s[..])
     }
     pub fn reset_guids(&self) -> &[keys::Guid] {
-        self.reset_guids.as_ref().map(|guids| keys::Guid::from_slice(&guids[..]))
+        self.reset_guids
+            .as_ref()
+            .map(|guids| keys::Guid::from_slice(&guids[..]))
             .unwrap_or(&[])
     }
     pub fn copy_message(&self) -> Option<&str> {
@@ -498,14 +498,14 @@ impl InteractionAttributes {
             (self.hide_category.as_ref(), keys::ShowHideAction::Hide),
             (self.toggle_category.as_ref(), keys::ShowHideAction::Toggle),
         ];
-        IntoIterator::into_iter(actions)
-            .filter_map(|(cat, action)| cat.map(|cat| (cat, action)))
+        IntoIterator::into_iter(actions).filter_map(|(cat, action)| cat.map(|cat| (cat, action)))
     }
     pub fn behaviour(&self) -> Option<keys::Behaviour> {
         self.taco_behavior.map(keys::Behaviour::from)
     }
     pub fn reset_delay(&self) -> f32 {
-        self.reset_length.map(keys::ResetLength)
+        self.reset_length
+            .map(keys::ResetLength)
             .unwrap_or_default()
             .into()
     }

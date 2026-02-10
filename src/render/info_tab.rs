@@ -2,9 +2,12 @@ use {
     super::TimerWindowState,
     crate::{
         built_info,
-        exports::runtime::{self as rt, statistics::{StatsRef, MetricsSwitch}},
+        exports::runtime::{
+            self as rt,
+            statistics::{MetricsSwitch, StatsRef},
+        },
         fl,
-        render::{machine::RenderMachine, element::im::prelude::*, RenderState},
+        render::{element::im::prelude::*, machine::RenderMachine, RenderState},
         Controller,
         ControllerEvent,
         TEXTURES,
@@ -197,7 +200,6 @@ impl InfoTabState {
         }
     }
 
-
     #[cfg(deleteme)]
     #[cfg(any(feature = "allocator", feature = "texture-loader", feature = "space"))]
     fn size_frag(size: isize) -> String {
@@ -236,7 +238,9 @@ impl InfoTabState {
     /// TODO: TreeNode sections
     pub fn stats_table(&self, ui: &Ui) {
         if let Ok(stats) = StatsRef::registry().try_read() {
-            if stats.is_empty() { return }
+            if stats.is_empty() {
+                return
+            }
             let switch = MetricsSwitch::read();
             let detailed = switch.contains(MetricsSwitch::COLLECT);
             with_i18n!("stats", |label| ui.text_with_font(NexusLinkFont::Big, label));
@@ -267,7 +271,9 @@ impl InfoTabState {
             let _table = ui.begin_table("stats", 2);
             let mut section_prev = 0usize;
             for (desc, counter) in stats.iter() {
-                if desc.detailed & !detailed { continue }
+                if desc.detailed & !detailed {
+                    continue
+                }
                 let value = match counter.read() {
                     0 => continue,
                     v => v,
@@ -282,7 +288,8 @@ impl InfoTabState {
                 ui.indent();
                 ui.table_next_column();
                 let display = counter.unit.display_value(value);
-                with_i18n!(desc.name, |label| ui.display_with_font(&NexusLinkFont::Ui, &format_args!("{label}:")));
+                with_i18n!(desc.name, |label| ui
+                    .display_with_font(&NexusLinkFont::Ui, &format_args!("{label}:")));
                 ui.table_next_column();
                 ui.display_with_font(&NexusLinkFont::Ui, &display);
                 ui.unindent();

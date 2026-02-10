@@ -1,14 +1,22 @@
 use {
     crate::controller::pathing::{
         info::MapPackInfo,
-        registry::{LoadedMarkerPath, LoadedPoiIndex, LoadedPoiNs, LoadedTrailIndex, LoadedTrailPath, LoadedPoiPath, LoadedTrailNs, PackInfoSignature},
+        registry::{
+            LoadedMarkerPath,
+            LoadedPoiIndex,
+            LoadedPoiNs,
+            LoadedPoiPath,
+            LoadedTrailIndex,
+            LoadedTrailNs,
+            LoadedTrailPath,
+            PackInfoSignature,
+        },
         state::{LoadedCategory, LoadedPoi, LoadedTrail},
     },
     std::sync::Arc,
-    taimi_hoard::{collections::lru::RecentlyUsed, loc::indexed::IndexedList},
+    taimi_hoard::{collections::lru::RecentlyUsed, iters::IterExt as _, loc::indexed::IndexedList},
     taimi_meta::packs::{id::MarkerPath, CategoryPath, MapIndex, PoiPath, TrailPath},
     taimi_pack::{attributes::keys::Guid, Pack},
-    taimi_hoard::iters::IterExt as _,
 };
 
 #[derive(Debug, Clone)]
@@ -111,7 +119,9 @@ impl LoadedMapPack {
     where
         'a: 'i,
     {
-        self.lpois_mut().iter_mut().zip(info.pois())
+        self.lpois_mut()
+            .iter_mut()
+            .zip(info.pois())
             .lazy_map(|((lp, l), p)| (lp, p, l))
     }
     pub fn poi_guids<'a, 'i>(
@@ -122,28 +132,27 @@ impl LoadedMapPack {
         'a: 'i,
     {
         let pois = info.pois().zip(self.lpois().paths());
-        info.poi_guid_filter(pois).zip(self.poi_guids.iter())
+        info.poi_guid_filter(pois)
+            .zip(self.poi_guids.iter())
             .lazy_map(|((p, lp), g)| (p, lp, g))
     }
-    pub fn poi_guid_by_index<'a>(
-        &'a self,
-        info: &'_ MapPackInfo,
-        path: LoadedPoiPath,
-    ) -> Option<&'a Guid> {
-        match info.poi_guid_filter(self.lpois().paths()).enumerate().find(|(_, p)| *p >= path) {
-            Some((i, p)) if p == path =>
-                self.poi_guids.get(i),
+    pub fn poi_guid_by_index<'a>(&'a self, info: &'_ MapPackInfo, path: LoadedPoiPath) -> Option<&'a Guid> {
+        match info
+            .poi_guid_filter(self.lpois().paths())
+            .enumerate()
+            .find(|(_, p)| *p >= path)
+        {
+            Some((i, p)) if p == path => self.poi_guids.get(i),
             _ => None,
         }
     }
-    pub fn poi_guid_by_path<'a>(
-        &'a self,
-        info: &'_ MapPackInfo,
-        path: PoiPath,
-    ) -> Option<&'a Guid> {
-        match info.poi_guid_filter(info.pois()).enumerate().find(|(_, p)| *p >= path) {
-            Some((i, p)) if p == path =>
-                self.poi_guids.get(i),
+    pub fn poi_guid_by_path<'a>(&'a self, info: &'_ MapPackInfo, path: PoiPath) -> Option<&'a Guid> {
+        match info
+            .poi_guid_filter(info.pois())
+            .enumerate()
+            .find(|(_, p)| *p >= path)
+        {
+            Some((i, p)) if p == path => self.poi_guids.get(i),
             _ => None,
         }
     }
@@ -189,7 +198,9 @@ impl LoadedMapPack {
     where
         'a: 'i,
     {
-        self.ltrails_mut().iter_mut().zip(info.trails())
+        self.ltrails_mut()
+            .iter_mut()
+            .zip(info.trails())
             .lazy_map(|((lp, l), p)| (lp, p, l))
     }
     pub fn trail_guids<'a, 'i>(
@@ -200,7 +211,8 @@ impl LoadedMapPack {
         'a: 'i,
     {
         let trails = info.trails().zip(self.ltrails().paths());
-        info.trail_guid_filter(trails).zip(&self.trail_guids)
+        info.trail_guid_filter(trails)
+            .zip(&self.trail_guids)
             .lazy_map(|((p, lp), g)| (p, lp, g))
     }
     pub fn marker_guids<'a, 'i>(
@@ -210,18 +222,16 @@ impl LoadedMapPack {
     where
         'a: 'i,
     {
-        let pois = self.poi_guids(info)
-            .lazy_map(|(p, lp, g)| {
-                let mp: MarkerPath = p.pivot_from();
-                let mlp: LoadedMarkerPath = lp.pivot_to();
-                (mp, mlp, g)
-            });
-        let trails = self.trail_guids(info)
-            .lazy_map(|(p, lp, g)| {
-                let mp: MarkerPath = p.pivot_from();
-                let mlp: LoadedMarkerPath = lp.pivot_to();
-                (mp, mlp, g)
-            });
+        let pois = self.poi_guids(info).lazy_map(|(p, lp, g)| {
+            let mp: MarkerPath = p.pivot_from();
+            let mlp: LoadedMarkerPath = lp.pivot_to();
+            (mp, mlp, g)
+        });
+        let trails = self.trail_guids(info).lazy_map(|(p, lp, g)| {
+            let mp: MarkerPath = p.pivot_from();
+            let mlp: LoadedMarkerPath = lp.pivot_to();
+            (mp, mlp, g)
+        });
         pois.chain(trails)
     }
     pub fn trail_at<'a>(&'a self, path: TrailPath<&'_ MapPackInfo>) -> Option<&'a LoadedTrail> {

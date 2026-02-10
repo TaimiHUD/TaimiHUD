@@ -6,8 +6,8 @@ use {
             prelude::*,
         },
         state::D3dStateSnapshot,
-        D3dContextBindableSlot,
         D3dContextBindable,
+        D3dContextBindableSlot,
     },
     std::{ffi, mem, slice},
 };
@@ -80,11 +80,25 @@ impl VertexBuffer {
         unsafe {
             let mut out = mem::MaybeUninit::<[Option<VertexBuffer>; N]>::uninit();
             let out_slice = out.as_mut_ptr() as *mut [mem::MaybeUninit<Option<Self>>; N];
-            Self::new_snapshot_in(context, slot, &mut buffers, &mut strides, &mut offsets, &mut *out_slice);
+            Self::new_snapshot_in(
+                context,
+                slot,
+                &mut buffers,
+                &mut strides,
+                &mut offsets,
+                &mut *out_slice,
+            );
             out.assume_init()
         }
     }
-    unsafe fn new_snapshot_in(context: &Dx11Context, slot: u32, buffers: &mut [Option<Buffer>], strides: &mut [u32], offsets: &mut [u32], out: &mut [mem::MaybeUninit<Option<Self>>]) {
+    unsafe fn new_snapshot_in(
+        context: &Dx11Context,
+        slot: u32,
+        buffers: &mut [Option<Buffer>],
+        strides: &mut [u32],
+        offsets: &mut [u32],
+        out: &mut [mem::MaybeUninit<Option<Self>>],
+    ) {
         unsafe {
             context.IAGetVertexBuffers(
                 slot,
@@ -115,7 +129,14 @@ impl VertexBuffer {
         let mut offsets = vec![0u32; len];
         unsafe {
             let mut out = Vec::with_capacity(len);
-            Self::new_snapshot_in(context, slot.start, &mut buffers, &mut strides, &mut offsets, out.spare_capacity_mut());
+            Self::new_snapshot_in(
+                context,
+                slot.start,
+                &mut buffers,
+                &mut strides,
+                &mut offsets,
+                out.spare_capacity_mut(),
+            );
             out.set_len(len);
             out
         }

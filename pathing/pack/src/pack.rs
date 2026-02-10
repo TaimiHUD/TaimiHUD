@@ -835,10 +835,7 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
                         Cow::Borrowed(replacements_0(caps))
                     },
                 };
-                let rest = caps
-                    .name("type_rest")
-                    .map(|m| m.as_str())
-                    .unwrap_or_default();
+                let rest = caps.name("type_rest").map(|m| m.as_str()).unwrap_or_default();
                 let _ = write!(dst, " type=\"{replacement}{rest}\"");
             } else if let Some(attr_nospace) = caps.name("attr_nospace") {
                 let attr_nospace = attr_nospace.as_str();

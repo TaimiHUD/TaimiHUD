@@ -1,4 +1,9 @@
-use crate::{prelude::*, state::{D3dStateSnapshot, D3dState}, D3dContextBindable, D3dContextBindableSlot};
+use crate::{
+    prelude::*,
+    state::{D3dState, D3dStateSnapshot},
+    D3dContextBindable,
+    D3dContextBindableSlot,
+};
 
 #[must_use]
 #[derive(Debug, Default)]
@@ -7,8 +12,9 @@ pub struct D3dStateToken<'c, S: ?Sized + D3dState<D3DC>, D3DC: D3dContext = crat
     pub state: S,
 }
 
-impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> D3dStateToken<'c, S, D3DC> where
- S: D3dState<D3DC>,
+impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> D3dStateToken<'c, S, D3DC>
+where
+    S: D3dState<D3DC>,
 {
     pub fn empty(device: &D3DC::IDevice) -> anyhow::Result<Self> {
         S::empty_state(device).map(|state| Self { state, context: None })
@@ -23,7 +29,8 @@ impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> D3dStateToken<'c, S, D3DC>
 }
 /// need interface cow from arcffi to make this work...
 #[cfg(todo)]
-impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> D3dStateSnapshot<D3DC> for D3dStateToken<'c, S, D3DC> where
+impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> D3dStateSnapshot<D3DC> for D3dStateToken<'c, S, D3DC>
+where
     S: D3dState<D3DC>,
 {
     fn empty_state(device: &D3DC::IDevice) -> anyhow::Result<Self> {

@@ -25,23 +25,20 @@ bitflags! {
 }
 
 impl PathingFilterFlags {
-    pub const DEFAULT: Self =
-        Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits());
-    pub const USER: Self = Self::from_bits_retain(Self::all().bits() & !(Self::Unassigned3.bits() | Self::Unassigned4.bits() | Self::Unassigned5.bits()));
-    pub const FILTERS_INFO: Self = Self::from_bits_retain(
-        Self::ShowHidden.bits()
+    pub const DEFAULT: Self = Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits());
+    pub const USER: Self = Self::from_bits_retain(
+        Self::all().bits()
+            & !(Self::Unassigned3.bits() | Self::Unassigned4.bits() | Self::Unassigned5.bits()),
     );
-    pub const FILTERS_ENABLE: Self = Self::from_bits_retain(
-        Self::Enabled.bits() | Self::Disabled.bits()
-    );
+    pub const FILTERS_INFO: Self = Self::from_bits_retain(Self::ShowHidden.bits());
+    pub const FILTERS_ENABLE: Self = Self::from_bits_retain(Self::Enabled.bits() | Self::Disabled.bits());
     pub const FILTERS_CONFIG: Self = Self::FILTERS_ENABLE;
-    pub const FILTERS_STATE: Self = Self::from_bits_retain(
-        Self::CurrentMap.bits()
-    );
+    pub const FILTERS_STATE: Self = Self::from_bits_retain(Self::CurrentMap.bits());
     pub const FILTERS_ALL: Self = Self::from_bits_retain(
-        Self::FILTERS_INFO.bits() | Self::FILTERS_CONFIG.bits() | Self::FILTERS_STATE.bits()
+        Self::FILTERS_INFO.bits() | Self::FILTERS_CONFIG.bits() | Self::FILTERS_STATE.bits(),
     );
-    pub const FILTERS_INVERTED: Self = Self::from_bits_retain(Self::DEFAULT.bits() & Self::FILTERS_ALL.bits());
+    pub const FILTERS_INVERTED: Self =
+        Self::from_bits_retain(Self::DEFAULT.bits() & Self::FILTERS_ALL.bits());
     pub const EMPTY: Self = Self::empty();
 
     pub fn as_str(self) -> Option<&'static str> {
@@ -61,7 +58,7 @@ impl PathingFilterFlags {
     pub fn enable_filter(self) -> Option<bool> {
         match self & Self::FILTERS_ENABLE {
             Self::Enabled | Self::Disabled => Some(self.contains(Self::Enabled)),
-            _ => None
+            _ => None,
         }
     }
     pub fn filter_for_enable(enable: Option<bool>) -> Self {
@@ -167,9 +164,12 @@ bitflags! {
 }
 impl PathingSearchFlags {
     pub const DEFAULT: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits());
-    pub const USER: Self = Self::from_bits_retain(Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits() /*| Self::INCLUDE_ID.bits()*/);
-    pub const ADVANCED: Self = Self::from_bits_retain(Self::all().bits() & !(Self::USER.bits() ));
-    pub const PERSIST: Self = Self::from_bits_retain((Self::USER.bits() | Self::ADVANCED.bits()) & !(Self::NEGATIVE.bits()));
+    pub const USER: Self = Self::from_bits_retain(
+        Self::IGNORE_CASE.bits() | Self::IGNORE_SPACE.bits(), /*| Self::INCLUDE_ID.bits()*/
+    );
+    pub const ADVANCED: Self = Self::from_bits_retain(Self::all().bits() & !(Self::USER.bits()));
+    pub const PERSIST: Self =
+        Self::from_bits_retain((Self::USER.bits() | Self::ADVANCED.bits()) & !(Self::NEGATIVE.bits()));
 
     pub fn as_str(self) -> Option<&'static str> {
         Some(match self {

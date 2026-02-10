@@ -387,11 +387,7 @@ impl TrailSection {
     }
 
     pub fn encode_point(point: Point3<f32>) -> [u8; Self::POINT_SIZE] {
-        let [
-            [x0, x1, x2, x3],
-            [y0, y1, y2, y3],
-            [z0, z1, z2, z3],
-        ] = [
+        let [[x0, x1, x2, x3], [y0, y1, y2, y3], [z0, z1, z2, z3]] = [
             point.x.to_le_bytes(),
             point.y.to_le_bytes(),
             point.z.to_le_bytes(),

@@ -1,12 +1,12 @@
 use {
     crate::controller::pathing::{
         registry::{
-            LoadedMarkerPath,
-            LoadedCategoryNs,
             LoadedCategoryIndex,
+            LoadedCategoryNs,
             LoadedCategoryPath,
-            LoadedPoiNs,
+            LoadedMarkerPath,
             LoadedPoiIndex,
+            LoadedPoiNs,
             LoadedPoiPath,
             LoadedTrailIndex,
             LoadedTrailNs,
@@ -25,17 +25,17 @@ use {
     glamour::Box3,
     std::{iter, mem, sync::Arc},
     taimi_hoard::{
-        iters::IterExt as _,
-        loc::{indexed::IndexedList, LocationRef, LocationGet, NamespacePivotTo},
         flags::BitSet,
+        iters::IterExt as _,
+        loc::{indexed::IndexedList, LocationGet, LocationRef, NamespacePivotTo},
     },
     taimi_meta::packs::{
         collections::CategorySet,
         id::{MarkerIndex, MarkerIndexVariant, MarkerPath},
-        PackCategoryNs,
         CategoryIndex,
         CategoryPath,
         MapIndex,
+        PackCategoryNs,
         PoiIndex,
         PoiPath,
         TrailIndex,
@@ -181,9 +181,7 @@ impl MapPackInfo {
             _ => match self.pois.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b => None,
-                Some(_) => Some(unsafe {
-                    self.poi_index_unchecked(path)
-                }),
+                Some(_) => Some(unsafe { self.poi_index_unchecked(path) }),
             },
         }
     }
@@ -240,9 +238,7 @@ impl MapPackInfo {
             _ => match self.trails.get(path.path as usize) {
                 None => None,
                 Some(b) if !*b => None,
-                Some(_) => Some(unsafe {
-                    self.trail_index_unchecked(path)
-                }),
+                Some(_) => Some(unsafe { self.trail_index_unchecked(path) }),
             },
         }
     }
@@ -276,9 +272,8 @@ impl MapPackInfo {
     }
     #[inline(always)]
     pub fn categories_ref(&self) -> &IndexedList<LoadedCategoryNs, LoadedCategoryIndex, [CategoryPath]> {
-        let categories = unsafe {
-            mem::transmute::<&[CategoryIndex], &[CategoryPath]>(&self.categories[..])
-        };
+        let categories =
+            unsafe { mem::transmute::<&[CategoryIndex], &[CategoryPath]>(&self.categories[..]) };
         IndexedList::from_ref(categories)
     }
     pub fn categories(&self) -> impl Iterator<Item = CategoryPath> + '_ {
@@ -292,7 +287,9 @@ impl MapPackInfo {
     }
     #[inline]
     pub fn loaded_categories(&self) -> impl Iterator<Item = (LoadedCategoryPath, CategoryPath)> + '_ {
-        self.categories_ref().map_data_to(|cats| cats.iter().copied()).into_iter()
+        self.categories_ref()
+            .map_data_to(|cats| cats.iter().copied())
+            .into_iter()
     }
     pub fn category_path(&self, path: LoadedCategoryPath) -> Option<CategoryPath> {
         self.categories().nth(path.path as usize)
@@ -323,17 +320,22 @@ impl MapPackInfo {
 
     pub fn marker_index(&self, path: MarkerPath) -> Option<LoadedMarkerPath> {
         match path.path.variant() {
-            MarkerIndexVariant::Category(index) => self.category_index(LoadedCategoryPath::with_path(index))
+            MarkerIndexVariant::Category(index) => self
+                .category_index(LoadedCategoryPath::with_path(index))
                 .map(LoadedCategoryNs::loc_pivot_to),
-            MarkerIndexVariant::Poi(index) => self.poi_index(LoadedPoiPath::with_path(index))
+            MarkerIndexVariant::Poi(index) => self
+                .poi_index(LoadedPoiPath::with_path(index))
                 .map(LoadedPoiNs::loc_pivot_to),
-            MarkerIndexVariant::Trail(index) => self.trail_index(LoadedTrailPath::with_path(index))
+            MarkerIndexVariant::Trail(index) => self
+                .trail_index(LoadedTrailPath::with_path(index))
                 .map(LoadedTrailNs::loc_pivot_to),
-            MarkerIndexVariant::TrailSection(index, section) => self.trail_index(LoadedTrailPath::with_path(index))
-                .map(|path| LoadedTrailSectionNs::loc_pivot_to({
-                    let section: TrailSectionPath = TrailSectionPath::with_path(section);
-                    LoadedTrailSectionPath::with_path(path.rel(section))
-                })),
+            MarkerIndexVariant::TrailSection(index, section) =>
+                self.trail_index(LoadedTrailPath::with_path(index)).map(|path| {
+                    LoadedTrailSectionNs::loc_pivot_to({
+                        let section: TrailSectionPath = TrailSectionPath::with_path(section);
+                        LoadedTrailSectionPath::with_path(path.rel(section))
+                    })
+                }),
             MarkerIndexVariant::Invalid(..) | MarkerIndexVariant::Unknown(..) => {
                 log::warn!("asked to index unrecognized marker path {path}");
                 None
@@ -341,11 +343,10 @@ impl MapPackInfo {
         }
     }
     pub fn path_from_loaded(&self, loaded: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
-        self.marker_path(loaded.unscope())
-            .map(|p| {
-                let pack_path = loaded.root.root;
-                pack_path.rel(p.path)
-            })
+        self.marker_path(loaded.unscope()).map(|p| {
+            let pack_path = loaded.root.root;
+            pack_path.rel(p.path)
+        })
     }
     /// TODO: use NamespaceTryConv or whatever?
     pub fn marker_path(&self, path: LoadedMarkerPath) -> Option<MarkerPath> {
@@ -383,15 +384,17 @@ impl MapPackInfo {
     }
     pub unsafe fn marker_path_unchecked(&self, path: LoadedMarkerPath) -> MarkerPath {
         match path.path.namespace() {
-            MarkerIndex::NS_POI => self.poi_path_unchecked(LoadedPoiPath::with_path(
-                path.path.index_poi_unchecked()
-            )).pivot_from(),
-            MarkerIndex::NS_TRAIL => self.trail_path_unchecked(LoadedTrailPath::with_path(
-                path.path.trail_index_unchecked()
-            )).pivot_from(),
-            MarkerIndex::NS_CAT => self.category_path_unchecked(LoadedCategoryPath::with_path(
-                path.path.index_category_unchecked()
-            )).pivot_from(),
+            MarkerIndex::NS_POI => self
+                .poi_path_unchecked(LoadedPoiPath::with_path(path.path.index_poi_unchecked()))
+                .pivot_from(),
+            MarkerIndex::NS_TRAIL => self
+                .trail_path_unchecked(LoadedTrailPath::with_path(path.path.trail_index_unchecked()))
+                .pivot_from(),
+            MarkerIndex::NS_CAT => self
+                .category_path_unchecked(LoadedCategoryPath::with_path(
+                    path.path.index_category_unchecked(),
+                ))
+                .pivot_from(),
             _ => MarkerPath::with_path(MarkerIndex::UNK),
         }
     }

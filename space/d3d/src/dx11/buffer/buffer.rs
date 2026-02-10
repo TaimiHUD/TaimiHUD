@@ -28,7 +28,8 @@ impl Buffer {
     /// 32?
     pub const VERTEX_SLOT_COUNT: usize = d3d11::D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT as usize;
     /// 14?
-    pub const CONSTANT_SLOT_COUNT: usize = d3d11::D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT as usize;
+    pub const CONSTANT_SLOT_COUNT: usize =
+        d3d11::D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT as usize;
 
     pub fn desc(&self) -> D3D11_BUFFER_DESC {
         let mut desc = D3D11_BUFFER_DESC::default();
@@ -368,30 +369,31 @@ impl Buffer {
         }
     }
 
-    pub fn new_snapshot_in<'v, V: ?Sized>(kind: ShaderKind, context: &Dx11Context, slot: u32, out: &'v mut V) where
+    pub fn new_snapshot_in<'v, V: ?Sized>(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: u32,
+        out: &'v mut V,
+    ) where
         V: AsMut<[Option<Self>]>,
     {
         let out = out.as_mut();
         match kind {
             ShaderKind::Vertex => {
                 use super::ConstantBufferV;
-                ConstantBufferV::new_snapshot_in(
-                    context,
-                    slot,
-                    ConstantBufferV::slice_from_buffer_mut(out),
-                )
+                ConstantBufferV::new_snapshot_in(context, slot, ConstantBufferV::slice_from_buffer_mut(out))
             },
             ShaderKind::Pixel => {
                 use super::ConstantBufferP;
-                ConstantBufferP::new_snapshot_in(
-                    context,
-                    slot,
-                    ConstantBufferP::slice_from_buffer_mut(out),
-                )
+                ConstantBufferP::new_snapshot_in(context, slot, ConstantBufferP::slice_from_buffer_mut(out))
             },
         }
     }
-    pub fn new_snapshot_vec(kind: ShaderKind, context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+    pub fn new_snapshot_vec(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: ops::Range<u32>,
+    ) -> Vec<Option<Self>> {
         let mut views = vec![None::<Self>; slot.len()];
         Self::new_snapshot_in(kind, context, slot.start, &mut views[..]);
         views

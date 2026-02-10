@@ -1,22 +1,27 @@
 use {
     crate::{
         controller::Controller,
+        exports::runtime as rt,
         render::{
             machine::{RenderMachine, RenderTask, RenderTaskPriority},
             RenderState,
         },
-        exports::runtime as rt,
     },
     anyhow::Context,
     futures::future::Either,
-    std::{fmt, ptr, sync::{LazyLock, RwLock}, time::{Duration, SystemTime, Instant as StdInstant}},
+    std::{
+        fmt,
+        ptr,
+        sync::{LazyLock, RwLock},
+        time::{Duration, Instant as StdInstant, SystemTime},
+    },
+    taimi_hoard::time::Timestamp,
     tokio::{
         runtime::{Builder, Handle, Runtime},
         sync::oneshot,
         task::LocalSet,
         time::{self, Instant},
     },
-    taimi_hoard::time::Timestamp,
 };
 
 impl Controller {
@@ -243,7 +248,10 @@ impl WallInstant {
                 true
             },
             Some(Ok(amt)) if amt > Self::DRIFT_THRESHOLD_MONO => {
-                log::warn!("monotonic clock drifted behind by {}s, recalibrating", amt.as_secs());
+                log::warn!(
+                    "monotonic clock drifted behind by {}s, recalibrating",
+                    amt.as_secs()
+                );
                 true
             },
             _ => false,
@@ -258,11 +266,12 @@ impl WallInstant {
     /// a couple months is enough for a single session at least!
     const FAR_ISH_FUTURE: Duration = Duration::from_secs(0x800000);
     pub fn far_future_sys() -> &'static SystemTime {
-        static FAR_FUTURE: LazyLock<SystemTime> = LazyLock::new(||
-            Timestamp::MAX_SYS.to_system_time()
+        static FAR_FUTURE: LazyLock<SystemTime> = LazyLock::new(|| {
+            Timestamp::MAX_SYS
+                .to_system_time()
                 .or_else(|| SystemTime::now().checked_add(WallInstant::FAR_ENOUGH_FUTURE))
                 .unwrap_or_else(|| SystemTime::now() + WallInstant::FAR_ISH_FUTURE)
-        );
+        });
         &FAR_FUTURE
     }
 
@@ -273,8 +282,8 @@ impl WallInstant {
     const DRIFT_THRESHOLD_MONO: Duration = Duration::from_secs(60);
     const DRIFT_THRESHOLD_SYSTEM: Duration = Self::DRIFT_THRESHOLD_MONO;
     pub fn new_calibrated(instant: Instant, calibration: &SystemTime) -> Self {
-        let timestamp = Timestamp::try_from_system_time(calibration)
-            .context("now precedes unix, expect time to break");
+        let timestamp =
+            Timestamp::try_from_system_time(calibration).context("now precedes unix, expect time to break");
         Self {
             instant,
             timestamp: rt::log::error_ok(timestamp).unwrap_or_default(),
@@ -285,12 +294,14 @@ impl WallInstant {
         &CALIBRATED
     }
     fn get_calibrated() -> Option<(SystemTime, Self)> {
-        Self::calibrated_shared().read()
+        Self::calibrated_shared()
+            .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
     pub fn calibrated() -> Self {
-        let calib = Self::calibrated_shared().read()
+        let calib = Self::calibrated_shared()
+            .read()
             .ok()
             .and_then(|e| e.map(|(_, calib)| calib.clone()));
         match calib {
@@ -319,7 +330,8 @@ impl WallInstant {
     pub fn past_instant() -> &'static StdInstant {
         static PAST: LazyLock<StdInstant> = LazyLock::new(|| {
             let snapshot = WallInstant::calibrated().instant.into_std();
-            snapshot.checked_sub(Timestamp::DAY)
+            snapshot
+                .checked_sub(Timestamp::DAY)
                 .or_else(|| snapshot.checked_sub(Timestamp::HOUR))
                 .unwrap_or(snapshot)
         });
@@ -341,20 +353,21 @@ impl WallInstant {
     pub fn far_future_instant() -> StdInstant {
         static FAR_FUTURE: LazyLock<Option<StdInstant>> = LazyLock::new(|| {
             let snapshot = StdInstant::now();
-            let future = snapshot.checked_add(WallInstant::FAR_ENOUGH_FUTURE)
+            let future = snapshot
+                .checked_add(WallInstant::FAR_ENOUGH_FUTURE)
                 .or_else(|| snapshot.checked_add(WallInstant::FAR_ISH_FUTURE));
             if future.is_none() {
                 log::error!("not much time left it seems?");
             }
             future
         });
-        FAR_FUTURE
-            .unwrap_or_else(|| {
-                let snapshot = StdInstant::now();
-                snapshot.checked_add(Timestamp::WEEK)
-                    .or(snapshot.checked_add(Timestamp::DAY))
-                    .unwrap_or(snapshot)
-            })
+        FAR_FUTURE.unwrap_or_else(|| {
+            let snapshot = StdInstant::now();
+            snapshot
+                .checked_add(Timestamp::WEEK)
+                .or(snapshot.checked_add(Timestamp::DAY))
+                .unwrap_or(snapshot)
+        })
     }
     pub fn as_system_time(&self) -> SystemTime {
         self.timestamp.into_system_time()
@@ -388,12 +401,18 @@ impl WallInstant {
     }
     pub fn add(mut self, amt: Duration) -> Self {
         self.timestamp.saturating_add_mut(amt);
-        self.instant = self.instant.checked_add(amt).unwrap_or_else(|| Self::far_future_instant().into());
+        self.instant = self
+            .instant
+            .checked_add(amt)
+            .unwrap_or_else(|| Self::far_future_instant().into());
         self
     }
     pub fn sub(mut self, amt: Duration) -> Self {
         self.timestamp.saturating_sub_mut(amt);
-        self.instant = self.instant.checked_sub(amt).unwrap_or_else(|| Self::past_instant().clone().into());
+        self.instant = self
+            .instant
+            .checked_sub(amt)
+            .unwrap_or_else(|| Self::past_instant().clone().into());
         self
     }
 

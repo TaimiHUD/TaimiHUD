@@ -9,7 +9,7 @@ use {
     glamour::{Box3, Point3, Size3},
     taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
     taimi_pack::{
-        attributes::{PoiAttributes, RenderAttributes, InteractionAttributes},
+        attributes::{InteractionAttributes, PoiAttributes, RenderAttributes},
         Pack,
         Poi,
     },

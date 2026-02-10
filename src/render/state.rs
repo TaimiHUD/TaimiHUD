@@ -640,10 +640,12 @@ impl RenderState {
             use crate::render::element::pack::PackVisibility;
             self.pathing_window.pre_render();
             let visibility = self.pathing_window.window_visibility();
-            let pack_visibility = self.pathing_window.packs_visibility().max(PackVisibility::visible(self.pathing_menu_open)).within(visibility);
-            self.machine
-                .pack_ui_state
-                .pre_draw(pack_visibility);
+            let pack_visibility = self
+                .pathing_window
+                .packs_visibility()
+                .max(PackVisibility::visible(self.pathing_menu_open))
+                .within(visibility);
+            self.machine.pack_ui_state.pre_draw(pack_visibility);
             #[cfg(any(feature = "paths-edit", feature = "paths-interact"))]
             let gameplay_map = self.machine.gameplay.gameplay_map();
             #[cfg(feature = "paths-edit")]
@@ -673,7 +675,9 @@ impl RenderState {
                             interact.update_static_render(&engine.packs);
                         }
                         if wants_all && !self.machine.pack_ui_state.pack_state.is_empty() {
-                            interact.update_static_ui(&self.machine.pack_ui_state.pack_state.map_ref_as_slice());
+                            interact.update_static_ui(
+                                &self.machine.pack_ui_state.pack_state.map_ref_as_slice(),
+                            );
                         }
                     }
                     let player_pos = match gameplay_map {

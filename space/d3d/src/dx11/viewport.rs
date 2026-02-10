@@ -1,7 +1,11 @@
 use {
-    crate::{dx11::prelude::*, state::{D3dState, D3dStateSnapshot}, D3dContextBindable},
-    std::{mem, slice, ops},
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
     num_traits::AsPrimitive,
+    std::{mem, ops, slice},
 };
 
 pub use crate::dx11::d3d11::D3D11_VIEWPORT;
@@ -51,14 +55,17 @@ impl Viewport {
                 let uninit = viewports.spare_capacity_mut();
                 let capacity = uninit.len() as u32;
                 viewport_count = capacity;
-                context.RSGetViewports(&mut viewport_count, Some(uninit.as_mut_ptr() as *mut D3D11_VIEWPORT));
+                context.RSGetViewports(
+                    &mut viewport_count,
+                    Some(uninit.as_mut_ptr() as *mut D3D11_VIEWPORT),
+                );
                 match viewport_count {
                     #[cfg(todo)]
                     viewport_count if viewport_count == capacity => {
                         // docs are unclear, so double-check?
                         viewports.reserve_exact(Self::snapshot_count(context) as usize);
                         viewport_count = Self::snapshot_count(context) as u32;
-                    }
+                    },
                     #[cfg(debug_assertions)]
                     viewport_count if viewport_count == capacity => {
                         // double-check that it doesn't truncate to our len...
@@ -88,7 +95,8 @@ impl Viewport {
     }
 
     /// Aligned to top-left origin (0, 0, 0)
-    pub fn with_size<U: Unit>(size: Size3<U>) -> Self where
+    pub fn with_size<U: Unit>(size: Size3<U>) -> Self
+    where
         U::Scalar: AsPrimitive<f32>,
     {
         let size = size.as_::<f32>();
@@ -106,7 +114,9 @@ impl Viewport {
     {
         let top_left = bounds.min.with_y(bounds.max.y).as_::<f32>();
         let bottom_right_z = AsPrimitive::as_(bounds.max.z);
-        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate()).size().as_::<f32>();
+        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate())
+            .size()
+            .as_::<f32>();
         let viewport = D3D11_VIEWPORT {
             TopLeftX: top_left.x,
             TopLeftY: top_left.y,
@@ -122,8 +132,14 @@ impl Viewport {
         *self == Viewport::EMPTY
     }
     pub fn box2(&self) -> Box2<f32> {
-        let min = Point2::new(self.viewport.TopLeftX, self.viewport.TopLeftY + self.viewport.Height);
-        let max = Point2::new(self.viewport.TopLeftX + self.viewport.Width, self.viewport.TopLeftY);
+        let min = Point2::new(
+            self.viewport.TopLeftX,
+            self.viewport.TopLeftY + self.viewport.Height,
+        );
+        let max = Point2::new(
+            self.viewport.TopLeftX + self.viewport.Width,
+            self.viewport.TopLeftY,
+        );
         Box2::new(min, max)
     }
     pub fn box3(&self) -> Box3<f32> {
@@ -140,7 +156,8 @@ impl Viewport {
         self.viewport.MinDepth..=self.viewport.MaxDepth
     }
     pub fn size3(&self) -> Size3<f32> {
-        self.size2().extend(self.viewport.MaxDepth - self.viewport.MinDepth)
+        self.size2()
+            .extend(self.viewport.MaxDepth - self.viewport.MinDepth)
     }
 
     pub fn slice_truncate(viewports: &[Self]) -> &[Self] {
@@ -167,9 +184,7 @@ impl Viewport {
         unsafe { mem::transmute_copy(&viewports) }
     }
     pub fn vec_from_raw(viewports: Vec<D3D11_VIEWPORT>) -> Vec<Self> {
-        unsafe {
-            mem::transmute(viewports)
-        }
+        unsafe { mem::transmute(viewports) }
     }
 
     pub fn bind_set<V: AsRef<[D3D11_VIEWPORT]>>(context: &Dx11Context, viewports: V) {
@@ -216,28 +231,32 @@ impl From<Viewport> for D3D11_VIEWPORT {
         viewport.viewport
     }
 }
-impl<U: Unit> From<Size3<U>> for Viewport where
+impl<U: Unit> From<Size3<U>> for Viewport
+where
     U::Scalar: AsPrimitive<f32>,
 {
     fn from(viewport: Size3<U>) -> Self {
         Self::with_size(viewport)
     }
 }
-impl<U: Unit> From<Box3<U>> for Viewport where
+impl<U: Unit> From<Box3<U>> for Viewport
+where
     U::Scalar: AsPrimitive<f32>,
 {
     fn from(viewport: Box3<U>) -> Self {
         Self::with_bounds(viewport)
     }
 }
-impl<U: Unit> From<Size2<U>> for Viewport where
+impl<U: Unit> From<Size2<U>> for Viewport
+where
     U::Scalar: AsPrimitive<f32>,
 {
     fn from(viewport: Size2<U>) -> Self {
         Self::with_size(viewport.extend(num_traits::One::one()))
     }
 }
-impl<U: Unit> From<Box2<U>> for Viewport where
+impl<U: Unit> From<Box2<U>> for Viewport
+where
     U::Scalar: AsPrimitive<f32>,
 {
     fn from(viewport: Box2<U>) -> Self {

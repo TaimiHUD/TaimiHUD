@@ -1,11 +1,9 @@
-pub use crate::d3d::D3D_PRIMITIVE_TOPOLOGY;
 use {
-    crate::{
-        prelude::*,
-        state::D3dState, D3dContextBindable,
-    },
+    crate::{prelude::*, state::D3dState, D3dContextBindable},
     core::mem,
 };
+
+pub use crate::d3d::D3D_PRIMITIVE_TOPOLOGY;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -39,9 +37,7 @@ impl PrimitiveTopology {
     }
     pub fn try_from_d3d(repr: D3D_PRIMITIVE_TOPOLOGY) -> Option<Self> {
         match repr.0 as u32 {
-            | Self::UNDEFINED..=Self::TRIANGLESTRIP
-            | Self::LINELIST_ADJ..=Self::TRIANGLESTRIP_ADJ
-            =>
+            | Self::UNDEFINED..=Self::TRIANGLESTRIP | Self::LINELIST_ADJ..=Self::TRIANGLESTRIP_ADJ =>
                 Some(unsafe { Self::from_d3d_unchecked(repr) }),
             Self::PATCHLIST_1..=Self::PATCHLIST_32 => {
                 log::error!("TODO: CONTROL_POINT_PATCHLIST");
@@ -67,7 +63,8 @@ impl PrimitiveTopology {
     pub const PATCHLIST_1: u32 = d3d::D3D11_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST.0 as _;
     pub const PATCHLIST_32: u32 = d3d::D3D11_PRIMITIVE_TOPOLOGY_32_CONTROL_POINT_PATCHLIST.0 as _;
 }
-impl<D3DC: D3dContext> D3dState<D3DC> for PrimitiveTopology where
+impl<D3DC: D3dContext> D3dState<D3DC> for PrimitiveTopology
+where
     Self: D3dContextBindable<D3DC>,
 {
     #[inline]

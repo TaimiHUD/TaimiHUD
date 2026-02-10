@@ -1,6 +1,8 @@
-use core::{fmt, iter, mem};
-use crate::iters::tree;
-use std::{borrow::Cow, slice};
+use {
+    crate::iters::tree,
+    core::{fmt, iter, mem},
+    std::{borrow::Cow, slice},
+};
 
 /// unlike [iter::Map], [self.map] is not guaranteed to run in sequence
 /// for all items, such as when [Iterator::nth] is used
@@ -61,7 +63,8 @@ where
         iter.map(map)
     }
 }
-impl<'a, T, F, R> LazyMapFn<slice::Iter<'a, T>, F> where
+impl<'a, T, F, R> LazyMapFn<slice::Iter<'a, T>, F>
+where
     F: FnMut(&'a T) -> R,
 {
     /// non-consuming peek
@@ -71,7 +74,8 @@ impl<'a, T, F, R> LazyMapFn<slice::Iter<'a, T>, F> where
         (&mut self.map)(item)
     }
 }
-impl<'a, T, F, R> LazyMapFn<slice::IterMut<'a, T>, F> where
+impl<'a, T, F, R> LazyMapFn<slice::IterMut<'a, T>, F>
+where
     F: FnMut(&'a mut T) -> R,
 {
     #[inline(always)]
@@ -83,7 +87,8 @@ impl<'a, T, F, R> LazyMapFn<slice::IterMut<'a, T>, F> where
     ///
     /// TODO: unstable..
     #[inline(always)]
-    pub unsafe fn index_mut_unchecked<'b>(&'b mut self, index: usize) -> R where
+    pub unsafe fn index_mut_unchecked<'b>(&'b mut self, index: usize) -> R
+    where
         R: 'b,
     {
         let slice: *mut [T] = {
@@ -165,7 +170,8 @@ impl<I: Iterator, F> fmt::Debug for LazyMapFn<I, F> {
 #[cfg(todo)]
 impl<I, F> From<iter::Map<I, F>> for LazyMapFn<I, F> {}
 
-impl<I, F, O: tree::TraversalOrder> tree::TreeTraversal<O> for LazyMapFn<I, F> where
+impl<I, F, O: tree::TraversalOrder> tree::TreeTraversal<O> for LazyMapFn<I, F>
+where
     I: tree::TreeTraversal<O>,
     Self: Iterator,
 {
@@ -196,14 +202,16 @@ where
         self.iter.node_skip_to_sibling()
     }
 }
-impl<O: tree::TraversalOrder, I: tree::PeekableTreeTraversal<O>, F, R> tree::PeekableTreeTraversal<O> for LazyMapFn<I, F>
+impl<O: tree::TraversalOrder, I: tree::PeekableTreeTraversal<O>, F, R> tree::PeekableTreeTraversal<O>
+    for LazyMapFn<I, F>
 where
     F: FnMut(I::Item) -> R,
     I::Item: Clone,
     R: Clone,
 {
     fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> {
-        self.iter.peek_node()
+        self.iter
+            .peek_node()
             .map(Cow::into_owned)
             .map(&mut self.map)
             .map(Cow::Owned)

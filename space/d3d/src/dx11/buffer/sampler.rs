@@ -4,7 +4,7 @@ pub use crate::dx11::d3d11::{
     D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_MODE,
 };
-use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindableSlot, D3dContextBindable};
+use crate::{dx11::prelude::*, state::D3dStateSnapshot, D3dContextBindable, D3dContextBindableSlot};
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11SamplerState;
@@ -59,10 +59,7 @@ impl SamplerState {
     pub fn new_snapshot_full(context: &Dx11Context) -> [Option<Self>; Self::MAX_COUNT] {
         Self::new_snapshot::<{ Self::MAX_COUNT }>(context, 0)
     }
-    pub fn new_snapshot_vec(
-        context: &Dx11Context,
-        slot: ops::Range<u32>,
-    ) -> Vec<Option<Self>> {
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
         let mut states = vec![None::<Self>; slot.len()];
         Self::new_snapshot_in(context, slot.start, &mut states[..]);
         states
@@ -75,11 +72,7 @@ impl SamplerState {
         Self::new_snapshot_in(context, slot, &mut states);
         states
     }
-    pub fn new_snapshot_in<'s>(
-        context: &Dx11Context,
-        slot: u32,
-        out: &'s mut [Option<Self>],
-    ) {
+    pub fn new_snapshot_in<'s>(context: &Dx11Context, slot: u32, out: &'s mut [Option<Self>]) {
         unsafe {
             let out: &'s mut [Option<ID3D11SamplerState>] = mem::transmute(out);
             context.PSGetSamplers(slot, Some(out));

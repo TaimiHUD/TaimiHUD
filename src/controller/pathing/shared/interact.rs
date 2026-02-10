@@ -1,38 +1,48 @@
-use bvh::bvh::Bvh;
-use crate::controller::pathing::state::interactive::InteractionEvent;
-use crate::controller::pathing::registry::{PoiMapPath, LoadedPoiPath};
-use crate::controller::runtime::WallInstant;
-use crate::exports::runtime::MumblePtr;
-use glamour::Point3;
-use tokio::{
-    sync::broadcast,
-    time::{Sleep, Instant},
+use {
+    crate::{
+        controller::{
+            pathing::{
+                registry::{LoadedPoiPath, PoiMapPath},
+                state::interactive::InteractionEvent,
+            },
+            runtime::WallInstant,
+        },
+        exports::runtime::MumblePtr,
+    },
+    bvh::bvh::Bvh,
+    futures::{
+        future::{self, Either},
+        ready,
+        stream::Stream,
+    },
+    glamour::Point3,
+    std::{
+        cmp,
+        collections::{BTreeMap, BTreeSet},
+        fmt,
+        future::Future,
+        mem,
+        pin::Pin,
+        ptr,
+        sync::{Arc, LazyLock},
+        task::{Context, Poll},
+        time::Duration,
+    },
+    taimi_hoard::{iters::IterExt as _, loc::Locator},
+    taimi_meta::{
+        coords::{vec_eq, LocalSpace},
+        packs::{MapIndex, PackPath, PoiPath},
+        spatial::BvhShape,
+    },
+    taimi_sync::watched,
+    tokio::{
+        sync::{broadcast, RwLock},
+        time::{Instant, Sleep},
+    },
+    tokio_stream::wrappers::BroadcastStream,
 };
-use tokio_stream::wrappers::BroadcastStream;
-use taimi_meta::coords::vec_eq;
-use taimi_meta::coords::LocalSpace;
-use taimi_meta::packs::{MapIndex, PackPath, PoiPath};
-use taimi_meta::spatial::BvhShape;
-use taimi_sync::watched;
-use futures::ready;
-use futures::stream::Stream;
-use futures::future::Either;
-use futures::future;
-use std::future::Future;
-use std::collections::{BTreeMap, BTreeSet};
-use std::task::Poll;
-use std::task::Context;
-use std::{ptr, mem};
-use std::time::Duration;
-use std::fmt;
-use std::cmp;
-use std::pin::Pin;
-use std::sync::{LazyLock, Arc};
-use tokio::sync::RwLock;
-use taimi_hoard::iters::IterExt as _;
-use taimi_hoard::loc::Locator;
 
-pub use crate::controller::pathing::interact::{SpaceInteraction, InteractMessage};
+pub use crate::controller::pathing::interact::{InteractMessage, SpaceInteraction};
 
 pub type InteractShared = InteractSender;
 
@@ -114,13 +124,12 @@ impl SharedInteractEntities {
 pub const TRIGGER_DIMENSION: usize = 2;
 #[cfg(todo = "unnecessary")]
 pub const TRIGGER_DIMENSION: usize = 3;
-pub type TriggerBvh = Bvh<f32, {TRIGGER_DIMENSION}>;
+pub type TriggerBvh = Bvh<f32, { TRIGGER_DIMENSION }>;
 /// don't write thanks, no I'm not going to bother with a newtype
 pub type SharedTriggerBvh = Arc<RwLock<TriggerBvh>>;
 pub fn empty_trigger_bvh() -> &'static SharedTriggerBvh {
-    static EMPTY_BVH_RW: LazyLock<SharedTriggerBvh> = LazyLock::new(||
-        Arc::new(RwLock::new(Bvh { nodes: Vec::new() }))
-    );
+    static EMPTY_BVH_RW: LazyLock<SharedTriggerBvh> =
+        LazyLock::new(|| Arc::new(RwLock::new(Bvh { nodes: Vec::new() })));
     &EMPTY_BVH_RW
 }
 
@@ -144,30 +153,38 @@ impl NearbyMarkers {
         }
     }
 
-    pub fn len(&self) -> usize { self.pois.len() }
-    pub fn is_empty(&self) -> bool { self.map_id.is_none() || self.pois.is_empty() }
+    pub fn len(&self) -> usize {
+        self.pois.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.map_id.is_none() || self.pois.is_empty()
+    }
     pub fn contains_loaded_poi(&self, path: PoiMapPath) -> bool {
-        self.lpoi_path(path).map(|lpath|
-            self.pois.contains_key(&lpath)
-        ).unwrap_or(false)
+        self.lpoi_path(path)
+            .map(|lpath| self.pois.contains_key(&lpath))
+            .unwrap_or(false)
     }
     pub fn iter_pois(&self) -> impl Iterator<Item = (PoiMapPath, PoiPath)> + '_ {
-        self.map_id.map(move |map_id|
-            self.pois.iter()
-                .lazy_map(move |(lpath, poi_path)| {
-                    let lpath =
-                        lpath.map_root(|root| root.rel(map_id))
+        self.map_id
+            .map(move |map_id| {
+                self.pois.iter().lazy_map(move |(lpath, poi_path)| {
+                    let lpath = lpath
+                        .map_root(|root| root.rel(map_id))
                         .map_path(Locator::into_path);
                     (lpath, *poi_path)
                 })
-            ).into_iter().flatten()
+            })
+            .into_iter()
+            .flatten()
     }
     pub fn iter_poi_lpaths(&self) -> impl Iterator<Item = NearbyPoiPath> + '_ {
         self.pois.keys().copied()
     }
 
     pub fn set_map_id(&mut self, map_id: Option<MapIndex>) {
-        if map_id == self.map_id { return }
+        if map_id == self.map_id {
+            return
+        }
         self.clear();
         self.map_id = map_id;
     }
@@ -181,20 +198,19 @@ impl NearbyMarkers {
             return
         }
         let lpoi: LoadedPoiPath = loaded_path.unscope();
-        let lpath = loaded_path.root.root
-            .rel(lpoi);
+        let lpath = loaded_path.root.root.rel(lpoi);
         self.pois.insert(lpath, path);
     }
     pub fn remove_poi(&mut self, loaded_path: PoiMapPath) -> Option<PoiPath> {
-        self.lpoi_path(loaded_path).and_then(|lpath|
-            self.pois.remove(&lpath)
-        )
+        self.lpoi_path(loaded_path)
+            .and_then(|lpath| self.pois.remove(&lpath))
     }
     pub fn append_take_from(&mut self, incoming: &mut Self) {
         self.pois.append(&mut incoming.pois);
     }
     #[inline]
-    pub fn remove_pois_sorted<I>(&mut self, pois: I) where
+    pub fn remove_pois_sorted<I>(&mut self, pois: I)
+    where
         I: IntoIterator<Item = NearbyPoiPath>,
     {
         self.remove_pois_sorted_dyn(&mut pois.into_iter())
@@ -213,9 +229,9 @@ impl NearbyMarkers {
     }
     pub fn remove_pois(&mut self, pois: &BTreeSet<PoiMapPath>) {
         let map_id = self.map_id;
-        let pois = pois.iter().filter_map(move |&loaded_path|
-            Self::lpoi_path_with(map_id, loaded_path)
-        );
+        let pois = pois
+            .iter()
+            .filter_map(move |&loaded_path| Self::lpoi_path_with(map_id, loaded_path));
         self.remove_pois_sorted(pois)
     }
 
@@ -223,7 +239,9 @@ impl NearbyMarkers {
         Self::lpoi_path_with(self.map_id, loaded_path)
     }
     fn lpoi_path_with(map_id: Option<MapIndex>, loaded_path: PoiMapPath) -> Option<NearbyPoiPath> {
-        if map_id != Some(loaded_path.root.path) { return None }
+        if map_id != Some(loaded_path.root.path) {
+            return None
+        }
         let lpoi: LoadedPoiPath = loaded_path.unscope();
         Some(loaded_path.root.root.rel(lpoi))
     }
@@ -254,11 +272,14 @@ impl FollowPlayer {
     /// 40ms (25 fps)
     pub const MUMBLELINK_POS_INTERVAL: Duration = Duration::from_millis(1000 / 25);
     /// throttle events to occur every few updates (~4fps)
-    pub const DEFAULT_THRESHOLD_TIME: Duration = Duration::from_millis(Self::MUMBLELINK_POS_INTERVAL.as_millis() as u64 * 6);
+    pub const DEFAULT_THRESHOLD_TIME: Duration =
+        Duration::from_millis(Self::MUMBLELINK_POS_INTERVAL.as_millis() as u64 * 6);
     /// even if [self.threshold_distance_squared] is unmet, eventually synchronize anyway
     pub const IDLE_TIMEOUT_TICKS: u32 = 64;
     /// [Self::MUMBLELINK_POS_INTERVAL] * [Self::IDLE_TIMEOUT_TICKS]
-    pub const IDLE_TIMEOUT: Duration = Duration::from_millis(Self::MUMBLELINK_POS_INTERVAL.as_millis() as u64 * Self::IDLE_TIMEOUT_TICKS as u64);
+    pub const IDLE_TIMEOUT: Duration = Duration::from_millis(
+        Self::MUMBLELINK_POS_INTERVAL.as_millis() as u64 * Self::IDLE_TIMEOUT_TICKS as u64,
+    );
     /// ~0.07m
     pub const DEFAULT_THRESHOLD_DIST_DIST: f32 = 0.005;
 
@@ -334,7 +355,8 @@ impl FollowPlayer {
         self.update_throttle_tick.wrapping_sub(self.last_tick)
     }
     pub fn update_throttle_remaining(&self) -> u32 {
-        self.threshold_time_ticks.saturating_sub(self.update_throttle_elapsed())
+        self.threshold_time_ticks
+            .saturating_sub(self.update_throttle_elapsed())
     }
     pub fn next_update_tick(&self) -> u32 {
         let delay = match self.cached_tick {
@@ -358,8 +380,7 @@ impl FollowPlayer {
     fn read_remaining_throttle_ticks(&mut self) -> u32 {
         match update_throttle_remaining() {
             0 => 0,
-            rem =>
-                rem.saturating_sub(self.read_update_throttle_tick()),
+            rem => rem.saturating_sub(self.read_update_throttle_tick()),
         }
     }
     pub fn poll_ready(&mut self, cx: &mut Context) -> Poll<()> {
@@ -401,7 +422,9 @@ impl FollowPlayer {
         }
     }
     pub fn set_threshold_timeout(&mut self, interval: Duration) {
-        if self.threshold_time == interval { return }
+        if self.threshold_time == interval {
+            return
+        }
         self.threshold_time = interval;
         if !self.update_throttle_ready() && self.last_tick != 0 {
             self.reset_throttle_at(self.last_emitted + interval);
@@ -431,7 +454,9 @@ impl FollowPlayer {
         let initial = *dest;
         for _ in 0..Self::ML_TICK_RETRY {
             let prev_tick = mem::replace(dest, ml.read_ui_tick());
-            if prev_tick == *dest { break }
+            if prev_tick == *dest {
+                break
+            }
         }
         dest.wrapping_sub(initial)
     }
@@ -443,7 +468,9 @@ impl FollowPlayer {
     }
     pub fn update_at(&mut self, when: Instant, consume: bool) -> Option<PlayerPosition> {
         let changed = self.update_from_mumblelink();
-        if !self.has_data() { return None }
+        if !self.has_data() {
+            return None
+        }
         let mut pos = None;
         if changed > 0 {
             if consume {
@@ -474,21 +501,24 @@ impl FollowPlayer {
     }
     pub fn has_moved(&self) -> bool {
         self.cached_tick != self.last_tick && !vec_eq(self.cached_pos, self.last_seen)
-            // && !self.cached_pos.x.is_infinite()
+        // && !self.cached_pos.x.is_infinite()
     }
     pub fn position_delta_delta_unchecked(&self) -> f32 {
         self.cached_pos.distance_squared(self.last_seen)
     }
     pub fn position_delta_delta(&self) -> Option<f32> {
-        if self.cached_pos.x.is_infinite() || self.cached_tick == self.last_tick { return None }
-        if self.last_seen.x.is_infinite() { return Some(f32::INFINITY) }
+        if self.cached_pos.x.is_infinite() || self.cached_tick == self.last_tick {
+            return None
+        }
+        if self.last_seen.x.is_infinite() {
+            return Some(f32::INFINITY)
+        }
         Some(self.position_delta_delta_unchecked())
     }
     pub(crate) fn delta_is_update(delta: Option<f32>, threshold_distance_squared: f32) -> bool {
         match delta {
             None => return false,
-            Some(d) if d.is_infinite() =>
-                return true,
+            Some(d) if d.is_infinite() => return true,
             Some(d) if d < threshold_distance_squared => false,
             d => d.is_some(),
         }
@@ -501,7 +531,9 @@ impl FollowPlayer {
         self.position_delta_delta().is_some()
     }
     fn update_overdue(&self, now: Instant) -> bool {
-        if !self.has_moved() { return false }
+        if !self.has_moved() {
+            return false
+        }
         now.duration_since(self.last_emitted) > Self::IDLE_TIMEOUT
     }
     /// otherwise a recent update emitted means we're waiting for throttle to timeout
@@ -516,7 +548,7 @@ impl FollowPlayer {
         let changed = self.update_from_mumblelink();
         match changed {
             0 => Poll::Pending,
-            _ => Poll::Ready(())
+            _ => Poll::Ready(()),
         }
     }
     pub fn commit_emit(&mut self, when: Instant) -> PlayerPosition {
@@ -541,20 +573,17 @@ impl FollowPlayer {
             ready => ready,
         };
         let next_delay = match res {
-            Poll::Ready(true) if !overdue =>
-                self.threshold_time,
-            Poll::Ready(..) =>
-                Self::MUMBLELINK_POS_INTERVAL,
+            Poll::Ready(true) if !overdue => self.threshold_time,
+            Poll::Ready(..) => Self::MUMBLELINK_POS_INTERVAL,
             Poll::Pending if self.last_tick == 0 =>
-                // having never seen an update means we're not yet in-game
+            // having never seen an update means we're not yet in-game
                 Self::IDLE_TIMEOUT,
             Poll::Pending =>
-                // try to catch next tick soon
+            // try to catch next tick soon
                 Self::MUMBLELINK_POS_INTERVAL / 2,
         };
         let res = match res {
-            Poll::Ready(true) =>
-                Poll::Ready(self.commit_emit(now)),
+            Poll::Ready(true) => Poll::Ready(self.commit_emit(now)),
             _ => Poll::Pending,
         };
         self.reset_throttle_at(now + next_delay);
@@ -580,16 +609,21 @@ impl Stream for FollowPlayer {
 impl fmt::Debug for FollowPlayer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut f = f.debug_struct("FollowPlayer");
-        let f = f.field("interval", &self.threshold_time)
+        let f = f
+            .field("interval", &self.threshold_time)
             .field("threshold", &self.threshold_distance());
         match self.ml {
-            Some(..) => f
-                .field("last_update", &self.last_emitted)
-                .field("ui_ticks_behind", &(self.cached_tick.wrapping_sub(self.last_tick))),
+            Some(..) => f.field("last_update", &self.last_emitted).field(
+                "ui_ticks_behind",
+                &(self.cached_tick.wrapping_sub(self.last_tick)),
+            ),
             None => f.field("last_update", &"uninitialized"),
-        }.finish()
+        }
+        .finish()
     }
 }
 impl Default for FollowPlayer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

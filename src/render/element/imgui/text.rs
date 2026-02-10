@@ -1,18 +1,23 @@
-use crate::exports::runtime as rt;
-use super::{imgui, Ui, AsUi, RawCast, UiToken, UiTokenMut, UiTokenDyn};
-use glamour::{Point2, Size2};
-use core::fmt::{self, Write};
-use std::io;
-use core::borrow::BorrowMut;
-use core::ptr::{self, NonNull};
-use core::mem;
+use {
+    super::{imgui, AsUi, RawCast, Ui, UiToken, UiTokenDyn, UiTokenMut},
+    crate::exports::runtime as rt,
+    core::{
+        borrow::BorrowMut,
+        fmt::{self, Write},
+        mem,
+        ptr::{self, NonNull},
+    },
+    glamour::{Point2, Size2},
+    std::io,
+};
 
 pub trait UiTextExt<'ui>: AsUi<'ui> {
     #[inline]
     fn push_font_token<N: UiFont<'ui>>(&self, font: N) -> N::FontToken {
         font.push_font(self.ui())
     }
-    fn with_font<'a, N, R, F>(&'a self, font: N, f: F) -> R where
+    fn with_font<'a, N, R, F>(&'a self, font: N, f: F) -> R
+    where
         F: FnOnce(&'a Self) -> R,
         N: UiFont<'ui>,
         N::FontToken: UiToken,
@@ -23,7 +28,8 @@ pub trait UiTextExt<'ui>: AsUi<'ui> {
         res
     }
 
-    fn text_with_font<'a, N, S>(&'a self, font: N, text: S) where
+    fn text_with_font<'a, N, S>(&'a self, font: N, text: S)
+    where
         S: AsRef<str>,
         N: UiFont<'ui>,
         N::FontToken: UiToken,
@@ -34,7 +40,8 @@ pub trait UiTextExt<'ui>: AsUi<'ui> {
             write.append(text);
         });
     }
-    fn display_with_font<'a, N, S>(&'a self, font: &N, text: &S) where
+    fn display_with_font<'a, N, S>(&'a self, font: &N, text: &S)
+    where
         S: fmt::Display,
         N: UiFontDyn<'ui>,
     {
@@ -53,7 +60,8 @@ pub trait UiTextExt<'ui>: AsUi<'ui> {
         font.token_pop();
     }
 
-    fn wrap_text_with_font<'a, N, S>(&'a self, font: N, text: S) where
+    fn wrap_text_with_font<'a, N, S>(&'a self, font: N, text: S)
+    where
         S: AsRef<str>,
         N: UiFont<'ui>,
         N::FontToken: UiTokenMut,
@@ -64,7 +72,8 @@ pub trait UiTextExt<'ui>: AsUi<'ui> {
             write.append(text);
         });
     }
-    fn wrap_display_with_font<'a, N, S>(&'a self, font: &N, text: &S) where
+    fn wrap_display_with_font<'a, N, S>(&'a self, font: &N, text: &S)
+    where
         S: fmt::Display,
         N: UiFontDyn<'ui>,
     {
@@ -93,9 +102,13 @@ impl UiToken for imgui::FontStackToken<'_> {
         false
     }
     #[inline]
-    fn token_pop(self) { self.pop() }
+    fn token_pop(self) {
+        self.pop()
+    }
     #[inline]
-    unsafe fn token_pop_mut_unchecked(&mut self) { ptr::drop_in_place(self) }
+    unsafe fn token_pop_mut_unchecked(&mut self) {
+        ptr::drop_in_place(self)
+    }
 }
 #[cfg(deleteme)]
 impl<'ui> From<imgui::FontStackToken<'ui>> for UiTokenDyn<'ui> {
@@ -115,12 +128,12 @@ unsafe impl<'ui> UiTokenZst for imgui::FontStackToken<'ui> {
 pub trait UiFont<'ui> {
     type FontToken: UiToken + 'ui;
     fn push_font(self, ui: &Ui<'ui>) -> Self::FontToken;
-
 }
 pub trait UiFontDyn<'ui> {
     fn push_font_dyn(&self, ui: &Ui<'ui>) -> UiTokenDyn<'ui>;
 }
-impl<'ui, T: UiFont<'ui>> UiFontDyn<'ui> for T where
+impl<'ui, T: UiFont<'ui>> UiFontDyn<'ui> for T
+where
     T::FontToken: Into<UiTokenDyn<'ui>>,
     T: Clone,
 {
@@ -144,7 +157,10 @@ impl NexusLinkFont {
             Self::Font => nl.font,
         }
     }
-    pub unsafe fn read_ptr_from_nexus_link(self, nl: *const nexus::data_link::NexusLink) -> *mut imgui::sys::ImFont {
+    pub unsafe fn read_ptr_from_nexus_link(
+        self,
+        nl: *const nexus::data_link::NexusLink,
+    ) -> *mut imgui::sys::ImFont {
         match self {
             Self::Big => ptr::read(&raw const (*nl).font_big),
             Self::Ui => ptr::read(&raw const (*nl).font_ui),
@@ -152,9 +168,9 @@ impl NexusLinkFont {
         }
     }
     pub fn font_ptr(self) -> Option<NonNull<imgui::sys::ImFont>> {
-        rt::nexus_link_ptr().ok().and_then(|nl| unsafe {
-            NonNull::new(self.read_ptr_from_nexus_link(nl.as_ptr()))
-        })
+        rt::nexus_link_ptr()
+            .ok()
+            .and_then(|nl| unsafe { NonNull::new(self.read_ptr_from_nexus_link(nl.as_ptr())) })
     }
     pub fn read_font(self) -> Option<&'static imgui::Font> {
         self.font_ptr().map(|ptr| unsafe { font_ref_from_nn(ptr) })
@@ -177,7 +193,9 @@ impl<'ui> UiFont<'ui> for NexusLinkFont {
         self.read_font_id().map(|font| font.push_font(ui))
     }
     #[cfg(not(feature = "extension-nexus"))]
-    fn push_font(self, _ui: &Ui<'ui>) -> Self::FontToken { None }
+    fn push_font(self, _ui: &Ui<'ui>) -> Self::FontToken {
+        None
+    }
 }
 impl<'ui> UiFont<'ui> for &'ui imgui::Font {
     type FontToken = <imgui::FontId as UiFont<'ui>>::FontToken;
@@ -191,9 +209,7 @@ impl<'ui> UiFont<'ui> for imgui::FontId {
     type FontToken = imgui::FontStackToken<'ui>;
     #[inline]
     fn push_font(self, ui: &Ui<'ui>) -> Self::FontToken {
-        unsafe {
-            ui.immortal_ui()
-        }.push_font(self)
+        unsafe { ui.immortal_ui() }.push_font(self)
     }
 }
 impl<'ui> UiFont<'ui> for () {
@@ -212,10 +228,7 @@ pub struct UiTextWrite<'a, 'ui> {
 impl<'a, 'ui> UiTextWrite<'a, 'ui> {
     #[inline(always)]
     pub const fn new(ui: &'a Ui<'ui>) -> Self {
-        Self {
-            ui,
-            start_of_line: None,
-        }
+        Self { ui, start_of_line: None }
     }
     #[inline]
     pub fn append(&mut self, s: &str) {
@@ -226,11 +239,13 @@ impl<'a, 'ui> UiTextWrite<'a, 'ui> {
         if let Some(next_start) = self.start_of_line.take() {
             match next_start {
                 s if s.x.is_infinite() => {
-                    _spacingtoken = Some(self.ui.push_style_var(imgui::StyleVar::ItemSpacing([f32::EPSILON, 0.0])));
+                    _spacingtoken = Some(
+                        self.ui
+                            .push_style_var(imgui::StyleVar::ItemSpacing([f32::EPSILON, 0.0])),
+                    );
                     self.ui.same_line();
                 },
-                s =>
-                    self.ui.set_cursor_pos(s.to_array()),
+                s => self.ui.set_cursor_pos(s.to_array()),
             }
         }
         let plain = s.strip_suffix("\n");
@@ -239,7 +254,12 @@ impl<'a, 'ui> UiTextWrite<'a, 'ui> {
         let prev_start = can_resume.then(|| Point2::from_array(self.ui.cursor_pos()));
         self.ui.text(plain.unwrap_or(s));
         if let Some(prev_start) = prev_start {
-            self.start_of_line = Some(prev_start + Size2::from_array(self.ui.item_rect_size()).with_height(0.0).to_vector());
+            self.start_of_line = Some(
+                prev_start
+                    + Size2::from_array(self.ui.item_rect_size())
+                        .with_height(0.0)
+                        .to_vector(),
+            );
         } else if !endln {
             self.start_of_line = Some(Point2::INFINITY);
         }
@@ -269,7 +289,8 @@ pub struct UiText<'a, 'ui, B: BorrowMut<String> = String> {
 }
 impl<'a, 'ui> UiText<'a, 'ui> {
     #[inline]
-    pub fn new_wrapped<U>(ui: &'a U) -> Self where
+    pub fn new_wrapped<U>(ui: &'a U) -> Self
+    where
         U: AsUi<'ui>,
     {
         Self::new(ui, true)
@@ -277,7 +298,8 @@ impl<'a, 'ui> UiText<'a, 'ui> {
 }
 impl<'a, 'ui, B: BorrowMut<String>> UiText<'a, 'ui, B> {
     #[inline]
-    pub fn new<U>(ui: &'a U, wrap: bool) -> Self where
+    pub fn new<U>(ui: &'a U, wrap: bool) -> Self
+    where
         U: AsUi<'ui>,
         B: Default,
     {

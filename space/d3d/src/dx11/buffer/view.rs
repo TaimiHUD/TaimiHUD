@@ -1,3 +1,17 @@
+use {
+    crate::{
+        dx11::{
+            buffer::{Resource, Texture2},
+            prelude::*,
+        },
+        shader::ShaderKind,
+        state::D3dStateSnapshot,
+        D3dContextBindable,
+        D3dContextBindableSlot,
+    },
+    std::mem,
+};
+
 pub use crate::{
     d3d::D3D_SRV_DIMENSION,
     dx11::d3d11::{
@@ -8,17 +22,6 @@ pub use crate::{
         D3D11_TEX2D_SRV,
     },
 };
-use crate::{
-    dx11::{
-        buffer::{Resource, Texture2},
-        prelude::*,
-    },
-    shader::ShaderKind,
-    state::D3dStateSnapshot,
-    D3dContextBindableSlot,
-    D3dContextBindable,
-};
-use std::mem;
 
 impl_d3d! {
     unsafe impl Dx11Child for ID3D11View;
@@ -66,30 +69,40 @@ impl ShaderResourceView {
             .map(Into::into)
     }
 
-    pub fn new_snapshot_in<V: ?Sized>(kind: ShaderKind, context: &Dx11Context, slot: u32, out: &mut V) where
+    pub fn new_snapshot_in<V: ?Sized>(kind: ShaderKind, context: &Dx11Context, slot: u32, out: &mut V)
+    where
         V: AsMut<[Option<Self>]>,
     {
         let out = out.as_mut();
         match kind {
-            ShaderKind::Vertex =>
-                ShaderResourceViewP::new_snapshot_in(context, slot, ShaderResourceViewP::slice_from_view_mut(out)),
-            ShaderKind::Pixel =>
-                ShaderResourceViewV::new_snapshot_in(context, slot, ShaderResourceViewV::slice_from_view_mut(out)),
+            ShaderKind::Vertex => ShaderResourceViewP::new_snapshot_in(
+                context,
+                slot,
+                ShaderResourceViewP::slice_from_view_mut(out),
+            ),
+            ShaderKind::Pixel => ShaderResourceViewV::new_snapshot_in(
+                context,
+                slot,
+                ShaderResourceViewV::slice_from_view_mut(out),
+            ),
         }
     }
-    pub fn new_snapshot_vec(kind: ShaderKind, context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+    pub fn new_snapshot_vec(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: ops::Range<u32>,
+    ) -> Vec<Option<Self>> {
         let mut views = vec![None::<Self>; slot.len()];
         Self::new_snapshot_in(kind, context, slot.start, &mut views[..]);
         views
     }
-    pub fn bind_set<V>(kind: ShaderKind, views: V, context: &Dx11Context, slot: u32) where
+    pub fn bind_set<V>(kind: ShaderKind, views: V, context: &Dx11Context, slot: u32)
+    where
         V: ID3D11ResourceOf<ID3D11ShaderResourceView>,
     {
         match kind {
-            ShaderKind::Vertex =>
-                Self::bind_set_vertex(views, context, slot),
-            ShaderKind::Pixel =>
-                Self::bind_set_pixel(views, context, slot),
+            ShaderKind::Vertex => Self::bind_set_vertex(views, context, slot),
+            ShaderKind::Pixel => Self::bind_set_pixel(views, context, slot),
         }
     }
 
@@ -121,21 +134,21 @@ impl ShaderResourceView {
     }
 
     pub fn vec_from_raw(views: Vec<Option<ID3D11ShaderResourceView>>) -> Vec<Option<Self>> {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
     pub fn slice_as_raw_mut(views: &mut [Option<Self>]) -> &mut [Option<ID3D11ShaderResourceView>] {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
 }
 
 #[cfg(todo)]
-pub struct VertexShaderResourceViews { views: V }
+pub struct VertexShaderResourceViews {
+    views: V,
+}
 #[cfg(todo)]
-pub struct PixelShaderResourceViews { views: V }
+pub struct PixelShaderResourceViews {
+    views: V,
+}
 
 impl_d3d! {
     @[transparent(Dx11Child <= ID3D11ShaderResourceView)]
@@ -158,13 +171,12 @@ impl ShaderResourceViewP {
         unsafe { mem::transmute(view) }
     }
 
-    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V) where
+    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V)
+    where
         V: AsMut<[Option<Self>]>,
     {
         let views = Self::slice_as_view_mut(out.as_mut());
-        unsafe {
-            context.PSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views)))
-        }
+        unsafe { context.PSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views))) }
     }
     pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
         let mut views = vec![None::<Self>; slot.len()];
@@ -174,15 +186,11 @@ impl ShaderResourceViewP {
 
     #[inline(always)]
     pub fn slice_as_view_mut(views: &mut [Option<Self>]) -> &mut [Option<ShaderResourceView>] {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
     #[inline(always)]
     pub fn slice_from_view_mut(views: &mut [Option<ShaderResourceView>]) -> &mut [Option<Self>] {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
 }
 
@@ -281,13 +289,12 @@ impl ShaderResourceViewV {
         unsafe { mem::transmute(view) }
     }
 
-    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V) where
+    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V)
+    where
         V: AsMut<[Option<Self>]>,
     {
         let views = Self::slice_as_view_mut(out.as_mut());
-        unsafe {
-            context.VSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views)))
-        }
+        unsafe { context.VSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views))) }
     }
     pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
         let mut views = vec![None::<Self>; slot.len()];
@@ -297,15 +304,11 @@ impl ShaderResourceViewV {
 
     #[inline(always)]
     pub fn slice_as_view_mut(views: &mut [Option<Self>]) -> &mut [Option<ShaderResourceView>] {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
     #[inline(always)]
     pub fn slice_from_view_mut(views: &mut [Option<ShaderResourceView>]) -> &mut [Option<Self>] {
-        unsafe {
-            mem::transmute(views)
-        }
+        unsafe { mem::transmute(views) }
     }
 }
 impl D3dContextBindableSlot<Dx11Context> for ShaderResourceViewV {

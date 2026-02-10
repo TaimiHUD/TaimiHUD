@@ -402,9 +402,7 @@ impl<T: Clone> Watched<T> {
         if !changed {
             let _ = self.try_get_mut();
         }
-        changed.then(|| unsafe {
-            self.cached.as_mut().unwrap_unchecked()
-        })
+        changed.then(|| unsafe { self.cached.as_mut().unwrap_unchecked() })
     }
 
     pub fn try_get_mut(&mut self) -> Option<&mut T> {
@@ -572,9 +570,7 @@ impl<T: Clone + Default> Watched<T> {
                     self.cached = Some(T::default());
                 }
             }
-            unsafe {
-                self.cached.as_mut().unwrap_unchecked()
-            }
+            unsafe { self.cached.as_mut().unwrap_unchecked() }
         }
         let _ = self.try_get_mut();
         self.cached.get_or_insert_default()
