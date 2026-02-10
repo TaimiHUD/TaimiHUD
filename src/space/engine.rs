@@ -756,6 +756,7 @@ impl Engine {
         }
         Ok(())
     }
+    #[cfg(feature = "goggles2")]
     pub fn render_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
         if !self.drawing {
             return
@@ -768,6 +769,7 @@ impl Engine {
 
         self.draw_carefully(machine, &device_context);
     }
+    #[cfg(feature = "goggles2")]
     pub fn draw_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
         use taimi_d3d::dx11;
 

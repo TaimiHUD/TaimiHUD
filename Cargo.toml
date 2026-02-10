@@ -89,6 +89,9 @@ space-list = [
 ]
 goggles = [
   "dep:retour",
+  #"goggles2",
+]
+goggles2 = [
 ]
 
 timers = [

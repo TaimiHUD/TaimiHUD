@@ -284,7 +284,7 @@ impl Buffer {
         let (strides, offsets) = match buffers.len() {
             count if count <= Self::SET_VERTEX_LIMIT => (&mut strides[..], &mut offsets[..]),
             count => {
-                log::info!("binding {count} vertex buffer slots, consider reducing!");
+                //log::info!("binding {count} vertex buffer slots, consider reducing!");
                 strides_storage = vec![0u32; count];
                 offsets_storage = vec![0u32; count];
                 (&mut strides_storage[..], &mut offsets_storage[..])

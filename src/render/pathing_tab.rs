@@ -1124,7 +1124,7 @@ impl PathingConfig {
         );
         if let Some(_tree) = lenses_tree {
             let _id = ui.push_id(c"lens");
-            render_goggles::options_ui_lenses(ui);
+            render_goggles::options_ui_lenses(ui, &machine);
         }
 
         ui.unindent();
