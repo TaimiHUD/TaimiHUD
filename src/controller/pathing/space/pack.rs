@@ -210,6 +210,9 @@ impl SpaceEntities {
             .take_while(|e| Self::is_residue(e, check_bvh))
             .count()
     }
+    pub fn len(&self) -> usize {
+        self.len() - self.trailing_residue(None)
+    }
     pub fn trim_trailing(&mut self, check_bvh: Option<&Bvh<f32, 3>>) {
         let removed = self.trailing_residue(check_bvh);
         if removed > 0 {
@@ -413,6 +416,10 @@ impl SpaceEntities {
             e.set_bh_removed();
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.entities.iter().all(|e| e.is_invalid())
+    }
 }
 impl Extend<(MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)> for SpaceEntities {
     fn extend<T: IntoIterator<Item = (MarkerId, Box3<DrawSpace>, Point3<DrawSpace>)>>(&mut self, iter: T) {
@@ -443,6 +450,10 @@ pub struct SpacePackCollection {
     pub loaded_packs: PackVecOf<SpacePack>,
     pub render_entities: SpaceEntities,
     pub bvh: Bvh<f32, 3>,
+    /// list of `render_entities` excluded from bvh
+    ///
+    /// likely either static or just not bothered to calculate bounds for them yet...
+    bvh_static: Vec<u32>,
 }
 
 impl SpacePackCollection {
@@ -452,6 +463,7 @@ impl SpacePackCollection {
             loaded_packs: Default::default(),
             render_entities: SpaceEntities::new(),
             bvh: Bvh { nodes: Vec::new() },
+            bvh_static: Vec::new(),
         }
     }
 
@@ -835,6 +847,10 @@ impl SpacePackCollection {
 
     pub fn clear_bvh(&mut self) {
         self.bvh = Bvh { nodes: Vec::new() };
+        self.bvh_static.clear();
+        if !self.render_entities.is_empty() {
+            self.bvh_static.push(Self::BVH_STATIC_ALL);
+        }
     }
     pub fn rebuild_bvh(&mut self) {
         self.render_entities.prune_residue();
@@ -846,6 +862,7 @@ impl SpacePackCollection {
             return
         }
         self.bvh = Bvh::build(&mut self.render_entities.entities);
+        self.bvh_static.clear();
     }
     fn signal_bvh_rebuild(&mut self) {
         if !self.render_entities.entities.is_empty() {
@@ -882,6 +899,32 @@ impl SpacePackCollection {
             let idx = slice_offset_from(shapes, shape);
             (idx, &shape.value.id)
         })
+    }
+    #[inline]
+    pub fn bvh_iter<'a, Q: aabb::IntersectsAabb<f32, 3>>(
+        &'a self,
+        query: &'a Q,
+    ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
+        let shapes = &self.render_entities.entities[..];
+        self.bvh_traverse(query)
+            .chain(self.bvh_iter_static().filter_map(move |idx| {
+                let shape = unsafe { shapes.get_unchecked(idx) };
+                match &shape.value.bounds {
+                    #[cfg(todo = "unnecessary")]
+                    _ if shape.is_invalid() => None,
+                    bounds if !query.intersects_aabb(bounds) => None,
+                    _ => Some((idx, &shape.value.id)),
+                }
+            }))
+    }
+    const BVH_STATIC_ALL: u32 = u32::MAX;
+    pub fn bvh_iter_static(&self) -> impl DoubleEndedIterator<Item = usize> + Clone + '_ {
+        let (all, rest) = match self.bvh_static.split_first() {
+            Some((&Self::BVH_STATIC_ALL, rest)) => (self.render_entities.len(), rest),
+            _ => (0, &self.bvh_static[..]),
+        };
+        let rest = rest.into_iter().map(|&i| i as usize);
+        (0..all).chain(rest)
     }
 }
 impl Default for SpacePackCollection {
