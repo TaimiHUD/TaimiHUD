@@ -534,9 +534,10 @@ impl Engine {
     /// TODO: anything related to frame-to-frame buffer setup (camera-dependent data mainly) goes here
     pub fn prepare_frame(
         &mut self,
-        _machine: &mut RenderMachine,
-        _device_context: &Dx11Context,
+        machine: &mut RenderMachine,
+        device_context: &Dx11Context,
     ) -> anyhow::Result<()> {
+        self.packs.prepare_frame(machine, device_context)?;
         Ok(())
     }
 

@@ -26,7 +26,7 @@ use {
         render::machine::{RenderMachine, RenderPosition},
         space::{
             dx11::RenderBackend,
-            pack::{PoiRender, TrailRender},
+            pack::{instance::EntityInstanceBuffer, PoiRender, TrailRender},
             DrawSpace,
         },
     },
@@ -34,7 +34,7 @@ use {
     bvh::aabb,
     glamour::{Box3, Point3},
     rustc_hash::FxHashSet,
-    std::{collections::BTreeSet, ops, sync::Arc},
+    std::{collections::BTreeSet, mem, ops, sync::Arc},
     taimi_d3d::dx11::prelude::*,
     taimi_hoard::{
         loc::{indexed::IndexedList, LocationMut, LocationRef},
@@ -123,8 +123,10 @@ pub struct PackRender {
     pub texture_rx: TextureLoadRequests,
     packs_rx: Option<watch::Receiver<SharedLoaderPacksInfo>>,
     packs_map: Option<watch::Receiver<SharedGameplayMap>>,
+
     pub render_list: PackRenderList,
     pub draw_state: PackRenderState,
+    pub resources: PackRenderResources,
 }
 
 impl PackRender {
@@ -139,6 +141,7 @@ impl PackRender {
             pack_data: Default::default(),
             render_list: Default::default(),
             draw_state: Default::default(),
+            resources: Default::default(),
             poi_common,
         })
     }
@@ -192,9 +195,7 @@ impl PackRender {
         }
         let mut space_dirty = false;
         if let Some(spacepacks) = self.spacepacks.try_read_if_changed() {
-            ArcPtrCmp::from_mut(&mut self.render_list.spacepacks).clone_from_arc(&*spacepacks);
-            // TODO: actual dirty check bleh
-            space_dirty = true;
+            space_dirty = self.render_list.update_space(&*spacepacks);
         }
         if space_dirty {
             self.mark_buffers_dirty();
@@ -471,6 +472,14 @@ impl PackRender {
 
         Ok(map_id.is_some())
     }
+    pub fn prepare_frame(
+        &mut self,
+        _machine: &mut RenderMachine,
+        _device_context: &Dx11Context,
+    ) -> anyhow::Result<()> {
+        self.render_list.prepare_frame();
+        Ok(())
+    }
     fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         let res = self
             .recreate_buffers_inner(device, machine)
@@ -742,8 +751,9 @@ impl PackRender {
     ///
     /// TODO: revisit, avoid, etc
     pub fn cleanup_background(self) {
-        let Self { pack_data, poi_common, .. } = self;
+        let Self { pack_data, poi_common, resources, .. } = self;
         poi_common.cleanup_background();
+        resources.cleanup_background();
         for pack in pack_data.data.into_iter() {
             pack.cleanup_background();
         }
@@ -755,16 +765,43 @@ impl PackRender {
 }
 
 #[derive(Debug, Default)]
+pub struct PackRenderResources {
+    pub len: usize,
+
+    pub entities_ib: Option<EntityInstanceBuffer>,
+    #[cfg(todo)]
+    pub map_ib: Option<BufferOf<InstanceBufferData>>,
+}
+impl PackRenderResources {
+    pub fn clear(&mut self) {
+        self.len = 0;
+    }
+    pub fn cleanup_background(mut self) {
+        mem::forget(self.x.take());
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct PackRenderState {
     pub drawn_incomplete: FxHashSet<MarkerId>,
     pub prev_map_id: Option<MapIndex>,
+    #[cfg(todo)]
+    pub drawn_visible: BitSet,
 }
 impl PackRenderState {
     pub fn clear(&mut self) {
         self.drawn_incomplete = Default::default();
+        #[cfg(todo)]
+        {
+            self.drawn_visible = Default::default();
+        }
     }
     pub fn clear_active(&mut self) {
         self.drawn_incomplete.clear();
+        #[cfg(todo)]
+        {
+            self.drawn_visible.clear();
+        }
     }
 }
 
@@ -772,9 +809,28 @@ impl PackRenderState {
 pub struct PackRenderList {
     spacepacks: Arc<SpacePackCollection>,
     draw_order_heap: render::RenderOrderHeap<usize>,
+    dirty: bool,
 }
 impl PackRenderList {
+    pub fn prepare_frame(&mut self) {
+        if mem::replace(&mut self.dirty, false) {
+            let shapes = self.spacepacks.render_entities.entities.len();
+            let min_cap = shapes / 8;
+            self.draw_order_heap.clear();
+            self.draw_order_heap.reserve(min_cap);
+        }
+    }
+
+    /// TODO: actual dirty check?
+    pub fn update_space(&mut self, spacepacks: &Arc<SpacePackCollection>) -> bool {
+        let dirty = ArcPtrCmp::from_mut(&mut self.spacepacks).clone_from_arc(spacepacks);
+        self.dirty |= dirty;
+        true
+    }
+
     /// adding some wiggle room around the map edges...
+    ///
+    /// TODO: impl trait and check with rotation instead or something?
     pub fn map_bounds_to_query(_map: MapContext, mut bounds: Box3<DrawSpace>) -> aabb::Aabb<f32, 3> {
         let buffer = bounds.size() * 0.15;
         bounds.min.x -= buffer.width;
@@ -790,17 +846,21 @@ impl PackRenderList {
         _map: MapContext,
         query: &'a Q,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
-        self.spacepacks.bvh_traverse(query).filter_map(move |(_idx, id)| {
+        self.spacepacks.bvh_iter(query).filter_map(move |(_idx, id)| {
             let pack_path = id.get_marker_pack_path();
             pack_data.lookup_ref(&pack_path).map(|p| (p, id))
         })
     }
+    #[cfg(todo = "unused")]
     pub fn iter_markers_all<'a, 'e>(
         &'a self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
     ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
         let shapes = &self.spacepacks.render_entities.entities[..];
         shapes.iter().filter_map(move |shape| {
+            if shape.is_invalid() {
+                return None
+            }
             let id = &shape.value.id;
             let pack_path = id.get_marker_pack_path();
             let pack = pack_data.lookup_ref(&pack_path);
@@ -827,9 +887,8 @@ impl PackRenderList {
         let shapes = &self.spacepacks.render_entities.entities[..];
         let extra = &self.spacepacks.render_entities.extra[..];
         self.draw_order_heap.clear();
-        self.draw_order_heap.reserve(shapes.len() / 8);
 
-        let bvh_iter = self.spacepacks.bvh_traverse(query).filter_map(move |(idx, _id)| {
+        let bvh_iter = self.spacepacks.bvh_iter(query).filter_map(move |(idx, _id)| {
             let ignore_draw_order = _id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL;
             extra.get(idx).map(|extra| {
                 let pos = match ignore_draw_order {
