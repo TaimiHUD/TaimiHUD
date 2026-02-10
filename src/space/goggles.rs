@@ -3,8 +3,9 @@ use {
     anyhow::anyhow,
     core::{
         ffi::c_void,
-        mem::transmute,
+        mem::{self, transmute},
         ptr::{self, NonNull},
+        slice,
     },
     retour::GenericDetour,
     std::{
@@ -396,49 +397,12 @@ unsafe extern "system" fn taimi_update_subresource(
         buffer = None;
     }
     if let Some(..) = buffer {
-        let data = core::slice::from_raw_parts(data as *const u32, (datasize / 4) as usize);
-        let mut haystack = data;
+        let data = slice::from_raw_parts(data as *const u32, (datasize / 4) as usize);
         let gran = FerretResource::get_granularity() as usize;
-        let persp = FerretResource::get_perspective();
-        let mut pmatch = None;
-        while !haystack.is_empty() && pmatch.is_none() {
-            if persp.matches_pre(haystack) {
-                let offset = haystack.as_ptr().offset_from(data.as_ptr()) as usize;
-                frame_log!(;"- pre-persp match @{offset:#x}?");
-                if persp.matches(haystack) {
-                    pmatch = Some(haystack);
-                }
-            }
-            haystack = haystack.get(gran..).unwrap_or(&[]);
+        if let Some(m) = FerretResource::get_perspective().search(data, gran) {
+            //print?
         }
-        if let Some(haystack) = pmatch {
-            // TODO: print prior too
-            let offset = haystack.as_ptr().offset_from(data.as_ptr()) as usize;
-            frame_log!(;"- actual match offset={offset:#x}");
-            #[cfg(todo)]
-            if persp.is_empty() {
-                log::debug!("empty matcher btw");
-            }
-            let trailing = offset
-                .checked_sub(16)
-                .map(|off| {
-                    core::iter::once_with(move || {
-                        frame_log!(;"preceding 16 bytes:");
-                        data.get_unchecked(off..offset)
-                    })
-                })
-                .into_iter()
-                .flatten();
-            let chunks = haystack.chunks(4).take(16).chain(trailing);
-            for chunk in chunks {
-                use core::fmt::Write;
-                let mut line = String::new();
-                for &v in chunk {
-                    let _ = write!(&mut line, "  {:4.03}", f32::from_bits(v));
-                }
-                frame_log!(;"\t::{line}");
-            }
-        }
+        if let Some(m) = FerretResource::get_camera().search(data, gran) {}
     }
     match GOGGLES.get() {
         Some(orig) => orig.update_subresource.call(
@@ -696,6 +660,7 @@ use {
 pub struct FerretResource {
     pub size_range: ops::Range<u16>,
     pub perspective: PerspectiveFerret,
+    pub camera: CameraFerret,
     pub granularity: u8,
     pub buffer_ferret: u64,
     pub ferret_draw: bool,
@@ -704,13 +669,14 @@ pub struct FerretResource {
 impl FerretResource {
     pub const DEFAULT: Self = Self {
         perspective: PerspectiveFerret::EMPTY,
+        camera: CameraFerret::EMPTY,
         granularity: Self::DEFAULT_GRANULARITY,
         size_range: 0u16..0u16,
         buffer_ferret: 0,
         ferret_draw: false,
         ferret_drawn: true,
     };
-    const DEFAULT_GRANULARITY: u8 = 4;
+    const DEFAULT_GRANULARITY: u8 = 2;
     pub fn get() -> *mut Self {
         static FERRET: sync_unsafe_cell::SyncUnsafeCell<FerretResource> =
             sync_unsafe_cell::SyncUnsafeCell::new(FerretResource::DEFAULT);
@@ -746,6 +712,12 @@ impl FerretResource {
     pub fn set_perspective(v: PerspectiveFerret) {
         unsafe { ptr::write_volatile(&raw mut (*Self::get()).perspective, v) }
     }
+    pub fn get_camera() -> CameraFerret {
+        unsafe { ptr::read_volatile(&raw const (*Self::get()).camera) }
+    }
+    pub fn set_camera(v: CameraFerret) {
+        unsafe { ptr::write_volatile(&raw mut (*Self::get()).camera, v) }
+    }
     pub fn set_size_range(v: ops::Range<u16>) {
         unsafe { ptr::write_volatile(&raw mut (*Self::get()).size_range, v) }
     }
@@ -766,6 +738,7 @@ impl PerspectiveFerret {
     }
     const ZERO32: u32 = 0.0f32.to_bits();
     const ONE32: u32 = 1.0f32.to_bits();
+    const NEG32: u32 = (-1.0f32).to_bits();
     pub const fn is_empty(&self) -> bool {
         self.expected_h.to_bits() == Self::ZERO32
     }
@@ -779,6 +752,7 @@ impl PerspectiveFerret {
     }
     const M4_LEN32: usize = 4 * 4;
     /// column-major
+    #[cfg(todo)]
     const M4_PERSP_MASK: BitArray<[u32; 1], Lsb0> = bitvec::bitarr![
         const u32, Lsb0;
         1, 0, 0, 0,
@@ -786,20 +760,33 @@ impl PerspectiveFerret {
         0, 0, 1, 0,
         0, 0, 1, 0,
     ];
+    /// row-major
+    const M4_PERSP_MASK: BitArray<[u32; 1], Lsb0> = bitvec::bitarr![
+        const u32, Lsb0;
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 1,
+        0, 0, 0, 0,
+    ];
     /// 1.0 @ (2,2)
     const M4_PERSP_ONE: usize = 8;
     const M4_PERSP_EPSILON: f32 = 0.05;
+    const M4_ZERO_EPSILON: f32 = 0.0005;
     pub fn matches_pre(&self, data: &[u32]) -> bool {
         if data.len() < Self::M4_LEN32 {
             return false
         }
-        let mut nonzero = false;
+        let mut nonzero = true;
         let checks = Self::M4_PERSP_MASK
             .iter()
             .zip(data)
             .filter_map(|(mask, &v)| match *mask {
                 false => Some(v),
                 true => {
+                    if v == Self::ZERO32 {
+                        nonzero = false;
+                    }
+                    #[cfg(todo)]
                     if v != Self::ZERO32 {
                         nonzero = true;
                     }
@@ -807,10 +794,25 @@ impl PerspectiveFerret {
                 },
             });
         for (i, v) in checks.enumerate() {
+            let f = f32::from_bits(v);
+            let expectedf = match i {
+                Self::M4_PERSP_ONE => -1.0,
+                _ => 0.0,
+            };
+            if (f/*.abs()*/ - expectedf).abs() > Self::M4_ZERO_EPSILON {
+                return false
+            }
+            #[cfg(todo)]
             let expected = match i {
-                Self::M4_PERSP_ONE => Self::ONE32,
+                #[cfg(todo = "unnecessary")]
+                Self::M4_PERSP_ONE if v == Self::ONE32 => {
+                    // left-handled...
+                    continue
+                },
+                Self::M4_PERSP_ONE => Self::NEG32,
                 _ => Self::ZERO32,
             };
+            #[cfg(todo)]
             if v != expected {
                 return false
             }
@@ -835,4 +837,181 @@ impl PerspectiveFerret {
         }
         true
     }
+}
+impl FerretPattern for PerspectiveFerret {
+    fn search<'d>(&self, data: &'d [u32], granularity: usize) -> Option<&'d [u32]> {
+        search_ferret(
+            data,
+            granularity,
+            |data| self.matches_pre(data),
+            |data| unsafe { self.matches(data) }.then_some(Self::M4_LEN32),
+        )
+    }
+}
+
+pub struct CameraFerret {
+    pub expected_dir: glam::Vec3,
+}
+impl CameraFerret {
+    pub const EMPTY: Self = Self { expected_dir: glam::Vec3::INFINITY };
+    pub fn new(dir: glam::Vec3) -> Self {
+        let mut ferret = Self::EMPTY;
+        ferret.set_expected(dir);
+        ferret
+    }
+    const ZERO32: u32 = 0.0f32.to_bits();
+    const ONE32: u32 = 1.0f32.to_bits();
+    const NEG32: u32 = (-1.0f32).to_bits();
+    pub const fn is_empty(&self) -> bool {
+        self.expected_dir.x.is_infinite()
+    }
+
+    pub fn set_expected(&mut self, dir: glam::Vec3) {
+        self.expected_dir = dir;
+    }
+    const M4_LEN32: usize = 4 * 4;
+    /// column-major
+    #[cfg(todo)]
+    const M4_CAM_MASK: BitArray<[u32; 1], Lsb0> = bitvec::bitarr![
+        const u32, Lsb0;
+        1, 1, 1, 0,
+        1, 1, 1, 0,
+        1, 1, 1, 0,
+        1, 1, 1, 0,
+    ];
+    /// row-major
+    const M4_CAM_MASK: BitArray<[u32; 1], Lsb0> = bitvec::bitarr![
+        const u32, Lsb0;
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+        0, 0, 0, 0,
+    ];
+    /// 1.0 @ (2,2)
+    const M4_CAM_ONE: usize = 3;
+    const M4_CAM_EPSILON: f32 = 0.05;
+    const M4_ZERO_EPSILON: f32 = 0.0005;
+    pub fn matches_pre(&self, data: &[u32]) -> bool {
+        if data.len() < Self::M4_LEN32 {
+            return false
+        }
+        let mut nonzero = true;
+        let checks = Self::M4_CAM_MASK
+            .iter()
+            .zip(data)
+            .filter_map(|(mask, &v)| match *mask {
+                false => Some(v),
+                true => {
+                    if v == Self::ZERO32 {
+                        nonzero = false;
+                    }
+                    None
+                },
+            });
+        for (i, v) in checks.enumerate() {
+            let f = f32::from_bits(v);
+            let expectedf = match i {
+                Self::M4_CAM_ONE => 1.0,
+                _ => 0.0,
+            };
+            if (f/*.abs()*/ - expectedf).abs() > Self::M4_ZERO_EPSILON {
+                return false
+            }
+            #[cfg(todo)]
+            let expected = match i {
+                #[cfg(todo = "unnecessary")]
+                Self::M4_CAM_ONE if v == Self::ONE32 => {
+                    // left-handled...
+                    continue
+                },
+                Self::M4_CAM_ONE => Self::NEG32,
+                _ => Self::ZERO32,
+            };
+            #[cfg(todo)]
+            if v != expected {
+                return false
+            }
+        }
+        nonzero
+    }
+    /// post-filter used after checking [Self::matches_pre]
+    pub unsafe fn matches(&self, data: &[u32]) -> bool {
+        if self.is_empty() {
+            return true
+        }
+        /*
+        let exp = [self.expected_w, self.expected_h];
+        let checks = Self::M4_CAM_MASK.iter_ones()
+            .map(|i| f32::from_bits(*unsafe { data.get_unchecked(i) })).zip(exp);
+        for (v, e) in checks {
+            let delta = (v - e).abs();
+            if delta > Self::M4_CAM_EPSILON {
+                return false
+            }
+        }*/
+        true
+    }
+}
+impl FerretPattern for CameraFerret {
+    fn search<'d>(&self, data: &'d [u32], granularity: usize) -> Option<&'d [u32]> {
+        search_ferret(
+            data,
+            granularity,
+            |data| self.matches_pre(data),
+            |data| unsafe { self.matches(data) }.then_some(Self::M4_LEN32),
+        )
+    }
+}
+
+pub trait FerretPattern {
+    fn search<'d>(&self, data: &'d [u32], granularity: usize) -> Option<&'d [u32]>;
+}
+
+fn print_ferret(data: &[u32], offset: usize, len: usize) {
+    let displen = (len / 4).max(16);
+    let prior = offset
+        .checked_sub(16)
+        .map(|off| {
+            core::iter::once_with(move || {
+                frame_log!(;"preceding 16:");
+                unsafe { data.get_unchecked(off..offset) }
+            })
+        })
+        .into_iter()
+        .flatten();
+    let found = unsafe { data.get_unchecked(offset..) };
+    let chunks = found.chunks(4).take(displen).chain(prior);
+    for chunk in chunks {
+        use core::fmt::Write;
+        let mut line = String::new();
+        for &v in chunk {
+            let _ = write!(&mut line, "  {:4.03}", f32::from_bits(v));
+        }
+        frame_log!(;"\t::{line}");
+    }
+}
+fn search_ferret<F, M>(data: &[u32], granularity: usize, mut filter: F, mut matcher: M) -> Option<&[u32]>
+where
+    F: FnMut(&[u32]) -> bool,
+    M: FnMut(&[u32]) -> Option<usize>,
+{
+    let mut haystack = data;
+    let mut pmatch = None;
+    while !haystack.is_empty() {
+        let next = haystack.get(granularity..).unwrap_or(&[]);
+        let search = mem::replace(&mut haystack, next);
+        if !filter(search) {
+            continue
+        }
+        let offset = unsafe { search.as_ptr().offset_from(data.as_ptr()) } as usize;
+        frame_log!(;"- pre-match @{offset:#x}?");
+        if let Some(len) = matcher(search) {
+            frame_log!(;"- actual match offset={offset:#x}");
+            print_ferret(data, offset, len);
+            pmatch = Some(unsafe { search.get_unchecked(..len) });
+        }
+        #[cfg(todo)]
+        break;
+    }
+    pmatch
 }

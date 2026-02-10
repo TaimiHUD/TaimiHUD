@@ -82,9 +82,12 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &super::machine::RenderMachine
                 goggles::FerretResource::set_ferret_draw(draw);
             }
             if ui.button("persp-en") {
+                let min = 144;
+                let min = 60;
                 let max = 224;
                 let max = 320;
-                goggles::FerretResource::set_size_range(144..(max + 1));
+                let max = 0x4080;
+                goggles::FerretResource::set_size_range(min..(max + 1));
             }
             ui.same_line();
             if ui.button("persp") {
