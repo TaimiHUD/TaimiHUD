@@ -151,10 +151,14 @@ impl DepthHandler {
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
 
-    pub fn setup(&self, device_context: &Dx11Context) {
-        let (dsview, clear_depth) = self.depth_stencil_view();
+    pub fn setup(&self, device_context: &Dx11Context, inherit: bool) {
+        let (dsview, mut clear_depth) = self.depth_stencil_view();
         self.rasterizer_state.set(device_context);
-        dsview.set(device_context);
+        if !inherit {
+            dsview.set(device_context);
+        } else {
+            clear_depth = None;
+        }
         self.depth_stencil_state.set(device_context);
         if let Some(clear_depth) = clear_depth {
             dsview.clear_depth(
@@ -218,15 +222,17 @@ impl DepthHandler {
         ..RasterizerState::DESC_DEFAULT
     };
 
-    pub fn setup_map(&self, device_context: &Dx11Context) {
+    pub fn setup_map(&self, device_context: &Dx11Context, inherit: bool) {
         self.rasterizer_state.set(device_context);
         //self.render_target_view.to_ref().without_depth().set(device_context);
         //self.render_target_view.set(device_context);
-        self.depth_stencil_view().0.set(device_context);
+        if !inherit {
+            self.depth_stencil_view().0.set(device_context);
+        }
         self.depth_stencil_state_map.set(device_context);
     }
 
-    pub fn setup_depth_write(&self, device_context: &Dx11Context, fill_depth: Option<bool>) {
+    pub fn setup_depth_write(&self, device_context: &Dx11Context, fill_depth: Option<bool>, inherit: bool) {
         match fill_depth {
             #[cfg(feature = "goggles")]
             Some(true) => &self.depth_stencil_state_write,
@@ -234,7 +240,9 @@ impl DepthHandler {
             None => &self.depth_stencil_state,
         }
         .set(device_context);
-        self.depth_stencil_view().0.set(device_context);
+        if !inherit {
+            self.depth_stencil_view().0.set(device_context);
+        }
     }
 
     pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
