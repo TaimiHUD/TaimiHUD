@@ -27,7 +27,7 @@ pub fn options_ui(ui: &imgui::Ui) {
     options_ui_lenses(ui);
 }
 
-pub fn options_ui_lenses(ui: &imgui::Ui) {
+pub fn options_ui_lenses(ui: &imgui::Ui, machine: &super::machine::RenderMachine) {
     if let Ok(lenses) = LENSES.read() {
         let selected_lens = LENS_PTR.load(Ordering::Relaxed);
         let preview = match selected_lens {
@@ -61,6 +61,7 @@ pub fn options_ui_lenses(ui: &imgui::Ui) {
         }
         thread_local! {
             static BUF: std::cell::RefCell<String> = std::cell::RefCell::default();
+            static DRAW: std::cell::Cell<bool> = std::cell::Cell::default();
         }
         BUF.with_borrow_mut(|buf| {
             if ui.input_text("ferret", buf).enter_returns_true(true).build() {
@@ -70,10 +71,29 @@ pub fn options_ui_lenses(ui: &imgui::Ui) {
                     buf.parse().ok()
                 };
                 if let Some(f) = f {
-                    goggles::ferret(f)
+                    goggles::FerretResource::set_buffer_ferret(f)
                 } else {
                     log::warn!("ferret invalid");
                 }
+            }
+            let mut draw = DRAW.get();
+            if ui.checkbox("draw", &mut draw) {
+                DRAW.set(draw);
+                goggles::FerretResource::set_ferret_draw(draw);
+            }
+            if ui.button("persp-en") {
+                let max = 224;
+                let max = 320;
+                goggles::FerretResource::set_size_range(144..(max + 1));
+            }
+            ui.same_line();
+            if ui.button("persp") {
+                let aratio = machine
+                    .aspect_ratio()
+                    .unwrap_or(super::machine::RenderMachine::DEFAULT_ASPECT_RATIO);
+                let fov_y = machine.get_fov().y;
+                let persp = goggles::PerspectiveFerret::new(fov_y, aratio);
+                goggles::FerretResource::set_perspective(persp);
             }
         });
     }

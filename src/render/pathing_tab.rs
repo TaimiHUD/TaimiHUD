@@ -1062,7 +1062,7 @@ impl PathingConfig {
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || render_goggles::options_ui_lenses(ui));
+            .build(ui, || render_goggles::options_ui_lenses(ui, &machine));
 
         ui.unindent();
 
