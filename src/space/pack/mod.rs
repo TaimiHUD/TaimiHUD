@@ -12,6 +12,7 @@ pub use self::{
     trail::{TrailRender, STATS_TRAIL_VERTEX_SIZE},
 };
 
+pub mod instance;
 mod pack;
 mod poi;
 pub mod render;
