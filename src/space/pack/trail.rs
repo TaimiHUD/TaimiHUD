@@ -39,6 +39,7 @@ pub struct TrailRender {
     pub texture_handle: Option<TextureKey>,
     pub texture: Option<TextureSlot>,
     pub section_vbuffer: Option<VertexBuffer>,
+    pub section_vb_ng: Option<super::instance::TrailVertexBuffer>,
     pub vbuffer_section_end: Vec<u32>,
 }
 
@@ -48,6 +49,7 @@ impl TrailRender {
             texture_handle: None,
             texture: None,
             section_vbuffer: None,
+            section_vb_ng: None,
             vbuffer_section_end: Vec::new(),
         }
     }
@@ -57,6 +59,10 @@ impl TrailRender {
         device: &Dx11Device,
         geometry: LoadedTrailGeometry,
     ) -> anyhow::Result<()> {
+        let trailv = geometry.vertices.iter()
+            .map(|v| super::instance::TrailVertex::from(*v))
+            .collect::<Vec<_>>();
+        let trailv = crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv));
         let model = Model::from_vertices(geometry.vertices);
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
         #[cfg(feature = "statistics")]
@@ -70,6 +76,7 @@ impl TrailRender {
                 #[cfg(feature = "statistics")]
                 STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size);
                 self.section_vbuffer = Some(vbuffer);
+                self.section_vb_ng = trailv;
                 self.vbuffer_section_end = geometry.section_lengths;
                 let mut start = 0u32;
                 for out in &mut self.vbuffer_section_end {
@@ -217,6 +224,7 @@ impl TrailRender {
     /// mark broken
     pub fn disable(&mut self) {
         self.section_vbuffer = None;
+        self.section_vb_ng = None;
         self.vbuffer_section_end.clear();
         self.vbuffer_section_end.push(0);
     }
@@ -229,6 +237,7 @@ impl TrailRender {
     pub fn cleanup_background(mut self) {
         mem::forget(self.texture.take());
         mem::forget(self.section_vbuffer.take());
+        mem::forget(self.section_vb_ng.take());
     }
 }
 
