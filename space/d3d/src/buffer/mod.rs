@@ -4,6 +4,7 @@ use {
 };
 
 pub mod dxgi;
+pub mod math;
 
 pub unsafe trait D3dContextBindableVertexBuffer<D3DC: D3dContext>:
     D3dContextBindableSlot<D3DC>

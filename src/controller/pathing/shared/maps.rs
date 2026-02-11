@@ -600,6 +600,16 @@ impl SharedMapPackState {
         info.loaded_trails(Some(self))
             .lazy_map(|shared| unsafe { shared.to_loaded_unchecked() })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.categories.is_empty()
+    }
+    pub fn clear(&mut self) {
+        if self.is_empty() {
+            return
+        }
+        *self = Default::default();
+    }
 }
 
 #[derive(Debug, Clone, Default)]
