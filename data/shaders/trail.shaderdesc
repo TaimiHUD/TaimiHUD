@@ -5,6 +5,12 @@
     "path": "trail.hlsl",
     "entrypoint": "VSMain",
     "layout_type": "JustVertex",
+  },
+  {
+    "identifier": "trail",
+    "kind": "Pixel",
+    "path": "trail.hlsl",
+    "entrypoint": "PSMain",
     "defs": {
       "DISCARD_ALPHA": "0.01",
       "DISCARD_Z": "1.1",
@@ -12,11 +18,5 @@
       "FEATHER_SIZE_Z": "2.8",
       "FEATHER_SCALE_Z": "DistanceParam.w / 6.9",
     },
-  },
-  {
-    "identifier": "trail",
-    "kind": "Pixel",
-    "path": "trail.hlsl",
-    "entrypoint": "PSMain",
   },
 ]
