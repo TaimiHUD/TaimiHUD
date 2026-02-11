@@ -1,5 +1,5 @@
 use {
-    crate::resources::Vertex,
+    crate::{resources::Vertex, space::pack::instance},
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
@@ -14,7 +14,7 @@ use {
             prelude::*,
             shader::{InputLayout, InputLayoutElement, D3D11_INPUT_ELEMENT_DESC},
         },
-        shader::{compile, ShaderDefinitions, ShaderTarget},
+        shader::{compile, ID3DInclude, ShaderDefinitions, ShaderTarget},
     },
 };
 
@@ -35,6 +35,8 @@ pub struct ShaderDescription {
 pub enum ShaderLayout {
     JustVertex,
     VertexInstance,
+    SpaceTrail,
+    SpacePoi,
     #[serde(rename = "inputs")]
     Inputs(Vec<InputLayoutElement>),
 }
@@ -67,6 +69,8 @@ impl ShaderDescription {
         match &self.layout_type {
             None | Some(ShaderLayout::VertexInstance) => &Self::INPUT_LAYOUT_INSTANCED,
             Some(ShaderLayout::JustVertex) => &Self::INPUT_LAYOUT_JUST_VERTEX,
+            Some(ShaderLayout::SpaceTrail) => &instance::INPUT_LAYOUT_TRAIL_INSTANCE,
+            Some(ShaderLayout::SpacePoi) => &instance::INPUT_LAYOUT_POI_INSTANCE,
             Some(ShaderLayout::Inputs(layout)) => InputLayoutElement::slice_as_desc(layout),
         }
     }
@@ -77,7 +81,7 @@ impl ShaderDescription {
     pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
     pub const COMPILE_FLAGS2: u32 = 0;
 
-    pub fn compile(&self, source: &[u8]) -> anyhow::Result<Blob> {
+    pub fn compile(&self, source: &[u8], includes: Option<&ID3DInclude>) -> anyhow::Result<Blob> {
         let filename = self.file_name().to_string_lossy();
         let name = CString::new(&filename[..])?;
         let entry_point = CString::new(&self.entrypoint[..])?;
@@ -87,7 +91,7 @@ impl ShaderDescription {
             self.target,
             &entry_point,
             self.defs.as_ref(),
-            None,
+            includes,
             Self::COMPILE_FLAGS1,
             Self::COMPILE_FLAGS2,
         )

@@ -14,19 +14,26 @@ use {
                 PackVecOf,
             },
             shared::{
+                LoadedMarkerRef,
                 SharedGameplayMap,
                 SharedLoaderPacksInfo,
                 SharedMapPackLoaded,
                 SharedMapPackState,
+                SharedMarkerRef,
                 SharedPackInfo,
             },
             space::{SpacePackCollection, SpacePackShared, TextureLoadRequests, TrailGeometryRequests},
         },
         exports::runtime as rt,
         render::machine::{RenderMachine, RenderPosition},
+        resources::shader::ShaderLoader,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{instance::EntityInstanceBuffer, PoiRender, TrailRender},
+            pack::{
+                instance::{self, EntityInstanceBuffer, EntityInstanceData, PoiVertexBuffer},
+                PoiRender,
+                TrailRender,
+            },
             DrawSpace,
         },
     },
@@ -35,7 +42,10 @@ use {
     glamour::{Box3, Point3},
     rustc_hash::FxHashSet,
     std::{collections::BTreeSet, mem, ops, sync::Arc},
-    taimi_d3d::dx11::prelude::*,
+    taimi_d3d::dx11::{
+        buffer::{ConstantBufferP, ConstantBufferV},
+        prelude::*,
+    },
     taimi_hoard::{
         loc::{indexed::IndexedList, LocationMut, LocationRef},
         statistics::Counter,
@@ -732,6 +742,8 @@ impl PackRender {
                                     .drawn_incomplete
                                     .insert(SpacePackShared::trail_geometry_id(&ltrail_path));
                             }
+                        } else {
+                            pack.map_state.clear();
                         }
 
                         for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info))
@@ -752,6 +764,15 @@ impl PackRender {
                         }
                     }
                 }
+                rt::log::error_ok(
+                    self.resources
+                        .prepare(
+                            device,
+                            self.pack_data.map_ref_as_slice(),
+                            self.spacepacks.render_entities.entities.iter().map(|e| e.id),
+                        )
+                        .context("RenderResources::prepare"),
+                );
                 if !ibs_dirty {
                     if self
                         .pack_data
@@ -917,6 +938,7 @@ impl PackRender {
             self.texture_rx.request_many(incomplete_textures);
         } else {
             drop(packs_map_changed);
+            self.resources.clear();
         }
         self.draw_state.clear_active();
         if map_id.is_some() {
@@ -1365,7 +1387,8 @@ impl PackRender {
         let ctx = LocalContext::/*Map(map)*/MAP;
         for (pack_data, marker_id) in entities {
             let render_id = marker_id.get_marker_index();
-            match render_id.namespace() {
+            let ns = render_id.namespace();
+            match ns {
                 MarkerIndex::NS_TRAIL => {
                     let path = {
                         let (t, s) = render_id.index_trail_section_unchecked();
@@ -1506,15 +1529,300 @@ pub struct PackRenderResources {
     pub len: usize,
 
     pub entities_ib: Option<EntityInstanceBuffer>,
+    pub shader_poi: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
+    pub shader_trail: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
+    pub shader_p: Option<taimi_d3d::dx11::ShaderP>,
+    pub poi_vb: Option<PoiVertexBuffer>,
+    pub shared_cb_v: Option<ConstantBufferV>,
+    pub shared_cb_p: Option<ConstantBufferP>,
     #[cfg(todo)]
-    pub map_ib: Option<BufferOf<InstanceBufferData>>,
+    pub map_ib: Option<MapEntityInstanceBuffer>,
 }
 impl PackRenderResources {
+    pub fn prepare<I: IntoIterator<Item = MarkerId>>(
+        &mut self,
+        device: &Dx11Device,
+        pack_data: &IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
+        markers: I,
+    ) -> anyhow::Result<()> {
+        let markers = markers.into_iter();
+        let mut out = Vec::with_capacity(markers.size_hint().1.unwrap_or(0));
+        for mid in markers {
+            let path = mid
+                .marker_path::<PackMapPath>()
+                .and_then(|path| pack_data.lookup_ref(&path.root.root).map(|p| (p, path)));
+            let mut ib = EntityInstanceData::INVALID;
+            let marker = path
+                .and_then(|(pack, path)| {
+                    pack.map_info
+                        .as_ref()
+                        .and_then(|i| SharedMarkerRef::from_loaded_path(i, Some(&pack.map_state), path))
+                })
+                .and_then(|m| m.to_loaded());
+            let common = match &marker {
+                Some(LoadedMarkerRef::Poi(poi)) => {
+                    let attrs = poi.poi_attrs();
+                    let ib = ib.write_poi(instance::PoiInstanceData {
+                        model: {
+                            let scale = glamour::Vector3::<f32>::splat(attrs.icon_size());
+                            let pos = poi.lpoi().position.to_vector();
+                            match attrs.rotate() {
+                                rot if rot == glam::Vec3::ZERO =>
+                                    glamour::Matrix4::from_scale_rotation_translation(
+                                        scale,
+                                        glam::Quat::IDENTITY,
+                                        pos.to_untyped(),
+                                    ),
+                                rot => glam::Mat4::from_scale_rotation_translation(
+                                    scale.to_raw(),
+                                    glam::Quat::from_euler(
+                                        glam::EulerRot::XYZ,
+                                        rot.x.to_radians() - core::f32::consts::FRAC_PI_2,
+                                        rot.y.to_radians(),
+                                        rot.z.to_radians(),
+                                    ),
+                                    pos.to_raw(),
+                                )
+                                .into(),
+                            }
+                        },
+                        ..instance::PoiInstanceData::INVALID
+                    });
+                    let bounce = poi.lpoi_info().get_interaction_attrs().and_then(|i| {
+                        i.bounce_behavior
+                            .map(|b| (b, i.bounce_height(), i.bounce_duration()))
+                    });
+                    if let Some((behaviour, height, duration)) = bounce {
+                        // TODO
+                        let anim_start_offset = 0.0;
+                        ib.set_bounce(height, duration, behaviour, anim_start_offset);
+                    } else {
+                        ib.clear_bounce();
+                    }
+                    if attrs.rotate.is_none() {
+                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_BILLBOARD;
+                    }
+                    if !attrs.scale_on_map_with_zoom() {
+                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_MAP_STATIC_SCALE;
+                    }
+                    // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
+                    ib.map_scale = attrs.map_display_size() / 2.0;
+                    ib.set_size_range(attrs.min_size(), attrs.max_size());
+                    Some((&mut ib.marker, poi.lpoi_info().marker_info()))
+                },
+                Some(LoadedMarkerRef::Trail(trail)) => {
+                    let attrs = trail.trail_attrs();
+                    let ib = ib.write_trail(instance::TrailInstanceData {
+                        ..instance::TrailInstanceData::INVALID
+                    });
+                    ib.marker.set_anim_scale(attrs.anim_speed());
+                    if attrs.is_wall() {
+                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_WALL;
+                    }
+                    Some((&mut ib.marker, trail.ltrail_info().marker_info()))
+                },
+                _ => None,
+            };
+            if let Some((ib, attrs)) = common {
+                use glam::Vec4Swizzles;
+
+                let r = attrs.attrs();
+                let tint = r.tint();
+                ib.colour = tint.xyz().into();
+                ib.set_alpha(tint.w);
+                let can_fade = match r.can_fade() {
+                    // I'd rather not fade all POIs by default...
+                    true if r.can_fade.is_none() && matches!(marker, Some(LoadedMarkerRef::Poi(..))) =>
+                        false,
+                    f => f,
+                };
+                if !can_fade {
+                    ib.flags |= instance::MarkerInstanceData::FLAG_OBSCURE_FADE;
+                }
+                ib.set_fade_range(r.fade_near(), r.fade_far());
+            }
+
+            out.push(ib);
+        }
+        let mut res = Ok(());
+        let len = out.len();
+        self.entities_ib = match out {
+            out if out.is_empty() => None,
+            out => match EntityInstanceData::alloc_populated(device, &out[..]) {
+                Ok(ib) => Some(ib),
+                Err(e) => {
+                    res = Err(e);
+                    None
+                },
+            },
+        };
+        if res.is_ok() {
+            self.len = len;
+        }
+        if self.entities_ib.is_some() {
+            if self.poi_vb.is_none() {
+                self.poi_vb = Some(instance::PoiVertex::alloc(
+                    device,
+                    &instance::PoiVertex::POI_QUAD,
+                )?);
+            }
+        }
+        STATS_ENTITY_INSTANCE_SIZE.reset(
+            self.entities_ib
+                .is_some()
+                .then_some(len * mem::size_of::<EntityInstanceData>())
+                .unwrap_or(0),
+        );
+
+        res
+    }
+    pub fn prepare_shaders(&mut self, shaders: &ShaderLoader) -> anyhow::Result<()> {
+        if self.entities_ib.is_none() {
+            return Ok(())
+        }
+
+        let trail = shaders.pair_named("trail-ng")?;
+        self.shader_trail = Some(trail.0);
+        self.shader_p = trail.1;
+        self.shader_poi = shaders.vertex.get("poi-ng").cloned();
+        Ok(())
+    }
+    pub fn update_shared(
+        &mut self,
+        device_context: &Dx11Context,
+        backend: &RenderBackend,
+        machine: &RenderMachine,
+        anim_timestamp: f32,
+    ) {
+        use glam::Vec2;
+        let shared_p = instance::ConstantDataP {
+            render: instance::RenderConstantDataP {
+                viewport: Vec2::new(
+                    backend
+                        .perspective_handler
+                        .constant_buffer_pixel_data
+                        .viewport_param
+                        .x,
+                    backend
+                        .perspective_handler
+                        .constant_buffer_pixel_data
+                        .viewport_param
+                        .y,
+                )
+                .into(),
+                player_feather: backend
+                    .perspective_handler
+                    .constant_buffer_pixel_data
+                    .overlap_threshold(),
+                distance_fade: backend
+                    .perspective_handler
+                    .constant_buffer_pixel_data
+                    .distance_param
+                    .y,
+                edge_feather: Vec2::new(
+                    backend
+                        .perspective_handler
+                        .constant_buffer_pixel_data
+                        .distance_param
+                        .z,
+                    backend
+                        .perspective_handler
+                        .constant_buffer_pixel_data
+                        .distance_param
+                        .w,
+                )
+                .into(),
+            },
+        };
+        match &mut self.shared_cb_p {
+            Some(cb) => {
+                cb.update_singleton(device_context, &shared_p);
+            },
+            cb => *cb = rt::log::error_ok(ConstantBufferP::new_with_data(&backend.device, &shared_p)),
+        }
+        let shared_v = instance::ConstantDataV {
+            render: instance::RenderConstantDataV {
+                player_pos: backend
+                    .perspective_handler
+                    .constant_buffer_data
+                    .player
+                    .truncate()
+                    .into(),
+                anim_timestamp,
+                camera_pos: machine
+                    .get_camera_mumblelink()
+                    .map(|(p, ..)| p)
+                    .unwrap_or_default()
+                    .to_vector()
+                    .to_untyped(),
+                view: backend.perspective_handler.constant_buffer_data.view.into(),
+                projection: backend.perspective_handler.constant_buffer_data.projection.into(),
+                _padding0: 0.0,
+                _padding1: glamour::Vector4::ZERO,
+                _padding2: glamour::Vector4::ZERO,
+            },
+            poi: instance::PoiConstantDataV {
+                marker: instance::MarkerConstantDataV {
+                    alpha: backend.perspective_handler.alpha(),
+                    scale: backend
+                        .perspective_handler
+                        .constant_buffer_data
+                        .poi_expansion
+                        .scale(),
+                },
+                billboard: taimi_meta::coords::billboard_from_look(
+                    backend.perspective_handler.constant_buffer_data.view.into(),
+                ),
+                map_scale: machine.map.calibration.local_space().scale.abs().y,
+                _padding0: 0.0,
+            },
+            trail: instance::TrailConstantDataV {
+                marker: instance::MarkerConstantDataV {
+                    alpha: backend.perspective_handler.alpha(),
+                    scale: backend
+                        .perspective_handler
+                        .constant_buffer_data
+                        .trail_expansion
+                        .normal_expansion,
+                },
+                tex_scale: backend
+                    .perspective_handler
+                    .constant_buffer_data
+                    .trail_texture
+                    .v_scale,
+                tex_offset: backend
+                    .perspective_handler
+                    .constant_buffer_data
+                    .trail_texture
+                    .v_offset,
+            },
+        };
+        match &mut self.shared_cb_v {
+            Some(cb) => {
+                cb.update_singleton(device_context, &shared_v);
+            },
+            cb => *cb = rt::log::error_ok(ConstantBufferV::new_with_data(&backend.device, &shared_v)),
+        }
+    }
     pub fn clear(&mut self) {
         self.len = 0;
+        self.entities_ib = None;
+        self.poi_vb = None;
+        self.shader_trail = None;
+        self.shader_poi = None;
+        self.shader_p = None;
+        self.shared_cb_v = None;
+        self.shared_cb_p = None;
+        STATS_ENTITY_INSTANCE_SIZE.reset(0);
     }
     pub fn cleanup_background(mut self) {
-        mem::forget(self.x.take());
+        mem::forget(self.entities_ib.take());
+        mem::forget(self.shader_poi.take());
+        mem::forget(self.shader_trail.take());
+        mem::forget(self.shader_p.take());
+        mem::forget(self.poi_vb.take());
+        mem::forget(self.shared_cb_v.take());
+        mem::forget(self.shared_cb_p.take());
     }
 }
 
@@ -1656,6 +1964,7 @@ enum ShaderState {
     Poi,
 }
 
+pub static STATS_ENTITY_INSTANCE_SIZE: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_COUNT: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW_MAP: Counter = Counter::DEFAULT;

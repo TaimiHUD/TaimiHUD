@@ -7,6 +7,7 @@ pub use self::{
         STATS_ENTITY_COUNT,
         STATS_ENTITY_DRAW,
         STATS_ENTITY_DRAW_MAP,
+        STATS_ENTITY_INSTANCE_SIZE,
     },
     poi::{PoiCommonRenderData, PoiRender, STATS_POI_INSTANCE_SIZE},
     trail::{TrailRender, STATS_TRAIL_VERTEX_SIZE},
