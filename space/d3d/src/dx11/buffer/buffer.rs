@@ -8,7 +8,7 @@ use {
         shader::ShaderKind,
         D3dContextBindableSlot,
     },
-    std::marker::PhantomData,
+    std::{fmt, marker::PhantomData},
 };
 
 pub use crate::dx11::d3d11::{ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA};
@@ -400,7 +400,6 @@ impl Buffer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct BufferOf<D: D3dBufferData, const OFF: usize = 0> {
     pub buffer: Buffer,
@@ -443,9 +442,14 @@ impl<const OFF: usize, D: D3dBufferData> BufferOf<D, OFF> {
 impl<const OFF: usize, D: D3dBufferData> ops::Deref for BufferOf<D, OFF> {
     type Target = Buffer;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.buffer
     }
+}
+impl<const OFF: usize, D: D3dBufferData> AsRef<Buffer> for BufferOf<D, OFF> {
+    #[inline]
+    fn as_ref(&self) -> &Buffer { &self.buffer }
 }
 
 impl<const OFF: usize, D: D3dBufferData> From<BufferOf<D, OFF>> for Buffer {
@@ -564,5 +568,34 @@ impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
 {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+
+impl<const OFF: usize, D: D3dBufferData> Clone for BufferOf<D, OFF> {
+    fn clone(&self) -> Self {
+        Self::with_buffer(Clone::clone(&self.buffer))
+    }
+    fn clone_from(&mut self, other: &Self) {
+        self.buffer.clone_from(&other.buffer)
+    }
+}
+
+impl<const OFF: usize, D: D3dBufferData, B> PartialEq<B> for BufferOf<D, OFF> where
+    B: AsRef<Buffer>
+{
+    fn eq(&self, rhs: &B) -> bool {
+        self.buffer.eq(rhs.as_ref())
+    }
+}
+impl<const OFF: usize, D: D3dBufferData> Eq for BufferOf<D, OFF> {}
+
+impl<const OFF: usize, D: D3dBufferData> fmt::Debug for BufferOf<D, OFF> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut f = f.debug_struct("BufferOf");
+        if OFF > 0 {
+            f.field("offset", &OFF);
+        }
+        f.field("buffer", &self.buffer)
+            .finish()
     }
 }

@@ -1,6 +1,6 @@
 pub use {
     self::target::{ShaderKind, ShaderTarget},
-    crate::d3d::{Fxc::D3DCompile, ID3DInclude, D3D_SHADER_MACRO},
+    crate::d3d::{Fxc::D3DCompile, ID3DInclude, ID3DInclude_Impl, ID3DInclude_Vtbl, D3D_SHADER_MACRO},
 };
 #[cfg(feature = "arcffi")]
 use {

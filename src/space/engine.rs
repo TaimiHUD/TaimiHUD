@@ -137,6 +137,7 @@ pub struct Engine {
     pub packs: PackRender,
 
     pub drawing: bool,
+    pub drawing_start: Option<Instant>,
 
     settings: Option<PathingSettings>,
 }
@@ -207,6 +208,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             drawing: false,
+            drawing_start: None,
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             settings: None,
@@ -808,10 +810,7 @@ impl Engine {
             let alpha = trail_alpha * poi_alpha;
             let poi_scale = {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
-                #[cfg(todo = "unused")]
-                {
-                    vdata._poi_expansion = PoiScale::with_scale(poi_scale);
-                }
+                vdata.poi_expansion = PoiScale::with_scale(poi_scale);
                 let trail_expansion = TrailScale::with_scale(trail_scale);
                 match trail_textured {
                     true if vdata.trail_expansion == trail_expansion
@@ -860,6 +859,13 @@ impl Engine {
             if trail_alpha > 0.0 || poi_alpha > 0.0 {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
+
+                {
+                    let anim_timestamp = self.drawing_start.as_ref()
+                        .map(|s| s.elapsed().as_secs_f32())
+                        .unwrap_or(0.0);
+                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, anim_timestamp);
+                }
 
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
@@ -985,6 +991,8 @@ impl Engine {
     ) -> anyhow::Result<()> {
         let res = Ok(());
 
+        self.drawing_start = None;
+
         res
     }
 
@@ -994,6 +1002,8 @@ impl Engine {
         _map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
         let res = Ok(());
+
+        self.drawing_start = Some(Instant::now());
 
         self.goggles_enter(true);
 
@@ -1115,6 +1125,10 @@ impl Engine {
             (
                 StatsRef::with_counter(&pack::STATS_ENTITY_COUNT, StatsUnit::Count),
                 StatsDesc::new(SEC, "stats-engine-entities"),
+            ),
+            (
+                StatsRef::with_counter(&pack::STATS_ENTITY_INSTANCE_SIZE, StatsUnit::Size),
+                StatsDesc::new(SEC, "stats-engine-instance-entities"),
             ),
             (
                 StatsRef::new(&pack::STATS_POI_INSTANCE_SIZE, StatsUnit::Size),

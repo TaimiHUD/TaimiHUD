@@ -29,16 +29,15 @@ pub struct PerspectiveData {
     pub billboard: Mat4,
     pub player: Vec4,
     pub trail_expansion: TrailScale,
-    /// unused?
-    pub _poi_expansion: PoiScale,
+    pub poi_expansion: PoiScale,
     pub trail_texture: TrailTextureMap,
 }
 
 #[repr(C, align(16))]
 #[derive(Debug, Copy, Clone)]
 pub struct PixelData {
-    distance_param: Vec4,
-    viewport_param: Vec4,
+    pub distance_param: Vec4,
+    pub viewport_param: Vec4,
 }
 
 pub struct PerspectiveHandler {
@@ -302,7 +301,7 @@ impl PerspectiveData {
         projection: Mat4::IDENTITY,
         player: Vec4::ZERO,
         billboard: Mat4::IDENTITY,
-        _poi_expansion: PoiScale::DEFAULT,
+        poi_expansion: PoiScale::DEFAULT,
         trail_expansion: TrailScale::DEFAULT,
         trail_texture: TrailTextureMap::DEFAULT,
     };

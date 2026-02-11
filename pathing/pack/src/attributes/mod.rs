@@ -213,7 +213,7 @@ impl MarkerAttributes {
         {
             self.interaction_mut().info_range = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce") {
-            self.interaction_mut().bounce_behavior = Some(value.parse()?);
+            self.interaction_mut().bounce_behavior = parse_opt(&value)?;
         } else if attr_name.eq_ignore_ascii_case("bounce-delay") {
             self.interaction_mut().bounce_delay = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("bounce-height") {
@@ -509,6 +509,18 @@ impl InteractionAttributes {
             .unwrap_or_default()
             .into()
     }
+    pub fn bounce_height(&self) -> f32 {
+        self.bounce_height
+            .map(keys::BounceHeight)
+            .unwrap_or_default()
+            .into()
+    }
+    pub fn bounce_duration(&self) -> f32 {
+        self.bounce_duration
+            .map(keys::BounceDuration)
+            .unwrap_or_default()
+            .into()
+    }
 }
 
 /// Filters.
@@ -655,11 +667,19 @@ impl RenderAttributes {
 
     #[inline]
     pub fn tint(&self) -> Vec4 {
-        self.tint.unwrap_or(keys::Tint::DEFAULT.into())
+        let mut tint = self.tint.unwrap_or(keys::Tint::DEFAULT.into());
+        if let Some(alpha) = self.alpha {
+            tint.w *= alpha;
+        }
+        tint
     }
     #[inline]
     pub fn alpha(&self) -> f32 {
-        self.alpha.unwrap_or(keys::Alpha::DEFAULT.into())
+        let mut a = self.alpha.unwrap_or(keys::Alpha::DEFAULT.into());
+        if let Some(tint) = &self.tint {
+            a *= tint.w;
+        }
+        a
     }
     pub fn can_fade(&self) -> bool {
         self.can_fade.unwrap_or(keys::CanFade::DEFAULT.into())
@@ -815,7 +835,7 @@ pub fn parse_opt<T: FromStr>(value: &str) -> Result<Option<T>, T::Err> {
 fn parse_color(value: &str) -> anyhow::Result<Vec4> {
     let val = value.trim_start_matches('#');
     let mut itint = u32::from_str_radix(val, 16)?;
-    if val.len() == 6 {
+    if val.len() <= 6 {
         itint |= 0xFF000000;
     }
     Ok(Vec4::new(
