@@ -4,6 +4,7 @@ pub use self::{
         PackRender,
         PackRenderData,
         PackRenderList,
+        PackRenderResources,
         PackRenderState,
         STATS_ENTITY_COUNT,
         STATS_ENTITY_DRAW,
