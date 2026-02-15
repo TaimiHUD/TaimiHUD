@@ -327,6 +327,7 @@ pub struct PoiRender {
     pub icon_handle: Option<TextureKey>,
     pub icon: Option<TextureSlot>,
     pub static_rotation: bool,
+    pub occlude: bool,
 }
 impl PoiRender {
     pub fn empty() -> Self {
@@ -334,6 +335,7 @@ impl PoiRender {
             icon_handle: None,
             icon: None,
             static_rotation: false,
+            occlude: false,
         }
     }
 

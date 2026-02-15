@@ -7,49 +7,79 @@ TrailOutputV trail_main_v(TrailInput input)
 
     output.displacement = v_render.player_pos - input.vertex.position;
 
-    float trail_is_wall = GET_MFLAG(input.marker.flags, MFLAG_WALL);
+    float trail_is_wall = float(GET_MFLAG(input.marker.flags, MFLAG_WALL));
     float2 vnorm2 = lerp(
         float2(0.0, input.vertex.normal.y),
         float2(input.vertex.normal.y, 0.0),
-        float(GET_MFLAG(input.marker.flags, MFLAG_WALL))
+        trail_is_wall
     );
     float3 norm = float3(input.vertex.normal.x, vnorm2.x, vnorm2.y) * v_trail.marker.scale;
 
     float4 pos_world = float4(input.vertex.position + norm, 1.0);
+
+    float3 norm_tri = float3(0.0, 1.0 - trail_is_wall, trail_is_wall);
+    float face_dir = dot(v_render.camera_dir, norm_tri);
+    bool back_of_face = face_dir < 0.0;
+
     float4 pos = mul(v_render.view, pos_world);
 #if 1
-    float fade_near = GET_FADE_START(input.marker.fade);
+    float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
+    float fade = lerp(
+        1.0,
+        0.0,
+        saturate((pos.z - fade_near) / fade_range)
+    );
 #endif
     output.position = mul(v_render.projection, pos);
 
-    float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale;
+    float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale * v_trail.marker.anim_scale;
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
 
     output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
-    float obscure_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OBSCURE_FADE));
 
-    output.fade = float2(obscure_fade, fade);
+    // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
+    // float clip_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OPAQUE));
+    uint flags = input.marker.flags & (v_trail.marker.flags | !MFLAG_OBSCURE_FADE);
+    flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
+    output.instance = uint2(
+        flags,
+        0
+    );
+    output.fade = float2(fade, 0.0);
 
     return output;
 }
 #endif
 
 #if SHADER_SPACE_TRAIL && SHADER_P
-TrailOutputP trail_main_p(TrailOutputV vout)
+TrailOutputP trail_main_p(TrailInputP inp)
 {
+    SpaceOutputV vout = inp.space;
+    int flags = vout.instance.x;
     TrailOutputP output;
     float4 colour = vout.colour * shaderTexture.Sample(SampleType, vout.tex);
-    float fade = vout.fade.y;
+    float fade = vout.fade.x;
     colour.w = colour.w * fade;
 
+#if 0
+    bool face_front = inp.face_front;
+#else
+    // we don't have any sources of back-facing geometry yet...
+    bool face_front = true;
+#endif
+    bool face_cull = GET_MFLAG(flags, MFLAG_FACE_CULL);
+    bool face_cull_dir = GET_MFLAG(flags, MFLAG_FACE_CULL_FRONT) ^ face_front;
+    float clip_face = float((!face_cull) | face_cull_dir);
+
+    float clip_fade = float(GET_MFLAG(flags, MFLAG_OPAQUE));
     // XXX: or just enable depth clipping?
 #if 0
-    if (colour.w < DISCARD_ALPHA || vout.position.z < DiscardZ) { discard; }
+    if ((colour.w + clip_fade) < DISCARD_ALPHA || vout.position.z < DiscardZ) { discard; }
 #else
-    clip(float2(
-        colour.w - DISCARD_ALPHA,
+    clip(float3(
+        clip_face,
+        colour.w + clip_fade - DISCARD_ALPHA,
         vout.position.z - DiscardZ
     ));
 #endif
@@ -64,7 +94,7 @@ TrailOutputP trail_main_p(TrailOutputV vout)
 #endif
 #if 1
     // fade out when close to the player
-    float obscure_fade = vout.fade.x;
+    float obscure_fade = float(GET_MFLAG(flags, MFLAG_OBSCURE_FADE));
     float overlap = lerp(
         saturate(distance_squared / p_render.player_feather),
         1.0f,
@@ -99,10 +129,14 @@ PoiOutputV poi_main_v(PoiInput input)
 {
     PoiOutputV output;
 
-    float is_billboard = float(GET_MFLAG(input.marker.flags, MFLAG_BILLBOARD));
+    uint is_billboard_bit = GET_MFLAG_BIT(input.marker.flags, MFLAG_BILLBOARD);
     float3 vertex = input.vertex.position;
+
+    float3 midpoint;
+    //bool is_size_limited = is_billboard &* GET_MFLAG(v_poi.marker.flags, MFLAG_BILLBOARD);
+    bool is_size_limited = bool(is_billboard_bit & v_poi.marker.flags);
+    if (is_size_limited) {
 #if 1
-#define POI_MIDPOINT 1
     // TODO: viewport in cb_v!
     float2 viewport = float2(3840.0, 2160.0);
     float aspect = viewport.y / viewport.x;
@@ -133,30 +167,43 @@ PoiOutputV poi_main_v(PoiInput input)
     float size_screen_screen = sqrt(dot(sz, sz));
     float limit_max = saturate(size_max / size_screen_screen);
     float limit_min = saturate(size_screen_screen / size_min);
+#if 0
     vertex.xy = vertex.xy * lerp(
         1.0,
         clamp(1.0, (1.0 / limit_min), limit_max),
-        is_billboard
+        is_size_limited
     );
-#if TODO
+#else
+    vertex.xy = vertex.xy * clamp(1.0, (1.0 / limit_min), limit_max);
 #endif
+    }
 #endif
+    bool is_billboard = bool(is_billboard_bit);
+
     float3 pos_origin = vertex * v_poi.marker.scale;
     pos_origin = lerp(
         pos_origin,
         mul(v_poi.billboard, float4(pos_origin, 1.0)).xyz,
-        is_billboard
+        float(is_billboard)
     );
     float4 pos = mul(input.model, float4(pos_origin, 1.0));
-#ifdef POI_MIDPOINT
+    // TODO: prefer real midpoint if available idk
+    midpoint = pos.xyz;
+
     output.displacement = v_render.player_pos - midpoint;
-#else
-    output.displacement = v_render.player_pos - pos.xyz;
-#endif
+
+    bool back_of_face = false;
+    if (!is_billboard) {
+        float3 norm_origin = float3(0.0, 0.0, 1.0);
+        // ignore translation, we just want it rotated...
+        float3 norm = normalize(mul(input.model, float4(norm_origin, 0.0)).xyz);
+        float face_dir = dot(v_render.camera_dir, norm);
+        back_of_face = face_dir < 0.0;
+    }
 
 #if 1
     float bounce_height = GET_BOUNCE_DIST(input.bounce);
-    float bounce_anim = (v_render.anim_timestamp - input.anim_offset) * input.marker.anim_scale;
+    float bounce_anim = (v_render.anim_timestamp - input.anim_offset) * input.marker.anim_scale * v_poi.marker.anim_scale;
     float bounce_y = lerp(
         saturate(bounce_anim),
         sin(bounce_anim),
@@ -168,9 +215,14 @@ PoiOutputV poi_main_v(PoiInput input)
     pos = mul(v_render.view, pos);
 #if 1
     // TODO: consider using displacement (from char) rather than camera z?
-    float fade_near = GET_FADE_START(input.marker.fade);
+    float fade_near = GET_MFLAG(v_poi.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
+    float fade = lerp(
+        1.0,
+        0.0,
+        saturate((pos.z - fade_near) / fade_range)
+    );
+
 #endif
     pos = mul(v_render.projection, pos);
     output.position = pos;
@@ -183,8 +235,14 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: fadenear/fadefar
     output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
     // TODO: apply+preprocess player_feather here?
-    float obscure_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OBSCURE_FADE));
-    output.fade = float2(obscure_fade, fade);
+
+    uint flags = input.marker.flags & (v_poi.marker.flags | !MFLAG_OBSCURE_FADE);
+    flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
+    output.instance = uint2(
+        flags,
+        0
+    );
+    output.fade = float2(fade, 0.0);
 
     return output;
 }
@@ -195,7 +253,12 @@ PoiOutputP poi_main_p(PoiOutputV vout)
 {
     PoiOutputP output;
     float4 colour = vout.colour * shaderTexture.Sample(SampleType, vout.tex);
-    if (colour.w < DISCARD_ALPHA || vout.position.z < DiscardZ) { discard; }
+
+    float clip_fade = vout.fade.z;
+    clip(float2(
+        colour.w - DISCARD_ALPHA + clip_fade,
+        vout.position.z - DiscardZ
+    ));
 
     float distance_squared = dot(vout.displacement, vout.displacement);
 

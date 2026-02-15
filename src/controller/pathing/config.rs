@@ -188,6 +188,7 @@ impl PathingController {
                 .update_map_states(true, true, &mut { maps }, Some(&self.filter_state));
         }
     }
+    #[cfg(todo)]
     pub(super) fn reload_config_for(&mut self, path: PackPath) {
         let Some(info) = self.packs.lookup_ref(&path) else { return };
         if !info.is_loaded() {

@@ -18,7 +18,11 @@ use {
         collections::BTreeMap,
         fmt,
         path::{Path, PathBuf},
-        sync::{Arc, RwLock},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+            RwLock,
+        },
     },
     taimi_hoard::loc::LocationRef,
     taimi_meta::packs::PackPath,
@@ -180,6 +184,8 @@ pub struct PackLoader {
     pub settings: SettingsLock,
     pub festival_categories: BTreeMap<&'static str, Festival>,
     pub load_throttle: RwLock<Arc<Semaphore>>,
+    /// TODO: there's a shared sender for this, switch to a handle of that instead
+    pub load_throttle_max: AtomicUsize,
 
     pub shared: Arc<PathingShared>,
 }
@@ -192,6 +198,7 @@ impl PackLoader {
             shared,
             festival_categories: FestivalFixup::festival_categories(),
             load_throttle: RwLock::new(Arc::new(Semaphore::new(load_throttle))),
+            load_throttle_max: AtomicUsize::new(load_throttle),
         }
     }
 
@@ -208,7 +215,12 @@ impl PackLoader {
             })
             .clone()
     }
+    pub fn adjust_load_throttle_to(&self, new_limit: usize) -> Result<(), ()> {
+        let prev = self.load_throttle_max.swap(new_limit, Ordering::Relaxed) as isize;
+        self.adjust_load_throttle_by(new_limit as isize - prev, new_limit)
+    }
     pub fn adjust_load_throttle_by(&self, change: isize, new_limit: usize) -> Result<(), ()> {
+        self.load_throttle_max.store(new_limit, Ordering::Relaxed);
         let succ = self
             .load_throttle
             .read()
@@ -249,6 +261,20 @@ impl PackLoader {
             // leak/forget the previous Arc?
         }
         Err(())
+    }
+    pub fn active_loads(&self) -> usize {
+        let max = self.load_throttle_max.load(Ordering::Relaxed);
+        let avail = self
+            .load_throttle
+            .read()
+            .map(|l| l.available_permits())
+            .unwrap_or(0);
+        max.saturating_sub(avail)
+    }
+    /// TODO: unimplemented (does distinction matter?)
+    pub fn pending_loads(&self) -> usize {
+        let pending = 0;
+        self.active_loads() + pending
     }
 
     pub fn pack_info(&self, path: PackPath) -> Option<Arc<SharedPackInfo>> {

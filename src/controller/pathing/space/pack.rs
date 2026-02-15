@@ -546,6 +546,7 @@ impl SpacePackCollection {
         packs: &LoadedPacks,
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
+        still_loading: bool,
     ) -> Result<(), bool> {
         let EntityUpdateReport {
             removed,
@@ -646,12 +647,20 @@ impl SpacePackCollection {
         };
         let mut full_rebuild = match partial_rebuild {
             _ if self.bvh.nodes.len() <= 1 => true,
+            true if still_loading => false,
             true if removed_count == 0 => false,
             _ if dirty.is_empty() && new_entities.is_empty() => false,
             _ => true,
         };
 
         if !full_rebuild {
+            let has_bvh_static =
+                !self.bvh_static.is_empty() && &self.bvh_static[..] == &[Self::BVH_STATIC_ALL];
+            if has_bvh_static && removed_count > 0 {
+                // (it's fine to leave removed items here but shrug)
+                self.bvh_static
+                    .retain(|i| removed.get(*i as usize).map(|r| *r).unwrap_or(true));
+            }
             #[cfg(todo)]
             let deactivations = dirty.values().copied().chain(removed.iter_ones());
             let mut removed = removed;
@@ -663,27 +672,52 @@ impl SpacePackCollection {
                 &mut self.bvh,
                 &mut { deactivations },
             );
-            let mut check_interval = match dirty_indices.clone().next().is_some() {
-                true => -((removed_count + Self::BVH_DEPTH_INTERVAL) as isize),
-                false => 0,
-            };
-            for i in dirty_indices.clone() {
-                self.bvh.add_shape(&mut self.render_entities.entities, i);
-                check_interval += 1;
-                if check_interval >= Self::BVH_DEPTH_INTERVAL as isize {
-                    check_interval = 0;
-                }
-                if check_interval == 0 {
-                    if !Self::check_bvh_depth(&self.bvh) {
-                        let dirty_count = dirty_indices.clone().count();
-                        log::debug!("rebuild ?/+{dirty_count}-{removed_count}");
-                        full_rebuild = true;
-                        break
+            let has_dirty = dirty_indices.clone().next().is_some();
+            let partial_static = true;
+            #[cfg(todo)]
+            let mut partial_static = false;
+            #[cfg(todo)]
+            if !still_loading {
+                let mut check_interval = match has_dirty {
+                    true => -((removed_count + Self::BVH_DEPTH_INTERVAL) as isize),
+                    false => 0,
+                };
+                for i in dirty_indices.clone() {
+                    self.bvh.add_shape(&mut self.render_entities.entities, i);
+                    check_interval += 1;
+                    if check_interval >= Self::BVH_DEPTH_INTERVAL as isize {
+                        check_interval = 0;
+                    }
+                    if check_interval == 0 {
+                        if !Self::check_bvh_depth(&self.bvh) {
+                            let dirty_count = dirty_indices.clone().count();
+                            log::debug!("rebuild ?/+{dirty_count}-{removed_count}");
+                            full_rebuild = true;
+                            break
+                        }
                     }
                 }
+                if check_interval != 0 && !Self::check_bvh_depth(&self.bvh) {
+                    full_rebuild = true;
+                }
+            } else {
+                partial_static = true;
             }
-            if check_interval != 0 && !Self::check_bvh_depth(&self.bvh) {
-                full_rebuild = true;
+            if partial_static && has_dirty {
+                if !has_bvh_static {
+                    self.bvh_static.clear();
+                }
+                self.bvh_static.extend(new_entities.clone().map(|i| i as u32));
+                if has_bvh_static {
+                    // avoiding duplicates ew...
+                    let mut dirty: BTreeSet<_> = dirty.values().cloned().map(|i| i as u32).collect();
+                    for i in &self.bvh_static {
+                        dirty.remove(i);
+                    }
+                    self.bvh_static.extend(dirty);
+                } else {
+                    self.bvh_static.extend(dirty.values().cloned().map(|i| i as u32));
+                }
             }
         }
         if full_rebuild {
@@ -853,21 +887,114 @@ impl SpacePackCollection {
             self.bvh_static.push(Self::BVH_STATIC_ALL);
         }
     }
-    pub fn rebuild_bvh(&mut self) {
+    pub async fn try_rebuild_bvh(&mut self) {
+        if self.discard_bvh() {
+            return
+        }
+        if !self.needs_bvh_rebuild() {
+            return
+        }
+        self.spawn_rebuild_bvh().await
+    }
+    pub async fn rebuild_bvh(&mut self) {
+        if self.discard_bvh() {
+            return
+        }
+        self.spawn_rebuild_bvh().await
+    }
+    pub fn discard_bvh(&mut self) -> bool {
         self.render_entities.prune_residue();
+        self.clear_bvh();
         if self.render_entities.entities.is_empty() {
             for pack in self.loaded_packs.values_mut() {
                 pack.clear_entities();
             }
-            self.clear_bvh();
-            return
+            true
+        } else {
+            false
         }
-        self.bvh = Bvh::build(&mut self.render_entities.entities);
-        self.bvh_static.clear();
+    }
+    async fn spawn_rebuild_bvh(&mut self) {
+        let bvh = match () {
+            #[cfg(todo)]
+            _ => Ok(tokio::task::block_in_place(|| Bvh::build(&mut self.render_entities.entities)).await),
+            _ => {
+                let mut shapes = mem::take(&mut self.render_entities.entities);
+                let bvh = tokio::task::spawn_blocking(move || {
+                    let bvh = Bvh::build(&mut shapes);
+                    (bvh, shapes)
+                })
+                .await;
+                match bvh {
+                    Ok((bvh, shapes)) => {
+                        self.render_entities.entities = shapes;
+                        Ok(bvh)
+                    },
+                    Err(e) => Err(e),
+                }
+            },
+        };
+        self.bvh = match bvh {
+            Ok(b) => {
+                self.bvh_static.clear();
+                b
+            },
+            Err(e) => {
+                crate::log_join_error("space bvh", e);
+                Bvh { nodes: Default::default() }
+            },
+        };
     }
     fn signal_bvh_rebuild(&mut self) {
         if !self.render_entities.entities.is_empty() {
             self.clear_bvh();
+        }
+    }
+    /// TODO
+    pub(crate) fn needs_bvh_rebuild(&self) -> bool {
+        if self.render_entities.entities.is_empty() {
+            return false
+        }
+        match self.bvh.nodes.is_empty() {
+            // rough lazy count of visible entities
+            true if self.render_entities.entities.len() < Self::BVH_MIN => false,
+            true if self.bvh_static.len() >= Self::BVH_MIN_STATIC => true,
+            true if self.render_entities.entities.len() > Self::BVH_MAX_STATIC
+                && self.bvh_static.len() <= 1 =>
+                true,
+            true => self
+                .render_entities
+                .extra
+                .iter()
+                .filter(|e| !e.is_invalid())
+                .nth(Self::BVH_MIN)
+                .is_some(),
+            false => self.bvh_static.len() > Self::BVH_PARTIAL,
+        }
+    }
+    /// number of entities to warrant a bvh
+    const BVH_MIN: usize = 32;
+    const BVH_MIN_STATIC: usize = 64;
+    /// number of entities to require a bvh (indicates fragmentation)
+    const BVH_MAX_STATIC: usize = 192;
+    /// number of entities pending bvh inclusion to warrant a full rebuild
+    const BVH_PARTIAL: usize = 22;
+    /// throw out data that would be discarded by a subsequent [Self::rebuild_bvh]
+    ///
+    /// TODO: purge bvh node indices from entities?
+    pub(crate) fn clone_without_bvh(&self) -> Self {
+        Self {
+            map_id: self.map_id,
+            loaded_packs: self.loaded_packs.clone(),
+            render_entities: self.render_entities.clone(),
+            bvh: Bvh { nodes: Default::default() },
+            #[cfg(todo = "unnecessary")]
+            bvh_static: if !self.bvh_static.is_empty() || self.bvh.nodes.is_empty() {
+                vec![Self::BVH_STATIC_ALL]
+            } else {
+                Vec::new()
+            },
+            bvh_static: Default::default(),
         }
     }
 
