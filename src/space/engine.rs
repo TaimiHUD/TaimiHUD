@@ -528,7 +528,9 @@ impl Engine {
         }
         self.schedule.run(&mut self.world);
 
-        self.drawing = self.packs.prepare(&self.render_backend.device, machine)?;
+        let settings = self.settings.as_ref()
+            .map(|s| &s.space);
+        self.drawing = self.packs.prepare(&self.render_backend.device, machine, settings)?;
 
         //self.packs.update();
         Ok(())
@@ -843,6 +845,22 @@ impl Engine {
                 .perspective_handler
                 .set_feather_scale(edge_feather_scale, self.render_backend.display_size);
 
+            let arcrender_settings = arcrender.then(|| {
+                let settings = self.map_settings(|s| ArcrenderSettings {
+                    trail_anim_speed: s.space.trail_anim_space(),
+                    trail_distance_fade: s.space.distance_fade_range(),
+                    poi_distance_fade: s.space.distance_fade_range(),
+                    poi_can_fade: s.space.player_overlap_poi(),
+                    trail_can_fade: s.space.player_overlap_threshold().is_some(),
+                    poi_limit_size: s.space.poi_limit_size(),
+                    .. ArcrenderSettings::DEFAULT
+                });
+                let anim_timestamp = self.drawing_start.as_ref()
+                    .map(|s| s.elapsed().as_secs_f32())
+                    .unwrap_or(0.0);
+                (settings, anim_timestamp)
+            });
+
             #[cfg(feature = "goggles")]
             if goggles_2pass {
                 // first pass at reduced opacity
@@ -851,8 +869,11 @@ impl Engine {
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
 
+                if let Some((settings, anim_timestamp)) = &arcrender_settings {
+                    self.packs.resources.update_shared(&device_context, &*backend, &*machine, *anim_timestamp, settings);
+                }
                 self.packs
-                    .draw_obscured(camera.clone(), cull, &*backend, &device_context);
+                    .draw_obscured(camera.clone(), cull, &*backend, &device_context, arcrender);
 
                 backend.depth_handler.set_state_obscured(&device_context, false);
             }
@@ -861,24 +882,12 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
-                if arcrender {
-                    let anim_timestamp = self.drawing_start.as_ref()
-                        .map(|s| s.elapsed().as_secs_f32())
-                        .unwrap_or(0.0);
-                    let settings = self.map_settings(|s| ArcrenderSettings {
-                        trail_anim_speed: s.space.trail_anim_space(),
-                        trail_distance_fade: s.space.distance_fade_range(),
-                        poi_distance_fade: s.space.distance_fade_range(),
-                        poi_can_fade: s.space.player_overlap_poi(),
-                        trail_can_fade: s.space.player_overlap_threshold().is_some(),
-                        poi_limit_size: s.space.poi_limit_size(),
-                        .. ArcrenderSettings::DEFAULT
-                    });
-                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, anim_timestamp, &settings);
+                if let Some((settings, anim_timestamp)) = &arcrender_settings {
+                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, *anim_timestamp, settings);
                 }
 
                 self.packs
-                    .draw(camera.clone(), cull, &self.render_backend, &device_context);
+                    .draw(camera.clone(), cull, &self.render_backend, &device_context, arcrender);
             }
         }
 
@@ -1014,6 +1023,7 @@ impl Engine {
         let res = Ok(());
 
         self.drawing_start = Some(Instant::now());
+        self.packs.resources.dirty = true;
 
         self.goggles_enter(true);
 

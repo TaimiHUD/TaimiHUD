@@ -85,8 +85,8 @@ struct PoiInputV {
 struct PoiInput {
     PoiInputV vertex;
     MarkerInput marker;
-    uint size_range: MFLAG2;
-    uint bounce: MFLAG3;
+    uint size_range: PFLAG0;
+    uint bounce: PFLAG1;
     column_major float4x4 model: PMODEL;
     float anim_offset: PDISP0;
     float map_scale: PDISP1;
@@ -142,13 +142,16 @@ struct PoiSharedV {
     column_major float4x4 billboard;
     MarkerSharedV marker;
     float map_scale;
-    float _padding0[3];
+    float _padding0;
+    float _padding1;
+    float _padding2;
 };
 struct TrailSharedV {
     MarkerSharedV marker;
     float tex_scale;
     float tex_offset;
-    float _padding0[2];
+    float _padding0;
+    float _padding1;
 };
 struct RenderSharedP {
     float2 viewport;
@@ -164,8 +167,8 @@ struct RenderSharedV {
     float3 camera_pos;
     float _padding0;
     float3 camera_dir;
-    float _padding1;
-    float4 _padding2;
+    float viewport_pixel_scale;
+    float4 _padding1;
 };
 
 #if SHADER_SPACE

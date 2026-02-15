@@ -375,7 +375,7 @@ impl SpaceSettings {
         self.trail_alpha.unwrap_or(Self::DEFAULT_TRAIL_ALPHA)
     }
     pub fn poi_alpha(&self) -> f32 {
-        self.trail_alpha.unwrap_or(Self::DEFAULT_POI_ALPHA)
+        self.poi_alpha.unwrap_or(Self::DEFAULT_POI_ALPHA)
     }
 
     pub fn trail_alpha_worldmap(&self) -> f32 {
