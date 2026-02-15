@@ -144,7 +144,9 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("occlude") {
             self.poi_mut().occlude = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("rotate") {
-            self.poi_mut().rotate = Some(Vec3::from_array(parse_array(&value)?));
+            self.poi_mut().rotate = str_opt_ref(&value).map(|value|
+                parse_array(&value).map(Vec3::from_array)
+            ).transpose()?;
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
             let x = value.parse()?;
             self.poi_mut().rotate.get_or_insert_default().x = x;

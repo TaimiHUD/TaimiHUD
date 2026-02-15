@@ -40,11 +40,15 @@ use crate::space::engine::{Engine, SpaceEvent};
 
 pub struct PathingConfig {
     enables: Watched<PathingEnables>,
+    arcrender_enabled: bool,
 }
 
 impl PathingConfig {
     pub fn new() -> Self {
-        let mut state = Self { enables: Watched::EMPTY };
+        let mut state = Self {
+            enables: Watched::EMPTY,
+            arcrender_enabled: false,
+        };
         Controller::with_sender(|s| {
             if let Some(p) = &s.pathing {
                 state.enables.restart_watching(&p.enables);
@@ -55,6 +59,9 @@ impl PathingConfig {
 
     fn katrender(&self) -> bool {
         self.enables.get().contains(PathingEnables::KATRENDER)
+    }
+    fn arcrender(&self) -> bool {
+        self.arcrender_enabled
     }
 
     pub fn draw(
@@ -166,12 +173,14 @@ impl PathingConfig {
         if self.katrender() {
             ui.same_line();
             if ui.button(&fl!("render-unload")) {
-                let _disabled = Settings::write_with_blocking(|settings| {
-                    settings.enable_katrender = false;
+                self.enables.write_if(|enables| {
+                    enables.remove(PathingEnables::KATRENDER);
+                    Some(true)
                 });
-                if _disabled.is_ok() {
-                    RenderState::try_send(RenderEvent::ReloadAll);
+                if let Some(mut settings) = crate::SETTINGS.get().map(|s| s.blocking_write())  {
+                    settings.enable_katrender = false;
                 }
+                RenderState::try_send(RenderEvent::ReloadAll);
             }
 
             ui.same_line();
@@ -246,6 +255,31 @@ impl PathingConfig {
         }
     }
 
+    fn slider_opt_alpha(
+        ui: &Ui,
+        label: &str,
+        value: f32,
+        initial: Option<f32>,
+    ) -> Option<Option<f32>> {
+        Self::slider_opt_mult(ui, label, value, Self::RANGE_ALPHA, initial)
+    }
+    fn slider_opt_mult(
+        ui: &Ui,
+        label: &str,
+        value: f32,
+        range: (f32, f32),
+        initial: Option<f32>,
+    ) -> Option<Option<f32>> {
+        let value = match value {
+            v if v <= 0.0 => None,
+            v => Some(v),
+        };
+        match Self::slider_opt_setting_with_initial(ui, label, value, range, None) {
+            Some(Some(SpaceSettings::NONE_F32)) =>
+                Some(Some(0.0)),
+            res => res,
+        }
+    }
     fn slider_opt_setting(
         ui: &Ui,
         label: &str,
@@ -294,6 +328,20 @@ impl PathingConfig {
         res
     }
 
+    fn toggle_setting(
+        ui: &Ui,
+        id: &str,
+        value: &mut bool,
+    ) -> Option<Option<bool>> {
+        if with_i18n!(id, |label| ui.checkbox(&label, value)) {
+            Some(Some(*value))
+        } else if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+            Some(None)
+        } else {
+            None
+        }
+    }
+
     fn set_pathing<F: FnOnce(&mut PathingSettings)>(f: F) {
         let res = Settings::write_with_blocking(|s| f(s.pathing_mut()))
             .context("failed to save pathing settings");
@@ -309,8 +357,10 @@ impl PathingConfig {
 
     const RANGE_ALPHA: (f32, f32) = (0.0, 1.0);
     const RANGE_SCALE: (f32, f32) = (0.0, 25.0);
+    const RANGE_SCALE_MULT5: (f32, f32) = (0.0, 5.0);
+    const RANGE_SCALE_MULT10: (f32, f32) = (0.0, 10.0);
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
-    const RANGE_SCALE_POI: (f32, f32) = (0.0, 5.0);
+    const RANGE_SCALE_POI: (f32, f32) = Self::RANGE_SCALE_MULT5;
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
     fn draw_pathing_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) -> Option<()> {
         let (
@@ -318,6 +368,8 @@ impl PathingConfig {
             camera_source,
             mut visible_space,
             player_overlap_threshold,
+            mut player_overlap_poi,
+            mut distance_fade_range,
             distance_fade_intensity,
             distance_max,
             trail_y_offset,
@@ -325,8 +377,12 @@ impl PathingConfig {
             trail_width,
             mut trail_textured_space,
             trail_alpha,
+            poi_alpha,
             scale_trail_space,
             scale_poi_space,
+            mut scale_poi_limit,
+            anim_trail_space,
+            mut arcrender,
             edge_feather_scale,
             (edge_scale,),
         ) = Self::get_pathing(|s| {
@@ -335,15 +391,21 @@ impl PathingConfig {
                 s.space.camera_source(),
                 s.space.visible_space(),
                 s.space.player_overlap_threshold(),
+                s.space.player_overlap_poi(),
+                s.space.distance_fade_range(),
                 s.space.distance_fade_intensity(),
                 s.space.distance_max(),
                 s.space.trail_y_offset(),
                 s.space.trail_resolution(),
                 s.space.trail_width(),
                 s.space.trail_textured_space(),
-                s.space.trail_alpha(), // s.space.poi_alpha(),
+                s.space.trail_alpha(),
+                s.space.poi_alpha(),
                 s.space.trail_scale_space(),
                 s.space.poi_scale_space(),
+                s.space.poi_limit_size(),
+                s.space.trail_anim_space(),
+                s.space.goggles.arcrender_enabled(),
                 s.space.edge_feather_scale(),
                 match () {
                     #[cfg(feature = "goggles")]
@@ -366,39 +428,64 @@ impl PathingConfig {
         if ui.checkbox(&fl!("pathing-config-textured"), &mut trail_textured_space) {
             Self::set_pathing(|s| s.space.trail_textured_space = Some(trail_textured_space));
         }
+        if ui.checkbox("arcrender", &mut arcrender) {
+            Self::set_pathing(|s| s.space.goggles.arcrender_enabled = Some(arcrender));
+        }
+        self.arcrender_enabled = arcrender;
 
         with_i18n!("pathing-config-reset-notice", |msg| ui.text_wrapped(&msg));
 
         ui.indent();
-        if let Some(value) = Self::slider_setting(
+        if let Some(value) = Self::slider_opt_alpha(
             ui,
             &fl!("pathing-config-trail-alpha"),
             trail_alpha,
-            Self::RANGE_ALPHA,
+            None,
         ) {
             Self::set_pathing(|s| s.space.trail_alpha = value);
         }
-        if let Some(value) = Self::slider_setting(
-            ui,
-            &fl!("pathing-config-trail-scale"),
-            scale_trail_space,
-            Self::RANGE_SCALE,
-        ) {
-            Self::set_pathing(|s| s.space.scale_trail_space = value);
+        if trail_alpha > 0.0 {
+            if let Some(value) = Self::slider_setting(
+                ui,
+                &fl!("pathing-config-trail-scale"),
+                scale_trail_space,
+                Self::RANGE_SCALE,
+            ) {
+                Self::set_pathing(|s| s.space.scale_trail_space = value);
+            }
+            if self.arcrender() {
+                if let Some(value) = Self::slider_opt_mult(
+                    ui,
+                    &fl!("pathing-config-trail-anim"),
+                    anim_trail_space,
+                    Self::RANGE_SCALE_MULT10,
+                    Some(SpaceSettings::DEFAULT_TRAIL_ANIM),
+                ) {
+                    Self::set_pathing(|s| s.space.anim_trail_space = value);
+                }
+            }
         }
-        #[cfg(todo)]
         if let Some(value) =
-            Self::slider_setting(ui, &fl!("pathing-config-poi-alpha"), poi_alpha, Self::RANGE_ALPHA)
+            Self::slider_opt_alpha(ui, &fl!("pathing-config-poi-alpha"), poi_alpha, None)
         {
             Self::set_pathing(|s| s.space.poi_alpha = value);
         }
-        if let Some(value) = Self::slider_setting(
-            ui,
-            &fl!("pathing-config-poi-scale"),
-            scale_poi_space,
-            Self::RANGE_SCALE_POI,
-        ) {
-            Self::set_pathing(|s| s.space.scale_poi_space = value);
+        if poi_alpha > 0.0 {
+            ui.indent();
+            if let Some(value) = Self::slider_setting(
+                ui,
+                &fl!("pathing-config-poi-scale"),
+                scale_poi_space,
+                Self::RANGE_SCALE_POI,
+            ) {
+                Self::set_pathing(|s| s.space.scale_poi_space = value);
+            }
+            if arcrender {
+                if let Some(value) = Self::toggle_setting(ui, "pathing-config-poi-scale-limit", &mut scale_poi_limit) {
+                    Self::set_pathing(|s| s.space.poi_limit_size = value);
+                }
+            }
+            ui.unindent();
         }
         if let Some(value) = Self::slider_opt_setting(
             ui,
@@ -408,6 +495,11 @@ impl PathingConfig {
         ) {
             Self::set_pathing(|s| s.space.distance_fade_intensity = value);
         }
+        if arcrender {
+            if let Some(value) = Self::toggle_setting(ui, "pathing-config-distance-fade-range", &mut distance_fade_range) {
+                Self::set_pathing(|s| s.space.distance_fade_range = value);
+            }
+        }
         if let Some(value) = Self::slider_opt_setting(
             ui,
             &fl!("pathing-config-player-overlap-threshold"),
@@ -415,6 +507,13 @@ impl PathingConfig {
             (0.01, 1000.0),
         ) {
             Self::set_pathing(|s| s.space.player_overlap_threshold = value);
+        }
+        if poi_alpha > 0.0 && arcrender {
+            ui.indent();
+            if let Some(value) = Self::toggle_setting(ui, "pathing-config-player-overlap-poi", &mut player_overlap_poi) {
+                Self::set_pathing(|s| s.space.player_overlap_poi = value);
+            }
+            ui.unindent();
         }
         if let Some(value) =
             Self::slider_opt_setting(ui, "edge feather scale", edge_feather_scale, (0.001f32, 5.0))
@@ -553,6 +652,8 @@ impl PathingConfig {
             mut trail_textured_world,
             map_trail_alpha_mini,
             map_trail_alpha_world,
+            map_poi_alpha_mini,
+            map_poi_alpha_world,
             scale_trail_mini,
             scale_trail_world,
             scale_poi_mini,
@@ -566,7 +667,8 @@ impl PathingConfig {
                 s.space.trail_textured_worldmap(),
                 s.space.trail_alpha_minimap(),
                 s.space.trail_alpha_worldmap(),
-                //s.space.poi_alpha_minimap(), s.space.poi_alpha_worldmap(),
+                s.space.poi_alpha_minimap(),
+                s.space.poi_alpha_worldmap(),
                 s.space.trail_scale_minimap(),
                 s.space.trail_scale_worldmap(),
                 s.space.poi_scale_minimap(),
@@ -583,38 +685,41 @@ impl PathingConfig {
             if ui.checkbox(&fl!("pathing-config-textured-minimap"), &mut trail_textured_mini) {
                 Self::set_pathing(|s| s.space.map_trail_textured_mini = Some(trail_textured_mini));
             }
-            if let Some(value) = Self::slider_setting(
+            if let Some(value) = Self::slider_opt_alpha(
                 ui,
                 &fl!("pathing-config-trail-alpha-minimap"),
                 map_trail_alpha_mini,
-                Self::RANGE_ALPHA,
+                None,
             ) {
                 Self::set_pathing(|s| s.space.map_trail_alpha_mini = value);
             }
-            #[cfg(todo)]
-            if let Some(value) = Self::slider_setting(
+            if map_trail_alpha_mini > 0.0 {
+                if let Some(value) = Self::slider_setting(
+                    ui,
+                    &fl!("pathing-config-trail-scale-minimap"),
+                    scale_trail_mini,
+                    Self::RANGE_SCALE_MAP,
+                ) {
+                    Self::set_pathing(|s| s.space.scale_trail_mini = value);
+                }
+            }
+            if let Some(value) = Self::slider_opt_alpha(
                 ui,
                 &fl!("pathing-config-poi-alpha-minimap"),
                 map_poi_alpha_mini,
-                Self::RANGE_ALPHA,
+                None,
             ) {
                 Self::set_pathing(|s| s.space.map_poi_alpha_mini = value);
             }
-            if let Some(value) = Self::slider_setting(
-                ui,
-                &fl!("pathing-config-trail-scale-minimap"),
-                scale_trail_mini,
-                Self::RANGE_SCALE_MAP,
-            ) {
-                Self::set_pathing(|s| s.space.scale_trail_mini = value);
-            }
-            if let Some(value) = Self::slider_setting(
-                ui,
-                &fl!("pathing-config-poi-scale-minimap"),
-                scale_poi_mini,
-                Self::RANGE_SCALE_POI,
-            ) {
-                Self::set_pathing(|s| s.space.scale_poi_mini = value);
+            if map_poi_alpha_mini > 0.0 {
+                if let Some(value) = Self::slider_setting(
+                    ui,
+                    &fl!("pathing-config-poi-scale-minimap"),
+                    scale_poi_mini,
+                    Self::RANGE_SCALE_POI,
+                ) {
+                    Self::set_pathing(|s| s.space.scale_poi_mini = value);
+                }
             }
         };
         let _minimap = TreeNode::new(&fl!("pathing-config-minimap"))
@@ -638,38 +743,41 @@ impl PathingConfig {
             if ui.checkbox(&fl!("pathing-config-map-open"), &mut map_open) {
                 Self::set_pathing(|s| s.space.map_open = Some(map_open));
             }
-            if let Some(value) = Self::slider_setting(
+            if let Some(value) = Self::slider_opt_alpha(
                 ui,
                 &fl!("pathing-config-trail-alpha-worldmap"),
                 map_trail_alpha_world,
-                Self::RANGE_ALPHA,
+                None,
             ) {
                 Self::set_pathing(|s| s.space.map_trail_alpha_world = value);
             }
-            #[cfg(todo)]
-            if let Some(value) = Self::slider_setting(
+            if map_trail_alpha_world > 0.0 {
+                if let Some(value) = Self::slider_setting(
+                    ui,
+                    &fl!("pathing-config-trail-scale-worldmap"),
+                    scale_trail_world,
+                    Self::RANGE_SCALE_MAP,
+                ) {
+                    Self::set_pathing(|s| s.space.scale_trail_world = value);
+                }
+            }
+            if let Some(value) = Self::slider_opt_alpha(
                 ui,
                 &fl!("pathing-config-poi-alpha-worldmap"),
                 map_poi_alpha_world,
-                Self::RANGE_ALPHA,
+                None,
             ) {
                 Self::set_pathing(|s| s.space.map_poi_alpha_world = value);
             }
-            if let Some(value) = Self::slider_setting(
-                ui,
-                &fl!("pathing-config-trail-scale-worldmap"),
-                scale_trail_world,
-                Self::RANGE_SCALE_MAP,
-            ) {
-                Self::set_pathing(|s| s.space.scale_trail_world = value);
-            }
-            if let Some(value) = Self::slider_setting(
-                ui,
-                &fl!("pathing-config-poi-scale-worldmap"),
-                scale_poi_world,
-                Self::RANGE_SCALE_POI,
-            ) {
-                Self::set_pathing(|s| s.space.scale_poi_world = value);
+            if map_poi_alpha_world > 0.0 {
+                if let Some(value) = Self::slider_setting(
+                    ui,
+                    &fl!("pathing-config-poi-scale-worldmap"),
+                    scale_poi_world,
+                    Self::RANGE_SCALE_POI,
+                ) {
+                    Self::set_pathing(|s| s.space.scale_poi_world = value);
+                }
             }
         };
 
@@ -886,7 +994,7 @@ impl PathingConfig {
             ));
         }
 
-        if let Some(value) = Self::slider_setting(ui, "x-ray opacity", obscured_alpha, Self::RANGE_ALPHA) {
+        if let Some(value) = Self::slider_opt_alpha(ui, "x-ray opacity", obscured_alpha, None) {
             Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
         }
 

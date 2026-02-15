@@ -314,10 +314,15 @@ const POI_QUAD_VERTICES: [Vertex; 4] = [
 pub struct PoiRender {
     pub icon_handle: Option<TextureKey>,
     pub icon: Option<TextureSlot>,
+    pub occlude: bool,
 }
 impl PoiRender {
     pub fn empty() -> Self {
-        Self { icon_handle: None, icon: None }
+        Self {
+            icon_handle: None,
+            icon: None,
+            occlude: false,
+        }
     }
 
     pub fn update(

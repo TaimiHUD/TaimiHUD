@@ -168,7 +168,11 @@ pub struct SpaceSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance_fade_intensity: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance_fade_range: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_overlap_threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_overlap_poi: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_feather_scale: Option<f32>,
 
@@ -187,6 +191,8 @@ pub struct SpaceSettings {
     pub map_poi_alpha_mini: Option<f32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poi_limit_size: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_poi_space: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_poi_mini: Option<f32>,
@@ -199,6 +205,13 @@ pub struct SpaceSettings {
     pub scale_trail_mini: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scale_trail_world: Option<f32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim_trail_space: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim_trail_mini: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim_trail_world: Option<f32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trail_y_offset: Option<f32>,
@@ -219,16 +232,20 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_RESOLUTION: f32 = 1.0 / 20.0;
     pub const DEFAULT_TRAIL_WIDTH: f32 = 1.016;
     pub const DEFAULT_DISTANCE_MAX: f32 = 700.0;
+    pub const DEFAULT_POI_LIMIT_SIZE: bool = true;
     pub const DEFAULT_POI_ALPHA: f32 = 1.0;
     pub const DEFAULT_POI_SCALE: f32 = 1.0;
     pub const DEFAULT_POI_SCALE_MAP: f32 = 1.0;
     pub const DEFAULT_TRAIL_ALPHA: f32 = Self::DEFAULT_POI_ALPHA;
     pub const DEFAULT_TRAIL_SCALE: f32 = 1.0;
+    pub const DEFAULT_TRAIL_ANIM: f32 = 1.0;
     pub const DEFAULT_TRAIL_SCALE_MAP: f32 = 5.0;
     pub const DEFAULT_POI_MAP_ALPHA: f32 = Self::DEFAULT_POI_ALPHA;
     pub const DEFAULT_TRAIL_MAP_ALPHA: f32 = Self::DEFAULT_TRAIL_ALPHA;
     pub const DEFAULT_DISTANCE_FADE_INTENSITY: f32 = 84.0;
+    pub const DEFAULT_DISTANCE_FADE_RANGE: bool = true;
     pub const DEFAULT_PLAYER_OVERLAP_THRESHOLD: f32 = 38.0;
+    pub const DEFAULT_PLAYER_OVERLAP_POI: bool = false;
     pub const DEFAULT_EDGE_FEATHER_SCALE: f32 = 0.8f32;
     pub const DEFAULT_MAP_OPEN: bool = false;
 
@@ -251,7 +268,9 @@ impl SpaceSettings {
                 map_open: None | Some(Self::DEFAULT_MAP_OPEN),
                 distance_max: None,
                 distance_fade_intensity: None,
+                distance_fade_range: None,
                 player_overlap_threshold: None,
+                player_overlap_poi: None,
                 edge_feather_scale: None | Some(Self::DEFAULT_EDGE_FEATHER_SCALE),
                 trail_alpha: None,
                 poi_alpha: None,
@@ -262,12 +281,16 @@ impl SpaceSettings {
                 map_trail_alpha_mini: None,
                 map_poi_alpha_world: None,
                 map_trail_alpha_world: None,
+                poi_limit_size: None,
                 scale_poi_space: None,
                 scale_poi_mini: None,
                 scale_poi_world: None,
                 scale_trail_space: None,
                 scale_trail_mini: None,
                 scale_trail_world: None,
+                anim_trail_space: None,
+                anim_trail_mini: None,
+                anim_trail_world: None,
                 trail_y_offset: None,
                 trail_resolution: None,
                 trail_width: None,
@@ -329,10 +352,18 @@ impl SpaceSettings {
             .map(Self::optional_f32)
             .unwrap_or(Some(Self::DEFAULT_DISTANCE_FADE_INTENSITY))
     }
+    pub fn distance_fade_range(&self) -> bool {
+        self.distance_fade_range
+            .unwrap_or(Self::DEFAULT_DISTANCE_FADE_RANGE)
+    }
     pub fn player_overlap_threshold(&self) -> Option<f32> {
         self.player_overlap_threshold
             .map(Self::optional_f32)
             .unwrap_or(Some(Self::DEFAULT_PLAYER_OVERLAP_THRESHOLD))
+    }
+    pub fn player_overlap_poi(&self) -> bool {
+        self.player_overlap_poi
+            .unwrap_or(Self::DEFAULT_PLAYER_OVERLAP_POI)
     }
     pub fn edge_feather_scale(&self) -> Option<f32> {
         self.edge_feather_scale
@@ -375,6 +406,9 @@ impl SpaceSettings {
         }
     }
 
+    pub fn poi_limit_size(&self) -> bool {
+        self.poi_limit_size.unwrap_or(Self::DEFAULT_POI_LIMIT_SIZE)
+    }
     pub fn poi_scale_space(&self) -> f32 {
         self.scale_poi_space.unwrap_or(Self::DEFAULT_POI_SCALE)
     }
@@ -406,6 +440,23 @@ impl SpaceSettings {
         match ctx {
             MapContext::Global => self.trail_scale_worldmap(),
             MapContext::Minimap => self.trail_scale_minimap(),
+        }
+    }
+
+    pub fn trail_anim_space(&self) -> f32 {
+        self.anim_trail_space.unwrap_or(Self::DEFAULT_TRAIL_ANIM)
+    }
+    pub fn trail_anim_worldmap(&self) -> f32 {
+        self.anim_trail_world.unwrap_or(self.trail_anim_space())
+    }
+    pub fn trail_anim_minimap(&self) -> f32 {
+        self.anim_trail_mini.unwrap_or(self.trail_anim_worldmap())
+    }
+    #[cfg(feature = "paths")]
+    pub fn trail_anim_map(&self, ctx: MapContext) -> f32 {
+        match ctx {
+            MapContext::Global => self.trail_anim_worldmap(),
+            MapContext::Minimap => self.trail_anim_minimap(),
         }
     }
 
@@ -475,6 +526,9 @@ impl fmt::Display for CameraSource {
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct GogglesSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arcrender_enabled: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goggles_enabled: Option<bool>,
 
     /// X-ray opacity
@@ -490,6 +544,7 @@ pub struct GogglesSettings {
 
 impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
+    pub const DEFAULT_ARCRENDER: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
     #[cfg(todo)]
@@ -500,6 +555,7 @@ impl GogglesSettings {
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
+                arcrender_enabled: None | Some(Self::DEFAULT_ARCRENDER),
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 obscured_alpha: None,
                 edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
@@ -511,6 +567,9 @@ impl GogglesSettings {
 
     pub fn enabled(&self) -> bool {
         self.goggles_enabled.unwrap_or(Self::DEFAULT_ENABLED)
+    }
+    pub fn arcrender_enabled(&self) -> bool {
+        self.arcrender_enabled.unwrap_or(Self::DEFAULT_ARCRENDER)
     }
 
     pub fn obscured_alpha(&self) -> f32 {

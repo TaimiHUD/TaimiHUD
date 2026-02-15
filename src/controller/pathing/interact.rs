@@ -329,6 +329,9 @@ impl MapInteractState {
         self.interest_auto = interest_auto;
         self.interest_nearby = interest_nearby;
     }
+    pub fn needs_trigger_bvh_rebuild(&self) -> bool {
+        self.trigger_bvh_dirty
+    }
     /// TODO: rebuild with executor
     ///
     /// TODO: waiting on mutex is unnecessary if you just replace it with a new one if a try_lock fails...
@@ -346,6 +349,7 @@ impl MapInteractState {
 
         self.ensure_bvh_rw();
 
+        // TODO: mem::take() instead? this isn't an arc...
         let mut shapes = self.entities.clone();
         let res = Controller::try_run_blocking("POI interaction hierarchy", {
             let mut trigger_bvh = self.trigger_bvh.clone().write_owned().await;
@@ -427,6 +431,7 @@ pub struct InteractReactor {
     pub enables: PathingEnables,
     /// TODO: passive interval as a multiple of this seems dumb
     pub update_interval: Duration,
+    fallback_progress: usize,
     event_dirty_bvh_rebuild: bool,
     event_dirty_settings: bool,
     event_dirty_entities: bool,
@@ -438,6 +443,7 @@ impl InteractReactor {
             config: Default::default(),
             enables: Default::default(),
             update_interval: Self::UPDATE_INTERVAL_RESPONSIVE,
+            fallback_progress: 0,
             event_dirty_bvh_rebuild: false,
             event_dirty_settings: false,
             event_dirty_entities: false,
@@ -850,8 +856,6 @@ impl InteractReactor {
         };
         let nearby = rx.nearby_tx.borrow().clone();
 
-        let trigger_bvh = self.map_interactions.trigger_bvh.read().await;
-        let query = SpaceInteraction::point_query(pos);
         let mut outgoing = nearby;
         #[cfg(todo)]
         if outgoing.map_id != Some(map_id) {
@@ -859,22 +863,69 @@ impl InteractReactor {
         }
         outgoing.set_map_id(Some(map_id));
         let mut incoming = NearbyMarkers::new_on_map(map_id);
-        let inrange = trigger_bvh.traverse_iterator(&query, &self.map_interactions.entities[..]);
-        for entity in inrange {
-            let id = entity.value.poi_path();
-            let is_nearby = entity.value.point_query_postprocess_filter(pos);
-            if is_nearby {
-                if outgoing.remove_poi(id).is_none() {
-                    if let Some((lpath, path)) = Self::lookup_lpoi_path(map_info, id) {
-                        incoming.insert_poi(lpath, path);
-                    } else {
-                        let path = id.map_root(LocDisplay);
-                        log::debug!("approached {path} which doesn't exist?");
+        if !self.map_interactions.trigger_bvh_dirty {
+            let trigger_bvh = self.map_interactions.trigger_bvh.read().await;
+            let query = SpaceInteraction::point_query(pos);
+            let inrange = trigger_bvh.traverse_iterator(&query, &self.map_interactions.entities[..]);
+            for entity in inrange {
+                let id = entity.value.poi_path();
+                let is_nearby = entity.value.point_query_postprocess_filter(pos);
+                if is_nearby {
+                    if outgoing.remove_poi(id).is_none() {
+                        if let Some((lpath, path)) = Self::lookup_lpoi_path(map_info, id) {
+                            incoming.insert_poi(lpath, path);
+                        } else {
+                            let path = id.map_root(LocDisplay);
+                            log::debug!("approached {path} which doesn't exist?");
+                        }
                     }
                 }
             }
+            drop(trigger_bvh);
+            self.fallback_progress = 0;
+        } else if !self.map_interactions.entities.is_empty() {
+            // fall back to partial update while still loading...
+            let total = self.map_interactions.entities.len();
+            let start = self.fallback_progress % total;
+            let amt = total.min(Self::FALLBACK_MAX_ITERATIONS);
+            self.fallback_progress = start.wrapping_add(amt);
+            // TODO: avoid sequential access when overbudget...
+            let subset = self.map_interactions.entities.iter()
+                .cycle()
+                .skip(start)
+                .take(amt);
+            // TODO: consider spawn_blocking and increase the window?
+            for entity in subset {
+                let id = entity.value.poi_path();
+                let is_nearby = entity.value.point_query_postprocess_filter(pos);
+                if is_nearby {
+                    if outgoing.remove_poi(id).is_none() {
+                        if let Some((lpath, path)) = Self::lookup_lpoi_path(map_info, id) {
+                            incoming.insert_poi(lpath, path);
+                        } else {
+                            let path = id.map_root(LocDisplay);
+                            log::debug!("approached {path} which doesn't exist?");
+                        }
+                    }
+                }
+            }
+            let deferred = total - amt;
+            let deferred_start = self.fallback_progress % total;
+            let deferred = self.map_interactions.entities.iter()
+                .cycle()
+                .skip(deferred_start)
+                .take(deferred);
+            for entity in deferred {
+                let id = entity.value.poi_path();
+                if !outgoing.contains_loaded_poi(id) { continue }
+                let is_nearby = entity.value.point_query_postprocess_filter(pos);
+                if is_nearby {
+                    // XXX: could just unconditionally remove the remainder, but
+                    // it's probably better to be responsive when it's likely a select few...
+                    outgoing.remove_poi(id);
+                }
+            }
         }
-        drop(trigger_bvh);
         let has_changes = !outgoing.is_empty() || !incoming.is_empty();
         // anything left in outgoing is no longer in range...
         let gone = outgoing
@@ -904,6 +955,7 @@ impl InteractReactor {
         }
         PathingEvent::Nop
     }
+    const FALLBACK_MAX_ITERATIONS: usize = 96;
     fn lookup_lpoi_path(map_info: &LoadedMapInfo, lpath: PoiMapPath) -> Option<(PoiMapPath, PoiPath)> {
         map_info
             .lookup_ref(&lpath.root)
@@ -1042,9 +1094,13 @@ impl InteractReactor {
         }
         if let Some((auto, passive)) = self.interest_movement() {
             rx.player_pos.set_threshold_timeout(match (auto, passive) {
-                (true, _) => self.update_interval,
-                (false, true) => Self::UPDATE_INTERVAL_PASSIVE.max(self.update_interval * 2),
                 (false, false) => Self::UPDATE_INTERVAL_SLOW,
+                _ if self.map_interactions.needs_trigger_bvh_rebuild() => {
+                    // when bvh postponed for higher-prio tasks, don't poll as often
+                    Self::UPDATE_INTERVAL_PASSIVE * 2
+                },
+                (false, true) => Self::UPDATE_INTERVAL_PASSIVE.max(self.update_interval * 2),
+                (true, _) => self.update_interval,
             });
             if let Poll::Ready(pos) = rx.player_pos.poll_next_update(cx) {
                 return Poll::Ready(InteractMessage::PlayerMoved(pos))
@@ -1110,6 +1166,10 @@ impl InteractReactor {
                 PathingEvent::Nop
             },
             InteractMessage::BvhRebuild => {
+                if rx.shared.packs.read_still_waiting().0 {
+                    log::debug!("DELETEME: delaying interact bvh");
+                    return PathingEvent::Nop
+                }
                 if self.map_interactions.trigger_bvh_dirty {
                     // TODO: spawn/bg this thanks
                     self.map_interactions.rebuild_trigger_bvh().await;
@@ -1274,6 +1334,13 @@ impl PathingController {
             self.filter_dismiss_poi(lpoi_path.pivot(loaded_path.root), until, contexts, reset);
         } else {
             log::debug!("TODO: marker dismiss {}", LocDisplay(loaded_path));
+        }
+    }
+
+    pub(super) async fn interact_rebuild_if_needed(&mut self) {
+        if self.interact.map_interactions.trigger_bvh_dirty {
+            // schedule it for next poll... could try inline if no other events are pending but bleh
+            self.interact.event_dirty_bvh_rebuild = true;
         }
     }
 }

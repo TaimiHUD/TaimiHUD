@@ -28,7 +28,7 @@ use {
         fmt,
         mem,
         path::Path,
-        sync::{Arc, RwLock},
+        sync::{atomic::{AtomicUsize, Ordering}, Arc, RwLock},
     },
     taimi_hoard::{
         iters::IterExt as _,
@@ -47,11 +47,16 @@ pub type SharedLoaderPacksInfo = PackBoxOf<SharedPackLoad>;
 #[derive(Debug)]
 pub struct SharedPacks {
     pub packs: watch::Sender<SharedLoaderPacksInfo>,
+    /// loading grace period
+    pub load_period: SharedGracePeriod,
 }
 
 impl SharedPacks {
     pub fn new() -> Self {
-        Self { packs: Default::default() }
+        Self {
+            packs: Default::default(),
+            load_period: Default::default(),
+        }
     }
 
     pub(crate) fn update_packs_extend(
@@ -624,4 +629,44 @@ pub enum LoadReport {
         texture: anyhow::Result<TextureKey>,
         resource: Option<AttrString>,
     },
+}
+
+/// TODO: a real struct with signal notify stuff
+pub type SharedGracePeriod = AtomicUsize;
+impl SharedPacks {
+    const GRACE_BIT_WAITING: usize = 1 << (mem::size_of::<usize>() * 8 - 1);
+    const GRACE_COUNT_MASK: usize = u16::MAX as usize & !Self::GRACE_BIT_WAITING;
+    pub(crate) fn update_load_period(&self, pending: usize, state: bool) -> bool {
+        let value = pending.min(Self::GRACE_COUNT_MASK) | state.then_some(Self::GRACE_BIT_WAITING).unwrap_or(0);
+        let prev = self.load_period.swap(value, Ordering::Relaxed);
+        self.notify_load_if(state, prev)
+    }
+    pub(crate) fn update_load_count(&self, pending: usize) {
+        let pending = pending.min(Self::GRACE_COUNT_MASK);
+        let _ = self.load_period.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
+            Some((prev & Self::GRACE_BIT_WAITING) | pending)
+        });
+    }
+    pub(crate) fn update_load_state(&self, state: bool) -> bool {
+        let prev = match state {
+            true => self.load_period.fetch_or(Self::GRACE_BIT_WAITING, Ordering::Relaxed),
+            false => self.load_period.fetch_and(!Self::GRACE_BIT_WAITING, Ordering::Relaxed),
+        };
+        self.notify_load_if(state, prev)
+    }
+    fn notify_load_if(&self, state: bool, prev: usize) -> bool {
+        let prev_state = prev & Self::GRACE_BIT_WAITING != 0;
+        let changed = state != prev_state;
+        if changed {
+            if !state {
+                log::debug!("TODO: notify grace period waiters");
+            }
+        }
+        changed
+    }
+    pub fn read_still_waiting(&self) -> (bool, usize) {
+        let v = self.load_period.load(Ordering::Acquire);
+        let state = v & Self::GRACE_BIT_WAITING != 0;
+        (state, v & Self::GRACE_COUNT_MASK)
+    }
 }
