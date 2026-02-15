@@ -340,6 +340,11 @@ impl PathingConfig {
             res = res.or(Self::slider_setting(ui, label, value, range));
         } else {
             ui.label_text(label, fl!("disabled"));
+            res = res.or_else(|| if ui.is_item_right_clicked() {
+                Some(None)
+            } else {
+                ui.is_item_clicked().then_some(initial)
+            });
         }
         ui.indent();
         res
@@ -352,7 +357,7 @@ impl PathingConfig {
     ) -> Option<Option<bool>> {
         if with_i18n!(id, |label| ui.checkbox(&label, value)) {
             Some(Some(*value))
-        } else if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+        } else if ui.is_item_right_clicked() {
             Some(None)
         } else {
             None
@@ -1022,7 +1027,8 @@ impl PathingConfig {
 
         ui.text_wrapped(fl!("pathing-config-goggles-notice"));
 
-        if with_i18n!("enable", |label| ui.checkbox(label, &mut is_enabled)) {
+        ui.indent();
+        if ui.checkbox(fl!("enable"), &mut is_enabled) {
             Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(is_enabled));
             match is_enabled {
                 true if !Engine::is_available() => (),
@@ -1041,6 +1047,7 @@ impl PathingConfig {
         }
 
         if !needs_setup {
+            ui.unindent();
             let _font = NexusLinkFont::Big.push_font(ui);
             ui.text_wrapped(
                 c"For good goggles, you will need to adjust the \"near\" slider for each new map you visit.",
@@ -1051,6 +1058,7 @@ impl PathingConfig {
                 "\n(the sweet spot is usually when you can see the path but grass is slightly covering it)",
                 "\nif you see flickering/z-fighting during movement, back off a little more or tweak far",
             ));
+            ui.indent();
         }
 
         if let Some(value) = Self::slider_opt_alpha(ui, c"x-ray opacity", obscured_alpha, None) {
@@ -1107,6 +1115,8 @@ impl PathingConfig {
             let _id = ui.push_id(c"lens");
             render_goggles::options_ui_lenses(ui);
         }
+
+        ui.unindent();
 
         Some(())
     }
