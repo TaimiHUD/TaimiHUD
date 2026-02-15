@@ -25,11 +25,7 @@ TrailOutputV trail_main_v(TrailInput input)
 #if 1
     float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = lerp(
-        1.0,
-        0.0,
-        saturate((pos.z - fade_near) / fade_range)
-    );
+    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
 #endif
     output.position = mul(v_render.projection, pos);
 
@@ -40,7 +36,7 @@ TrailOutputV trail_main_v(TrailInput input)
 
     // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
     // float clip_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OPAQUE));
-    uint flags = input.marker.flags & (v_trail.marker.flags | !MFLAG_OBSCURE_FADE);
+    uint flags = input.marker.flags & (v_trail.marker.flags | ~MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags,
@@ -56,7 +52,7 @@ TrailOutputV trail_main_v(TrailInput input)
 TrailOutputP trail_main_p(TrailInputP inp)
 {
     SpaceOutputV vout = inp.space;
-    int flags = vout.instance.x;
+    uint flags = vout.instance.x;
     TrailOutputP output;
     float4 colour = vout.colour * shaderTexture.Sample(SampleType, vout.tex);
     float fade = vout.fade.x;
@@ -70,7 +66,7 @@ TrailOutputP trail_main_p(TrailInputP inp)
 #endif
     bool face_cull = GET_MFLAG(flags, MFLAG_FACE_CULL);
     bool face_cull_dir = GET_MFLAG(flags, MFLAG_FACE_CULL_FRONT) ^ face_front;
-    float clip_face = float((!face_cull) | face_cull_dir);
+    float clip_face = float((!face_cull) | face_cull_dir) - 0.5f;
 
     float clip_fade = float(GET_MFLAG(flags, MFLAG_OPAQUE));
     // XXX: or just enable depth clipping?
@@ -133,10 +129,10 @@ PoiOutputV poi_main_v(PoiInput input)
     float3 vertex = input.vertex.position;
 
     float3 midpoint;
+#if 1
     //bool is_size_limited = is_billboard &* GET_MFLAG(v_poi.marker.flags, MFLAG_BILLBOARD);
     bool is_size_limited = bool(is_billboard_bit & v_poi.marker.flags);
     if (is_size_limited) {
-#if 1
     // TODO: viewport in cb_v!
     float2 viewport = float2(3840.0, 2160.0);
     float aspect = viewport.y / viewport.x;
@@ -144,12 +140,12 @@ PoiOutputV poi_main_v(PoiInput input)
     //float vpscale = sqrt(dot(viewport, viewport)) * 2.0;
 #else
     // bhud just treats it as a max height rather than size?
-    float vpscale = viewport.y * 2.0;
+    float vpscale = v_render.viewport_pixel_scale;
 #endif
 
-    float size_min = GET_PAIR0f(input.size_range) / vpscale;
-    float size_max = GET_PAIR1f(input.size_range) / vpscale;
-    float3 midpoint = mul(input.model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    float size_min = GET_PAIR0f(input.size_range) * vpscale;
+    float size_max = GET_PAIR1f(input.size_range) * vpscale;
+    midpoint = mul(input.model, float4(0.0, 0.0, 0.0, 1.0)).xyz;
 #if 0
     float4 viewed = mul(v_render.view, float4(midpoint, 1.0));
     float cam_dist = viewed.z;
@@ -164,7 +160,8 @@ PoiOutputV poi_main_v(PoiInput input)
     float4 sz4 = mul(v_render.projection, float4(1.0, 1.0, cam_dist, 1.0));
     float2 sz = sz4.xy / sz4.w;
 #endif
-    float size_screen_screen = sqrt(dot(sz, sz));
+    //float size_screen_screen = sqrt(dot(sz, sz));
+    float size_screen_screen = sz.y * 2.0;
     float limit_max = saturate(size_max / size_screen_screen);
     float limit_min = saturate(size_screen_screen / size_min);
 #if 0
@@ -196,8 +193,8 @@ PoiOutputV poi_main_v(PoiInput input)
     if (!is_billboard) {
         float3 norm_origin = float3(0.0, 0.0, 1.0);
         // ignore translation, we just want it rotated...
-        float3 norm = normalize(mul(input.model, float4(norm_origin, 0.0)).xyz);
-        float face_dir = dot(v_render.camera_dir, norm);
+        float3 norm = mul(input.model, float4(norm_origin, 0.0)).xyz;
+        float face_dir = dot(midpoint - v_render.camera_pos, norm);
         back_of_face = face_dir < 0.0;
     }
 
@@ -217,12 +214,9 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: consider using displacement (from char) rather than camera z?
     float fade_near = GET_MFLAG(v_poi.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = lerp(
-        1.0,
-        0.0,
-        saturate((pos.z - fade_near) / fade_range)
-    );
-
+    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
+#else
+    float fade = 1.0;
 #endif
     pos = mul(v_render.projection, pos);
     output.position = pos;
@@ -236,7 +230,7 @@ PoiOutputV poi_main_v(PoiInput input)
     output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
     // TODO: apply+preprocess player_feather here?
 
-    uint flags = input.marker.flags & (v_poi.marker.flags | !MFLAG_OBSCURE_FADE);
+    uint flags = input.marker.flags & (v_poi.marker.flags | ~MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags,
