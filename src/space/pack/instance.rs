@@ -119,14 +119,21 @@ pub struct PoiInstanceData {
     pub _padding0: Vector2<f32>,
 }
 impl PoiInstanceData {
-    pub const INVALID: Self = Self {
-        marker: MarkerInstanceData::INVALID,
-        model: Matrix4::IDENTITY,
-        size_range: 0,
-        bounce: 0,
-        anim_offset: 0.0,
-        map_scale: 0.0,
-        _padding0: Vector2::ZERO,
+    const SIZE: usize = MarkerInstanceData::SIZE + mem::size_of::<f32>() * (2 + 4 * 4 + 2 + 2);
+    pub const INVALID: Self = {
+        let invalid = Self {
+            marker: MarkerInstanceData::INVALID,
+            model: Matrix4::IDENTITY,
+            size_range: 0,
+            bounce: 0,
+            anim_offset: 0.0,
+            map_scale: 0.0,
+            _padding0: Vector2::ZERO,
+        };
+        match mem::size_of::<Self>() {
+            PoiInstanceData::SIZE => invalid,
+            _ => panic!("alignments bleh"),
+        }
     };
     /// unit/s
     #[cfg(todo = "unused")]
@@ -287,7 +294,8 @@ pub struct RenderConstantDataV {
     pub _padding0: f32,
     /// see `camera_pos` comment
     pub camera_dir: Vector3,
-    pub _padding1: f32,
+    /// used to restrict billboard sizes on-screen
+    pub viewport_pixel_scale: f32,
     pub _padding2: Vector4,
 }
 unsafe impl D3dBufferData for RenderConstantDataV {}
@@ -492,10 +500,10 @@ impl From<Vertex> for TrailVertex {
 }
 unsafe impl D3dBufferData for TrailVertex {}
 pub const INPUT_LAYOUT_MARKER: [D3D11_INPUT_ELEMENT_DESC; 4] = [
-    InputLayout::for_instance(1, c"MCOLOUR", 0, dxgi::DXGI_FORMAT_R32G32B32_FLOAT, None),
-    InputLayout::for_instance(1, c"MANIM", 0, dxgi::DXGI_FORMAT_R32_FLOAT, None),
-    InputLayout::for_instance(1, c"MFLAG", 0, dxgi::DXGI_FORMAT_R32_UINT, None),
-    InputLayout::for_instance(1, c"MFLAG", 1, dxgi::DXGI_FORMAT_R32_UINT, None),
+    InputLayout::for_instance(1, c"MCOLOUR", 0, dxgi::DXGI_FORMAT_R32G32B32_FLOAT, Some(offset_of!(MarkerInstanceData, colour))),
+    InputLayout::for_instance(1, c"MANIM", 0, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(MarkerInstanceData, anim_scale))),
+    InputLayout::for_instance(1, c"MFLAG", 0, dxgi::DXGI_FORMAT_R32_UINT, Some(offset_of!(MarkerInstanceData, flags))),
+    InputLayout::for_instance(1, c"MFLAG", 1, dxgi::DXGI_FORMAT_R32_UINT, Some(offset_of!(MarkerInstanceData, fade_range))),
 ];
 pub const INPUT_LAYOUT_TRAIL_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 7] = [
     TrailVertex::INPUT_LAYOUT[0], // POSITION0
@@ -518,15 +526,15 @@ pub const INPUT_LAYOUT_POI_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 15] = [
     INPUT_LAYOUT_MARKER[2], // MFLAG0 (flags)
     INPUT_LAYOUT_MARKER[3], // MFLAG1 (fade)
     // size_range, bounce
-    InputLayout::for_instance(1, c"MFLAG", 2, dxgi::DXGI_FORMAT_R32_UINT, Some(offset_of!(PoiInstanceData, size_range))),
-    InputLayout::for_instance(1, c"MFLAG", 3, dxgi::DXGI_FORMAT_R32_UINT, None),
-    InputLayout::for_instance(1, c"PMODEL", 0, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
+    InputLayout::for_instance(1, c"PFLAG", 0, dxgi::DXGI_FORMAT_R32_UINT, Some(offset_of!(PoiInstanceData, size_range))),
+    InputLayout::for_instance(1, c"PFLAG", 1, dxgi::DXGI_FORMAT_R32_UINT, Some(offset_of!(PoiInstanceData, bounce))),
+    InputLayout::for_instance(1, c"PMODEL", 0, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, Some(offset_of!(PoiInstanceData, model))),
     InputLayout::for_instance(1, c"PMODEL", 1, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
     InputLayout::for_instance(1, c"PMODEL", 2, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
     // TODO: change to 3x3
     InputLayout::for_instance(1, c"PMODEL", 3, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
-    InputLayout::for_instance(1, c"PDISP", 0, dxgi::DXGI_FORMAT_R32_FLOAT, None),
-    InputLayout::for_instance(1, c"PDISP", 1, dxgi::DXGI_FORMAT_R32_FLOAT, None),
+    InputLayout::for_instance(1, c"PDISP", 0, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(PoiInstanceData, anim_offset))),
+    InputLayout::for_instance(1, c"PDISP", 1, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(PoiInstanceData, map_scale))),
     #[cfg(todo = "unused")]
     InputLayout::for_instance(1, c"PPADDING", 0, dxgi::DXGI_FORMAT_R32G32_FLOAT, Some(offset_of!(PoiInstanceData, x))),
 ];

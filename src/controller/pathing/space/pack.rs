@@ -211,7 +211,7 @@ impl SpaceEntities {
             .count()
     }
     pub fn len(&self) -> usize {
-        self.len() - self.trailing_residue(None)
+        self.entities.len() - self.trailing_residue(None)
     }
     pub fn trim_trailing(&mut self, check_bvh: Option<&Bvh<f32, 3>>) {
         let removed = self.trailing_residue(check_bvh);
@@ -993,7 +993,7 @@ impl SpacePackCollection {
         self.map_id = None;
     }
     pub fn is_empty(&self) -> bool {
-        self.map_id.is_none() || (self.bvh.nodes.is_empty() && self.render_entities.entities.is_empty())
+        self.map_id.is_none() || self.render_entities.entities.is_empty()
     }
 
     #[inline]
