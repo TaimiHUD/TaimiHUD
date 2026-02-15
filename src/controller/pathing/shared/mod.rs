@@ -4,6 +4,7 @@ pub use {
         display::LocDisplay,
         loader::{
             LoadReport,
+            SharedGracePeriod,
             SharedLoaderPacksInfo,
             SharedPackConfig,
             SharedPackInfo,

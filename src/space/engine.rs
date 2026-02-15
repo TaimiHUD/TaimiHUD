@@ -21,7 +21,7 @@ use {
         settings::{PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::{self, PackRender, PackRenderList},
+            pack::{self, ArcrenderSettings, PackRender, PackRenderList},
         },
         timer::{PhaseState, TimerDirection, TimerFile, TimerMarker},
     },
@@ -752,13 +752,14 @@ impl Engine {
     }
     pub fn draw(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, inherit: bool) {
         let map_ctx = machine.is_map_visible();
-        let (visible_space, visible_map, camera_source, edge_feather_scale, (_obscured_alpha,)) = self
-            .map_settings(|s| {
+        let (visible_space, visible_map, camera_source, edge_feather_scale, arcrender, (_obscured_alpha,)) =
+            self.map_settings(|s| {
                 (
                     s.space.visible_space().then_some(s.space.distance_max()),
                     map_ctx.map(|ctx| s.space.visible_map(ctx)),
                     s.space.camera_source(),
                     s.space.edge_feather_scale(),
+                    s.space.goggles.arcrender_enabled(),
                     match () {
                         #[cfg(feature = "goggles")]
                         _ => (s.space.goggles.obscured_alpha(),),
@@ -1015,17 +1016,27 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
-                {
+                if arcrender {
                     let anim_timestamp = self
                         .drawing_start
                         .as_ref()
                         .map(|s| s.elapsed().as_secs_f32())
                         .unwrap_or(0.0);
+                    let settings = self.map_settings(|s| ArcrenderSettings {
+                        trail_anim_speed: s.space.trail_anim_space(),
+                        trail_distance_fade: s.space.distance_fade_range(),
+                        poi_distance_fade: s.space.distance_fade_range(),
+                        poi_can_fade: s.space.player_overlap_poi(),
+                        trail_can_fade: s.space.player_overlap_threshold().is_some(),
+                        poi_limit_size: s.space.poi_limit_size(),
+                        ..ArcrenderSettings::DEFAULT
+                    });
                     self.packs.resources.update_shared(
                         &device_context,
                         &self.render_backend,
                         &*machine,
                         anim_timestamp,
+                        &settings,
                     );
                 }
 

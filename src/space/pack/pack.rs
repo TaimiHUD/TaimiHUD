@@ -24,9 +24,10 @@ use {
             },
             space::{SpacePackCollection, SpacePackShared, TextureLoadRequests, TrailGeometryRequests},
         },
-        exports::runtime as rt,
+        exports::runtime::{self as rt, textures::TextureSlot},
         render::machine::{RenderMachine, RenderPosition},
         resources::shader::ShaderLoader,
+        settings::pathing::SpaceSettings,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             pack::{
@@ -709,7 +710,20 @@ impl PackRender {
 
                         let poi_len = map_info.info.poi_count();
                         if pack.pois.len() != poi_len {
+                            let dirty_start = if poi_len < pack.pois.len() { 0 } else { pack.pois.len() };
                             pack.pois.resize_with(poi_len, PoiRender::empty);
+                            let dirty_pois = pack
+                                .pois
+                                .values_mut()
+                                .zip(map_info.pois_iter().skip(dirty_start))
+                                .skip(dirty_start);
+                            for (poi, info) in dirty_pois {
+                                let attrs = info.poi_attrs();
+                                poi.occlude = attrs.occlude();
+                                if poi.occlude && attrs.icon_file.is_none() {
+                                    poi.icon = Some(TextureSlot::Unavailable);
+                                }
+                            }
                         }
 
                         let trail_len = map_info.trail_count();
@@ -824,7 +838,6 @@ impl PackRender {
                 }
             }
             for (marker_path, texture) in self.texture_rx.try_recv_fulfilled() {
-                use crate::exports::runtime::textures::TextureSlot;
                 // texture loader should be notified, so no need to do anything really?
                 let id = MarkerId::for_marker(marker_path);
                 if texture.is_none() {
@@ -1496,6 +1509,7 @@ impl PackRender {
     pub fn clear(&mut self) {
         self.clear_packs();
         self.draw_state.clear();
+        self.resources.clear();
     }
     pub fn clear_packs(&mut self) {
         for pack in self.pack_data.values_mut() {
@@ -1506,6 +1520,7 @@ impl PackRender {
         self.clear_packs();
         self.cleanup_textures();
         self.poi_common.clear();
+        self.resources.clear();
     }
     /// See [crate::space::engine::Engine::cleanup_background]
     ///
@@ -1533,6 +1548,7 @@ pub struct PackRenderResources {
     pub shader_trail: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
     pub shader_p: Option<taimi_d3d::dx11::ShaderP>,
     pub poi_vb: Option<PoiVertexBuffer>,
+    pub poi_vb_trans: Option<PoiVertexBuffer>,
     pub shared_cb_v: Option<ConstantBufferV>,
     pub shared_cb_p: Option<ConstantBufferP>,
     #[cfg(todo)]
@@ -1602,6 +1618,9 @@ impl PackRenderResources {
                     if attrs.rotate.is_none() {
                         ib.marker.flags |= instance::MarkerInstanceData::FLAG_BILLBOARD;
                     }
+                    if attrs.occlude() {
+                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_OPAQUE;
+                    }
                     if !attrs.scale_on_map_with_zoom() {
                         ib.marker.flags |= instance::MarkerInstanceData::FLAG_MAP_STATIC_SCALE;
                     }
@@ -1624,7 +1643,7 @@ impl PackRenderResources {
                 _ => None,
             };
             if let Some((ib, attrs)) = common {
-                use glam::Vec4Swizzles;
+                use {glam::Vec4Swizzles, taimi_pack::attributes::CullDirection};
 
                 let r = attrs.attrs();
                 let tint = r.tint();
@@ -1639,6 +1658,15 @@ impl PackRenderResources {
                 if !can_fade {
                     ib.flags |= instance::MarkerInstanceData::FLAG_OBSCURE_FADE;
                 }
+                ib.flags |= match r.cull() {
+                    CullDirection::None => 0,
+                    dir => {
+                        let cull_front = matches!(dir, CullDirection::CounterClockwise)
+                            .then_some(instance::MarkerInstanceData::FLAG_FACE_CULL_FRONT);
+
+                        instance::MarkerInstanceData::FLAG_FACE_CULL | cull_front.unwrap_or(0)
+                    },
+                };
                 ib.set_fade_range(r.fade_near(), r.fade_far());
             }
 
@@ -1664,6 +1692,12 @@ impl PackRenderResources {
                 self.poi_vb = Some(instance::PoiVertex::alloc(
                     device,
                     &instance::PoiVertex::POI_QUAD,
+                )?);
+            }
+            if self.poi_vb_trans.is_none() {
+                self.poi_vb_trans = Some(instance::PoiVertex::alloc(
+                    device,
+                    &instance::PoiVertex::POI_QUAD_TRANSPARENT,
                 )?);
             }
         }
@@ -1693,6 +1727,7 @@ impl PackRenderResources {
         backend: &RenderBackend,
         machine: &RenderMachine,
         anim_timestamp: f32,
+        settings: &ArcrenderSettings,
     ) {
         use glam::Vec2;
         let shared_p = instance::ConstantDataP {
@@ -1740,6 +1775,10 @@ impl PackRenderResources {
             },
             cb => *cb = rt::log::error_ok(ConstantBufferP::new_with_data(&backend.device, &shared_p)),
         }
+        let (camera_pos, camera_dir) = match machine.get_camera_mumblelink() {
+            Some((pos, dir, ..)) => (pos.to_vector().to_untyped(), dir.to_untyped()),
+            None => (glamour::Vector3::ZERO, glamour::Vector3::Z),
+        };
         let shared_v = instance::ConstantDataV {
             render: instance::RenderConstantDataV {
                 player_pos: backend
@@ -1749,16 +1788,12 @@ impl PackRenderResources {
                     .truncate()
                     .into(),
                 anim_timestamp,
-                camera_pos: machine
-                    .get_camera_mumblelink()
-                    .map(|(p, ..)| p)
-                    .unwrap_or_default()
-                    .to_vector()
-                    .to_untyped(),
+                camera_pos,
+                camera_dir,
                 view: backend.perspective_handler.constant_buffer_data.view.into(),
                 projection: backend.perspective_handler.constant_buffer_data.projection.into(),
                 _padding0: 0.0,
-                _padding1: glamour::Vector4::ZERO,
+                _padding1: 0.0,
                 _padding2: glamour::Vector4::ZERO,
             },
             poi: instance::PoiConstantDataV {
@@ -1769,12 +1804,23 @@ impl PackRenderResources {
                         .constant_buffer_data
                         .poi_expansion
                         .scale(),
+                    anim_scale: settings.poi_anim_speed,
+                    flags: settings
+                        .poi_distance_fade
+                        .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
+                        .unwrap_or(0) | settings
+                        .poi_can_fade
+                        .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
+                        .unwrap_or(0) | settings
+                        .poi_limit_size
+                        .then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE)
+                        .unwrap_or(0),
                 },
                 billboard: taimi_meta::coords::billboard_from_look(
                     backend.perspective_handler.constant_buffer_data.view.into(),
                 ),
                 map_scale: machine.map.calibration.local_space().scale.abs().y,
-                _padding0: 0.0,
+                _padding0: glamour::Vector3::ZERO,
             },
             trail: instance::TrailConstantDataV {
                 marker: instance::MarkerConstantDataV {
@@ -1784,6 +1830,14 @@ impl PackRenderResources {
                         .constant_buffer_data
                         .trail_expansion
                         .normal_expansion,
+                    anim_scale: settings.trail_anim_speed,
+                    flags: settings
+                        .trail_distance_fade
+                        .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
+                        .unwrap_or(0) | settings
+                        .trail_can_fade
+                        .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
+                        .unwrap_or(0),
                 },
                 tex_scale: backend
                     .perspective_handler
@@ -1795,6 +1849,7 @@ impl PackRenderResources {
                     .constant_buffer_data
                     .trail_texture
                     .v_offset,
+                _padding0: glamour::Vector2::ZERO,
             },
         };
         match &mut self.shared_cb_v {
@@ -1808,6 +1863,7 @@ impl PackRenderResources {
         self.len = 0;
         self.entities_ib = None;
         self.poi_vb = None;
+        self.poi_vb_trans = None;
         self.shader_trail = None;
         self.shader_poi = None;
         self.shader_p = None;
@@ -1821,6 +1877,7 @@ impl PackRenderResources {
         mem::forget(self.shader_trail.take());
         mem::forget(self.shader_p.take());
         mem::forget(self.poi_vb.take());
+        mem::forget(self.poi_vb_trans.take());
         mem::forget(self.shared_cb_v.take());
         mem::forget(self.shared_cb_p.take());
     }
@@ -1962,6 +2019,26 @@ enum ShaderState {
     None,
     Trail,
     Poi,
+}
+pub struct ArcrenderSettings {
+    pub poi_anim_speed: f32,
+    pub trail_anim_speed: f32,
+    pub trail_can_fade: bool,
+    pub trail_distance_fade: bool,
+    pub poi_can_fade: bool,
+    pub poi_distance_fade: bool,
+    pub poi_limit_size: bool,
+}
+impl ArcrenderSettings {
+    pub const DEFAULT: Self = Self {
+        poi_can_fade: SpaceSettings::DEFAULT_PLAYER_OVERLAP_POI,
+        poi_limit_size: SpaceSettings::DEFAULT_POI_LIMIT_SIZE,
+        trail_can_fade: SpaceSettings::DEFAULT_PLAYER_OVERLAP_THRESHOLD > 0.0,
+        trail_anim_speed: SpaceSettings::DEFAULT_TRAIL_ANIM,
+        poi_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
+        trail_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
+        poi_anim_speed: 1.0,
+    };
 }
 
 pub static STATS_ENTITY_INSTANCE_SIZE: Counter = Counter::DEFAULT;

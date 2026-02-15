@@ -431,6 +431,7 @@ pub struct LoadedPackInfo {
     pub sig: PackInfoSignature,
     pub info: Arc<SharedPackInfo>,
     pub unloaded: Option<UnloadedReason>,
+    pub data_loaded: bool,
 }
 impl LoadedPackInfo {
     pub fn empty() -> Self {
@@ -439,14 +440,30 @@ impl LoadedPackInfo {
             sig: PackInfoSignature::EMPTY,
             info: Arc::new(SharedPackInfo::empty(None)),
             unloaded: Some(UnloadedReason::Gravestone),
+            data_loaded: false,
         }
     }
 
+    /// TODO: && data_loaded?
     pub fn is_loaded(&self) -> bool {
         self.unloaded.is_none()
     }
     pub fn can_reload(&self) -> bool {
-        self.unloaded.as_ref().map(|r| r.can_reload()).unwrap_or(false)
+        self.unloaded
+            .as_ref()
+            .map(|r| r.can_reload())
+            .unwrap_or(!self.data_loaded)
+    }
+    pub fn try_mark_loading(&mut self) -> bool {
+        match self.unloaded {
+            None | Some(UnloadedReason::Pending) if !self.data_loaded => (),
+            _ => return false,
+        }
+        #[cfg(todo)]
+        {
+            self.unloaded = Some(UnloadedReason::Loading);
+        }
+        true
     }
 
     pub fn update_with(&mut self, info: &SharedPackLoad) -> bool {
@@ -465,6 +482,10 @@ impl LoadedPackInfo {
         let mut dirty = false;
         if self.unloaded != loaded.unloaded {
             self.unloaded = loaded.unloaded.clone();
+            dirty = true;
+        }
+        if self.data_loaded != loaded.pack.is_some() {
+            self.data_loaded ^= true;
             dirty = true;
         }
         dirty
@@ -590,6 +611,12 @@ impl LoadedPacks {
 
     pub fn clear(&mut self) {
         self.packs.clear();
+    }
+
+    pub fn any_loading(&self) -> bool {
+        self.packs
+            .values()
+            .any(|p| matches!(p.unloaded, Some(UnloadedReason::Loading)))
     }
 }
 impl LocationRef<PackRegistryNs, PackIndex> for LoadedPacks {

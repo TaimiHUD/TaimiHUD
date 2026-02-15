@@ -1,5 +1,6 @@
 pub use self::{
     pack::{
+        ArcrenderSettings,
         PackRender,
         PackRenderData,
         PackRenderList,
