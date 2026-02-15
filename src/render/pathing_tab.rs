@@ -322,7 +322,12 @@ impl PathingConfig {
         if let Some(value) = value {
             res = res.or(Self::slider_setting(ui, label, value, range));
         } else {
-            ui.label_text(label, &fl!("disabled"));
+            with_i18n!("disabled", |msg| ui.label_text(label, &msg));
+            res = res.or_else(|| if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+                Some(None)
+            } else {
+                ui.is_item_clicked().then_some(initial)
+            });
         }
         ui.indent();
         res
@@ -963,6 +968,7 @@ impl PathingConfig {
 
         ui.text_wrapped(&fl!("pathing-config-goggles-notice"));
 
+        ui.indent();
         if ui.checkbox(&fl!("enable"), &mut is_enabled) {
             Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(is_enabled));
             match is_enabled {
@@ -982,6 +988,7 @@ impl PathingConfig {
         }
 
         if !needs_setup {
+            ui.unindent();
             let _font = RenderState::push_font("big", ui);
             ui.text_wrapped(
                 "For good goggles, you will need to adjust the \"near\" slider for each new map you visit.",
@@ -992,6 +999,7 @@ impl PathingConfig {
                 "\n(the sweet spot is usually when you can see the path but grass is slightly covering it)",
                 "\nif you see flickering/z-fighting during movement, back off a little more or tweak far",
             ));
+            ui.indent();
         }
 
         if let Some(value) = Self::slider_opt_alpha(ui, "x-ray opacity", obscured_alpha, None) {
@@ -1044,6 +1052,8 @@ impl PathingConfig {
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, || render_goggles::options_ui_lenses(ui));
+
+        ui.unindent();
 
         Some(())
     }
