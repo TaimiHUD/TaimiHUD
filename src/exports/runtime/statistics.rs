@@ -155,12 +155,17 @@ impl StatsUnit {
                 let num = value as u32;
                 let denom = (value >> 32) as u32;
                 let num = num as i32;
-                if denom <= 2 {
-                    let num = num as i32;
-                    return write!(f, "{num}/{denom}")
-                } else {
-                    let suffix = (denom == 100).then_some("%").unwrap_or("");
-                    return write!(f, "{:.04}{suffix}", num as f64 / denom as f64)
+                match denom {
+                    denom if denom <= 2 => {
+                        let num = num as i32;
+                        write!(f, "{num}/{denom}")
+                    },
+                    denom if denom % 100 == 0 => {
+                        return write!(f, "{:.04}%", num as f64 * 100.0 / denom as f64)
+                    },
+                    denom => {
+                        return write!(f, "{:.04}", num as f64 / denom as f64)
+                    },
                 }
             },
         })

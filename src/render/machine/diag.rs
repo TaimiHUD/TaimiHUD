@@ -43,12 +43,13 @@ impl RenderMachine {
     }
     pub(super) fn metrics_pre_render(&mut self) {
         if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
-            if self.metrics_checkpoint.is_none() {
-                self.metrics_checkpoint = Some(Instant::now());
-            }
             self.metrics_checkpoint_render = Some(Instant::now());
+            if self.metrics_checkpoint.is_none() {
+                self.metrics_checkpoint = self.metrics_checkpoint_render;
+            }
         } else {
             self.metrics_checkpoint = None;
+            STATS_FRAME_TIME_SLICE.reset(0);
         }
     }
     pub(super) fn metrics_post_render(&mut self) {
