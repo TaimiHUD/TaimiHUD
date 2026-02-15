@@ -12,6 +12,7 @@ pub use {
             SharedPacks,
             SharedResourceRequests,
             SharedResourceRequestsTx,
+            SharedGracePeriod,
         },
         maps::{
             LoadedMarkerRef,

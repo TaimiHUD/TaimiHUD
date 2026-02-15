@@ -215,14 +215,24 @@ impl MarkerInstanceData {
     pub const FLAG_RISE: u32 = 0x0800;
     /// trail `isWall`
     pub const FLAG_WALL: u32 = 0x1000;
+    /// avoid alpha blending if `occlude` is set
+    pub const FLAG_OPAQUE: u32 = 0x2000;
     /// marker for safety
     pub const FLAG_IS_TRAIL: u32 = 0x8000;
+    pub const FLAG_FACE_CULL: u32 = 0x0002_0000;
+    /// cull front faces
+    pub const FLAG_FACE_CULL_FRONT: u32 = 0x0001_0000;
 
     pub const FADE_RESOLUTION_NEAR: f32 = 8.0;
     pub const FADE_RESOLUTION_FAR: f32 = 4.0;
     pub fn set_fade_range(&mut self, near_start: f32, far_end: f32) {
-        let start = near_start * Self::FADE_RESOLUTION_NEAR;
-        // store range relative to start rather than absolute end?
+        let start = match near_start {
+            near_start if near_start < 0.0 =>
+                IRRELEVANT_MAX.abs(),
+            near_start => near_start * Self::FADE_RESOLUTION_NEAR,
+        };
+        // store range relative to start rather than absolute end
+        // TODO: pick end based on distance/intensity settings if <=start as a semi-infinite mode?
         let end = match far_end {
             end => ((end - near_start) * Self::FADE_RESOLUTION_FAR).max(1.0),
             #[cfg(todo)]
@@ -270,9 +280,14 @@ pub struct RenderConstantDataV {
     pub view: Matrix4<f32>,
     pub player_pos: Vector3,
     pub anim_timestamp: f32,
+    /// XXX: HLSL could extract this from view matrix?
+    ///
+    /// cbuffer space isn't limited though, so better not to?
     pub camera_pos: Vector3,
     pub _padding0: f32,
-    pub _padding1: Vector4,
+    /// see `camera_pos` comment
+    pub camera_dir: Vector3,
+    pub _padding1: f32,
     pub _padding2: Vector4,
 }
 unsafe impl D3dBufferData for RenderConstantDataV {}
@@ -294,6 +309,13 @@ pub struct MarkerConstantDataP {
 pub struct MarkerConstantDataV {
     pub scale: f32,
     pub alpha: f32,
+    pub anim_scale: f32,
+    pub flags: u32,
+}
+impl MarkerConstantDataV {
+    pub const FLAG_OBSCURE_FADE: u32 = MarkerInstanceData::FLAG_OBSCURE_FADE;
+    pub const FLAG_POI_LIMIT_SIZE: u32 = MarkerInstanceData::FLAG_BILLBOARD;
+    pub const FLAG_DISTANCE_FADE: u32 = MarkerInstanceData::FLAG_WALL;
 }
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
@@ -301,6 +323,7 @@ pub struct TrailConstantDataV {
     pub marker: MarkerConstantDataV,
     pub tex_scale: f32,
     pub tex_offset: f32,
+    pub _padding0: Vector2<f32>,
 }
 unsafe impl D3dBufferData for TrailConstantDataV {}
 #[derive(Debug, Copy, Clone)]
@@ -311,7 +334,7 @@ pub struct PoiConstantDataV {
     pub marker: MarkerConstantDataV,
     /// TODO: Vec2?
     pub map_scale: f32,
-    pub _padding0: f32,
+    pub _padding0: Vector3<f32>,
 }
 unsafe impl D3dBufferData for PoiConstantDataV {}
 
@@ -429,6 +452,24 @@ impl TrailVertex {
             Vector3::new(1.0, 1.0, 0.0),
             Vector2::ZERO,
         ),
+    ];
+    pub const POI_QUAD_TRANSPARENT: [Self; 4] = [
+        Self {
+            texture: Vector2::ONE,
+            .. Self::POI_QUAD[0]
+        },
+        Self {
+            texture: Vector2::new(0.9, 1.0),
+            .. Self::POI_QUAD[1]
+        },
+        Self {
+            texture: Vector2::new(1.0, 0.9),
+            .. Self::POI_QUAD[2]
+        },
+        Self {
+            texture: Vector2::new(0.9, 0.9),
+            .. Self::POI_QUAD[3]
+        },
     ];
 
     pub fn alloc(device: &Dx11Device, vertices: &[Self]) -> anyhow::Result<TrailVertexBuffer> {

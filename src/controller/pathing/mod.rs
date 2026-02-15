@@ -47,7 +47,7 @@ use {
             UiState,
         },
     },
-    taimi_pack::attributes::{AttrString, Festivals},
+    taimi_pack::attributes::AttrString,
     taimi_sync::watched,
     tokio::{select, sync::Semaphore, task::JoinSet},
     tokio_util::sync::ReusableBoxFuture,
@@ -214,6 +214,7 @@ pub(crate) struct PathingController {
     /// we only need to regen if a new pack slot is allocated
     pack_configs_sig: PackPath,
     packs_rx: watched::Rx<shared::SharedLoaderPacksInfo>,
+    now_loading_timeout: ReusableBoxFuture<'static, ()>,
 }
 
 impl PathingController {
@@ -239,6 +240,7 @@ impl PathingController {
             map_info: Default::default(),
             maps: Default::default(),
             pack_configs: Box::new(stream::pending()),
+            now_loading_timeout: ReusableBoxFuture::new(future::pending()),
             pack_configs_sig: PackPath::default(),
             filter_state: Default::default(),
             filter_state_signal: None,
@@ -278,7 +280,6 @@ impl PathingController {
         }
         let gameplay_prev = self.rx.gameplay.get_mut().clone();
         let enables_prev = self.rx.enables.get_mut().clone();
-        let load_throttle_prev = self.rx.load_throttle.get_mut().clone();
         let (scheduled_events, filter_next_schedule) = match () {
             #[cfg(feature = "paths-filter")]
             _ => (
@@ -308,31 +309,43 @@ impl PathingController {
                 }
             },
             Ok(_) = self.packs_rx.changed() => {
-                let (pack_count, packs_dirty, configs_dirty) = {
+                let mut packs_dirty = PackSet::default();
+                let mut fresh_load = None;
+                let pack_count = {
                     let packs = self.packs_rx.borrow_and_update();
                     if let Some(last) = packs.paths().last() {
                         // extend pack state to same length...
                         let _ = self.packs.write(last);
                     }
-                    let mut packs_dirty = PackSet::default();
                     for ((path, dest), info) in self.packs.packs.iter_mut().zip(packs.values()) {
-                        if dest.update_with(info) {
+                        if dest.sig != info.info.sig {
                             packs_dirty.insert(path);
+                        }
+                        if dest.update_with_info(&info.info) {
+                            //packs_dirty.insert(path);
+                        }
+                        if dest.update_with_loaded(&info.loaded.borrow()) {
+                            packs_dirty.insert(path);
+                            let fresh_load = fresh_load.get_or_insert(false);
+                            if let Some(UnloadedReason::Loading) = &dest.unloaded {
+                                *fresh_load |= true;
+                            }
                         }
                     }
                     let pack_count = packs.end_path();
                     // XXX: avoid two locks please?
+                    #[cfg(todo = "unnecessary")]
                     let config_sigs = packs.values().map(|p| p.config.borrow().info_sig);
                     #[cfg(todo = "unnecessary")]
-                    let info_sigs = packs.values().map(|p| p.info.sig);
                     let configs_dirty = self.packs.sigs_dirty(config_sigs);
-                    (pack_count, packs_dirty, configs_dirty)
+                    pack_count
                 };
                 if self.pack_configs_sig < pack_count {
                     // we only need to resubscribe when length changes...
                     let additions = mem::replace(&mut self.pack_configs_sig, pack_count);
                     self.pack_configs = self.loader.shared.watch_config_changes(Either::Right(additions..));
                 }
+                self.load_grace_period_update(fresh_load.unwrap_or(false));
                 let map_id = gameplay_prev.gameplay_map();
                 #[cfg(feature = "paths-filter")]
                 let hidden_guids = (map_id.is_some() && !packs_dirty.is_empty())
@@ -345,6 +358,12 @@ impl PathingController {
                 for path in &packs_dirty {
                     if let Some(map_path) = map_id.map(|map| path.rel(map)) {
                         if let Some(pack) = self.packs.lookup_ref(&map_path.root) {
+                            match &pack.unloaded {
+                                None if pack.data_loaded => (),
+                                #[cfg(todo)]
+                                Some(UnloadedReason::Pending) => (),
+                                _ => continue,
+                            }
                             if !pack.info.has_map(map_path.path) {
                                 continue
                             }
@@ -352,23 +371,28 @@ impl PathingController {
                         let _ = self.prepare_for_pack_map(map_path, true, hidden_ctx);
                     }
                 }
+                #[cfg(todo)]
                 for path in &configs_dirty {
                     self.reload_config_for(path);
                 }
-            },
+            }
             enables = self.rx.enables.when_changed() => {
                 let changed = *enables ^ enables_prev;
                 if changed.contains(PathingEnables::ENGINE) && enables.contains(PathingEnables::ENGINE) {
                     log::debug!("engine online, let's go!");
                 }
             },
+            _ = &mut self.now_loading_timeout => {
+                self.loader.shared.packs.update_load_state(false);
+                self.now_loading_timeout.set(future::pending());
+                // TODO: move to a signal and let subsystems subscribe as needed...
+                self.space_pack_rebuild_if_needed().await;
+                self.interact_rebuild_if_needed().await;
+            },
             load_throttle = self.rx.load_throttle.when_changed() => {
                 let new_amt = (*load_throttle).max(1).min(Semaphore::MAX_PERMITS / 2);
-                let change = new_amt as isize - load_throttle_prev as isize;
-                if change != 0 {
-                    log::trace!("adjusting load throttle by {change} to {new_amt}");
-                }
-                match self.loader.adjust_load_throttle_by(change, new_amt) {
+                log::trace!("adjusting load throttle to {new_amt}");
+                match self.loader.adjust_load_throttle_to(new_amt) {
                     Ok(()) => (),
                     Err(()) => log::debug!("refreshed loader throttle due to outstanding permits"),
                 }
@@ -609,6 +633,11 @@ impl PathingController {
     }
 
     async fn load_all(&mut self) {
+        for pack in self.packs.packs.values_mut() {
+            if pack.try_mark_loading() {
+                pack.used.mark_used();
+            }
+        }
         let res = Self::do_load_all(self.loader.clone())
             .await
             .context("Loading all paths");
@@ -825,19 +854,31 @@ impl PathingController {
     ///
     /// TODO: might still be possible to use if bound to a mouse button maybe?
     #[cfg(feature = "paths-interact")]
-    fn filter_press_gameplay(&mut self, _control: GameControl) -> Option<MapIndex> {
+    fn filter_press_gameplay(&mut self, control: GameControl) -> Option<MapIndex> {
         let ml = match () {
             #[cfg(todo = "unnecessary")]
             _ => rt::mumble_link_ptr().ok(),
             _ => self.rx.interact.player_pos.ml,
         };
-        self.gameplay_map().and_then(|map_id| {
+        let res = self.gameplay_map().and_then(|map_id| {
             let is_text_input = ml
                 .map(|ml| ml.read_ui_state())
                 .map(|state| UiState::from(state).contains(UiState::TextInput))
                 .unwrap_or(true);
             (!is_text_input).then_some(map_id)
-        })
+        })?;
+
+        match control {
+            GameControl::Miscellaneous_Interact => {
+                if self.interact.map_interactions.needs_trigger_bvh_rebuild() {
+                    log::info!("ignoring interact while loading");
+                    return None
+                }
+            },
+            _ => (),
+        }
+
+        Some(res)
     }
     #[cfg(feature = "paths-interact")]
     pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
@@ -895,6 +936,33 @@ impl PathingController {
                     .collect_garbage(&mut self.rx, maps, map_id, aggressive)
                     .await;
             }
+        }
+    }
+
+    const LOAD_PERIOD_TIMEOUT_MULT: Duration = Duration::from_secs(1);
+    const LOAD_PERIOD_TIMEOUT_MAX: Duration = Duration::from_secs(4);
+    fn load_grace_period_update(&mut self, load_started: bool) {
+        let pending = match load_started {
+            false if !self.packs.any_loading() => 0,
+            s => self.loader.pending_loads().max(s as usize),
+        };
+        let state = match load_started {
+            _ if pending == 0 => Some(false),
+            true => Some(true),
+            false => None,
+        };
+        if let Some(state) = state {
+            self.loader.shared.packs.update_load_period(pending, state);
+            if load_started {
+                let timeout = (Self::LOAD_PERIOD_TIMEOUT_MULT * pending as u32).min(
+                    Self::LOAD_PERIOD_TIMEOUT_MAX
+                );
+                self.now_loading_timeout.set(tokio::time::sleep(timeout));
+            } else if !state {
+                self.now_loading_timeout.set(future::pending());
+            }
+        } else {
+            self.loader.shared.packs.update_load_count(pending);
         }
     }
 

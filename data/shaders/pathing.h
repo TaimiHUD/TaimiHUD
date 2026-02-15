@@ -108,7 +108,8 @@ struct SpaceOutputV {
     float4 colour: COLOR0;
     float2 tex: TEXCOORD0;
     /*noperspective*/ float3 displacement: POSITION1;
-    float2 fade: COLOR1;
+    float2 fade: TEXCOORD1;
+    nointerpolation uint2 instance: OFLAGS0;
 };
 #define TrailOutputV SpaceOutputV
 #define PoiOutputV SpaceOutputV
@@ -116,6 +117,13 @@ struct MapOutputV {
     SpaceOutputV space;
     float map_scale: POSITION2;
 };
+
+struct SpaceInputP {
+    SpaceOutputV space;
+    //bool face_front: SV_IsFrontFace;
+};
+#define TrailInputP SpaceInputP
+#define PoiInputP SpaceInputP
 
 struct SpaceOutputP {
     float4 colour: SV_Target0;
@@ -126,17 +134,21 @@ struct SpaceOutputP {
 struct MarkerSharedV {
     float scale;
     float alpha;
+    float anim_scale;
+    uint flags;
 };
+#define SFLAG_DISTANCE_FADE MFLAG_WALL
 struct PoiSharedV {
     column_major float4x4 billboard;
     MarkerSharedV marker;
     float map_scale;
-    float _padding0;
+    float _padding0[3];
 };
 struct TrailSharedV {
     MarkerSharedV marker;
     float tex_scale;
     float tex_offset;
+    float _padding0[2];
 };
 struct RenderSharedP {
     float2 viewport;
@@ -151,7 +163,8 @@ struct RenderSharedV {
     float anim_timestamp;
     float3 camera_pos;
     float _padding0;
-    float4 _padding1;
+    float3 camera_dir;
+    float _padding1;
     float4 _padding2;
 };
 
@@ -178,9 +191,14 @@ SamplerState SampleType : register(s0);
 #define MFLAG_MAP_STATIC_SCALE 0x0400
 #define MFLAG_RISE 0x0800
 #define MFLAG_WALL 0x1000
+#define MFLAG_OPAQUE 0x2000
 #define MFLAG_IS_TRAIL 0x8000
-#define GET_MFLAG(flags, flag) (bool((flags) & (flag)))
-#define GET_MFLAG_ALPHA(flags) (float((flags) & MFLAG_ALPHA_MASK) / 255.0f)
+#define MFLAG_FACE_CULL_FRONT 0x10000
+#define MFLAG_FACE_CULL_FRONT_SHIFT 16
+#define MFLAG_FACE_CULL 0x20000
+#define GET_MFLAG(flags, flag) bool(GET_MFLAG_BIT(flags, flag))
+#define GET_MFLAG_BIT(flags, flag) ((flags) & (flag))
+#define GET_MFLAG_ALPHA(flags) (float(GET_MFLAG_BIT(flags, MFLAG_ALPHA_MASK)) / 255.0f)
 
 //#define MAD(v, m, a) mad(v, m, a)
 #define MAD(v, m, a) ((v) * (m) + (a))

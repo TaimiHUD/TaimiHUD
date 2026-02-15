@@ -602,7 +602,7 @@ impl PathingController {
         for path in &packs {
             self.packs.mark_used(path);
             if let Some(pack) = self.packs.lookup_mut(&path) {
-                let _ = pack.unloaded.get_or_insert_with(|| UnloadedReason::Loading);
+                pack.try_mark_loading();
             }
         }
         let manager = self.loader.clone();

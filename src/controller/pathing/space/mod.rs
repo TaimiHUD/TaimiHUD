@@ -569,6 +569,20 @@ impl PathingController {
         (key, None)
     }
 
+    pub async fn space_pack_rebuild_if_needed(&mut self) {
+        if !self.space.packs.needs_bvh_rebuild() {
+            return
+        }
+        let packs = {
+            if Arc::strong_count(&self.space.packs) > 1 {
+                self.space.packs = Arc::new(self.space.packs.clone_without_bvh());
+            }
+            Arc::make_mut(&mut self.space.packs)
+        };
+        packs.rebuild_bvh().await;
+        Self::space_publish_packs(&self.loader, Some(&self.space.packs), Some(true));
+    }
+
     /// map changed in a way that may be relevant to [SpacePackCollection] state
     pub async fn space_pack_updates(&mut self) {
         let map_id = self.gameplay_map();
@@ -578,11 +592,14 @@ impl PathingController {
             let entities_dirty = true;
             let space_dirty = if entities_dirty {
                 let space_packs = Arc::make_mut(&mut self.space.packs);
+                let still_loading = self.loader.shared.packs.read_still_waiting().0;
                 let bvh_dirty =
-                    space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps);
+                    space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps, still_loading);
                 match bvh_dirty {
                     Err(true) => {
-                        space_packs.rebuild_bvh();
+                        if !still_loading {
+                            space_packs.try_rebuild_bvh().await;
+                        }
                         true
                     },
                     Err(false) => true,
@@ -645,14 +662,14 @@ impl PathingController {
                 Some(false) => None,
                 _ => {
                     log::info!("space entity rebuild...");
-                    Some(space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps))
+                    Some(space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps, false))
                 },
             }
         };
         let _dirty = match (bvh, bvh_dirty) {
             (Some(true), _) | (None, Some(Err(true))) => {
                 log::info!("space bvh rebuild...");
-                space_packs.rebuild_bvh();
+                space_packs.rebuild_bvh().await;
                 true
             },
             (Some(false), _) => {
