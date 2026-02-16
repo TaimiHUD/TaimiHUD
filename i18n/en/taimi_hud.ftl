@@ -451,6 +451,7 @@ pathing-config-trail-resolution = Trail Resolution
 pathing-config-trail-width = Base Width
 pathing-config-goggles = X-ray Goggles Experiment
 pathing-config-goggles-notice = This currently requires setting Render Sampling to Native under Graphics Options.
+pathing-config-goggles-distance-notice = Mitigate performance impact of rendering obscured paths
 pathing-config-filters = Dynamic Content
 pathing-config-interactions = Interactions
 pathing-config-autotrigger = Auto-trigger
