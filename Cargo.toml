@@ -220,6 +220,8 @@ windows = [
 crate-type = ["cdylib"] # nexus addons are dynamic system libraries (dll)
 path = "src/lib.rs"
 
+[workspace.lints.rust]
+unconditional_recursion = { level = "deny" }
 [workspace.lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = [
