@@ -54,6 +54,7 @@ use {
         sync::Arc,
         task::{Context, Poll},
         time::Duration,
+        mem,
     },
     taimi_hoard::{cmp::CmpIgnore, flags::BitSet, loc::LocationRef, time::Timestamp},
     taimi_meta::{
@@ -70,6 +71,7 @@ use {
     taimi_sync::arcs::ArcPtrCmp,
     tokio::sync::{broadcast, RwLock},
     tokio_stream::wrappers::errors::BroadcastStreamRecvError as BroadcastError,
+    taimi_hoard::vec::vec32_eq,
 };
 
 #[derive(Debug, Clone)]
@@ -304,28 +306,62 @@ impl MapInteractState {
 
     /// TODO: partial updates and whatnot
     pub fn update_entities(&mut self, maps: &LoadedMaps, map_info: &LoadedMapInfo, map_id: MapIndex) {
-        self.clear_active();
-
+        #[cfg(todo)]
         let mut interest_auto = self.interest_auto;
+        #[cfg(todo)]
         let mut interest_nearby = self.interest_nearby;
-        for (map_path, map, _map_info) in maps.iter_with_info(map_info, Some(map_id)) {
-            let pois = map.lpois().iter().filter_map(|(lpath, poi)| {
-                let (interest, auto) = SpaceInteraction::poi_interest(poi);
-                interest_nearby.insert(interest);
-                if auto {
-                    interest_auto.insert(interest & TriggerKind::AUTO_TRIGGER_MASK);
-                }
-                match interest.is_empty() {
-                    true => None,
-                    false => Some(BvhShape::new(SpaceInteraction::with_poi(
-                        map_path.rel(lpath.path),
-                        poi,
-                    ))),
+        let (mut interest_auto, mut interest_nearby) = (TriggerKind::empty(), TriggerKind::empty());
+        let mut pois = maps.iter_with_info(map_info, Some(map_id))
+            .flat_map(|(map_path, map, _map_info)|
+                    map.lpois().iter()
+                    .filter_map(move |(lpath, poi)| {
+                        let (interest, auto) = SpaceInteraction::poi_interest(poi);
+                        match interest.is_empty() {
+                            true => None,
+                            false => Some((map_path.rel(lpath.path), poi, interest, auto)),
+                        }
+                    })
+            ).inspect(|(_, _, interest, auto)| {
+                interest_nearby.insert(*interest);
+                if *auto {
+                    interest_auto.insert(*interest & TriggerKind::AUTO_TRIGGER_MASK);
                 }
             });
-            self.entities.extend(pois);
+        let mut entities_dirty = false;
+        let mut trunc = None;
+        for (i, dest) in self.entities.iter_mut().enumerate() {
+            let Some((lpath, poi, _interest, _auto)) = pois.next() else {
+                trunc = Some(i);
+                break
+            };
+            let e = SpaceInteraction::with_poi(
+                lpath,
+                poi,
+            );
+            let prev = mem::replace(&mut dest.value, e);
+            entities_dirty |= (prev.path != lpath) | !vec32_eq(prev.bounds.position, dest.bounds.position) | (prev.bounds.radius.to_bits() != dest.bounds.radius.to_bits());
         }
-        self.trigger_bvh_dirty = !self.entities.is_empty();
+        if let Some(trunc) = trunc {
+            entities_dirty = true;
+            unsafe {
+                self.entities.set_len(trunc);
+            }
+        } else {
+            let additional = pois.map(|(lpath, poi, ..)| {
+                entities_dirty = true;
+                BvhShape::new(SpaceInteraction::with_poi(
+                    lpath,
+                    poi,
+                ))
+            });
+            self.entities.extend(additional);
+        }
+        entities_dirty |= (self.interest_auto != interest_auto) | (self.interest_nearby != interest_nearby);
+        if entities_dirty {
+            self.clear_bvh();
+            self.clear_nearby();
+        }
+        self.trigger_bvh_dirty |= entities_dirty && !self.entities.is_empty();
         self.interest_auto = interest_auto;
         self.interest_nearby = interest_nearby;
     }
@@ -375,10 +411,19 @@ impl MapInteractState {
         self.trigger_bvh_dirty = false;
     }
     pub fn clear_active(&mut self) {
+        self.clear_entities();
+        self.clear_nearby();
+        self.clear_bvh();
+    }
+    fn clear_entities(&mut self) {
         self.entities.clear();
-        self.nearby.clear();
         self.interest_auto = TriggerKind::empty();
         self.interest_nearby = TriggerKind::empty();
+    }
+    fn clear_nearby(&mut self) {
+        self.nearby.clear();
+    }
+    fn clear_bvh(&mut self) {
         let empty_bvh_rw = empty_trigger_bvh();
         let trigger_bvh_cleared = if Arc::ptr_eq(&self.trigger_bvh, empty_bvh_rw) {
             // nothing to do...
@@ -1342,6 +1387,9 @@ impl PathingController {
             // schedule it for next poll... could try inline if no other events are pending but bleh
             self.interact.event_dirty_bvh_rebuild = true;
         }
+    }
+    pub(super) fn interact_entity_updates(&mut self) {
+        self.interact.event_dirty_entities = true;
     }
 }
 impl PathingController {
