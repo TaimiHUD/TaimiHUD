@@ -38,7 +38,7 @@ use {
     },
     anyhow::Context,
     bvh::aabb,
-    glamour::{Box3, Point3, Intersection},
+    glamour::{Box3, Point3},
     rustc_hash::FxHashSet,
     std::{collections::BTreeSet, mem, ops, sync::Arc},
     taimi_d3d::dx11::prelude::*,
@@ -691,7 +691,12 @@ impl PackRender {
                 packs_map => packs_map,
             }
         };
-        if prev_map_id.is_none() && space_dirty && self.spacepacks.render_entities.entities.len() > 0 {
+        let prev_waiting = mem::replace(&mut self.draw_state.prev_waiting, pathing.packs.read_still_waiting().0);
+        let summarize = !self.spacepacks.render_entities.entities.is_empty() && map_id.is_some() && (
+            prev_map_id.is_none()
+            || prev_waiting
+        ) && !self.draw_state.prev_waiting;
+        if summarize {
             let (pois, trails) = self.spacepacks.loaded_packs.values().fold(
                 (0usize, 0usize),
                 |(mut pois, mut trails), p| {
@@ -701,7 +706,6 @@ impl PackRender {
                 },
             );
             log::info!("Loaded {trails} trails and {pois} POIs");
-            // TODO: this will not trigger properly as items slowly load in...
         }
         if let Some(map_id) = map_id {
             if let Some(packs_map) = &packs_map_changed {
@@ -1970,6 +1974,8 @@ impl PackRenderResources {
 pub struct PackRenderState {
     pub drawn_incomplete: FxHashSet<MarkerId>,
     pub prev_map_id: Option<MapIndex>,
+    /// TODO: stash this in a common place like machine maybe?
+    pub prev_waiting: bool,
     #[cfg(todo)]
     pub drawn_visible: BitSet,
 }
