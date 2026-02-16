@@ -552,6 +552,11 @@ impl<'a> PackBuilder<'a> {
             if poi.map_id == 0 {
                 poi.map_id = category.map_id;
             }
+            let has_achievement_filter = poi.attributes.filters.as_ref().map(|f| f.achievement_id().is_some()).unwrap_or(false);
+            let needs_behaviour = || poi.attributes.interaction.as_ref().map(|i| i.taco_behavior.is_none()).unwrap_or(true);
+            if has_achievement_filter && needs_behaviour() {
+                poi.attributes.interaction_mut().taco_behavior = Some(attributes::TacoBehavior::DismissAchievement);
+            }
         }
         for trail in &mut pack.trails {
             let category = Self::lookup_category_relaxed(

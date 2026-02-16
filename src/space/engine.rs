@@ -40,10 +40,14 @@ use {
         },
     },
     taimi_sync::watched::{watch, Watched},
-    tokio::{
-        sync::mpsc::{Receiver, Sender},
-        time::Instant,
-    },
+    tokio::sync::mpsc::{Receiver, Sender},
+    std::time::Instant,
+};
+#[cfg(feature = "paths-interact")]
+use {
+    crate::controller::pathing::state::interactive::{InteractionEvent, InteractionEventAction},
+    crate::settings::pathing::TriggerKind,
+    tokio::sync::broadcast,
 };
 #[cfg(feature = "space-ecs")]
 use {
@@ -146,14 +150,14 @@ fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Mark
     let now = Instant::now();
     for (entity, marker, mut render) in &mut query {
         let start = marker.phase.start_for_set(marker.marker.offset_set());
-        if now > marker.marker.end(start) {
+        if now > marker.marker.end(start.into()).into_std() {
             log::trace!(
                 "Entity {} reached end after {}, despawning.",
                 entity,
                 marker.marker.duration
             );
             commands.entity(entity).despawn();
-        } else if now > marker.marker.start(start) && render.disabled {
+        } else if now > marker.marker.start(start.into()).into_std() && render.disabled {
             log::trace!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
             render.disabled = false;
         }
@@ -202,6 +206,8 @@ pub struct Engine {
     pub world: World,
 
     pub packs: PackRender,
+    #[cfg(feature = "paths-interact")]
+    pub interact_rx: Option<broadcast::Receiver<InteractionEvent>>,
 
     pub drawing: bool,
     pub drawing_start: Option<Instant>,
@@ -280,6 +286,8 @@ impl Engine {
             drawing_start: None,
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
+            #[cfg(feature = "paths-interact")]
+            interact_rx: None,
             settings: None,
         };
 
@@ -340,7 +348,15 @@ impl Engine {
                     return Err(e)
                 },
             }
-            let gameplay = Controller::with_sender(|s| s.gameplay.clone());
+            #[cfg(feature = "paths-interact")]
+            let mut interact_rx = None;
+            let gameplay = Controller::with_sender(|s| {
+                #[cfg(feature = "paths-interact")]
+                if let Some(pathing) = &s.pathing {
+                    interact_rx = Some(pathing.shared.interact.events.subscribe());
+                }
+                s.gameplay.clone()
+            });
             let Some(gameplay) = gameplay.flatten() else {
                 anyhow::bail!("controller unavailable");
             };
@@ -349,7 +365,11 @@ impl Engine {
                     res = Some(anyhow!("{e:#}"));
                     Err(e)
                 },
-                Ok(e) => {
+                Ok(mut e) => {
+                    #[cfg(feature = "paths-interact")]
+                    {
+                        e.interact_rx = interact_rx;
+                    }
                     #[cfg(feature = "extension-nexus")]
                     machine.rtapi_setup();
                     #[cfg(feature = "goggles")]
@@ -673,6 +693,30 @@ impl Engine {
                     ev_rem += 1;
                 },
                 Some(true) => (),
+            }
+        }
+        #[cfg(feature = "paths-interact")]
+        if let Some(rx) = &mut self.interact_rx {
+            for _ in 0..48 {
+                let when = || self.drawing_start.as_ref()
+                    .map(|s| s.elapsed().as_secs_f32());
+                match rx.try_recv() {
+                    Ok(InteractionEvent::Interact { action: InteractionEventAction::Report(action), loaded_path, path: _,  } ) => {
+                        if action.contains(TriggerKind::BOUNCE) {
+                            if let Some(when) = when() {
+                                self.packs.poi_anim_start(loaded_path, when);
+                            }
+                        }
+                    },
+                    Ok(InteractionEvent::Gone { loaded_path, .. }) => {
+                        if let Some(when) = when() {
+                            self.packs.poi_anim_end(loaded_path, when);
+                        }
+                    },
+                    Ok(..) => (),
+                    Err(broadcast::error::TryRecvError::Lagged(..)) => (),
+                    Err(..) => break,
+                }
             }
         }
         self.schedule.run(&mut self.world);
@@ -1309,8 +1353,8 @@ impl Engine {
         // clean up a buffer if the map isn't likely to use it...
         let _ = self.render_backend.perspective_handler.constant_buffer_poi.take();
 
-        self.drawing_start = Some(Instant::now());
-        self.packs.resources.dirty = true;
+        let prev_start = mem::replace(&mut self.drawing_start, Some(Instant::now()));
+        self.packs.gameplay_map_enter(prev_start);
 
         self.goggles_enter(true);
 

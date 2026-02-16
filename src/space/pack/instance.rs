@@ -169,7 +169,7 @@ impl PoiInstanceData {
         let _arg1 = 0.0;
         self.bounce = pack_int_pair(h, _arg1);
     }
-    pub fn set_bounce(&mut self, height: f32, duration: f32, behaviour: BounceBehavior, start: f32) {
+    pub fn set_bounce(&mut self, height: f32, duration: f32, behaviour: BounceBehavior, start: Option<f32>) {
         match behaviour {
             BounceBehavior::Rise =>
                 self.marker.flags |= MarkerInstanceData::FLAG_RISE,
@@ -177,7 +177,10 @@ impl PoiInstanceData {
                 self.marker.flags &= !MarkerInstanceData::FLAG_RISE,
         }
         self.set_bounce_params(height, duration);
-        self.anim_offset = start;
+        self.anim_offset = start.unwrap_or(0.0);
+        if start.is_none() {
+            self.marker.set_anim_scale(0.0);
+        }
     }
 }
 #[derive(Debug, Copy, Clone)]
