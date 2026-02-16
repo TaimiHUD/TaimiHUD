@@ -82,7 +82,7 @@ impl SpacePack {
     }
     pub fn unpopulate(&mut self, marker: MarkerIndex) -> bool {
         match marker.namespace() {
-            MarkerIndex::NS_TRAIL => false,
+            MarkerIndex::NS_TRAIL if !self.info_sig.is_empty() => false,
             _ => {
                 self.mark_unpopulated(marker);
                 true
