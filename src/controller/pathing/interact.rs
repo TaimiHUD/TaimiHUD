@@ -537,8 +537,9 @@ impl InteractReactor {
             });
         }
     }
-    pub(super) fn process_interaction(
+    fn process_interaction(
         &mut self,
+        event_tx: &broadcast::Sender<InteractionEvent>,
         filter_state: &FilterState,
         (path, loaded_path, lpoi): (PoiPath, LoadedPoiPath<PackMapPath>, &LoadedPoi),
         action: InteractionEventAction,
@@ -552,12 +553,13 @@ impl InteractReactor {
         let marker_path = path.pivot_from();
         let lpath = loaded_path.map_path(MarkerIndex::with_poi);
 
-        let mut took_action = None;
+        let mut took_action = None::<TriggerKind>;
+        let mut side_effects = TriggerKind::empty();
         let blocked = "trigger settings blocked";
         if let Some(message) = attrs.info.as_ref() {
-            let allowed = allowed.contains(TriggerKind::INFO);
-            *took_action.get_or_insert_default() |= allowed;
-            if allowed {
+            let allowed = allowed & TriggerKind::INFO;
+            took_action.get_or_insert_default().insert(allowed);
+            if !allowed.is_empty() {
                 events.push(PathingEvent::TriggerMarkerInfo {
                     path: marker_path,
                     loaded_path: lpath,
@@ -568,9 +570,9 @@ impl InteractReactor {
             }
         }
         if let Some(value) = attrs.copy_value.as_ref() {
-            let allowed = allowed.contains(TriggerKind::COPY);
-            *took_action.get_or_insert_default() |= allowed;
-            if allowed {
+            let allowed = allowed & TriggerKind::COPY;
+            took_action.get_or_insert_default().insert(allowed);
+            if !allowed.is_empty() {
                 events.push(PathingEvent::TriggerMarkerCopy {
                     path: marker_path,
                     loaded_path: lpath,
@@ -582,9 +584,9 @@ impl InteractReactor {
             }
         }
         for (id, show_hide) in attrs.category_actions() {
-            let allowed = allowed.contains(TriggerKind::TOGGLE);
-            *took_action.get_or_insert_default() |= allowed;
-            if allowed {
+            let allowed = allowed & TriggerKind::from_show_hide_action(show_hide);
+            took_action.get_or_insert_default().insert(allowed);
+            if !allowed.is_empty() {
                 #[cfg(todo)]
                 let cat = show_hide.category().pivot(loaded_path.root.root);
                 let cat = id.clone();
@@ -599,9 +601,9 @@ impl InteractReactor {
             }
         }
         if let reset @ &[_, ..] = attrs.reset_guids() {
-            let allowed = allowed.contains(TriggerKind::RESET);
-            *took_action.get_or_insert_default() |= allowed;
-            if allowed {
+            let allowed = allowed & TriggerKind::RESET;
+            took_action.get_or_insert_default().insert(allowed);
+            if !allowed.is_empty() {
                 let ids = reset
                     .iter()
                     .map(|guid| MarkerId::from_uuid_ref(guid.as_ref()).clone())
@@ -613,16 +615,18 @@ impl InteractReactor {
         }
         let script = lpoi.info().get_marker_attrs().and_then(|m| m.script.as_ref());
         if let Some(_script) = script {
-            let allowed = allowed.contains(TriggerKind::SCRIPT);
-            *took_action.get_or_insert_default() |= allowed;
-            if allowed {
+            let allowed = allowed & TriggerKind::SCRIPT;
+            took_action.get_or_insert_default().insert(allowed);
+            if !allowed.is_empty() {
                 log::debug!("TODO: interact script");
             } else {
                 log::info!("{blocked} script");
             }
         }
         if let Some(_bounce) = attrs.bounce_behavior {
-            if allowed.contains(TriggerKind::BOUNCE) {
+            let allowed = allowed & TriggerKind::BOUNCE;
+            side_effects.insert(allowed);
+            if !allowed.is_empty() {
                 log::debug!("TODO: interact bounce anim");
             } else {
                 log::info!("{blocked} animation");
@@ -635,7 +639,7 @@ impl InteractReactor {
         };
         if let Some((behaviour, reset_delay)) = behaviour {
             let organic = match action.is_natural() {
-                true => took_action.unwrap_or(true),
+                true => took_action.map(|a| !a.is_empty()).unwrap_or(true),
                 false => true,
             };
             if allowed.contains(TriggerKind::BEHAVIOUR) && organic {
@@ -682,6 +686,10 @@ impl InteractReactor {
                             }))),
                         }
                     },
+                    Behaviour::Blish(BlishBehaviour::TaimiAchievement) => {
+                        log::info!("TODO: dismiss achievement marker immediately");
+                        None
+                    },
                     Behaviour::Taco(TacoBehaviour::ResetDelay) =>
                         Some(Either::Right(keys::ResetLength(reset_delay).duration())),
                     Behaviour::Taco(TacoBehaviour::AlwaysVisible) =>
@@ -716,10 +724,11 @@ impl InteractReactor {
                     contexts,
                     reset,
                 });
+                took_action.get_or_insert_default().insert(TriggerKind::BEHAVIOUR);
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
-        } else if action.is_natural() && took_action.unwrap_or(false) {
+        } else if action.is_natural() && took_action.map(|a| !a.is_empty()).unwrap_or(false) {
             let contexts = vec![HideContext::for_map(loaded_path.root.path, None)];
             events.push(PathingEvent::DismissMarker {
                 path: marker_path,
@@ -728,6 +737,12 @@ impl InteractReactor {
                 contexts,
                 reset: Some(AutoReset::Distance),
             });
+            took_action.get_or_insert_default().insert(TriggerKind::DISMISS);
+        }
+        let aftermath = took_action.unwrap_or_default() | side_effects;
+        if !aftermath.is_empty() {
+            let action = InteractionEventAction::Report(aftermath);
+            let _ = event_tx.send(InteractionEvent::Interact { action, path, loaded_path });
         }
         PathingEvent::FanOut(events).flatten()
     }
@@ -785,6 +800,10 @@ impl InteractReactor {
             },
             InteractionEventAction::Interact => self.config.trigger_allow_interact,
             InteractionEventAction::AutoTrigger => self.config.trigger_allow_auto,
+            InteractionEventAction::Report(..) => {
+                // should've been filtered out much sooner...
+                TriggerKind::empty()
+            },
         }
     }
     pub(super) fn prepare_action<'a>(
@@ -814,6 +833,9 @@ impl InteractReactor {
                 let action = if act_auto { Some(InteractionEventAction::AutoTrigger) } else { None };
                 action.map(|action| (path, loaded_path, lpoi, guid, action))
             },
+            InteractionEvent::Interact { action: InteractionEventAction::Report(..), .. } =>
+                // should've been filtered out but just in case...
+                None,
             &InteractionEvent::Interact { ref action, path, loaded_path } => {
                 let (map, map_info) = maps.lookup_with_info(map_info, &loaded_path.root)?;
                 let lpath: LoadedPoiPath = loaded_path.unscope();
@@ -824,8 +846,9 @@ impl InteractReactor {
             InteractionEvent::Gone { .. } => None,
         }
     }
-    pub(super) fn process_interact<'a>(
+    fn process_interact<'a>(
         &mut self,
+        event_tx: &broadcast::Sender<InteractionEvent>,
         filter_state: &FilterState,
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
@@ -840,7 +863,7 @@ impl InteractReactor {
                     return PathingEvent::Nop
                 };
                 let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
-                self.process_interaction(filter_state, (path, lpath, lpoi), action, allowed)
+                self.process_interaction(event_tx, filter_state, (path, lpath, lpoi), action, allowed)
             },
         }
     }
@@ -1085,8 +1108,8 @@ impl InteractReactor {
                 .send(InteractionEvent::Interact { action, path, loaded_path });
             let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
             if !allowed.is_empty() {
-                let interact = self.process_interaction(filter_state, (path, lpath, lpoi), action, allowed);
-                if !matches!((&res, &interact), (PathingEvent::Nop, PathingEvent::Nop)) {
+                let interact = self.process_interaction(&rx.event_tx, filter_state, (path, lpath, lpoi), action, allowed);
+                if !matches!((&res, &interact), (PathingEvent::Nop, _) | (_, PathingEvent::Nop)) {
                     log::debug!("TODO: activating multiple POIs, should've stopped at the closest?");
                 }
                 match interact {
@@ -1127,8 +1150,15 @@ impl InteractReactor {
         if let Poll::Ready(m) = self.poll_event_flag(cx) {
             return Poll::Ready(m)
         }
-        for _ in 0..Self::EVENT_RX_RETRY {
+        let rx_tick = 32;
+        let mut rx_retry = Self::EVENT_RX_RETRY * rx_tick;
+        while rx_retry > 0 {
+            let mut rx_tick = rx_tick;
             match rx.event_rx.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(InteractionEvent::Interact { action: InteractionEventAction::Report(..), .. }))) => {
+                    // we emit these, filter them out early...
+                    rx_tick = 1
+                },
                 Poll::Ready(Some(Ok(e))) => return Poll::Ready(InteractMessage::Event(e)),
                 Poll::Ready(Some(Err(BroadcastError::Lagged(amt)))) => {
                     log::warn!("lagged behind by {amt} interactions");
@@ -1136,6 +1166,7 @@ impl InteractReactor {
                 },
                 Poll::Ready(None) | Poll::Pending => break,
             }
+            rx_retry = rx_retry.saturating_sub(rx_tick);
         }
         if let Some((auto, passive)) = self.interest_movement() {
             rx.player_pos.set_threshold_timeout(match (auto, passive) {
@@ -1228,7 +1259,7 @@ impl InteractReactor {
                 }
                 PathingEvent::Nop
             },
-            InteractMessage::Event(event) => self.process_interact(filter_state, map_info, maps, event),
+            InteractMessage::Event(event) => self.process_interact(&rx.interact.event_tx, filter_state, map_info, maps, event),
             InteractMessage::PlayerMoved(pos) => {
                 let res = self.process_movement(&mut rx.interact, map_info, maps, pos).await;
                 rx.interact.player_pos.readjust_now();

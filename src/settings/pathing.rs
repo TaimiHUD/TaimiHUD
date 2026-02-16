@@ -722,6 +722,14 @@ impl TriggerKind {
             _ => None,
         }
     }
+    #[cfg(feature = "paths")]
+    pub const fn from_show_hide_action(action: ShowHideAction) -> Self {
+        match action {
+            ShowHideAction::Show => Self::SHOW,
+            ShowHideAction::Hide => Self::HIDE,
+            ShowHideAction::Toggle => Self::TOGGLE,
+        }
+    }
     pub fn show_hide_actions(self) -> impl Iterator<Item = (Self, ShowHideAction)> {
         (self & Self::CATEGORY_MASK)
             .into_iter()

@@ -9,6 +9,7 @@ use {
                 LoadedTrailIndex,
                 LoadedTrailNs,
                 LoadedTrailPath,
+                PoiMapPath,
                 PackIndex,
                 PackRegistryNs,
                 PackVecOf,
@@ -41,6 +42,7 @@ use {
     glamour::{Box3, Point3},
     rustc_hash::FxHashSet,
     std::{collections::BTreeSet, mem, ops, sync::Arc},
+    std::time::Instant,
     taimi_d3d::dx11::prelude::*,
     taimi_d3d::dx11::buffer::{ConstantBufferP, ConstantBufferV},
     taimi_hoard::{
@@ -525,6 +527,35 @@ impl PackRender {
         self.render_list.prepare_frame();
         Ok(())
     }
+
+    pub fn gameplay_map_enter(&mut self, _prev_anchor: Option<Instant>) {
+        self.resources.dirty = true;
+        // timestamps reset, so relative ones are invalid now...
+        for pack in self.pack_data.values_mut() {
+            for poi in pack.pois.values_mut() {
+                poi.anim = None;
+            }
+        }
+    }
+    pub fn poi_anim_start(&mut self, lpath: PoiMapPath, when: f32) {
+        let Some(pack) = self.pack_data.lookup_mut(&lpath.root.root) else { return };
+        let lpoi_path: LoadedPoiPath = lpath.unscope();
+        let Some(poi) = pack.pois.lookup_mut(&lpoi_path) else { return };
+        poi.anim = Some(when);
+        self.resources.dirty = true;
+    }
+    /// TODO: ease out or something
+    pub fn poi_anim_end(&mut self, lpath: PoiMapPath, when: f32) {
+        let Some(pack) = self.pack_data.lookup_mut(&lpath.root.root) else { return };
+        let lpoi_path: LoadedPoiPath = lpath.unscope();
+        let Some(poi) = pack.pois.lookup_mut(&lpoi_path) else { return };
+        if poi.anim.is_none() {
+            return
+        }
+        poi.anim = None;
+        self.resources.dirty = true;
+    }
+
     fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
         let res = self
             .recreate_buffers_inner(device, machine)
@@ -993,9 +1024,11 @@ impl PackRenderResources {
             let marker = path.and_then(|(pack, path)|
                 pack.map_info.as_ref().and_then(|i|
                     SharedMarkerRef::from_loaded_path(i, Some(&pack.map_state), path)
-            )).and_then(|m| m.to_loaded());
+                        .and_then(|m| m.to_loaded())
+                        .map(|m| (m, pack))
+            ));
             let common = match &marker {
-                Some(LoadedMarkerRef::Poi(poi)) => {
+                Some((LoadedMarkerRef::Poi(poi), pack_data)) => {
                     let attrs = poi.poi_attrs();
                     let ib = ib.write_poi(instance::PoiInstanceData {
                         model: {
@@ -1017,15 +1050,21 @@ impl PackRenderResources {
                         },
                         .. instance::PoiInstanceData::INVALID
                     });
-                    let bounce = poi.lpoi_info().get_interaction_attrs().and_then(|i|
-                        i.bounce_behavior.map(|b|
-                            (b, i.bounce_height(), i.bounce_duration())
-                        )
-                    );
+                    let anim_start = pack_data.pois.lookup_ref(&poi.loaded_index())
+                        .and_then(|rpoi| rpoi.anim);
+                    let bounce_args = poi.lpoi_info().get_interaction_attrs()
+                        .map(|i| (i.bounce_behavior, i.bounce_height(), i.bounce_duration()));
+                    let bounce = match bounce_args {
+                        Some((Some(behaviour), height, duration)) => Some((behaviour, height, duration)),
+                        bounce if anim_start.is_some() => Some({
+                            let (height, duration) = bounce.map(|(_, height, duration)| (height, duration)).unzip();
+                            use taimi_pack::attributes::{keys, BounceBehavior};
+                            (BounceBehavior::Bounce, height.unwrap_or(keys::BounceHeight::DEFAULT.into()), duration.unwrap_or(keys::BounceDuration::DEFAULT.into()))
+                        }),
+                        _ => None,
+                    };
                     if let Some((behaviour, height, duration)) = bounce {
-                        // TODO
-                        let anim_start_offset = 0.0;
-                        ib.set_bounce(height, duration, behaviour, anim_start_offset);
+                        ib.set_bounce(height, duration, behaviour, anim_start);
                     } else {
                         ib.clear_bounce();
                     }
@@ -1043,7 +1082,7 @@ impl PackRenderResources {
                     ib.set_size_range(attrs.min_size(), attrs.max_size());
                     Some((&mut ib.marker, poi.lpoi_info().marker_info()))
                 },
-                Some(LoadedMarkerRef::Trail(trail)) => {
+                Some((LoadedMarkerRef::Trail(trail), _pack_data)) => {
                     let attrs = trail.trail_attrs();
                     let ib = ib.write_trail(instance::TrailInstanceData {
                         .. instance::TrailInstanceData::INVALID
@@ -1066,7 +1105,7 @@ impl PackRenderResources {
                 ib.set_alpha(tint.w);
                 let can_fade = match r.can_fade() {
                     // I'd rather not fade all POIs by default...
-                    true if r.can_fade.is_none() && matches!(marker, Some(LoadedMarkerRef::Poi(..))) =>
+                    true if r.can_fade.is_none() && matches!(marker, Some((LoadedMarkerRef::Poi(..), ..))) =>
                         false,
                     f => f,
                 };

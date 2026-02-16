@@ -1036,6 +1036,11 @@ pub enum TacoBehavior {
     OnceDailyPerCharacter = 7,
     /// BlishHUD extension.
     ReappearOnWeeklyReset = 101,
+    /// TaimiHUD extension.
+    DismissAchievement = Self::TAIMI_ACHIEVEMENT as _,
+}
+impl TacoBehavior {
+    const TAIMI_ACHIEVEMENT: i32 = keys::BlishBehaviour::TaimiAchievement as i32;
 }
 
 impl TryFrom<i32> for TacoBehavior {
@@ -1053,6 +1058,8 @@ impl TryFrom<i32> for TacoBehavior {
             6 => OncePerInstance,
             7 => OnceDailyPerCharacter,
             101 => ReappearOnWeeklyReset,
+            #[cfg(todo)]
+            Self::TAIMI_ACHIEVEMENT => DismissAchievement,
             _ => {
                 anyhow::bail!("unknown taco behavior `{value}`");
             },

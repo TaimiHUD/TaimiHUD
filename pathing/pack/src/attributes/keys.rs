@@ -830,6 +830,8 @@ impl TacoBehaviour {
 #[repr(u8)]
 pub enum BlishBehaviour {
     ResetWeekly = 101,
+    /// "dismiss" an achievement-filtered marker
+    TaimiAchievement = 33,
 }
 impl BlishBehaviour {
     pub const fn value(self) -> u8 {
@@ -855,6 +857,7 @@ impl Behaviour {
         Self::Taco(TacoBehaviour::ResetInstance),
         Self::Taco(TacoBehaviour::ResetDailyPerCharacter),
         Self::Blish(BlishBehaviour::ResetWeekly),
+        Self::Blish(BlishBehaviour::TaimiAchievement),
     ];
 
     pub const fn value(self) -> u8 {
