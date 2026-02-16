@@ -1029,6 +1029,10 @@ impl PoiInfo {
         log::debug!("rx maps");
         if let Some(map_id) = maps.map_id {
             let dirty = &mut self.dirty;
+            self.markers.retain(|k, _marker| {
+                let map_path = k.get_marker_pack_map_path();
+                map_path.path == map_id
+            });
             match self.filters.contains(InteractFilterFlags::DISABLED) {
                 false => {
                     let updates = maps.iter_state().map(|(_, map, map_info)| (map_info, Some(map)));
