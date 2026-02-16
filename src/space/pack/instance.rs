@@ -241,14 +241,19 @@ impl MarkerInstanceData {
                 IRRELEVANT_MAX.abs(),
             near_start => near_start * Self::FADE_RESOLUTION_NEAR,
         };
-        // store range relative to start rather than absolute end
         // TODO: pick end based on distance/intensity settings if <=start as a semi-infinite mode?
-        let end = match far_end {
-            end => ((end - near_start) * Self::FADE_RESOLUTION_FAR).max(1.0),
+        self.fade_range = match far_end {
+            end => {
+                // store range relative to start rather than absolute end
+                let range = ((end - near_start) * Self::FADE_RESOLUTION_FAR).max(1.0);
+                pack_int_pair(start, range)
+            },
             #[cfg(todo)]
-            end => (end * Self::FADE_RESOLUTION_FAR).max(start + 1.0),
+            end => {
+                let end = (end * Self::FADE_RESOLUTION_FAR).max(start + 1.0);
+                pack_int_range(start, end)
+            },
         };
-        self.fade_range = pack_int_range(start, end);
     }
 
     pub fn alpha(&self) -> f32 {
