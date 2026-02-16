@@ -202,10 +202,10 @@ PoiOutputV poi_main_v(PoiInput input)
     float bounce_height = GET_BOUNCE_DIST(input.bounce);
     float bounce_anim = (v_render.anim_timestamp - input.anim_offset) * input.marker.anim_scale * v_poi.marker.anim_scale;
     float bounce_y = lerp(
-        saturate(bounce_anim),
-        sin(bounce_anim),
+        min(bounce_anim, 1.0),
+        0.5f - cos(bounce_anim) * 0.5,
         float(!GET_MFLAG(input.marker.flags, MFLAG_RISE))
-    );
+    ) * bounce_height;
     pos.y = pos.y + bounce_y;
 #endif
 

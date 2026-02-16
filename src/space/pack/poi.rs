@@ -328,6 +328,7 @@ pub struct PoiRender {
     pub icon: Option<TextureSlot>,
     pub static_rotation: bool,
     pub occlude: bool,
+    pub anim: Option<f32>,
 }
 impl PoiRender {
     pub fn empty() -> Self {
@@ -336,6 +337,7 @@ impl PoiRender {
             icon: None,
             static_rotation: false,
             occlude: false,
+            anim: None,
         }
     }
 

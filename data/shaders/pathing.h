@@ -52,8 +52,8 @@ static const float3 FeatherOffset = float3(FEATHER_OFFSET.xy, 1.0 + FEATHER_OFFS
 struct MarkerInput {
     float3 colour: MCOLOUR;
     float anim_scale: MANIM0;
-    uint flags: MFLAG0;
-    uint fade: MFLAG1;
+    nointerpolation uint flags: MFLAG0;
+    nointerpolation uint fade: MFLAG1;
 };
 #define FADE_RESOLUTION_NEAR 8.0f
 #define FADE_RESOLUTION_FAR 4.0f
@@ -85,17 +85,19 @@ struct PoiInputV {
 struct PoiInput {
     PoiInputV vertex;
     MarkerInput marker;
-    uint size_range: PFLAG0;
-    uint bounce: PFLAG1;
+    nointerpolation uint size_range: PFLAG0;
+    nointerpolation uint bounce: PFLAG1;
     column_major float4x4 model: PMODEL;
     float anim_offset: PDISP0;
     float map_scale: PDISP1;
     //float2 _padding;
 };
 #define BOUNCE_HEIGHT_RESOLUTION 16.0f
+#define BOUNCE_HEIGHT_OFFSET 16384
+#define GET_PAIR0i(b) ((b) & 0xffff)
 #define GET_PAIR0f(b) float((b) & 0xffff)
 #define GET_PAIR1f(b) float((b) >> 16)
-#define GET_BOUNCE_DIST(b) (GET_PAIR0f(b) / BOUNCE_HEIGHT_RESOLUTION)
+#define GET_BOUNCE_DIST(b) (float(int(GET_PAIR0i(b)) - BOUNCE_HEIGHT_OFFSET) / BOUNCE_HEIGHT_RESOLUTION)
 //#define GET_BOUNCE_ARG1 GET_PAIR1f
 #if 0
 #define BOUNCE_DURATION_RESOLUTION 16.0f
