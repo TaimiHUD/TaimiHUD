@@ -605,7 +605,7 @@ impl Engine {
     }
     pub fn draw(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, inherit: bool) {
         let map_ctx = machine.is_map_visible();
-        let (visible_space, visible_map, camera_source, edge_feather_scale, arcrender, (_obscured_alpha,)) = self
+        let (visible_space, visible_map, camera_source, edge_feather_scale, arcrender, (_obscured_alpha, _obscured_dist)) = self
             .map_settings(|s| {
                 (
                     s.space.visible_space().then_some(s.space.distance_max()),
@@ -615,9 +615,9 @@ impl Engine {
                     s.space.goggles.arcrender_enabled(),
                     match () {
                         #[cfg(feature = "goggles")]
-                        _ => (s.space.goggles.obscured_alpha(),),
+                        _ => (s.space.goggles.obscured_alpha(), s.space.obscured_distance()),
                         #[cfg(not(feature = "goggles"))]
-                        _ => ((),),
+                        _ => ((),()),
                     },
                 )
             });
@@ -868,6 +868,18 @@ impl Engine {
                 backend.perspective_handler.set_alpha(_obscured_alpha);
                 backend.perspective_handler.update_cb(&device_context);
                 backend.depth_handler.set_state_obscured(&device_context, true);
+                let obscured_cull;
+                let cull = match _obscured_dist {
+                    dist if dist <= _depth.end =>
+                        cull,
+                    dist => {
+                        obscured_cull = MapFrustum::from_camera_data(
+                            camera,
+                            _depth.start..dist,
+                        );
+                        &obscured_cull
+                    },
+                };
 
                 if let Some((settings, anim_timestamp)) = &arcrender_settings {
                     self.packs.resources.update_shared(&device_context, &*backend, &*machine, *anim_timestamp, settings);

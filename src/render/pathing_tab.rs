@@ -961,8 +961,8 @@ impl PathingConfig {
 
         let map_id = machine.gameplay.gameplay_map();
         let Range { start: near, end: far } = machine.depth_range();
-        let (mut is_enabled, obscured_alpha) =
-            Self::get_pathing(|s| (s.space.goggles.enabled(), s.space.goggles.obscured_alpha()))?;
+        let (mut is_enabled, obscured_alpha, obscured_distance, obscured_distance_effective) =
+            Self::get_pathing(|s| (s.space.goggles.enabled(), s.space.goggles.obscured_alpha(), s.space.goggles.obscured_distance(), s.space.obscured_distance()))?;
 
         let (enabled, needs_setup) = render_goggles::get_state();
 
@@ -1004,6 +1004,17 @@ impl PathingConfig {
 
         if let Some(value) = Self::slider_opt_alpha(ui, "x-ray opacity", obscured_alpha, None) {
             Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
+        }
+        if obscured_alpha > 0.0 {
+            if let Some(value) = Self::slider_setting(ui, "x-ray distance", obscured_distance, (0.1, 1.0)) {
+                Self::set_pathing(|s| s.space.goggles.obscured_distance = value);
+            }
+            if ui.is_item_hovered() {
+                ui.tooltip(|| {
+                    ui.text(format!("{obscured_distance_effective}m @ {:.01}%", obscured_distance * 100.0));
+                    with_i18n!("pathing-config-goggles-distance-notice", |msg| ui.text(&msg));
+                });
+            }
         }
 
         if let Some(map_id) = map_id {

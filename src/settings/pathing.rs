@@ -475,6 +475,12 @@ impl SpaceSettings {
     pub fn trail_width(&self) -> f32 {
         self.trail_width.unwrap_or(Self::DEFAULT_TRAIL_WIDTH)
     }
+    #[cfg(feature = "goggles")]
+    pub fn obscured_distance(&self) -> f32 {
+        let max = self.distance_max();
+        (self.goggles.obscured_distance() * max)
+            .max(GogglesSettings::MIN_OBSCURED_DISTANCE.min(max))
+    }
 }
 
 #[derive(
@@ -538,6 +544,9 @@ pub struct GogglesSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edge_scale: Option<f32>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obscured_distance: Option<f32>,
+
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub map_depth_calibration: Arc<BTreeMap<u32, (f32, f32)>>,
 }
@@ -546,6 +555,8 @@ impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
     pub const DEFAULT_ARCRENDER: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
+    pub const DEFAULT_OBSCURED_DISTANCE: f32 = 0.45;
+    pub const MIN_OBSCURED_DISTANCE: f32 = 64.0;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
     #[cfg(todo)]
     pub const DEFAULT_EDGE_SCALE: f32 = 0.5f32;
@@ -558,6 +569,7 @@ impl GogglesSettings {
                 arcrender_enabled: None | Some(Self::DEFAULT_ARCRENDER),
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 obscured_alpha: None,
+                obscured_distance: None,
                 edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
                 map_depth_calibration,
             } if map_depth_calibration.is_empty() => true,
@@ -574,6 +586,9 @@ impl GogglesSettings {
 
     pub fn obscured_alpha(&self) -> f32 {
         self.obscured_alpha.unwrap_or(Self::DEFAULT_OBSCURED_ALPHA)
+    }
+    pub fn obscured_distance(&self) -> f32 {
+        self.obscured_distance.unwrap_or(Self::DEFAULT_OBSCURED_DISTANCE)
     }
 
     pub fn edge_scale(&self) -> Option<f32> {
