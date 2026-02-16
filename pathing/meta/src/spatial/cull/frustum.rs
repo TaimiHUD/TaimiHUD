@@ -1,10 +1,8 @@
-#[cfg(feature = "spatial")]
-use glamour::vec4;
-#[cfg(not(feature = "spatial"))]
 use glamour::{vec4, Box3, Intersection};
 use {
     crate::coords::LocalSpace as DrawSpace,
-    bvh::aabb::IntersectsAabb,
+    crate::spatial::aabb3box,
+    bvh::aabb::{Aabb, IntersectsAabb},
     core::ops::Range,
     glamour::{Point3, Vector3, Vector4},
 };
@@ -173,6 +171,12 @@ impl MapFrustum {
     pub fn planes(&self) -> &[Vector4<DrawSpace>; MapFrustum::PLANES] {
         unsafe { &*(self as *const Self as *const [Vector4<DrawSpace>; MapFrustum::PLANES]) }
     }
+    pub fn min_planes(&self) -> [&Vector4<DrawSpace>; 2] {
+        [
+            &self.near,
+            &self.left,
+        ]
+    }
 }
 
 fn points_to_plane(p0: glam::Vec3, p1: glam::Vec3, p2: glam::Vec3) -> glam::Vec4 {
@@ -215,7 +219,6 @@ impl IntersectsAabb<f32, 3> for MapFrustum {
     }
 }
 
-#[cfg(not(feature = "spatial"))]
 impl Intersection<Point3<DrawSpace>> for MapFrustum {
     type Intersection = bool;
 
@@ -225,7 +228,7 @@ impl Intersection<Point3<DrawSpace>> for MapFrustum {
 
     fn intersection(&self, thing: &Point3<DrawSpace>) -> Option<Self::Intersection> {
         let point = thing.extend(1.0);
-        for plane in self.planes() {
+        for plane in self.min_planes() {
             if plane.dot(point.into()) < 0.0 {
                 return Some(false)
             }
@@ -234,8 +237,18 @@ impl Intersection<Point3<DrawSpace>> for MapFrustum {
         Some(true)
     }
 }
+impl Intersection<Aabb<f32, 3>> for MapFrustum {
+    type Intersection = bool;
 
-#[cfg(not(feature = "spatial"))]
+    fn intersects(&self, thing: &Aabb<f32, 3>) -> bool {
+        self.intersection(thing) == Some(true)
+    }
+
+    fn intersection(&self, thing: &Aabb<f32, 3>) -> Option<Self::Intersection> {
+        self.intersection(&aabb3box(*thing))
+    }
+}
+
 impl Intersection<Box3<DrawSpace>> for MapFrustum {
     type Intersection = bool;
 

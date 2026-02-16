@@ -69,6 +69,20 @@ where
     let Box3 { min, max } = bounds;
     aabb::Aabb::with_bounds(min.into_nalg(), max.into_nalg())
 }
+pub fn aabb2box<U: Unit>(bounds: aabb::Aabb<U::Scalar, 2>) -> Box2<U>
+where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point2<U>: MintConv<MintNalg = nalgebra::Point2<U::Scalar>>,
+{
+    Box2::new(MintConv::from_nalg(bounds.min), MintConv::from_nalg(bounds.max))
+}
+pub fn aabb3box<U: Unit>(bounds: aabb::Aabb<U::Scalar, 3>) -> Box3<U>
+where
+    U::Scalar: BHValue + nalgebra::SimdValue,
+    Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
+{
+    Box3::new(MintConv::from_nalg(bounds.min), MintConv::from_nalg(bounds.max))
+}
 
 pub trait MintConv: Sized {
     type Mint;
