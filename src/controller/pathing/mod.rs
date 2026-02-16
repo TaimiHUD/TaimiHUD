@@ -493,6 +493,8 @@ impl PathingController {
             },
             Ok(_) = self.space.maps_rx.changed() => {
                 self.space_pack_updates().await;
+                // TODO: give interact its own watcher to use in its poll etc
+                self.interact_entity_updates();
             },
             controls = self.controls.wait() => match controls {
                 Err(e) => log::error!("Control bindings error! {e:#}"),
