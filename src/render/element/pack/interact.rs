@@ -87,6 +87,8 @@ pub struct DrawMenuPoi<'a, 'ui> {
     pub ui: &'a Ui<'ui>,
     pub hidden: bool,
     pub guid: bool,
+    pub has_achievement_filter: bool,
+    pub interest: TriggerKind,
     pub act_trigger: Option<InteractionEventAction>,
     pub act_untrigger: bool,
     pub act_guid_copy: bool,
@@ -133,6 +135,11 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
             let behaviours = keys::Behaviour::ALL.iter().skip(1);
             ui.indent();
             for &behaviour in behaviours {
+                if let keys::Behaviour::Blish(keys::BlishBehaviour::TaimiAchievement) = behaviour {
+                    if !self.has_achievement_filter {
+                        continue
+                    }
+                }
                 let label = format!("dismiss-behaviour-{}", behaviour.value());
                 let act = with_i18n!(&label, |label| Selectable::new(label).build(ui));
                 match behaviour {
@@ -157,6 +164,15 @@ impl<'a, 'u> DrawMenuPoi<'a, 'u> {
                 let _ = self
                     .act_trigger
                     .get_or_insert(InteractionEventAction::Dismiss(config));
+            }
+        }
+        if !self.hidden {
+            if with_i18n!("poi-activate-bounce", |label| Selectable::new(label).build(ui)) {
+                self.act_trigger
+                    .get_or_insert(match self.interest.contains(TriggerKind::BOUNCE) {
+                        true => InteractionEventAction::Manual(TriggerKind::BOUNCE),
+                        false => InteractionEventAction::Report(TriggerKind::BOUNCE),
+                    });
             }
         }
         ui.separator();
@@ -226,6 +242,8 @@ impl PoiInfoContext {
             ui,
             hidden: self.hidden,
             guid: true,
+            has_achievement_filter: false,
+            interest: TriggerKind::empty(),
             act_trigger: None,
             act_untrigger: false,
             act_guid_copy: false,
@@ -1499,6 +1517,18 @@ impl<'s, 'a, 'u> DrawPoiInfo<'s, 'a, 'u> {
                         };
                         if !label.is_empty() {
                             ui.text(label)
+                        }
+                        if let Some(Some(lpath)) = trigger.then_some(lpoi_path) {
+                            let action = InteractionEvent::Interact {
+                                action: InteractionEventAction::Trigger,
+                                path: marker.path,
+                                loaded_path: map_path.rel(lpath.path),
+                            };
+                            Controller::with_sender(|s| {
+                                if let Some(s) = &s.pathing {
+                                    let _ = s.shared.interact.events.send(action);
+                                }
+                            });
                         }
                         let has_tooltip = interest
                             .intersects(TriggerKind::INFO | TriggerKind::COPY | TriggerKind::BEHAVIOUR);

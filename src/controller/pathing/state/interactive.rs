@@ -106,6 +106,8 @@ pub enum InteractionEventAction {
     Trigger,
     Dismiss(BehaviourConfig),
     Manual(TriggerKind),
+    /// just to let anyone who might want to know...
+    Report(TriggerKind),
 }
 
 impl InteractionEventAction {
@@ -114,7 +116,7 @@ impl InteractionEventAction {
         match self {
             Self::Interact | Self::AutoTrigger => true,
             // anything triggered intentionally (via UI usually) is fair game
-            Self::Trigger | Self::Manual(..) | Self::Dismiss(..) => false,
+            Self::Trigger | Self::Manual(..) | Self::Dismiss(..) | Self::Report(..) => false,
         }
     }
 }
