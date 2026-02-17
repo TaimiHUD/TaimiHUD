@@ -523,6 +523,12 @@ impl InteractionAttributes {
             .unwrap_or_default()
             .into()
     }
+    pub fn bounce_delay(&self) -> f32 {
+        self.bounce_delay
+            .map(keys::BounceDelay)
+            .unwrap_or_default()
+            .into()
+    }
 }
 
 /// Filters.

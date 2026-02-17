@@ -41,7 +41,7 @@ use {
     bvh::aabb,
     glamour::{Box3, Point3},
     rustc_hash::FxHashSet,
-    std::{collections::BTreeSet, mem, ops, sync::Arc},
+    std::{collections::{BTreeSet, BTreeMap}, mem, ops, sync::Arc},
     std::time::Instant,
     taimi_d3d::dx11::prelude::*,
     taimi_d3d::dx11::buffer::{ConstantBufferP, ConstantBufferV},
@@ -64,6 +64,7 @@ use {
         arcs::ArcPtrCmp,
         watched::{watch, Watched},
     },
+    taimi_pack::attributes::{keys, BounceBehavior},
 };
 
 /// Internal rendering data.
@@ -120,6 +121,10 @@ impl PackRenderData {
         for trail in self.trails.drain(..) {
             trail.cleanup_background();
         }
+    }
+
+    pub fn map_path(&self) -> Option<PackMapPath> {
+        self.map_info.as_ref().map(|i| i.path)
     }
 }
 
@@ -502,7 +507,7 @@ impl PackRender {
             if self.resources.dirty {
                 let arcrender = settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
                 if arcrender {
-                    let res = self.resources.prepare(device, self.pack_data.map_ref_as_slice(), self.spacepacks.render_entities.entities.iter().map(|e| e.id)).context("RenderResources::prepare");
+                    let res = self.resources.prepare(device, self.pack_data.map_ref_as_slice(), &mut self.draw_state, self.spacepacks.render_entities.entities.iter().map(|e| e.id)).context("RenderResources::prepare");
                     rt::log::error_ok(res);
                 }
             }
@@ -523,7 +528,17 @@ impl PackRender {
         &mut self,
         _machine: &mut RenderMachine,
         _device_context: &Dx11Context,
+        anim_timestamp: Option<f32>,
     ) -> anyhow::Result<()> {
+        self.resources.anim_timestamp = anim_timestamp;
+        if let Some(anim_timestamp) = self.resources.anim_timestamp {
+            self.draw_state.prune_anims(anim_timestamp);
+            if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
+                self.resources.dirty = true;
+            }
+        } else {
+            self.draw_state.clear_anims();
+        }
         self.render_list.prepare_frame();
         Ok(())
     }
@@ -536,24 +551,56 @@ impl PackRender {
                 poi.anim = None;
             }
         }
+        self.draw_state.clear_anims();
     }
     pub fn poi_anim_start(&mut self, lpath: PoiMapPath, when: f32) {
         let Some(pack) = self.pack_data.lookup_mut(&lpath.root.root) else { return };
         let lpoi_path: LoadedPoiPath = lpath.unscope();
         let Some(poi) = pack.pois.lookup_mut(&lpoi_path) else { return };
-        poi.anim = Some(when);
-        self.resources.dirty = true;
+        match &mut poi.anim {
+            &mut Some(start) if start < when => (),
+            anim => {
+                *anim = Some(when);
+                self.resources.dirty = true;
+            },
+        }
     }
     /// TODO: ease out or something
     pub fn poi_anim_end(&mut self, lpath: PoiMapPath, when: f32) {
+        if self.draw_state.anims.contains_key(&lpath) { return }
         let Some(pack) = self.pack_data.lookup_mut(&lpath.root.root) else { return };
         let lpoi_path: LoadedPoiPath = lpath.unscope();
         let Some(poi) = pack.pois.lookup_mut(&lpoi_path) else { return };
-        if poi.anim.is_none() {
-            return
+        let Some(prev_anim) = poi.anim else { return };
+        let elapsed = when - prev_anim;
+        let (bounce_behavour, bounce_duration, bounce_delay) = pack.map_info.as_ref().and_then(|map_info| map_info.pois().lookup_ref(&lpoi_path))
+            .map(|info| {
+                let i = info.interaction_attrs();
+                (i.bounce_behavior, i.bounce_duration(), i.bounce_delay())
+            }).unwrap_or((None, keys::BounceDuration::DEFAULT.into(), keys::BounceDelay::DEFAULT.into()));
+        let bounce = bounce_behavour.unwrap_or(BounceBehavior::Bounce);
+        let elapsed = (elapsed - bounce_delay).max(0.0);
+        let rem = match bounce {
+            BounceBehavior::Bounce => bounce_duration - elapsed % bounce_duration,
+            BounceBehavior::Rise => {
+                // reverse anim...
+                self.resources.dirty = true;
+                let rem = bounce_duration.min(elapsed) / 2.0;
+                poi.anim = Some(when + rem);
+                rem
+            },
+        };
+        match rem {
+            #[cfg(todo)]
+            0.0..=0.2 => {
+                // close enough, just stop
+                poi.anim = None;
+                self.resources.dirty = true;
+            },
+            rem => {
+                self.draw_state.anims.insert(lpath, when + rem);
+            },
         }
-        poi.anim = None;
-        self.resources.dirty = true;
     }
 
     fn recreate_buffers(&mut self, device: &Dx11Device, machine: &RenderMachine) -> anyhow::Result<()> {
@@ -626,7 +673,6 @@ impl PackRender {
                 Self::draw_entities(
                     &mut self.draw_state,
                     &mut draw,
-                    backend,
                     entities,
                 );
             },
@@ -641,7 +687,6 @@ impl PackRender {
                 Self::draw_entities(
                     &mut self.draw_state,
                     &mut draw,
-                    backend,
                     entities,
                 );
             },
@@ -776,7 +821,6 @@ impl PackRender {
                 Self::draw_entities(
                     &mut self.draw_state,
                     &mut draw,
-                    backend,
                     entities,
                 );
             },
@@ -791,7 +835,6 @@ impl PackRender {
                 Self::draw_entities(
                     &mut self.draw_state,
                     &mut draw,
-                    backend,
                     entities,
                 );
             },
@@ -801,7 +844,6 @@ impl PackRender {
     pub fn draw_entities<'e, D, E>(
         draw_state: &mut PackRenderState,
         draw: &mut D,
-        backend: &RenderBackend,
         entities: E,
     ) where
         E: IntoIterator<Item = (&'e PackRenderData, usize, &'e MarkerId)>,
@@ -847,10 +889,14 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    if !lpoi.visibility.is_visible_for_space() {
+                    let mut visible = lpoi.visibility.is_visible_for_space();
+                    if visible && poi.report_incomplete(&marker_id, draw_state) {
                         continue
                     }
-                    if poi.report_incomplete(&marker_id, draw_state) {
+                    if !visible && draw.poi_visible_override(draw_state, pack_data, space_idx, poi, path) {
+                        visible = true;
+                    }
+                    if !visible {
                         continue
                     }
                     if draw.draw_poi(pack_data, space_idx, poi, path) {
@@ -994,6 +1040,7 @@ impl PackRender {
 pub struct PackRenderResources {
     pub len: usize,
     pub dirty: bool,
+    pub anim_timestamp: Option<f32>,
 
     pub entities_ib: Option<EntityInstanceBuffer>,
     pub shader_poi: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
@@ -1011,6 +1058,7 @@ impl PackRenderResources {
         &mut self,
         device: &Dx11Device,
         pack_data: &IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
+        draw_state: &mut PackRenderState,
         markers: I,
     ) -> anyhow::Result<()> {
         let markers = markers.into_iter();
@@ -1053,18 +1101,25 @@ impl PackRenderResources {
                     let anim_start = pack_data.pois.lookup_ref(&poi.loaded_index())
                         .and_then(|rpoi| rpoi.anim);
                     let bounce_args = poi.lpoi_info().get_interaction_attrs()
-                        .map(|i| (i.bounce_behavior, i.bounce_height(), i.bounce_duration()));
+                        .map(|i| (i.bounce_behavior, i.bounce_height(), i.bounce_duration(), i.bounce_delay()));
+                    let mut bounce_delay: f32 = keys::BounceDelay::DEFAULT.into();
                     let bounce = match bounce_args {
-                        Some((Some(behaviour), height, duration)) => Some((behaviour, height, duration)),
+                        Some((Some(behaviour), height, duration, delay)) => {
+                            bounce_delay = delay;
+                            Some((behaviour, height, duration))
+                        },
                         bounce if anim_start.is_some() => Some({
-                            let (height, duration) = bounce.map(|(_, height, duration)| (height, duration)).unzip();
-                            use taimi_pack::attributes::{keys, BounceBehavior};
+                            let (height, duration) = bounce.map(|(_, height, duration, delay)| {
+                                bounce_delay = delay;
+                                (height, duration)
+                            }).unzip();
                             (BounceBehavior::Bounce, height.unwrap_or(keys::BounceHeight::DEFAULT.into()), duration.unwrap_or(keys::BounceDuration::DEFAULT.into()))
                         }),
                         _ => None,
                     };
                     if let Some((behaviour, height, duration)) = bounce {
-                        ib.set_bounce(height, duration, behaviour, anim_start);
+                        let ending = draw_state.anims.contains_key(&poi.loaded_path());
+                        ib.set_bounce(height, duration, behaviour, ending, bounce_delay, anim_start);
                     } else {
                         ib.clear_bounce();
                     }
@@ -1168,7 +1223,7 @@ impl PackRenderResources {
         self.shader_poi = shaders.vertex.get("poi-ng").cloned();
         Ok(())
     }
-    pub fn update_shared(&mut self, device_context: &Dx11Context, backend: &RenderBackend, machine: &RenderMachine, anim_timestamp: f32, settings: &ArcrenderSettings) {
+    pub fn update_shared(&mut self, device_context: &Dx11Context, backend: &RenderBackend, machine: &RenderMachine, settings: &ArcrenderSettings) {
         use glam::Vec2;
         let shared_p = instance::ConstantDataP {
             render: instance::RenderConstantDataP {
@@ -1200,7 +1255,7 @@ impl PackRenderResources {
         let shared_v = instance::ConstantDataV {
             render: instance::RenderConstantDataV {
                 player_pos: backend.perspective_handler.constant_buffer_data.player.truncate().into(),
-                anim_timestamp,
+                anim_timestamp: self.anim_timestamp.unwrap_or(0.0),
                 camera_pos,
                 camera_dir,
                 view: backend.perspective_handler.constant_buffer_data.view.into(),
@@ -1279,12 +1334,15 @@ pub struct PackRenderState {
     pub prev_map_id: Option<MapIndex>,
     /// TODO: stash this in a common place like machine maybe?
     pub prev_waiting: bool,
+    pub anims: BTreeMap<PoiMapPath, f32>,
+    pub anim_stop: BTreeSet<PoiMapPath>,
     #[cfg(todo)]
     pub drawn_visible: BitSet,
 }
 impl PackRenderState {
     pub fn clear(&mut self) {
         self.drawn_incomplete = Default::default();
+        self.clear_anims();
         #[cfg(todo)]
         {
             self.drawn_visible = Default::default();
@@ -1296,6 +1354,37 @@ impl PackRenderState {
         {
             self.drawn_visible.clear();
         }
+    }
+    pub fn clear_anims(&mut self) {
+        self.anims.clear();
+        self.anim_stop.clear();
+    }
+
+    pub(super) fn poi_get_anim_end(&self, lpath: PoiMapPath) -> Option<f32> {
+        self.anims.get(&lpath).copied()
+    }
+
+    fn prune_anims(&mut self, when: f32) {
+        self.anims.retain(|path, end| {
+            let ongoing = *end > when;
+            if !ongoing {
+                self.anim_stop.insert(*path);
+            }
+            ongoing
+        });
+    }
+    fn end_anims(&mut self, pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>) -> bool {
+        let mut dirty = false;
+        for lpath in mem::take(&mut self.anim_stop).into_iter() {
+            let Some(pack) = pack_data.lookup_mut(&lpath.root.root) else { continue };
+            let lpath: LoadedPoiPath = lpath.unscope();
+            let Some(poi) = pack.pois.lookup_mut(&lpath) else { continue };
+            if poi.anim.is_some() {
+                dirty = true;
+                poi.anim = None;
+            }
+        }
+        dirty
     }
 }
 
@@ -1427,7 +1516,7 @@ impl ArcrenderSettings {
         poi_limit_size: SpaceSettings::DEFAULT_POI_LIMIT_SIZE,
         trail_can_fade: SpaceSettings::DEFAULT_PLAYER_OVERLAP_THRESHOLD > 0.0,
         trail_anim_speed: SpaceSettings::DEFAULT_TRAIL_ANIM,
-        poi_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE ,
+        poi_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         trail_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         poi_anim_speed: 1.0,
     };
