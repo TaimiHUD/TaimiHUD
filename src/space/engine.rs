@@ -739,7 +739,9 @@ impl Engine {
         machine: &mut RenderMachine,
         device_context: &Dx11Context,
     ) -> anyhow::Result<()> {
-        self.packs.prepare_frame(machine, device_context)?;
+        let anim_timestamp = self.drawing_start.as_ref()
+            .map(|s| s.elapsed().as_secs_f32());
+        self.packs.prepare_frame(machine, device_context, anim_timestamp)?;
         Ok(())
     }
 
@@ -1059,10 +1061,7 @@ impl Engine {
                     poi_limit_size: s.space.poi_limit_size(),
                     .. ArcrenderSettings::DEFAULT
                 });
-                let anim_timestamp = self.drawing_start.as_ref()
-                    .map(|s| s.elapsed().as_secs_f32())
-                    .unwrap_or(0.0);
-                (settings, anim_timestamp)
+                settings
             });
 
             #[cfg(feature = "goggles")]
@@ -1085,8 +1084,8 @@ impl Engine {
                     },
                 };
 
-                if let Some((settings, anim_timestamp)) = &arcrender_settings {
-                    self.packs.resources.update_shared(&device_context, &*backend, &*machine, *anim_timestamp, settings);
+                if let Some(settings) = &arcrender_settings {
+                    self.packs.resources.update_shared(&device_context, &*backend, &*machine, settings);
                 }
                 self.packs
                     .draw_obscured(camera.clone(), cull, &*backend, &device_context, arcrender);
@@ -1098,8 +1097,8 @@ impl Engine {
                 self.render_backend.perspective_handler.set_alpha(alpha);
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
-                if let Some((settings, anim_timestamp)) = &arcrender_settings {
-                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, *anim_timestamp, settings);
+                if let Some(settings) = &arcrender_settings {
+                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, settings);
                 }
 
                 self.packs

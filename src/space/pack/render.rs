@@ -3,7 +3,7 @@ use {
         registry::{LoadedPoiPath, LoadedTrailPath},
         space::DrawSpace,
     },
-    crate::space::pack::{instance::{PoiVertexBuffer, PoiVertex}, PoiRender, TrailRender, PoiCommonRenderData, PackRenderResources, PackRenderData},
+    crate::space::pack::{instance::{PoiVertexBuffer, PoiVertex}, PoiRender, TrailRender, PoiCommonRenderData, PackRenderResources, PackRenderState, PackRenderData},
     crate::resources::{ShaderLoader, ShaderPair},
     taimi_d3d::dx11::prelude::*,
     glamour::{Point3, Vector3},
@@ -62,6 +62,14 @@ pub struct HeapEntity<T> {
 pub trait DrawSpaceEntity {
     fn draw_trail_section(&mut self, pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, path: LoadedTrailPath, section: TrailSectionPath) -> bool;
     fn draw_poi(&mut self, pack_data: &PackRenderData, space_idx: usize, poi: &PoiRender, path: LoadedPoiPath) -> bool;
+    #[inline(always)]
+    fn poi_visible_override(&mut self, draw_state: &mut PackRenderState, pack_data: &PackRenderData, space_idx: usize, poi: &PoiRender, path: LoadedPoiPath) -> bool {
+        let _ = pack_data;
+        let _ = space_idx;
+        let _ = poi;
+        let _ = path;
+        false
+    }
     fn finish(&mut self);
 }
 
@@ -214,6 +222,20 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
             self.context.DrawInstanced(PoiVertex::POI_QUAD.len() as u32, 1, 0, space_idx as u32);
         }
         true
+    }
+    fn poi_visible_override(&mut self, draw_state: &mut PackRenderState, pack_data: &PackRenderData, _space_idx: usize, poi: &PoiRender, path: LoadedPoiPath) -> bool {
+        let Some(..) = poi.anim else { return false };
+        let Some(now) = self.resources.anim_timestamp else { return false };
+        let Some(lpath) = pack_data.map_path().map(|map_path| map_path.rel(path.path)) else { return false };
+        let ongoing = match draw_state.poi_get_anim_end(lpath) {
+            None => false,
+            Some(end) => now < end,
+        };
+        #[cfg(todo = "unnecessary")]
+        if !ongoing {
+            draw_state.anim_stop.insert(lpath);
+        }
+        ongoing
     }
 
     fn finish(&mut self) {}

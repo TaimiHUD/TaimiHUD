@@ -918,6 +918,12 @@ impl keys::SetAttr<keys::ResetGuid> for InteractionAttributes {
     fn unset_attr(&mut self) {
         self.reset_guids = None;
     }
+    pub fn bounce_delay(&self) -> f32 {
+        self.bounce_delay
+            .map(keys::BounceDelay)
+            .unwrap_or_default()
+            .into()
+    }
 }
 
 /// Filters.

@@ -140,6 +140,7 @@ impl PoiInstanceData {
     pub const BOUNCE_DURATION_RESOLUTION: u32 = 16;
     /// unit/m
     pub const BOUNCE_HEIGHT_RESOLUTION: u32 = 16;
+    pub const BOUNCE_HEIGHT_OFFSET: f32 = 0x4000 as f32;
     pub fn set_size_range(&mut self, min: f32, max: f32) {
         self.size_range = pack_int_range(min, max);
     }
@@ -159,28 +160,35 @@ impl PoiInstanceData {
                 };
                 (
                     height * Self::BOUNCE_HEIGHT_RESOLUTION as f32,
-                    height * period / duration,
+                    period / duration,
                 )
             },
         };
-        self.marker.set_anim_scale(d);
+        self.marker.set_anim_scale(self.marker.anim_scale * d);
         #[cfg(todo)]
         let arg1 = (duration * Self::BOUNCE_DURATION_RESOLUTION as f32).min(1.0);
         let _arg1 = 0.0;
-        self.bounce = pack_int_pair(h, _arg1);
+        self.bounce = pack_int_pair(h + Self::BOUNCE_HEIGHT_OFFSET, _arg1);
     }
-    pub fn set_bounce(&mut self, height: f32, duration: f32, behaviour: BounceBehavior, start: Option<f32>) {
+    /// TODO: incorporate delay
+    pub fn set_bounce(&mut self, height: f32, duration: f32, behaviour: BounceBehavior, wind_down: bool, delay: f32, start: Option<f32>) {
+        let mut scale = match start {
+            Some(..) => 1.0,
+            None => 0.0,
+        };
         match behaviour {
-            BounceBehavior::Rise =>
-                self.marker.flags |= MarkerInstanceData::FLAG_RISE,
+            BounceBehavior::Rise => {
+                if wind_down {
+                    scale = -2.0;
+                }
+                self.marker.flags |= MarkerInstanceData::FLAG_RISE
+            },
             BounceBehavior::Bounce =>
                 self.marker.flags &= !MarkerInstanceData::FLAG_RISE,
         }
+        self.marker.set_anim_scale(scale);
         self.set_bounce_params(height, duration);
         self.anim_offset = start.unwrap_or(0.0);
-        if start.is_none() {
-            self.marker.set_anim_scale(0.0);
-        }
     }
 }
 #[derive(Debug, Copy, Clone)]
@@ -251,7 +259,7 @@ impl MarkerInstanceData {
             #[cfg(todo)]
             end => {
                 let end = (end * Self::FADE_RESOLUTION_FAR).max(start + 1.0);
-                pack_int_range(start, end)
+                pack_int_pair(start, end)
             },
         };
     }
