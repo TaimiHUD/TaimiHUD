@@ -143,7 +143,43 @@ impl Poi {
         self.attributes
             .get_poi()
             .and_then(|poi| poi.icon_size)
-            .unwrap_or(1.0)
+            .unwrap_or(keys::IconSize::DEFAULT.into())
+    }
+    pub fn map_display_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.map_display_size)
+            .unwrap_or(keys::MapDisplaySize::DEFAULT.into())
+    }
+    pub fn scale_on_map_with_zoom(&self) -> bool {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.scale_on_map_with_zoom)
+            .unwrap_or(keys::ScaleOnMapWithZoom::DEFAULT.into())
+    }
+    pub fn min_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.min_size)
+            .unwrap_or(keys::MinSize::DEFAULT.into())
+    }
+    pub fn max_size(&self) -> f32 {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.max_size)
+            .unwrap_or(keys::MaxSize::DEFAULT.into())
+    }
+    pub fn occlude(&self) -> bool {
+        self.attributes
+            .get_poi()
+            .and_then(|poi| poi.occlude)
+            .unwrap_or(keys::Occlude::DEFAULT.into())
+    }
+    pub fn rotate(&self) -> Option<Vec3> {
+        self.attributes.get_poi().and_then(|poi| poi.rotate())
+    }
+    pub fn rotation(&self) -> Option<Quat> {
+        self.attributes.get_poi().and_then(|poi| poi.rotation())
     }
 }
 
