@@ -916,6 +916,21 @@ impl PathingController {
             }
         }
         log::debug!("{report}");
+        let packs = &*self.space.packs;
+        if !packs.is_empty() {
+            report.clear();
+            let allocated = packs.render_entities.entities.len();
+            let used = packs.render_entities.entities.iter().filter(|e| !e.is_invalid()).count();
+            let _ = writeln!(report, "space entities: {used}/{allocated}");
+            let bvh = packs.bvh.nodes.len();
+            let bvh_static = packs.bvh_iter_static().count();
+            let _ = writeln!(report, "space bvh: {bvh} nodes + {bvh_static} static");
+            log::debug!("{report}");
+        }
+        let (waiting, pending) = self.loader.shared.packs.read_still_waiting();
+        if waiting || pending > 0 {
+            log::debug!("{pending} pack loads in progress (waiting={waiting})");
+        }
     }
 }
 impl PackLoader {

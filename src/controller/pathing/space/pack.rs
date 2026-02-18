@@ -1047,6 +1047,7 @@ impl Default for SpacePackCollection {
     }
 }
 
+/// TODO: just move this to state tracking fields on [SpacePackCollection] instead
 #[derive(Debug, Clone, Default)]
 struct EntityUpdateReport {
     removed: BitSet,
