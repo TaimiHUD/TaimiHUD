@@ -144,18 +144,26 @@ impl MarkerAttributes {
         } else if attr_name.eq_ignore_ascii_case("occlude") {
             self.poi_mut().occlude = Some(parse_bool(&value)?);
         } else if attr_name.eq_ignore_ascii_case("rotate") {
-            self.poi_mut().rotate = str_opt_ref(&value).map(|value|
-                parse_array(&value).map(Vec3::from_array)
-            ).transpose()?;
+            // TODO: unclear if unspecified trailing axis should count as "set" or not for inherit reasons?
+            // also attr definition order may matter, with this taking priority
+            let rotate = &mut self.poi_mut().rotate;
+            match value.is_empty() {
+                true => *rotate = None,
+                false => {
+                    let mut axes = rotate.unwrap_or(PoiAttributes::ROTATE_UNSET).to_array();
+                    parse_into_array(&mut axes, &value)?;
+                    *rotate = Some(Vec3::from_array(axes));
+                },
+            }
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
-            let x = value.parse()?;
-            self.poi_mut().rotate.get_or_insert_default().x = x;
+            let x = str_opt_ref(&value).map(f32::from_str).transpose()?;
+            self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).x = x.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("rotate-y") {
-            let y = value.parse()?;
-            self.poi_mut().rotate.get_or_insert_default().y = y;
+            let y = str_opt_ref(&value).map(f32::from_str).transpose()?;
+            self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).y = y.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("rotate-z") {
-            let z = value.parse()?;
-            self.poi_mut().rotate.get_or_insert_default().z = z;
+            let z = str_opt_ref(&value).map(f32::from_str).transpose()?;
+            self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).z = z.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title") {
             if self.poi().billboard_text.is_none() || !value.is_empty() {
                 self.poi_mut().billboard_text = Some(string_into(value));
@@ -781,8 +789,14 @@ impl PoiAttributes {
         if self.occlude.is_none() {
             self.occlude = base.occlude;
         }
-        if self.rotate.is_none() {
-            self.rotate = base.rotate;
+        if let Some(rotate) = base.rotate {
+            let dest = self.rotate.get_or_insert(Self::ROTATE_UNSET);
+            let dest_axis = [&mut dest.x, &mut dest.y, &mut dest.z];
+            for (rotate, dest) in rotate.to_array().iter().zip(dest_axis) {
+                if dest.to_bits() == Self::ROTATE_UNSET_AXIS.to_bits() {
+                    *dest = *rotate;
+                }
+            }
         }
         if self.billboard_text.is_none() {
             self.billboard_text = base.billboard_text.clone();
@@ -818,8 +832,21 @@ impl PoiAttributes {
     pub fn occlude(&self) -> bool {
         self.occlude.unwrap_or(keys::Occlude::DEFAULT.into())
     }
-    pub fn rotate(&self) -> Vec3 {
-        self.rotate.unwrap_or(keys::Rotate::DEFAULT.into())
+
+    pub const ROTATE_UNSET_AXIS: f32 = -0.0;
+    pub const ROTATE_UNSET: Vec3 = Vec3::new(Self::ROTATE_UNSET_AXIS, Self::ROTATE_UNSET_AXIS, Self::ROTATE_UNSET_AXIS);
+    /// in `rotx * roty * rotz` order
+    ///
+    /// [may need swizzles to match game space orientation idk](Self::rotation)
+    pub fn rotate(&self) -> Option<Vec3> {
+        self.rotate
+            .map(|r| r.map(f32::to_radians))
+    }
+    /// identity orients a plane looking up the direction of +Y
+    ///
+    /// (handedness? confusing whether the coordinate space swaps Z and Y...)
+    pub fn rotation(&self) -> Option<glam::Quat> {
+        self.rotate.map(|r| glam::Quat::from_euler(glam::EulerRot::XYZ, r.x.to_radians(), r.y.to_radians(), r.z.to_radians()))
     }
 }
 
@@ -885,7 +912,12 @@ where
     <T as FromStr>::Err: Into<anyhow::Error>,
 {
     let mut list = [T::default(); N];
-
+    parse_into_array(&mut list, value)
+        .map(move |()| list)
+}
+fn parse_into_array<const N: usize, T: FromStr>(list: &mut [T; N], value: &str) -> anyhow::Result<()> where
+    <T as FromStr>::Err: Into<anyhow::Error>,
+{
     let values = value.split(',').map(|f| f.trim_ascii()).map(FromStr::from_str);
     for (dest, item) in list.iter_mut().zip(values) {
         *dest = item
@@ -893,7 +925,7 @@ where
             .with_context(|| format!("parsing list `{value}`"))?;
     }
 
-    Ok(list)
+    Ok(())
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

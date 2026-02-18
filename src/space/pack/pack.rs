@@ -1061,6 +1061,8 @@ impl PackRenderResources {
         draw_state: &mut PackRenderState,
         markers: I,
     ) -> anyhow::Result<()> {
+        use glam::Quat;
+
         let markers = markers.into_iter();
         let mut out = Vec::with_capacity(markers.size_hint().1.unwrap_or(0));
         for mid in markers {
@@ -1084,17 +1086,40 @@ impl PackRenderResources {
                                 attrs.icon_size()
                             );
                             let pos = poi.lpoi().position.to_vector();
-                            match attrs.rotate() {
-                                rot if rot == glam::Vec3::ZERO =>
-                                    glamour::Matrix4::from_scale_rotation_translation(scale,
-                                        glam::Quat::IDENTITY,
-                                        pos.to_untyped(),
-                                    ),
-                                rot => glam::Mat4::from_scale_rotation_translation(scale.to_raw(),
-                                    glam::Quat::from_euler(glam::EulerRot::XYZ, rot.x.to_radians() - core::f32::consts::FRAC_PI_2, rot.y.to_radians(), rot.z.to_radians()),
-                                    pos.to_raw(),
-                                ).into(),
-                            }
+                            let rot = match attrs {
+                                #[cfg(deleteme)]
+                                _ => {
+                                    let rot = attrs.rotate.map(|r| r.map(f32::to_radians));
+                                    use glam::EulerRot;
+                                    let erot = Self::tmp_rot().get();
+                                    let pre = Self::tmp_pre().get() * core::f32::consts::PI;
+                                    //let pre = Quat::from_euler(EulerRot::XYZ, pre.x, pre.y, pre.z);
+                                    let post = Self::tmp_post().get() * core::f32::consts::PI;
+                                    let post = Quat::from_euler(EulerRot::XYZ, post.x, post.y, post.z);
+                                    let xyz = (rot * Self::tmp_mul().get()).to_array();
+                                    let mut swizz = glam::Vec3::ZERO;
+                                    let order = Self::tmp_order().get();
+                                    for (i, out) in order.iter().zip([&mut swizz.x, &mut swizz.y, &mut swizz.z]) {
+                                        *out = xyz[*i];
+                                    }
+                                    //let swizz = rot * Self::tmp_mul().get();
+                                    let rot = //pre *
+                                        Quat::from_euler(erot, swizz.x + pre.x, swizz.y + pre.y, swizz.z + pre.z)
+                                        * post
+                                        ;
+                                    rot
+                                },
+                                #[cfg(todo)]
+                                attrs => attrs.rotation().map(|rot| rot * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+                                attrs => attrs.rotate().map(|rot|
+                                    // can maybe get away with less fancy math idk...
+                                    Quat::from_euler(glam::EulerRot::XZY, rot.x - core::f32::consts::FRAC_PI_2, rot.y, -rot.z)
+                                ),
+                            };
+                            glamour::Matrix4::from_scale_rotation_translation(scale,
+                                rot.unwrap_or(Quat::IDENTITY),
+                                pos.to_untyped(),
+                            )
                         },
                         .. instance::PoiInstanceData::INVALID
                     });

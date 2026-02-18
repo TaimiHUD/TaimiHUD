@@ -752,6 +752,8 @@ impl FromStr for Rotate {
     type Err = <Array<3, f32> as FromStr>::Err;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        #[cfg(todo = "unnecessary")]
+        let Some(value) = str_opt(value) else { return Ok(Self::DEFAULT) };
         Array::<3, f32>::from_str(value)
             .map(|Array(v)| Vec3::from_array(v))
             .map(Self)

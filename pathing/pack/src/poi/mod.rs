@@ -142,11 +142,10 @@ impl Poi {
             .unwrap_or(keys::Occlude::DEFAULT.into())
     }
     pub fn rotate(&self) -> Option<Vec3> {
-        self.attributes.get_poi().and_then(|poi| poi.rotate)
+        self.attributes.get_poi().and_then(|poi| poi.rotate())
     }
     pub fn rotation(&self) -> Option<Quat> {
-        self.rotate()
-            .map(|r| Quat::from_euler(EulerRot::XYZ, r.x, r.y, r.z))
+        self.attributes.get_poi().and_then(|poi| poi.rotation())
     }
 }
 
