@@ -110,7 +110,7 @@ struct SpaceOutputV {
     float4 colour: COLOR0;
     float2 tex: TEXCOORD0;
     /*noperspective*/ float3 displacement: POSITION1;
-    float2 fade: TEXCOORD1;
+    float2 fade: OFADE0;
     nointerpolation uint2 instance: OFLAGS0;
 };
 #define TrailOutputV SpaceOutputV
