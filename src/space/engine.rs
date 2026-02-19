@@ -748,11 +748,6 @@ impl Engine {
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         self.prepare(machine)?;
         if self.drawing {
-            if super::goggles::FerretResource::get_ferret_draw() {
-                // SKIP!
-                super::goggles::FerretResource::set_ferret_drawn(false);
-                return Ok(())
-            }
             let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
                 .context("I lost my context!")?;
 
