@@ -25,11 +25,7 @@ TrailOutputV trail_main_v(TrailInput input)
 #if 1
     float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = lerp(
-        1.0,
-        0.0,
-        saturate((pos.z - fade_near) / fade_range)
-    );
+    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
 #endif
     output.position = mul(v_render.projection, pos);
 
@@ -70,7 +66,7 @@ TrailOutputP trail_main_p(TrailInputP inp)
 #endif
     bool face_cull = GET_MFLAG(flags, MFLAG_FACE_CULL);
     bool face_cull_dir = GET_MFLAG(flags, MFLAG_FACE_CULL_FRONT) ^ face_front;
-    float clip_face = float((!face_cull) | face_cull_dir);
+    float clip_face = float((!face_cull) | face_cull_dir) - 0.5f;
 
     float clip_fade = float(GET_MFLAG(flags, MFLAG_OPAQUE));
     // XXX: or just enable depth clipping?
@@ -197,8 +193,8 @@ PoiOutputV poi_main_v(PoiInput input)
     if (!is_billboard) {
         float3 norm_origin = float3(0.0, 0.0, 1.0);
         // ignore translation, we just want it rotated...
-        float3 norm = normalize(mul(input.model, float4(norm_origin, 0.0)).xyz);
-        float face_dir = dot(v_render.camera_dir, norm);
+        float3 norm = mul(input.model, float4(norm_origin, 0.0)).xyz;
+        float face_dir = dot(midpoint - v_render.camera_pos, norm);
         back_of_face = face_dir < 0.0;
     }
 
@@ -218,11 +214,7 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: consider using displacement (from char) rather than camera z?
     float fade_near = GET_MFLAG(v_poi.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = lerp(
-        1.0,
-        0.0,
-        saturate((pos.z - fade_near) / fade_range)
-    );
+    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
 #else
     float fade = 1.0;
 #endif
