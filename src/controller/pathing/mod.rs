@@ -620,7 +620,7 @@ impl PathingController {
                 pack.used.mark_used();
             }
         }
-        let res = Self::do_load_all(self.loader.clone())
+        let res = self.do_load_all()
             .await
             .context("Loading all paths");
         if let Err(e) = res {

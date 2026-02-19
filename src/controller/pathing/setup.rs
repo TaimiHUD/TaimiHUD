@@ -242,9 +242,11 @@ impl PathingController {
         .filter_map(|res| async move { res.transpose() })
     }
 
-    pub(super) async fn do_load_all(manager: Arc<PackLoader>) -> anyhow::Result<()> {
-        let res = Self::new_task_load_all(manager).await;
-        match res {
+    pub(super) async fn do_load_all(&mut self) -> anyhow::Result<()> {
+        let loads = Self::new_task_load_all(self.loader.clone());
+        let _cancel = self.tasks.spawn(loads);
+        #[cfg(todo = "unnecessary")]
+        match loads.await {
             res @ (Ok(PathingEvent::Nop) | Err(..)) => res.map(drop),
             Ok(event) => {
                 let event_name = format!("{event}");
@@ -254,6 +256,7 @@ impl PathingController {
                 Ok(())
             },
         }
+        Ok(())
     }
     pub(super) fn new_task_load_all(
         manager: Arc<PackLoader>,
