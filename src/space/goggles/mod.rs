@@ -101,6 +101,11 @@ unsafe extern "system" fn taimi_set_depth_state(
     if frame_log!(::is_game()) {
         frame_log!(;"D3D11DeviceContext::OMSetDepthStencilState({this:?}, {state:?}, {stencil_ref:?})");
     }
+
+    if FrameState::is_game() {
+        lens::set_depth_state(this, state, stencil_ref);
+    }
+
     let mut trigger = false;
     if let Some(state) = state {
         if state.as_raw() as usize == g2!(*&ferret.buffer_ferret) as usize {
@@ -174,8 +179,9 @@ unsafe extern "system" fn taimi_set_targets(
         };
         frame_log!(;"D3D11DeviceContext::OMSetRenderTargets({this:?}, {views:?}, {depth_view:?})");
     }
-
-    lens::set_targets(this, count, views_ptr, depth_view);
+    if FrameState::is_game() {
+        lens::set_targets(this, count, views_ptr, depth_view);
+    }
 
     if count > 0 {
         let mut trigger = false;
