@@ -481,20 +481,19 @@ fn imgui_present<'ui>(
         return
     }
 
-    let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) else {
-        return
-    };
+    if let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) {
+        RenderMachine::turn_render_entry();
 
-    RenderMachine::turn_render_entry();
+        if !render_ready {
+            RenderState::render_setup();
+        }
+        if let Some((imgui, context)) = imgui {
+            let ui = imgui.bound_ui();
 
-    if !render_ready {
-        RenderState::render_setup();
+            imgui_draw_present(ui, context)
+        }
     }
-    if let Some((imgui, context)) = imgui {
-        let ui = imgui.bound_ui();
-
-        imgui_draw_present(ui, context)
-    }
+    RenderState::post_render(AddonHostName::ArcDPS);
 }
 fn imgui_draw_present<'ui, U>(ui: &'ui mut U, context: DrawContextInput<'ui>)
 where

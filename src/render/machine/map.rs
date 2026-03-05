@@ -84,6 +84,14 @@ impl RenderMachine {
             MarkersController::try_send(MarkersEvent::UiMapOpened(self.get_map_open_state()));
         }
     }
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub fn is_ui_hidden(&self) -> bool {
+        match self.map_hidden {
+            #[cfg(feature = "space")]
+            false if self.is_cutscene() => true,
+            h => h,
+        }
+    }
 
     #[cfg(any(feature = "markers", feature = "space"))]
     pub fn is_map_visible(&self) -> Option<MapContext> {
@@ -92,7 +100,7 @@ impl RenderMachine {
                 .get_map_open_state()
                 // TODO: .primary_context() if no anims enabled
                 .visible_context();
-            match (context, self.map_hidden) {
+            match (context, self.is_ui_hidden()) {
                 (MapContext::Minimap, true) => None,
                 (context, _) => Some(context),
             }

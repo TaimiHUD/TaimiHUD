@@ -602,6 +602,9 @@ pub enum CameraSource {
     #[serde(rename = "rtapi")]
     #[strum(serialize = "rtapi")]
     RealTimeAPI,
+    #[serde(rename = "goggles")]
+    #[strum(serialize = "goggles-camera")]
+    Goggles2,
 }
 
 impl CameraSource {
@@ -609,6 +612,7 @@ impl CameraSource {
         match self {
             Self::MumbleLink => "mumblelink",
             Self::RealTimeAPI => "rtapi",
+            Self::Goggles2 => "goggles",
         }
     }
 }
@@ -632,6 +636,8 @@ pub struct GogglesSettings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goggles_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_enabled: Option<bool>,
 
     /// X-ray opacity
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -645,15 +651,20 @@ pub struct GogglesSettings {
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub map_depth_calibration: Arc<BTreeMap<u32, (f32, f32)>>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_shadowboxing: Option<bool>,
 }
 
 impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
+    pub const DEFAULT_ENABLED_PROJECT: bool = false;
     pub const DEFAULT_ARCRENDER: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
     pub const DEFAULT_OBSCURED_DISTANCE: f32 = 0.45;
     pub const MIN_OBSCURED_DISTANCE: f32 = 64.0;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);
+    pub const DEFAULT_PROJECT_SHADOWBOXING: bool = false;
     #[cfg(todo)]
     pub const DEFAULT_EDGE_SCALE: f32 = 0.5f32;
     pub const DEFAULT_EDGE_SCALE: f32 = SpaceSettings::NONE_F32;
@@ -664,6 +675,8 @@ impl GogglesSettings {
             Self {
                 arcrender_enabled: None | Some(Self::DEFAULT_ARCRENDER),
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
+                project_enabled: None | Some(Self::DEFAULT_ENABLED_PROJECT),
+                project_shadowboxing: None,
                 obscured_alpha: None,
                 obscured_distance: None,
                 edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
@@ -675,6 +688,13 @@ impl GogglesSettings {
 
     pub fn enabled(&self) -> bool {
         self.goggles_enabled.unwrap_or(Self::DEFAULT_ENABLED)
+    }
+    pub fn project_enabled(&self) -> bool {
+        self.project_enabled.unwrap_or(Self::DEFAULT_ENABLED_PROJECT)
+    }
+    pub fn project_shadowboxing(&self) -> bool {
+        self.project_shadowboxing
+            .unwrap_or(Self::DEFAULT_PROJECT_SHADOWBOXING)
     }
     pub fn arcrender_enabled(&self) -> bool {
         self.arcrender_enabled.unwrap_or(Self::DEFAULT_ARCRENDER)

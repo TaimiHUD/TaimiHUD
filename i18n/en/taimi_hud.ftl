@@ -493,6 +493,7 @@ pathing-notice-rtapi-missing = RTAPI is a separate addon that must be installed 
 pathing-notice-rtapi = if you experience stuttering, try changing Vertical Sync or switching to MumbleLink
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
+goggles-camera = The Aether
 
 ## Space
 

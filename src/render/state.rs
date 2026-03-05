@@ -42,6 +42,8 @@ use {
 use super::edit_marker_window::EditMarkerWindowState;
 #[cfg(feature = "markers")]
 use crate::marker::format::MarkerSet;
+#[cfg(feature = "extension-nexus")]
+use crate::render::machine::FrameState;
 #[cfg(feature = "space")]
 use crate::{render::PathingWindowState, space::Engine};
 
@@ -252,6 +254,13 @@ impl RenderState {
                     #[cfg(feature = "goggles")]
                     UiDepthReleased() => {
                         self.machine.turn_depth_event(false);
+                        if self.machine.gameplay.gameplay_map().is_some()
+                            && crate::space::goggles::lens::read_lens() == core::ptr::dangling_mut()
+                        {
+                            if let Some(Ok(engine)) = &mut self.engine {
+                                engine.goggles_lens_reset(0, false);
+                            }
+                        }
                     },
                     #[cfg(feature = "goggles")]
                     UiDepthAcquired() => {
@@ -762,6 +771,10 @@ impl RenderState {
     }
 
     pub fn pre_render(host: AddonHostName) -> Option<bool> {
+        #[cfg(feature = "extension-nexus")]
+        if let AddonHostName::Nexus = host {
+            FrameState::NEXUS.publish_set();
+        }
         let host = match Self::is_host(host) {
             None => {
                 Self::select_host();
@@ -779,6 +792,15 @@ impl RenderState {
                 let ready = IS_RENDER_THREAD.replace(true);
                 ready || !Self::is_running()
             }),
+        }
+    }
+    pub fn post_render(host: AddonHostName) {
+        #[cfg(feature = "extension-nexus")]
+        if let AddonHostName::Nexus = host {
+            FrameState::NEXUS.publish_clear();
+            if FrameState::GAME_FRAME_SUBSEQUENT && crate::exports::nexus::available() {
+                FrameState::GAME.publish_set();
+            }
         }
     }
 
