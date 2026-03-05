@@ -1,6 +1,9 @@
 use {
     self::id::IdNameSeg,
-    crate::attributes::{parse_bool, MarkerAttributes},
+    crate::{
+        attributes::{parse_bool, MarkerAttributes},
+        pack::PackBuilderCategoryWarnings,
+    },
     anyhow::{anyhow, Context},
     bitflags::bitflags,
     std::{mem, sync::Arc},
@@ -22,7 +25,10 @@ pub struct Category {
 }
 
 impl Category {
-    pub fn from_xml(attrs: Vec<xml::attribute::OwnedAttribute>) -> anyhow::Result<Category> {
+    pub fn from_xml(
+        warnings: &mut PackBuilderCategoryWarnings,
+        attrs: Vec<xml::attribute::OwnedAttribute>,
+    ) -> anyhow::Result<Category> {
         let mut marker_attributes = MarkerAttributes::default();
         let mut attributes_bh = MarkerAttributes::default();
 
@@ -78,13 +84,19 @@ impl Category {
                         .map_err(From::from)
                 } else {
                     match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                        Ok(false) => Ok(log::debug!("unrecognized category attribute `{}`", attr.name)),
+                        Ok(false) => {
+                            warnings.attr_warning(&attr.name, &"Category");
+                            Ok(())
+                        },
                         res => res.map(drop),
                     }
                 }
             } else {
                 match marker_attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::info!("unrecognized category attribute `{}`", attr.name)),
+                    Ok(false) => {
+                        warnings.attr_warning(&attr.name, &"Category");
+                        Ok(())
+                    },
                     res => res.map(drop),
                 }
             }

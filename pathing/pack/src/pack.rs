@@ -64,6 +64,15 @@ impl Pack {
         builder.merge_category_attributes();
         builder.apply_marker_attributes();
 
+        match pack.categories.root_categories().next() {
+            Some(root)
+                if pack.categories.root_categories.len() == 1
+                    && pack.name.is_empty()
+                    && root.display_name.is_some() =>
+                pack.name = root.display_name().into(),
+            _ => (),
+        }
+
         Ok(pack)
     }
 
@@ -223,6 +232,30 @@ fn inner_merge_category_attributes(categories: &mut IndexMap<CategoryId, Categor
     }
 }
 
+#[derive(Debug, Default)]
+pub struct PackBuilderMarkerWarnings {
+    pub quiet: bool,
+    pub(crate) warnings_attr: HashSet<String>,
+}
+impl PackBuilderMarkerWarnings {
+    pub fn quiet() -> Self {
+        let mut warnings = Self::default();
+        warnings.quiet = true;
+        warnings
+    }
+
+    /// TODO: case-insensitive map
+    pub fn attr_warning(&mut self, name: &OwnedName, node_desc: &dyn fmt::Display) {
+        if self.quiet || self.warnings_attr.contains(&name.local_name) {
+            return
+        }
+        let _unseen = self.warnings_attr.insert(name.local_name.clone());
+        debug_assert!(_unseen);
+        log::debug!("unrecognized {node_desc} attribute `{name}`");
+    }
+}
+pub type PackBuilderCategoryWarnings = PackBuilderMarkerWarnings;
+
 #[derive(Debug)]
 struct PackBuilder<'a> {
     pack: &'a mut Pack,
@@ -230,6 +263,10 @@ struct PackBuilder<'a> {
     warnings_case: HashSet<CategoryId>,
     warnings_empty: HashSet<Uuid>,
     warnings_missing: HashSet<IdCmpRelaxed<CategoryId>>,
+    warnings_node: HashSet<String>,
+    pub(crate) warnings_marker: PackBuilderMarkerWarnings,
+    #[cfg(todo = "unnecessary")]
+    warnings_category: PackBuilderCategoryWarnings,
 }
 impl<'a> PackBuilder<'a> {
     pub fn new_empty(pack: &'a mut Pack) -> Self {
@@ -239,6 +276,8 @@ impl<'a> PackBuilder<'a> {
             warnings_case: Default::default(),
             warnings_empty: Default::default(),
             warnings_missing: Default::default(),
+            warnings_node: Default::default(),
+            warnings_marker: Default::default(),
         }
     }
     pub fn commit_trail(&mut self, trail: Trail) {
@@ -270,7 +309,7 @@ impl<'a> PackBuilder<'a> {
         if let Some(canon_id) = self.category_ids.get(IdCmpRelaxed::with_ref(id)) {
             if log::log_enabled!(log::Level::Info) && id != &canon_id.id {
                 if self.warnings_case.insert(canon_id.id.clone()) {
-                    log::info!("Inconsistent category ID `{id}`");
+                    log::debug!("Inconsistent category ID `{id}`");
                 }
             }
             new_id = Some(canon_id.id.clone());
@@ -352,7 +391,7 @@ impl<'a> PackBuilder<'a> {
                     let cat = all_categories.get(&canon_id.id);
                     if cat.is_some() {
                         if warnings_case.insert(canon_id.id.clone()) {
-                            log::info!("Inconsistent case for {id}: {}", canon_id.id);
+                            log::debug!("Inconsistent case for {id}: {}", canon_id.id);
                         }
                         *id = canon_id
                             .id
@@ -387,7 +426,7 @@ impl<'a> PackBuilder<'a> {
             let Some(category) = category else {
                 if let Some(id) = CategoryId::try_with_full_id(poi.category.clone()) {
                     if self.warnings_missing.insert(IdCmpRelaxed::new(id)) {
-                        log::warn!("missing category `{}` for {}", poi.category, poi);
+                        log::info!("missing category `{}` for {}", poi.category, poi);
                     }
                 }
                 continue;
@@ -438,13 +477,16 @@ fn inner_parse_pack_def(
 
     loop {
         let elem = parser.next()?;
+        let elem_context = || format!("{asset}:{}", parser.position());
         let elem = match elem {
             #[cfg(feature = "fixup-ladyelyssa")]
             XmlEvent::StartElement { name, attributes, namespace }
                 if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") =>
             {
                 // LadyElyssa.taco typo/corruption
-                log::debug!("compensating for invalid element {name}");
+                if pack.warnings_node.insert(name.local_name.clone()) {
+                    log::info!("compensating for invalid element <{name}> at {}", elem_context());
+                }
                 XmlEvent::StartElement {
                     name: OwnedName::local("markercategory"),
                     attributes,
@@ -454,12 +496,9 @@ fn inner_parse_pack_def(
             #[cfg(feature = "fixup-ladyelyssa")]
             XmlEvent::EndElement { name }
                 if name.local_name.eq_ignore_ascii_case("MarkerCategorykerCategory") =>
-            {
-                log::debug!("compensating for invalid element {name}");
                 XmlEvent::EndElement {
                     name: OwnedName::local("markercategory"),
-                }
-            },
+                },
             elem => elem,
         };
         match &elem {
@@ -472,7 +511,12 @@ fn inner_parse_pack_def(
                         .unwrap_or(false) =>
             {
                 // TehsTrails/Parser/TehsTrails.xml issue
-                log::debug!("compensating for invalid element <{}> inside OverlayData", name);
+                if pack.warnings_node.insert(name.local_name.clone()) {
+                    log::info!(
+                        "compensating for invalid element <{name}> inside OverlayData at {}",
+                        elem_context()
+                    );
+                }
                 parse_stack.push(PartialItem::PoiGroup);
             },
             #[cfg(feature = "fixup-tehstrails")]
@@ -496,8 +540,8 @@ fn inner_parse_pack_def(
                         parse_stack.push(PartialItem::OverlayData);
                     },
                     "markercategory" => {
-                        let category = Category::from_xml(attributes)
-                            .with_context(|| format!("Category parse failed in {asset}"))
+                        let category = Category::from_xml(&mut pack.warnings_marker, attributes)
+                            .with_context(|| format!("Category parse failed at {}", elem_context()))
                             .and_then(|category| pack.push_category(&mut parse_stack, category));
                         match category {
                             Ok(()) => (),
@@ -510,25 +554,27 @@ fn inner_parse_pack_def(
                     "pois" => {
                         parse_stack.push(PartialItem::PoiGroup);
                     },
-                    "poi" => match Poi::from_xml(asset_parent.as_ref(), attributes) {
-                        Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
-                        Err(e) => {
-                            log::warn!("POI parse failed in {asset}: {e:#}");
-                            parse_stack.push(PartialItem::PoisonElem);
+                    "poi" =>
+                        match Poi::from_xml(&mut pack.warnings_marker, asset_parent.as_ref(), attributes) {
+                            Ok(poi) => parse_stack.push(PartialItem::Poi(poi)),
+                            Err(e) => {
+                                log::warn!("POI parse failed at {}: {e:#}", elem_context());
+                                parse_stack.push(PartialItem::PoisonElem);
+                            },
                         },
-                    },
                     "trail" => {
                         let trail =
-                            Trail::from_xml(asset_parent.as_ref(), attributes).and_then(|mut trail| {
-                                if trail.map_id.is_none() {
-                                    trail.update_map_id(ctx)?
-                                }
-                                Ok(trail)
-                            });
+                            Trail::from_xml(&mut pack.warnings_marker, asset_parent.as_ref(), attributes)
+                                .and_then(|mut trail| {
+                                    if trail.map_id.is_none() {
+                                        trail.update_map_id(ctx)?
+                                    }
+                                    Ok(trail)
+                                });
                         match trail {
                             Ok(trail) => parse_stack.push(PartialItem::Trail(trail)),
                             Err(e) => {
-                                log::warn!("Trail parse failed in {asset}: {e:#}");
+                                log::warn!("Trail parse failed at {}: {e:#}", elem_context());
                                 parse_stack.push(PartialItem::PoisonElem);
                             },
                         }
@@ -543,8 +589,10 @@ fn inner_parse_pack_def(
             XmlEvent::StartElement { name, .. } | XmlEvent::EndElement { name, .. }
                 if name.local_name.eq_ignore_ascii_case("route") =>
             {
-                // GW2 TacO ReActif FR Externe.taco?
-                log::warn!("ignoring unsupported <{name}> group");
+                // GW2 TacO ReActif FR Externe.taco and TacOMarkers
+                if pack.warnings_node.insert(name.local_name.clone()) {
+                    log::warn!("ignoring unsupported <{name}> group");
+                }
             },
             XmlEvent::StartElement { name, .. } => anyhow::bail!(
                 "Unexpected <{name}> while parsing {}",
@@ -742,6 +790,8 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         "fadeNear|zpos",
         // linus voe
         "|GUID",
+        // aurizara_hp
+        "|type",
         r#")\s*=\s*""#,
         // rediche's WvW marker pack
         "|",

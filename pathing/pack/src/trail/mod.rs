@@ -3,7 +3,7 @@ use {
         attributes::{AttrString, MarkerAttributes},
         category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
-        pack::{taco_safe_name, taco_xml_to_guid},
+        pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
     },
     anyhow::Context,
     core::f32,
@@ -28,6 +28,7 @@ pub struct Trail {
 
 impl Trail {
     pub fn from_xml(
+        warnings: &mut PackBuilderMarkerWarnings,
         asset_parent: Option<&AttrString>,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Trail> {
@@ -66,7 +67,9 @@ impl Trail {
             .with_context(|| format!("Trail attribute '{}'", attr.name));
             match res {
                 Err(e) => log::warn!("{e:#}"),
-                Ok(false) => log::info!("unrecognized trail attribute `{}`", attr.name),
+                Ok(false) => {
+                    warnings.attr_warning(&attr.name, &"Trail");
+                },
                 Ok(true) => (),
             }
         }
