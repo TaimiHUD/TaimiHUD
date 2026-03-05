@@ -68,6 +68,31 @@ impl<U: Unit> Mat43<U> {
     }
 
     #[inline]
+    pub fn from_cols_array(cols: [U::Scalar; 12]) -> Self where
+        Self: Copy,
+    {
+        *Self::from_cols_array_ref(&cols)
+    }
+    #[inline]
+    pub const fn from_cols_array_ref(cols: &[U::Scalar; 12]) -> &Self {
+        unsafe {
+            mem::transmute(cols)
+        }
+    }
+    #[inline]
+    pub fn from_cols_array_2d(cols: [[U::Scalar; 4]; 3]) -> Self where
+        Self: Copy,
+    {
+        *Self::from_cols_array_2d_ref(&cols)
+    }
+    #[inline]
+    pub const fn from_cols_array_2d_ref(cols: &[[U::Scalar; 4]; 3]) -> &Self {
+        unsafe {
+            mem::transmute(cols)
+        }
+    }
+
+    #[inline]
     pub const fn x_col(&self) -> Vector3<U> {
         Self::vec4to3(self.x_axis)
     }

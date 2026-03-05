@@ -522,6 +522,9 @@ pub enum CameraSource {
     #[serde(rename = "rtapi")]
     #[strum(serialize = "rtapi")]
     RealTimeAPI,
+    #[serde(rename = "goggles")]
+    #[strum(serialize = "goggles-camera")]
+    Goggles2,
 }
 
 impl CameraSource {
@@ -529,6 +532,7 @@ impl CameraSource {
         match self {
             Self::MumbleLink => "mumblelink",
             Self::RealTimeAPI => "rtapi",
+            Self::Goggles2 => "goggles",
         }
     }
 }

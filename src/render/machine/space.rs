@@ -11,17 +11,20 @@ use {
         ui::MapOpen,
     },
 };
+#[cfg(feature = "goggles")]
+use crate::space::goggles;
+#[cfg(feature = "goggles2-camera")]
+use goggles::{camera::CameraSearch, CameraFerret, PerspectiveFerret, FerretResource};
 
 impl RenderMachine {
     const CAMERA_SMOOTHING_PER_FRAME: f32 = 0.135;
     pub fn get_camera_pos(&self, source: CameraSource) -> Option<RenderPositioning<DrawSpace>> {
-        #[cfg(feature = "extension-nexus")]
-        let has_rtapi = !self.rtapi_state.camera.0.x.is_infinite();
         match source {
             #[cfg(feature = "extension-nexus")]
-            CameraSource::RealTimeAPI if has_rtapi => Some(self.rtapi_state.camera),
+            CameraSource::RealTimeAPI if self.rtapi_state.has_camera() =>
+                return Some(self.rtapi_state.camera),
             #[cfg(feature = "extension-nexus")]
-            CameraSource::MumbleLink if self.mumblelink_frame_skip > 0 && has_rtapi => Some({
+            CameraSource::MumbleLink if self.mumblelink_frame_skip > 0 && self.rtapi_state.has_camera() => return Some({
                 let factor = Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32 /*.min(1.0)*/;
                 let (ml_pos, ml_front) = &self.mumblelink_camera;
                 let (pos, front) = self.rtapi_state.camera;
@@ -31,8 +34,30 @@ impl RenderMachine {
                     //.rotate_towards(front, turn * Self::CAMERA_SMOOTHING_PER_FRAME)?
                 )
             }),
-            _ => self.get_camera_mumblelink(),
+            #[cfg(feature = "goggles2-camera")]
+            CameraSource::Goggles2 => {
+                let cam = FerretResource::snatch_camera();
+                if !cam.is_empty() {
+                    return Some(cam.get_as_look())
+                }
+            },
+            _ => (),
         }
+        match self.get_camera_mumblelink() {
+            _ if self.is_cutscene() => (),
+            cam @ Some(..) => return cam,
+            None => (),
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if self.goggles.has_camera_fallback() {
+            // TODO: cam_mumblelink should be marked stale in this case probably?
+            let cam = FerretResource::snatch_camera_smooth();
+            if !cam.is_empty() {
+                return Some(cam.get_as_look())
+            }
+        }
+
+        None
     }
 
     pub fn get_camera(&mut self, source: CameraSource) -> RenderPosition<DrawSpace> {
@@ -63,7 +88,7 @@ impl RenderMachine {
     pub fn depth_range(&self) -> Range<f32> {
         self.get_depth_range().unwrap_or_else(|| match () {
             #[cfg(feature = "goggles")]
-            _ if crate::space::goggles::is_enabled() => Self::GOGGLES_DEPTH_RANGE,
+            _ if goggles::is_enabled() => Self::GOGGLES_DEPTH_RANGE,
             _ => Self::DEFAULT_DEPTH_RANGE,
         })
     }
@@ -103,6 +128,20 @@ impl RenderMachine {
     }
 
     pub fn get_space_perspective(&self) -> Transform3<DrawSpace, ScreenSpace> {
+        #[cfg(feature = "goggles2-camera")]
+        if let Some((h, aspect, near, far)) = self.goggles.perspective_params() {
+            use glamour::Vector4;
+            let w = h / aspect;
+            let r = far / (far - near);
+            let near_m = near * MapLocalScale::METRES_PER_INCH;
+            let persp = Matrix4::from_cols(
+                Vector4::ZERO.with_x(w),
+                Vector4::ZERO.with_y(h),
+                Vector4::W.with_z(r),
+                Vector4::ZERO.with_z(-r * near_m),
+            );
+            return Transform3::from_matrix_unchecked(persp)
+        }
         let r = self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO);
         let Range { start: near, end: far } = self.get_depth_range().unwrap_or(Self::DEFAULT_DEPTH_RANGE);
         let fov = self.get_fov();
@@ -157,6 +196,240 @@ impl RenderMachine {
             if changed {
                 self.act_map_open();
             }
+        }
+    }
+}
+
+#[cfg(feature = "goggles")]
+#[derive(Debug, Clone, Default)]
+pub struct GogglesState {
+    pub enabled: bool,
+    #[cfg(feature = "goggles2-camera")]
+    pub camera_enabled: bool,
+    #[cfg(feature = "goggles2-camera")]
+    pub camera_paused: bool,
+    #[cfg(feature = "goggles2-camera")]
+    pub camera_lost: u16,
+    #[cfg(feature = "goggles2-camera")]
+    pub perspective_lost: u16,
+    #[cfg(feature = "goggles2-camera")]
+    pub perspective_params: (f32, f32, f32, f32),
+}
+#[cfg(feature = "goggles")]
+impl GogglesState {
+    pub(crate) fn act_map_enter(&mut self) {
+        #[cfg(feature = "goggles2-camera")]
+        {
+            self.camera_paused = false;
+            if self.camera_enabled {
+                self.camera_clear();
+            }
+        }
+    }
+    /// TODO: awkwardly called by engine, hacky...
+    pub(super) fn act_render_post(&mut self) {
+        #[cfg(todo)]
+        if !self.enabled { return }
+
+        #[cfg(feature = "goggles2-camera")]
+        if self.camera_enabled && CameraSearch::with_mut_unchecked(|s| s.seen_frame()) {
+            if let Some((_b, _o, _is_m43)) = FerretResource::found_camera() {
+                let lost_cam = FerretResource::wants_snatch_camera();
+                if lost_cam {
+                    if self.camera_lost == 0 {
+                        log::warn!("lost cambuf {:p}@{_o:#x}", _b as *mut ());
+                    }
+                    self.camera_lost = self.camera_lost.max(1);
+                    FerretResource::clear_camera_found();
+                } else {
+                    self.camera_lost = Default::default();
+                }
+            }
+
+            if let Some((_b, _o)) = FerretResource::found_perspective() {
+                let lost_persp = FerretResource::wants_snatch_perspective();
+                if lost_persp {
+                    if self.perspective_lost == 0 {
+                        log::warn!("lost perspbuf {:p}@{_o:#x}", _b as *mut ());
+                    }
+                    self.perspective_lost = self.perspective_lost.max(1);
+                    FerretResource::clear_perspective_found();
+                } else {
+                    self.perspective_lost = Default::default();
+                }
+            }
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if self.camera_enabled {
+            CameraSearch::with_mut_unchecked(|s| s.clear_active());
+            if !self.camera_paused {
+                FerretResource::trip_snatch_camera();
+                FerretResource::trip_snatch_camera_smooth();
+                FerretResource::trip_snatch_perspective();
+            }
+        }
+    }
+
+    pub(crate) fn act_pre_render(&mut self, _visible: bool) {
+        #[cfg(feature = "goggles2-camera")]
+        if self.camera_enabled && !self.camera_paused && !FerretResource::wants_snatch_perspective() {
+            let persp = FerretResource::snatch_perspective();
+            self.perspective_params = Self::perspective_params_for(&persp);
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if self.camera_enabled && FerretResource::wants_camera() {
+            let mut alternatives = 0;
+            let found = CameraSearch::with_mut_unchecked(|s| {
+                alternatives = s.matches.len();
+                s.distill()
+            });
+            if let Some((buf_dest, found)) = found {
+                log::info!("found new cam at {buf_dest:p}@{:#x} out of {alternatives} choices", found.offset);
+                goggles::FerretResource::set_camera_found(buf_dest, found.offset as _, found.is_m43);
+            }
+        }
+    }
+    pub(crate) fn reset_search(&mut self, _force: bool) {
+        #[cfg(feature = "goggles2-camera")]
+        {
+            self.perspective_lost = self.perspective_lost.min(1);
+            self.camera_lost = self.camera_lost.min(1);
+        }
+    }
+}
+#[cfg(feature = "goggles2-camera")]
+impl GogglesState {
+    pub(crate) fn camera_enable(&mut self) {
+        self.camera_enabled = true;
+        self.camera_clear();
+        #[cfg(todo)]
+        let (min, max) = (0x160, 0x1b0+1);
+        #[cfg(todo)]
+        let (min, max) = (60, 0x390);
+        let (min, max) = (60, 0x5c0);
+        FerretResource::set_size_range(min..max + 1);
+        FerretResource::set_granularity(4);
+        //FerretResource::set_granularity(8);
+    }
+    pub(crate) fn camera_disable(&mut self) {
+        self.camera_enabled = false;
+        self.camera_clear();
+        FerretResource::set_size_range(8..8);
+    }
+    fn camera_lost_defer(lost: &mut u16, update: u8) -> bool {
+        let mut deferred = update != 0;
+        let retry = match *lost {
+            0 => return false,
+            1 => {
+                deferred = false;
+                true
+            },
+            2..=3 => true,
+            lost @ 4..=0x100 => lost & 0x0f == 0,
+            lost => lost & 0xff == 0,
+        };
+        if !deferred {
+            let next = lost.wrapping_add(1);
+            *lost = match next {
+                0 => 0x100,
+                lost => lost,
+            };
+        }
+        !retry
+    }
+    pub(super) fn camera_setup(&mut self, cam: Option<RenderPositioning<DrawSpace>>, (fov_y, aspect): (f32, f32), update: u8) {
+        self.camera_paused = false;
+        let cam = match cam {
+            Some(..) if Self::camera_lost_defer(&mut self.camera_lost, update) => None,
+            cam => cam,
+        };
+        if let Some((pos, dir)) = cam {
+            let up = RenderMachine::LOCAL_UP;
+            let cam = CameraFerret::new(pos, dir, up);
+            FerretResource::set_camera(cam);
+        } else {
+            FerretResource::set_camera(CameraFerret::EMPTY);
+        }
+        let update_persp = || match cam.is_some() {
+            //#[cfg(todo)]
+            true => {
+                // desynchronize updates to reduce per-frame impact of the search
+                update.wrapping_sub(1)
+            },
+            _ => update,
+        };
+        if !Self::camera_lost_defer(&mut self.perspective_lost, update_persp()) {
+            let persp = PerspectiveFerret::new(fov_y, aspect);
+            FerretResource::set_perspective(persp);
+        } else {
+            FerretResource::set_perspective(PerspectiveFerret::EMPTY);
+        }
+    }
+    pub(super) fn camera_pause(&mut self, intermission: bool) {
+        self.camera_paused = !intermission;
+        if intermission {
+            let needs_persp = match () {
+                #[cfg(todo)]
+                _ => !FerretResource::wants_perspective(),
+                _ => true,
+            };
+            if needs_persp {
+                let persp = FerretResource::snatch_perspective();
+                if !persp.is_empty() {
+                    FerretResource::set_perspective(persp.get_ferret_perspective());
+                }
+            }
+            let cam = FerretResource::snatch_camera();
+            if !cam.is_empty() {
+                FerretResource::set_camera(cam.get_ferret_look());
+            }
+            // TODO: else if !fallback_cam.is_empty()?
+        } else {
+            FerretResource::set_perspective(PerspectiveFerret::EMPTY);
+            FerretResource::set_camera(CameraFerret::EMPTY);
+        }
+    }
+    pub(super) fn camera_clear(&mut self) {
+        FerretResource::clear_camera_found();
+        FerretResource::clear_perspective_found();
+        FerretResource::set_camera(CameraFerret::EMPTY);
+        FerretResource::set_perspective(PerspectiveFerret::EMPTY);
+        CameraSearch::with_mut_unchecked(|s| s.clear());
+        self.perspective_params = Default::default();
+        self.perspective_lost = Default::default();
+        self.camera_lost = Default::default();
+    }
+    pub(super) fn perspective_params(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.perspective_params.0.to_bits() != 0.0f32.to_bits() {
+            Some(self.perspective_params)
+        } else {
+            None
+        }
+    }
+    fn perspective_params_for(m: &goggles::camera::SnatchMatrix) -> (f32, f32, f32, f32) {
+        let (h, range) = m.get_as_perspective();
+        let aspect = m.perspective_aspect_ratio();
+        (h, aspect, range.start, range.end)
+    }
+
+    /// TODO
+    pub(super) fn is_camera_moving(&self) -> bool {
+        false
+    }
+    /// TODO
+    pub(super) fn has_camera(&self) -> bool {
+        if !self.camera_enabled { return false }
+        match () {
+            _ if FerretResource::has_found_camera() && !FerretResource::wants_snatch_camera() =>
+                true,
+            _ if self.has_camera_fallback() => true,
+            _ => false,
+        }
+    }
+    pub(super) fn has_camera_fallback(&self) -> bool {
+        match () {
+            _ if !FerretResource::has_found_perspective() => false,
+            _ => !FerretResource::wants_snatch_camera_smooth(),
         }
     }
 }

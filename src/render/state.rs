@@ -38,6 +38,8 @@ use {
     tokio::sync::mpsc::{Receiver, Sender},
 };
 
+#[cfg(feature = "extension-nexus")]
+use crate::render::machine::FrameState;
 #[cfg(feature = "markers-edit")]
 use super::edit_marker_window::EditMarkerWindowState;
 #[cfg(feature = "markers")]
@@ -735,6 +737,10 @@ impl RenderState {
     }
 
     pub fn pre_render(host: AddonHostName) -> Option<bool> {
+        #[cfg(feature = "extension-nexus")]
+        if let AddonHostName::Nexus = host {
+            FrameState::NEXUS.publish_set();
+        }
         let host = match Self::is_host(host) {
             None => {
                 Self::select_host();
@@ -752,6 +758,15 @@ impl RenderState {
                 let ready = IS_RENDER_THREAD.replace(true);
                 ready || !Self::is_running()
             }),
+        }
+    }
+    pub fn post_render(host: AddonHostName) {
+        #[cfg(feature = "extension-nexus")]
+        if let AddonHostName::Nexus = host {
+            FrameState::NEXUS.publish_clear();
+            if FrameState::GAME_FRAME_SUBSEQUENT && crate::exports::nexus::available() {
+                FrameState::GAME.publish_set();
+            }
         }
     }
 

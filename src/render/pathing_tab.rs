@@ -568,9 +568,10 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.distance_max = value);
         }
         ui.unindent();
-        #[cfg(feature = "extension-nexus")]
+        #[cfg(any(feature = "extension-nexus", feature = "goggles2-camera"))]
         if let Some(value) = Self::combo_setting(ui, fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
+            #[cfg(feature = "extension-nexus")]
             if value == Some(CameraSource::RealTimeAPI) {
                 match machine.rtapi_init() {
                     Err(e) => log::warn!("{e:#}"),
@@ -579,15 +580,35 @@ impl PathingConfig {
                     Ok(true) => (),
                 }
             }
+            #[cfg(feature = "goggles2-camera")]
+            if value == Some(CameraSource::Goggles2) {
+                if !machine.goggles.camera_enabled {
+                    machine.goggles.camera_enable();
+                }
+            } else if machine.goggles.camera_enabled {
+                //machine.goggles.camera_disable();
+            }
         }
-        #[cfg(feature = "extension-nexus")]
+        #[cfg(any(feature = "extension-nexus", feature = "goggles2-camera"))]
         match camera_source {
             CameraSource::MumbleLink => with_i18n!("pathing-notice-mumblelink", |msg| ui.text_wrapped(msg)),
+            #[cfg(feature = "extension-nexus")]
             CameraSource::RealTimeAPI => {
                 if machine.rtapi.is_none() {
                     with_i18n!("pathing-notice-rtapi-missing", |msg| ui.text_wrapped(&msg));
                 }
                 with_i18n!("pathing-notice-rtapi", |msg| ui.text_wrapped(&msg));
+            },
+            #[cfg(feature = "goggles2-camera")]
+            CameraSource::Goggles2 => {
+                ui.text_wrapped("goggles must also be enabled");
+            },
+            #[cfg(not(feature = "goggles2-camera"))]
+            CameraSource::Goggles2 => {
+                #[cfg(not(feature = "goggles2-camera"))]
+                {
+                    ui.text_wrapped("missing");
+                }
             },
         }
 
@@ -1124,7 +1145,7 @@ impl PathingConfig {
         );
         if let Some(_tree) = lenses_tree {
             let _id = ui.push_id(c"lens");
-            render_goggles::options_ui_lenses(ui, &machine);
+            render_goggles::options_ui_lenses(ui, machine);
         }
 
         ui.unindent();

@@ -695,6 +695,8 @@ impl PackRender {
             };
             match packs_changed {
                 Some(packs_map) if packs_map.map_id != map_id => None,
+                #[cfg(todo)]
+                Some(..) if machine.is_ingame_paused() => None,
                 packs_map => packs_map,
             }
         };
@@ -978,7 +980,7 @@ impl PackRender {
             }
         }
 
-        Ok(map_id.is_some())
+        Ok(map_id.is_some() && !machine.is_ingame_paused())
     }
     pub fn prepare_frame(
         &mut self,
@@ -2022,6 +2024,14 @@ impl PackRenderResources {
                 projection: backend.perspective_handler.constant_buffer_data.projection.into(),
                 _padding0: 0.0,
                 viewport_pixel_scale: 1.0 / backend.perspective_handler.constant_buffer_pixel_data.viewport_param.y,
+                #[cfg(todo = "unnecessary")]
+                viewport_pixel_scale: {
+                    let vp_size = glam::Vec2::new(
+                        backend.perspective_handler.constant_buffer_pixel_data.viewport_param.x,
+                        backend.perspective_handler.constant_buffer_pixel_data.viewport_param.y,
+                    );
+                    vp_size.dot(vp_size).sqrt() * 2.0
+                },
                 _padding2: glamour::Vector4::ZERO,
             },
             poi: instance::PoiConstantDataV {

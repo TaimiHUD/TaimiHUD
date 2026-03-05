@@ -60,7 +60,7 @@ use {
 };
 
 #[cfg(feature = "goggles")]
-use crate::space::goggles;
+use crate::space::goggles::{self, g2};
 
 #[derive(Component)]
 struct Render {
@@ -321,10 +321,22 @@ impl Engine {
     where
         F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
     {
-        let enabled = Settings::try_read().map(|s| s.enable_katrender);
+        let (enabled, _goggles) = Settings::try_read().map(|s| (
+            s.enable_katrender,
+            match s.pathing.as_ref() {
+                #[cfg(feature = "goggles")]
+                Some(p) => (
+                    p.space.goggles.enabled(),
+                    p.space.camera_source == Some(crate::settings::pathing::CameraSource::Goggles2),
+                ),
+                _ => (false, false),
+            },
+        )).unwrap_or((false, (false, false)));
+        #[cfg(feature = "goggles")]
+        let (goggles_enabled, _goggles_camera) = _goggles;
 
         let engine = match slot {
-            None if machine.gameplay.is_initial() || !enabled.unwrap_or(false) => {
+            None if machine.gameplay.is_initial() || !enabled => {
                 // if early game loading or charsel, delay init
                 // TODO: make this an option, but have fallback plan if you cause crashes...
                 return Ok(false)
@@ -373,7 +385,11 @@ impl Engine {
                     #[cfg(feature = "extension-nexus")]
                     machine.rtapi_setup();
                     #[cfg(feature = "goggles")]
-                    goggles::classify_space_lens(&e);
+                    goggles::lens::classify_space_lens(&e);
+                    #[cfg(feature = "goggles2-camera")]
+                    if _goggles_camera && !machine.goggles.camera_enabled {
+                        machine.goggles.camera_enable();
+                    }
 
                     Ok(e)
                 },
@@ -384,7 +400,7 @@ impl Engine {
             return Err(e)
         }
         match engine {
-            Ok(..) if !enabled.unwrap_or(true) => Ok(false),
+            Ok(..) if !enabled => Ok(false),
             Ok(e) => f(e, machine).map(move |()| fresh),
             Err(..) => Ok(false),
         }
@@ -546,7 +562,7 @@ impl Engine {
                     #[cfg(feature = "goggles")]
                     GogglesRefreshLens { force, delay_override } => {
                         if self.map_settings(|s| s.space.goggles.enabled()) {
-                            self.goggles_enter(force);
+                            self.goggles_enter(machine, force);
                         }
                         if let (Some(delay_override), Some((delay, ..))) =
                             (delay_override, &mut self.goggles_select_lens_delay)
@@ -615,6 +631,7 @@ impl Engine {
     }
     fn process_gameplay_event(
         &mut self,
+        machine: &mut RenderMachine,
         gameplay: GameplayState,
         trans: GameplayTransition,
     ) -> anyhow::Result<()> {
@@ -631,7 +648,7 @@ impl Engine {
                     "{}entering map {new_map_id}",
                     if prev == Some(new_map_id) { "re-" } else { "" }
                 );
-                self.gameplay_map_enter(&device_context?, new_map_id)
+                self.gameplay_map_enter(machine, &device_context?, new_map_id)
             },
             GameplayState::Gameplay { map_id: None } => {
                 log::info!("how do we know we loaded into a null map from {trans:?} to {gameplay:?}?");
@@ -673,7 +690,7 @@ impl Engine {
         if let Some(gameplay) = self.gameplay.try_read_if_changed().cloned() {
             let trans = gameplay.latest_transition_from(gameplay_prev);
             let res = self
-                .process_gameplay_event(gameplay, trans)
+                .process_gameplay_event(machine, gameplay, trans)
                 .with_context(|| format!("Map load error from {trans:?} to {gameplay:?}"));
             if let Err(e) = res {
                 log::error!("{e:#}");
@@ -749,9 +766,9 @@ impl Engine {
         self.prepare(machine)?;
         if self.drawing {
             #[cfg(feature = "goggles2")]
-            if super::goggles::FerretResource::get_ferret_draw() {
+            if g2!(*&ferret.ferret_draw) {
                 // SKIP!
-                super::goggles::FerretResource::set_ferret_drawn(false);
+                g2!(*&mut ferret.ferret_drawn = false);
                 return Ok(())
             }
             let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
@@ -768,6 +785,7 @@ impl Engine {
             return
         }
 
+        machine.goggles.act_pre_render(true);
         let prep = self.prepare_frame(machine, &device_context);
         if rt::log::error_ok(prep).is_none() {
             return
@@ -954,11 +972,17 @@ impl Engine {
         #[cfg(feature = "goggles")]
         let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
+        let masking_corners = is_rendering && self.render_backend.depth_handler.fill_edge.is_some() && !machine.is_ui_hidden();
         let masking = minimap_bounds.is_some()
-            || (is_rendering && self.render_backend.depth_handler.fill_edge.is_some());
-        let masking = match render_world.is_some() && masking && !machine.map_hidden {
+            || masking_corners;
+        let masking = match render_world.is_some() && masking {
             #[cfg(feature = "goggles")]
-            true if goggles_enabled => Some(true),
+            true if goggles_enabled => match goggles_2pass {
+                // writing to stencil of game's buffer is a bad idea and won't clear
+                #[cfg(todo)]
+                false => Some(false),
+                _ => Some(true),
+            },
             true => Some(false),
             _ => None,
         };
@@ -985,7 +1009,11 @@ impl Engine {
         }
 
         if let Some(depth_fill) = masking {
-            self.render_backend.depth_handler.fill_corners(&device_context);
+            if masking_corners {
+                self.render_backend
+                    .depth_handler
+                    .fill_corners(&device_context, depth_fill);
+            }
 
             self.render_backend
                 .depth_handler
@@ -1347,6 +1375,7 @@ impl Engine {
 
     pub fn gameplay_map_enter(
         &mut self,
+        machine: &mut RenderMachine,
         _device_context: &Dx11Context,
         _map_id: NonZeroU32,
     ) -> anyhow::Result<()> {
@@ -1358,7 +1387,11 @@ impl Engine {
         let prev_start = mem::replace(&mut self.drawing_start, Some(Instant::now()));
         self.packs.gameplay_map_enter(prev_start);
 
-        self.goggles_enter(true);
+        #[cfg(feature = "goggles")]
+        {
+            machine.goggles.act_map_enter();
+        }
+        self.goggles_enter(machine, true);
 
         res
     }
@@ -1417,9 +1450,10 @@ impl Engine {
 
     #[cfg(feature = "goggles")]
     const GOGGLES_START_DELAY_TICKS: u32 = 8 * 6;
-    pub fn goggles_enter(&mut self, _force: bool) {
+    pub fn goggles_enter(&mut self, machine: &mut RenderMachine, force: bool) {
         // fastload or early notifications can throw off the lens selection...
-        self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, _force));
+        self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, force));
+        machine.goggles.reset_search(force);
     }
     pub fn goggles_exit(&mut self) {
         #[cfg(feature = "goggles")]

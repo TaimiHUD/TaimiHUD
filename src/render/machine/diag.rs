@@ -8,6 +8,7 @@ use {
         ptr,
         sync::{LazyLock, Mutex},
         time::Instant,
+        sync::atomic::{AtomicU32, Ordering},
     },
     sync_unsafe_cell::SyncUnsafeCell,
 };
@@ -39,7 +40,8 @@ impl RenderMachine {
     }
     pub(super) fn metrics_pre(&mut self) {
         self.metrics_switch = MetricsSwitch::read();
-        FrameLog::is_taimi_set(true);
+        FrameState::TAIMI.publish_set();
+        FrameState::GAME.publish_clear();
     }
     pub(super) fn metrics_pre_render(&mut self) {
         if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
@@ -77,7 +79,16 @@ impl RenderMachine {
                 STATS_FRAME_TIME_SLICE.reset(StatsUnit::frac(num as i32, total as u32));
             }
         }
-        FrameLog::is_taimi_set(false);
+        FrameState::TAIMI.publish_clear();
+        let game_frame_subsequent = FrameState::GAME_FRAME_SUBSEQUENT;
+        #[cfg(feature = "extension-nexus")]
+        let game_frame_subsequent = match crate::exports::nexus::available() {
+            true => false,
+            _ => game_frame_subsequent,
+        };
+        if game_frame_subsequent {
+            FrameState::GAME.publish_set();
+        }
     }
     pub(super) fn act_frame_log(&mut self) {
         if self.metrics_switch.contains(MetricsSwitch::FRAME_LOG) {
@@ -110,18 +121,8 @@ impl FrameLog {
     pub fn is_enabled() -> bool {
         MetricsSwitch::read().contains(MetricsSwitch::FRAME_LOG)
     }
-    pub fn is_taimi() -> bool {
-        unsafe { ptr::read_volatile(Self::is_taimi_flag().get()) }
-    }
     pub fn is_game() -> bool {
-        !Self::is_taimi() && Self::is_enabled()
-    }
-    pub fn is_taimi_set(is_taimi: bool) {
-        unsafe { ptr::write_volatile(Self::is_taimi_flag().get(), is_taimi) }
-    }
-    pub fn is_taimi_flag() -> &'static SyncUnsafeCell<bool> {
-        static FLAG: SyncUnsafeCell<bool> = SyncUnsafeCell::new(false);
-        &FLAG
+        FrameState::is_game() && Self::is_enabled()
     }
     pub fn take_records(&self) -> Option<LinkedList<String>> {
         self.records
@@ -173,3 +174,48 @@ macro_rules! frame_log {
     };
 }
 pub use frame_log;
+
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct FrameState: u32 {
+        const TAIMI = 0x01;
+        #[cfg(feature = "extension-nexus")]
+        const NEXUS = 0x02;
+        const GAME = 0x04;
+    }
+}
+impl FrameState {
+    pub(crate) const STATE_ORDERING: Ordering = Ordering::Relaxed;
+    pub const DEFAULT: Self = Self::empty();
+
+    pub(crate) const fn state() -> &'static AtomicU32 {
+        static STATE: AtomicU32 = AtomicU32::new(FrameState::DEFAULT.bits());
+        &STATE
+    }
+
+    /// assume game frame starts once we're done rendering
+    ///
+    /// TODO: use dx buffer clear to mark start of frame or something -
+    /// this isn't guaranteed and will be a problem with multi-threaded or bg rendering
+    pub const GAME_FRAME_SUBSEQUENT: bool = true;
+    pub fn is_game() -> bool {
+        matches!(Self::read(), Self::DEFAULT | Self::GAME)
+    }
+    #[cfg(todo = "unused")]
+    pub fn is_taimi() -> bool {
+        Self::read().contains(Self::TAIMI)
+    }
+    pub fn read() -> Self {
+        Self::from_bits_retain(Self::state().load(Self::STATE_ORDERING))
+    }
+    #[cfg(todo = "unused")]
+    pub fn publish_toggle(self) {
+        Self::state().fetch_xor(self.bits(), Self::STATE_ORDERING);
+    }
+    pub fn publish_set(self) {
+        Self::state().fetch_or(self.bits(), Self::STATE_ORDERING);
+    }
+    pub fn publish_clear(self) {
+        Self::state().fetch_and((!self).bits(), Self::STATE_ORDERING);
+    }
+}

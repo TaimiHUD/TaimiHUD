@@ -44,8 +44,10 @@ use {
 
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
+#[cfg(feature = "space")]
+pub use self::space::GogglesState;
 pub use self::{
-    diag::{frame_log, FrameLog},
+    diag::{frame_log, FrameLog, FrameState},
     mumblelink::MumblelinkTick,
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
@@ -89,6 +91,8 @@ pub struct RenderMachine {
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
+    #[cfg(feature = "goggles")]
+    pub goggles: GogglesState,
     #[cfg(feature = "extension-nexus")]
     pub rtapi: Option<rt::RealTimeApi>,
     #[cfg(feature = "extension-nexus")]
@@ -156,6 +160,8 @@ impl RenderMachine {
             fov: Vector2::ZERO,
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
+            #[cfg(feature = "goggles")]
+            goggles: GogglesState::default(),
             #[cfg(feature = "space")]
             depth_range: None,
             #[cfg(feature = "extension-nexus")]
@@ -248,7 +254,7 @@ impl RenderMachine {
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
-            self.map_info = match self.gameplay.latest_map() {
+            self.map_info = match gameplay.latest_map() {
                 None => {
                     if self.map_hidden {
                         log::info!("UI toggle escape hatch - resetting hidden state due to loading screen");
@@ -375,23 +381,30 @@ impl RenderMachine {
             }
             let _ = self.pack_map.try_read_mut();
         }
+        #[cfg(feature = "goggles")]
+        {
+            let visible = self.gameplay.gameplay_map().is_some();
+            self.goggles.act_pre_render(visible);
+            if true {
+                let size = self.display_size_ref();
+                crate::space::goggles::FerretResource::set_display_size(size.to_raw());
+            }
+        }
     }
 
     pub fn turn_render(&mut self, _render_slot: RenderSlot<'_>) {
         #[cfg(any(feature = "markers", feature = "space"))]
         let controls_changed = self.controls.update().map(|(&state, changes)| (state, changes));
 
-        let (ml, frameskip_gameplay) = self.next_mumblelink_frame();
+        let (ml, mut frameskip_gameplay) = self.next_mumblelink_frame();
 
-        let mut gameplay_change = if let Some(ml) = ml {
-            let mumble_gameplay = self.act_mumblelink_tick(ml);
-            mumble_gameplay.or(frameskip_gameplay)
-        } else {
-            frameskip_gameplay
-        };
+        let mumble_gameplay = ml.and_then(|ml|
+            self.act_mumblelink_tick(ml)
+        );
 
         let ui_tick = self.ui_tick();
 
+        let mut gameplay_change = None;
         #[cfg(feature = "extension-nexus")]
         if let Some(rtapi) = self
             .rtapi
@@ -402,9 +415,16 @@ impl RenderMachine {
             let rtapi_gameplay = self.rtapi_state.update(rtapi, ui_tick, rtapi_camera);
             if let Some(rtapi_gameplay) = rtapi_gameplay {
                 gameplay_change = Some(rtapi_gameplay);
+            } else {
+                frameskip_gameplay = None;
             }
+        } else {
+            self.rtapi_state.set_inactive();
         }
 
+        let gameplay_change = gameplay_change
+            .or(mumble_gameplay)
+            .or(frameskip_gameplay);
         let gameplay_transition = gameplay_change.and_then(|gameplay| match gameplay {
             GameplayState::Intermission {
                 next_map_id: map_id @ Some(..),
@@ -482,6 +502,58 @@ impl RenderMachine {
     fn post_render(&mut self) {
         self.metrics_post_render();
         self.act_frame_log();
+        #[cfg(feature = "goggles2-camera")]
+        if self.goggles.camera_enabled {
+            let cam = match self.get_camera_mumblelink() {
+                #[cfg(feature = "extension-nexus")]
+                _ if self.rtapi_state.is_cutscene() => Err(true),
+                #[cfg(feature = "extension-nexus")]
+                #[cfg(todo = "unnecessary")]
+                _ if self.rtapi_state.is_intermission() => Err(false),
+                _ if self.gameplay.gameplay_map().is_none() => Err(false),
+                cam => Ok(cam),
+            };
+            match cam {
+                Ok(cam) => {
+                    let persp = (
+                        self.get_fov().y,
+                        self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO),
+                    );
+                    let ml_frame = self.mumblelink_frame.wrapping_add(self.mumblelink_frame_skip);
+                    let update_mod: u32 = match self.mumblelink_state {
+                        s if !s.contains(UiState::WINDOW_FOCUS) =>
+                            0x80,
+                        s if s.contains(UiState::MAP_OPEN) => match self.get_map_open_state() {
+                            MapOpen::Closed | MapOpen::Closing { .. } =>
+                                0x08,
+                            _ => 0x80,
+                        },
+                        _ => 0x02,
+                    };
+                    let update_mask = update_mod - 1;
+                    let update = (ml_frame & update_mask) as u8;
+                    self.goggles.camera_setup(cam, persp, update);
+                },
+                Err(intermission) =>
+                    self.goggles.camera_pause(intermission),
+            }
+        }
+        #[cfg(feature = "goggles")]
+        {
+            self.goggles.act_render_post();
+        }
+        if frame_log!(::is_enabled()) {
+            if let Some((pos, dir)) = self.get_player_pos() {
+                frame_log!(;
+                    "player @ {pos:?} front={dir:?}"
+                );
+            }
+            if let Some((pos, dir)) = self.get_camera_mumblelink() {
+                frame_log!(;
+                    "camera @ {pos:?} dir={dir:?}"
+                );
+            }
+        }
     }
 
     pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
@@ -502,8 +574,32 @@ impl RenderMachine {
     }
 
     #[inline]
+    fn is_cutscene(&self) -> bool {
+        #[cfg(feature = "extension-nexus")]
+        if self.rtapi_state.is_active() {
+            return self.rtapi_state.is_cutscene();
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if self.gameplay.gameplay_map().is_none() && self.goggles.camera_enabled && self.goggles.is_camera_moving() { return true }
+        false
+    }
+    #[inline]
     pub fn is_ingame(&self) -> Option<NonZero<MapID>> {
-        self.gameplay.gameplay_map()
+        match self.gameplay {
+            GameplayState::Intermission { initial: false, next_map_id: Some(next), .. } if self.is_cutscene() =>
+                Some(next),
+            gameplay => gameplay.gameplay_map(),
+        }
+    }
+    #[inline]
+    pub(crate) fn is_ingame_paused(&self) -> bool {
+        #[cfg(feature = "extension-nexus")]
+        if self.rtapi_state.is_loading_uncertain() { return true }
+        if self.is_cutscene() {
+            #[cfg(feature = "goggles2-camera")]
+            if !self.goggles.has_camera() { return true }
+        }
+        false
     }
 }
 

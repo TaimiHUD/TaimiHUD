@@ -2,7 +2,7 @@ use {
     crate::{
         exports::runtime as rt,
         render::element::prelude::*,
-        space::goggles::{self, LensClass, LENSES, LENS_PTR},
+        space::goggles::{self, lens::{LensClass, LENSES, LENS_PTR}},
     },
     anyhow::Context,
     std::{mem, ptr, sync::atomic::Ordering, thread},
@@ -27,7 +27,7 @@ pub fn options_ui(ui: &imgui::Ui) {
     options_ui_lenses(ui);
 }
 
-pub fn options_ui_lenses<'ui, U>(ui: &mut U, machine: &super::machine::RenderMachine)
+pub fn options_ui_lenses<'ui, U>(ui: &mut U, machine: &mut super::machine::RenderMachine)
 where
     U: ?Sized + ImDrawWindow<'ui>,
 {
@@ -68,6 +68,38 @@ where
             static DRAW: std::cell::Cell<bool> = std::cell::Cell::default();
         }
         BUF.with_borrow_mut(|buf| {
+            let mut draw = DRAW.get();
+            if ui.checkbox("draw", &mut draw) {
+                DRAW.set(draw);
+                goggles::FerretResource::set_ferret_draw(draw);
+            }
+            ui.same_line();
+            let mut cam = machine.goggles.camera_enabled;
+            if ui.checkbox("camera", &mut cam) {
+                match cam {
+                    true => machine.goggles.camera_enable(),
+                    false => machine.goggles.camera_disable(),
+                }
+            }
+            ui.same_line();
+            if ui.button("search") {
+                let min = 144;
+                let min = 60;
+                let max = 224;
+                let max = 320;
+                let max = 0x4080;
+                goggles::FerretResource::set_granularity(4);
+                goggles::FerretResource::set_size_range(min..(max + 1));
+            }
+            ui.same_line();
+            if ui.button("clr") {
+                goggles::FerretResource::set_perspective(goggles::PerspectiveFerret::EMPTY);
+                goggles::FerretResource::set_camera(goggles::CameraFerret::EMPTY);
+                goggles::FerretResource::set_size_range(8..8);
+                goggles::FerretResource::clear_camera_found();
+                goggles::FerretResource::clear_perspective_found();
+                machine.goggles.camera_enabled = false;
+            }
             if ui.input_text("ferret", buf).enter_returns_true(true).build() {
                 let f = if let Some(rest) = buf.strip_prefix("0x") {
                     u64::from_str_radix(rest, 16).ok()
@@ -80,27 +112,19 @@ where
                     log::warn!("ferret invalid");
                 }
             }
-            let mut draw = DRAW.get();
-            if ui.checkbox("draw", &mut draw) {
-                DRAW.set(draw);
-                goggles::FerretResource::set_ferret_draw(draw);
+            let mut camera_b = 0;
+            if let Some((b, off, _is_m43)) = goggles::FerretResource::found_camera() {
+                ui.text(format!("cam: {:p}@{off:#x}", b as *mut ()));
+                camera_b = b;
             }
-            if ui.button("persp-en") {
-                let min = 144;
-                let min = 60;
-                let max = 224;
-                let max = 320;
-                let max = 0x4080;
-                goggles::FerretResource::set_size_range(min..(max + 1));
-            }
-            ui.same_line();
-            if ui.button("persp") {
-                let aratio = machine
-                    .aspect_ratio()
-                    .unwrap_or(super::machine::RenderMachine::DEFAULT_ASPECT_RATIO);
-                let fov_y = machine.get_fov().y;
-                let persp = goggles::PerspectiveFerret::new(fov_y, aratio);
-                goggles::FerretResource::set_perspective(persp);
+            if let Some((b, off)) = goggles::FerretResource::found_perspective() {
+                use taimi_hoard::lazyfmt;
+                if b != camera_b {
+                    if camera_b != 0 {
+                        ui.same_line();
+                    }
+                    ui.text(format!("persp{}@{off:#x}", lazyfmt::or_empty((b != camera_b).then_some(format_args!(": {:p}", b as *mut ())))));
+                }
             }
         });
     }
