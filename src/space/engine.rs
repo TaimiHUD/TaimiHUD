@@ -1452,8 +1452,11 @@ impl Engine {
     const GOGGLES_START_DELAY_TICKS: u32 = 8 * 6;
     pub fn goggles_enter(&mut self, machine: &mut RenderMachine, force: bool) {
         // fastload or early notifications can throw off the lens selection...
-        self.goggles_select_lens_delay = Some((Self::GOGGLES_START_DELAY_TICKS, force));
+        self.goggles_lens_reset(Self::GOGGLES_START_DELAY_TICKS, force);
         machine.goggles.reset_search(force);
+    }
+    pub fn goggles_lens_reset(&mut self, ticks: u32, force: bool) {
+        self.goggles_select_lens_delay = Some((ticks, force));
     }
     pub fn goggles_exit(&mut self) {
         #[cfg(feature = "goggles")]

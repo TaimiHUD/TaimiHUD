@@ -271,6 +271,10 @@ impl GogglesState {
     }
 
     pub(crate) fn act_pre_render(&mut self, _visible: bool) {
+        #[cfg(feature = "goggles")]
+        if /*self.enabled*/ true {
+            goggles::lens::reset_frame();
+        }
         #[cfg(feature = "goggles2-camera")]
         if self.camera_enabled && !self.camera_paused && !FerretResource::wants_snatch_perspective() {
             let persp = FerretResource::snatch_perspective();

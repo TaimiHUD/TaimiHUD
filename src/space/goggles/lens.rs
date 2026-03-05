@@ -1,8 +1,10 @@
 use {
     crate::render::{RenderEvent, RenderState},
     core::ptr::{self, NonNull},
+    core::ffi::c_void,
     retour::GenericDetour,
     std::{
+        cell::Cell,
         collections::BTreeMap,
         sync::{
             atomic::{AtomicPtr, Ordering},
@@ -13,6 +15,7 @@ use {
         core::{IUnknown, Interface, InterfaceRef},
         Win32::Graphics::Direct3D11::{
             ID3D11DepthStencilView,
+            ID3D11DepthStencilState,
             ID3D11DeviceContext,
             ID3D11RenderTargetView,
             D3D11_COMPARISON_LESS,
@@ -64,7 +67,11 @@ pub fn pick_lens(force: bool) {
         if !force && lenses.contains_key(&(selected_lens as usize)) {
             return
         }
-        if let Some((&world_key, _cls)) = lenses.iter().find(|(_, cls)| matches!(cls, LensClass::World)) {
+        let selected = lenses
+            .iter()
+            .filter(|(_, cls)| matches!(cls, LensClass::World | LensClass::Test))
+            .max_by_key(|(_, cls)| matches!(cls, LensClass::World));
+        if let Some((&world_key, _cls)) = selected {
             LENS_PTR.store(world_key as *mut _, Ordering::Relaxed);
         }
     }
@@ -83,95 +90,116 @@ pub enum LensClass {
     Overlay,
 }
 
+thread_local! {
+    static DEPTH_VIEW_BOUND: Cell<usize> = Cell::new(0);
+}
+pub(crate) fn reset_frame() {
+    DEPTH_VIEW_BOUND.set(0);
+}
 pub(super) fn set_targets(
-    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    _this: InterfaceRef<'static, ID3D11DeviceContext>,
     _count: u32,
     _views_ptr: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
     depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
 ) {
-    if let Some(view) = depth_view {
-        let key = view.as_raw() as usize;
-        let known = LENSES.read().map_err(drop).map(|l| l.get(&key).copied());
-        match known {
-            Ok(Some(_lens)) => {
-                //log::trace!("recognized as {lens:?}");
-            },
-            Ok(None) => {
-                //log::debug!("unknown buffer, attempting classification...");
-                let cls = {
-                    #[cfg(todo)]
-                    let desc_view = unsafe {
-                        let mut desc_view = Default::default();
-                        view.GetDesc(&mut desc_view);
-                        desc_view
-                    };
-                    let mut desc_state = Default::default();
-                    let mut state = None;
-                    let mut stencil_ref = 0u32;
-                    let viewport_ok = || {
-                        let mut viewports = [D3D11_VIEWPORT::default(); 4];
-                        let mut _count = viewports.len() as u32;
-                        unsafe {
-                            this.RSGetViewports(&mut _count, Some(viewports.as_mut_ptr()));
-                        }
-                        if viewports[0].TopLeftX != 0.0 || viewports[0].TopLeftY != 0.0 { return false }
-                        let expected = g2!(*&ferret.display_size);
-                        viewports[0].Width == expected.x && viewports[0].Height == expected.y
-                    };
-                    unsafe {
-                        this.OMGetDepthStencilState(Some(&mut state), Some(&mut stencil_ref));
-                        if let Some(state) = &state {
-                            state.GetDesc(&mut desc_state);
-                        }
-                    }
-                    match &state {
-                        Some(_state) => {
-                            //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
-                            //log::trace!("{desc_state:?}");
-                            match desc_state.DepthEnable.0 != 0 {
-                                false if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO =>
-                                    Some(LensClass::UI),
-                                true if desc_state.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO => {
-                                    //log::trace!("skipping for now (read-only bind)");
-                                    None
-                                },
-                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS =>
-                                    Some(match stencil_ref {
-                                        0 if viewport_ok() =>
-                                            LensClass::World,
-                                        0 => LensClass::Unsupported,
-                                        _ => LensClass::Dummy,
-                                    }),
-                                true if desc_state.DepthFunc == D3D11_COMPARISON_LESS_EQUAL =>
-                                    Some(LensClass::Test),
-                                true => Some(LensClass::Unknown),
-                                false => Some(LensClass::Overlay),
-                            }
-                        },
-                        None => {
-                            log::warn!("failed to get state, maybe it doesn't exist?");
-                            Some(LensClass::Unknown)
-                        },
-                    }
-                };
-                if let Some(cls) = cls {
-                    if let Ok(mut lenses) = LENSES.write() {
-                        lenses.insert(key, cls);
-                        if cls == LensClass::World {
-                            let selected_lens = LENS_PTR.load(Ordering::Relaxed);
-                            if !selected_lens.is_null() && !lenses.contains_key(&(selected_lens as usize)) {
-                                LENS_PTR.store(key as *mut _, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                    if cls == LensClass::World {
-                        RenderState::try_send(RenderEvent::UiDepthAcquired());
-                    }
+    DEPTH_VIEW_BOUND.set(depth_view.map(|v| v.as_raw() as usize).unwrap_or(0));
+    match depth_view {
+        None =>
+            DEPTH_VIEW_BOUND.set(0),
+        Some(view) => {
+            let key = view.as_raw() as usize;
+            let known = LENSES.read().map_err(drop).map(|l| l.get(&key).copied());
+            let key = match known {
+                Err(()) => {
+                    // poisoned???
+                    0
+                },
+                Ok(Some(_lens)) => {
+                    //log::trace!("recognized as {lens:?}");
+                    0
+                },
+                Ok(None) => key,
+            };
+            DEPTH_VIEW_BOUND.set(key);
+        },
+    }
+}
+pub(super) unsafe fn set_depth_state(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    state: Option<InterfaceRef<'static, ID3D11DepthStencilState>>,
+    stencil_ref: u32,
+) {
+    let Some(state) = state else { return };
+    let key = DEPTH_VIEW_BOUND.get();
+    let depth_view = NonNull::new(key as *mut c_void).map(|v|
+        InterfaceRef::<ID3D11DepthStencilView>::from_raw(v)
+    );
+    let Some(_view) = depth_view else { return };
+    //log::debug!("unknown buffer, attempting classification...");
+    let cls = {
+        #[cfg(todo)]
+        let desc_view = unsafe {
+            let mut desc_view = Default::default();
+            view.GetDesc(&mut desc_view);
+            desc_view
+        };
+        let mut desc_state = Default::default();
+        let viewport_ok = || {
+            let mut viewports = [D3D11_VIEWPORT::default(); 4];
+            let mut _count = viewports.len() as u32;
+            unsafe {
+                this.RSGetViewports(&mut _count, Some(viewports.as_mut_ptr()));
+            }
+            if viewports[0].TopLeftX != 0.0 || viewports[0].TopLeftY != 0.0 { return false }
+            let expected = g2!(*&ferret.display_size);
+            viewports[0].Width == expected.x && viewports[0].Height == expected.y
+        };
+        unsafe {
+            state.GetDesc(&mut desc_state);
+        }
+        //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
+        //log::trace!("{desc_state:?}");
+        match desc_state.DepthEnable.0 != 0 {
+            _ if !viewport_ok() =>
+                Some(LensClass::Unsupported),
+            false => {
+                if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO {
+                    log::trace!("skipping for now (write-only bind)");
                 }
+                None
             },
-            Err(()) => {
-                // poisoned???
+            #[cfg(todo)]
+            false if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO =>
+                Some(LensClass::UI),
+            true if desc_state.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO => {
+                //log::trace!("skipping for now (read-only bind)");
+                None
             },
+            true if desc_state.DepthFunc == D3D11_COMPARISON_LESS =>
+                Some(match stencil_ref {
+                    0 if viewport_ok() =>
+                        LensClass::World,
+                    0 => LensClass::Unsupported,
+                    _ => LensClass::Dummy,
+                }),
+            true if desc_state.DepthFunc == D3D11_COMPARISON_LESS_EQUAL =>
+                Some(LensClass::Test),
+            true => Some(LensClass::Unknown),
+            false => Some(LensClass::Overlay),
+        }
+    };
+    if let Some(cls) = cls {
+        if let Ok(mut lenses) = LENSES.write() {
+            lenses.insert(key, cls);
+            if cls == LensClass::World {
+                let selected_lens = LENS_PTR.load(Ordering::Relaxed);
+                if !selected_lens.is_null() && !lenses.contains_key(&(selected_lens as usize)) {
+                    LENS_PTR.store(key as *mut _, Ordering::Relaxed);
+                }
+            }
+        }
+        if cls == LensClass::World {
+            RenderState::try_send(RenderEvent::UiDepthAcquired());
         }
     }
 }
@@ -195,21 +223,21 @@ pub(super) fn release_depth_view(refcount: u32, key: usize) {
     if refcount > 0 { return }
     let removed = if let Ok(mut lenses) = LENSES.write() {
         let removed = lenses.remove(&key);
-        if let Some(LensClass::World) = removed {
+        let selected = LENS_PTR.compare_exchange(
+            key as *mut _,
+            ptr::dangling_mut(),
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+        if matches!(removed, Some(LensClass::World)) || selected.is_ok() {
             RenderState::try_send(RenderEvent::UiDepthReleased());
-            let _ = LENS_PTR.compare_exchange(
-                key as *mut _,
-                ptr::dangling_mut(),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
         }
         removed.is_some()
     } else {
         false
     };
     if removed {
-        log::trace!("released depth view {key:08x}");
+        //log::trace!("released depth view {key:08x}");
     }
 }
 

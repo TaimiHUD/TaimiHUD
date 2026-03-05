@@ -252,6 +252,11 @@ impl RenderState {
                     #[cfg(feature = "goggles")]
                     UiDepthReleased() => {
                         self.machine.turn_depth_event(false);
+                        if self.machine.gameplay.gameplay_map().is_some() && crate::space::goggles::lens::read_lens() == core::ptr::dangling_mut() {
+                            if let Some(Ok(engine)) = &mut self.engine {
+                                engine.goggles_lens_reset(0, false);
+                            }
+                        }
                     },
                     #[cfg(feature = "goggles")]
                     UiDepthAcquired() => {
