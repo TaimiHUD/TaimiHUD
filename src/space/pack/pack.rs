@@ -1597,7 +1597,6 @@ impl PackRender {
                     log::error!("Render ID {render_id} refers to invalid marker {marker_id}");
                 },
             }
-            num_drawn += 1;
         }
         if !poi_billboarding {
             backend
