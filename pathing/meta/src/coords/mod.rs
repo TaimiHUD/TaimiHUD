@@ -38,8 +38,10 @@ pub struct MapSpace([f32; 2]);
 }
 
 coord_newtype! {
-/// local mumblelink coordinates
+/// local [mumblelink coordinates](https://www.mumble.info/documentation/developer/positional-audio/link-plugin/#coordinate-system)
 /// (meters)
+///
+/// left-handed, y increases upward
 ///
 /// e.g. local_player_pos
 pub struct LocalSpace([f32; 3]);
@@ -48,6 +50,8 @@ pub struct LocalSpace([f32; 3]);
 coord_newtype! {
 /// internal draw coordinates
 /// (inches)
+///
+/// z increases downward, y forward
 pub struct GameSpace([f32; 3]);
 }
 
@@ -442,6 +446,21 @@ impl LocalSpace {
     pub fn to2(point: LocalPoint) -> LocalPoint2 {
         point.xz()
     }
+    #[inline]
+    pub fn to_game(point: LocalPoint) -> Point3<GameSpace> {
+        Self::vector_to_game(point.to_vector()).to_point()
+    }
+    pub fn vector_to_game(local: Vector3<LocalSpace>) -> Vector3<GameSpace> {
+        (local.xzy().to_vec3a() * MapLocalScale::INCHES_PER_METRE3A).into()
+    }
+    #[inline]
+    pub fn norm_to_game(local: Vector3<LocalSpace>) -> Vector3<GameSpace> {
+        Vector3::new(
+            local.x,
+            local.z,
+            -local.y,
+        )
+    }
 
     /// Scale to [MapSpace] using a common reference point
     ///
@@ -484,6 +503,40 @@ impl LocalSpace {
             local_player_pos_xz.to_vector(),
         )
     }
+
+    pub const UP: Vector3<Self> = Vector3::Y;
+}
+
+impl GameSpace {
+    #[inline]
+    pub fn to2(point: Point3<GameSpace>) -> Point2<GameSpace> {
+        point.truncate()
+    }
+    #[inline]
+    pub fn to2_local(point: Point3<GameSpace>) -> LocalPoint2 {
+        Self::to_local2(Self::to2(point))
+    }
+    #[inline]
+    pub fn to_local2(point: Point2<GameSpace>) -> LocalPoint2 {
+        (point * MapLocalScale::METRES_PER_INCH).cast()
+    }
+    #[inline]
+    pub fn to_local(point: Point3<GameSpace>) -> Point3<LocalSpace> {
+        Self::vector_to_local(point.to_vector()).to_point()
+    }
+    pub fn vector_to_local(game: Vector3<GameSpace>) -> Vector3<LocalSpace> {
+        (game.xzy().to_vec3a() * MapLocalScale::METRES_PER_INCH3A).into()
+    }
+    #[inline]
+    pub fn norm_to_local(game: Vector3<GameSpace>) -> Vector3<LocalSpace> {
+        Vector3::new(
+            game.x,
+            -game.z,
+            game.y,
+        )
+    }
+
+    pub const UP: Vector3<Self> = Vector3::new(0.0, 0.0, -1.0);
 }
 
 pub fn transform2_cast<S2, D2, S, D>(trans: Transform2<S, D>) -> Transform2<S2, D2>
@@ -545,6 +598,66 @@ pub fn billboard_from_look(mut look: Matrix4<f32>) -> Matrix4<f32> {
     look = look.transpose();
     look.z_axis = -look.z_axis;
     look
+}
+
+pub fn decompose_look_to32(look: glam::Mat4) -> (glam::Mat3A, glam::Vec3A) {
+    let eye = glam::Vec3A::from_vec4(look.w_axis);
+    (glam::Mat3A::from_mat4(look).transpose(), -eye)
+}
+pub fn decompose_look_to32_rows(look: glam::Mat4) -> (glam::Mat3A, glam::Vec3A) {
+    let eye = glam::Vec3A::new(
+        look.x_axis.w,
+        look.y_axis.w,
+        look.z_axis.w,
+    );
+    (glam::Mat3A::from_mat4(look), -eye)
+}
+pub fn decompose_look32<U: Unit<Scalar = f32>>(look_to: glam::Mat4) -> (Point3<U>, Vector3<U>, Vector3<U>) {
+    let (look, eye) = decompose_look_to32(look_to);
+    let (eye, dir, up) = decompose_look32_rows(look, eye);
+    (eye.into(), dir.into(), up.into())
+}
+pub fn decompose_look32_rows(look: glam::Mat3A, eye: glam::Vec3A) -> (glam::Vec3A, glam::Vec3A, glam::Vec3A) {
+    let eye = match look {
+        #[cfg(todo = "unnecessary")]
+        look => look.mul_transpose_vec3(eye),
+        look => {
+            #[cfg(todo)]
+            let eye = glam::Vec3A::new(
+                eye.x,
+                eye.y,
+                -eye.z,
+            );
+            look * eye
+        },
+    };
+    let dir = match &look {
+        #[cfg(todo)]
+        look => Vector3::new(
+            look.x_axis.z,
+            look.y_axis.z,
+            look.z_axis.z,
+        ),
+        look => look.z_axis,
+    };
+    let up = match &look {
+        #[cfg(todo = "unnecessary")]
+        look => {
+            let side = match &look {
+                #[cfg(todo)]
+                look => Vector3::new(
+                    look.x_axis.x,
+                    look.y_axis.x,
+                    look.z_axis.x,
+                ),
+                look => look.x_axis,
+            };
+            dir.cross(side)
+        },
+        look => look.y_axis,
+    };
+
+    (eye, dir, up)
 }
 
 #[test]

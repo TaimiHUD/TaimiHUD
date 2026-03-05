@@ -16,6 +16,7 @@ pub struct RenderStateRtapi {
     pub player: (Point3<LocalSpace>, Vector3<LocalSpace>),
     pub gameplay: u32,
     pub prev_map_id: u32,
+    pub gameplay_count: u32,
 }
 
 /// shhh [rt::RealTimeApi] is fine to share tbh
@@ -66,11 +67,12 @@ impl RenderMachine {
 impl RenderStateRtapi {
     pub const fn new() -> Self {
         Self {
-            gameplay: GameState::CharacterSelection as u32,
+            gameplay: Self::GAMEPLAY_NONE,
             player: RenderMachine::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
             camera: RenderMachine::POSITIONING_EMPTY,
             prev_map_id: 0,
+            gameplay_count: 0,
         }
     }
 
@@ -78,6 +80,8 @@ impl RenderStateRtapi {
     const GAMEPLAY_LOADING: u32 = GameState::LoadingScreen as _;
     /// Vista viewing...
     const GAMEPLAY_CINEMATIC: u32 = GameState::Cinematic as _;
+    const GAMEPLAY_CHARSEL: u32 = GameState::CharacterSelection as _;
+    const GAMEPLAY_NONE: u32 = u32::MAX - 1;
 
     pub fn update(
         &mut self,
@@ -85,8 +89,28 @@ impl RenderStateRtapi {
         ui_tick: Option<MumblelinkTick>,
         camera_wanted: bool,
     ) -> Option<GameplayState> {
-        let prev_gameplay = self.gameplay;
-        self.gameplay = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state) };
+        let prev_gameplay = mem::replace(&mut self.gameplay, unsafe {
+            ptr::read_volatile(&raw const (*rtapi.as_ptr()).game_state)
+        });
+        let gameplay_delay = match self.gameplay {
+            Self::GAMEPLAY_LOADING => {
+                // game "loads" for a handful of frames prior to starting a cutscene such as a vista...
+                // unfortunately I think this means we can't tell if loading actually means map load or not? :<
+                Self::COUNT_UNCERTAIN_LOADING
+            },
+            _ => Self::COUNT_FRESH,
+        };
+        if self.gameplay != prev_gameplay {
+            self.gameplay_count = match prev_gameplay {
+                Self::GAMEPLAY_NONE => Self::COUNT_AWHILE,
+                prev if self.gameplay == Self::GAMEPLAY_LOADING && prev != Self::GAMEPLAY_INGAME =>
+                    Self::COUNT_UNCERTAIN_LOADING,
+                _ => Self::COUNT_FRESH,
+            }
+        } else {
+            self.gameplay_count = self.gameplay_count.saturating_add(1);
+        }
+        let gameplay_counts = self.gameplay_count >= gameplay_delay;
         let map_id = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id) };
         let prev_map_id = mem::replace(&mut self.prev_map_id, map_id);
         let gameplay_update = match self.gameplay {
@@ -94,11 +118,15 @@ impl RenderStateRtapi {
                 Some(GameplayState::new_loading(map_id, prev_map_id)),
             Self::GAMEPLAY_INGAME if map_id != prev_map_id || prev_gameplay != Self::GAMEPLAY_INGAME =>
                 Some(GameplayState::new_ingame(map_id)),
-            state if state == prev_gameplay => None,
+            _ if !gameplay_counts || self.gameplay_count >= Self::COUNT_EMITTED => None,
             Self::GAMEPLAY_LOADING => Some(GameplayState::new_loading(Default::default(), map_id)),
             Self::GAMEPLAY_CINEMATIC => Some(GameplayState::new_loading(map_id, map_id)),
             state => GameState::try_from(state).ok().map(GameplayState::from),
         };
+        if gameplay_update.is_some() {
+            // .max(self.gameplay_count)?
+            self.gameplay_count = Self::COUNT_EMITTED;
+        }
 
         let rtapi_ingame = self.gameplay == Self::GAMEPLAY_INGAME;
         let rtapi_camera = camera_wanted;
@@ -161,5 +189,40 @@ impl RenderStateRtapi {
 
         // TODO: camera_fov
         gameplay_update
+    }
+
+    #[cfg(feature = "goggles2-camera")]
+    pub fn is_intermission(&self) -> bool {
+        match self.gameplay {
+            Self::GAMEPLAY_LOADING => true,
+            Self::GAMEPLAY_CHARSEL if self.prev_map_id != 0 => true,
+            _ => false,
+        }
+    }
+    pub fn is_cutscene(&self) -> bool {
+        if self.is_loading_uncertain() { return true }
+        self.gameplay == Self::GAMEPLAY_CINEMATIC /* && self.is_ingame()*/
+    }
+    #[cfg(todo)]
+    pub fn is_ingame(&self) -> bool {
+        !self.player.0.x.is_infinite()
+    }
+    pub fn has_camera(&self) -> bool {
+        !self.camera.0.x.is_infinite()
+    }
+    /// 3 or 4 might be enough, but bleh...
+    const COUNT_UNCERTAIN_LOADING: u32 = 6;
+    const COUNT_AWHILE: u32 = 0x400;
+    const COUNT_EMITTED: u32 = 0x800;
+    const COUNT_FRESH: u32 = 0;
+    pub fn is_loading_uncertain(&self) -> bool {
+        self.gameplay == Self::GAMEPLAY_LOADING && self.gameplay_count < Self::COUNT_UNCERTAIN_LOADING
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.gameplay != Self::GAMEPLAY_NONE
+    }
+    pub fn set_inactive(&mut self) {
+        self.gameplay = Self::GAMEPLAY_NONE;
     }
 }

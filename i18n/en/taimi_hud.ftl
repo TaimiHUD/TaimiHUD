@@ -443,6 +443,7 @@ pathing-config-reset-notice = Right-click any slider below to restore its defaul
 pathing-notice-space = {space} is required for pathing functionality.
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
+goggles-camera = The Aether
 
 ## Space
 

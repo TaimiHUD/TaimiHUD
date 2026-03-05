@@ -198,19 +198,19 @@ impl PathingConfig {
         T: VariantArray + Eq + Copy + Into<&'static str>,
     {
         let _token = ui.push_id(label);
-        let current = LANGUAGE_LOADER.get(value.into());
+        let current: &str = value.into();
         let draw = || {
             let mut selected = None;
             for &opt in T::VARIANTS {
-                let name = LANGUAGE_LOADER.get(opt.into());
-                let selection = Selectable::new(name).selected(value == opt);
-                if selection.build(ui) {
+                let name: &str = opt.into();
+                let selection = with_i18n!(name, |name| Selectable::new(name).selected(value == opt).build(ui));
+                if selection {
                     selected = Some(opt.clone());
                 }
             }
             selected
         };
-        let changed = ComboBox::new(label).preview_value(&current).build(ui, draw);
+        let changed = with_i18n!(current, |current| ComboBox::new(label).preview_value(&current).build(ui, draw));
         match changed {
             Some(Some(selected)) => Some(Some(selected)),
             None if ui.is_item_clicked_with_button(imgui::MouseButton::Right) =>
@@ -545,9 +545,10 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.distance_max = value);
         }
         ui.unindent();
-        #[cfg(feature = "extension-nexus")]
+        #[cfg(any(feature = "extension-nexus", feature = "goggles2-camera"))]
         if let Some(value) = Self::combo_setting(ui, &fl!("pathing-config-camera-source"), camera_source) {
             Self::set_pathing(|s| s.space.camera_source = value);
+            #[cfg(feature = "extension-nexus")]
             if value == Some(CameraSource::RealTimeAPI) {
                 match machine.rtapi_init() {
                     Err(e) => log::warn!("{e:#}"),
@@ -556,12 +557,21 @@ impl PathingConfig {
                     Ok(true) => (),
                 }
             }
+            #[cfg(feature = "goggles2-camera")]
+            if value == Some(CameraSource::Goggles2) {
+                if !machine.goggles.camera_enabled {
+                    machine.goggles.camera_enable();
+                }
+            } else if machine.goggles.camera_enabled {
+                //machine.goggles.camera_disable();
+            }
         }
-        #[cfg(feature = "extension-nexus")]
+        #[cfg(any(feature = "extension-nexus", feature = "goggles2-camera"))]
         match camera_source {
             CameraSource::MumbleLink => ui.text_wrapped(
                 "if you experience stuttering, try changing Vertical Sync under the in-game graphical settings",
             ),
+            #[cfg(feature = "extension-nexus")]
             CameraSource::RealTimeAPI => {
                 if machine.rtapi.is_none() {
                     ui.text_wrapped(
@@ -571,6 +581,17 @@ impl PathingConfig {
                 ui.text_wrapped(
                     "if you experience stuttering, try changing Vertical Sync or switching to MumbleLink",
                 );
+            },
+            #[cfg(feature = "goggles2-camera")]
+            CameraSource::Goggles2 => {
+                ui.text_wrapped("goggles must also be enabled");
+            },
+            #[cfg(not(feature = "goggles2-camera"))]
+            CameraSource::Goggles2 => {
+                #[cfg(not(feature = "goggles2-camera"))]
+                {
+                    ui.text_wrapped("missing");
+                }
             },
         }
 
@@ -1062,7 +1083,7 @@ impl PathingConfig {
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || render_goggles::options_ui_lenses(ui, &machine));
+            .build(ui, || render_goggles::options_ui_lenses(ui, machine));
 
         ui.unindent();
 

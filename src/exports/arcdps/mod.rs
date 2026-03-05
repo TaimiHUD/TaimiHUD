@@ -460,19 +460,19 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
         return
     }
 
-    let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) else {
-        return
-    };
+    if let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) {
+        RenderMachine::turn_render_entry();
 
-    RenderMachine::turn_render_entry();
+        if !render_ready {
+            RenderState::render_setup(ui);
+        }
 
-    if !render_ready {
-        RenderState::render_setup(ui);
+        RenderMachine::turn_ui_entry(ui);
+
+        RenderState::render_ui(ui);
     }
 
-    RenderMachine::turn_ui_entry(ui);
-
-    RenderState::render_ui(ui);
+    RenderState::post_render(AddonHostName::ArcDPS);
 }
 
 fn imgui_options_tab(ui: &imgui::Ui) {
