@@ -1,5 +1,6 @@
 use {
     crate::coords::{coord_newtype, GameSpace, LocalSpace, MapSpace},
+    glam::Vec3A,
     glamour::{Box2, Size2, Vector2},
 };
 
@@ -21,11 +22,31 @@ impl MapLocalScale {
     /// (local z+ is usually global y-, so for y scale negatively)
     pub const COMMON: Self = Self::with_game_scale(Vector2::new(24.0, -24.0));
 
-    /// 3.28084ft / m or 0.3048m / ft
-    ///
+    /// 39.368552322?
+    #[cfg(todo)]
+    pub const INCHES_PER_METRE: f32 = 39.369999;
     /// precision chosen to match RTAPI
-    pub const METRES_PER_FEET: f32 = 12.0 / 39.369999;
+    pub const INCHES_PER_METRE: f32 = 39.37;
+    #[cfg(todo)]
+    pub const INCHES_PER_METRE: f32 = (1.0f64 / Self::METRES_PER_INCH as f64) as f32;
+    /// 3.28084ft / m or 0.3048m / ft
+    pub const METRES_PER_FEET: f32 = (Self::METRES_PER_INCH as f64 * 12.0f64) as f32;
+    #[cfg(todo)]
     pub const METRES_PER_INCH: f32 = Self::METRES_PER_FEET / 12.0;
+    pub const METRES_PER_INCH: f32 = 1.0 / Self::INCHES_PER_METRE;
+    /// ~0.02540098? ~0.02540001?
+    #[cfg(todo)]
+    pub const METRES_PER_INCH: f32 = 0.02540005;
+    pub(super) const INCHES_PER_METRE3A: Vec3A = Vec3A::new(
+        Self::INCHES_PER_METRE,
+        Self::INCHES_PER_METRE,
+        -Self::INCHES_PER_METRE,
+    );
+    pub(super) const METRES_PER_INCH3A: Vec3A = Vec3A::new(
+        Self::METRES_PER_INCH,
+        -Self::METRES_PER_INCH,
+        Self::METRES_PER_INCH,
+    );
 
     pub fn with_scale(scale: Vector2<LocalSpace>) -> Self {
         Self { scale }

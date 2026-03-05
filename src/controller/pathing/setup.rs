@@ -313,15 +313,21 @@ impl PathingController {
     ///
     /// unless reentering, which indicates leave+enter will immediately follow
     pub(super) fn handle_map_suspend(&mut self, gameplay: &GameplayState) {
+        let mut probably_loading = match gameplay {
+            GameplayState::Intermission { initial: true, .. } => true,
+            GameplayState::Intermission { next_map_id: None, .. } => true,
+            _ => false,
+        };
+        if !self.rx.is_katrender_enabled() {
+            self.map_info.clear(None);
+            probably_loading = true;
+        }
         match &mut self.space.packs {
+            _ if !probably_loading => (),
             #[cfg(todo = "unnecessary")]
             packs => Arc::make_mut(packs).clear(),
             packs => *packs = Arc::new(Default::default()),
         };
-        if !self.rx.is_katrender_enabled() {
-            self.map_info.clear(None);
-        }
-        let probably_loading = matches!(gameplay, GameplayState::Intermission { next_map_id: None, .. });
         if probably_loading {
             self.maps.prune(Some(&self.map_info));
             #[cfg(feature = "paths-interact")]

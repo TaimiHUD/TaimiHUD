@@ -709,6 +709,8 @@ impl PackRender {
             };
             match packs_changed {
                 Some(packs_map) if packs_map.map_id != map_id => None,
+                #[cfg(todo)]
+                Some(..) if machine.is_ingame_paused() => None,
                 packs_map => packs_map,
             }
         };
@@ -998,22 +1000,25 @@ impl PackRender {
             }
         }
 
-        Ok(map_id.is_some())
+        Ok(map_id.is_some() && !machine.is_ingame_paused())
     }
     pub fn prepare_frame(
         &mut self,
         _machine: &mut RenderMachine,
         _device_context: &Dx11Context,
         anim_timestamp: Option<f32>,
+        fresh: bool,
     ) -> anyhow::Result<()> {
-        self.resources.anim_timestamp = anim_timestamp;
-        if let Some(anim_timestamp) = self.resources.anim_timestamp {
-            self.draw_state.prune_anims(anim_timestamp);
-            if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
-                self.resources.dirty = true;
+        if fresh {
+            self.resources.anim_timestamp = anim_timestamp;
+            if let Some(anim_timestamp) = self.resources.anim_timestamp {
+                self.draw_state.prune_anims(anim_timestamp);
+                if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
+                    self.resources.dirty = true;
+                }
+            } else {
+                self.draw_state.clear_anims();
             }
-        } else {
-            self.draw_state.clear_anims();
         }
         self.render_list.prepare_frame();
         Ok(())
@@ -2114,6 +2119,22 @@ impl PackRenderResources {
                         .constant_buffer_pixel_data
                         .viewport_param
                         .y,
+                #[cfg(todo = "unnecessary")]
+                viewport_pixel_scale: {
+                    let vp_size = glam::Vec2::new(
+                        backend
+                            .perspective_handler
+                            .constant_buffer_pixel_data
+                            .viewport_param
+                            .x,
+                        backend
+                            .perspective_handler
+                            .constant_buffer_pixel_data
+                            .viewport_param
+                            .y,
+                    );
+                    vp_size.dot(vp_size).sqrt() * 2.0
+                },
                 _padding2: glamour::Vector4::ZERO,
             },
             poi: instance::PoiConstantDataV {
@@ -2133,7 +2154,7 @@ impl PackRenderResources {
                         .unwrap_or(0) | settings
                         .poi_limit_size
                         .then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE)
-                        .unwrap_or(0),
+                        .unwrap_or(0) | settings.poi_flags,
                 },
                 billboard: taimi_meta::coords::billboard_from_look(
                     backend.perspective_handler.constant_buffer_data.view.into(),
@@ -2155,7 +2176,7 @@ impl PackRenderResources {
                         .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
                         .unwrap_or(0) | (!settings.trail_can_fade)
                         .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
-                        .unwrap_or(0),
+                        .unwrap_or(0) | settings.trail_flags,
                 },
                 tex_scale: backend
                     .perspective_handler
@@ -2386,9 +2407,11 @@ pub struct ArcrenderSettings {
     pub trail_anim_speed: f32,
     pub trail_can_fade: bool,
     pub trail_distance_fade: bool,
+    pub trail_flags: u32,
     pub poi_can_fade: bool,
     pub poi_distance_fade: bool,
     pub poi_limit_size: bool,
+    pub poi_flags: u32,
 }
 impl ArcrenderSettings {
     pub const DEFAULT: Self = Self {
@@ -2399,6 +2422,8 @@ impl ArcrenderSettings {
         poi_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         trail_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         poi_anim_speed: 1.0,
+        trail_flags: 0,
+        poi_flags: 0,
     };
 }
 

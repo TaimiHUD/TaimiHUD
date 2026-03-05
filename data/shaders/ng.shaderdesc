@@ -7,7 +7,8 @@
     "layout_type": "SpaceTrail",
     "defs": {
       "SHADER_V": "1",
-      "SHADER_SPACE": "2"
+      "SHADER_SPACE": "2",
+      "GOGGLES2_SHADOWBOXING": "2"
     }
   },
   {
@@ -23,6 +24,7 @@
       "FEATHER_OFFSET": "float3(1.0, 0.945, 0.42)",
       "FEATHER_SIZE_Z": "2.8",
       "FEATHER_SCALE_Z": "p_render.edge_feather.y / 6.9",
+      "GOGGLES2_SHADOWBOXING": "2"
     }
   },
   {
@@ -33,7 +35,8 @@
     "layout_type": "SpacePoi",
     "defs": {
       "SHADER_V": "1",
-      "SHADER_SPACE": "1"
+      "SHADER_SPACE": "1",
+      "GOGGLES2_SHADOWBOXING": "2"
     }
   },
 ]

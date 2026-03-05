@@ -132,6 +132,8 @@ unsafe fn load_nexus() {
     let Some(aapi) = addon_api() else { return };
     #[cfg(feature = "space")]
     (aapi.renderer.register)(RenderType::PreRender, unsafe_render_pre);
+    #[cfg(feature = "space")]
+    (aapi.renderer.register)(RenderType::PostRender, unsafe_render_post);
     (aapi.renderer.register)(RenderType::Render, unsafe_render);
     (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options);
     (aapi.wnd_proc.register)(wnd);
@@ -157,6 +159,11 @@ extern "C-unwind" fn unsafe_render_pre() {
         }
     }
 }
+extern "C-unwind" fn unsafe_render_post() {
+    unsafe {
+        RenderState::post_render(AddonHostName::Nexus);
+    }
+}
 extern "C-unwind" fn unsafe_render() {
     unsafe {
         #[cfg(not(feature = "space"))]
@@ -169,6 +176,8 @@ extern "C-unwind" fn unsafe_render() {
             RenderMachine::turn_ui_entry(ui);
             RenderState::render_ui(ui, frame.as_ref());
         });
+        #[cfg(not(feature = "space"))]
+        unsafe_render_post();
     }
 }
 extern "C-unwind" fn unsafe_options() {
@@ -227,7 +236,10 @@ pub fn uninit_cleanup() {
             (aapi.renderer.deregister)(unsafe_options);
             (aapi.renderer.deregister)(unsafe_options_fallback);
             (aapi.renderer.deregister)(unsafe_render);
+            #[cfg(feature = "space")]
             (aapi.renderer.deregister)(unsafe_render_pre);
+            #[cfg(feature = "space")]
+            (aapi.renderer.deregister)(unsafe_render_post);
             (aapi.wnd_proc.deregister)(wnd);
         }
     }
