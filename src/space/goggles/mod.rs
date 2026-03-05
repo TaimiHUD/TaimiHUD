@@ -35,7 +35,7 @@ pub use self::lens::{
 pub use self::camera::{
     FerretResource, PerspectiveFerret, CameraFerret,
 };
-#[cfg(feature = "goggles2")]
+#[cfg(feature = "goggles2-camera")]
 pub(crate) use self::camera::g2;
 
 pub mod lens;
