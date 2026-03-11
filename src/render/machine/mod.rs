@@ -103,7 +103,7 @@ pub struct RenderMachine {
     pub mumblelink_state: UiState,
     pub mumblelink_player: RenderPositioning,
     #[cfg(feature = "space")]
-    pub mumblelink_camera: RenderPositioning,
+    pub mumblelink_camera: RenderPosition,
     pub mumblelink_users: RenderUsers,
     pub gameplay: GameplayState,
     #[cfg(not(any(feature = "markers", feature = "space")))]
@@ -126,6 +126,8 @@ impl RenderMachine {
     pub const USERS: RenderUsers = RenderUsers::all();
 
     pub const POSITIONING_EMPTY: RenderPositioning = (Point3::INFINITY, Vector3::INFINITY);
+    #[cfg(feature = "space")]
+    pub const POSITION_EMPTY: RenderPosition = (Point3::INFINITY, Vector3::INFINITY, Vector3::INFINITY);
 
     pub fn new() -> Self {
         Self {
@@ -172,7 +174,7 @@ impl RenderMachine {
             mumblelink_state: UiState::empty(),
             mumblelink_player: Self::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
-            mumblelink_camera: Self::POSITIONING_EMPTY,
+            mumblelink_camera: Self::POSITION_EMPTY,
             mumblelink_users: Self::USERS,
             gameplay: GameplayState::INITIAL,
             #[cfg(not(any(feature = "markers", feature = "space")))]
@@ -540,9 +542,9 @@ impl RenderMachine {
                     "player @ {pos:?} front={dir:?}"
                 );
             }
-            if let Some((pos, dir)) = self.get_camera_mumblelink() {
+            if let Some((pos, dir, up)) = self.get_camera_mumblelink() {
                 frame_log!(;
-                    "camera @ {pos:?} dir={dir:?}"
+                    "camera @ {pos:?} dir={dir:?} up={up:?}"
                 );
             }
         }

@@ -16,7 +16,11 @@ use {
     },
 };
 #[cfg(any(feature = "markers", feature = "space"))]
-use {arcloader_mumblelink::identity::MumbleIdentity, taimi_meta::ui::{realign_fov, MapOpen}};
+use {
+    arcloader_mumblelink::identity::MumbleIdentity,
+    taimi_meta::ui::{realign_fov, MapOpen},
+    crate::render::machine::RenderPosition,
+};
 
 impl RenderMachine {
     pub const LOCAL_UP: Vector3<LocalSpace> = Vector3::Y;
@@ -48,7 +52,7 @@ impl RenderMachine {
     }
 
     #[cfg(feature = "space")]
-    pub fn get_camera_mumblelink(&self) -> Option<RenderPositioning> {
+    pub fn get_camera_mumblelink(&self) -> Option<RenderPosition> {
         match self.mumblelink_camera.1.x.is_infinite()
             || rt::vec_eq(self.mumblelink_camera.1, Vector3::ZERO)
         {
@@ -178,21 +182,21 @@ impl RenderMachine {
         }
 
         let _camera_update = if !self.mumblelink_users.is_empty() {
-            let (camera_pos, camera_front) = unsafe {
+            let camera = unsafe {
                 let camera = &raw const (*ml.as_ptr()).camera;
                 let camera_pos = Point3::from_array(ptr::read_volatile(&raw const (*camera).position));
                 let camera_front = Vector3::from_array(ptr::read_volatile(&raw const (*camera).front));
+                let camera_up = Vector3::from_array(ptr::read_volatile(&raw const (*camera).top));
                 if !crate::built_info::IS_TAGGED_VERSION {
-                    let up = ptr::read_volatile(&raw const (*camera).top);
-                    if !rt::vec_eq(up, [0.0; 3]) {
-                        log::info!("Whoa, MumbleLink actually populates camera_up ({up:?})? Unthinkable!");
+                    if !rt::vec_eq(camera_up, Vector3::ZERO) {
+                        log::info!("Whoa, MumbleLink actually populates camera_up ({camera_up:?})? Unthinkable!");
                     }
                 }
-                (camera_pos, camera_front)
+                (camera_pos, camera_front, camera_up)
             };
-            let camera_dirty = !rt::vec_eq(self.mumblelink_camera.0, camera_pos)
-                || !rt::vec_eq(self.mumblelink_camera.1, camera_front);
-            self.mumblelink_camera = (camera_pos, camera_front);
+            let camera_dirty = !rt::vec_eq(self.mumblelink_camera.0, camera.0)
+                || !rt::vec_eq(self.mumblelink_camera.1, camera.1);
+            self.mumblelink_camera = camera;
             camera_dirty.then_some(())
         } else {
             None

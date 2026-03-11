@@ -235,6 +235,7 @@ impl MarkerInstanceData {
     pub const FLAG_WALL: u32 = 0x1000;
     /// avoid alpha blending if `occlude` is set
     pub const FLAG_OPAQUE: u32 = 0x2000;
+    pub const FLAG_RESERVED_14: u32 = 0x4000;
     /// marker for safety
     pub const FLAG_IS_TRAIL: u32 = 0x8000;
     pub const FLAG_FACE_CULL: u32 = 0x0002_0000;

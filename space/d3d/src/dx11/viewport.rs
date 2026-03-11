@@ -47,14 +47,14 @@ impl Viewport {
     }
     /// TODO: unclear if null arg is required to get full/untruncated count or not
     pub fn new_snapshot_vec(context: &Dx11Context) -> Vec<Self> {
-        let initial_len = 8.min(Self::MAX_VIEWPORTS);
-        let mut viewports = Vec::<D3D11_VIEWPORT>::with_capacity(initial_len);
-        let mut viewport_count = 0;
+        let mut capacity = 8.min(Self::MAX_VIEWPORTS) as u32;
+        let mut viewports = Vec::<D3D11_VIEWPORT>::with_capacity(capacity as usize);
+        let mut viewport_count = capacity;
         for _ in 0..2 {
             unsafe {
                 let uninit = viewports.spare_capacity_mut();
-                let capacity = uninit.len() as u32;
-                viewport_count = capacity;
+                capacity = viewport_count;
+                debug_assert!(uninit.len() >= viewport_count as usize);
                 context.RSGetViewports(
                     &mut viewport_count,
                     Some(uninit.as_mut_ptr() as *mut D3D11_VIEWPORT),
@@ -74,7 +74,6 @@ impl Viewport {
                     _ => (),
                 }
                 if viewport_count > capacity {
-                    viewport_count = capacity;
                     viewports.reserve_exact(viewport_count as usize);
                 } else {
                     break
@@ -131,6 +130,9 @@ impl Viewport {
     pub fn is_empty(&self) -> bool {
         *self == Viewport::EMPTY
     }
+    pub fn get(&self) -> Option<&Self> {
+        (!self.is_empty()).then_some(self)
+    }
     pub fn box2(&self) -> Box2<f32> {
         let min = Point2::new(
             self.viewport.TopLeftX,
@@ -163,9 +165,9 @@ impl Viewport {
     pub fn slice_truncate(viewports: &[Self]) -> &[Self] {
         let len = match viewports.iter().rposition(|vp| !vp.is_empty()) {
             Some(len) => len,
-            None => return viewports,
+            None => return &[],
         };
-        unsafe { viewports.get_unchecked(..len) }
+        unsafe { viewports.get_unchecked(..=len) }
     }
 
     pub fn slice_as_raw(viewports: &[Self]) -> &[D3D11_VIEWPORT] {

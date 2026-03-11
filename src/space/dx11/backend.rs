@@ -125,7 +125,11 @@ impl RenderBackend {
     }
 
     const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC =
-        D3D11_RENDER_TARGET_BLEND_DESC { ..BlendState::TARGET_DESC_ADDITIVE };
+        D3D11_RENDER_TARGET_BLEND_DESC {
+            #[cfg(feature = "goggles2")]
+            RenderTargetWriteMask: (d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0 | d3d11::D3D11_COLOR_WRITE_ENABLE_GREEN.0 | d3d11::D3D11_COLOR_WRITE_ENABLE_BLUE.0) as _,
+            ..BlendState::TARGET_DESC_ADDITIVE
+        };
 
     const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
         MinLOD: 0.0,

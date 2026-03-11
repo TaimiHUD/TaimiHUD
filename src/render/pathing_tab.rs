@@ -1007,6 +1007,19 @@ impl PathingConfig {
                 },
             }
         }
+        #[cfg(feature = "goggles2-project")]
+        {
+            let mut project_enabled = machine.goggles.project_enabled;
+            ui.same_line();
+            if ui.checkbox("Projector", &mut project_enabled) {
+                Self::set_pathing(|s| s.space.goggles.project_enabled = Some(project_enabled));
+                if project_enabled {
+                    machine.goggles.project_enable();
+                } else {
+                    machine.goggles.project_disable();
+                }
+            }
+        }
 
         if !needs_setup {
             ui.unindent();

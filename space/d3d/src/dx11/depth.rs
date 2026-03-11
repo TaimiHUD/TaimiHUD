@@ -12,7 +12,7 @@ pub use crate::dx11::d3d11::{
 };
 use crate::{
     dx11::{
-        buffer::{self, Resource, Texture2, D3D11_TEXTURE2D_DESC},
+        buffer::{self, Resource, Texture2, View, D3D11_TEXTURE2D_DESC},
         prelude::*,
     },
     state::D3dStateSnapshot,
@@ -82,6 +82,14 @@ impl DepthState {
             .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce state pointer")))
             .context("CreateDepthStencilState")
             .map(Into::into)
+    }
+
+    pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_DESC {
+        let mut out = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc(&mut out);
+        }
+        out
     }
 }
 
@@ -153,7 +161,11 @@ impl_d3d! {
     unsafe impl Dx11Child for ID3D11DepthStencilView;
 
     @[transparent(Dx11Child <= ID3D11DepthStencilView)]
-    pub struct DepthView.view;
+    pub struct DepthView {
+        pub view: View,
+    }
+    @into()
+    @deref(View);
 }
 
 impl_d3d! { impl bitflags for
@@ -168,7 +180,7 @@ impl ClearFlags {
 
 impl DepthView {
     pub fn clear(&self, context: &Dx11Context, flags: ClearFlags, depth: f32, stencil: u8) {
-        unsafe { context.ClearDepthStencilView(&self.view, flags.to_raw(), depth, stencil) }
+        unsafe { context.ClearDepthStencilView(self.as_d3d(), flags.to_raw(), depth, stencil) }
     }
 
     pub const fn desc_for_texture2(
@@ -228,12 +240,8 @@ impl DepthView {
     pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_VIEW_DESC {
         let mut out = Default::default();
         unsafe {
-            self.view.GetDesc(&mut out);
+            self.as_d3d().GetDesc(&mut out);
         }
         out
-    }
-
-    pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
-        unsafe { self.view.GetResource() }.context("ID3D11DepthStencilView::GetResource")
     }
 }

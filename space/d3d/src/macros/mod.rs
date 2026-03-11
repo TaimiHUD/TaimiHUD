@@ -59,6 +59,18 @@ macro_rules! impl_d3d {
                 }
             }
             #[inline]
+            pub const fn as_d3d_raw(&self) -> &::core::ptr::NonNull<::core::ffi::c_void> {
+                unsafe {
+                    ::core::mem::transmute(self)
+                }
+            }
+            #[inline]
+            pub const unsafe fn from_d3d_raw_ref(raw: &::core::ptr::NonNull<::core::ffi::c_void>) -> &Self {
+                unsafe {
+                    ::core::mem::transmute(raw)
+                }
+            }
+            #[inline]
             pub const fn as_d3d_mut(&mut self) -> &mut $out {
                 unsafe {
                     ::core::mem::transmute(self)

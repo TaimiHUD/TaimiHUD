@@ -206,9 +206,8 @@ pub struct FerretResource {
     pub perspective: PerspectiveFerret,
     pub camera: CameraFerret,
     pub granularity: u8,
-    pub buffer_ferret: u64,
-    pub ferret_draw: bool,
-    pub ferret_drawn: bool,
+    #[cfg(feature = "goggles2-project")]
+    pub project: super::project::ProjectFerret,
     pub snatch_camera: SnatchMatrix,
     pub found_camera: Option<(usize, usize, bool)>,
     pub found_perspective: Option<(usize, usize)>,
@@ -223,9 +222,8 @@ impl FerretResource {
         camera: CameraFerret::EMPTY,
         granularity: Self::DEFAULT_GRANULARITY,
         size_range: 0u16..0u16,
-        buffer_ferret: 0,
-        ferret_draw: false,
-        ferret_drawn: true,
+        #[cfg(feature = "goggles2-project")]
+        project: super::project::ProjectFerret::EMPTY,
         snatch_camera: SnatchMatrix::DEFAULT,
         snatch_camera_smooth: SnatchMatrix::DEFAULT,
         snatch_perspective: SnatchMatrix::DEFAULT,
@@ -238,13 +236,6 @@ impl FerretResource {
         static FERRET: SyncUnsafeCell<FerretResource> =
             SyncUnsafeCell::new(FerretResource::DEFAULT);
         FERRET.get()
-    }
-    pub fn set_buffer_ferret(v: u64) {
-        g2!(*&mut ferret.buffer_ferret = v)
-    }
-    #[inline]
-    pub fn set_ferret_draw(v: bool) {
-        g2!(*&mut ferret.ferret_draw = v)
     }
     #[inline]
     pub fn set_display_size(v: glam::Vec2) {
@@ -792,6 +783,8 @@ impl CameraFerret {
         if let Some((offset, is_m43, accuracy)) = offset {
             let accuracy = ((dir.truncate() - accuracy).abs().element_sum() * 100.0).min(u8::MAX as f32) as u8;
             CameraSearch::with_mut_unchecked(|s| s.report(buf_dest, CameraMatch {
+                #[cfg(feature = "goggles2-project")]
+                drawn: FerretResource::project_report_drawn(),
                 is_m43,
                 offset: offset as _,
                 accuracy,
@@ -1031,6 +1024,8 @@ impl Default for SnatchMatrix {
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct CameraMatch {
+    #[cfg(feature = "goggles2-project")]
+    pub drawn: bool,
     pub is_m43: bool,
     pub accuracy: u8,
     pub offset: u32,
@@ -1100,6 +1095,22 @@ macro_rules! g2 {
             #[allow(unused_unsafe)]
             ferret_v_ => unsafe {
                 ::core::ptr::write(&raw mut (*$crate::space::goggles::FerretResource::get())$(.$field)+, ferret_v_)
+            },
+        }
+    };
+    (&raw mut ferret$(.$field:ident)+) => {
+        match () {
+            #[allow(unused_unsafe)]
+            () => unsafe {
+                &raw mut (*$crate::space::goggles::FerretResource::get())$(.$field)+
+            },
+        }
+    };
+    (&raw const ferret$(.$field:ident)+) => {
+        match () {
+            #[allow(unused_unsafe)]
+            () => unsafe {
+                &raw const (*$crate::space::goggles::FerretResource::get())$(.$field)+
             },
         }
     };

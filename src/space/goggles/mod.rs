@@ -1,5 +1,6 @@
 use {
     crate::render::machine::{frame_log, FrameState},
+    crate::render::RenderState,
     anyhow::anyhow,
     core::{
         ffi::c_void,
@@ -11,7 +12,12 @@ use {
     },
     retour::GenericDetour,
     std::sync::OnceLock,
-    taimi_d3d::dx11::buffer::ResourceDimension,
+    taimi_d3d::dx11::{
+        buffer::ResourceDimension,
+        RenderTargetView,
+        DepthView,
+        DepthState,
+    },
     //taimi_d3d::prelude::*,
     windows::{
         core::{IUnknown, Interface, InterfaceRef},
@@ -29,7 +35,7 @@ use {
     taimi_hoard::lazyfmt,
 };
 pub use self::lens::{
-    current_lens, clear_lens, pick_lens, LensClass,
+    current_lens, clear_lens, pick_lens,
 };
 #[cfg(feature = "goggles2-camera")]
 pub use self::camera::{
@@ -39,6 +45,8 @@ pub use self::camera::{
 pub(crate) use self::camera::g2;
 
 pub mod lens;
+#[cfg(feature = "goggles2-project")]
+pub mod project;
 #[cfg(feature = "goggles2-camera")]
 pub mod camera;
 
@@ -48,6 +56,7 @@ pub struct Goggles {
     pub update_subresource: GenericDetour<UpdateSubresource>,
     pub set_depth_state: GenericDetour<SetDepthState>,
     pub clear_depth: GenericDetour<ClearDepth>,
+    pub clear_colour: GenericDetour<ClearColour>,
     pub set_buffers: GenericDetour<SetBuffers>,
 }
 
@@ -75,6 +84,11 @@ type ClearDepth = unsafe extern "system" fn(
     depth: f32,
     fill_value: u8,
 );
+type ClearColour = unsafe extern "system" fn(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    view: Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
+    colour: *const [f32; 4],
+);
 type Release = unsafe extern "system" fn(this: InterfaceRef<'static, IUnknown>) -> u32;
 type UpdateSubresource = unsafe extern "system" fn(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
@@ -98,45 +112,36 @@ unsafe extern "system" fn taimi_set_depth_state(
     state: Option<InterfaceRef<'static, ID3D11DepthStencilState>>,
     stencil_ref: u32,
 ) {
-    if frame_log!(::is_game()) {
-        frame_log!(;"D3D11DeviceContext::OMSetDepthStencilState({this:?}, {state:?}, {stencil_ref:?})");
-    }
+    #[cfg(feature = "goggles2-project")]
+    let mut project = None;
 
-    if FrameState::is_game() {
-        lens::set_depth_state(this, state, stencil_ref);
-    }
-
-    let mut trigger = false;
-    if let Some(state) = state {
-        if state.as_raw() as usize == g2!(*&ferret.buffer_ferret) as usize {
-            trigger = true;
+    if FrameState::is_game() && RenderState::is_render_thread() {
+        let state = state.as_ref()
+            .map(|s| DepthState::from_d3d_ref(s));
+        if frame_log!(::is_enabled()) {
+            frame_log!(;"D3D11DeviceContext::OMSetDepthStencilState({state:?}, {stencil_ref:?})");
+        }
+        lens::set_depth_state(this.as_ref(), state, stencil_ref);
+        #[cfg(feature = "goggles2-project")]
+        {
+            project = Some(project::set_state_pre(&this, state, stencil_ref));
         }
     }
-    if trigger {
-        #[cfg(feature = "goggles2")]
-        if g2!(*&ferret.ferret_draw) {
-            if FrameState::is_game() && !g2!(*&ferret.ferret_drawn) {
-                g2!(*&mut ferret.ferret_drawn = true);
-                let mut state = crate::render::RenderState::lock();
-                if let Some(state) = &mut *state {
-                    if let Some(Ok(engine)) = &mut state.engine {
-                        engine.render_carefully(&mut state.machine, &this);
-                    }
-                }
-                drop(state);
-                //log::debug!("careful'd");
-            }
-        } else {
-            return
-        }
-    }
-    match GOGGLES.get() {
+
+    let res = match GOGGLES.get() {
         Some(orig) => orig.set_depth_state.call(this, state, stencil_ref),
         None => {
             log::warn!("set_depth_state in place without original?");
             return
         },
+    };
+
+    #[cfg(feature = "goggles2-project")]
+    if let Some(project) = project {
+        project::set_state_post(this.as_ref(), project);
     }
+
+    res
 }
 
 unsafe extern "system" fn taimi_set_buffers(
@@ -151,7 +156,7 @@ unsafe extern "system" fn taimi_set_buffers(
             0 => &[],
             count => core::slice::from_raw_parts(buffers_ptr, count),
         };
-        frame_log!(;"D3D11DeviceContext::SetBuffers({slot}, {this:?}, {buffers:?})");
+        frame_log!(;"D3D11DeviceContext::SetBuffers({slot}, {buffers:?})");
         for (i, buffer) in buffers.iter().enumerate() {
             let Some(buffer) = buffer else { continue };
             let mut desc = Default::default();
@@ -172,49 +177,23 @@ unsafe extern "system" fn taimi_set_targets(
     views_ptr: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
     depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
 ) {
-    if frame_log!(::is_game()) {
+    #[cfg(feature = "goggles2-project")]
+    let mut project = None;
+    if FrameState::is_game() && RenderState::is_render_thread() {
+        let depth = depth_view.as_ref().map(|v| DepthView::from_d3d_ref(v));
         let views = match count as usize {
             0 => &[],
-            count => core::slice::from_raw_parts(views_ptr, count),
+            count => core::slice::from_raw_parts(views_ptr as *const Option<RenderTargetView>, count),
         };
-        frame_log!(;"D3D11DeviceContext::OMSetRenderTargets({this:?}, {views:?}, {depth_view:?})");
-    }
-    if FrameState::is_game() {
-        lens::set_targets(this, count, views_ptr, depth_view);
-    }
+        if frame_log!(::is_enabled()) {
+            frame_log!(;"D3D11DeviceContext::OMSetRenderTargets({views:?}, {depth:?})");
+        }
+        #[cfg(feature = "goggles2-project")]
+        {
+            project = Some(project::set_targets_pre(this.as_ref(), views, depth));
+        }
 
-    if count > 0 {
-        let mut trigger = false;
-        if let Some(v) = depth_view {
-            if v.as_raw() as usize == g2!(*&ferret.buffer_ferret) as usize {
-                trigger = true;
-            }
-        }
-        if let Some(v) = *views_ptr {
-            if v.as_raw() as usize == g2!(*&ferret.buffer_ferret) as usize {
-                trigger = true;
-            }
-        }
-        if trigger {
-            if let Some(v) = *views_ptr {
-                #[cfg(feature = "goggles2")]
-                if g2!(*&ferret.ferret_draw) {
-                    if FrameState::is_game() && !g2!(*&ferret.ferret_drawn) {
-                        g2!(*&mut ferret.ferret_drawn = true);
-                        let mut state = crate::render::RenderState::lock();
-                        if let Some(state) = &mut *state {
-                            if let Some(Ok(engine)) = &mut state.engine {
-                                engine.render_carefully(&mut state.machine, &this);
-                            }
-                        }
-                        drop(state);
-                        //log::debug!("careful'd");
-                    }
-                } else {
-                    this.ClearRenderTargetView(v, &[0.5, 0.7, 0.2, 0.5]);
-                }
-            }
-        }
+        lens::set_targets(this.as_ref(), depth);
     }
     match GOGGLES.get() {
         Some(orig) => orig.set_targets.call(this, count, views_ptr, depth_view),
@@ -222,6 +201,11 @@ unsafe extern "system" fn taimi_set_targets(
             log::warn!("set_targets in place without original?");
         },
     };
+
+    #[cfg(feature = "goggles2-project")]
+    if let Some(project) = project {
+        project::set_targets_post(this.as_ref(), project);
+    }
 }
 unsafe extern "system" fn taimi_update_subresource(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
@@ -356,16 +340,65 @@ unsafe extern "system" fn taimi_clear_depth(
     depth: f32,
     fill_value: u8,
 ) {
-    if frame_log!(::is_game()) {
-        frame_log!(;"D3D11DeviceContext::ClearDepthStencilView({this:?}, {view:?}, {flags:?}, {depth:?}, {fill_value:?})");
+    #[cfg(feature = "goggles2-project")]
+    let mut project = None;
+    if FrameState::is_game() && RenderState::is_render_thread() {
+        if frame_log!(::is_enabled()) {
+            frame_log!(;"D3D11DeviceContext::ClearDepthStencilView({view:?}, {flags:?}, {depth:?}, {fill_value:?})");
+        }
+        #[cfg(feature = "goggles2-project")]
+        {
+            project = Some(project::clear_depth_pre(&this, view, flags, depth, fill_value));
+        }
     }
-    match GOGGLES.get() {
+
+    let res = match GOGGLES.get() {
         Some(orig) => orig.clear_depth.call(this, view, flags, depth, fill_value),
         None => {
             log::warn!("clear_depth in place without original?");
             return
         },
     };
+
+    #[cfg(feature = "goggles2-project")]
+    if let Some(project) = project {
+        project::clear_depth_post(this.as_ref(), project);
+    }
+
+    res
+}
+unsafe extern "system" fn taimi_clear_colour(
+    this: InterfaceRef<'static, ID3D11DeviceContext>,
+    view: Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
+    colour: *const [f32; 4],
+) {
+    #[cfg(feature = "goggles2-project")]
+    let mut project = None;
+    if FrameState::is_game() && RenderState::is_render_thread() {
+        let colour = &*colour;
+        if frame_log!(::is_enabled()) {
+            frame_log!(;"D3D11DeviceContext::ClearRenderTargetView({view:?}, {colour:?})");
+        }
+        #[cfg(feature = "goggles2-project")]
+        {
+            project = Some(project::clear_colour_pre(&this, view, colour));
+        }
+    }
+
+    let res = match GOGGLES.get() {
+        Some(orig) => orig.clear_colour.call(this, view, colour),
+        None => {
+            log::warn!("clear_colour in place without original?");
+            return
+        },
+    };
+
+    #[cfg(feature = "goggles2-project")]
+    if let Some(project) = project {
+        project::clear_colour_post(this.as_ref(), project);
+    }
+
+    res
 }
 
 // TODO: pass ID3D11DepthStencilView_Vtbl .-.
@@ -377,6 +410,10 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
     let clear_depth: unsafe extern "system" fn(*mut c_void, *mut c_void, u32, f32, u8) =
         vtable.ClearDepthStencilView;
     let clear_depth: ClearDepth = unsafe { transmute(clear_depth) };
+
+    let clear_colour: unsafe extern "system" fn(*mut c_void, *mut c_void, *const f32) =
+        vtable.ClearRenderTargetView;
+    let clear_colour: ClearColour = unsafe { transmute(clear_colour) };
 
     let set_buffers: unsafe extern "system" fn(*mut c_void, u32, u32, *const *mut c_void) =
         vtable.VSSetConstantBuffers;
@@ -407,6 +444,7 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
         Goggles {
             set_depth_state: GenericDetour::new(set_depth_state, taimi_set_depth_state)?,
             clear_depth: GenericDetour::new(clear_depth, taimi_clear_depth)?,
+            clear_colour: GenericDetour::new(clear_colour, taimi_clear_colour)?,
             set_buffers: GenericDetour::new(set_buffers, taimi_set_buffers)?,
             set_targets: GenericDetour::new(set_targets, taimi_set_targets)?,
             update_subresource: GenericDetour::new(update_subresource, taimi_update_subresource)?,
@@ -427,6 +465,7 @@ pub fn enable() -> anyhow::Result<()> {
             release_depth_view.enable()?;
         }
         orig.clear_depth.enable()?;
+        orig.clear_colour.enable()?;
         orig.set_buffers.enable()?;
         orig.set_depth_state.enable()?;
         orig.update_subresource.enable()?;
@@ -453,6 +492,9 @@ pub fn disable() -> anyhow::Result<()> {
             res = Err(e.into());
         }
         if let Err(e) = orig.clear_depth.disable() {
+            res = Err(e.into());
+        }
+        if let Err(e) = orig.clear_colour.disable() {
             res = Err(e.into());
         }
         if let Err(e) = orig.set_buffers.disable() {

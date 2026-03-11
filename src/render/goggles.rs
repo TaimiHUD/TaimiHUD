@@ -37,9 +37,12 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
                 None => format!("{key:?}"),
             },
         };
+        let mut new_lens = None;
         if let Some(combo) = ui.begin_combo("Lens", preview) {
-            let mut new_lens = None;
             for (&key, &clss) in lenses.iter() {
+                if matches!(clss, LensClass::Unknown) {
+                    continue
+                }
                 let selected = imgui::Selectable::new(format!("{clss:?} ({key:08x})"))
                     .selected(selected_lens as usize == key)
                     .build(ui);
@@ -48,81 +51,242 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
                 }
             }
             combo.end();
+        }
+        match new_lens {
+            None if ui.is_item_clicked_with_button(imgui::MouseButton::Right) => {
+                LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+            },
+            None => (),
+            Some((_, LensClass::Space)) => {
+                LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
+            },
+            Some((key, _)) => {
+                LENS_PTR.store(key as *mut _, Ordering::Relaxed);
+            },
+        }
 
-            match new_lens {
-                None => (),
-                Some((_, LensClass::Space)) => {
-                    LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-                },
-                Some((key, _)) => {
-                    LENS_PTR.store(key as *mut _, Ordering::Relaxed);
-                },
-            }
-        }
-        thread_local! {
-            static BUF: std::cell::RefCell<String> = std::cell::RefCell::default();
-            static DRAW: std::cell::Cell<bool> = std::cell::Cell::default();
-        }
-        BUF.with_borrow_mut(|buf| {
-            let mut draw = DRAW.get();
-            if ui.checkbox("draw", &mut draw) {
-                DRAW.set(draw);
-                goggles::FerretResource::set_ferret_draw(draw);
-            }
-            ui.same_line();
-            let mut cam = machine.goggles.camera_enabled;
-            if ui.checkbox("camera", &mut cam) {
-                match cam {
-                    true => machine.goggles.camera_enable(),
-                    false => machine.goggles.camera_disable(),
+        let selected_proj = goggles::FerretResource::project_target_buffer();
+        let mut new_proj = None;
+        if let Some(selected_proj) = selected_proj {
+            let preview = match selected_proj {
+                None => "Default".into(),
+                Some(key) =>
+                    format!("{key:p}"),
+            };
+            if let Some(combo) = ui.begin_combo("Projection", preview) {
+                let selected_off = imgui::Selectable::new("Off")
+                    .selected(selected_proj == None)
+                    .build(ui);
+                if selected_off {
+                    new_proj = Some((None, None));
                 }
-            }
-            ui.same_line();
-            if ui.button("search") {
-                let min = 144;
-                let min = 60;
-                let max = 224;
-                let max = 320;
-                let max = 0x4080;
-                goggles::FerretResource::set_granularity(4);
-                goggles::FerretResource::set_size_range(min..(max + 1));
-            }
-            ui.same_line();
-            if ui.button("clr") {
-                goggles::FerretResource::set_perspective(goggles::PerspectiveFerret::EMPTY);
-                goggles::FerretResource::set_camera(goggles::CameraFerret::EMPTY);
-                goggles::FerretResource::set_size_range(8..8);
-                goggles::FerretResource::clear_camera_found();
-                goggles::FerretResource::clear_perspective_found();
-                machine.goggles.camera_enabled = false;
-            }
-            if ui.input_text("ferret", buf).enter_returns_true(true).build() {
-                let f = if let Some(rest) = buf.strip_prefix("0x") {
-                    u64::from_str_radix(rest, 16).ok()
-                } else {
-                    buf.parse().ok()
-                };
-                if let Some(f) = f {
-                    goggles::FerretResource::set_buffer_ferret(f)
-                } else {
-                    log::warn!("ferret invalid");
-                }
-            }
-            let mut camera_b = 0;
-            if let Some((b, off, _is_m43)) = goggles::FerretResource::found_camera() {
-                ui.text(format!("cam: {:p}@{off:#x}", b as *mut ()));
-                camera_b = b;
-            }
-            if let Some((b, off)) = goggles::FerretResource::found_perspective() {
-                use taimi_hoard::lazyfmt;
-                if b != camera_b {
-                    if camera_b != 0 {
-                        ui.same_line();
+                for (&key, &clss) in lenses.iter() {
+                    if !matches!(clss, LensClass::World | LensClass::Test | LensClass::UI | LensClass::Dummy) {
+                        continue
                     }
-                    ui.text(format!("persp{}@{off:#x}", lazyfmt::or_empty((b != camera_b).then_some(format_args!(": {:p}", b as *mut ())))));
+                    let selected = imgui::Selectable::new(format!("LENS={clss:?} ({key:08x})"))
+                        .selected(selected_proj.map(|p| p.as_ptr() as usize) == Some(key))
+                        .build(ui);
+                    if selected {
+                        new_proj = Some((core::ptr::NonNull::new(key as *mut _), None));
+                    }
+                }
+                for (key, info) in goggles::FerretResource::project_iter_ui(goggles::project::ProjectClassification::DEFAULT_TARGET) {
+                    let ty = match info.kind {
+                        goggles::project::ProjectBufferKind::DepthView => "DV",
+                        goggles::project::ProjectBufferKind::RenderTarget => "RT",
+                    };
+                    let mut selected = imgui::Selectable::new(format!("{ty}={:?} ({:#08x})", info.classification, key.as_ptr() as usize))
+                        .selected(selected_proj == Some(key))
+                        .build(ui);
+                    if ui.is_item_hovered() {
+                        if ui.is_mouse_down(imgui::MouseButton::Left) {
+                            selected = true;
+                        }
+                        let now = goggles::g2!(*&ferret.project.frame_count);
+                        let lifetime = info.age();
+                        let seen = info.seen_since(now);
+                        ui.tooltip_text(format!("seen={seen} age={lifetime}"));
+                    }
+                    if selected {
+                        new_proj = Some((Some(key), Some(info.classification)));
+                    }
                 }
             }
-        });
+            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+                new_proj = Some((None, Some(goggles::project::ProjectClassification::DEFAULT_TARGET)));
+            }
+            // TODO: use this for target and enable, then no need to unwrap
+            let mut request = goggles::FerretResource::project_target_request().unwrap();
+            let selected_mode = request.cond;
+            let preview: &str = selected_mode.into();
+            let mut new_mode = None;
+            let mut request_dirty = false;
+            if let Some(combo) = ui.begin_combo("pmode", preview) {
+                for &mode in <goggles::project::ProjectCondition as strum::VariantArray>::VARIANTS {
+                    let modename: &str = mode.into();
+                    let selected = imgui::Selectable::new(modename)
+                        .selected(selected_mode == mode)
+                        .build(ui);
+                    if selected {
+                        new_mode = Some(mode)
+                    }
+                }
+                combo.end();
+            }
+            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+                new_mode = Some(goggles::project::ProjectCondition::DEFAULT_TARGET);
+            }
+            if let Some(new_mode) = new_mode {
+                request.cond = new_mode;
+                request_dirty = true;
+            }
+
+            if ui.checkbox("patient", &mut request.patient) {
+                request_dirty = true;
+            }
+            ui.same_line();
+            if ui.checkbox("empty", &mut request.empty) {
+                request_dirty = true;
+            }
+
+            if request_dirty {
+                goggles::FerretResource::project_set_target_request(Some(request));
+            }
+        } else {
+            let mut proj = false;
+            if ui.checkbox("Projection", &mut proj) {
+                debug_assert!(proj);
+                new_proj = Some((None, Some(goggles::project::ProjectClassification::DEFAULT_TARGET)));
+            }
+        }
+        match new_proj {
+            None => (),
+            Some((None, None)) => {
+                goggles::FerretResource::project_set_target_request(None);
+            },
+            Some((key, classification)) => {
+                goggles::FerretResource::project_set_target(key, classification);
+            },
+        }
+
+        let selected_shadowbox = goggles::FerretResource::project_shadowbox_buffer();
+        let mut new_shadowbox = None;
+        if let Some(selected_shadowbox) = selected_shadowbox {
+            let preview = match selected_shadowbox {
+                None => "Default".into(),
+                Some(key) =>
+                    format!("{key:p}"),
+            };
+            if let Some(_combo) = ui.begin_combo("Shadowboxing", preview) {
+                let selected_off = imgui::Selectable::new("Off")
+                    .selected(selected_shadowbox == None)
+                    .build(ui);
+                if selected_off {
+                    new_shadowbox = Some((None, None));
+                }
+                for (key, info) in goggles::FerretResource::project_iter_ui(goggles::project::ProjectClassification::DEFAULT_SHADOWBOX) {
+                    let selected = imgui::Selectable::new(format!("RT={:?} ({:#08x})", info.classification, key.as_ptr() as usize))
+                        .selected(selected_shadowbox == Some(key))
+                        .build(ui);
+                    if selected {
+                        new_shadowbox = Some((Some(key), Some(info.classification)));
+                    }
+                }
+            }
+            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+                new_shadowbox = Some((None, Some(goggles::project::ProjectClassification::DEFAULT_SHADOWBOX)));
+            }
+        } else {
+            let mut shadowbox = false;
+            if ui.checkbox("Shadowboxing", &mut shadowbox) {
+                debug_assert!(shadowbox);
+                new_shadowbox = Some((None, Some(goggles::project::ProjectClassification::DEFAULT_SHADOWBOX)));
+            }
+        }
+        match new_shadowbox {
+            None => (),
+            Some((None, None)) => {
+                goggles::FerretResource::project_set_shadowbox_request(None);
+            },
+            Some((key, classification)) => {
+                goggles::FerretResource::project_set_shadowbox(key, classification);
+            },
+        }
+
+        if ui.checkbox("dfill", &mut machine.goggles.project_depth_fill) {
+        }
+        ui.same_line();
+        if ui.checkbox("dvp", &mut machine.goggles.project_viewport_force) {
+        }
+        if let Some(target) = unsafe { &mut *goggles::g2!(&raw mut ferret.project.target) } {
+            ui.same_line();
+            let mut debug = matches!(target.action, goggles::project::ProjectAction::DebugDetect);
+            if ui.checkbox("debug", &mut debug) {
+                match debug {
+                    true => target.action = goggles::project::ProjectAction::DebugDetect,
+                    false => target.action = goggles::project::ProjectAction::Draw,
+                }
+            }
+        }
+
+        ui.same_line();
+        ui.checkbox("uninherit", &mut machine.goggles.inherit_render);
+
+        ui.same_line();
+        if ui.checkbox("blen", &mut machine.goggles.project_blend_force) {
+        }
+
+        let mut cam = machine.goggles.camera_enabled;
+        if ui.checkbox("camera", &mut cam) {
+            match cam {
+                true => machine.goggles.camera_enable(),
+                false => machine.goggles.camera_disable(),
+            }
+        }
+        ui.same_line();
+        if ui.button("search") {
+            let min = 144;
+            let min = 60;
+            let max = 224;
+            let max = 320;
+            let max = 0x4080;
+            goggles::FerretResource::set_granularity(4);
+            goggles::FerretResource::set_size_range(min..(max + 1));
+        }
+        ui.same_line();
+        if ui.button("clr") {
+            goggles::FerretResource::set_perspective(goggles::PerspectiveFerret::EMPTY);
+            goggles::FerretResource::set_camera(goggles::CameraFerret::EMPTY);
+            goggles::FerretResource::set_size_range(8..8);
+            goggles::FerretResource::clear_camera_found();
+            goggles::FerretResource::clear_perspective_found();
+            machine.goggles.camera_enabled = false;
+        }
+        let mut camera_b = 0;
+        if let Some((b, off, _is_m43)) = goggles::FerretResource::found_camera() {
+            ui.text(format!("cam: {:p}@{off:#x}", b as *mut ()));
+            camera_b = b;
+        }
+        if let Some((b, off)) = goggles::FerretResource::found_perspective() {
+            use taimi_hoard::lazyfmt;
+            if b != camera_b {
+                if camera_b != 0 {
+                    ui.same_line();
+                }
+                ui.text(format!("persp{}@{off:#x}", lazyfmt::or_empty((b != camera_b).then_some(format_args!(": {:p}", b as *mut ())))));
+            }
+        }
+    }
+
+    ui.same_line();
+    if let Some(report) = goggles::FerretResource::project_report_target() {
+        let count = report.count;
+        ui.text(format!("draws={count}"));
+        if !report.acted {
+            ui.same_line();
+            ui.text("drawfail")
+        }
     }
 }
 

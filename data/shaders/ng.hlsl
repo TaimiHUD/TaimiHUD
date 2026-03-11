@@ -28,6 +28,11 @@ TrailOutputV trail_main_v(TrailInput input)
     float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
 #endif
     output.position = mul(v_render.projection, pos);
+#if GOGGLES2_SHADOWBOXING
+    if (GET_MFLAG(v_trail.marker.flags, 0x4000)) {
+        output.position.z = output.position.z + 0.0015;
+    }
+#endif
 
     float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale * v_trail.marker.anim_scale;
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
@@ -39,7 +44,11 @@ TrailOutputV trail_main_v(TrailInput input)
     uint flags = input.marker.flags & (v_trail.marker.flags | ~MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
-        flags,
+        flags
+#if GOGGLES2_SHADOWBOXING
+            | (v_trail.marker.flags & 0x4000)
+#endif
+        ,
         0
     );
     output.fade = float2(fade, 0.0);
@@ -114,6 +123,11 @@ TrailOutputP trail_main_p(TrailInputP inp)
 
     float feather = feather3.x * feather3.y;
     colour.w = colour.w * overlap * saturate(intensity) * feather*feather * feather3.z;
+#if GOGGLES2_SHADOWBOXING
+    if (GET_MFLAG(flags, 0x4000) && colour.w < 0.992) {
+        discard;
+    }
+#endif
     output.colour = colour;
 
     return output;
@@ -220,6 +234,11 @@ PoiOutputV poi_main_v(PoiInput input)
 #endif
     pos = mul(v_render.projection, pos);
     output.position = pos;
+#if GOGGLES2_SHADOWBOXING
+    if (GET_MFLAG(v_poi.marker.flags, 0x4000)) {
+        output.position.z = output.position.z + 0.0015;
+    }
+#endif
 
     output.tex = input.vertex.tex;
 
@@ -233,7 +252,11 @@ PoiOutputV poi_main_v(PoiInput input)
     uint flags = input.marker.flags & (v_poi.marker.flags | ~MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
-        flags,
+        flags
+#if GOGGLES2_SHADOWBOXING
+            | (v_poi.marker.flags & 0x4000)
+#endif
+        ,
         0
     );
     output.fade = float2(fade, 0.0);
@@ -274,6 +297,11 @@ PoiOutputP poi_main_p(PoiOutputV vout)
 #endif
 
     float alpha = colour.w * saturate(intensity) * feather*feather * feather3.z;
+#if GOGGLES2_SHADOWBOXING
+    if (GET_MFLAG(flags, 0x4000) && alpha < 0.992) {
+        discard;
+    }
+#endif
     output.colour = float4(colour.xyz, alpha);
 
     return output;

@@ -4,10 +4,11 @@ pub use crate::dx11::d3d11::{
     D3D11_CULL_MODE,
     D3D11_FILL_MODE,
     D3D11_RASTERIZER_DESC,
+    D3D11_RENDER_TARGET_VIEW_DESC,
 };
 use crate::{
     dx11::{
-        buffer::Texture2,
+        buffer::{Resource, Texture2, View},
         d3d11::ID3D11Texture2D,
         depth::{ClearFlags, DepthView},
         prelude::*,
@@ -159,11 +160,9 @@ impl<V, D> RenderTargetViews<V, D> {
     where
         V: ID3D11ResourceOf<ID3D11RenderTargetView>,
     {
-        let colour = colour.into().to_array();
+        let colour = colour.into();
         for view in self.views().iter().flatten() {
-            unsafe {
-                context.ClearRenderTargetView(view, &colour);
-            }
+            RenderTargetView::from_d3d_ref(view).clear_rgba(context, colour);
         }
     }
 
@@ -229,13 +228,23 @@ impl_d3d! {
     unsafe impl Dx11Child for ID3D11RenderTargetView;
 
     @[transparent(Dx11Child <= ID3D11RenderTargetView)]
-    pub struct RenderTargetView.view;
+    pub struct RenderTargetView {
+        pub view: View,
+    }
+    @into()
+    @deref(View);
 }
 
 impl RenderTargetView {
+    pub const MAX_RENDER_TARGETS: usize = MAX_RENDER_TARGETS;
+
     pub fn new_with_buffer2(device: &Dx11Device, framebuffer: &Texture2) -> anyhow::Result<Self> {
+        Self::new_with_desc(device, framebuffer, None)
+    }
+    pub fn new_with_desc(device: &Dx11Device, resource: &Resource, desc: Option<&D3D11_RENDER_TARGET_VIEW_DESC>) -> anyhow::Result<Self> {
         let mut out: Option<ID3D11RenderTargetView> = None;
-        unsafe { device.CreateRenderTargetView(&framebuffer.resource, None, Some(&mut out)) }
+        let desc = desc.map(|d| d as *const _);
+        unsafe { device.CreateRenderTargetView(resource, desc, Some(&mut out)) }
             .map_err(anyhow::Error::from)
             .and_then(move |()| out.ok_or_else(|| anyhow!("failed to produce view pointer")))
             .context("CreateRenderTargetView")
@@ -243,6 +252,25 @@ impl RenderTargetView {
     }
     pub fn slice_as_raw_mut(views: &mut [Option<Self>]) -> &mut [Option<ID3D11RenderTargetView>] {
         unsafe { mem::transmute(views) }
+    }
+
+    pub fn get_desc(&self) -> D3D11_RENDER_TARGET_VIEW_DESC {
+        let mut out = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc(&mut out);
+        }
+        out
+    }
+
+    pub fn clear_rgba(&self, context: &Dx11Context, colour: Vec4) {
+        let colour = colour.to_array();
+        self.clear_rgba_ref(context, &colour)
+    }
+    #[inline]
+    pub fn clear_rgba_ref(&self, context: &Dx11Context, colour: &[f32; 4]) {
+        unsafe {
+            context.ClearRenderTargetView(self, &colour);
+        }
     }
 }
 
