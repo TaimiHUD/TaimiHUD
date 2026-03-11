@@ -89,13 +89,15 @@ space-list = [
 ]
 goggles = [
   "dep:retour",
-  #"goggles2",
+  "goggles2",
   "goggles2-camera",
 ]
 goggles2 = [
   "goggles2-camera",
+  "goggles2-project",
 ]
 goggles2-camera = []
+goggles2-project = []
 
 timers = [
   "space-ecs",

@@ -1,7 +1,6 @@
 use {
     crate::render::{RenderEvent, RenderState},
     core::ptr::{self, NonNull},
-    core::ffi::c_void,
     retour::GenericDetour,
     std::{
         cell::Cell,
@@ -15,15 +14,12 @@ use {
         core::{IUnknown, Interface, InterfaceRef},
         Win32::Graphics::Direct3D11::{
             ID3D11DepthStencilView,
-            ID3D11DepthStencilState,
-            ID3D11DeviceContext,
-            ID3D11RenderTargetView,
             D3D11_COMPARISON_LESS,
             D3D11_COMPARISON_LESS_EQUAL,
             D3D11_DEPTH_WRITE_MASK_ZERO,
-            D3D11_VIEWPORT,
         },
     },
+    taimi_d3d::dx11::{prelude::*, DepthView, DepthState, buffer::{D3D11_TEXTURE2D_DESC, Resource, View}},
     super::{Release, g2},
 };
 #[cfg(feature = "space")]
@@ -81,6 +77,7 @@ pub fn pick_lens(force: bool) {
 pub enum LensClass {
     Unknown,
     Unsupported,
+    Sampled,
     //Imgui,
     Space,
     World,
@@ -91,50 +88,90 @@ pub enum LensClass {
 }
 
 thread_local! {
-    static DEPTH_VIEW_BOUND: Cell<usize> = Cell::new(0);
+    static DEPTH_VIEW_BOUND_KEY: Cell<usize> = Cell::new(0);
 }
-pub(crate) fn reset_frame() {
-    DEPTH_VIEW_BOUND.set(0);
+pub(crate) fn get_view_dims(view: &View) -> Option<D3D11_TEXTURE2D_DESC> {
+    let resource = view.get_resource().ok().map(Resource::from_d3d)?;
+    if let Some(t2) = resource.as_texture2() {
+        Some(t2.desc())
+    } else {
+        // TODO: texture3d? how2mips idk
+        None
+    }
 }
-pub(super) fn set_targets(
-    _this: InterfaceRef<'static, ID3D11DeviceContext>,
-    _count: u32,
-    _views_ptr: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
-    depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
+pub(super) unsafe fn set_targets(
+    _this: &Dx11Context,
+    depth_view: Option<&DepthView>,
 ) {
-    DEPTH_VIEW_BOUND.set(depth_view.map(|v| v.as_raw() as usize).unwrap_or(0));
-    match depth_view {
+    let key = depth_view.map(|v| v.as_d3d_raw().as_ptr() as usize).unwrap_or(0);
+    DEPTH_VIEW_BOUND_KEY.set(match depth_view {
         None =>
-            DEPTH_VIEW_BOUND.set(0),
+            key,
         Some(view) => {
-            let key = view.as_raw() as usize;
             let known = LENSES.read().map_err(drop).map(|l| l.get(&key).copied());
-            let key = match known {
+            match known {
                 Err(()) => {
                     // poisoned???
                     0
                 },
+                Ok(Some(LensClass::Unknown)) => key,
                 Ok(Some(_lens)) => {
+                    if let LensClass::Unsupported | LensClass::Sampled = _lens {
+                        #[cfg(todo)]
+                        {
+                        DEPTH_VIEW_BOUND.set(0);
+                        }
+                    }
                     //log::trace!("recognized as {lens:?}");
                     0
                 },
-                Ok(None) => key,
-            };
-            DEPTH_VIEW_BOUND.set(key);
+                Ok(None) => {
+                    let size_ok = if let Some(dims) = get_view_dims(view) {
+                        let format_ok = match dims.Format {
+                            _ => true,
+                        };
+                        if !format_ok {
+                            log::warn!("DEBUG DELETEME(dv): fmt actually caught something? {}", dims.Format.0);
+                            Err(LensClass::Unsupported)
+                        } else {
+                            let expected = g2!(*&ferret.display_size);
+                            if dims.Width == expected.x as u32 && dims.Height == expected.y as u32 {
+                                Ok(())
+                            } else {
+                                let expected_aspect = expected.x / expected.y;
+                                let aspect = dims.Width as f32 / dims.Height as f32;
+                                match (expected_aspect - aspect).abs() < 2e-4f32 {
+                                    true => Err(LensClass::Sampled),
+                                    false => Err(LensClass::Unsupported),
+                                }
+                            }
+                        }
+                    } else {
+                        Err(LensClass::Unsupported)
+                    };
+                    let (cls, k) = match size_ok {
+                        Ok(()) => (LensClass::Unknown, key),
+                        Err(c) => (c, 0),
+                    };
+                    if let Ok(mut lenses) = LENSES.write() {
+                        lenses.insert(key, cls);
+                    }
+                    k
+                },
+            }
         },
-    }
+    });
 }
 pub(super) unsafe fn set_depth_state(
-    this: InterfaceRef<'static, ID3D11DeviceContext>,
-    state: Option<InterfaceRef<'static, ID3D11DepthStencilState>>,
+    context: &Dx11Context,
+    state: Option<&DepthState>,
     stencil_ref: u32,
 ) {
-    let Some(state) = state else { return };
-    let key = DEPTH_VIEW_BOUND.get();
-    let depth_view = NonNull::new(key as *mut c_void).map(|v|
-        InterfaceRef::<ID3D11DepthStencilView>::from_raw(v)
-    );
-    let Some(_view) = depth_view else { return };
+    let Some(state) = state else {
+        return
+    };
+    let key = DEPTH_VIEW_BOUND_KEY.get();
+    if key == 0 { return }
     //log::debug!("unknown buffer, attempting classification...");
     let cls = {
         #[cfg(todo)]
@@ -143,25 +180,23 @@ pub(super) unsafe fn set_depth_state(
             view.GetDesc(&mut desc_view);
             desc_view
         };
-        let mut desc_state = Default::default();
+        // TODO: desc can't change after state created, so cache ptr in bloom filter maybe?
         let viewport_ok = || {
-            let mut viewports = [D3D11_VIEWPORT::default(); 4];
-            let mut _count = viewports.len() as u32;
-            unsafe {
-                this.RSGetViewports(&mut _count, Some(viewports.as_mut_ptr()));
-            }
-            if viewports[0].TopLeftX != 0.0 || viewports[0].TopLeftY != 0.0 { return false }
+            let [viewport] = taimi_d3d::dx11::Viewport::new_snapshot(context);
             let expected = g2!(*&ferret.display_size);
-            viewports[0].Width == expected.x && viewports[0].Height == expected.y
+            if viewport.viewport.TopLeftX.to_bits() != 0.0f32.to_bits() || viewport.viewport.TopLeftY.to_bits() != 0.0f32.to_bits() { return false }
+            let expected_aspect = expected.x / expected.y;
+            let viewport_aspect = viewport.viewport.Width / viewport.viewport.Height;
+            (expected_aspect - viewport_aspect).abs() < 2e-4f32
         };
-        unsafe {
-            state.GetDesc(&mut desc_state);
-        }
-        //log::trace!("{view:?} was ref=0x{stencil_ref:08x}, {:?}", state);
-        //log::trace!("{desc_state:?}");
+        let desc_state = state.get_desc();
         match desc_state.DepthEnable.0 != 0 {
-            _ if !viewport_ok() =>
-                Some(LensClass::Unsupported),
+            _ if key == 0 => {
+                None
+            },
+            _ if !viewport_ok() => {
+                None
+            },
             false => {
                 if desc_state.DepthWriteMask != D3D11_DEPTH_WRITE_MASK_ZERO {
                     log::trace!("skipping for now (write-only bind)");
@@ -177,14 +212,18 @@ pub(super) unsafe fn set_depth_state(
             },
             true if desc_state.DepthFunc == D3D11_COMPARISON_LESS =>
                 Some(match stencil_ref {
+                    0 => LensClass::World,
+                    #[cfg(todo = "unnecessary")]
                     0 if viewport_ok() =>
                         LensClass::World,
+                    #[cfg(todo = "unnecessary")]
                     0 => LensClass::Unsupported,
                     _ => LensClass::Dummy,
                 }),
             true if desc_state.DepthFunc == D3D11_COMPARISON_LESS_EQUAL =>
                 Some(LensClass::Test),
             true => Some(LensClass::Unknown),
+            #[cfg(todo)]
             false => Some(LensClass::Overlay),
         }
     };
@@ -286,7 +325,7 @@ pub fn classify_current_lens(cls: LensClass) {
 #[cfg(feature = "space")]
 pub fn classify_space_lens(engine: &Engine) {
     if let Some(view) = &engine.render_backend.depth_handler.render_target_view.depth {
-        let dsview = view.view.as_raw();
+        let dsview = view.as_d3d().as_raw();
         classify_lens(dsview as *mut _, LensClass::Space);
     }
 }

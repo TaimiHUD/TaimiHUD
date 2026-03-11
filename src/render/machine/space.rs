@@ -1,6 +1,6 @@
 use {
     crate::{
-        render::machine::{RenderMachine, RenderPosition, RenderPositioning},
+        render::machine::{RenderMachine, RenderPosition},
         settings::pathing::CameraSource,
         space::DrawSpace,
     },
@@ -10,62 +10,116 @@ use {
         coords::{camera_view, MapLocalScale, ScreenSpace},
         ui::MapOpen,
     },
+    taimi_hoard::vec::vec32_eq,
 };
 #[cfg(feature = "goggles")]
-use crate::space::goggles;
+use crate::{
+    space::goggles,
+    settings::pathing::SpaceSettings,
+    space::engine::Engine,
+};
+#[cfg(feature = "goggles2")]
+use goggles::FerretResource;
+#[cfg(feature = "goggles2-project")]
+use goggles::project::ProjectRequest;
 #[cfg(feature = "goggles2-camera")]
-use goggles::{camera::CameraSearch, CameraFerret, PerspectiveFerret, FerretResource};
+use goggles::camera::{CameraSearch, CameraFerret, PerspectiveFerret};
 
 impl RenderMachine {
     const CAMERA_SMOOTHING_PER_FRAME: f32 = 0.135;
-    pub fn get_camera_pos(&self, source: CameraSource) -> Option<RenderPositioning<DrawSpace>> {
-        match source {
-            #[cfg(feature = "extension-nexus")]
-            CameraSource::RealTimeAPI if self.rtapi_state.has_camera() =>
-                return Some(self.rtapi_state.camera),
-            #[cfg(feature = "extension-nexus")]
-            CameraSource::MumbleLink if self.mumblelink_frame_skip > 0 && self.rtapi_state.has_camera() => return Some({
-                let factor = Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32 /*.min(1.0)*/;
-                let (ml_pos, ml_front) = &self.mumblelink_camera;
-                let (pos, front) = self.rtapi_state.camera;
-                (
-                    ml_pos.lerp(pos, factor),
-                    ml_front.slerp(front, factor),
-                    //.rotate_towards(front, turn * Self::CAMERA_SMOOTHING_PER_FRAME)?
-                )
-            }),
-            #[cfg(feature = "goggles2-camera")]
-            CameraSource::Goggles2 => {
-                let cam = FerretResource::snatch_camera();
-                if !cam.is_empty() {
-                    return Some(cam.get_as_look())
-                }
+    pub fn get_camera_pos(&self, source: CameraSource) -> Option<(RenderPosition<DrawSpace>, CameraSource)> {
+        let mut has_up = false;
+        let mut camsrc = CameraSource::MumbleLink;
+        let mut cam = match self.get_camera_mumblelink() {
+            Some(cam) => {
+                has_up = !cam.2.x.is_infinite() && !vec32_eq(cam.2, Vector3::ZERO);
+                cam
             },
-            _ => (),
+            None => Self::POSITION_EMPTY,
+        };
+        if self.is_cutscene() {
+            cam = Self::POSITION_EMPTY;
+            has_up = false;
         }
-        match self.get_camera_mumblelink() {
-            _ if self.is_cutscene() => (),
-            cam @ Some(..) => return cam,
-            None => (),
-        }
-        #[cfg(feature = "goggles2-camera")]
-        if self.goggles.has_camera_fallback() {
-            // TODO: cam_mumblelink should be marked stale in this case probably?
-            let cam = FerretResource::snatch_camera_smooth();
-            if !cam.is_empty() {
-                return Some(cam.get_as_look())
+        #[cfg(feature = "extension-nexus")]
+        if self.rtapi_state.has_camera() {
+            if source == CameraSource::RealTimeAPI || cam.1.x.is_infinite() {
+                let (pos, dir) = self.rtapi_state.camera;
+                cam = (pos, dir, cam.2);
+                camsrc = CameraSource::RealTimeAPI;
             }
         }
-
-        None
+        #[cfg(feature = "goggles2-camera")]
+        {
+            let g2_has_cam = self.goggles.has_camera_primary();
+            let prefer_g2 = source == CameraSource::Goggles2;
+            let need_cam = cam.1.x.is_infinite();
+            let snatch = if (prefer_g2 | need_cam | !has_up) && g2_has_cam {
+                Some(FerretResource::snatch_camera())
+            } else if self.goggles.has_camera_fallback() && (need_cam | !has_up) {
+                Some(FerretResource::snatch_camera_smooth())
+            } else {
+                None
+            };
+            match snatch {
+                Some(snatch) if (g2_has_cam && prefer_g2) | need_cam => {
+                    let (pos, dir) = snatch.get_as_look();
+                    cam.0 = pos;
+                    cam.1 = dir;
+                    has_up = false;
+                    camsrc = CameraSource::Goggles2;
+                },
+                _ => (),
+            }
+            match snatch {
+                Some(snatch) if !has_up => {
+                    cam.2 = snatch.get_look_up();
+                    // TODO? cam.3 = snatch.get_look_side();
+                    has_up = true;
+                },
+                _ => (),
+            }
+        }
+        let has_cam = !cam.1.x.is_infinite();
+        if camsrc == CameraSource::MumbleLink && has_cam && self.mumblelink_frame_skip > 0 {
+            let mut interp = None;
+            #[cfg(feature = "goggles2-camera")]
+            if self.goggles.has_camera_primary() {
+                interp = Some(FerretResource::snatch_camera().get_as_look())
+            } else if self.goggles.has_camera_fallback() {
+                interp = Some(FerretResource::snatch_camera_smooth().get_as_look())
+            }
+            #[cfg(feature = "extension-nexus")]
+            if interp.is_none() && self.rtapi_state.has_camera() {
+                interp = Some(self.rtapi_state.camera);
+            }
+            if let Some((pos, front)) = interp {
+                let (ml_pos, ml_front, ..) = &self.mumblelink_camera;
+                let factor = Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32 /*.min(1.0)*/;
+                cam.0 = ml_pos.lerp(pos, factor);
+                cam.1 = ml_front.slerp(front, factor);
+                //.rotate_towards(front, turn * Self::CAMERA_SMOOTHING_PER_FRAME)?
+            }
+        }
+        match has_up.then(|| cam.2.try_normalize()) {
+            Some(Some(up)) => cam.2 = up,
+            _ => has_up = false,
+        }
+        if !has_up {
+            cam.2 = Self::LOCAL_UP;
+        }
+        has_cam.then_some((cam, camsrc))
     }
 
     pub fn get_camera(&mut self, source: CameraSource) -> RenderPosition<DrawSpace> {
         // TODO: cache direct ptr per frame
-        let (pos, front) = self
-            .get_camera_pos(source)
-            .unwrap_or((Point3::ZERO, Vector3::ZERO));
-        (pos, front.normalize_or(Self::LOCAL_FORWARD), Self::LOCAL_UP)
+        match self.get_camera_pos(source) {
+            Some((cam, _src)) => cam,
+            None => {
+                log::warn!("BUG: missing camera data");
+                (Point3::ZERO, Self::LOCAL_FORWARD, Self::LOCAL_UP)
+            },
+        }
     }
 
     pub const DEFAULT_DEPTH_RANGE: Range<f32> = {
@@ -204,6 +258,20 @@ impl RenderMachine {
 #[derive(Debug, Clone, Default)]
 pub struct GogglesState {
     pub enabled: bool,
+    #[cfg(feature = "goggles2")]
+    pub is_drawing: bool,
+    #[cfg(feature = "goggles2")]
+    pub inherit_render: bool,
+    #[cfg(feature = "goggles2")]
+    pub project_depth_fill: bool,
+    #[cfg(feature = "goggles2")]
+    pub project_viewport_force: bool,
+    #[cfg(feature = "goggles2")]
+    pub project_shadow: bool,
+    #[cfg(feature = "goggles2")]
+    pub project_blend_force: bool,
+    #[cfg(feature = "goggles2-project")]
+    pub project_enabled: bool,
     #[cfg(feature = "goggles2-camera")]
     pub camera_enabled: bool,
     #[cfg(feature = "goggles2-camera")]
@@ -268,18 +336,13 @@ impl GogglesState {
                 FerretResource::trip_snatch_perspective();
             }
         }
+        #[cfg(feature = "goggles2-project")]
+        if self.project_enabled {
+            FerretResource::project_reset_frame();
+        }
     }
 
     pub(crate) fn act_pre_render(&mut self, _visible: bool) {
-        #[cfg(feature = "goggles")]
-        if /*self.enabled*/ true {
-            goggles::lens::reset_frame();
-        }
-        #[cfg(feature = "goggles2-camera")]
-        if self.camera_enabled && !self.camera_paused && !FerretResource::wants_snatch_perspective() {
-            let persp = FerretResource::snatch_perspective();
-            self.perspective_params = Self::perspective_params_for(&persp);
-        }
         #[cfg(feature = "goggles2-camera")]
         if self.camera_enabled && FerretResource::wants_camera() {
             let mut alternatives = 0;
@@ -292,6 +355,23 @@ impl GogglesState {
                 goggles::FerretResource::set_camera_found(buf_dest, found.offset as _, found.is_m43);
             }
         }
+        #[cfg(feature = "goggles2-project")]
+        if self.project_enabled {
+            FerretResource::project_report_frame();
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if _visible {
+            self.camera_commit_perspective();
+        }
+    }
+    pub(crate) fn prepare_frame(&mut self) {
+        #[cfg(feature = "goggles2-project")]
+        if self.project_enabled {
+            #[cfg(feature = "goggles2-camera")]
+            {
+                self.camera_commit_perspective();
+            }
+        }
     }
     pub(crate) fn reset_search(&mut self, _force: bool) {
         #[cfg(feature = "goggles2-camera")]
@@ -300,7 +380,52 @@ impl GogglesState {
             self.camera_lost = self.camera_lost.min(1);
         }
     }
+    pub(crate) fn settings_enables(&self, settings: &SpaceSettings) -> GogglesEnables {
+        let cam = settings.camera_source == Some(CameraSource::Goggles2);
+        let project = settings.goggles.project_enabled();
+        let enabled = settings.goggles.enabled();
+        let project_shadow = settings.goggles.project_shadowboxing();
+        (enabled, enabled && cam, (enabled && project, project_shadow))
+    }
+    pub(crate) fn act_enable(&mut self, (en, en_cam, (en_proj, en_proj_shadowbox)): GogglesEnables) {
+        if en | en_cam | en_proj {
+            #[cfg(feature = "goggles")]
+            goggles::enable();
+        } else {
+            #[cfg(feature = "goggles")]
+            goggles::disable();
+            return
+        }
+        #[cfg(feature = "goggles")]
+        if en {
+            #[cfg(todo)]
+            goggles::clear_lens();
+        }
+        #[cfg(feature = "goggles2-camera")]
+        if en_cam || en {
+            self.camera_enable();
+        } else if self.camera_enabled {
+            self.camera_disable();
+        }
+        #[cfg(feature = "goggles2-project")]
+        if en_proj || en {
+            self.project_enable();
+            match en_proj_shadowbox {
+                true => FerretResource::project_set_shadowbox_request(Some(ProjectRequest::default_shadowbox())),
+                false => FerretResource::project_set_shadowbox_request(None),
+            }
+        } else if self.project_enabled {
+            self.project_disable();
+        }
+    }
+    #[cfg(feature = "space")]
+    pub(crate) fn setup_engine(&mut self, engine: &Engine, enables: GogglesEnables) {
+        #[cfg(feature = "goggles")]
+        goggles::lens::classify_space_lens(engine);
+        self.act_enable(enables);
+    }
 }
+type GogglesEnables = (bool, bool, (bool, bool));
 #[cfg(feature = "goggles2-camera")]
 impl GogglesState {
     pub(crate) fn camera_enable(&mut self) {
@@ -341,14 +466,14 @@ impl GogglesState {
         }
         !retry
     }
-    pub(super) fn camera_setup(&mut self, cam: Option<RenderPositioning<DrawSpace>>, (fov_y, aspect): (f32, f32), update: u8) {
+    pub(super) fn camera_setup(&mut self, cam: Option<RenderPosition<DrawSpace>>, (fov_y, aspect): (f32, f32), update: u8) {
         self.camera_paused = false;
         let cam = match cam {
             Some(..) if Self::camera_lost_defer(&mut self.camera_lost, update) => None,
             cam => cam,
         };
-        if let Some((pos, dir)) = cam {
-            let up = RenderMachine::LOCAL_UP;
+        if let Some((pos, dir, up)) = cam {
+            let up = up.normalize_or(RenderMachine::LOCAL_UP);
             let cam = CameraFerret::new(pos, dir, up);
             FerretResource::set_camera(cam);
         } else {
@@ -420,11 +545,14 @@ impl GogglesState {
     pub(super) fn is_camera_moving(&self) -> bool {
         false
     }
+    pub(super) fn has_camera_primary(&self) -> bool {
+        FerretResource::has_found_camera() && !FerretResource::wants_snatch_camera()
+    }
     /// TODO
     pub(super) fn has_camera(&self) -> bool {
         if !self.camera_enabled { return false }
         match () {
-            _ if FerretResource::has_found_camera() && !FerretResource::wants_snatch_camera() =>
+            _ if self.has_camera_primary() =>
                 true,
             _ if self.has_camera_fallback() => true,
             _ => false,
@@ -435,5 +563,25 @@ impl GogglesState {
             _ if !FerretResource::has_found_perspective() => false,
             _ => !FerretResource::wants_snatch_camera_smooth(),
         }
+    }
+    fn camera_commit_perspective(&mut self) {
+        if self.camera_enabled && !self.camera_paused && !FerretResource::wants_snatch_perspective() {
+            let persp = FerretResource::snatch_perspective();
+            self.perspective_params = Self::perspective_params_for(&persp);
+        }
+    }
+}
+#[cfg(feature = "goggles2-project")]
+impl GogglesState {
+    pub(crate) fn project_enable(&mut self) {
+        self.project_enabled = true;
+        if !FerretResource::project_enabled() {
+            FerretResource::project_set_target_request(Some(ProjectRequest::default_target()));
+        }
+    }
+    pub(crate) fn project_disable(&mut self) {
+        self.project_enabled = false;
+        FerretResource::project_set_shadowbox_request(None);
+        FerretResource::project_set_target_request(None);
     }
 }

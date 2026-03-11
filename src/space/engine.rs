@@ -60,7 +60,9 @@ use {
 };
 
 #[cfg(feature = "goggles")]
-use crate::space::goggles::{self, g2};
+use crate::space::goggles;
+#[cfg(feature = "goggles2-project")]
+use crate::space::goggles::FerretResource;
 
 #[derive(Component)]
 struct Render {
@@ -211,6 +213,7 @@ pub struct Engine {
 
     pub drawing: bool,
     pub drawing_start: Option<Instant>,
+    pub frame_context: Option<(Instant,)>,
 
     settings: Option<PathingSettings>,
 }
@@ -283,6 +286,7 @@ impl Engine {
             phase_states: Default::default(),
             packs,
             drawing: false,
+            frame_context: None,
             drawing_start: None,
             #[cfg(feature = "goggles")]
             goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
@@ -321,19 +325,15 @@ impl Engine {
     where
         F: FnOnce(&mut Self, &mut RenderMachine) -> anyhow::Result<()>,
     {
+        let _goggles_disabled = (false, false, (false, false));
         let (enabled, _goggles) = Settings::try_read().map(|s| (
             s.enable_katrender,
             match s.pathing.as_ref() {
                 #[cfg(feature = "goggles")]
-                Some(p) => (
-                    p.space.goggles.enabled(),
-                    p.space.camera_source == Some(crate::settings::pathing::CameraSource::Goggles2),
-                ),
-                _ => (false, false),
+                Some(p) => machine.goggles.settings_enables(&p.space),
+                _ => _goggles_disabled,
             },
-        )).unwrap_or((false, (false, false)));
-        #[cfg(feature = "goggles")]
-        let (goggles_enabled, _goggles_camera) = _goggles;
+        )).unwrap_or((false, _goggles_disabled));
 
         let engine = match slot {
             None if machine.gameplay.is_initial() || !enabled => {
@@ -385,11 +385,7 @@ impl Engine {
                     #[cfg(feature = "extension-nexus")]
                     machine.rtapi_setup();
                     #[cfg(feature = "goggles")]
-                    goggles::lens::classify_space_lens(&e);
-                    #[cfg(feature = "goggles2-camera")]
-                    if _goggles_camera && !machine.goggles.camera_enabled {
-                        machine.goggles.camera_enable();
-                    }
+                    machine.goggles.setup_engine(&mut e, _goggles);
 
                     Ok(e)
                 },
@@ -756,58 +752,78 @@ impl Engine {
         machine: &mut RenderMachine,
         device_context: &Dx11Context,
     ) -> anyhow::Result<()> {
+        let fresh = self.frame_context.is_none();
+        let (frame_start,) = self.frame_context.get_or_insert_with(|| {
+            let now = Instant::now();
+            (now,)
+        });
+        #[cfg(feature = "goggles2")]
+        {
+            machine.goggles.prepare_frame();
+        }
+        let frame_start = *frame_start;
         let anim_timestamp = self.drawing_start.as_ref()
-            .map(|s| s.elapsed().as_secs_f32());
-        self.packs.prepare_frame(machine, device_context, anim_timestamp)?;
+            .map(|s| s.duration_since(frame_start).as_secs_f32());
+        self.packs.prepare_frame(machine, device_context, anim_timestamp, fresh)?;
         Ok(())
     }
 
     pub fn render(&mut self, machine: &mut RenderMachine) -> anyhow::Result<()> {
         self.prepare(machine)?;
         if self.drawing {
-            #[cfg(feature = "goggles2")]
-            if g2!(*&ferret.ferret_draw) {
-                // SKIP!
-                g2!(*&mut ferret.ferret_drawn = false);
-                return Ok(())
-            }
             let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
                 .context("I lost my context!")?;
 
+            #[cfg(feature = "goggles2-project")]
+            {
+                //machine.goggles.is_drawing = self.frame_context.is_some();
+                machine.goggles.is_drawing = goggles::g2!(*&ferret.project.target_report.acted);
+            }
             self.prepare_frame(machine, &device_context)?;
             self.draw(machine, &device_context, false);
         }
+        self.frame_context = None;
         Ok(())
     }
     #[cfg(feature = "goggles2")]
-    pub fn render_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
-        if !self.drawing {
+    pub fn render_carefully(
+        &mut self,
+        machine: &mut RenderMachine,
+        device_context: &Dx11Context,
+        target: Option<&taimi_d3d::dx11::RenderTargetView>,
+        depth_view: Option<&taimi_d3d::dx11::DepthView>,
+    ) {
+        if !self.drawing || self.map_settings(|s| !s.space.visible_space()) {
             return
         }
 
-        machine.goggles.act_pre_render(true);
         let prep = self.prepare_frame(machine, &device_context);
         if rt::log::error_ok(prep).is_none() {
             return
         }
 
-        self.draw_carefully(machine, &device_context);
+        self.draw_carefully(machine, &device_context, target, depth_view);
     }
     #[cfg(feature = "goggles2")]
-    pub fn draw_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
+    fn draw_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context,
+        target: Option<&taimi_d3d::dx11::RenderTargetView>,
+        depth_view: Option<&taimi_d3d::dx11::DepthView>,
+    ) {
         use taimi_d3d::dx11;
 
         unsafe {
             device_context.Flush();
         }
+        let _state_prim = device_context.get_snapshot::<taimi_d3d::state::PrimitiveTopology>();
         let _state_blend = device_context.get_snapshot::<dx11::OMBlendState<Option<dx11::BlendState>>>();
         let _state_depth = device_context.get_snapshot::<dx11::OMDepthState>();
         let _state_raster = device_context.get_snapshot::<Option<dx11::RasterizerState>>();
         let _shaderp = device_context.get_snapshot::<Option<dx11::ShaderP>>();
         let _shaderv = device_context.get_snapshot::<Option<dx11::ShaderV>>();
         let _shaderlayout = device_context.get_snapshot::<Option<dx11::shader::InputLayout>>();
+        // TODO: increase to max bleh? or is that 8?
         let _rendertarget =
-            device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 2]>>();
+            device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 8]>>();
         let _viewport = device_context.get_snapshot::<Vec<dx11::Viewport>>();
         let _scissor = device_context.get_snapshot::<Vec<dx11::ScissorRect>>();
         #[cfg(todo = "unnecessary")]
@@ -819,7 +835,54 @@ impl Engine {
         let _srvp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewP>>>();
         #[cfg(todo = "unnecessary")]
         let _srvv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewV>>>();
+        let aspect = self.render_backend.viewport.viewport.Width / self.render_backend.viewport.viewport.Height;
+        let vp_size = _viewport.state[0].get().and_then(|vp| {
+            if vp.viewport.TopLeftX != 0.0 || vp.viewport.TopLeftY != 0.0 { return None }
+            let size = vp.size2();
+            if (aspect - (size.width / size.height)).abs() > 2e3 {
+                return None
+            }
+            Some(size.cast())
+        });
+        let rt_size = || target.as_ref().and_then(|rt|
+            goggles::lens::get_view_dims(&rt)
+        ).map(|desc| Size2::<ScreenSpace>::new(desc.Width as f32, desc.Height as f32))
+            .and_then(|size| {
+                if (aspect - (size.width / size.height)).abs() > 2e3 {
+                    return None
+                }
+                Some(size)
+            });
+        let target_size = match machine.goggles.project_viewport_force {
+            _ if vp_size.is_some() => vp_size,
+            false => rt_size(),
+            _ => None,
+        };
+        let (display_size, viewport) = (self.render_backend.display_size, self.render_backend.viewport);
+        if let Some(target_size) = target_size {
+            self.render_backend.display_size = target_size;
+            self.render_backend.viewport.viewport.Width = target_size.width;
+            self.render_backend.viewport.viewport.Height = target_size.height;
+        }
+        self.render_backend.depth_handler.inherit_depth = match machine.goggles.inherit_render {
+            true if goggles::current_lens().is_some() => None,
+            true => depth_view.as_ref()
+                .map(|v| v.as_d3d_raw().as_ptr() as usize),
+            false => None,
+        }.unwrap_or(0);
+        self.render_backend.depth_handler.inherit_render = match machine.goggles.inherit_render {
+            _ if FerretResource::project_hack_shadowbox() => None,
+            true => target.as_ref(),
+            false if goggles::current_lens().is_some() => target.as_ref(),
+            false => None,
+        }.map(|v| v.as_d3d_raw().as_ptr() as usize).unwrap_or(0);
         self.draw(machine, device_context, true);
+        self.render_backend.depth_handler.inherit_render = 0;
+        self.render_backend.depth_handler.inherit_depth = 0;
+        if target_size.is_some() {
+            self.render_backend.display_size = display_size;
+            self.render_backend.viewport = viewport;
+        }
         unsafe {
             device_context.Flush();
         }
@@ -844,12 +907,15 @@ impl Engine {
             });
 
         let render_map = match visible_map {
+            Some(..) if inherit => None,
             Some(true) =>
                 map_ctx.map(|ctx| (ctx, super::dx11::PerspectiveHandler::map_local_bounds(machine))),
             _ => None,
         };
         let render_world = match visible_space {
             None => None,
+            #[cfg(feature = "goggles2-project")]
+            Some(..) if machine.goggles.is_drawing && !inherit => None,
             Some(..) if machine.get_map_open_state().is_visible() => None,
             Some(distance_max) => {
                 let depth = machine.depth_range();
@@ -874,9 +940,18 @@ impl Engine {
             self.render_backend
                 .sampler_state
                 .set(&device_context, texture_trail_slot);
-            self.render_backend.blend_state.set(&device_context);
+            let (set_blend, set_viewport) = match inherit {
+                #[cfg(feature = "goggles2")]
+                true  => (!machine.goggles.project_blend_force, true),
+                _ => (true, true),
+            };
+            if set_blend {
+                self.render_backend.blend_state.set(&device_context);
+            }
             self.render_backend.depth_handler.setup(&device_context, inherit);
-            self.render_backend.viewport.set(&device_context);
+            if set_viewport {
+                self.render_backend.viewport.set(&device_context);
+            }
         }
 
         let minimap_bounds = match &render_map {
@@ -972,10 +1047,9 @@ impl Engine {
         #[cfg(feature = "goggles")]
         let goggles_2pass = goggles_enabled && _obscured_alpha > 0.0;
 
-        let masking_corners = is_rendering && self.render_backend.depth_handler.fill_edge.is_some() && !machine.is_ui_hidden();
-        let masking = minimap_bounds.is_some()
-            || masking_corners;
-        let masking = match render_world.is_some() && masking {
+        let masking_corners = self.render_backend.depth_handler.fill_edge.is_some();
+        let masking = minimap_bounds.is_some() || masking_corners;
+        let masking = match render_world.is_some() && masking && !machine.is_ui_hidden() && !inherit {
             #[cfg(feature = "goggles")]
             true if goggles_enabled => match goggles_2pass {
                 // writing to stencil of game's buffer is a bad idea and won't clear
@@ -1090,6 +1164,10 @@ impl Engine {
                     poi_can_fade: s.space.player_overlap_poi(),
                     trail_can_fade: s.space.player_overlap_threshold().is_some(),
                     poi_limit_size: s.space.poi_limit_size(),
+                    #[cfg(feature = "goggles2")]
+                    trail_flags: if FerretResource::project_hack_shadowbox() { pack::instance::MarkerInstanceData::FLAG_RESERVED_14 } else { 0 },
+                    #[cfg(feature = "goggles2")]
+                    poi_flags: if FerretResource::project_hack_shadowbox() { pack::instance::MarkerInstanceData::FLAG_RESERVED_14 } else { 0 },
                     .. ArcrenderSettings::DEFAULT
                 });
                 settings
@@ -1130,6 +1208,11 @@ impl Engine {
 
                 if let Some(settings) = &arcrender_settings {
                     self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, settings);
+                }
+
+                #[cfg(feature = "goggles2")]
+                if inherit && machine.goggles.project_depth_fill {
+                    self.render_backend.depth_handler.depth_stencil_state_readonly.set(&device_context);
                 }
 
                 self.packs
