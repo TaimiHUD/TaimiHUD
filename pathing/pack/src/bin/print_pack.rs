@@ -1,5 +1,5 @@
 use {
-    std::{env, ffi::OsStr, fs, path::Path, time::Instant},
+    std::{collections::BTreeSet, env, ffi::OsStr, fs, path::Path, time::Instant},
     taimi_hoard::{lazyfmt, statistics::allocator::CounterAllocator},
     taimi_pack::{loader, Pack},
 };
@@ -44,10 +44,10 @@ fn main() -> anyhow::Result<()> {
         (mem_consumed as f64) / (1024.0 * 1024.0),
     );
 
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = BTreeSet::new();
     for (_key, cat) in pack.categories.all_categories.iter() {
-        let mut id = cat.full_id.as_id();
-        let unseen = seen.insert(id);
+        let unseen = seen.insert(cat.full_id.as_id());
+        #[cfg(todo = "unnecessary")]
         while let Some(parent) = id.parent() {
             if let Some(cat) = pack.categories.all_categories.get(parent) {
                 assert_eq!(cat.full_id.as_id(), parent);
@@ -62,20 +62,11 @@ fn main() -> anyhow::Result<()> {
                 log::warn!("invalid category {:?}", cat.full_id.as_id());
             }
         } else {
-            panic!("cat??? {:?}", cat.full_id.as_id());
+            log::error!("duplicate cat??? {}", cat.full_id.as_id());
         }
     }
     seen.clear();
     for trail in pack.trails.iter() {
-        #[cfg(todo = "unnecessary")]
-        if !pack
-            .categories
-            .all_categories
-            .contains_key(trail.category.as_id())
-            && seen.insert(trail.category.as_id())
-        {
-            log::error!("missing category type={} for trail {}", trail.category, trail);
-        }
         let trl_name = trail.trail_path.as_ref().map(|p| &p[..]).unwrap_or("<unavail>");
         let context = lazyfmt::StrFmt::fmt_fn(|f| write!(f, "{trl_name} ({trail})"));
         let res = context.annotate_result(trail.read_trl_data(&mut loader));
@@ -99,14 +90,6 @@ fn main() -> anyhow::Result<()> {
             log::trace!("{empty_count} sections empty in {context}");
         } else if trl.sections.is_empty() {
             log::debug!("empty trail? {context}");
-        }
-    }
-    #[cfg(todo = "unnecessary")]
-    for poi in pack.pois.iter() {
-        if !pack.categories.all_categories.contains_key(poi.category.as_id())
-            && seen.insert(poi.category.as_id())
-        {
-            log::error!("missing category type={} for poi {}", poi.category, poi);
         }
     }
 

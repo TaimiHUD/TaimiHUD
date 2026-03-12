@@ -106,6 +106,11 @@ impl CategoryCollection {
             cat.trim_attributes();
         }
     }
+
+    fn any_primary_root(&self) -> Option<&Category> {
+        self.root_categories()
+            .max_by_key(|c| (!c.is_hidden(), !c.is_separator(), c.sub_categories.len()))
+    }
 }
 
 fn taco_safe_char(is_full: bool, c: char) -> bool {
@@ -307,7 +312,7 @@ impl<'a> PackBuilder<'a> {
         .or(new_id.map(CategoryId::with_full_id));
         let id = new_id.as_ref().unwrap_or(&category.full_id);
         if let Some(canon_id) = self.category_ids.get(IdCmpRelaxed::with_ref(id)) {
-            if log::log_enabled!(log::Level::Info) && id != &canon_id.id {
+            if log::log_enabled!(log::Level::Debug) && id != &canon_id.id {
                 if self.warnings_case.insert(canon_id.id.clone()) {
                     log::debug!("Inconsistent category ID `{id}`");
                 }
@@ -381,6 +386,7 @@ impl<'a> PackBuilder<'a> {
         category_ids: &HashSet<IdCmpRelaxed<CategoryId>>,
         warnings_case: &mut HashSet<CategoryId>,
         warnings_empty: &mut HashSet<Uuid>,
+        warnings_missing: &mut HashSet<IdCmpRelaxed<CategoryId>>,
         all_categories: &'c IndexMap<CategoryId, Category>,
         id: &mut IdNameBox,
         guid: &Uuid,
@@ -403,11 +409,41 @@ impl<'a> PackBuilder<'a> {
                 },
                 None if id.as_str().is_empty() => {
                     if warnings_empty.insert(guid.clone()) {
+                        #[cfg(todo)]
+                        let guid = Guid::from_ref(guid);
                         log::warn!("No category provided for {guid}");
                     }
                     None
                 },
-                None => None,
+                None => {
+                    let mut found_id = None;
+                    let mut parent_id = id.as_id();
+                    while let Some(id) = parent_id.parent() {
+                        found_id = category_ids.get(IdCmpRelaxed::with_ref(id));
+                        if found_id.is_some() {
+                            break
+                        }
+                        parent_id = id;
+                    }
+                    let mut warn = false;
+                    if let Some(id_key) = CategoryId::try_with_full_id(id.clone()) {
+                        warn = warnings_missing.insert(IdCmpRelaxed::new(id_key));
+                    }
+                    if warn {
+                        #[cfg(todo)]
+                        let guid = Guid::from_ref(guid);
+                        log::info!("nonexistent category `{id}` provided for {guid}");
+                    }
+                    found_id.and_then(|found_id| {
+                        *id = found_id
+                            .id
+                            .as_full_id()
+                            .cloned()
+                            .unwrap_or_else(|| IdNameBox::new_cloned(&found_id.id));
+                        //if warn { log::debug!("falling back to {id}"); }
+                        all_categories.get(&found_id.id)
+                    })
+                },
             }
         })
     }
@@ -419,17 +455,13 @@ impl<'a> PackBuilder<'a> {
                 &self.category_ids,
                 &mut self.warnings_case,
                 &mut self.warnings_empty,
+                &mut self.warnings_missing,
                 &pack.categories.all_categories,
                 &mut poi.category,
                 &poi.guid,
             );
-            let Some(category) = category else {
-                if let Some(id) = CategoryId::try_with_full_id(poi.category.clone()) {
-                    if self.warnings_missing.insert(IdCmpRelaxed::new(id)) {
-                        log::info!("missing category `{}` for {}", poi.category, poi);
-                    }
-                }
-                continue;
+            let Some(category) = category.or_else(|| pack.categories.any_primary_root()) else {
+                continue
             };
             if let Some(id) = category.full_id.as_full_id() {
                 poi.category = id.clone();
@@ -441,17 +473,13 @@ impl<'a> PackBuilder<'a> {
                 &self.category_ids,
                 &mut self.warnings_case,
                 &mut self.warnings_empty,
+                &mut self.warnings_missing,
                 &pack.categories.all_categories,
                 &mut trail.category,
                 &trail.guid,
             );
-            let Some(category) = category else {
-                if let Some(id) = CategoryId::try_with_full_id(trail.category.clone()) {
-                    if self.warnings_missing.insert(IdCmpRelaxed::new(id)) {
-                        log::warn!("missing category `{}` for {}", trail.category, trail);
-                    }
-                }
-                continue;
+            let Some(category) = category.or_else(|| pack.categories.any_primary_root()) else {
+                continue
             };
             if let Some(id) = category.full_id.as_full_id() {
                 trail.category = id.clone();
