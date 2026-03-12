@@ -486,13 +486,13 @@ impl FerretResource {
         g2!(*&ferret.project.state_shadowbox)
     }
     pub(crate) fn project_report_target() -> Option<ProjectReport> {
-        let has_target = unsafe {
-            (&*g2!(&raw const ferret.project.target)).is_some()
-        };
         Self::project_enabled().then_some(g2!(*&ferret.project.target_report))
     }
     pub(super) fn project_report_drawn() -> bool {
-        g2!(*&ferret.project.target_report.acted)
+        let target = unsafe {
+            &*g2!(&raw const ferret.project.target)
+        };
+        target.as_ref().map(|t| t.count > *t.request.delay.start()).unwrap_or(true)
     }
     pub(crate) fn project_iter_ui(_target: ProjectClassification) -> impl Iterator<Item = (D3dNn, ProjectBufferInfo)> {
         let seen = unsafe {

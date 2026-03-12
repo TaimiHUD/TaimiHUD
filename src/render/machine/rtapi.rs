@@ -207,6 +207,7 @@ impl RenderStateRtapi {
     pub fn is_ingame(&self) -> bool {
         !self.player.0.x.is_infinite()
     }
+    #[cfg(feature = "space")]
     pub fn has_camera(&self) -> bool {
         !self.camera.0.x.is_infinite()
     }
@@ -224,5 +225,10 @@ impl RenderStateRtapi {
     }
     pub fn set_inactive(&mut self) {
         self.gameplay = Self::GAMEPLAY_NONE;
+        self.player = RenderMachine::POSITIONING_EMPTY;
+        #[cfg(feature = "space")]
+        {
+            self.camera = RenderMachine::POSITIONING_EMPTY;
+        }
     }
 }
