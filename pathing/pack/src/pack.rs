@@ -772,6 +772,8 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         "fadeNear|zpos",
         // linus voe
         "|GUID",
+        // aurizara_hp
+        "|type",
         r#")\s*=\s*""#,
         // rediche's WvW marker pack
         "|",
