@@ -603,10 +603,7 @@ impl Engine {
             let now = Instant::now();
             (now,)
         });
-        #[cfg(feature = "goggles2")]
-        {
-            machine.goggles.prepare_frame();
-        }
+        machine.prepare_frame();
         let frame_start = *frame_start;
         let anim_timestamp = self.drawing_start.as_ref()
             .map(|s| frame_start.duration_since(*s).as_secs_f32());

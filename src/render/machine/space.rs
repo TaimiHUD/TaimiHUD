@@ -81,6 +81,7 @@ impl RenderMachine {
             }
         }
         let has_cam = !cam.1.x.is_infinite();
+        #[cfg(todo)]
         if camsrc == CameraSource::MumbleLink && has_cam && self.mumblelink_frame_skip > 0 {
             let mut interp = None;
             #[cfg(feature = "goggles2-camera")]
@@ -255,6 +256,13 @@ impl RenderMachine {
             if changed {
                 self.act_map_open();
             }
+        }
+    }
+
+    pub fn prepare_frame(&mut self) {
+        #[cfg(feature = "goggles2")]
+        {
+            self.goggles.prepare_frame();
         }
     }
 }
