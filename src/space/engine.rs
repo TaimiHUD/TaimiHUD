@@ -763,7 +763,7 @@ impl Engine {
         }
         let frame_start = *frame_start;
         let anim_timestamp = self.drawing_start.as_ref()
-            .map(|s| s.duration_since(frame_start).as_secs_f32());
+            .map(|s| frame_start.duration_since(*s).as_secs_f32());
         self.packs.prepare_frame(machine, device_context, anim_timestamp, fresh)?;
         Ok(())
     }
