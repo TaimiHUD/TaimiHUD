@@ -811,8 +811,10 @@ impl Engine {
     ) {
         use taimi_d3d::dx11;
 
-        unsafe {
-            device_context.Flush();
+        if machine.goggles.project_flush {
+            unsafe {
+                device_context.Flush();
+            }
         }
         let _state_prim = device_context.get_snapshot::<taimi_d3d::state::PrimitiveTopology>();
         let _state_blend = device_context.get_snapshot::<dx11::OMBlendState<Option<dx11::BlendState>>>();
@@ -883,8 +885,10 @@ impl Engine {
             self.render_backend.display_size = display_size;
             self.render_backend.viewport = viewport;
         }
-        unsafe {
-            device_context.Flush();
+        if machine.goggles.project_flush {
+            unsafe {
+                device_context.Flush();
+            }
         }
     }
     pub fn draw(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, inherit: bool) {
