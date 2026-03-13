@@ -277,6 +277,8 @@ pub struct GogglesState {
     pub project_blend_force: bool,
     #[cfg(feature = "goggles2-project")]
     pub project_enabled: bool,
+    #[cfg(feature = "goggles2-project")]
+    pub project_flush: bool,
     #[cfg(feature = "goggles2-camera")]
     pub camera_enabled: bool,
     #[cfg(feature = "goggles2-camera")]

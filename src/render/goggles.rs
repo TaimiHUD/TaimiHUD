@@ -236,6 +236,9 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
         ui.same_line();
         if ui.checkbox("blen", &mut machine.goggles.project_blend_force) {
         }
+        ui.same_line();
+        if ui.checkbox("flush", &mut machine.goggles.project_flush) {
+        }
 
         let mut cam = machine.goggles.camera_enabled;
         if ui.checkbox("camera", &mut cam) {
