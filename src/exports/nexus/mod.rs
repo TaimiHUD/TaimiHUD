@@ -152,7 +152,7 @@ extern "C-unwind" fn unsafe_render_pre() {
         };
         RenderMachine::turn_render_entry();
         if !render_ready {
-            exports::nexus::with_ui(RenderState::render_setup);
+            RenderState::render_setup();
         }
     }
 }

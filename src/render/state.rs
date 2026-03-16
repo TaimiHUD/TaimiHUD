@@ -735,7 +735,7 @@ impl RenderState {
         }
     }
 
-    pub fn render_setup(_ui: &Ui) {
+    pub fn render_setup() {
         if !Self::is_running() {
             return
         }

@@ -464,7 +464,7 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
         RenderMachine::turn_render_entry();
 
         if !render_ready {
-            RenderState::render_setup(ui);
+            RenderState::render_setup();
         }
 
         RenderMachine::turn_ui_entry(ui);
