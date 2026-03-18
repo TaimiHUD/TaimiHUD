@@ -190,7 +190,7 @@ pub(super) unsafe fn set_depth_state(
             (expected_aspect - viewport_aspect).abs() < 2e-4f32
         };
         let desc_state = state.get_desc();
-        match desc_state.DepthEnable.0 != 0 {
+        let cls = match desc_state.DepthEnable.0 != 0 {
             _ if key == 0 => {
                 None
             },
@@ -225,7 +225,21 @@ pub(super) unsafe fn set_depth_state(
             true => Some(LensClass::Unknown),
             #[cfg(todo)]
             false => Some(LensClass::Overlay),
+        };
+        #[cfg(deleteme)]
+        if let Some(cls) = cls {
+            log::debug!("DELETEME: classified {key:#x},{cls:?} with ref=0x{stencil_ref:08x}, den={}, dw={}, df={}, se={}({:#x},{:#x}), sf={},{}",
+                desc_state.DepthEnable.0,
+                desc_state.DepthWriteMask.0,
+                desc_state.DepthFunc.0,
+                desc_state.StencilEnable.0,
+                desc_state.StencilReadMask,
+                desc_state.StencilWriteMask,
+                desc_state.FrontFace.StencilFunc.0,
+                desc_state.BackFace.StencilFunc.0,
+            );
         }
+        cls
     };
     if let Some(cls) = cls {
         if let Ok(mut lenses) = LENSES.write() {

@@ -104,6 +104,12 @@ pub struct RenderMachine {
     pub mumblelink_player: RenderPositioning,
     #[cfg(feature = "space")]
     pub mumblelink_camera: RenderPosition,
+    #[cfg(feature = "space")]
+    pub mumblelink_camera_frame: u32,
+    #[cfg(feature = "space")]
+    pub mumblelink_camera_prev: RenderPositioning,
+    #[cfg(feature = "space")]
+    pub mumblelink_camera_prev_frame: u32,
     pub mumblelink_users: RenderUsers,
     pub gameplay: GameplayState,
     #[cfg(not(any(feature = "markers", feature = "space")))]
@@ -175,6 +181,12 @@ impl RenderMachine {
             mumblelink_player: Self::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
             mumblelink_camera: Self::POSITION_EMPTY,
+            #[cfg(feature = "space")]
+            mumblelink_camera_frame: 0,
+            #[cfg(feature = "space")]
+            mumblelink_camera_prev: Self::POSITIONING_EMPTY,
+            #[cfg(feature = "space")]
+            mumblelink_camera_prev_frame: 0,
             mumblelink_users: Self::USERS,
             gameplay: GameplayState::INITIAL,
             #[cfg(not(any(feature = "markers", feature = "space")))]
@@ -251,6 +263,7 @@ impl RenderMachine {
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
+            use taimi_meta::coords::MapLocalScale;
             self.map_info = match gameplay.latest_map() {
                 None => {
                     if self.map_hidden {
@@ -266,9 +279,25 @@ impl RenderMachine {
                             self.map.calibration.local_offset = None;
                         }
                         self.map.calibration.update_from_map(&map);
+                        #[cfg(feature = "space")]
+                        {
+                            let continent = map.continent_rect().size();
+                            let rect = map.map_rect();
+                            let map_extents = rect.size().to_vector() + rect.center().to_vector();
+                            let map_aspect = map_extents.x / map_extents.y;
+                            let far = continent.height * 12.0 * map_aspect.min(Self::DEPTH_ASPECT_MAX) * MapLocalScale::METRES_PER_INCH;
+                            let near = far * Self::DEPTH_NEAR_MULT;
+                            self.depth_range = Some(near..far);
+                        }
                         Some(map)
                     },
-                    None => None,
+                    None => {
+                        #[cfg(feature = "space")]
+                        {
+                            self.depth_range = None;
+                        }
+                        None
+                    },
                 },
             };
         }
@@ -346,10 +375,8 @@ impl RenderMachine {
         }
     }
 
-    #[cfg(todo)]
-    pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_lines256";
-    #[cfg(todo)]
-    pub const TEXTURE_LOGO_BIN: &'static [u8] =
+    pub const TEXTURE_LOGO_LINES_KEY: &'static str = "taimihud_lines256";
+    pub const TEXTURE_LOGO_LINES_BIN: &'static [u8] =
         include_bytes!("../../../data/textures/logotype-lines-256.png");
     pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_glow256";
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
@@ -390,11 +417,12 @@ impl RenderMachine {
         #[cfg(any(feature = "markers", feature = "space"))]
         let controls_changed = self.controls.update().map(|(&state, changes)| (state, changes));
 
-        let (ml, mut frameskip_gameplay) = self.next_mumblelink_frame();
+        let (ml, mut frameskip_gameplay, frame_skip) = self.next_mumblelink_frame();
 
         let mumble_gameplay = ml.and_then(|ml|
             self.act_mumblelink_tick(ml)
         );
+        self.mumblelink_frame_skip = frame_skip;
 
         let ui_tick = self.ui_tick();
 

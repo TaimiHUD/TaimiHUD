@@ -13,6 +13,7 @@ use {
     },
     taimi_d3d::dx11::{
         prelude::*,
+        buffer::BindFlags,
         context::DeviceContext0,
         depth::ComparisonFunc,
         RenderTargetView,
@@ -106,7 +107,8 @@ pub(super) unsafe fn set_targets_pre(
             btree_map::Entry::Vacant(e) => {
                 e.insert(ProjectBufferInfo {
                     classification: {
-                        let buf_desc = super::lens::get_view_dims(RenderTargetView::from_d3d_raw_ref(&view_ptr));
+                        let view = RenderTargetView::from_d3d_raw_ref(&view_ptr);
+                        let buf_desc = super::lens::get_view_dims(view);
                         let format_ok = |format| match format {
                             | dxgi::DXGI_FORMAT_A8_UNORM
                             | dxgi::DXGI_FORMAT_R1_UNORM
@@ -139,15 +141,33 @@ pub(super) unsafe fn set_targets_pre(
                             //dims.Width == expected.x as u32 && dims.Height == expected.y as u32
                             ((expected.x / expected.y) - (w as f32 / h as f32)).abs() <= 2e-4f32
                         };
-                        let size_ok = match buf_desc {
-                            Some(desc) if !format_ok(desc.Format) => false,
-                            Some(desc) if !size_ok(desc.Width, desc.Height) => false,
-                            _ => true,
-                        };
-                        match size_ok {
-                            false => ProjectClassification::Unsupported,
-                            true => ProjectClassification::New,
+                        let mut cls = ProjectClassification::New;
+                        match &buf_desc {
+                            Some(desc) if !format_ok(desc.Format) =>
+                                cls = ProjectClassification::Unsupported,
+                            Some(desc) if !size_ok(desc.Width, desc.Height) =>
+                                cls = ProjectClassification::Unsupported,
+                            // bind&D3D11_BIND_SHADER_RESOURCE (in addition to RT) is interesting
+                            #[cfg(todo)]
+                            Some(desc) if (desc.BindFlags.0 & BindFlags::SHADER.0) == 0 =>
+                                cls = ProjectClassification::UI,
+                            _ => (),
                         }
+                        let (mut sz, mut fmt, mut usage, mut bind, mut misc, mut cpu) = Default::default();
+                        if let Some(desc) = &buf_desc {
+                            usage = desc.Usage.0;
+                            bind = desc.BindFlags;
+                            misc = desc.MipLevels;
+                            cpu = desc.CPUAccessFlags;
+                            fmt = desc.Format.0;
+                            sz = (desc.Width, desc.Height);
+                        }
+                        #[cfg(deleteme)]
+                        if cls != ProjectClassification::Unsupported {
+                            let key = render_ptr.map(|p| p.as_ptr() as usize).unwrap_or(0);
+                            log::debug!("DELETEME: new RT {key:#x} bind={bind:#x},{usage:#x},{misc:#x},{cpu:#x} fmt={fmt:#x}, sz={}x{}", sz.0, sz.1);
+                        }
+                        cls
                     },
                     last_seen: now,
                     first_seen: now,
@@ -164,6 +184,23 @@ pub(super) unsafe fn set_targets_pre(
             kind: ProjectBufferKind::DepthView,
         });
         buf.last_seen = now;
+        let was_new = buf.classification == ProjectClassification::New;
+        #[cfg(deleteme)]
+        if was_new {
+            let depth_view = RenderTargetView::from_d3d_raw_ref(&depth_ptr);
+            let buf_desc = super::lens::get_view_dims(depth_view);
+            let (mut sz, mut fmt, mut usage, mut bind, mut misc, mut cpu) = Default::default();
+            if let Some(desc) = &buf_desc {
+                usage = desc.Usage.0;
+                bind = desc.BindFlags;
+                misc = desc.MipLevels;
+                cpu = desc.CPUAccessFlags;
+                fmt = desc.Format.0;
+                sz = (desc.Width, desc.Height);
+            }
+            let key = depth_ptr.as_ptr() as usize;
+            log::debug!("DELETEME: new DV {key:#x} bind={bind:#x},{usage:#x},{misc:#x},{cpu:#x} fmt={fmt:#x} sz={}x{}", sz.0, sz.1);
+        }
         if matches!(buf.classification, ProjectClassification::New | ProjectClassification::Unknown) {
             let lens_cls = super::lens::LENSES.try_read().ok().and_then(|l| l.get(&(depth_ptr.as_ptr() as usize)).copied());
             match lens_cls {
@@ -183,6 +220,12 @@ pub(super) unsafe fn set_targets_pre(
                 _ => (),
             }
         }
+        if was_new && buf.classification != ProjectClassification::New {
+            let cls = buf.classification;
+            let key = depth_ptr.as_ptr() as usize;
+            #[cfg(deleteme)]
+            log::debug!("DELETEME: DV {key:#x} cls={cls:?}");
+        }
     }
 
     draw_point(context, ProjectCondition::Unbind);
@@ -194,12 +237,12 @@ pub(super) unsafe fn set_targets_post(
     (render_ptr, depth_ptr): SetTargetsKey,
 ) {
     let prev_depth = g2!(*&ferret.project.bound_depth);
-    if prev_depth != depth_ptr {
-        g2!(*&mut ferret.project.bound_depth_written = false);
-    }
     g2!(*&mut ferret.project.bound_render = render_ptr);
     g2!(*&mut ferret.project.bound_depth = depth_ptr);
     draw_point(context, ProjectCondition::SetTargets);
+    if prev_depth != depth_ptr {
+        g2!(*&mut ferret.project.bound_depth_written = false);
+    }
     // TODO: hacky
     g2!(*&mut ferret.project.bound_depth_depthless = true);
 }
@@ -220,12 +263,28 @@ pub(super) unsafe fn set_state_pre(
             if let Some(render_ptr) = g2!(*&ferret.project.bound_render) {
                 if let Some(buf) = seen.get_mut(&render_ptr) {
                     if matches!(buf.classification, ProjectClassification::New | ProjectClassification::Unknown) {
+                        let was_new = matches!(buf.classification, ProjectClassification::New);
                         match desc.DepthFunc {
                             ComparisonFunc::LESS if stencil_ref == 0 =>
                                 buf.classification = ProjectClassification::World,
                             ComparisonFunc::LESS_EQUAL =>
                                 buf.classification = ProjectClassification::Shadowbox,
                             _ => (),
+                        }
+                        #[cfg(deleteme)]
+                        if was_new {
+                            let key = render_ptr.as_ptr() as usize;
+                            let cls = buf.classification;
+                            log::debug!("DELETEME: classified {key:#x},{cls:?} with ref=0x{stencil_ref:08x}, den={}, dw={}, df={}, se={}({:#x},{:#x}), sf={},{}",
+                                desc.DepthEnable.0,
+                                desc.DepthWriteMask.0,
+                                desc.DepthFunc.0,
+                                desc.StencilEnable.0,
+                                desc.StencilReadMask,
+                                desc.StencilWriteMask,
+                                desc.FrontFace.StencilFunc.0,
+                                desc.BackFace.StencilFunc.0,
+                            );
                         }
                     }
                 }
@@ -603,6 +662,7 @@ pub struct ProjectRequest {
     pub empty: bool,
     pub acquire: Option<ProjectClassification>,
     pub patient: bool,
+    pub manual_delay: bool,
     #[cfg(todo)]
     pub empty_depth: bool,
 }
@@ -615,6 +675,7 @@ impl ProjectRequest {
             empty: false,
             acquire: Some(ProjectClassification::World),
             patient: false,
+            manual_delay: false,
         }
     }
     pub fn default_shadowbox() -> Self {
@@ -625,10 +686,11 @@ impl ProjectRequest {
             empty: false,
             acquire: Some(ProjectClassification::Shadowbox),
             patient: false,
+            manual_delay: false,
         }
     }
     pub fn fallback() -> Self {
-        ProjectRequest { target: None, cond: ProjectCondition::Unbind, delay: 0..=0, empty: false, acquire: None, patient: true }
+        ProjectRequest { target: None, cond: ProjectCondition::Unbind, delay: 0..=0, empty: false, acquire: None, patient: true, manual_delay: false }
     }
     #[inline]
     pub fn pre_match(
@@ -718,6 +780,8 @@ impl ProjectPoint {
                 (*self.request.delay.end()).min(c)..=c,
             None if self.request.patient =>
                 0..=(*self.request.delay.end()).min(2),
+            _ if self.request.manual_delay =>
+                self.request.delay.clone(),
             _ => 0..=0,
         };
         report
@@ -756,7 +820,7 @@ impl ProjectClassification {
     pub const DEFAULT_TARGET: Self = Self::World;
     pub const DEFAULT_SHADOWBOX: Self = Self::Shadowbox;
 }
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ProjectBufferKind {
     DepthView,
     RenderTarget,

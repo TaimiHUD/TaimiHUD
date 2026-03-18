@@ -26,7 +26,7 @@ use goggles::project::ProjectRequest;
 use goggles::camera::{CameraSearch, CameraFerret, PerspectiveFerret};
 
 impl RenderMachine {
-    const CAMERA_SMOOTHING_PER_FRAME: f32 = 0.135;
+    pub(super) const CAMERA_SMOOTHING_PER_FRAME: f32 = 0.135;
     pub fn get_camera_pos(&self, source: CameraSource) -> Option<(RenderPosition<DrawSpace>, CameraSource)> {
         let mut has_up = false;
         let mut camsrc = CameraSource::MumbleLink;
@@ -96,7 +96,7 @@ impl RenderMachine {
             }
             if let Some((pos, front)) = interp {
                 let (ml_pos, ml_front, ..) = &self.mumblelink_camera;
-                let factor = Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32 /*.min(1.0)*/;
+                let factor = (Self::CAMERA_SMOOTHING_PER_FRAME * self.mumblelink_frame_skip as f32).min(1.0);
                 cam.0 = ml_pos.lerp(pos, factor);
                 cam.1 = ml_front.slerp(front, factor);
                 //.rotate_towards(front, turn * Self::CAMERA_SMOOTHING_PER_FRAME)?
@@ -123,16 +123,23 @@ impl RenderMachine {
         }
     }
 
+    pub const DEPTH_FAR_MULT: f32 = 2114.0f32;
+    pub const DEPTH_NEAR_MULT: f32 = 1.0f32 / Self::DEPTH_FAR_MULT;
+    pub(super) const DEPTH_ASPECT_MAX: f32 = 1.5f32;
     pub const DEFAULT_DEPTH_RANGE: Range<f32> = {
-        let near = 0.5 / MapLocalScale::METRES_PER_FEET;
-        let far = 700.0 / MapLocalScale::METRES_PER_FEET;
-        near..far
-    };
-    #[cfg(feature = "goggles")]
-    pub const GOGGLES_DEPTH_RANGE: Range<f32> = {
+        #[cfg(deleteme)]{
         pub const M_TO_UNIT: f32 = 2.0 / MapLocalScale::METRES_PER_FEET;
         let near = M_TO_UNIT / 10.0;
         let far = 10_000.0 / M_TO_UNIT;
+        }
+        let near = MapLocalScale::METRES_PER_INCH * 28.0f32;
+        let far = near * Self::DEPTH_FAR_MULT;
+        near..far
+    };
+    #[cfg(deleteme)]
+    pub const DEFAULT_DEPTH_RANGE: Range<f32> = {
+        let near = 0.5 / MapLocalScale::METRES_PER_FEET;
+        let far = 700.0 / MapLocalScale::METRES_PER_FEET;
         near..far
     };
 
@@ -141,11 +148,13 @@ impl RenderMachine {
     }
 
     pub fn depth_range(&self) -> Range<f32> {
-        self.get_depth_range().unwrap_or_else(|| match () {
-            #[cfg(feature = "goggles")]
-            _ if goggles::is_enabled() => Self::GOGGLES_DEPTH_RANGE,
-            _ => Self::DEFAULT_DEPTH_RANGE,
-        })
+        #[cfg(feature = "goggles2-camera")]
+        if let Some((_, _, near, far)) = self.goggles.perspective_params() {
+            let near = near * MapLocalScale::METRES_PER_INCH;
+            let far = far * MapLocalScale::METRES_PER_INCH;
+            return near..far
+        }
+        self.get_depth_range().unwrap_or(Self::DEFAULT_DEPTH_RANGE)
     }
 
     /// 50 degrees vertical field of view
@@ -264,6 +273,7 @@ impl RenderMachine {
         {
             self.goggles.prepare_frame();
         }
+        self.lastminute_mumblelink_update();
     }
 }
 
@@ -582,6 +592,13 @@ impl GogglesState {
     fn camera_commit_perspective(&mut self) {
         if self.camera_enabled && !self.camera_paused && !FerretResource::wants_snatch_perspective() {
             let persp = FerretResource::snatch_perspective();
+            if self.perspective_params().is_none() {
+                let (h, range) = persp.get_as_perspective();
+                let (_near, far) = (range.start, range.end);
+                let map_id = crate::exports::runtime::mumble_link_ptr()
+                    .map(|ml| ml.read_map_id()).unwrap_or(0);
+                log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({_near}..{far}) h={h:?}");
+            }
             self.perspective_params = Self::perspective_params_for(&persp);
         }
     }

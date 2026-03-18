@@ -740,6 +740,7 @@ impl RenderState {
             return
         }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
+        crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_LINES_KEY, RenderMachine::TEXTURE_LOGO_LINES_BIN);
         rt::setup_stats();
         #[cfg(feature = "space")]
         crate::space::Engine::setup_stats();

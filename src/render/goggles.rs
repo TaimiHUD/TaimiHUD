@@ -73,7 +73,7 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
                 Some(key) =>
                     format!("{key:p}"),
             };
-            if let Some(combo) = ui.begin_combo("Projection", preview) {
+            if let Some(_combo) = ui.begin_combo("Projection", preview) {
                 let selected_off = imgui::Selectable::new("Off")
                     .selected(selected_proj == None)
                     .build(ui);
@@ -143,6 +143,7 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
             }
 
             if ui.checkbox("patient", &mut request.patient) {
+                request.manual_delay = false;
                 request_dirty = true;
             }
             ui.same_line();
@@ -227,6 +228,50 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
                     true => target.action = goggles::project::ProjectAction::DebugDetect,
                     false => target.action = goggles::project::ProjectAction::Draw,
                 }
+            } else if ui.is_item_hovered() {
+                use taimi_d3d::dx11::{DepthView, RenderTargetView, View};
+
+                let selected_proj = selected_proj.flatten();
+                let selected_buf = goggles::FerretResource::project_iter_ui(goggles::project::ProjectClassification::DEFAULT_TARGET).find(|(k, _)| Some(*k) == selected_proj)
+                    .map(|(_, b)| b);
+                let view = selected_proj.as_ref().and_then(|p| selected_buf.as_ref().map(move |buf| (p, buf.kind)));
+                let mut rview = None;
+                let mut dview = None;
+                let view: Option<&View> = match view {
+                    _ if selected_buf.as_ref().map(|b| b.last_seen) != Some(goggles::g2!(*&ferret.project.frame_count).wrapping_sub(1)) =>
+                        None,
+                    Some((p, goggles::project::ProjectBufferKind::DepthView)) => Some({
+                        &*dview.insert(unsafe { DepthView::from_d3d_raw_ref(p) })
+                    }),
+                    Some((p, goggles::project::ProjectBufferKind::RenderTarget)) => Some({
+                        &*rview.insert(unsafe { RenderTargetView::from_d3d_raw_ref(p) })
+                    }),
+                    None => None,
+                };
+                if let (Some(view), Some(info)) = (view, selected_buf) {
+                    ui.tooltip(|| {
+                        ui.text(format!("view {:p}", view.as_d3d_raw().as_ptr()));
+                        if let Some(buf_desc) = goggles::lens::get_view_dims(view) {
+                            ui.text(format!("size=({},{}) mips={}({})", buf_desc.Width, buf_desc.Height, buf_desc.MipLevels, buf_desc.SampleDesc.Count));
+                            ui.text(format!("format={:#x} usage={:#x} bind={:#x} misc={:#x}", buf_desc.Format.0, buf_desc.Usage.0, buf_desc.BindFlags, buf_desc.MiscFlags));
+                        }
+                        if machine.goggles.perspective_params.0 != 0.0 {
+                            let (_h, aspect, near, far) = machine.goggles.perspective_params;
+                            ui.text(format!("zrange={near:?}..{far:?}({aspect})"));
+                            let map_id = machine.gameplay.gameplay_map();
+                            let map = map_id.and_then(|map_id| taimi_meta::map::MapCache.lookup_map(map_id.get())
+                                .map(|map| (map_id, map))
+                            );
+                            if let Some((map_id, map)) = map {
+                                ui.text(format!("map({map_id})={:?} cont={:?}", map.map_rect(), map.continent_rect()));
+                                ui.text(format!("mapsz={:?} contsz={:?}", map.map_rect().size(), map.continent_rect().size()));
+                                if let (Some(min), Some(max)) = (map.floors.iter().min(), map.floors.iter().max()) {
+                                    ui.text(format!("floors={min}..={max}"));
+                                }
+                            }
+                        }
+                    });
+                }
             }
         }
 
@@ -238,6 +283,19 @@ pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMac
         }
         ui.same_line();
         if ui.checkbox("flush", &mut machine.goggles.project_flush) {
+        }
+
+        ui.same_line();
+        if ui.checkbox("shad", &mut machine.goggles.project_shadow) {
+        }
+
+        if let Some(mut request) = goggles::FerretResource::project_target_request() {
+            let mut delay = *request.delay.start();
+            if imgui::Slider::new("delay", 0u32, 64u32).build(ui, &mut delay) {
+                request.delay = delay..=delay;
+                request.manual_delay = true;
+                goggles::FerretResource::project_set_target_request(Some(request));
+            }
         }
 
         let mut cam = machine.goggles.camera_enabled;
