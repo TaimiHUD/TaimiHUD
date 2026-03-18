@@ -1,6 +1,6 @@
 use {
     crate::{
-        attributes,
+        attributes::{self, keys::Guid},
         category::{
             id::{CategoryId, FullIdRef, IdCmpRelaxed, IdNameBox, IdNameSeg},
             Category,
@@ -161,18 +161,9 @@ pub fn file_path_eq<P: AsRef<[u8]>>(locator: &str, path: P) -> bool {
 }
 
 /// I hate this. See: <https://github.com/blish-hud/Pathing/blob/25b65248c7861e585b2e80a52ffb7fd4ddb371d5/Utility/AttributeParsingUtil.cs#L39>
-pub fn taco_xml_to_guid(value: &str) -> Uuid {
-    use {
-        base64::{engine::general_purpose, Engine as _},
-        md5::{Digest, Md5},
-    };
-    let mut raw_guid = [0u8; 16];
-    if let Ok(len) = general_purpose::STANDARD.decode_slice(value, &mut raw_guid) {
-        if len == 16 {
-            return Uuid::from_bytes_le(raw_guid);
-        }
-    }
-    Uuid::from_bytes_le(Md5::digest(value).into())
+#[deprecated = "Guid::decode_or_hash"]
+pub(crate) fn taco_xml_to_guid(value: &str) -> Uuid {
+    Guid::decode_or_hash(value.as_bytes()).into()
 }
 
 fn parse_pack_def(
@@ -435,7 +426,6 @@ impl<'a> PackBuilder<'a> {
                 },
                 None if id.as_str().is_empty() => {
                     if warnings_empty.insert(guid.clone()) {
-                        #[cfg(todo)]
                         let guid = Guid::from_ref(guid);
                         log::warn!("No category provided for {guid}");
                     }
@@ -456,7 +446,6 @@ impl<'a> PackBuilder<'a> {
                         warn = warnings_missing.insert(IdCmpRelaxed::new(id_key));
                     }
                     if warn {
-                        #[cfg(todo)]
                         let guid = Guid::from_ref(guid);
                         log::info!("nonexistent category `{id}` provided for {guid}");
                         #[cfg(feature = "fixup-typos")]

@@ -1457,8 +1457,34 @@ impl Guid {
     pub fn is_empty(&self) -> bool {
         self.0.is_nil()
     }
+    #[inline]
     pub fn or_empty(&self) -> Option<&Self> {
         (!self.is_empty()).then_some(self)
+    }
+    #[inline]
+    pub fn non_empty(self) -> Option<Self> {
+        (!self.is_empty()).then_some(self)
+    }
+    /// TODO: whitelist UUID versions/variants so made-up GUIDs end up at [Self::hash_guidlike]
+    pub fn decode(s: &[u8]) -> Result<Self, base64::DecodeSliceError> {
+        let mut raw_guid = [0u8; 16];
+        match base64::engine::general_purpose::STANDARD.decode_slice(s, &mut raw_guid) {
+            Ok(16) => Ok(Self(Uuid::from_bytes_le(raw_guid))),
+            Ok(l) => Err(base64::DecodeError::InvalidLength(l).into()),
+            Err(e) => Err(e),
+        }
+    }
+    /// invalid GUIDs from hand-made XMLs will be hashed instead
+    pub fn hash_guidlike(s: &[u8]) -> Self {
+        use md5::{Digest, Md5};
+        #[cfg(todo)]
+        if s.is_empty() {
+            return Self::EMPTY
+        }
+        Self(Uuid::from_bytes_le(Md5::digest(s).into()))
+    }
+    pub fn decode_or_hash(s: &[u8]) -> Self {
+        Self::decode(s).unwrap_or_else(|_| Self::hash_guidlike(s))
     }
 }
 impl AttrKey for Guid {
@@ -1466,16 +1492,13 @@ impl AttrKey for Guid {
     const ATTR: &'static str = "guid";
     const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
 }
+/// TODO: log failures/fallbacks when this becomes used for all parsing
 impl FromStr for Guid {
-    type Err = base64::DecodeSliceError;
+    type Err = anyhow::Error;
 
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut raw_guid = [0u8; 16];
-        match base64::engine::general_purpose::STANDARD.decode_slice(s, &mut raw_guid) {
-            Ok(16) => Ok(Self(Uuid::from_bytes_le(raw_guid))),
-            Ok(l) => Err(base64::DecodeError::InvalidLength(l).into()),
-            Err(e) => Err(e),
-        }
+        Ok(Self::decode_or_hash(s.as_bytes()))
     }
 }
 impl fmt::Display for Guid {
@@ -1517,6 +1540,12 @@ impl From<Option<Guid>> for Guid {
         v.unwrap_or_default()
     }
 }
+impl<'a> From<Option<&'a Uuid>> for Guid {
+    #[inline]
+    fn from(v: Option<&'a Uuid>) -> Self {
+        v.copied().map(Self).unwrap_or_default()
+    }
+}
 impl<'a> From<&'a Uuid> for &'a Guid {
     #[inline]
     fn from(v: &'a Uuid) -> Self {
@@ -1527,6 +1556,12 @@ impl<'a> From<&'a Guid> for &'a Uuid {
     #[inline]
     fn from(v: &'a Guid) -> Self {
         &v.0
+    }
+}
+impl<'a> From<&'a Uuid> for Guid {
+    #[inline]
+    fn from(v: &'a Uuid) -> Self {
+        Guid::from_ref(v).clone()
     }
 }
 impl AsRef<Uuid> for Guid {

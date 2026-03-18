@@ -147,7 +147,7 @@ impl Poi {
 
 impl fmt::Display for Poi {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let guid = &self.guid;
+        let guid = keys::Guid::from_ref(&self.guid);
         let category = &self.category;
         match &self.parent_path {
             Some(parent) => write!(f, "{parent}{category}/{guid}"),

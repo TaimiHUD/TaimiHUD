@@ -27,6 +27,7 @@ use {
         io::{self, BufRead, Read},
         mem,
     },
+    taimi_hoard::lazyfmt,
     uuid::Uuid,
 };
 
@@ -102,7 +103,20 @@ impl Trail {
             }
         }
         if category.is_empty() {
-            anyhow::bail!("No 'type' specified for Trail");
+            let disp_id = log::log_enabled!(log::Level::Debug).then_some(lazyfmt::MaybeFmt::new(|f| {
+                match &guid {
+                    Some(guid) if !guid.is_nil() => return write!(f, " {}", keys::Guid::from_ref(guid)),
+                    _ => (),
+                }
+                if let Some(path) = &trail_path {
+                    write!(f, "({})", &path[..])
+                } else if let Some(tex) = &attributes.trail().texture {
+                    write!(f, "({})", &tex[..])
+                } else {
+                    Ok(())
+                }
+            }));
+            anyhow::bail!("No 'type' specified for Trail{}", lazyfmt::or_empty(disp_id));
         }
 
         let guid = guid.unwrap_or_default();
@@ -188,7 +202,7 @@ impl Trail {
 impl fmt::Display for Trail {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let category = &self.category;
-        let guid = &self.guid;
+        let guid = keys::Guid::from_ref(&self.guid);
         match &self.parent_path {
             Some(parent) => write!(f, "{parent}{category}/{guid}"),
             None => write!(f, "{category}/{guid}"),

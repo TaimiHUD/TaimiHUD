@@ -1,6 +1,6 @@
 use {
     self::cell::GetAttrDyn,
-    crate::{category::id::IdNameBox, pack::taco_xml_to_guid},
+    crate::category::id::IdNameBox,
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
@@ -244,7 +244,9 @@ impl MarkerAttributes {
         {
             self.interaction_mut().toggle_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
-            let guids = value.split(',').map(|g| taco_xml_to_guid(g.trim_ascii()));
+            let guids = value
+                .split(',')
+                .map(|g| keys::Guid::decode_or_hash(g.as_bytes().trim_ascii()).into());
             self.interaction_mut().reset_guids = Some(list_into(guids.collect::<Box<[_]>>()));
         } else if attr_name.eq_ignore_ascii_case("show") {
             self.interaction_mut().show_category = Some(value.into());
