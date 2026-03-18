@@ -71,6 +71,18 @@ impl Trail {
             }
         }
 
+        #[cfg(feature = "fixup-fvd")]
+        {
+            /// `GUID="/nvefCms5kWE7aSlgxB5KA" trailData="Data/Trails/ARAH/ARAH_P2_MineSkip.trl"`
+            const TYPE_ARAH2_GUID: Uuid = match Uuid::try_parse_ascii(b"7cde7bfe-ac29-45e6-84ed-a4a583107928") {
+                Ok(u) => u,
+                Err(..) => unreachable!(),
+            };
+            const TYPE_ARAH2: &'static str = "fvd_guide.arah.p2.path";
+            if category.is_empty() && guid == Some(TYPE_ARAH2_GUID) {
+                category = TYPE_ARAH2.into();
+            }
+        }
         if category.is_empty() {
             anyhow::bail!("No 'type' specified for Trail");
         }

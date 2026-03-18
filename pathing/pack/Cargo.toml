@@ -30,9 +30,11 @@ zip = [
 fixup-typos = [
   "fixup-ladyelyssa",
   "fixup-tehstrails",
+  "fixup-fvd",
 ]
 fixup-ladyelyssa = []
 fixup-tehstrails = []
+fixup-fvd = []
 
 [dependencies]
 taimi_hoard = { path = "../../rt/hoard" }
