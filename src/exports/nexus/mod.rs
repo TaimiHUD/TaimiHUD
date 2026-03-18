@@ -424,6 +424,9 @@ pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>
         return Ok(None)
     }
     let Some(aapi) = addon_api() else { return Ok(None) };
+    if metadata.target().starts_with("taimi_pack::") && !crate::built_info::IS_TAGGED_VERSION {
+        return Ok(None)
+    }
 
     let level = rt::log::nexus_log_level(metadata.level());
     let channel = rt::NAME_C.as_ptr();

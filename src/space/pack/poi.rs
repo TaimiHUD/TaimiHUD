@@ -55,6 +55,7 @@ pub struct PoiCommonRenderData {
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
 
     pub fallback_texture: Option<TextureSlot>,
+    pub fallback_texture2: Option<TextureSlot>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -81,6 +82,7 @@ impl PoiCommonRenderData {
             map_ib: None,
             world_ib: None,
             fallback_texture: None,
+            fallback_texture2: None,
         })
     }
 
@@ -152,6 +154,11 @@ impl PoiCommonRenderData {
         if self.fallback_texture.is_none() {
             if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_KEY) {
                 self.fallback_texture = texture;
+            }
+        }
+        if self.fallback_texture2.is_none() {
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_LINES_KEY) {
+                self.fallback_texture2 = texture;
             }
         }
     }

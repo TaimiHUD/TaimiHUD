@@ -12,26 +12,26 @@ pub type MapID = u32;
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Map {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    min_level: Option<isize>,
+    pub min_level: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_level: Option<isize>,
-    default_floor: Option<isize>,
+    pub max_level: Option<isize>,
+    pub default_floor: Option<isize>,
     #[serde(rename = "type", default)]
-    kind: Option<MapType>,
+    pub kind: Option<MapType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    floors: Vec<isize>,
+    pub floors: Vec<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    region_id: Option<isize>,
+    pub region_id: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    region_name: Option<String>,
+    pub region_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    continent_id: Option<isize>,
+    pub continent_id: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    continent_name: Option<String>,
-    map_rect: [[i32; 2]; 2],
-    continent_rect: [[i32; 2]; 2],
+    pub continent_name: Option<String>,
+    pub map_rect: [[i32; 2]; 2],
+    pub continent_rect: [[i32; 2]; 2],
 }
 
 impl Map {

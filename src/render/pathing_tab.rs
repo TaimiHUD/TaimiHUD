@@ -1115,16 +1115,25 @@ impl PathingConfig {
             let map_id = map_id.get();
 
             //RenderState::font_text("ui", ui, "Goggles");
-            if let Some(Some(value)) = Self::slider_setting(ui, c"near", near, (0.15, 1.2)) {
+            if let Some(Some(value)) = Self::slider_setting(ui, c"near", near, /*(0.15, 1.2)*/(4.0, 32.0)) {
                 Self::set_pathing(|s| {
+                    #[cfg(deleteme)]
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
+                    #[cfg(deleteme)]
                     let e = map_depth_calibration
                         .entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
+                    #[cfg(deleteme)]
                     let prev = e.0;
-                    e.0 = value / RenderMachine::GOGGLES_DEPTH_RANGE.start;
-                    let near = value;
+                    #[cfg(deleteme)]
+                    {
+                        e.0 = value / RenderMachine::GOGGLES_DEPTH_RANGE.start;
+                    }
+                    let mut near = value;
+                    near *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
+                    #[cfg(deleteme)]
                     let mut far = far;
+                    #[cfg(deleteme)]
                     if e.1 == 1.0 || e.1 == prev {
                         e.1 = e.0;
                         far = e.1 * RenderMachine::GOGGLES_DEPTH_RANGE.end;
@@ -1132,20 +1141,33 @@ impl PathingConfig {
                     machine.depth_range = Some(near..far);
                 });
             }
-            if let Some(Some(value)) = Self::slider_setting(ui, c"far", far, (500.0, 2500.0)) {
+            near *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
+            let mut far = far * taimi_meta::coords::MapLocalScale::INCHES_PER_METRE;
+            if let Some(Some(value)) = Self::slider_setting(ui, c"far", far, /*(500.0, 2500.0)*/(2114.0f32 * 8.0, 2114.0f32 * 48.0)) {
                 Self::set_pathing(|s| {
+                    #[cfg(deleteme)]
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
+                    #[cfg(deleteme)]
                     let e = map_depth_calibration
                         .entry(map_id)
                         .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
+                    #[cfg(deleteme)]
+                    {
                     e.1 = value / RenderMachine::GOGGLES_DEPTH_RANGE.end;
-                    machine.depth_range = Some(near..value);
+                    }
+                    let mut far = value;
+                    far *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
+                    machine.depth_range = Some(near..far);
                 });
             }
+            far *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
             if ui.button(c"distance reset") {
                 Self::set_pathing(|s| {
+                    #[cfg(deleteme)]
+                    {
                     let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
                     map_depth_calibration.remove(&map_id);
+                    }
                     machine.depth_range = None;
                 });
             }

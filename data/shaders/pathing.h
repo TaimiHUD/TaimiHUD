@@ -106,6 +106,9 @@ struct PoiInput {
 #endif
 
 struct SpaceOutputV {
+#if SHADER_P && 0
+    linear centroid sample
+#endif
     float4 position: SV_Position;
     float4 colour: COLOR0;
     float2 tex: TEXCOORD0;
@@ -129,6 +132,7 @@ struct SpaceInputP {
 
 struct SpaceOutputP {
     float4 colour: SV_Target0;
+    //float depth_push: SV_DepthGreaterEqual;
 };
 #define TrailOutputP SpaceOutputP
 #define PoiOutputP SpaceOutputP

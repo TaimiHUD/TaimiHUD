@@ -38,6 +38,13 @@ TrailOutputV trail_main_v(TrailInput input)
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
 
     output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
+#if GOGGLES2_SHADOWBOXING && 0
+    if (GET_MFLAG(v_trail.marker.flags, 0x4000)) {
+        output.colour.x = 0.0;
+        output.colour.y = 0.0;
+        output.colour.z = 0.0;
+    }
+#endif
 
     // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
     // float clip_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OPAQUE));
@@ -123,6 +130,11 @@ TrailOutputP trail_main_p(TrailInputP inp)
 
     float feather = feather3.x * feather3.y;
     colour.w = colour.w * overlap * saturate(intensity) * feather*feather * feather3.z;
+#if 0
+    output.depth_push = colour.w >= 0.99 ? 0.0 : 1.0;
+#else
+    //output.depth_push = 0.0;
+#endif
 #if GOGGLES2_SHADOWBOXING
     if (GET_MFLAG(flags, 0x4000) && colour.w < 0.992) {
         discard;
@@ -297,6 +309,9 @@ PoiOutputP poi_main_p(PoiOutputV vout)
 #endif
 
     float alpha = colour.w * saturate(intensity) * feather*feather * feather3.z;
+#if 0
+    output.depth_push = alpha >= 0.99 ? 0.0 : 1.0;
+#endif
 #if GOGGLES2_SHADOWBOXING
     if (GET_MFLAG(flags, 0x4000) && alpha < 0.992) {
         discard;

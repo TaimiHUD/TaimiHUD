@@ -947,7 +947,11 @@ impl Engine {
                 _ => (true, true),
             };
             if set_blend {
-                self.render_backend.blend_state.set(&device_context);
+                let blend_state = match () {
+                    _ if inherit && machine.goggles.project_shadow => &self.render_backend.blend_state_shadow,
+                    _ => &self.render_backend.blend_state,
+                };
+                blend_state.set(&device_context);
             }
             self.render_backend.depth_handler.setup(&device_context, inherit);
             if set_viewport {
@@ -1246,6 +1250,7 @@ impl Engine {
 
                 #[cfg(feature = "goggles2")]
                 if inherit && machine.goggles.project_depth_fill {
+                    //self.render_backend.depth_handler.depth_stencil_state_write.set(&device_context);
                     self.render_backend.depth_handler.depth_stencil_state_readonly.set(&device_context);
                 }
 
@@ -1591,7 +1596,9 @@ impl Engine {
             s.map(|s| {
                 (
                     s.space.goggles.enabled(),
+                    #[cfg(deleteme)]
                     map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get())),
+                    ()
                 )
             })
         });
@@ -1607,6 +1614,7 @@ impl Engine {
 
             goggles::pick_lens(force);
 
+            #[cfg(deleteme)]
             if let Some((min, max)) = depth {
                 let reference = RenderMachine::GOGGLES_DEPTH_RANGE;
                 machine.depth_range = Some(reference.start * min..reference.end * max);

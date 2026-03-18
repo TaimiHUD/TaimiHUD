@@ -149,8 +149,12 @@ impl TrailRender {
         let texture = self
             .texture
             .as_ref()
-            .and_then(TextureSlot::get)
-            .or_else(|| common.fallback_texture.as_ref());
+            .and_then(TextureSlot::get);
+        let texture = match texture {
+            None if matches!(self.texture, Some(TextureSlot::Unavailable)) =>
+                common.fallback_texture2.as_ref(),
+            texture => texture.or_else(|| common.fallback_texture.as_ref())
+        };
         if let Some(texture) = texture {
             texture.set(device_context, 0);
         }
