@@ -579,7 +579,7 @@ impl Engine {
 
         let minimap_bounds = match &render_map {
             Some((map_ctx, ..)) if matches!(map_ctx, MapContext::Global) => None,
-            None if !is_rendering => None,
+            None if !is_rendering || machine.map_hidden => None,
             _ => Some({
                 let bounds = machine.map.calibration.compass_bounds();
                 Box2::from(machine.map.calibration.map(bounds))
@@ -590,6 +590,10 @@ impl Engine {
             self.render_backend
                 .depth_handler
                 .setup_minimap_scissor(&device_context, minimap_bounds);
+        } else {
+            self.render_backend
+                .depth_handler
+                .set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
         }
 
         if let Some((map_ctx, local_bounds)) = render_map {
@@ -663,9 +667,9 @@ impl Engine {
 
         let masking = minimap_bounds.is_some()
             || (is_rendering && self.render_backend.depth_handler.fill_edge.is_some());
-        let masking = match render_world.is_some() && masking {
+        let masking = match render_world.is_some() && masking && !machine.map_hidden {
             #[cfg(feature = "goggles")]
-            true if goggles_2pass => Some(true),
+            true if goggles_enabled => Some(true),
             true => Some(false),
             _ => None,
         };
@@ -692,9 +696,7 @@ impl Engine {
         }
 
         if let Some(depth_fill) = masking {
-            self.render_backend
-                .depth_handler
-                .fill_corners(&device_context, depth_fill);
+            self.render_backend.depth_handler.fill_corners(&device_context);
 
             self.render_backend
                 .depth_handler
