@@ -135,6 +135,9 @@ impl DataSourceTabState {
             for download_data in &settings.remotes {
                 let source_id = download_data.datasource_name();
                 let source = download_data.source();
+                if download_data.installed_tag.is_none() && source.is_deprecated() {
+                    continue
+                }
                 let pushy = ui.push_id(&source_id);
                 if let Some(source) = self.populated_sources.get_mut(&source_id[..]) {
                     *source = (download_data.kind, self.populated_generation);
@@ -203,8 +206,9 @@ impl DataSourceTabState {
             let Ok(sources) = crate::SOURCES.try_read() else { return };
             for (kind, source) in sources.iter() {
                 let source = source.as_source();
-                if self.populated_sources.get(&source.name()[..])
-                    == Some(&(kind, self.populated_generation))
+                if source.is_deprecated()
+                    || self.populated_sources.get(&source.name()[..])
+                        == Some(&(kind, self.populated_generation))
                 {
                     continue
                 }

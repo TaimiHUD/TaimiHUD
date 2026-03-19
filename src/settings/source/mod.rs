@@ -213,6 +213,11 @@ pub trait Source: Debug {
         self.get_metadata_str(MetadataKey::DisplayName)
             .unwrap_or_else(|| self.name().into())
     }
+    fn is_deprecated(&self) -> bool {
+        self.get_metadata_str(MetadataKey::IsDeprecated)
+            .map(|v| MetadataKey::bool_is_truthy(&v[..]))
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -231,6 +236,7 @@ pub enum MetadataKey {
     #[cfg(todo)]
     AssetName,
     DirName,
+    IsDeprecated,
 }
 
 impl MetadataKey {
@@ -241,7 +247,20 @@ impl MetadataKey {
             Self::Author => "author",
             Self::HomepageUrl => "homepage_url",
             Self::DirName => "dir_name",
+            Self::IsDeprecated => "deprecated",
         }
+    }
+
+    pub const BOOL_TRUE: &'static str = "true";
+    pub const BOOL_FALSE: &'static str = "";
+    pub fn bool_value(v: bool) -> &'static str {
+        match v {
+            true => Self::BOOL_TRUE,
+            false => Self::BOOL_FALSE,
+        }
+    }
+    pub fn bool_is_truthy(v: &str) -> bool {
+        !v.is_empty()
     }
 }
 

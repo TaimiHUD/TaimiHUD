@@ -1,6 +1,6 @@
 [[Markers]]
-author = "BlishHUD Commander's Markers"
-description = "Markers that were embedded into the source code of BlishHUD's Commander's Markers."
+author = "Commander's Markers"
+description = "Markers that were embedded into the source code of Blish HUD Commander's Markers."
 display_name = "Stock Markers"
 homepage_url = "https://github.com/TaimiHUD/CommandersMarkersInternalMarkers"
 name = "BlishHUD Commander's Markers Internal Markers"
@@ -45,5 +45,15 @@ description = "These are timers by QuitarHero created for Charr's Timer Module."
 homepage_url = "https://github.com/QuitarHero/Hero-Timers"
 name = "Hero's Timers"
 owner = "QuitarHero"
+repository = "Hero-Timers"
+type = "GitHub"
+
+[[Timers]]
+author = "Kat"
+deprecated = true
+description = "DEPRECATED. No longer recommended, please switch to QuitarHero's Timers."
+homepage_url = "https://github.com/kittywitch/Hero-Timers"
+name = "Kat's fork of Hero's Timers"
+owner = "kittywitch"
 repository = "Hero-Timers"
 type = "GitHub"
