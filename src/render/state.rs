@@ -650,8 +650,8 @@ impl RenderState {
             let pack_visibility = self
                 .pathing_window
                 .packs_visibility()
-                .max(PackVisibility::visible(self.pathing_menu_open))
-                .within(visibility);
+                .within(visibility)
+                .max(PackVisibility::visible(self.pathing_menu_open));
             self.machine.pack_ui_state.pre_draw(pack_visibility);
             #[cfg(any(feature = "paths-edit", feature = "paths-interact"))]
             let gameplay_map = self.machine.gameplay.gameplay_map();
