@@ -319,7 +319,9 @@ unsafe impl D3dBufferData for RenderConstantDataV {}
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct RenderConstantDataP {
+    #[cfg(todo)]
     pub viewport: Vector2,
+    pub edge_feather_viewport: Vector2,
     pub player_feather: f32,
     pub distance_fade: f32,
     pub edge_feather: [f32; 2],
