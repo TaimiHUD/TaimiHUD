@@ -71,7 +71,7 @@ impl RenderMachine {
     }
 
     /// 50 degrees vertical field of view
-    pub const DEFAULT_FOV_Y: Angle = Angle::from_radians(0.8730f32);
+    pub const DEFAULT_FOV_Y: Angle = Angle::from_radians(50.0f32.to_radians());
     pub fn fov_y(&self) -> Option<Angle> {
         match self.fov.y.to_bits() {
             0 => None,
@@ -91,7 +91,8 @@ impl RenderMachine {
         #[cfg(todo)]
         let fov2 = Self::DEFAULT_FOV_Y.to_radians() * 0.5;
         // fov2.tan() // not const...
-        0.466512
+        //0.466512
+        0.466307
     });
     pub fn set_fov(&mut self, fov: Vector2<Angle>) {
         self.fov = fov;
