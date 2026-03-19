@@ -22,6 +22,7 @@ use {
         path::{Path, PathBuf},
         pin::Pin,
     },
+    taimi_hoard::is_false_ref,
     url::Url,
 };
 
@@ -190,6 +191,8 @@ pub struct GitHubSource {
     pub homepage_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(rename = "deprecated", default, skip_serializing_if = "is_false_ref")]
+    pub is_deprecated: bool,
 }
 
 impl GitHubSource {
@@ -209,6 +212,7 @@ impl GitHubSource {
             display_name: None,
             homepage_url: None,
             name: None,
+            is_deprecated: false,
         }
     }
 
@@ -335,6 +339,7 @@ impl Source for GitHubSource {
                         format!("https://github.com/{}/{}", self.owner, self.repository).into()
                     }),
             ),
+            MetadataKey::IsDeprecated => Some(Cow::Borrowed(MetadataKey::bool_value(self.is_deprecated))),
             _ => None,
         }
     }
@@ -343,8 +348,12 @@ impl Source for GitHubSource {
             MetadataKey::Author | MetadataKey::HomepageUrl => true,
             MetadataKey::DisplayName => self.display_name.is_some() || self.name.is_some(),
             MetadataKey::Description => self.description.is_some(),
+            MetadataKey::IsDeprecated => self.is_deprecated,
             _ => false,
         }
+    }
+    fn is_deprecated(&self) -> bool {
+        self.is_deprecated
     }
 
     fn download_latest(
