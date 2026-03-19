@@ -433,6 +433,17 @@ impl<'a> PackBuilder<'a> {
                         #[cfg(todo)]
                         let guid = Guid::from_ref(guid);
                         log::info!("nonexistent category `{id}` provided for {guid}");
+                        #[cfg(feature = "fixup-typos")]
+                        match id.as_str() {
+                            #[cfg(feature = "fixup-tehstrails")]
+                            "tt.mc.cm.skyscaleNotifier" =>
+                                found_id = category_ids
+                                    .get(IdCmpRelaxed::with_ref(FullIdRef::from_str(
+                                        "tt.mc.cm.mm.skyscaleNotifier",
+                                    )))
+                                    .or(found_id),
+                            _ => (),
+                        }
                     }
                     found_id.and_then(|found_id| {
                         *id = found_id
