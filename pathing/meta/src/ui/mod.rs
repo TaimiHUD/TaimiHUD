@@ -140,6 +140,8 @@ pub fn realign_fov(fov_y: f32) -> f32 {
 }
 #[test]
 fn mumble_identity_fov() {
+    use std::collections::BTreeSet;
+
     fn assert_mumble_fov(fov_y: f32, deg: f32) {
         let fixed_deg = realign_fov_to_degree(fov_y);
         let fixed = fixed_deg.to_radians();
@@ -162,6 +164,16 @@ fn mumble_identity_fov() {
     assert_mumble_fov(0.909, 52.1);
     assert_mumble_fov(1.222, 70.0);
     assert_mumble_fov(0.436, 25.0);
+    let mut dedupe = BTreeSet::new();
+    for deg in 20u32..=75 {
+        let deg = deg as f32;
+        let fov_y = deg.to_radians();
+        let trunc: f32 = format!("{fov_y:.03}").parse().unwrap();
+        assert_mumble_fov(trunc, deg);
+        if !dedupe.insert(trunc.to_bits()) {
+            panic!("fov clash at {deg}° = {trunc}");
+        }
+    }
 }
 
 bitflags::bitflags! {
