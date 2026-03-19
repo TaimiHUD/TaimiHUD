@@ -72,10 +72,9 @@ impl<'de> de::Deserialize<'de> for PathingFilterFlags {
         BitFlagDe::new().deserialize(deserializer)
     }
 }
-/// TODO: [BitFlagSer::new_human]
 impl ser::Serialize for PathingFilterFlags {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BitFlagSer::<Self>::new_bits(*self).serialize(serializer)
+        BitFlagSer::<Self>::new_human(*self).serialize(serializer)
     }
 }
 impl BitFlagContainer for PathingFilterFlags {
@@ -152,10 +151,9 @@ impl<'de> de::Deserialize<'de> for PathingSearchFlags {
         BitFlagDe::new().deserialize(deserializer)
     }
 }
-/// TODO: [BitFlagSer::new_human]
 impl ser::Serialize for PathingSearchFlags {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        BitFlagSer::<Self>::new_bits(*self).serialize(serializer)
+        BitFlagSer::<Self>::new_human(*self).serialize(serializer)
     }
 }
 impl BitFlagContainer for PathingSearchFlags {

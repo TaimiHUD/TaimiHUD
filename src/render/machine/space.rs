@@ -106,8 +106,10 @@ impl RenderMachine {
     pub fn get_space_perspective(&self) -> Transform3<DrawSpace, ScreenSpace> {
         let r = self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO);
         let Range { start: near, end: far } = self.get_depth_range().unwrap_or(Self::DEFAULT_DEPTH_RANGE);
-        Transform3::from_matrix_unchecked(match self.get_fov() {
-            fov => Matrix4::perspective_lh(Angle::new(fov.y), r, near, far),
+        let fov = self.get_fov();
+        let scaling = Self::DEFAULT_FOV_Y.to_radians() / fov.y;
+        Transform3::from_matrix_unchecked(match fov {
+            fov => Matrix4::perspective_lh(Angle::new(fov.y), r, near * scaling, far * scaling),
             #[cfg(todo)]
             fov => {
                 use glamour::Vector4;

@@ -18,7 +18,7 @@ authors = [
 ]
 homepage = "https://taimihud.com"
 description = "Pathing, encounter timers and markers"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 build = "build.rs"
 
@@ -190,6 +190,8 @@ windows = [
 crate-type = ["cdylib"] # nexus addons are dynamic system libraries (dll)
 path = "src/lib.rs"
 
+[workspace.lints.rust]
+unconditional_recursion = { level = "deny" }
 [workspace.lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = [
