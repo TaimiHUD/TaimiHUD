@@ -838,7 +838,7 @@ impl Engine {
         let vp_size = _viewport.state[0].get().and_then(|vp| {
             if vp.viewport.TopLeftX != 0.0 || vp.viewport.TopLeftY != 0.0 { return None }
             let size = vp.size2();
-            if (aspect - (size.width / size.height)).abs() > 2e3 {
+            if (aspect - (size.width / size.height)).abs() > 2e-3 {
                 return None
             }
             Some(size.cast())
@@ -847,7 +847,7 @@ impl Engine {
             goggles::lens::get_view_dims(&rt)
         ).map(|desc| Size2::<ScreenSpace>::new(desc.Width as f32, desc.Height as f32))
             .and_then(|size| {
-                if (aspect - (size.width / size.height)).abs() > 2e3 {
+                if (aspect - (size.width / size.height)).abs() > 2e-3 {
                     return None
                 }
                 Some(size)
@@ -1123,8 +1123,11 @@ impl Engine {
             });
             // TODO: cpbuffer per type? just mixing them together for now...
             let alpha = trail_alpha * poi_alpha;
-            let poi_scale = {
+            let (prev_trail_expansion, prev_trail_texture);
+            let poi_scale3 = {
                 let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
+                prev_trail_expansion = vdata.trail_expansion;
+                prev_trail_texture = vdata.trail_texture;
                 vdata.poi_expansion = PoiScale::with_scale(poi_scale);
                 let trail_expansion = TrailScale::with_scale(trail_scale);
                 match trail_textured {
@@ -1152,25 +1155,43 @@ impl Engine {
 
             self.render_backend
                 .perspective_handler
-                .update_perspective(machine, camera, poi_scale);
+                .update_perspective(machine, camera, poi_scale3);
             self.render_backend
                 .perspective_handler
                 .set_feather_scale(edge_feather_scale, self.render_backend.display_size);
 
             let arcrender_settings = arcrender.then(|| {
-                let settings = self.map_settings(|s| ArcrenderSettings {
+                let mut settings = self.map_settings(|s| ArcrenderSettings {
                     trail_anim_speed: s.space.trail_anim_space(),
                     trail_distance_fade: s.space.distance_fade_range(),
+                    trail_overlap_threshold: overlap_threshold,
+                    trail_intensity: distance_intensity,
                     poi_distance_fade: s.space.distance_fade_range(),
                     poi_can_fade: s.space.player_overlap_poi(),
                     trail_can_fade: s.space.player_overlap_threshold().is_some(),
                     poi_limit_size: s.space.poi_limit_size(),
+                    poi_expansion: PoiScale::with_scale(poi_scale),
+                    trail_expansion: TrailScale::with_scale(trail_scale),
+                    trail_alpha,
+                    poi_alpha,
+                    trail_texture: prev_trail_texture,
                     #[cfg(feature = "goggles2")]
                     trail_flags: if FerretResource::project_hack_shadowbox() { pack::instance::MarkerInstanceData::FLAG_RESERVED_14 } else { 0 },
                     #[cfg(feature = "goggles2")]
                     poi_flags: if FerretResource::project_hack_shadowbox() { pack::instance::MarkerInstanceData::FLAG_RESERVED_14 } else { 0 },
                     .. ArcrenderSettings::DEFAULT
                 });
+                settings.set_feather_scale(edge_feather_scale, self.render_backend.display_size);
+                match trail_textured {
+                    true if prev_trail_expansion == settings.trail_expansion
+                        && settings.trail_texture != TrailTextureMap::UNTEXTURED =>
+                        (),
+                    true => {
+                        settings.trail_texture.set_scale_from_expansion(settings.trail_expansion);
+                        settings.trail_texture.v_offset = 0.0;
+                    },
+                    false => settings.trail_texture = TrailTextureMap::UNTEXTURED,
+                }
                 settings
             });
 
@@ -1195,7 +1216,13 @@ impl Engine {
                 };
 
                 if let Some(settings) = &arcrender_settings {
-                    self.packs.resources.update_shared(&device_context, &*backend, &*machine, settings);
+                    self.packs.resources.update_shared(
+                        &device_context, &*backend, &*machine, settings,
+                        camera,
+                        machine.get_player_pos().map(|(p, ..)| p),
+                        backend.perspective_handler.constant_buffer_data.projection.into(),
+                        backend.perspective_handler.constant_buffer_data.view.into(),
+                    );
                 }
                 self.packs
                     .draw_obscured(camera.clone(), cull, &*backend, &device_context, arcrender);
@@ -1208,7 +1235,13 @@ impl Engine {
                 self.render_backend.perspective_handler.update_cb(&device_context);
 
                 if let Some(settings) = &arcrender_settings {
-                    self.packs.resources.update_shared(&device_context, &self.render_backend, &*machine, settings);
+                    self.packs.resources.update_shared(
+                        &device_context, &self.render_backend, &*machine, settings,
+                        camera,
+                        machine.get_player_pos().map(|(p, ..)| p),
+                        self.render_backend.perspective_handler.constant_buffer_data.projection.into(),
+                        self.render_backend.perspective_handler.constant_buffer_data.view.into(),
+                    );
                 }
 
                 #[cfg(feature = "goggles2")]
