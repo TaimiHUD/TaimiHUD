@@ -2,10 +2,10 @@ use {
     crate::{
         attributes::{keys, AttrString, MarkerAttributes},
         category::id::IdNameBox,
-        pack::{taco_safe_name, taco_xml_to_guid},
+        pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
     },
     anyhow::Context,
-    glam::{EulerRot, Quat, Vec3},
+    glam::{Quat, Vec3},
     glamour::Point3,
     std::fmt,
     uuid::Uuid,
@@ -23,6 +23,7 @@ pub struct Poi {
 
 impl Poi {
     pub fn from_xml(
+        warnings: &mut PackBuilderMarkerWarnings,
         asset_parent: Option<&AttrString>,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Poi> {
@@ -54,12 +55,18 @@ impl Poi {
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
                 match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::debug!("unrecognized POI attribute `{}`", attr.name)),
+                    Ok(false) => {
+                        warnings.attr_warning(&attr.name, &"POI");
+                        Ok(())
+                    },
                     res => res.map(drop),
                 }
             } else {
                 match attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::info!("unrecognized POI attribute `{}`", attr.name)),
+                    Ok(false) => {
+                        warnings.attr_warning(&attr.name, &"POI");
+                        Ok(())
+                    },
                     res => res.map(drop),
                 }
             }

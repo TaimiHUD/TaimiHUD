@@ -3,7 +3,7 @@ use {
         attributes::{self, keys, AttrString, MarkerAttributes},
         category::id::IdNameBox,
         loader::{LoaderAssetReader, PackLoaderContext},
-        pack::{taco_safe_name, taco_xml_to_guid},
+        pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
     },
     anyhow::Context,
     core::f32,
@@ -29,6 +29,7 @@ pub struct Trail {
 
 impl Trail {
     pub fn from_xml(
+        warnings: &mut PackBuilderMarkerWarnings,
         asset_parent: Option<&AttrString>,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Trail> {
@@ -67,7 +68,9 @@ impl Trail {
             .with_context(|| format!("Trail attribute '{}'", attr.name));
             match res {
                 Err(e) => log::warn!("{e:#}"),
-                Ok(false) => log::info!("unrecognized trail attribute `{}`", attr.name),
+                Ok(false) => {
+                    warnings.attr_warning(&attr.name, &"Trail");
+                },
                 Ok(true) => (),
             }
         }
@@ -75,10 +78,11 @@ impl Trail {
         #[cfg(feature = "fixup-fvd")]
         {
             /// `GUID="/nvefCms5kWE7aSlgxB5KA" trailData="Data/Trails/ARAH/ARAH_P2_MineSkip.trl"`
-            const TYPE_ARAH2_GUID: Uuid = match Uuid::try_parse_ascii(b"7cde7bfe-ac29-45e6-84ed-a4a583107928") {
-                Ok(u) => u,
-                Err(..) => unreachable!(),
-            };
+            const TYPE_ARAH2_GUID: Uuid =
+                match Uuid::try_parse_ascii(b"7cde7bfe-ac29-45e6-84ed-a4a583107928") {
+                    Ok(u) => u,
+                    Err(..) => unreachable!(),
+                };
             const TYPE_ARAH2: &'static str = "fvd_guide.arah.p2.path";
             if category.is_empty() && guid == Some(TYPE_ARAH2_GUID) {
                 category = TYPE_ARAH2.into();
