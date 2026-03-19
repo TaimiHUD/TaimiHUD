@@ -156,7 +156,10 @@ struct TrailSharedV {
     float _padding1;
 };
 struct RenderSharedP {
+#if TODO && 0
     float2 viewport;
+#endif
+    float2 edge_viewport21;
     float player_feather;
     float distance_fade;
     float2 edge_feather;

@@ -110,7 +110,7 @@ TrailOutputP trail_main_p(TrailInputP inp)
 #endif
 
 #if 1
-    float2 viewport_size_1 = float2(p_render.viewport.x, p_render.viewport.y);
+    float2 viewport_size_1 = float2(p_render.edge_viewport21.x, p_render.edge_viewport21.y);
     float3 feather_scale = float3(p_render.edge_feather.x, p_render.edge_feather.y, FEATHER_SCALE_Z);
     float3 feather_offset = float3(
         abs(FeatherOffset.xy - vout.position.xy * viewport_size_1),

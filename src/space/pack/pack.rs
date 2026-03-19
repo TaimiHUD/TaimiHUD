@@ -23,10 +23,18 @@ use {
                 SharedMarkerRef,
                 SharedPackInfo,
             },
-            space::{SpacePackCollection, SpacePackShared, TextureLoadRequests, TrailGeometryRequests},
+            space::{
+                PoiScale,
+                SpacePackCollection,
+                SpacePackShared,
+                TextureLoadRequests,
+                TrailGeometryRequests,
+                TrailScale,
+                TrailTextureMap,
+            },
         },
         exports::runtime::{self as rt, textures::TextureSlot},
-        render::machine::{RenderMachine, RenderPosition},
+        render::machine::{RenderMachine, RenderPosition, RenderPositioning},
         resources::shader::ShaderLoader,
         settings::pathing::SpaceSettings,
         space::{
@@ -37,11 +45,12 @@ use {
                 TrailRender,
             },
             DrawSpace,
+            ScreenSpace,
         },
     },
     anyhow::Context,
     bvh::aabb,
-    glamour::{Box3, Point3},
+    glamour::{Box3, Matrix4, Point3, Size2, Vector2},
     rustc_hash::FxHashSet,
     std::{
         collections::{BTreeMap, BTreeSet},
@@ -2042,109 +2051,57 @@ impl PackRenderResources {
         self.shader_poi = shaders.vertex.get("poi-ng").cloned();
         Ok(())
     }
+    #[inline]
     pub fn update_shared(
         &mut self,
         device_context: &Dx11Context,
         backend: &RenderBackend,
         machine: &RenderMachine,
         settings: &ArcrenderSettings,
+        (camera_pos, camera_dir, _camera_up): RenderPosition,
+        player_pos: Option<Point3<DrawSpace>>,
+        projection: Matrix4<f32>,
+        view: Matrix4<f32>,
     ) {
-        use glam::Vec2;
+        let vp_size = backend.viewport.size2();
         let shared_p = instance::ConstantDataP {
             render: instance::RenderConstantDataP {
-                viewport: Vec2::new(
-                    backend
-                        .perspective_handler
-                        .constant_buffer_pixel_data
-                        .viewport_param
-                        .x,
-                    backend
-                        .perspective_handler
-                        .constant_buffer_pixel_data
-                        .viewport_param
-                        .y,
-                )
-                .into(),
-                player_feather: backend
-                    .perspective_handler
-                    .constant_buffer_pixel_data
-                    .overlap_threshold(),
-                distance_fade: backend
-                    .perspective_handler
-                    .constant_buffer_pixel_data
-                    .distance_param
-                    .y,
-                edge_feather: Vec2::new(
-                    backend
-                        .perspective_handler
-                        .constant_buffer_pixel_data
-                        .distance_param
-                        .z,
-                    backend
-                        .perspective_handler
-                        .constant_buffer_pixel_data
-                        .distance_param
-                        .w,
-                )
-                .into(),
+                #[cfg(todo)]
+                viewport: vp_size.to_vector(),
+                player_feather: settings.trail_player_feather(),
+                distance_fade: settings.trail_intensity(),
+                edge_feather: settings.edge_feather().to_array(),
+                edge_feather_viewport: settings.edge_viewport(vp_size),
             },
         };
+        let billboard = taimi_meta::coords::billboard_from_look(view.into());
         match &mut self.shared_cb_p {
             Some(cb) => {
                 cb.update_singleton(device_context, &shared_p);
             },
             cb => *cb = rt::log::error_ok(ConstantBufferP::new_with_data(&backend.device, &shared_p)),
         }
-        let (camera_pos, camera_dir) = match machine.get_camera_mumblelink() {
-            Some((pos, dir, ..)) => (pos.to_vector().to_untyped(), dir.to_untyped()),
-            None => (glamour::Vector3::ZERO, glamour::Vector3::Z),
-        };
         let shared_v = instance::ConstantDataV {
             render: instance::RenderConstantDataV {
-                player_pos: backend
-                    .perspective_handler
-                    .constant_buffer_data
-                    .player
-                    .truncate()
-                    .into(),
+                player_pos: player_pos
+                    .unwrap_or(Point3::splat(taimi_meta::spatial::IRRELEVANT_MID))
+                    .to_vector()
+                    .cast(),
                 anim_timestamp: self.anim_timestamp.unwrap_or(0.0),
-                camera_pos,
-                camera_dir,
-                view: backend.perspective_handler.constant_buffer_data.view.into(),
-                projection: backend.perspective_handler.constant_buffer_data.projection.into(),
+                camera_pos: camera_pos.to_vector().cast(),
+                camera_dir: camera_dir.cast(),
+                view,
+                projection,
                 _padding0: 0.0,
-                viewport_pixel_scale: 1.0
-                    / backend
-                        .perspective_handler
-                        .constant_buffer_pixel_data
-                        .viewport_param
-                        .y,
+                viewport_pixel_scale: 1.0 / vp_size.height,
                 #[cfg(todo = "unnecessary")]
-                viewport_pixel_scale: {
-                    let vp_size = glam::Vec2::new(
-                        backend
-                            .perspective_handler
-                            .constant_buffer_pixel_data
-                            .viewport_param
-                            .x,
-                        backend
-                            .perspective_handler
-                            .constant_buffer_pixel_data
-                            .viewport_param
-                            .y,
-                    );
-                    vp_size.dot(vp_size).sqrt() * 2.0
-                },
+                viewport_pixel_scale: vp_size.dot(vp_size).sqrt() * 2.0,
                 _padding2: glamour::Vector4::ZERO,
             },
             poi: instance::PoiConstantDataV {
                 marker: instance::MarkerConstantDataV {
-                    alpha: backend.perspective_handler.alpha(),
-                    scale: backend
-                        .perspective_handler
-                        .constant_buffer_data
-                        .poi_expansion
-                        .scale(),
+                    alpha: settings.poi_alpha,
+                    scale: settings.poi_expansion.scale(),
                     anim_scale: settings.poi_anim_speed,
                     flags: settings
                         .poi_distance_fade
@@ -2156,20 +2113,14 @@ impl PackRenderResources {
                         .then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE)
                         .unwrap_or(0) | settings.poi_flags,
                 },
-                billboard: taimi_meta::coords::billboard_from_look(
-                    backend.perspective_handler.constant_buffer_data.view.into(),
-                ),
+                billboard,
                 map_scale: machine.map.calibration.local_space().scale.abs().y,
                 _padding0: glamour::Vector3::ZERO,
             },
             trail: instance::TrailConstantDataV {
                 marker: instance::MarkerConstantDataV {
-                    alpha: backend.perspective_handler.alpha(),
-                    scale: backend
-                        .perspective_handler
-                        .constant_buffer_data
-                        .trail_expansion
-                        .normal_expansion,
+                    alpha: settings.trail_alpha,
+                    scale: settings.trail_expansion.normal_expansion,
                     anim_scale: settings.trail_anim_speed,
                     flags: settings
                         .trail_distance_fade
@@ -2178,16 +2129,8 @@ impl PackRenderResources {
                         .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
                         .unwrap_or(0) | settings.trail_flags,
                 },
-                tex_scale: backend
-                    .perspective_handler
-                    .constant_buffer_data
-                    .trail_texture
-                    .v_scale,
-                tex_offset: backend
-                    .perspective_handler
-                    .constant_buffer_data
-                    .trail_texture
-                    .v_offset,
+                tex_scale: settings.trail_texture.v_scale,
+                tex_offset: settings.trail_texture.v_offset,
                 _padding0: glamour::Vector2::ZERO,
             },
         };
@@ -2403,18 +2346,34 @@ enum ShaderState {
     Poi,
 }
 pub struct ArcrenderSettings {
-    pub poi_anim_speed: f32,
     pub trail_anim_speed: f32,
+    pub trail_alpha: f32,
+    pub trail_expansion: TrailScale,
     pub trail_can_fade: bool,
     pub trail_distance_fade: bool,
+    pub trail_overlap_threshold: Option<f32>,
+    pub trail_intensity: Option<f32>,
+    pub trail_texture: TrailTextureMap,
     pub trail_flags: u32,
+    pub poi_anim_speed: f32,
     pub poi_can_fade: bool,
+    pub poi_alpha: f32,
+    pub poi_expansion: PoiScale,
     pub poi_distance_fade: bool,
     pub poi_limit_size: bool,
+    #[cfg(todo)]
+    pub poi_overlap_threshold: Option<f32>,
+    #[cfg(todo)]
+    pub poi_intensity: Option<f32>,
     pub poi_flags: u32,
+    pub feather_scale: Option<Vector2>,
 }
 impl ArcrenderSettings {
     pub const DEFAULT: Self = Self {
+        poi_alpha: 1.0f32,
+        poi_expansion: PoiScale::DEFAULT,
+        trail_expansion: TrailScale::DEFAULT,
+        trail_alpha: 1.0f32,
         poi_can_fade: SpaceSettings::DEFAULT_PLAYER_OVERLAP_POI,
         poi_limit_size: SpaceSettings::DEFAULT_POI_LIMIT_SIZE,
         trail_can_fade: SpaceSettings::DEFAULT_PLAYER_OVERLAP_THRESHOLD > 0.0,
@@ -2422,9 +2381,72 @@ impl ArcrenderSettings {
         poi_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         trail_distance_fade: SpaceSettings::DEFAULT_DISTANCE_FADE_RANGE,
         poi_anim_speed: 1.0,
+        trail_overlap_threshold: None,
+        #[cfg(todo)]
+        poi_overlap_threshold: None,
+        trail_intensity: None,
+        #[cfg(todo)]
+        poi_intensity: None,
+        trail_texture: TrailTextureMap::DEFAULT,
         trail_flags: 0,
         poi_flags: 0,
+        feather_scale: None,
     };
+
+    pub const OVERLAP_THRESHOLD_OFF: f32 = 0.01;
+    #[cfg(todo = "unnecessary")]
+    const OVERLAP_THRESHOLD_DEFAULT: f32 = SpaceSettings::DEFAULT_PLAYER_OVERLAP_THRESHOLD;
+    pub fn trail_player_feather(&self) -> f32 {
+        self.trail_overlap_threshold
+            .unwrap_or(Self::OVERLAP_THRESHOLD_OFF)
+    }
+    #[cfg(todo)]
+    pub fn poi_player_feather(&self) -> f32 {
+        self.poi_overlap_threshold.unwrap_or(Self::OVERLAP_THRESHOLD_OFF)
+    }
+
+    pub const INTENSITY_OFF: f32 = 1_000_000.0;
+    pub fn trail_intensity(&self) -> f32 {
+        self.trail_intensity.unwrap_or(Self::INTENSITY_OFF)
+    }
+    #[cfg(todo)]
+    pub fn poi_intensity(&self) -> f32 {
+        self.poi_intensity.unwrap_or(Self::INTENSITY_OFF)
+    }
+
+    pub const FEATHER_SCALE_SQUARE: Vector2 = Vector2::new(0.065f32, 0.0825f32);
+    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>, display_size: Size2<ScreenSpace>) {
+        let aspect_ratio = display_size.width / display_size.height;
+        let aspect_ratio_recip = display_size.height / display_size.width;
+        self.feather_scale = feather_scale.map(|scale| {
+            let normalized = match () {
+                #[cfg(todo = "unnecessary")]
+                _ => (Vector2::new(aspect_ratio_recip, aspect_ratio) * Self::FEATHER_SCALE_SQUARE).recip(),
+                _ => {
+                    const FEATHER_SCALE_SQUARE_RECIP: Vector2 = Vector2::new(
+                        1.0f32 / ArcrenderSettings::FEATHER_SCALE_SQUARE.x,
+                        1.0f32 / ArcrenderSettings::FEATHER_SCALE_SQUARE.y,
+                    );
+                    Vector2::new(aspect_ratio, aspect_ratio_recip) * FEATHER_SCALE_SQUARE_RECIP
+                },
+            };
+            scale * normalized
+        });
+    }
+
+    pub const FEATHER_SCALE_NONE: f32 = 1.0e8;
+    pub fn edge_feather(&self) -> Vector2 {
+        self.feather_scale
+            .unwrap_or(Vector2::splat(Self::FEATHER_SCALE_NONE))
+    }
+    pub const VIEWPORT_NONE: f32 = 1.0 / 10000.0;
+    pub fn edge_viewport(&self, viewport_size: Size2) -> Vector2 {
+        self.feather_scale
+            .is_some()
+            .then_some(viewport_size)
+            .map(|size| size.to_vector().recip() * 2.0)
+            .unwrap_or(Vector2::splat(Self::VIEWPORT_NONE))
+    }
 }
 
 pub static STATS_ENTITY_INSTANCE_SIZE: Counter = Counter::DEFAULT;
