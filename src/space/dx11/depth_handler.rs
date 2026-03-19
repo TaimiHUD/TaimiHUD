@@ -273,10 +273,14 @@ impl DepthHandler {
         self.depth_stencil_state_map.set(device_context);
     }
 
-    pub fn setup_depth_write(&self, device_context: &Dx11Context, enable: Option<bool>, inherit: bool) {
-        if enable.is_none() {
-            self.depth_stencil_state.set(device_context);
+    pub fn setup_depth_write(&self, device_context: &Dx11Context, fill_depth: Option<bool>, inherit: bool) {
+        match fill_depth {
+            #[cfg(feature = "goggles")]
+            Some(true) => &self.depth_stencil_state_write,
+            Some(..) => &self.depth_stencil_state_mask,
+            None => &self.depth_stencil_state,
         }
+        .set(device_context);
         if !inherit || self.inherit_render != 0 {
             self.depth_stencil_view().0.set(device_context);
         }
@@ -303,7 +307,6 @@ impl DepthHandler {
     }
 
     pub fn setup_fill(&self, device_context: &Dx11Context) {
-        self.depth_stencil_state_mask.set(device_context);
         unsafe {
             device_context.PSSetShader(None, None);
         }
@@ -317,17 +320,11 @@ impl DepthHandler {
         }
     }
 
-    pub fn fill_corners(&self, device_context: &Dx11Context, depth: bool) {
+    pub fn fill_corners(&self, device_context: &Dx11Context) {
         let geometry = match &self.fill_edge {
             Some(fill) => fill,
             None => return,
         };
-        let state = match depth {
-            #[cfg(feature = "goggles")]
-            true => &self.depth_stencil_state_write,
-            _ => &self.depth_stencil_state_mask,
-        };
-        state.set(device_context);
         geometry.set(device_context, 0);
 
         unsafe {

@@ -799,7 +799,7 @@ impl Engine {
 
         let minimap_bounds = match &render_map {
             Some((map_ctx, ..)) if matches!(map_ctx, MapContext::Global) => None,
-            None if !is_rendering => None,
+            None if !is_rendering || machine.is_ui_hidden() || inherit => None,
             _ => Some({
                 let bounds = machine.map.calibration.compass_bounds();
                 Box2::from(machine.map.calibration.map(bounds))
@@ -925,11 +925,11 @@ impl Engine {
                 .set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
         }
 
-        if let Some(depth_fill) = masking {
+        if let Some(..) = masking {
             if masking_corners {
                 self.render_backend
                     .depth_handler
-                    .fill_corners(&device_context, depth_fill);
+                    .fill_corners(&device_context);
             }
 
             self.render_backend
