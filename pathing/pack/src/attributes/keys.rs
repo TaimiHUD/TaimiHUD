@@ -821,6 +821,9 @@ pub enum TacoBehaviour {
     ResetDailyPerCharacter = 7,
 }
 impl TacoBehaviour {
+    pub const TACO_MIN: u32 = 0;
+    pub const TACO_MAX: u32 = 99;
+
     pub const fn value(self) -> u8 {
         self as u8
     }
@@ -842,6 +845,12 @@ impl BlishBehaviour {
     pub const unsafe fn from_value_unchecked(value: u8) -> Self {
         mem::transmute(value)
     }
+}
+/// TODO
+pub use self::BlishBehaviour as TaimiBehaviour;
+impl TaimiBehaviour {
+    pub const TAIMI_MIN: u32 = 33;
+    pub const TAIMI_MAX: u32 = 45;
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Behaviour {
@@ -870,6 +879,11 @@ impl Behaviour {
     }
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::Taco(TacoBehaviour::AlwaysVisible))
+    }
+
+    #[inline]
+    pub fn Taimi(b: TaimiBehaviour) -> Self {
+        Self::Blish(b)
     }
 }
 impl AttrKey for Behaviour {
@@ -900,8 +914,11 @@ impl From<Behaviour> for u8 {
 impl From<TacoBehavior> for Behaviour {
     fn from(value: TacoBehavior) -> Self {
         unsafe {
-            match value as usize {
-                0..99 => Self::Taco(TacoBehaviour::from_value_unchecked(value as u8)),
+            match value as u32 {
+                TaimiBehaviour::TAIMI_MIN..=TaimiBehaviour::TAIMI_MAX =>
+                    Self::Taimi(TaimiBehaviour::from_value_unchecked(value as u8)),
+                TacoBehaviour::TACO_MIN..=TacoBehaviour::TACO_MAX =>
+                    Self::Taco(TacoBehaviour::from_value_unchecked(value as u8)),
                 _ => Self::Blish(BlishBehaviour::from_value_unchecked(value as u8)),
             }
         }
