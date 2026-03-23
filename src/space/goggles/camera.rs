@@ -9,7 +9,7 @@ use {
     },
     std::collections::{BTreeMap, BTreeSet},
     glamour::{Point3, Vector3},
-    glam::Mat4,
+    glam::{Mat4, Vec3A},
     //taimi_d3d::prelude::*,
     windows::core::Interface,
     taimi_meta::coords::{self, LocalSpace, GameSpace},
@@ -73,17 +73,24 @@ pub(super) unsafe fn update_perspective(
     _len: Option<NonZero<u32>>,
 ) {
     if dest_offset != 0 || subresource != 0 { return }
-    if !FerretResource::wants_snatch_perspective() { return }
+    let wants_persp = FerretResource::wants_snatch_perspective();
+    #[cfg(todo)]
+    if !wants_persp && !FerretResource::wants_snatch_camera_smooth() { return }
     let Some((_expecting, offset)) = FerretResource::found_perspective() else { return };
     let Some(offset) = (offset * 4).checked_sub(dest_offset as usize) else { return };
     let data = data as *const u32;
     let m = slice::from_raw_parts(data.byte_add(offset), CameraFerret::M4_LEN32);
     let lost = !PerspectiveFerret::matches_shape(m);
+    if wants_persp {
+        if lost {
+            FerretResource::clear_perspective_found();
+        } else {
+            PerspectiveFerret::report_matrix(m, None, resource.as_d3d().as_raw());
+        }
+    }
     if lost {
-        FerretResource::clear_perspective_found();
         return
     }
-    PerspectiveFerret::report_matrix(m, None, resource.as_d3d().as_raw());
     if let Some(cam_smooth_offset) = offset.checked_sub(CameraFerret::M43_LEN32 * 4) {
         let mdata = slice::from_raw_parts(data.byte_add(cam_smooth_offset), CameraFerret::M43_LEN32);
         let m = SnatchMatrix::from(CameraFerret::m43_at_unchecked(mdata));
@@ -193,6 +200,10 @@ pub(super) fn update_subresource(
                     let m = SnatchMatrix::from(CameraFerret::m43_at_unchecked(mdata));
                     if CameraFerret::matrix_matches_shape43(&m.data) {
                         g2!(*&mut ferret.snatch_camera_smooth = m);
+                    } else {
+                        // TODO: try to prioritise this? seems kinda fine though since the buffer is usually updated multiple times per frame
+                        #[cfg(todo = "unnecessary")]
+                        FerretResource::clear_perspective_found();
                     }
                 }
             }
@@ -600,7 +611,7 @@ impl CameraFerret {
         let (eye, dir, _up) = coords::decompose_look32_rows(look, look_eye);
         #[cfg(todo)]
         let (exp, found) = (self.expected_dir.xz(), dir.xz());
-        let (exp, found) = (glam::Vec3A::from(self.expected_dir), dir);
+        let (exp, found) = (Vec3A::from(self.expected_dir), dir);
         if !exp.abs_diff_eq(found, Self::M4_CAM_DIR_EPSILON) {
             frame_log!("\tcamdir mismatch of {dir:?}");
             print_ferret(data, 0, Self::M4_LEN32);
@@ -646,7 +657,7 @@ impl CameraFerret {
         if check_dir {
             #[cfg(todo)]
             let (exp, found) = (self.expected_dir.xz(), dir.xz());
-            let (exp, found) = (glam::Vec3A::from(self.expected_dir), dir);
+            let (exp, found) = (Vec3A::from(self.expected_dir), dir);
             if !exp.abs_diff_eq(found, Self::M4_CAM_DIR_EPSILON) {
                 return false
             }
@@ -664,10 +675,14 @@ impl CameraFerret {
         let exp = self.expected_dir.x;
         (x - exp).abs() <= Self::M4_CAM_Z_EPSILON
     }
-    fn dir_up_matches(data: &[u32]) -> bool {
-        let Some(z) = data.get(Self::M43_DIR_OFFSET - 2) else { return false };
+    fn dir_up_matches(&self, data: &[u32]) -> bool {
+        let Some(up_z) = data.get(Self::M43_DIR_OFFSET - 2) else { return false };
+        let up_z = f32::from_bits(*up_z);
+        if Self::up_matches(up_z) { return true }
+        let Some(z) = data.get(Self::M43_DIR_OFFSET + 2) else { return false };
         let z = f32::from_bits(*z);
-        Self::up_matches(z)
+        let exp = self.expected_dir.z;
+        (z - exp).abs() <= Self::M4_CAM_Z_EPSILON || Self::up_matches(z)
     }
     #[inline]
     fn up_matches(z: f32) -> bool {
@@ -680,8 +695,8 @@ impl CameraFerret {
             ),
             _ => return false,
         };
-        let exp = glam::Vec3A::from(self.expected_dir);
-        if !glam::Vec3A::from_vec4(z_axis).abs_diff_eq(exp, Self::M4_CAM_DIR_EPSILON) {
+        let exp = Vec3A::from(self.expected_dir);
+        if !Vec3A::from_vec4(z_axis).abs_diff_eq(exp, Self::M4_CAM_DIR_EPSILON) {
             if z_axis.y != 0.0 && z_axis.z != 0.0 {
                 //log::debug!("failed to match dir in {z_axis:?}, expected {exp:?}");
             }
@@ -701,7 +716,7 @@ impl CameraFerret {
     pub fn find_m43_exact(&self, data: &[u32], require_persp_suffix: bool) -> Option<Result<usize, ()>> {
         let off = self.bitfind_m43_offset(data)?;
         let suffix = data.get((off + Self::M43_LEN32)..)?;
-        if !Self::dir_up_matches(unsafe { data.get_unchecked(off..) }) { return None }
+        if !self.dir_up_matches(unsafe { data.get_unchecked(off..) }) { return None }
         if !require_persp_suffix && Self::is_w(suffix) {
         } else if !require_persp_suffix || !PerspectiveFerret::matches_shape(suffix) {
             return Some(Err(()))
@@ -719,7 +734,7 @@ impl CameraFerret {
             data,
             4,
             |data| {
-                if !self.dir_x_matches(data) || !Self::dir_up_matches(data) {
+                if !self.dir_x_matches(data) || !self.dir_up_matches(data) {
                     return false
                 }
                 let matches = self.dir_matches(data, true);
@@ -826,8 +841,20 @@ impl CameraFerret {
     fn matrix_matches_shape43(look: &glam::Mat4) -> bool {
         #[cfg(todo)]
         let (side, dir) = (&look.x_axis, &look.z_axis);
-        let up = &look.z_axis;
-        Self::up_matches(up.z)
+        let up = &look.y_axis;
+        if Self::up_matches(up.z) {
+            return true
+        }
+        let cam = unsafe {
+            &*g2!(&raw const ferret.camera)
+        };
+        let z = look.z_axis.z;
+        #[cfg(todo)]
+        let up_z = look.y_axis.z;
+        if !cam.is_empty() && (cam.expected_dir.z - z).abs() <= Self::M4_CAM_Z_EPSILON * 6.0 {
+            return true
+        }
+        false
     }
 }
 fn find_all(data: &[u32], needle: &[f32], eps: f32) -> Option<ops::RangeInclusive<usize>> {
@@ -960,9 +987,13 @@ impl SnatchMatrix {
         self.data.w_axis.w.is_infinite()
     }
 
-    pub fn get_as_look(&self) -> (Point3<LocalSpace>, Vector3<LocalSpace>) {
+    #[inline]
+    pub fn get_as_look_raw(&self) -> (Vec3A, Vec3A, Vec3A) {
         let (look, look_eye) = coords::decompose_look_to32_rows(self.data);
-        let (eye, dir, _up) = coords::decompose_look32_rows(look, look_eye);
+        coords::decompose_look32_rows(look, look_eye)
+    }
+    pub fn get_as_look(&self) -> (Point3<LocalSpace>, Vector3<LocalSpace>) {
+        let (eye, dir, _up) = self.get_as_look_raw();
         (GameSpace::to_local(eye.into()).into(), GameSpace::norm_to_local(dir.into()).into())
     }
     pub fn get_look_up(&self) -> glamour::Vector3<LocalSpace> {
