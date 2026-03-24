@@ -94,12 +94,12 @@ mod cache {
                     #[cfg(not(feature = "gzip"))]
                     () => serde_json::from_str(MapCache::maps_json()),
                     #[cfg(feature = "gzip")]
-                    () => match MapCache::maps_json_gz().context("couldn't inflate map cache") {
+                    () => match MapCache::maps_json_gz().context("inflating map cache") {
                         Ok(json) => serde_json::from_str(&json),
                         Err(e) => Err(serde::de::Error::custom(e)),
                     },
                 }
-                .context("failed to deserialize map cache");
+                .context("deserialize map cache");
                 if let Err(_e) = &maps {
                     log::error!("{_e:#}");
                 }
@@ -116,42 +116,51 @@ mod cache {
             const MAPS_JSON: &'static str = include_str!(env!("INC_MAP_CACHE"));
             MAPS_JSON
         }
-
         #[cfg(feature = "gzip")]
         pub(crate) fn maps_json_gz() -> anyhow::Result<String> {
+            const MAPS_JSON_GZ: &'static [u8] = include_bytes!(env!("INC_MAP_CACHE_GZ"));
+            const MAPS_JSON_BUFLEN: usize = match usize::from_str_radix(env!("INC_MAP_CACHE_BUFLEN"), 10) {
+                Ok(len) => len,
+                Err(..) => panic!("GZ len"),
+            };
+            Self::decode_gz(MAPS_JSON_GZ, MAPS_JSON_BUFLEN)
+        }
+
+        #[cfg(feature = "gzip")]
+        fn decode_gz(input: &'static [u8], len: usize) -> anyhow::Result<String> {
             use async_compression::{
                 codecs::{gzip::GzipDecoder, Decode},
                 core::util::PartialBuffer,
             };
 
-            const MAPS_JSON_GZ: &'static [u8] = include_bytes!(env!("INC_MAP_CACHE_GZ"));
-            /// TODO: build script could export this as env var?
-            const MAPS_JSON_LEN: usize = 0x64000;
-            let mut input = PartialBuffer::new(MAPS_JSON_GZ);
-            let mut out = PartialBuffer::new(vec![0u8; MAPS_JSON_LEN]);
+            let mut input = PartialBuffer::new(input);
+            let mut out = PartialBuffer::new(vec![0u8; len]);
             let mut decoder = GzipDecoder::new();
+            let truncated = || anyhow::anyhow!("BUG: out of buffer for cache!");
             while !input.unwritten().is_empty() {
-                let res = decoder
-                    .decode(&mut input, &mut out)
-                    .context("GZIP decode failure");
+                let out_full = out.unwritten().is_empty();
+                let res = decoder.decode(&mut input, &mut out).context("GZ decode");
                 if res? {
                     break
                 }
+                if out_full && !input.unwritten().is_empty() {
+                    return Err(truncated())
+                }
             }
             loop {
-                let res = decoder.finish(&mut out).context("GZIP failed to finalize");
+                let res = decoder.finish(&mut out).context("GZ init");
                 if res? {
                     break
                 }
                 if out.unwritten().is_empty() {
-                    anyhow::bail!("BUG: buffer ran out of room for map cache!");
+                    return Err(truncated())
                 }
             }
 
             let len = out.written().len();
             let mut out = out.into_inner();
             out.truncate(len);
-            String::from_utf8(out).context("decoded data not stringy enough")
+            String::from_utf8(out).context("unstringy")
         }
     }
 }
@@ -175,7 +184,7 @@ fn map_decode() {
 
     const LIMIT: usize = 48;
     for (id, map) in maps.iter().take(LIMIT) {
-        eprintln!("map#{id}: {map:#?}");
+        eprintln!("map#{id}: {:?}", map.kind);
         let local_rect = map.map_rect();
         let global_rect = map.continent_rect();
         eprintln!("loc: {:?}", local_rect);
