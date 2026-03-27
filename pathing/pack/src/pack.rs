@@ -184,9 +184,29 @@ fn parse_pack_def(
 
     let mut parser = xml::EventReader::new(Cursor::new(pack_xml.into_owned().into_bytes()));
 
-    match inner_parse_pack_def(pack, ctx, &mut parser, asset) {
+    let mut parse_stack: Vec<PartialItem> = Vec::with_capacity(16);
+    match inner_parse_pack_def(pack, ctx, &mut parse_stack, &mut parser, asset) {
         Ok(()) => Ok(()),
-        Err(e) => Err(e).context(format!("Parsing pack def at {asset}:{}", parser.position())),
+        Err(e) => {
+            // avoid inconsistent pack state by finalizing in-progress nodes
+            while let Some(item) = parse_stack.last() {
+                let res = match &item {
+                    PartialItem::PoisonElem | PartialItem::OverlayData | PartialItem::PoiGroup => {
+                        parse_stack.pop();
+                        continue
+                    },
+                    // this one's actually important!
+                    PartialItem::MarkerCategory(..) => pack.pop_category(&mut parse_stack),
+                    PartialItem::Poi(..) => pack.pop_poi(&mut parse_stack),
+                    PartialItem::Trail(..) => pack.pop_trail(&mut parse_stack),
+                }
+                .with_context(|| String::from(asset));
+                if let Err(e) = res {
+                    log::warn!("{e:#}");
+                }
+            }
+            Err(e).context(format!("Parsing pack def at {asset}:{}", parser.position()))
+        },
     }
 }
 
@@ -504,10 +524,10 @@ impl<'a> PackBuilder<'a> {
 fn inner_parse_pack_def(
     pack: &mut PackBuilder,
     ctx: &mut impl PackLoaderContext,
+    parse_stack: &mut Vec<PartialItem>,
     parser: &mut xml::EventReader<impl std::io::Read>,
     asset: &str,
 ) -> anyhow::Result<()> {
-    let mut parse_stack: Vec<PartialItem> = Vec::with_capacity(16);
     let asset_parent = Path::new(asset).parent().map(|p| {
         let mut parent = p.to_string_lossy().into_owned();
         parent.push_str("/");
@@ -581,7 +601,7 @@ fn inner_parse_pack_def(
                     "markercategory" => {
                         let category = Category::from_xml(&mut pack.warnings_marker, attributes)
                             .with_context(|| format!("Category parse failed at {}", elem_context()))
-                            .and_then(|category| pack.push_category(&mut parse_stack, category));
+                            .and_then(|category| pack.push_category(parse_stack, category));
                         match category {
                             Ok(()) => (),
                             Err(e) => {
@@ -651,13 +671,13 @@ fn inner_parse_pack_def(
                         parse_stack.pop();
                     },
                     "markercategory" => {
-                        pack.pop_category(&mut parse_stack)?;
+                        pack.pop_category(parse_stack)?;
                     },
                     "poi" => {
-                        pack.pop_poi(&mut parse_stack)?;
+                        pack.pop_poi(parse_stack)?;
                     },
                     "trail" => {
-                        pack.pop_trail(&mut parse_stack)?;
+                        pack.pop_trail(parse_stack)?;
                     },
                     _ => anyhow::bail!("Unexpected </{name}>"),
                 }
