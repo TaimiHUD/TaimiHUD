@@ -34,6 +34,7 @@ fn write_map_cache() {
         &INC_MAP_CACHE,
         Some(MAP_SIGN_FILENAME.as_ref()),
     );
+    process_cache_data(&INC_MAP_PROJ_CACHE_GZ, map_proj_cache, &INC_MAP_PROJ_CACHE, None);
 }
 
 const INC_MAP_CACHE: &'static str = "INC_MAP_CACHE";
@@ -42,6 +43,14 @@ const MAP_FILENAME: &'static str = "maps.json";
 const MAP_SIGN_FILENAME: &'static str = "maps-sign.json";
 fn map_cache(mut parent: PathBuf) -> PathBuf {
     parent.push(MAP_FILENAME);
+    parent
+}
+
+const INC_MAP_PROJ_CACHE: &'static str = "INC_MAP_PROJ_CACHE";
+const INC_MAP_PROJ_CACHE_GZ: &'static str = "INC_MAP_PROJ_CACHE_GZ";
+const MAP_PROJ_FILENAME: &'static str = "projection.json";
+fn map_proj_cache(mut parent: PathBuf) -> PathBuf {
+    parent.push(MAP_PROJ_FILENAME);
     parent
 }
 
