@@ -2,7 +2,7 @@
 set -eu
 
 calc() {
-	command calc -qd "$@" | tr -d '[:blank:]'
+	command calc -D:0 -qd "$@" | tr -d '[:blank:]'
 }
 
 do_convjson() {
@@ -14,13 +14,16 @@ do_convjson() {
 	fi
 	printf '{'
 	while read -r line; do
-		mapid=$(cut -d, -f1 <<<"$line")
+		mapid=$(cut -d, -f1 <<<"$line" | sed -e 's/^0\+//')
 		zfar=$(cut -d, -f2 <<<"$line")
 		zfari=$(calc "(round($zfar / $prec) * $prec)")
 		zfar=$(calc -q -d "($zfari / $factor)")
 		#jq -Mc --argjson mapid "$mapid" '{"\($mapid)": { z: { $far, $far3072, } }}'
-		printf '%s\n"%s":{"z":{"far":%d,"far3072":%s}}' "$first" "$mapid" "$zfari" "$zfar"
+		printf '%s\n"%d":{"z":{' "$first" "$mapid"
 		first=,
+		#printf '"far":%d,' "$zfari"
+		printf '"farz":%s' "$zfar"
+		printf '}}'
 	done < $projcsv
 	printf '\n}\n'
 }

@@ -76,10 +76,45 @@ impl Map {
 
 pub type MapType = String;
 
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct MapProjection {
+    #[cfg_attr(feature = "serde", serde(rename = "z"))]
+    pub depth: MapProjectionDepth,
+}
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+pub struct MapProjectionDepth {
+    pub farz: f32,
+}
+impl MapProjectionDepth {
+    pub const fn with_far(z_far: f32) -> Self {
+        Self::with_farz(z_far * Self::FAR_FACTOR_INV)
+    }
+    pub const fn with_farz(farz: f32) -> Self {
+        Self { farz }
+    }
+    pub fn z_far(&self) -> f32 {
+        self.farz * Self::FAR_FACTOR
+    }
+    pub fn z_near_raw(&self, fov_y_recip: f32) -> f32 {
+        self.z_far() * fov_y_recip * Self::NEAR_FACTOR_INV
+    }
+    pub fn z_near(&self, fov_y: f32) -> f32 {
+        self.z_near_raw(fov_y.recip()).min(Self::NEAR_MAX)
+    }
+
+    pub const FAR_FACTOR: f32 = 3072.0f32;
+    const FAR_FACTOR_INV: f32 = Self::FAR_FACTOR.recip();
+    pub const NEAR_FACTOR: f32 = 1922.0f32;
+    const NEAR_FACTOR_INV: f32 = Self::NEAR_FACTOR.recip();
+    pub const NEAR_MAX: f32 = 25.0f32;
+}
+
 #[cfg(feature = "map-cache")]
 mod cache {
     use {
-        crate::map::{Map, MapID},
+        crate::map::{Map, MapProjection, MapID},
         anyhow::Context,
         std::{borrow::Cow, collections::BTreeMap, sync::LazyLock},
     };
@@ -111,6 +146,29 @@ mod cache {
             Some(Cow::Borrowed(map))
         }
 
+        pub fn lookup_map_projection(&self, map_id: MapID) -> Option<Cow<'_, MapProjection>> {
+            static PROJ_CACHE: LazyLock<BTreeMap<MapID, MapProjection>> = LazyLock::new(|| {
+                let maps: Result<BTreeMap<MapID, MapProjection>, _> = match () {
+                    #[cfg(not(feature = "gzip"))]
+                    () => serde_json::from_str(MapCache::projection_json()),
+                    #[cfg(feature = "gzip")]
+                    () => match MapCache::projection_json_gz().context("inflating project cache") {
+                        Ok(json) => serde_json::from_str(&json),
+                        Err(e) => Err(serde::de::Error::custom(e)),
+                    },
+                }
+                .context("deserialize project cache");
+                if let Err(_e) = &maps {
+                    log::error!("{_e:#}");
+                }
+                maps.unwrap_or_default()
+            });
+
+            let map = PROJ_CACHE.get(&map_id)?;
+
+            Some(Cow::Borrowed(map))
+        }
+
         #[cfg(not(feature = "gzip"))]
         pub(crate) fn maps_json() -> &'static str {
             const MAPS_JSON: &'static str = include_str!(env!("INC_MAP_CACHE"));
@@ -124,6 +182,21 @@ mod cache {
                 Err(..) => panic!("GZ len"),
             };
             Self::decode_gz(MAPS_JSON_GZ, MAPS_JSON_BUFLEN)
+        }
+
+        #[cfg(not(feature = "gzip"))]
+        pub(crate) fn projection_json() -> &'static str {
+            const PROJ_JSON: &'static str = include_str!(env!("INC_MAP_PROJCACHE"));
+            PROJ_JSON
+        }
+        #[cfg(feature = "gzip")]
+        pub(crate) fn projection_json_gz() -> anyhow::Result<String> {
+            const PROJ_JSON_GZ: &'static [u8] = include_bytes!(env!("INC_MAP_PROJ_CACHE_GZ"));
+            const PROJ_JSON_BUFLEN: usize = match usize::from_str_radix(env!("INC_MAP_PROJ_CACHE_BUFLEN"), 10) {
+                Ok(len) => len,
+                Err(..) => panic!("GZ len"),
+            };
+            Self::decode_gz(PROJ_JSON_GZ, PROJ_JSON_BUFLEN)
         }
 
         #[cfg(feature = "gzip")]
@@ -199,6 +272,33 @@ fn map_decode() {
         eprintln!("{scale:?} @ {offset:?}");
         let skew = scale.map(map.map_rect().center().to_vector());
         eprintln!("skew: {skew:?} x 2ft");
+    }
+
+    //eprintln!("{maps:#?}");
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn project_decode() {
+    use std::collections::BTreeMap;
+
+    let project_json = match () {
+        #[cfg(not(feature = "map-cache"))]
+        () => include_str!("../data/projection.json"),
+        #[cfg(all(feature = "map-cache", not(feature = "gzip")))]
+        () => MapCache::projection_json(),
+        #[cfg(all(feature = "map-cache", feature = "gzip"))]
+        () => MapCache::projection_json_gz().unwrap(),
+    };
+    let projections: BTreeMap<MapID, MapProjection> = serde_json::from_str(&project_json).unwrap();
+
+    const LIMIT: usize = 16;
+    for (id, project) in projections.iter().take(LIMIT) {
+        eprintln!("map#{id}: far={}\"", project.depth.z_far());
+        for fov_deg in [33u32, 50, 57, 63, 70] {
+            let fovy = (fov_deg as f32).to_radians();
+            eprintln!("\tnear={}\"(@{fov_deg}°)", project.depth.z_near(fovy));
+        }
     }
 
     //eprintln!("{maps:#?}");
