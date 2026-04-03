@@ -304,11 +304,60 @@ fn apply_built_info() {
         "develop" => "Develop",
         c => c.strip_prefix("dev-").unwrap_or(c),
     }));
+
     tags.push(ci.is_none().then_some("local"));
     if release_channel != Some("debug") {
         tags.push(debug.then_some("debug"));
     }
     tags.push(dirty.then_some("dirty"));
+
+    let mut release_cfg = Vec::new();
+    let is_branch = match &release {
+        Some(Ok(_)) => {
+            release_cfg.push("tag");
+            false
+        },
+        Some(Err("")) | None => false,
+        Some(Err(..)) => true,
+    };
+    let ci_str = ci.as_ref().and_then(|ci| ci.to_str());
+    match (release_channel, ci_str) {
+        (None, _) => release_cfg.push("release"),
+        (Some("debug"), ..) => release_cfg.push("debug"),
+        #[cfg(todo)]
+        (Some(ch), Some("nix") | Some("drv")) if ch.starts_with("dev") || is_branch => (),
+        (Some(ch), None | Some("local")) if ch.starts_with("dev") || is_branch => release_cfg.push("debug"),
+        _ if dirty => (),
+        (Some("rc"), _) => release_cfg.push("rc"),
+        (Some(ch), Some(..)) if ch.starts_with("dev") || is_branch => release_cfg.push("branch"),
+        (Some(..), _) => release_cfg.push("pre"),
+    }
+    let mut a_release = false;
+    for dev in release_cfg {
+        match dev {
+            "debug" | "release" => {
+                println!("cargo::rustc-cfg=taimi_{dev}");
+                println!("cargo::rustc-cfg=taimi_{dev}={dev:?}");
+                if dev == "debug" {
+                    println!("cargo::rustc-cfg=taimi_dev={dev:?}");
+                } else {
+                    a_release = true;
+                }
+            },
+            "drv" | "ci" | "branch" => println!("cargo::rustc-cfg=taimi_dev={dev:?}"),
+            "tag" | "rc" | "pre" => {
+                a_release = true;
+                println!("cargo::rustc-cfg=taimi_release={dev:?}")
+            },
+            _ => (),
+        }
+    }
+    match ci_str {
+        _ if a_release => (),
+        None | Some("local") => (),
+        Some("nix") | Some("drv") => println!("cargo::rustc-cfg=taimi_dev={:?}", "drv"),
+        Some(..) => println!("cargo::rustc-cfg=taimi_dev={:?}", "ci"),
+    }
 
     if tags.iter().any(Option::is_some) {
         let tags = tags.into_iter().flatten().collect::<Vec<_>>().join("+");

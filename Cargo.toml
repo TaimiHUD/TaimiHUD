@@ -198,6 +198,9 @@ check-cfg = [
   'cfg(todo, values("unused", "unnecessary"))',
   'cfg(todo)',
   'cfg(taimi_has, values("author", "title", "version"))',
+  'cfg(taimi_debug)', 'cfg(taimi_debug, values("debug"))',
+  'cfg(taimi_dev)', 'cfg(taimi_dev, values("debug", "drv", "ci", "branch"))',
+  'cfg(taimi_release)', 'cfg(taimi_release, values("tag", "rc", "pre", "release"))',
 ]
 
 [profile.release]

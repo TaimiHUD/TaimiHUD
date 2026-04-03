@@ -48,6 +48,7 @@ impl Control {
         match self.as_control() {
             Some(control) => control.into(),
             None => {
+                #[cfg(taimi_debug)]
                 log::warn!("unrecognized control {self}");
                 "unknown"
             },
