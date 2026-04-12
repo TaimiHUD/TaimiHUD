@@ -136,6 +136,7 @@ where
             Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: pack action {act:?} unexpected");
                 None
             },
@@ -160,6 +161,7 @@ where
             },
             Some(UiAction::LEFT_CLICK) => Some(PackAction::ACTIVATE),
             Some(act) => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: unloaded pack action {act:?} unexpected");
                 None
             },
@@ -266,6 +268,7 @@ where
             Some(UiAction::Hovered) => Some(UiAction::Hovered),
             _act => {
                 if let Some(act) = _act {
+                    #[cfg(taimi_debug)]
                     log::debug!("DELETEME: cat decoration action {act:?} unexpected");
                 }
                 None

@@ -36,6 +36,7 @@ pub type PixelShaders = FxHashMap<String, Option<ShaderP>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShaderLoader {
+    pub partial: FxHashMap<String, ShaderDescription>,
     pub vertex: VertexShaders,
     pub pixel: PixelShaders,
 }
@@ -92,6 +93,12 @@ impl ShaderLoader {
         let mut shaders: ShaderLoader = Self::default();
         let includes = ID3DInclude::new(dir);
         for mut shader_description in shader_descriptions {
+            if shader_description.partial {
+                shaders
+                    .partial
+                    .insert(shader_description.identifier.clone(), shader_description);
+                continue
+            }
             shader_description.defs.terminate();
             let context = || format!("loading shader {}", shader_description.identifier);
             let bytecode = dir
@@ -99,20 +106,19 @@ impl ShaderLoader {
                 .and_then(|source| shader_description.compile(&source, Some(&*includes)))
                 .with_context(context);
             let Some(bytecode) = rt::log::warn_ok(bytecode) else { continue };
-            match shader_description.target.kind() {
+            let layout = match shader_description.target.kind() {
                 ShaderKind::Vertex => {
-                    let shader = ShaderV::new_with_bytecode(device, &bytecode)?;
                     let desc = shader_description.input_layout_desc();
-                    let layout = InputLayout::new_with_desc(device, desc, &bytecode)?;
-                    shaders
-                        .vertex
-                        .insert(shader_description.identifier, (shader, layout));
+                    InputLayout::new_with_desc(device, desc, &bytecode).map(Some)
                 },
-                ShaderKind::Pixel => {
-                    let shader = ShaderP::new_with_bytecode(device, &bytecode)?;
-                    shaders.pixel.insert(shader_description.identifier, Some(shader));
-                },
-            }
+                ShaderKind::Pixel => Ok(None),
+            };
+            let res = layout
+                .and_then(|layout| {
+                    shaders.insert(device, shader_description.identifier.clone(), &bytecode, layout)
+                })
+                .with_context(context);
+            let _ = rt::log::warn_ok(res);
         }
         log::info!(
             "Finished shader setup. {} vertex shaders, {} pixel shaders loaded!",
@@ -120,6 +126,51 @@ impl ShaderLoader {
             shaders.pixel.len()
         );
         Ok(shaders)
+    }
+    pub fn insert(
+        &mut self,
+        device: &Dx11Device,
+        identifier: String,
+        bytecode: &Blob,
+        vertex_layout: Option<InputLayout>,
+    ) -> anyhow::Result<()> {
+        match vertex_layout {
+            Some(layout) => {
+                let shader = ShaderV::new_with_bytecode(device, bytecode)?;
+                self.vertex.insert(identifier, (shader, layout));
+            },
+            None => {
+                let shader = ShaderP::new_with_bytecode(device, bytecode)?;
+                self.pixel.insert(identifier, Some(shader));
+            },
+        }
+        Ok(())
+    }
+    pub fn load_partial(
+        &mut self,
+        device: &Dx11Device,
+        identifier: &str,
+        bytecode: &Blob,
+        partial_id: &str,
+    ) -> anyhow::Result<()> {
+        let context = || format!("loading shader {identifier}");
+        let layout = self
+            .partial
+            .get(partial_id)
+            .context("missing")
+            .and_then(|partial| match partial.target.kind() {
+                ShaderKind::Vertex => {
+                    let desc = partial.input_layout_desc();
+                    InputLayout::new_with_desc(device, desc, bytecode)
+                        .map(Some)
+                        .map_err(Into::into)
+                },
+                ShaderKind::Pixel => Ok(None),
+            })
+            .with_context(|| format!("template {partial_id:?}"));
+        layout
+            .and_then(|layout| self.insert(device, identifier.into(), bytecode, layout))
+            .with_context(context)
     }
 
     pub fn pair_named(&self, name: &str) -> anyhow::Result<ShaderPair> {
@@ -154,7 +205,7 @@ impl ShaderLoader {
     }
 }
 
-struct ShaderDirectory {
+pub struct ShaderDirectory {
     root: PathBuf,
     fallback: Option<&'static include_dir::Dir<'static>>,
     open_files: Mutex<Vec<Box<[u8]>>>,
@@ -291,6 +342,15 @@ impl ShaderDirectory {
                 Some((p.path().into(), Cow::Borrowed(file.contents())))
             },
         })
+    }
+}
+impl Clone for ShaderDirectory {
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            fallback: self.fallback.clone(),
+            open_files: Default::default(),
+        }
     }
 }
 

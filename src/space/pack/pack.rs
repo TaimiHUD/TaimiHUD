@@ -25,6 +25,7 @@ use {
             },
             space::{
                 PoiScale,
+                SpaceEntities,
                 SpacePackCollection,
                 SpacePackShared,
                 TextureLoadRequests,
@@ -32,11 +33,13 @@ use {
                 TrailScale,
                 TrailTextureMap,
             },
+            PathingController,
+            PathingEvent,
         },
         exports::runtime::{self as rt, textures::TextureSlot},
-        render::machine::{RenderMachine, RenderPosition, RenderPositioning},
+        render::machine::{RenderMachine, RenderPosition},
         resources::shader::ShaderLoader,
-        settings::pathing::SpaceSettings,
+        settings::pathing::{PathingSettings, SpaceSettings},
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             pack::{
@@ -59,9 +62,13 @@ use {
         sync::Arc,
         time::Instant,
     },
-    taimi_d3d::dx11::{
-        buffer::{ConstantBufferP, ConstantBufferV},
-        prelude::*,
+    taimi_d3d::{
+        dx11::{
+            self,
+            buffer::{ConstantBufferP, ConstantBufferV},
+            prelude::*,
+        },
+        shader::ShaderKind,
     },
     taimi_hoard::{
         loc::{indexed::IndexedList, LocationMut, LocationRef},
@@ -75,8 +82,8 @@ use {
             PoiIndex,
             TrailSectionPath,
         },
-        spatial::{box3aabb, cull::MapFrustum},
-        ui::{LocalContext, MapContext},
+        spatial::box3aabb,
+        ui::{LocalContext, MapCalibration, MapContext},
     },
     taimi_pack::attributes::{keys, BounceBehavior},
     taimi_sync::{
@@ -612,6 +619,8 @@ pub struct PackRender {
     pub render_list: PackRenderList,
     pub draw_state: PackRenderState,
     pub resources: PackRenderResources,
+    pub shared_v: instance::ConstantDataV,
+    pub shared_p: instance::ConstantDataP,
 }
 
 impl PackRender {
@@ -627,6 +636,8 @@ impl PackRender {
             render_list: Default::default(),
             draw_state: Default::default(),
             resources: Default::default(),
+            shared_v: Default::default(),
+            shared_p: Default::default(),
             poi_common,
         })
     }
@@ -694,6 +705,7 @@ impl PackRender {
                 self.resources.dirty = true;
             }
         }
+        let arcrender = || settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
         let mut ibs_dirty = self.poi_common.is_empty();
         let map_id = match self.render_list.spacepacks.map_id {
             map_id if map_id != machine.is_ingame() => None,
@@ -708,7 +720,36 @@ impl PackRender {
                 self.draw_state.prev_map_id = map_id;
                 self.resources.dirty = true;
                 space_dirty = true;
+            } else {
+                STATS_ENTITY_COUNT.reset(0);
             }
+        }
+        if space_dirty {
+            STATS_ENTITY_COUNT.reset_with(|| {
+                if map_id.is_some() {
+                    match &self.render_list.spacepacks {
+                        #[cfg(todo)]
+                        space => space
+                            .render_entities
+                            .entities
+                            .iter()
+                            .filter(|e| !e.is_invalid())
+                            .count(),
+                        space => space
+                            .loaded_packs
+                            .values()
+                            .flat_map(|p| {
+                                [
+                                    p.populated_pois.count_ones() as u32,
+                                    p.populated_trails.count_ones() as u32,
+                                ]
+                            })
+                            .sum::<u32>(),
+                    }
+                } else {
+                    0
+                }
+            });
         }
         let packs_map_changed = {
             let packs_changed = match self.packs_map.as_mut() {
@@ -863,7 +904,7 @@ impl PackRender {
                     geometry if geometry.is_empty() => None,
                     geometry => rt::log::error_ok(
                         trail
-                            .setup_geometry(device, geometry)
+                            .setup_geometry(device, geometry, arcrender())
                             .context("loading trail geometry"),
                     ),
                 };
@@ -875,7 +916,7 @@ impl PackRender {
                 // texture loader should be notified, so no need to do anything really?
                 let id = MarkerId::for_marker(marker_path);
                 if texture.is_none() {
-                    log::debug!("request for tex {marker_path} failed");
+                    log::error!("request for tex {marker_path} failed");
                 }
                 if marker_path.root.path != map_id {
                     log::info!("received outdated tex for {marker_path}");
@@ -984,8 +1025,7 @@ impl PackRender {
             self.trail_rx.request_many(incomplete_trail_geometry);
             self.texture_rx.request_many(incomplete_textures);
             if self.resources.dirty {
-                let arcrender = settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
-                if arcrender {
+                if arcrender() {
                     let res = self
                         .resources
                         .prepare(
@@ -1009,28 +1049,26 @@ impl PackRender {
             }
         }
 
-        Ok(map_id.is_some() && !machine.is_ingame_paused())
+        Ok(map_id.is_some())
     }
-    pub fn prepare_frame(
-        &mut self,
-        _machine: &mut RenderMachine,
-        _device_context: &Dx11Context,
-        anim_timestamp: Option<f32>,
-        fresh: bool,
-    ) -> anyhow::Result<()> {
-        if fresh {
-            self.resources.anim_timestamp = anim_timestamp;
-            if let Some(anim_timestamp) = self.resources.anim_timestamp {
-                self.draw_state.prune_anims(anim_timestamp);
-                if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
-                    self.resources.dirty = true;
-                }
-            } else {
-                self.draw_state.clear_anims();
+    pub fn prepare_frame(&mut self, anim_timestamp: Option<f32>) {
+        self.resources.anim_timestamp = anim_timestamp;
+        if let Some(anim_timestamp) = self.resources.anim_timestamp {
+            self.draw_state.prune_anims(anim_timestamp);
+            if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
+                self.resources.dirty = true;
             }
+        } else {
+            self.draw_state.clear_anims();
         }
-        self.render_list.prepare_frame();
-        Ok(())
+        STATS_ENTITY_DRAW.reset(0);
+        STATS_ENTITY_DRAW_PASS.reset(0);
+        STATS_ENTITY_DRAW_ALL.reset(0);
+        STATS_ENTITY_DRAW_MAP.reset(0);
+    }
+    #[inline]
+    pub fn setup_frame(&mut self, _device_context: &Dx11Context) {
+        self.render_list.setup_frame();
     }
 
     pub fn gameplay_map_enter(&mut self, _prev_anchor: Option<Instant>) {
@@ -1349,8 +1387,8 @@ impl PackRender {
 
     pub fn draw(
         &mut self,
-        camera: RenderPosition,
-        frustum: &MapFrustum,
+        camera: &RenderPosition,
+        frustum: &impl aabb::IntersectsAabb<f32, 3>,
         backend: &RenderBackend,
         context: &Dx11Context,
         arcrender: bool,
@@ -1359,11 +1397,10 @@ impl PackRender {
         let entities =
             self.render_list
                 .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
+        self.draw_state.primary_draw = true;
         match arcrender {
+            true if self.resources.shader_variant.is_none() => (),
             true => {
-                if self.resources.shader_trail.is_none() {
-                    rt::log::error_ok(self.resources.prepare_shaders(&backend.shaders));
-                }
                 let mut draw = render::DrawSpaceArc {
                     context,
                     resources: &self.resources,
@@ -1384,133 +1421,13 @@ impl PackRender {
                 Self::draw_entities(&mut self.draw_state, &mut draw, entities);
             },
         }
-        STATS_ENTITY_COUNT.reset_with(|| spacepacks.render_entities.entities.len());
-    }
-    /// TESTING123
-    #[cfg(deleteme)]
-    pub fn draw_arc(
-        &mut self,
-        camera: RenderPosition,
-        frustum: &MapFrustum,
-        backend: &RenderBackend,
-        device_context: &Dx11Context,
-    ) {
-        let Some(spacepacks) = self.spacepacks.cached.as_ref() else { return };
-        if self.resources.shader_trail.is_none() {
-            rt::log::error_ok(self.resources.prepare_shaders(&backend.shaders));
-        }
-        let mut shader_state = ShaderState::None;
-        let mut shader_poi_quad = None;
-        let mut num_drawn = 0usize;
-        for (i, shape) in spacepacks.render_entities.entities.iter().enumerate() {
-            let e = &shape.value;
-            if e.is_invalid() {
-                continue
-            }
-            #[cfg(todo)]
-            if !frustum.intersects_aabb(&shape.bounds) {
-                continue
-            }
-            if !frustum.intersects(&shape.bounds) {
-                continue
-            }
-            let Some(pack_path) = e.id.marker_path::<PackMapPath>() else { continue };
-            let Some(pack_data) = self.pack_data.lookup_ref(&pack_path.root.root) else {
-                continue
-            };
-            let render_id = pack_path.path;
-            match render_id.namespace() {
-                MarkerIndex::NS_TRAIL => {
-                    let (t, s) = render_id.index_trail_section_unchecked();
-                    let tpath: LoadedTrailPath = LoadedTrailPath::with_path(t);
-                    #[cfg(todo)]
-                    let path = tpath.rel(TrailSectionPath::with_path(s));
-                    let Some(trail) = pack_data.trails.lookup_ref(&tpath) else { continue };
-                    //if !matches!(trail.texture, Some(TextureSlot::Loaded(..))) { continue }
-                    if trail.texture.is_none() {
-                        continue
-                    }
-                    let Some(vb) = &trail.section_vb_ng else { continue };
-                    let Some(ops::Range { start, end }) = trail.section_geometry_vertices(s) else {
-                        continue
-                    };
-                    if shader_state == ShaderState::None {
-                        let Some(shaderp) = &self.resources.shader_p else { continue };
-                        let Some(ib) = &self.resources.entities_ib else { continue };
-                        let Some(cb_p) = &self.resources.shared_cb_p else { continue };
-                        let Some(cb_v) = &self.resources.shared_cb_v else { continue };
-                        shaderp.set(device_context);
-                        ib.set(device_context, 1);
-                        cb_p.set(device_context, 0);
-                        cb_v.set(device_context, 0);
-                    }
-                    if shader_state != ShaderState::Trail {
-                        let Some((shaderv, shaderl)) = &self.resources.shader_trail else { continue };
-                        shaderv.set(device_context);
-                        shaderl.set(device_context);
-                        shader_state = ShaderState::Trail;
-                    }
-                    trail.bind_texture(device_context, &self.poi_common, LocalContext::MAP);
-                    vb.set(device_context, 0);
-                    unsafe {
-                        device_context.DrawInstanced(end - start, 1, start, i as u32);
-                    }
-                },
-                MarkerIndex::NS_POI => {
-                    let path = LoadedPoiPath::with_path(render_id.index_poi_unchecked());
-                    let Some(poi) = pack_data.pois.lookup_ref(&path) else { continue };
-                    if shader_state == ShaderState::None {
-                        let Some(shaderp) = &self.resources.shader_p else { continue };
-                        let Some(ib) = &self.resources.entities_ib else { continue };
-                        let Some(cb_p) = &self.resources.shared_cb_p else { continue };
-                        let Some(cb_v) = &self.resources.shared_cb_v else { continue };
-                        shaderp.set(device_context);
-                        ib.set(device_context, 1);
-                        cb_p.set(device_context, 0);
-                        cb_v.set(device_context, 0);
-                    }
-                    let vb_quad = match poi.occlude {
-                        true => self.resources.poi_vb_trans.as_ref(),
-                        _ => {
-                            if poi.icon.is_none() {
-                                continue
-                            }
-                            self.resources.poi_vb.as_ref()
-                        },
-                    };
-                    let Some(vb_quad) = vb_quad else { continue };
-                    if shader_state != ShaderState::Poi {
-                        let Some((shaderv, shaderl)) = &self.resources.shader_poi else { continue };
-                        shaderv.set(device_context);
-                        shaderl.set(device_context);
-                        shader_poi_quad = Some(vb_quad);
-                        vb_quad.set(device_context, 0);
-                        shader_state = ShaderState::Poi;
-                    } else if shader_poi_quad != Some(vb_quad) {
-                        vb_quad.set(device_context, 0);
-                        shader_poi_quad = Some(vb_quad);
-                    }
-                    poi.bind_texture(device_context, &self.poi_common, LocalContext::MAP);
-                    unsafe {
-                        device_context.DrawInstanced(
-                            instance::TrailVertex::POI_QUAD.len() as u32,
-                            1,
-                            0,
-                            i as u32,
-                        );
-                    }
-                },
-                _ => (),
-            }
-            num_drawn += 1;
-        }
-        STATS_ENTITY_DRAW.reset(num_drawn);
+        self.draw_state.primary_draw = false;
     }
     #[cfg(feature = "goggles")]
     pub fn draw_obscured(
         &mut self,
-        camera: RenderPosition,
-        frustum: &MapFrustum,
+        camera: &RenderPosition,
+        frustum: &impl aabb::IntersectsAabb<f32, 3>,
         backend: &RenderBackend,
         context: &Dx11Context,
         arcrender: bool,
@@ -1519,10 +1436,8 @@ impl PackRender {
             self.render_list
                 .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
         match arcrender {
+            true if self.resources.shader_variant.is_none() => (),
             true => {
-                if self.resources.shader_trail.is_none() {
-                    rt::log::error_ok(self.resources.prepare_shaders(&backend.shaders));
-                }
                 let mut draw = render::DrawSpaceArc {
                     context,
                     resources: &self.resources,
@@ -1579,7 +1494,7 @@ impl PackRender {
                     if !ltrail.visibility.is_visible_for_space() {
                         continue
                     }
-                    if trail.report_incomplete(&marker_id, draw_state, path) {
+                    if trail.report_incomplete(&marker_id, draw_state, path, draw.is_arcrender()) {
                         continue
                     }
                     #[cfg(todo)]
@@ -1657,7 +1572,12 @@ impl PackRender {
             }
         }
         draw.finish();
-        STATS_ENTITY_DRAW.reset(num_drawn);
+        if draw_state.is_secondary_draw() {
+            STATS_ENTITY_DRAW_PASS.increment(1);
+        } else {
+            STATS_ENTITY_DRAW.reset(num_drawn);
+        }
+        STATS_ENTITY_DRAW_ALL.increment(num_drawn);
     }
     pub fn draw_map_entities<'e, E>(
         draw_state: &mut PackRenderState,
@@ -1667,14 +1587,15 @@ impl PackRender {
         map: MapContext,
         entities: E,
     ) where
-        E: IntoIterator<Item = (&'e PackRenderData, &'e MarkerId)>,
+        E: IntoIterator<Item = (&'e PackRenderData, usize, &'e MarkerId)>,
     {
+        draw_state.primary_draw_map = true;
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0usize;
         #[cfg(todo)]
         let mut trail_colour = None;
         let ctx = LocalContext::/*Map(map)*/MAP;
-        for (pack_data, marker_id) in entities {
+        for (pack_data, _space_idx, marker_id) in entities {
             let render_id = marker_id.get_marker_index();
             let ns = render_id.namespace();
             match ns {
@@ -1699,7 +1620,7 @@ impl PackRender {
                     if !ltrail.visibility.is_visible_for_map(map) {
                         continue
                     }
-                    if trail.report_incomplete(&marker_id, draw_state, path) {
+                    if trail.report_incomplete(&marker_id, draw_state, path, false) {
                         continue
                     }
                     if shader_state == ShaderState::None {
@@ -1766,6 +1687,7 @@ impl PackRender {
                 },
                 _ => {
                     log::error!("Render ID {render_id} refers to invalid marker {marker_id}");
+                    continue
                 },
             }
             num_drawn += 1;
@@ -1780,6 +1702,7 @@ impl PackRender {
             }
         }
         STATS_ENTITY_DRAW_MAP.reset(num_drawn);
+        draw_state.primary_draw_map = false;
     }
 
     pub fn clear(&mut self) {
@@ -1822,9 +1745,11 @@ pub struct PackRenderResources {
     pub anim_timestamp: Option<f32>,
 
     pub entities_ib: Option<EntityInstanceBuffer>,
-    pub shader_poi: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
-    pub shader_trail: Option<(taimi_d3d::dx11::ShaderV, taimi_d3d::dx11::shader::InputLayout)>,
-    pub shader_p: Option<taimi_d3d::dx11::ShaderP>,
+    pub shader_poi: Option<(dx11::ShaderV, dx11::shader::InputLayout)>,
+    pub shader_trail: Option<(dx11::ShaderV, dx11::shader::InputLayout)>,
+    pub shader_p_trail: Option<dx11::ShaderP>,
+    pub shader_p_poi: Option<dx11::ShaderP>,
+    pub shader_variant: Option<render::ArcShaderVariant>,
     pub poi_vb: Option<PoiVertexBuffer>,
     pub poi_vb_trans: Option<PoiVertexBuffer>,
     pub shared_cb_v: Option<ConstantBufferV>,
@@ -2040,6 +1965,7 @@ impl PackRenderResources {
 
         res
     }
+    #[cfg(deleteme)]
     pub fn prepare_shaders(&mut self, shaders: &ShaderLoader) -> anyhow::Result<()> {
         if self.entities_ib.is_none() {
             return Ok(())
@@ -2051,103 +1977,143 @@ impl PackRenderResources {
         self.shader_poi = shaders.vertex.get("poi-ng").cloned();
         Ok(())
     }
+    pub fn prepare_shaders_arc(
+        &mut self,
+        shaders: &ShaderLoader,
+        draw_state: &mut PackRenderState,
+        variant: render::ArcShaderVariant,
+    ) -> bool {
+        if self.entities_ib.is_none() {
+            return true
+        }
+        if self.shader_variant == Some(variant) {
+            return true
+        }
+        self.shader_variant = None;
+        let trail_v = Self::lookup_shaders_arc(
+            shaders,
+            draw_state,
+            variant,
+            ShaderKind::Vertex,
+            Some(render::ShaderState::Trail),
+        );
+        let trail_p = Self::lookup_shaders_arc(
+            shaders,
+            draw_state,
+            variant,
+            ShaderKind::Pixel,
+            Some(render::ShaderState::Trail),
+        );
+        let poi_v = Self::lookup_shaders_arc(
+            shaders,
+            draw_state,
+            variant,
+            ShaderKind::Vertex,
+            Some(render::ShaderState::Poi),
+        );
+        let poi_p = Self::lookup_shaders_arc(
+            shaders,
+            draw_state,
+            variant,
+            ShaderKind::Pixel,
+            Some(render::ShaderState::Poi),
+        );
+
+        match (trail_v, trail_p) {
+            (Some((Some(v), _)), Some((_, p))) => {
+                self.shader_trail = Some(v.clone());
+                self.shader_p_trail = p.cloned();
+            },
+            _ => return false,
+        }
+        match (poi_v, poi_p) {
+            (Some((Some(v), _)), Some((_, p))) => {
+                self.shader_poi = Some(v.clone());
+                self.shader_p_poi = match p {
+                    #[cfg(todo)]
+                    Some(p)
+                        if Some(p.as_d3d_raw()) == self.shader_p_trail.as_ref().map(|p| p.as_d3d_raw()) =>
+                        None,
+                    p => p.cloned(),
+                };
+            },
+            _ => return false,
+        }
+        self.shader_variant = Some(variant);
+        true
+    }
+    pub fn lookup_shaders_arc<'a>(
+        shaders: &'a ShaderLoader,
+        draw_state: &mut PackRenderState,
+        variant: render::ArcShaderVariant,
+        kind: ShaderKind,
+        entity: Option<render::ShaderState>,
+    ) -> Option<(
+        Option<&'a (dx11::ShaderV, dx11::shader::InputLayout)>,
+        Option<&'a dx11::ShaderP>,
+    )> {
+        let Some(id) = variant.id(kind, entity) else { return Some((None, None)) };
+        match kind {
+            ShaderKind::Vertex => match shaders.vertex.get(id) {
+                Some(v) => return Some((Some(v), None)),
+                _ => (),
+            },
+            ShaderKind::Pixel => match shaders.pixel.get(id) {
+                Some(v) => return Some((None, v.as_ref())),
+                _ => (),
+            },
+        }
+        let template = variant
+            .template_id(kind, entity)
+            .and_then(|pid| shaders.partial.get(pid));
+        if draw_state.shaders_incomplete.insert((kind, id)) {
+            let req = template.map(|t| PathingEvent::LoadShader {
+                kind,
+                variant,
+                entity,
+                template: t.clone(),
+            });
+            match req.map(PathingController::try_send) {
+                None => log::warn!("shader {id} missing"),
+                Some(true) => log::debug!("requesting shader {id}"),
+                Some(false) => {
+                    draw_state.shaders_incomplete.remove(&(kind, id));
+                },
+            }
+        }
+
+        None
+    }
     #[inline]
     pub fn update_shared(
         &mut self,
         device_context: &Dx11Context,
-        backend: &RenderBackend,
-        machine: &RenderMachine,
-        settings: &ArcrenderSettings,
-        (camera_pos, camera_dir, _camera_up): RenderPosition,
-        player_pos: Option<Point3<DrawSpace>>,
-        projection: Matrix4<f32>,
-        view: Matrix4<f32>,
+        device: &Dx11Device,
+        shared_v: &instance::ConstantDataV,
+        shared_p: &instance::ConstantDataP,
     ) {
-        let vp_size = backend.viewport.size2();
-        let shared_p = instance::ConstantDataP {
-            render: instance::RenderConstantDataP {
-                #[cfg(todo)]
-                viewport: vp_size.to_vector(),
-                player_feather: settings.trail_player_feather(),
-                distance_fade: settings.trail_intensity(),
-                edge_feather: settings.edge_feather().to_array(),
-                edge_feather_viewport: settings.edge_viewport(vp_size),
-            },
-        };
-        let billboard = taimi_meta::coords::billboard_from_look(view.into());
         match &mut self.shared_cb_p {
             Some(cb) => {
-                cb.update_singleton(device_context, &shared_p);
+                cb.update_singleton(device_context, shared_p);
             },
-            cb => *cb = rt::log::error_ok(ConstantBufferP::new_with_data(&backend.device, &shared_p)),
+            cb => *cb = rt::log::error_ok(ConstantBufferP::new_with_data(device, shared_p)),
         }
-        let shared_v = instance::ConstantDataV {
-            render: instance::RenderConstantDataV {
-                player_pos: player_pos
-                    .unwrap_or(Point3::splat(taimi_meta::spatial::IRRELEVANT_MID))
-                    .to_vector()
-                    .cast(),
-                anim_timestamp: self.anim_timestamp.unwrap_or(0.0),
-                camera_pos: camera_pos.to_vector().cast(),
-                camera_dir: camera_dir.cast(),
-                view,
-                projection,
-                _padding0: 0.0,
-                viewport_pixel_scale: 1.0 / vp_size.height,
-                #[cfg(todo = "unnecessary")]
-                viewport_pixel_scale: vp_size.dot(vp_size).sqrt() * 2.0,
-                _padding2: glamour::Vector4::ZERO,
-            },
-            poi: instance::PoiConstantDataV {
-                marker: instance::MarkerConstantDataV {
-                    alpha: settings.poi_alpha,
-                    scale: settings.poi_expansion.scale(),
-                    anim_scale: settings.poi_anim_speed,
-                    flags: settings
-                        .poi_distance_fade
-                        .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
-                        .unwrap_or(0) | (!settings.poi_can_fade)
-                        .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
-                        .unwrap_or(0) | settings
-                        .poi_limit_size
-                        .then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE)
-                        .unwrap_or(0) | settings.poi_flags,
-                },
-                billboard,
-                map_scale: machine.map.calibration.local_space().scale.abs().y,
-                _padding0: glamour::Vector3::ZERO,
-            },
-            trail: instance::TrailConstantDataV {
-                marker: instance::MarkerConstantDataV {
-                    alpha: settings.trail_alpha,
-                    scale: settings.trail_expansion.normal_expansion,
-                    anim_scale: settings.trail_anim_speed,
-                    flags: settings
-                        .trail_distance_fade
-                        .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
-                        .unwrap_or(0) | (!settings.trail_can_fade)
-                        .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
-                        .unwrap_or(0) | settings.trail_flags,
-                },
-                tex_scale: settings.trail_texture.v_scale,
-                tex_offset: settings.trail_texture.v_offset,
-                _padding0: glamour::Vector2::ZERO,
-            },
-        };
         match &mut self.shared_cb_v {
             Some(cb) => {
-                cb.update_singleton(device_context, &shared_v);
+                cb.update_singleton(device_context, shared_v);
             },
-            cb => *cb = rt::log::error_ok(ConstantBufferV::new_with_data(&backend.device, &shared_v)),
+            cb => *cb = rt::log::error_ok(ConstantBufferV::new_with_data(device, shared_v)),
         }
     }
     pub fn clear(&mut self) {
         self.clear_buffers();
         self.poi_vb = None;
         self.poi_vb_trans = None;
+        self.shader_variant = None;
         self.shader_trail = None;
         self.shader_poi = None;
-        self.shader_p = None;
+        self.shader_p_trail = None;
+        self.shader_p_poi = None;
         self.shared_cb_v = None;
         self.shared_cb_p = None;
         STATS_ENTITY_INSTANCE_SIZE.reset(0);
@@ -2162,7 +2128,8 @@ impl PackRenderResources {
         mem::forget(self.entities_ib.take());
         mem::forget(self.shader_poi.take());
         mem::forget(self.shader_trail.take());
-        mem::forget(self.shader_p.take());
+        mem::forget(self.shader_p_poi.take());
+        mem::forget(self.shader_p_trail.take());
         mem::forget(self.poi_vb.take());
         mem::forget(self.poi_vb_trans.take());
         mem::forget(self.shared_cb_v.take());
@@ -2173,17 +2140,21 @@ impl PackRenderResources {
 #[derive(Debug, Default)]
 pub struct PackRenderState {
     pub drawn_incomplete: FxHashSet<MarkerId>,
+    pub shaders_incomplete: FxHashSet<(ShaderKind, &'static str)>,
     pub prev_map_id: Option<MapIndex>,
     /// TODO: stash this in a common place like machine maybe?
     pub prev_waiting: bool,
     pub anims: BTreeMap<PoiMapPath, f32>,
     pub anim_stop: BTreeSet<PoiMapPath>,
+    pub primary_draw: bool,
+    pub primary_draw_map: bool,
     #[cfg(todo)]
     pub drawn_visible: BitSet,
 }
 impl PackRenderState {
     pub fn clear(&mut self) {
         self.drawn_incomplete = Default::default();
+        self.shaders_incomplete = Default::default();
         self.clear_anims();
         #[cfg(todo)]
         {
@@ -2200,6 +2171,18 @@ impl PackRenderState {
     pub fn clear_anims(&mut self) {
         self.anims.clear();
         self.anim_stop.clear();
+    }
+
+    #[inline]
+    pub fn is_secondary_draw(&self) -> bool {
+        !self.primary_draw & !self.primary_draw_map
+    }
+    pub fn mark_incomplete(&mut self, id: &MarkerId) -> bool {
+        if self.is_secondary_draw() {
+            return false
+        }
+        self.drawn_incomplete.insert(id.clone());
+        !self.primary_draw
     }
 
     pub(super) fn poi_get_anim_end(&self, lpath: PoiMapPath) -> Option<f32> {
@@ -2240,7 +2223,8 @@ pub struct PackRenderList {
     dirty: bool,
 }
 impl PackRenderList {
-    pub fn prepare_frame(&mut self) {
+    #[inline]
+    pub fn setup_frame(&mut self) {
         if mem::replace(&mut self.dirty, false) {
             let shapes = self.spacepacks.render_entities.entities.len();
             let min_cap = shapes / 8;
@@ -2269,14 +2253,26 @@ impl PackRenderList {
     }
     /// TODO: filter by visibility flags here?
     pub fn iter_markers_map<'a, 'e, Q: aabb::IntersectsAabb<f32, 3>>(
-        &'a self,
+        &'a mut self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
         _map: MapContext,
         query: &'a Q,
-    ) -> impl Iterator<Item = (&'e PackRenderData, &'a MarkerId)> {
-        self.spacepacks.bvh_iter(query).filter_map(move |(_idx, id)| {
+    ) -> impl Iterator<Item = (&'e PackRenderData, usize, &'a MarkerId)> {
+        self.iter_entities_visible(query, move |e, idx, id| {
+            let pos = match e.extra.get(idx) {
+                _ if id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL => None,
+                None => None,
+                Some(extra) if extra.position.x.is_infinite() => Some(i32::MIN),
+                Some(extra) => Some(render::RenderOrderSort::dist_to_sort_with(
+                    extra.position.y,
+                    render::RenderOrderSort::DIST_FACTOR_CONSERVATIVE,
+                )),
+            };
+            Some((pos, idx))
+        })
+        .filter_map(|(idx, id)| {
             let pack_path = id.get_marker_pack_path();
-            pack_data.lookup_ref(&pack_path).map(|p| (p, id))
+            pack_data.lookup_ref(&pack_path).map(|p| (p, idx, id))
         })
     }
     #[cfg(todo = "unused")]
@@ -2299,36 +2295,44 @@ impl PackRenderList {
         &'a mut self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
         query: &'a Q,
-        camera: RenderPosition,
+        camera: &'_ RenderPosition,
     ) -> impl Iterator<Item = (&'e PackRenderData, usize, &'a MarkerId)> {
-        self.iter_entities_visible(query, camera).filter_map(|(idx, id)| {
+        let key = render::RenderOrderSort::with_camera(camera);
+        self.iter_entities_visible(query, move |e, idx, id| {
+            let ignore_draw_order = id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL;
+            e.extra.get(idx).map(|extra| {
+                let pos = match ignore_draw_order {
+                    true => None,
+                    false if extra.position.x.is_infinite() => None,
+                    false => Some(key.cam_dist_order_for(extra.position)),
+                };
+                (pos, idx)
+            })
+        })
+        .filter_map(|(idx, id)| {
             let pack_path = id.get_marker_pack_path();
             pack_data.lookup_ref(&pack_path).map(|p| (p, idx, id))
         })
     }
-    fn iter_entities_visible<'a, Q: aabb::IntersectsAabb<f32, 3>>(
+    pub(crate) fn iter_entities_visible<'a, Q, F>(
         &'a mut self,
         query: &'a Q,
-        (cam_origin, cam_dir, _cam_up): RenderPosition,
-    ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
-        let shapes = &self.spacepacks.render_entities.entities[..];
-        let extra = &self.spacepacks.render_entities.extra[..];
+        mut filter: F,
+    ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a
+    where
+        Q: aabb::IntersectsAabb<f32, 3>,
+        F: FnMut(&SpaceEntities, usize, &MarkerId) -> Option<(Option<i32>, usize)> + 'a,
+    {
+        let entities = &self.spacepacks.render_entities;
+        let shapes = &entities.entities[..];
         self.draw_order_heap.clear();
 
-        let bvh_iter = self.spacepacks.bvh_iter(query).filter_map(move |(idx, _id)| {
-            let ignore_draw_order = _id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL;
-            extra.get(idx).map(|extra| {
-                let pos = match ignore_draw_order {
-                    true => Point3::INFINITY,
-                    false => extra.position,
-                };
-                (pos, idx)
-            })
-        });
+        let bvh_iter = self
+            .spacepacks
+            .bvh_iter(query)
+            .filter_map(move |(idx, id)| filter(entities, idx, id));
         let ordered = render::RenderOrderBuilder {
             bvh_iter,
-            cam_origin,
-            cam_dir,
             draw_order_heap: &mut self.draw_order_heap,
         };
         let iter = ordered.map(move |idx| {
@@ -2367,6 +2371,7 @@ pub struct ArcrenderSettings {
     pub poi_intensity: Option<f32>,
     pub poi_flags: u32,
     pub feather_scale: Option<Vector2>,
+    pub feather_scale1: Option<f32>,
 }
 impl ArcrenderSettings {
     pub const DEFAULT: Self = Self {
@@ -2391,6 +2396,7 @@ impl ArcrenderSettings {
         trail_flags: 0,
         poi_flags: 0,
         feather_scale: None,
+        feather_scale1: None,
     };
 
     pub const OVERLAP_THRESHOLD_OFF: f32 = 0.01;
@@ -2415,10 +2421,18 @@ impl ArcrenderSettings {
     }
 
     pub const FEATHER_SCALE_SQUARE: Vector2 = Vector2::new(0.065f32, 0.0825f32);
-    pub fn set_feather_scale(&mut self, feather_scale: Option<f32>, display_size: Size2<ScreenSpace>) {
+    pub fn set_feather_scale(
+        &mut self,
+        feather_scale: Option<f32>,
+        display_size: Option<Size2<ScreenSpace>>,
+    ) {
+        self.feather_scale1 = feather_scale;
+        self.feather_scale = display_size.and_then(|sz| self.edge_feather_for(sz));
+    }
+    fn edge_feather_for(&self, display_size: Size2<ScreenSpace>) -> Option<Vector2> {
         let aspect_ratio = display_size.width / display_size.height;
         let aspect_ratio_recip = display_size.height / display_size.width;
-        self.feather_scale = feather_scale.map(|scale| {
+        self.feather_scale1.map(|scale| {
             let normalized = match () {
                 #[cfg(todo = "unnecessary")]
                 _ => (Vector2::new(aspect_ratio_recip, aspect_ratio) * Self::FEATHER_SCALE_SQUARE).recip(),
@@ -2431,25 +2445,147 @@ impl ArcrenderSettings {
                 },
             };
             scale * normalized
-        });
+        })
     }
 
     pub const FEATHER_SCALE_NONE: f32 = 1.0e8;
-    pub fn edge_feather(&self) -> Vector2 {
-        self.feather_scale
-            .unwrap_or(Vector2::splat(Self::FEATHER_SCALE_NONE))
+    pub fn edge_feather(&self, display_size: Size2<ScreenSpace>) -> Vector2 {
+        match self.feather_scale {
+            None if self.feather_scale1.is_some() => self.edge_feather_for(display_size),
+            s => s,
+        }
+        .unwrap_or(Vector2::splat(Self::FEATHER_SCALE_NONE))
     }
     pub const VIEWPORT_NONE: f32 = 1.0 / 10000.0;
     pub fn edge_viewport(&self, viewport_size: Size2) -> Vector2 {
-        self.feather_scale
+        self.feather_scale1
             .is_some()
             .then_some(viewport_size)
             .map(|size| size.to_vector().recip() * 2.0)
             .unwrap_or(Vector2::splat(Self::VIEWPORT_NONE))
     }
+
+    /// TODO: technically just needs aspect ratio...
+    pub fn set_from(&mut self, settings: &PathingSettings, display_size: Option<Size2<ScreenSpace>>) {
+        let space = &settings.space;
+        self.trail_anim_speed = space.trail_anim_space();
+        self.trail_distance_fade = space.distance_fade_range();
+        self.trail_overlap_threshold = space.player_overlap_threshold();
+        self.trail_intensity = space.distance_fade_intensity();
+        self.poi_distance_fade = space.distance_fade_range();
+        self.poi_can_fade = space.player_overlap_poi();
+        self.trail_can_fade = space.player_overlap_threshold().is_some();
+        self.poi_limit_size = space.poi_limit_size();
+        self.poi_expansion = PoiScale::with_scale(space.poi_scale_space());
+        let prev_trail_expansion = mem::replace(
+            &mut self.trail_expansion,
+            TrailScale::with_scale(space.trail_scale_space()),
+        );
+        self.trail_alpha = space.trail_alpha();
+        self.poi_alpha = space.poi_alpha();
+        match space.trail_textured_space() {
+            true if prev_trail_expansion == self.trail_expansion
+                && self.trail_texture != TrailTextureMap::UNTEXTURED =>
+                (),
+            true => {
+                self.trail_texture.set_scale_from_expansion(self.trail_expansion);
+                self.trail_texture.v_offset = 0.0;
+            },
+            false => self.trail_texture = TrailTextureMap::UNTEXTURED,
+        }
+        match space.edge_feather_scale() {
+            s if self.feather_scale1 == s => (),
+            s => self.set_feather_scale(s, display_size),
+        }
+    }
+
+    #[inline]
+    pub fn apply_p(&self, shared_p: &mut instance::ConstantDataP, viewport_size: Size2<ScreenSpace>) {
+        let render = &mut shared_p.render;
+        #[cfg(todo)]
+        {
+            render.viewport = viewport_size.to_vector();
+        }
+        render.player_feather = self.trail_player_feather();
+        render.distance_fade = self.trail_intensity();
+        render.edge_feather = self.edge_feather(viewport_size).to_array();
+        render.edge_feather_viewport = self.edge_viewport(viewport_size.cast());
+    }
+    #[inline]
+    pub fn apply_v(&self, shared_v: &mut instance::ConstantDataV) {
+        self.apply_v_trail(&mut shared_v.trail);
+        self.apply_v_poi(&mut shared_v.poi);
+    }
+    #[inline]
+    pub fn apply_v_trail(&self, trail_v: &mut instance::TrailConstantDataV) {
+        trail_v.tex_scale = self.trail_texture.v_scale;
+        trail_v.tex_offset = self.trail_texture.v_offset;
+        let marker = &mut trail_v.marker;
+        marker.alpha = self.trail_alpha;
+        marker.scale = self.trail_expansion.normal_expansion;
+        marker.anim_scale = self.trail_anim_speed;
+        marker.flags = self
+            .trail_distance_fade
+            .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
+            .unwrap_or(0)
+            | (!self.trail_can_fade)
+                .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
+                .unwrap_or(0)
+            | self.trail_flags;
+    }
+    #[inline]
+    pub fn apply_v_poi(&self, poi_v: &mut instance::PoiConstantDataV) {
+        let marker = &mut poi_v.marker;
+        marker.alpha = self.poi_alpha;
+        marker.scale = self.poi_expansion.scale();
+        marker.anim_scale = self.poi_anim_speed;
+        marker.flags = self
+            .poi_distance_fade
+            .then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE)
+            .unwrap_or(0)
+            | (!self.poi_can_fade)
+                .then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE)
+                .unwrap_or(0)
+            | self
+                .poi_limit_size
+                .then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE)
+                .unwrap_or(0)
+            | self.poi_flags;
+    }
+
+    #[inline]
+    pub fn setup_v(
+        shared_v: &mut instance::ConstantDataV,
+        viewport_size: Size2<ScreenSpace>,
+        map_calibration: &MapCalibration,
+        (camera_pos, camera_dir, _camera_up): &RenderPosition,
+        player_pos: Option<Point3<DrawSpace>>,
+        projection: Matrix4<f32>,
+        view: Matrix4<f32>,
+        anim_timestamp: Option<f32>,
+    ) {
+        shared_v.render.player_pos = player_pos
+            .unwrap_or(Point3::splat(taimi_meta::spatial::IRRELEVANT_MID))
+            .to_vector()
+            .cast();
+        shared_v.render.anim_timestamp = anim_timestamp.unwrap_or(0.0);
+        shared_v.render.camera_pos = camera_pos.to_vector().cast();
+        shared_v.render.camera_dir = camera_dir.cast();
+        shared_v.render.view = view;
+        shared_v.render.projection = projection;
+        shared_v.render.viewport_pixel_scale = 1.0 / viewport_size.height;
+        #[cfg(todo = "unnecessary")]
+        {
+            shared_v.render.viewport_pixel_scale = viewport_size.dot(viewport_size).sqrt() * 2.0;
+        }
+        shared_v.poi.billboard = taimi_meta::coords::billboard_from_look(view.into());
+        shared_v.poi.map_scale = map_calibration.local_space().scale.abs().y;
+    }
 }
 
 pub static STATS_ENTITY_INSTANCE_SIZE: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW: Counter = Counter::DEFAULT;
+pub static STATS_ENTITY_DRAW_PASS: Counter = Counter::DEFAULT;
+pub static STATS_ENTITY_DRAW_ALL: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_COUNT: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW_MAP: Counter = Counter::DEFAULT;

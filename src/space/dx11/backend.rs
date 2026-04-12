@@ -5,7 +5,7 @@ use {
         space::{resources::ShaderLoader, ScreenSpace},
     },
     anyhow::Context,
-    glamour::Size2,
+    glamour::{Rect, Size2},
     std::sync::OnceLock,
     taimi_d3d::dx11::{
         blend::{BlendState, OMBlendState, D3D11_RENDER_TARGET_BLEND_DESC},
@@ -20,6 +20,8 @@ pub struct RenderBackend {
     pub depth_handler: DepthHandler,
     pub perspective_handler: PerspectiveHandler,
     pub blend_state: OMBlendState<BlendState>,
+    #[cfg(feature = "goggles2")]
+    pub blend_state_shadow: OMBlendState<BlendState>,
 
     pub shaders: ShaderLoader,
     pub sampler_state: SamplerState,
@@ -50,6 +52,9 @@ impl RenderBackend {
         let blend_desc = BlendState::desc_for_target(Self::BLEND_STATE_DESC_RT, false, false);
         let blend_state =
             BlendState::new_with_desc(&device, &blend_desc).context("Blending setup failed")?;
+        let blend_desc_shadow = BlendState::desc_for_target(Self::BLEND_STATE_DESC_G2_SHADOW, false, false);
+        let blend_state_shadow =
+            BlendState::new_with_desc(&device, &blend_desc_shadow).context("Blending setup failed")?;
         //log::info!("Setting up device context");
         //let device_context = unsafe { device.GetImmediateContext().expect("I lost my context!") };
 
@@ -65,6 +70,8 @@ impl RenderBackend {
         }*/
         Ok(RenderBackend {
             blend_state: OMBlendState::new(blend_state, None, None),
+            #[cfg(feature = "goggles2")]
+            blend_state_shadow: OMBlendState::new(blend_state_shadow, None, None),
             depth_handler,
             perspective_handler,
 
@@ -148,10 +155,27 @@ impl RenderBackend {
         ..BlendState::TARGET_DESC_ADDITIVE
     };
 
+    #[cfg(feature = "goggles2")]
+    const BLEND_STATE_DESC_G2_SHADOW: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
+        RenderTargetWriteMask: (d3d11::D3D11_COLOR_WRITE_ENABLE_ALPHA.0
+            | d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0) as _,
+        //SrcBlend: taimi_d3d::dx11::blend::BlendFactor::ONE,
+        //BlendOp: taimi_d3d::dx11::blend::BlendOp::Sub,
+        BlendOpAlpha: taimi_d3d::dx11::blend::BlendOp::MIN,
+        //DestBlendAlpha: taimi_d3d::dx11::blend::BlendFactor::SRC_ALPHA,
+        ..Self::BLEND_STATE_DESC_RT
+    };
+
     const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
         MinLOD: 0.0,
         ComparisonFunc: d3d11::D3D11_COMPARISON_ALWAYS,
         BorderColor: [0.0; 4],
         ..SamplerState::desc_with_address(TextureAddressMode::WRAP.to_vec3())
     };
+
+    #[inline]
+    pub fn viewport_rect(&self) -> Rect<ScreenSpace> {
+        let r = self.viewport.rect();
+        Rect::new(r.origin.cast(), r.size.cast())
+    }
 }

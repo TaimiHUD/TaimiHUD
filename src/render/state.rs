@@ -254,6 +254,7 @@ impl RenderState {
                     #[cfg(feature = "goggles")]
                     UiDepthReleased() => {
                         self.machine.turn_depth_event(false);
+                        #[cfg(deleteme)]
                         if self.machine.gameplay.gameplay_map().is_some()
                             && crate::space::goggles::lens::read_lens() == core::ptr::dangling_mut()
                         {
@@ -821,6 +822,10 @@ impl RenderState {
             return
         }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
+        crate::texture_schedule_bytes(
+            RenderMachine::TEXTURE_LOGO_LINES_KEY,
+            RenderMachine::TEXTURE_LOGO_LINES_BIN,
+        );
         rt::setup_stats();
         #[cfg(feature = "space")]
         crate::space::Engine::setup_stats();
@@ -856,7 +861,14 @@ impl RenderState {
             state.shutdown();
             lock.take();
         } else {
+            let render_slot = (match () {
+                #[cfg(feature = "space")]
+                () => &mut state.engine,
+                #[cfg(not(feature = "space"))]
+                () => (),
+            },);
             state.machine.post_ui();
+            state.machine.post_render_late(render_slot);
         }
     }
 

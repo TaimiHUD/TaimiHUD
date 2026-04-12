@@ -1259,6 +1259,7 @@ impl InteractReactor {
             },
             InteractMessage::BvhRebuild => {
                 if rx.shared.packs.read_still_waiting().0 {
+                    #[cfg(taimi_debug)]
                     log::debug!("DELETEME: delaying interact bvh");
                     return PathingEvent::Nop
                 }

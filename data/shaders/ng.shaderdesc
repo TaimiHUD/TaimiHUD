@@ -1,42 +1,39 @@
 [
   {
-    "identifier": "trail-ng",
+    "partial": true,
+    "identifier": "trail-ng-v",
     "kind": "Vertex",
     "path": "ng.hlsl",
     "entrypoint": "trail_main_v",
     "layout_type": "SpaceTrail",
     "defs": {
       "SHADER_V": "1",
-      "SHADER_SPACE": "2",
-      "GOGGLES2_SHADOWBOXING": "2"
     }
   },
   {
-    "identifier": "trail-ng",
-    "kind": "Pixel",
-    "path": "ng.hlsl",
-    "entrypoint": "trail_main_p",
-    "defs": {
-      "SHADER_P": "1",
-      "SHADER_SPACE": "2",
-      "DISCARD_ALPHA": "0.01",
-      "DISCARD_Z": "1.1",
-      "FEATHER_OFFSET": "float3(1.0, 0.945, 0.42)",
-      "FEATHER_SIZE_Z": "2.8",
-      "FEATHER_SCALE_Z": "p_render.edge_feather.y / 6.9",
-      "GOGGLES2_SHADOWBOXING": "2"
-    }
-  },
-  {
-    "identifier": "poi-ng",
+    "partial": true,
+    "identifier": "poi-ng-v",
     "kind": "Vertex",
     "path": "ng.hlsl",
     "entrypoint": "poi_main_v",
     "layout_type": "SpacePoi",
     "defs": {
       "SHADER_V": "1",
-      "SHADER_SPACE": "1",
-      "GOGGLES2_SHADOWBOXING": "2"
+    }
+  },
+  {
+    "partial": true,
+    "identifier": "trail-ng-p",
+    "kind": "Pixel",
+    "path": "ng.hlsl",
+    "entrypoint": "trail_main_p",
+    "defs": {
+      "SHADER_P": "1",
+      "DISCARD_ALPHA": "0.01",
+      "DISCARD_Z": "1.1",
+      "FEATHER_OFFSET": "float3(1.0, 0.945, 0.42)",
+      "FEATHER_SIZE_Z": "2.8",
+      "FEATHER_SCALE_Z": "p_render.edge_feather.y / 6.9",
     }
   },
 ]

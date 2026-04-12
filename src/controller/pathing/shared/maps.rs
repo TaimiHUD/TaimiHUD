@@ -815,6 +815,7 @@ impl<'a> SharedMarkerRef<'a> {
         }
         let map = match len_map {
             Some(len_map) if idx >= len_map => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: {loaded_index} map state expected");
                 None
             },

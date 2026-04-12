@@ -33,7 +33,7 @@ impl MapLocalScale {
     pub const METRES_PER_FEET: f32 = (Self::METRES_PER_INCH as f64 * 12.0f64) as f32;
     #[cfg(todo)]
     pub const METRES_PER_INCH: f32 = Self::METRES_PER_FEET / 12.0;
-    pub const METRES_PER_INCH: f32 = 1.0 / Self::INCHES_PER_METRE;
+    pub const METRES_PER_INCH: f32 = Self::INCHES_PER_METRE.recip();
     /// ~0.02540098? ~0.02540001?
     #[cfg(todo)]
     pub const METRES_PER_INCH: f32 = 0.02540005;
@@ -78,12 +78,30 @@ impl MapLocalScale {
         Self::with_game_scale(scale)
     }
 
-    /// inches per global unit
+    /// inches per global unit (typically ~24)
     pub const fn scale_local(&self) -> Vector2<GameSpace> {
         Vector2::new(
-            self.scale.x / Self::METRES_PER_INCH,
-            self.scale.y / Self::METRES_PER_INCH,
+            self.scale.x * Self::INCHES_PER_METRE,
+            self.scale.y * Self::INCHES_PER_METRE,
         )
+    }
+
+    /// length of a global unit (~2ft) in metres
+    pub fn scale_length(&self) -> f32 {
+        match () {
+            _ => self.scale.length(),
+            #[cfg(todo)]
+            _ => self.scale.element_sum() * (core::f32::consts::SQRT_2 / 2),
+        }
+    }
+
+    /// length of a global unit (~2ft) in inches
+    pub fn scale_local_length(&self) -> f32 {
+        match () {
+            _ => self.scale_local().length(),
+            #[cfg(todo)]
+            _ => self.scale_local().element_sum() * (core::f32::consts::SQRT_2 / 2),
+        }
     }
 
     #[cfg(feature = "map-cache")]

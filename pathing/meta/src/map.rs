@@ -12,26 +12,26 @@ pub type MapID = u32;
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Map {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
+    pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    min_level: Option<isize>,
+    pub min_level: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_level: Option<isize>,
-    default_floor: Option<isize>,
+    pub max_level: Option<isize>,
+    pub default_floor: Option<isize>,
     #[serde(rename = "type", default)]
-    kind: Option<MapType>,
+    pub kind: Option<MapType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    floors: Vec<isize>,
+    pub floors: Vec<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    region_id: Option<isize>,
+    pub region_id: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    region_name: Option<String>,
+    pub region_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    continent_id: Option<isize>,
+    pub continent_id: Option<isize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    continent_name: Option<String>,
-    map_rect: [[i32; 2]; 2],
-    continent_rect: [[i32; 2]; 2],
+    pub continent_name: Option<String>,
+    pub map_rect: [[i32; 2]; 2],
+    pub continent_rect: [[i32; 2]; 2],
 }
 
 impl Map {
@@ -88,27 +88,74 @@ pub struct MapProjectionDepth {
     pub farz: f32,
 }
 impl MapProjectionDepth {
-    pub const fn with_far(z_far: f32) -> Self {
+    pub const fn with_far_in(z_far: f32) -> Self {
         Self::with_farz(z_far * Self::FAR_FACTOR_INV)
     }
     pub const fn with_farz(farz: f32) -> Self {
         Self { farz }
     }
-    pub fn z_far(&self) -> f32 {
-        self.farz * Self::FAR_FACTOR
+    pub const fn z_far_in(&self) -> f32 {
+        self.farz * Self::FAR_FACTOR_IN
     }
-    pub fn z_near_raw(&self, fov_y_recip: f32) -> f32 {
-        self.z_far() * fov_y_recip * Self::NEAR_FACTOR_INV
+    pub const fn z_near_in_reference(&self) -> f32 {
+        self.farz * Self::FAR_NEAR_FACTOR_INV
     }
-    pub fn z_near(&self, fov_y: f32) -> f32 {
-        self.z_near_raw(fov_y.recip()).min(Self::NEAR_MAX)
+    pub fn z_near_in_raw(&self, fov_y_recip: f32) -> f32 {
+        self.z_near_in_reference() * fov_y_recip
+    }
+    pub fn z_near_in(&self, fov_y: f32) -> f32 {
+        self.z_near_in_raw(fov_y.recip()).min(Self::NEAR_MAX_IN)
     }
 
-    pub const FAR_FACTOR: f32 = 3072.0f32;
-    const FAR_FACTOR_INV: f32 = Self::FAR_FACTOR.recip();
-    pub const NEAR_FACTOR: f32 = 1922.0f32;
+    /// `128*24`
+    pub const FAR_FACTOR_IN: f32 = 3072.0f32;
+    const FAR_FACTOR_INV: f32 = Self::FAR_FACTOR_IN.recip();
+    #[cfg(todo)]
+    pub const FAR_FACTOR_M: f32 = Self::FAR_FACTOR_IN * Self::DEFAULT_METRES_PER_INCH;
+    pub const NEAR_FACTOR: f32 = match () {
+        #[cfg(todo)]
+        _ => 7.56f32.exp() + 1.024f32.recip().exp(),
+        _ => 1922.5,
+    };
     const NEAR_FACTOR_INV: f32 = Self::NEAR_FACTOR.recip();
-    pub const NEAR_MAX: f32 = 25.0f32;
+    const FAR_NEAR_FACTOR_INV: f32 = Self::FAR_FACTOR_IN / Self::NEAR_FACTOR;
+    pub const NEAR_MAX_IN: f32 = 25.0f32;
+    pub const DEFAULT_NEAR_MAX_M: f32 = Self::NEAR_MAX_IN * Self::DEFAULT_METRES_PER_INCH;
+
+    pub const DEFAULT_FALLBACK: Self = match () {
+        #[cfg(todo)]
+        _ => Self::with_farz(15.0),
+        _ => Self::with_farz(8.0),
+    };
+    pub const DEFAULT_METRES_PER_INCH: f32 = match () {
+        #[cfg(todo)]
+        _ => MapLocalScale::METRES_PER_INCH * core::f32::consts::SQRT_2,
+        _ => MapLocalScale::METRES_PER_INCH,
+    };
+}
+impl From<MapProjection> for MapProjectionDepth {
+    #[inline(always)]
+    fn from(proj: MapProjection) -> Self {
+        proj.depth
+    }
+}
+impl From<&'_ MapProjection> for MapProjectionDepth {
+    #[inline(always)]
+    fn from(proj: &MapProjection) -> Self {
+        proj.depth.clone()
+    }
+}
+impl From<MapProjectionDepth> for MapProjection {
+    #[inline(always)]
+    fn from(depth: MapProjectionDepth) -> Self {
+        Self { depth }
+    }
+}
+impl From<&'_ MapProjectionDepth> for MapProjection {
+    #[inline(always)]
+    fn from(depth: &MapProjectionDepth) -> Self {
+        depth.clone().into()
+    }
 }
 
 #[cfg(feature = "map-cache")]

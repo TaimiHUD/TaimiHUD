@@ -1,4 +1,5 @@
 mod arc;
+pub mod goggles;
 mod needs_update;
 pub mod pathing;
 mod progress_bar_config;
