@@ -1,7 +1,8 @@
 use {
     crate::{
         resources::Model,
-        space::{dx11::SwapChain, ScreenSpace},
+        render::machine::frame_log,
+        space::{dx11::SwapChain, engine::{DrawDescSpace, DrawDescMap}, ScreenSpace},
     },
     glamour::{Box2, Point2, Size2},
     taimi_d3d::dx11::{
@@ -12,9 +13,6 @@ use {
     },
     taimi_meta::ui::MapCalibration,
 };
-
-#[cfg(feature = "goggles")]
-use crate::space::goggles;
 
 type OMDepthState = taimi_d3d::dx11::OMDepthState<DepthState>;
 
@@ -27,8 +25,10 @@ pub struct DepthHandler {
     pub depth_stencil_state_map: OMDepthState,
     pub depth_stencil_state_mask: OMDepthState,
     #[cfg(feature = "goggles2")]
+    #[cfg(deleteme)]
     pub(crate) inherit_render: usize,
     #[cfg(feature = "goggles2")]
+    #[cfg(deleteme)]
     pub(crate) inherit_depth: usize,
     #[cfg(feature = "goggles")]
     pub depth_stencil_state_write: OMDepthState,
@@ -84,8 +84,10 @@ impl DepthHandler {
                 Self::STENCIL_REF_MASK,
             ),
             #[cfg(feature = "goggles2")]
+            #[cfg(deleteme)]
             inherit_render: 0,
             #[cfg(feature = "goggles2")]
+            #[cfg(deleteme)]
             inherit_depth: 0,
             #[cfg(feature = "goggles")]
             depth_stencil_state_write: OMDepthState::with_state(
@@ -168,16 +170,16 @@ impl DepthHandler {
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
 
-    pub fn setup(&self, device_context: &Dx11Context, inherit: bool) {
-        let (dsview, mut clear_depth) = self.depth_stencil_view();
+    #[cfg(todo)]
+    pub fn setup(&self, device_context: &Dx11Context, desc: &DrawDescSpace) {
+        let dsview = self.depth_stencil_view_with(desc);
         self.rasterizer_state.set(device_context);
-        if !inherit || self.inherit_render != 0 {
+        if !desc.implicit_render_target() {
             dsview.set(device_context);
-        } else {
-            clear_depth = None;
         }
         self.depth_stencil_state.set(device_context);
-        if let Some(clear_depth) = clear_depth {
+        #[cfg(todo)]
+        if let Some(clear_depth) = desc.clear_depth() {
             dsview.clear_depth(
                 device_context,
                 ClearFlags::DEPTH_STENCIL,
@@ -186,7 +188,51 @@ impl DepthHandler {
             );
         }
     }
+    #[cfg(todo)]
+    pub fn clear_depth(&self, device_context: &Dx11Context) {
+        self.render_target_view.clear_depth(
+            device_context,
+            ClearFlags::DEPTH_STENCIL,
+            DrawDescSpace::CLEAR_DEPTH,
+            Self::STENCIL_CLEAR,
+        );
+    }
 
+    pub fn depth_stencil_view_with<'a>(
+        &'a self,
+        desc: &'a DrawDescSpace,
+    ) -> RenderTargetViews<
+        //InterfaceRef<'a, d3d11::ID3D11RenderTargetView>,
+        Option<&'a RenderTargetView>,
+        &'a DepthView,
+    > {
+        let mut dsview = RenderTargetViews {
+            views: Some(&self.render_target_view.views),
+            depth: self.render_target_view.depth.as_ref(),
+        };
+        #[cfg(feature = "goggles")]
+        {
+            if let Some(rtv) = desc.goggles.render_view() {
+                frame_log!("project to RT");
+                dsview.views = Some(rtv);
+            }
+            if let Some(dv) = desc.goggles.depth_view() {
+                frame_log!("project to DV");
+                dsview.depth = Some(dv);
+            }
+        }
+        if desc.null_depth_view() {
+            frame_log!("DV invalid");
+            dsview.depth = None;
+        }
+        if desc.null_render_view() {
+            frame_log!("RT invalid");
+            dsview.views = None;
+        }
+
+        dsview
+    }
+    #[cfg(deleteme)]
     pub fn depth_stencil_view(
         &self,
     ) -> (
@@ -244,6 +290,7 @@ impl DepthHandler {
     }
 
     #[cfg(feature = "goggles")]
+    #[cfg(deleteme)]
     pub fn set_state_obscured(&self, device_context: &Dx11Context, obscured: bool) {
         let state = match obscured {
             true => &self.depth_stencil_state_obscured,
@@ -263,17 +310,28 @@ impl DepthHandler {
         ..RasterizerState::DESC_DEFAULT
     };
 
-    pub fn setup_map(&self, device_context: &Dx11Context, inherit: bool) {
+    #[cfg(deleteme)]
+    pub fn setup_map(&self, device_context: &Dx11Context, desc: &DrawDescMap) {
         self.rasterizer_state.set(device_context);
         //self.render_target_view.to_ref().without_depth().set(device_context);
         //self.render_target_view.set(device_context);
-        if !inherit || self.inherit_render != 0 {
-            self.depth_stencil_view().0.set(device_context);
+        if !desc.implicit_render_target() {
+            let dsview = self.depth_stencil_view_with(desc);
+            #[cfg(deleteme)]
+            #[cfg(feature = "goggles2-project")]
+            let dsview = if desc.goggles.has_render_view() && desc.goggles.target_depthview.is_none() && !desc.goggles.buffer_compat {
+                RenderTargetViews {
+                    depth: None,
+                    .. dsview
+                }
+            } else { dsview };
+            dsview.set(device_context);
         }
         self.depth_stencil_state_map.set(device_context);
     }
 
-    pub fn setup_depth_write(&self, device_context: &Dx11Context, fill_depth: Option<bool>, inherit: bool) {
+    #[cfg(deleteme)]
+    pub fn setup_depth_write(&self, device_context: &Dx11Context, fill_depth: Option<bool>, desc: &DrawDescSpace) {
         match fill_depth {
             #[cfg(feature = "goggles")]
             Some(true) => &self.depth_stencil_state_write,
@@ -281,8 +339,8 @@ impl DepthHandler {
             None => &self.depth_stencil_state,
         }
         .set(device_context);
-        if !inherit || self.inherit_render != 0 {
-            self.depth_stencil_view().0.set(device_context);
+        if !desc.implicit_render_target() {
+            self.depth_stencil_view_with(desc).set(device_context);
         }
     }
 
@@ -306,6 +364,7 @@ impl DepthHandler {
         }
     }
 
+    #[cfg(deleteme)]
     pub fn setup_fill(&self, device_context: &Dx11Context) {
         unsafe {
             device_context.PSSetShader(None, None);

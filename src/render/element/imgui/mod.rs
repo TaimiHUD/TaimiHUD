@@ -1,6 +1,7 @@
 use {
     self::text::UiTextExt as _,
     core::{fmt, mem, ptr},
+    imgui::Style,
 };
 
 #[allow(unused_imports)]
@@ -15,7 +16,7 @@ pub mod prelude {
     #![allow(unused_imports)]
     pub use {
         super::{
-            imgui::{self, MouseButton, Selectable},
+            imgui::{self, ChildWindow, ComboBox, Condition, TreeNode, TreeNodeFlags, MouseButton, Selectable, Slider, StyleVar, Window, WindowFlags},
             text::{NexusLinkFont, UiFont, UiText, UiTextExt as _, UiTextWrite},
             AsUi,
             Ui,
@@ -36,6 +37,57 @@ pub trait AsUi<'ui> {
         N::FontToken: Into<UiTokenDyn<'ui>>,
     {
         self.ui().push_font_token(font).into()
+    }
+
+    /// be careful, since style vars can be pushed and that probably ruins everything!
+    #[inline]
+    fn with_style<R, F: FnOnce(&Style) -> R>(&self, f: F) -> R {
+        debug_assert!(unsafe {
+            imgui::sys::igGetIO() as *const imgui::sys::ImGuiIO == self.ui().io().raw()
+        });
+        let style = unsafe {
+            Style::from_raw(&*imgui::sys::igGetStyle())
+        };
+        f(style)
+    }
+
+    fn is_cursor_inline(&self) -> Option<f32> {
+        let ui = self.ui();
+        let [x, _] = ui.cursor_pos();
+        let [start_x, _] = ui.cursor_start_pos();
+        #[cfg(todo)]
+        let start_x = {
+            let [min_x, _] = ui.window_content_region_min();
+            start_x.max(min_x)
+        };
+        ((x - start_x).abs() > 2e-1).then_some(x)
+    }
+    fn reserve_line_checkbox(&self, label: &str) -> bool {
+        let ui = self.ui();
+        let inline = self.is_cursor_inline();
+        let prior_edge = match inline {
+            #[cfg(todo)]
+            Some(x) => x,
+            _ => {
+                let [x, _] = ui.item_rect_max();
+                let [startx, _] = ui.window_pos();
+                x - startx
+            },
+        };
+        let is_inline = inline.is_some();
+        let (box_w, [spacing_w, _]) = self.with_style(|style| (style.indent_spacing, style.item_spacing));
+        let [text_w, _] = ui.calc_text_size(label);
+        let [max_x, _] = ui.content_region_max();
+        let threshold = box_w + spacing_w * 2.0;
+        if (max_x - text_w - threshold) > prior_edge {
+            let is_inline = false;
+            if !is_inline {
+                ui.same_line();
+            }
+            true
+        } else {
+            false
+        }
     }
 }
 impl<'ui> AsUi<'ui> for Ui<'ui> {

@@ -3,7 +3,7 @@ pub mod loader;
 pub mod pair;
 
 pub use {
-    description::ShaderDescription,
-    loader::{PixelShaders, ShaderLoader, VertexShaders},
+    description::{ShaderDescription, ShaderLayout},
+    loader::{PixelShaders, ShaderDirectory, ShaderLoader, VertexShaders},
     pair::ShaderPair,
 };

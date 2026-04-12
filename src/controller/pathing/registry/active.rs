@@ -303,7 +303,7 @@ impl PackLoader {
         self.fixup_pack(&mut pack);
         Ok(pack)
     }
-    pub async fn load_pack_data(loader: SharedLoaderBox) -> anyhow::Result<Pack> {
+    async fn load_pack_data(loader: SharedLoaderBox) -> anyhow::Result<Pack> {
         let context = "loading TacO pack";
         let mut loader = loader.lock_owned().await;
         Controller::try_run_blocking(context, move || Pack::load(&mut *loader).context(context)).await

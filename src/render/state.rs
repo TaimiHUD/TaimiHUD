@@ -238,6 +238,7 @@ impl RenderState {
                     #[cfg(feature = "goggles")]
                     UiDepthReleased() => {
                         self.machine.turn_depth_event(false);
+                        #[cfg(deleteme)]
                         if self.machine.gameplay.gameplay_map().is_some() && crate::space::goggles::lens::read_lens() == core::ptr::dangling_mut() {
                             if let Some(Ok(engine)) = &mut self.engine {
                                 engine.goggles_lens_reset(0, false);
@@ -773,7 +774,14 @@ impl RenderState {
             state.shutdown();
             lock.take();
         } else {
+            let render_slot = (match () {
+                #[cfg(feature = "space")]
+                () => &mut state.engine,
+                #[cfg(not(feature = "space"))]
+                () => (),
+            },);
             state.machine.post_ui();
+            state.machine.post_render_late(render_slot);
         }
     }
 

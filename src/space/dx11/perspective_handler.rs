@@ -3,14 +3,15 @@ use {
         controller::pathing::space::{PoiScale, TrailScale, TrailTextureMap},
         render::machine::{RenderMachine, RenderPosition},
         settings::pathing::SpaceSettings,
-        space::ScreenSpace,
+        space::{engine::DrawDescMap, ScreenSpace},
     },
-    glam::{Mat4, Quat, Vec2, Vec3, Vec4},
-    glamour::{Box2, Box3, Point3, Size2, TransformMap},
+    glam::{Mat4, Quat, Vec2, Vec3, Vec3Swizzles, Vec4},
+    glamour::{Box2, Box3, Point3, Rect, Size2, TransformMap},
     taimi_d3d::{
         dx11::{
             buffer::{ConstantBufferP, ConstantBufferV},
             prelude::*,
+            Viewport,
         },
         D3dContextBindableSlot,
     },
@@ -129,10 +130,8 @@ impl PerspectiveHandler {
     const HEIGHT_OFFSET_BELOW_MINI: f32 = -75.0;
     const HEIGHT_OFFSET_ABOVE_MINI: f32 = 95.0;
 
-    pub fn map_local_bounds(machine: &mut RenderMachine) -> Box3<LocalSpace> {
+    pub fn map_local_bounds(machine: &mut RenderMachine, ctx: MapContext) -> Box3<LocalSpace> {
         let map_to_local = machine.map.calibration.map_to_local();
-        let open = machine.map_open();
-        let ctx = machine.is_map_visible().unwrap_or(open.into());
         let fake_to_map = match ctx {
             #[cfg(todo)]
             _ => machine.map.fake_to_worldmap_for(ctx),
@@ -174,15 +173,13 @@ impl PerspectiveHandler {
         )
     }
 
-    pub fn update_map(&mut self, machine: &mut RenderMachine, bounds: Box3<LocalSpace>, fwoom: bool) {
+    /// TODO: stay in fakespace until applying conversion at the end (does it also preserve rotations or is it not square?)
+    pub fn update_map(&mut self, machine: &mut RenderMachine, display_viewport: &Viewport, bounds_screen: Rect<ScreenSpace>, bounds: Box3<LocalSpace>, fwoom: bool, desc: &DrawDescMap) {
         let open = machine.map_open();
         let ctx = machine.is_map_visible().unwrap_or(open.into());
 
         let map_to_local = machine.map.calibration.map_to_local();
         let centre_local = map_to_local.map(machine.map.centre_for(ctx));
-
-        let map_bounds_fake = machine.map.calibration.bounds_for(ctx);
-        let bounds_screen: glamour::Rect<ScreenSpace> = machine.map.calibration.map(map_bounds_fake);
 
         let (_pos, cam_front, _up) = machine.get_camera(Default::default());
         let anim_progress = open.progress().and_then(|p| fwoom.then_some(p)).map(|p| {
@@ -217,12 +214,16 @@ impl PerspectiveHandler {
             Quat::IDENTITY
         };
 
-        let size = bounds.size();
-        let (left, right) = (bounds.min.x, bounds.max.x);
-        let (bottom, top) = (bounds.min.z, bounds.max.z);
-        let (near, far) = (0.001f32, 1000.0f32);
         let mid = Vec3::new(centre_local.x, bounds.center().y, centre_local.y);
+        #[cfg(feature = "goggles2-project")]
+        #[cfg(deleteme)]
+        let mid = if desc.goggles.is_project() && display_viewport.viewport.Width == display_viewport.viewport.Height && desc.depth_read {
+            mid.with_y(mid.y + crate::space::goggles::g2!(*&ferret.project.minimap_depth_offset))
+        } else { mid };
         let (map_rotation, counter_rot) = match machine.map.rotation() {
+            #[cfg(feature = "goggles2-project")]
+            Some(amt) if desc.goggles.is_project() && display_viewport.viewport.Width == display_viewport.viewport.Height =>
+                (Quat::IDENTITY, Quat::from_rotation_y(-amt.to_radians())),
             Some(amt) => (
                 Quat::from_rotation_y(amt.to_radians()),
                 Quat::from_rotation_y(-amt.to_radians()),
@@ -233,24 +234,55 @@ impl PerspectiveHandler {
         self.constant_buffer_mapv_data.model = Mat4::from_quat(counter_rot);
         self.constant_buffer_mapv_data.world = Mat4::from_quat(map_rotation)
             * Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, trans);
-        let screen_mid = bounds_screen.center();
-        let screen_sz = bounds_screen.size;
-        let screen = machine.map.calibration.display_size;
-        let scl = Vec3::new(
-            screen_sz.width / screen.width,
-            screen_sz.height / screen.height,
-            1.0,
-        );
-        let window_trans = Vec2::new(-mid.x, -mid.z);
-        let window_trans = Vec2::new(
-            window_trans.x - (screen_mid.x / screen.width - 0.5) * size.width,
-            window_trans.y + (screen_mid.y / screen.height - 0.5) * size.depth,
-        );
+        let trans = trans.xz();
+
+        let map_size = bounds_screen.size.to_raw();
+        let display_reference = machine.map.calibration.display_size.to_raw();
+        let screen2clip01 = display_reference.recip();
+        let scl = (map_size * screen2clip01).extend(1.0);
+
+        let bounds2d = Box2::new(bounds.min.xz(), bounds.max.xz());
+        let local_bounds_size2 = bounds2d.size().to_raw();
+        let trans2d = if bounds_screen.origin != glamour::Point2::ZERO {
+            let screen_mid = bounds_screen.center();
+            let offset = (screen_mid.to_raw() * screen2clip01) - Vec2::splat(0.5);
+            let localsize_mirrored = local_bounds_size2.with_x(-local_bounds_size2.x);
+            trans + offset * localsize_mirrored
+        } else {
+            trans
+        };
+        #[cfg(feature = "goggles2-project")]
+        let (bounds2d, scl, trans2d) = if desc.goggles.is_project() && display_viewport.viewport.Width == display_viewport.viewport.Height {
+            let viewport_size = display_viewport.size2().to_raw();
+            let map_size = machine.map.calibration.bounds_for(ctx).size.to_raw();
+            let vpscl = viewport_size / map_size;
+            let trans2d = trans * vpscl;
+            let trans2d = trans;
+            let szscl = local_bounds_size2 * 0.5 * vpscl;
+            let localmid = bounds2d.center().to_raw();
+            let localmid = centre_local.to_raw();
+            let bounds2d = Box2::new(
+                (localmid - szscl).into(), (localmid + szscl).into(),
+            );
+            let scl = Vec2::ONE;
+            #[cfg(todo)]
+            let scl = scl * machine.map.calibration.ui_size.normal_scale();
+        /*let viewport_size = display_viewport.size2().to_raw();
+        let viewport2clip01 = viewport_size.recip();
+        let screenclip2displayclip = viewport_size / display_reference;
+        let scl = (map_size * screen2clip01 * screenclip2displayclip).extend(1.0);*/
+            (bounds2d, scl.extend(1.0), trans2d)
+        } else {
+            (bounds2d, scl, trans2d)
+        };
+        let (left, right) = (bounds2d.min.x, bounds2d.max.x);
+        let (bottom, top) = (bounds2d.min.y, bounds2d.max.y);
+        let (near, far) = (0.001f32, 1000.0f32);
         self.constant_buffer_mapv_data.view = Mat4::orthographic_lh(
-            left + window_trans.x,
-            right + window_trans.x,
-            bottom + window_trans.y,
-            top + window_trans.y,
+            left + trans2d.x,
+            right + trans2d.x,
+            bottom + trans2d.y,
+            top + trans2d.y,
             near,
             far,
         ) * Mat4::from_scale_rotation_translation(

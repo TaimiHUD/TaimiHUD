@@ -37,13 +37,21 @@ TrailOutputV trail_main_v(TrailInput input)
     float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale * v_trail.marker.anim_scale;
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
 
-    output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
+    float3 input_colour = input.marker.colour;
+#if GOGGLES_OBSCURED && 0
+    input_colour = saturate(input_colour * max(1.0, v_trail.marker.alpha));
+#endif
+    output.colour = float4(input_colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
 #if GOGGLES2_SHADOWBOXING && 0
     if (GET_MFLAG(v_trail.marker.flags, 0x4000)) {
         output.colour.x = 0.0;
         output.colour.y = 0.0;
         output.colour.z = 0.0;
     }
+#endif
+#if GOGGLES2_REFLECTING
+    // to draw directly onto water surface
+    output.position.y *= GET_MFLAG(v_trail.marker.flags, 0x4000) ? -1.0 : 1.0;
 #endif
 
     // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
@@ -71,6 +79,9 @@ TrailOutputP trail_main_p(TrailInputP inp)
     uint flags = vout.instance.x;
     TrailOutputP output;
     float4 colour = vout.colour * shaderTexture.Sample(SampleType, vout.tex);
+#if GOGGLES_OBSCURED
+    colour.w += (0.5 + colour.x + colour.y + colour.z) * max(0.0, vout.colour.w - 1.0);
+#endif
     float fade = vout.fade.x;
     colour.w = colour.w * fade;
 
@@ -251,6 +262,10 @@ PoiOutputV poi_main_v(PoiInput input)
         output.position.z = output.position.z + 0.0015;
     }
 #endif
+#if GOGGLES2_REFLECTING
+    // to draw directly onto water surface
+    output.position.y *= GET_MFLAG(v_poi.marker.flags, 0x4000) ? -1.0 : 1.0;
+#endif
 
     output.tex = input.vertex.tex;
 
@@ -258,7 +273,11 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: max/min size
     // TODO: can-fade
     // TODO: fadenear/fadefar
-    output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
+    float3 input_colour = input.marker.colour;
+#if GOGGLES_OBSCURED && 0
+    input_colour = saturate(input_colour * max(1.0, v_poi.marker.alpha));
+#endif
+    output.colour = float4(input_colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
     // TODO: apply+preprocess player_feather here?
 
     uint flags = input.marker.flags & (v_poi.marker.flags | ~MFLAG_OBSCURE_FADE);

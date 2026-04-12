@@ -48,16 +48,13 @@ impl Timestamp {
     pub fn with_timestamp_f64(ts: f64) -> Self {
         Self::after_epoch(Duration::from_secs_f64(ts))
     }
-    /// TODO: const in 1.90 x.x
     #[inline]
-    pub fn with_timestamp_f64_const(ts: f64) -> Self {
-        let nanosecond = Self::SECOND_AS_NANOS as f64;
-        Self::after_epoch(Duration::new(ts.floor() as u64, (ts.fract() * nanosecond) as u32))
+    pub const fn with_timestamp_f64_const(ts: f64) -> Self {
+        Self::after_epoch(duration_from_secs_f64(ts))
     }
-    /// TODO: const in 1.90 x.x
     #[inline]
-    pub fn with_timestamp_f32_const(ts: f32) -> Self {
-        Self::with_timestamp_f64_const(ts as f64)
+    pub const fn with_timestamp_f32_const(ts: f32) -> Self {
+        Self::after_epoch(duration_from_secs_f32(ts))
     }
     #[inline]
     pub fn with_timestamp_f32(ts: f32) -> Self {
@@ -374,5 +371,47 @@ impl ser::Serialize for Timestamp {
 impl<'de> de::Deserialize<'de> for Timestamp {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         f64::deserialize(deserializer).map(Self::with_timestamp_f64)
+    }
+}
+
+/// [Duration::from_secs_f64] not const-stable...
+///
+/// TODO: const in 1.90 x.x
+#[inline(always)]
+pub const fn duration_from_secs_f64(amt: f64) -> Duration {
+    match () {
+        #[cfg(todo = "unnecessary")]
+        () => Duration::from_micros((Timestamp::SECOND_AS_MICROS as f64 * amt) as u64),
+        _ => {
+            let (floor, fract) = match () {
+                #[cfg(todo)]
+                _ => (amt.floor() as u64, amt.fract()),
+                _ => {
+                    // those aren't stable either? come on...
+                    let floor = amt as u64;
+                    (floor, amt - floor as f64)
+                },
+            };
+            let nanosecond = Timestamp::SECOND_AS_NANOS as f64;
+            Duration::new(floor as u64, (fract * nanosecond) as u32)
+        },
+    }
+}
+/// TODO: const in 1.90 x.x
+#[inline(always)]
+pub const fn duration_from_secs_f32(amt: f32) -> Duration {
+    duration_from_secs_f64(amt as f64)
+}
+
+#[test]
+fn duration_from_secs_const() {
+    const SECS: f32 = 502.3f32;
+    const RECREATED: Duration = duration_from_secs_f32(SECS);
+    let expected = Duration::from_secs_f32(SECS);
+    let expected_s = expected.as_secs_f64();
+    let recreated_s = RECREATED.as_secs_f64();
+    if (expected_s - recreated_s).abs() > 1e-7 {
+        assert_eq!(expected_s, recreated_s);
+        assert_eq!(expected, RECREATED);
     }
 }

@@ -1,8 +1,16 @@
 use {
-    crate::render::{machine::frame_log, RenderState},
+    crate::{
+        render::machine::{frame_log, RenderMachine, RenderPosition},
+        settings::goggles::GogglesEnables,
+        space::DrawSpace,
+    },
+    super::{
+        g2,
+        tracking::{print_ferret, search_ferret, FerretPattern},
+        GogglesShared,
+    },
     core::{
         ffi::c_void,
-        mem,
         ptr,
         slice,
         num::NonZero,
@@ -10,25 +18,33 @@ use {
     std::collections::{BTreeMap, BTreeSet},
     glamour::{Point3, Vector3},
     glam::{Mat4, Vec3A},
-    //taimi_d3d::prelude::*,
+    taimi_meta::{
+        coords::{self, LocalSpace, GameSpace},
+        map::MapProjectionDepth,
+    },
+    taimi_d3d::{
+        buffer::math::Mat43,
+        dx11::{
+            prelude::*,
+            Buffer,
+            Resource,
+        },
+    },
     windows::core::Interface,
-    taimi_meta::coords::{self, LocalSpace, GameSpace},
-    taimi_d3d::buffer::math::Mat43,
-    taimi_d3d::dx11::Resource,
-    taimi_d3d::dx11::buffer::Buffer,
-    sync_unsafe_cell::SyncUnsafeCell,
 };
 use {
     bitvec::{array::BitArray, order::Lsb0},
     core::ops,
 };
 
+#[inline(always)]
 pub(super) fn wants_update_camera(resource: *mut c_void) -> bool {
-    let exp = FerretResource::found_camera().map(|(b, ..)| b as *mut c_void).unwrap_or(ptr::null_mut());
+    let exp = GogglesShared::found_camera().map(|(b, ..)| b as *mut c_void).unwrap_or(ptr::null_mut());
     resource == exp
 }
+#[inline(always)]
 pub(super) fn wants_update_perspective(resource: *mut c_void) -> bool {
-    let exp = FerretResource::found_perspective().map(|(b, ..)| b as *mut c_void).unwrap_or(ptr::null_mut());
+    let exp = GogglesShared::found_perspective().map(|(b, ..)| b as *mut c_void).unwrap_or(ptr::null_mut());
     resource == exp
 }
 pub(super) unsafe fn update_camera(
@@ -40,8 +56,8 @@ pub(super) unsafe fn update_camera(
 ) {
     if dest_offset != 0 || subresource != 0 { return }
     #[cfg(todo = "unnecessary")]
-    if !FerretResource::wants_snatch_camera() { return }
-    let Some((_expecting, offset, is_m43)) = FerretResource::found_camera() else { return };
+    if !GogglesShared::wants_snatch_camera() { return }
+    let Some((_expecting, offset, is_m43)) = GogglesShared::found_camera() else { return };
     let Some(offset) = (offset * 4).checked_sub(dest_offset as usize) else { return };
     let data = data as *const u32;
     let precheck = slice::from_raw_parts(data.byte_add(offset + CameraFerret::M43_LEN32 * 4), CameraFerret::M4_LEN32);
@@ -59,7 +75,7 @@ pub(super) unsafe fn update_camera(
         lost => lost,
     };
     if lost {
-        FerretResource::clear_camera_found();
+        GogglesShared::clear_camera_found();
         return
     }
     let m = slice::from_raw_parts(data.byte_add(offset), CameraFerret::M43_LEN32);
@@ -73,17 +89,17 @@ pub(super) unsafe fn update_perspective(
     _len: Option<NonZero<u32>>,
 ) {
     if dest_offset != 0 || subresource != 0 { return }
-    let wants_persp = FerretResource::wants_snatch_perspective();
+    let wants_persp = GogglesShared::wants_snatch_perspective();
     #[cfg(todo)]
-    if !wants_persp && !FerretResource::wants_snatch_camera_smooth() { return }
-    let Some((_expecting, offset)) = FerretResource::found_perspective() else { return };
+    if !wants_persp && !GogglesShared::wants_snatch_camera_smooth() { return }
+    let Some((_expecting, offset)) = GogglesShared::found_perspective() else { return };
     let Some(offset) = (offset * 4).checked_sub(dest_offset as usize) else { return };
     let data = data as *const u32;
     let m = slice::from_raw_parts(data.byte_add(offset), CameraFerret::M4_LEN32);
     let lost = !PerspectiveFerret::matches_shape(m);
     if wants_persp {
         if lost {
-            FerretResource::clear_perspective_found();
+            GogglesShared::clear_perspective_found();
         } else {
             PerspectiveFerret::report_matrix(m, None, resource.as_d3d().as_raw());
         }
@@ -95,38 +111,46 @@ pub(super) unsafe fn update_perspective(
         let mdata = slice::from_raw_parts(data.byte_add(cam_smooth_offset), CameraFerret::M43_LEN32);
         let m = SnatchMatrix::from(CameraFerret::m43_at_unchecked(mdata));
         if CameraFerret::matrix_matches_shape43(&m.data) {
-            g2!(*&mut ferret.snatch_camera_smooth = m);
+            g2!(*&mut ferret.cam.snatch_camera_smooth = m);
         }
     }
 }
+#[inline(always)]
+pub(super) fn wants_anything(
+    _resource: &Dx11Resource,
+) -> bool {
+    g2!(*&ferret.cam.size_range.end) != CameraShared::SIZE_RANGE_EMPTY.end
+}
+#[inline(always)]
 pub(super) fn wants_update_subresource_pre(
     resource: *mut c_void,
     (matched_cam, matched_persp): (bool, bool),
 ) -> bool {
-    if !RenderState::is_render_thread() { return false }
     let blacklisted = !CameraSearch::with_mut_unchecked(|s| s.visit(resource));
     if blacklisted { return false }
-    (!matched_cam && !FerretResource::has_found_camera() && FerretResource::wants_camera())
-    || (!matched_persp && !FerretResource::has_found_perspective() && FerretResource::wants_perspective())
+    (!matched_cam && !GogglesShared::has_found_camera() && GogglesShared::wants_camera())
+    || (!matched_persp && !GogglesShared::has_found_perspective() && GogglesShared::wants_perspective())
 }
 pub(super) fn wants_update_subresource(
     buffer_size: u32,
     region: ops::Range<u32>,
     (_matched_cam, _matched_persp): (bool, bool),
 ) -> bool {
-    if frame_log!(::is_game()) { return true }
+    #[cfg(todo)]
+    if frame_log!(::is_enabled()) { return true }
     buffer_size < 0x10000
         && region.len() >= CameraFerret::M4_LEN32 * 4
-        && g2!(*&ferret.size_range).contains(&(buffer_size as u16))
+        && g2!(*&ferret.cam.size_range).contains(&(buffer_size as u16))
 }
 pub(super) fn update_subresource(
     resource: &Resource,
-    buffer: &Buffer,
+    _buffer: &Buffer,
     data: &[u32],
     _offset: u32,
     (matched_cam, matched_persp): (bool, bool),
 ) {
-    if frame_log!(::is_game()) {
+    if frame_log!(::is_enabled()) {
+        #[cfg(todo)]
         if matched_cam || matched_persp {
             frame_log!(;"matched cam={matched_cam} persp={matched_persp}");
             print_ferret(data, (_offset / 4) as usize, data.len());
@@ -141,7 +165,7 @@ pub(super) fn update_subresource(
                 },
                 None,
             );
-            let fcam = g2!(*&ferret.camera);
+            let fcam = g2!(*&ferret.cam.camera);
             let found_cam = if found_persp.is_some() {
                 frame_log!(;"persp-shape btw!");
                 None
@@ -154,14 +178,14 @@ pub(super) fn update_subresource(
         }
         return
     }
-    let gran = FerretResource::get_granularity() as usize;
-    let wants_cam = !matched_cam && FerretResource::wants_camera() && !FerretResource::has_found_camera();
-    let wants_persp = !matched_persp && FerretResource::wants_perspective() && !FerretResource::has_found_perspective();
+    let gran = GogglesShared::get_granularity() as usize;
+    let wants_cam = !matched_cam && GogglesShared::wants_camera() && !GogglesShared::has_found_camera();
+    let wants_persp = !matched_persp && GogglesShared::wants_perspective() && !GogglesShared::has_found_perspective();
     let mut persp_offset = None;
     let mut cam_offset = None;
     let searchspace = data.get(..0x68).unwrap_or(data);
     if wants_cam {
-        let fcam = g2!(*&ferret.camera);
+        let fcam = g2!(*&ferret.cam.camera);
         let require_persp_suffix = false;
         // TODO: fallback after a couple attempts? might be better to find persp and work back from that instead...
         let fallback_fuzzy = true;
@@ -180,7 +204,7 @@ pub(super) fn update_subresource(
         }
     }
     if wants_persp {
-        let fpersp = g2!(*&ferret.perspective);
+        let fpersp = g2!(*&ferret.cam.perspective);
         let persp_offset = match persp_offset {
             None => {
                 fpersp.search(searchspace, gran)
@@ -199,11 +223,11 @@ pub(super) fn update_subresource(
                     let mdata = data.get_unchecked(cam_smooth_offset..);
                     let m = SnatchMatrix::from(CameraFerret::m43_at_unchecked(mdata));
                     if CameraFerret::matrix_matches_shape43(&m.data) {
-                        g2!(*&mut ferret.snatch_camera_smooth = m);
+                        g2!(*&mut ferret.cam.snatch_camera_smooth = m);
                     } else {
                         // TODO: try to prioritise this? seems kinda fine though since the buffer is usually updated multiple times per frame
                         #[cfg(todo = "unnecessary")]
-                        FerretResource::clear_perspective_found();
+                        GogglesShared::clear_perspective_found();
                     }
                 }
             }
@@ -211,14 +235,11 @@ pub(super) fn update_subresource(
     }
 }
 
-pub struct FerretResource {
-    pub display_size: glam::Vec2,
+pub struct CameraShared {
     pub size_range: ops::Range<u16>,
     pub perspective: PerspectiveFerret,
     pub camera: CameraFerret,
     pub granularity: u8,
-    #[cfg(feature = "goggles2-project")]
-    pub project: super::project::ProjectFerret,
     pub snatch_camera: SnatchMatrix,
     pub found_camera: Option<(usize, usize, bool)>,
     pub found_perspective: Option<(usize, usize)>,
@@ -226,75 +247,65 @@ pub struct FerretResource {
     /// backup via perspective
     pub snatch_camera_smooth: SnatchMatrix,
 }
-impl FerretResource {
-    pub const DEFAULT: Self = Self {
-        display_size: glam::Vec2::ZERO,
+impl CameraShared {
+    pub const EMPTY: Self = Self {
         perspective: PerspectiveFerret::EMPTY,
         camera: CameraFerret::EMPTY,
         granularity: Self::DEFAULT_GRANULARITY,
-        size_range: 0u16..0u16,
-        #[cfg(feature = "goggles2-project")]
-        project: super::project::ProjectFerret::EMPTY,
+        size_range: Self::SIZE_RANGE_EMPTY,
         snatch_camera: SnatchMatrix::DEFAULT,
         snatch_camera_smooth: SnatchMatrix::DEFAULT,
         snatch_perspective: SnatchMatrix::DEFAULT,
         found_perspective: None,
         found_camera: None,
     };
+    const SIZE_RANGE_EMPTY: ops::Range<u16> = 0u16..0u16;
     const DEFAULT_GRANULARITY: u8 = 2;
-    #[inline(always)]
-    pub fn get() -> *mut Self {
-        static FERRET: SyncUnsafeCell<FerretResource> =
-            SyncUnsafeCell::new(FerretResource::DEFAULT);
-        FERRET.get()
-    }
-    #[inline]
-    pub fn set_display_size(v: glam::Vec2) {
-        g2!(*&mut ferret.display_size = v)
-    }
+}
+impl GogglesShared {
     pub fn get_granularity() -> u8 {
-        g2!(*&ferret.granularity).max(1)
+        g2!(*&ferret.cam.granularity).max(1)
     }
     #[inline]
     pub fn set_granularity(v: u8) {
-        g2!(*&mut ferret.granularity = v)
+        g2!(*&mut ferret.cam.granularity = v)
     }
     pub fn wants_perspective() -> bool {
-        g2!(*&ferret.perspective.expected_h).to_bits() != PerspectiveFerret::ZERO32
+        g2!(*&ferret.cam.perspective.expected_h).to_bits() != GogglesShared::ZERO32
     }
     #[inline]
     pub fn set_perspective(v: PerspectiveFerret) {
-        g2!(*&mut ferret.perspective = v)
+        g2!(*&mut ferret.cam.perspective = v)
     }
     pub fn wants_camera() -> bool {
-        !g2!(*&ferret.camera.expected_dir.x).is_infinite()
+        !g2!(*&ferret.cam.camera.expected_dir.x).is_infinite()
     }
     #[inline]
     pub fn set_camera(v: CameraFerret) {
-        g2!(*&mut ferret.camera = v)
+        g2!(*&mut ferret.cam.camera = v)
     }
     #[inline]
     pub fn set_size_range(v: ops::Range<u16>) {
-        g2!(*&mut ferret.size_range = v)
+        g2!(*&mut ferret.cam.size_range = v)
     }
     #[inline]
     pub fn trip_snatch_camera() {
-        g2!(*&mut ferret.snatch_camera = SnatchMatrix::DEFAULT)
+        g2!(*&mut ferret.cam.snatch_camera = SnatchMatrix::DEFAULT)
     }
     #[inline]
     pub fn snatch_camera() -> SnatchMatrix {
-        g2!(*&ferret.snatch_camera)
+        g2!(*&ferret.cam.snatch_camera)
     }
     pub fn wants_snatch_camera() -> bool {
-        g2!(*&ferret.snatch_camera.data.w_axis.w).is_infinite()
+        g2!(*&ferret.cam.snatch_camera.data.w_axis.w).is_infinite()
     }
     #[inline]
     pub fn clear_camera_found() {
-        g2!(*&mut ferret.found_camera = None)
+        g2!(*&mut ferret.cam.found_camera = None)
     }
     #[inline]
     pub fn set_camera_found(buf: *mut c_void, off: usize, is_m43: bool) {
-        g2!(*&mut ferret.found_camera = Some((buf as usize, off, is_m43)))
+        g2!(*&mut ferret.cam.found_camera = Some((buf as usize, off, is_m43)))
     }
     /// TODO: flag instead?
     /// (same for has_found_perspective)
@@ -303,44 +314,44 @@ impl FerretResource {
         Self::found_camera().is_some()
     }
     pub fn found_camera() -> Option<(usize, usize, bool)> {
-        g2!(*&ferret.found_camera)
+        g2!(*&ferret.cam.found_camera)
     }
     #[inline]
     pub fn trip_snatch_perspective() {
-        g2!(*&mut ferret.snatch_perspective = SnatchMatrix::DEFAULT)
+        g2!(*&mut ferret.cam.snatch_perspective = SnatchMatrix::DEFAULT)
     }
     #[inline]
     pub fn snatch_perspective() -> SnatchMatrix {
-        g2!(*&ferret.snatch_perspective)
+        g2!(*&ferret.cam.snatch_perspective)
     }
     pub fn wants_snatch_camera_smooth() -> bool {
-        g2!(*&ferret.snatch_camera_smooth.data.w_axis.w).is_infinite()
+        g2!(*&ferret.cam.snatch_camera_smooth.data.w_axis.w).is_infinite()
     }
     #[inline]
     pub fn trip_snatch_camera_smooth() {
-        g2!(*&mut ferret.snatch_camera_smooth = SnatchMatrix::DEFAULT)
+        g2!(*&mut ferret.cam.snatch_camera_smooth = SnatchMatrix::DEFAULT)
     }
     #[inline]
     pub fn snatch_camera_smooth() -> SnatchMatrix {
-        g2!(*&ferret.snatch_camera_smooth)
+        g2!(*&ferret.cam.snatch_camera_smooth)
     }
     pub fn wants_snatch_perspective() -> bool {
-        g2!(*&ferret.snatch_perspective.data.w_axis.w).is_infinite()
+        g2!(*&ferret.cam.snatch_perspective.data.w_axis.w).is_infinite()
     }
     #[inline]
     pub fn clear_perspective_found() {
-        g2!(*&mut ferret.found_perspective = None)
+        g2!(*&mut ferret.cam.found_perspective = None)
     }
     #[inline]
     pub fn set_perspective_found(buf: *mut c_void, off: usize) {
-        g2!(*&mut ferret.found_perspective = Some((buf as usize, off)))
+        g2!(*&mut ferret.cam.found_perspective = Some((buf as usize, off)))
     }
     #[inline]
     pub fn has_found_perspective() -> bool {
         Self::found_perspective().is_some()
     }
     pub fn found_perspective() -> Option<(usize, usize)> {
-        g2!(*&ferret.found_perspective)
+        g2!(*&ferret.cam.found_perspective)
     }
 }
 #[derive(Debug, Copy, Clone)]
@@ -361,11 +372,8 @@ impl PerspectiveFerret {
             expected_h,
         }
     }
-    const ZERO32: u32 = 0.0f32.to_bits();
-    const ONE32: u32 = 1.0f32.to_bits();
-    const NEG32: u32 = (-1.0f32).to_bits();
     pub const fn is_empty(&self) -> bool {
-        self.expected_h.to_bits() == Self::ZERO32
+        self.expected_h.to_bits() == GogglesShared::ZERO32
     }
 
     pub fn set_expected_perspective(&mut self, fov_y: f32, aspect_ratio: f32) {
@@ -418,7 +426,7 @@ impl PerspectiveFerret {
             .filter_map(|(mask, &v)| match *mask {
                 false => Some(v),
                 true => {
-                    if v == Self::ZERO32 || matches!(f32::from_bits(v), -0.00001..=0.00001) {
+                    if v == GogglesShared::ZERO32 || matches!(f32::from_bits(v), -0.00001..=0.00001) {
                         zerocount += 1;
                     }
                     None
@@ -467,13 +475,13 @@ impl PerspectiveFerret {
     pub const COMPACT_LEN32: usize = 4;
 
     unsafe fn report_matrix(m: &[u32], offset: Option<usize>, buf_dest: *mut c_void) {
-        if FerretResource::wants_snatch_perspective() {
+        if GogglesShared::wants_snatch_perspective() {
             let m = CameraFerret::m4_at_unchecked(m);
-            g2!(*&mut ferret.snatch_perspective = m.into());
+            g2!(*&mut ferret.cam.snatch_perspective = m.into());
             if let Some(offset) = offset {
-                if !FerretResource::has_found_perspective() {
+                if !GogglesShared::has_found_perspective() {
                     log::info!("found new perspective {buf_dest:p}@{offset:#x}");
-                    FerretResource::set_perspective_found(buf_dest, offset);
+                    GogglesShared::set_perspective_found(buf_dest, offset);
                 }
             }
         }
@@ -518,10 +526,6 @@ impl CameraFerret {
             expected_eye_vector_z,
         }
     }
-    const ZERO32: u32 = 0.0f32.to_bits();
-    const NEGZERO32: u32 = (-0.0f32).to_bits();
-    const ONE32: u32 = 1.0f32.to_bits();
-    const NEG32: u32 = (-1.0f32).to_bits();
     pub const fn is_empty(&self) -> bool {
         self.expected_dir.x.is_infinite()
     }
@@ -568,7 +572,7 @@ impl CameraFerret {
             .filter_map(|(mask, &v)| match *mask {
                 false => Some(v),
                 true => {
-                    if v == Self::ZERO32 || matches!(f32::from_bits(v), -0.00001..=0.00001) {
+                    if v == GogglesShared::ZERO32 || matches!(f32::from_bits(v), -0.00001..=0.00001) {
                         zerocount += 1;
                     }
                     None
@@ -792,14 +796,14 @@ impl CameraFerret {
     unsafe fn report_matrix(m: &[u32], offset: Option<(usize, bool, glam::Vec3)>, buf_dest: *mut c_void) {
         let m = SnatchMatrix::from(CameraFerret::m43_at_unchecked(m));
         let dir = m.data.z_axis;
-        if FerretResource::wants_snatch_camera() {
-            g2!(*&mut ferret.snatch_camera = m);
+        if GogglesShared::wants_snatch_camera() {
+            g2!(*&mut ferret.cam.snatch_camera = m);
         }
         if let Some((offset, is_m43, accuracy)) = offset {
             let accuracy = ((dir.truncate() - accuracy).abs().element_sum() * 100.0).min(u8::MAX as f32) as u8;
             CameraSearch::with_mut_unchecked(|s| s.report(buf_dest, CameraMatch {
                 #[cfg(feature = "goggles2-project")]
-                drawn: FerretResource::project_report_drawn(),
+                drawn: super::project::ProjectShared::has_drawn_space(),
                 is_m43,
                 offset: offset as _,
                 accuracy,
@@ -846,7 +850,7 @@ impl CameraFerret {
             return true
         }
         let cam = unsafe {
-            &*g2!(&raw const ferret.camera)
+            &*g2!(&raw const ferret.cam.camera)
         };
         let z = look.z_axis.z;
         #[cfg(todo)]
@@ -862,7 +866,7 @@ fn find_all(data: &[u32], needle: &[f32], eps: f32) -> Option<ops::RangeInclusiv
     if needle.is_empty() { return None }
     let mut found = Vec::new();
     'data: for (i, &d) in data.iter().enumerate() {
-        if matches!(d, CameraFerret::ZERO32 | CameraFerret::NEGZERO32) { continue }
+        if matches!(d, GogglesShared::ZERO32 | GogglesShared::NEGZERO32) { continue }
         let f = f32::from_bits(d);
         let fabs = f.abs();
         for (ni, &n) in needle.iter().enumerate() {
@@ -904,66 +908,6 @@ impl FerretPattern for CameraFerret {
 
         Some(found)
     }
-}
-
-pub trait FerretPattern {
-    fn search<'d>(&self, data: &'d [u32], granularity: usize) -> Option<&'d [u32]>;
-}
-
-fn print_ferret(data: &[u32], offset: usize, len: usize) {
-    if !frame_log!(::is_game()) { return }
-    let displen = ((len + 3) / 4).max(16);
-    let prior = (offset > 0)
-        .then_some(offset
-        .saturating_sub(16))
-        .map(|off| {
-            core::iter::once_with(move || {
-                frame_log!(;"preceding 16:");
-                unsafe { data.get_unchecked(off..offset) }
-            })
-        })
-        .into_iter()
-        .flatten();
-    let found = unsafe { data.get_unchecked(offset..) };
-    let chunks = found.chunks(4).take(displen).chain(prior);
-    for chunk in chunks {
-        use core::fmt::Write;
-        let mut line = String::new();
-        for &v in chunk {
-            let _ = write!(&mut line, "  {:4.09}", f32::from_bits(v));
-        }
-        frame_log!(;"\t::{line}");
-    }
-}
-fn search_ferret<F, M>(data: &[u32], granularity: usize, mut filter: F, mut matcher: M, matchlen: Option<usize>) -> Option<&[u32]>
-where
-    F: FnMut(&[u32]) -> bool,
-    M: FnMut(&[u32]) -> Option<usize>,
-{
-    let mut haystack = data;
-    let mut pmatch = None;
-    while !haystack.is_empty() {
-        let next = haystack.get(granularity..).unwrap_or(&[]);
-        let search = mem::replace(&mut haystack, next);
-        if !filter(search) {
-            continue
-        }
-        let offset = unsafe { search.as_ptr().offset_from(data.as_ptr()) } as usize;
-        //frame_log!(;"- pre-match @{offset:#x}?");
-        let mut matchlen = matchlen;
-        if let Some(len) = matcher(search) {
-            frame_log!(;"- actual match offset={offset:#x}");
-            print_ferret(data, offset, len);
-            matchlen = Some(len);
-            pmatch = Some(unsafe { search.get_unchecked(..len) });
-            #[cfg(todo)]
-            break;
-        }
-        if let Some(amt) = matchlen {
-            haystack = search.get(amt.max(granularity)..).unwrap_or(&[]);
-        }
-    }
-    pmatch
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -1120,39 +1064,280 @@ impl CameraSearch {
     }
 }
 
-macro_rules! g2 {
-    (*&mut ferret$(.$field:ident)+ = $v:expr$(;)?) => {
-        match $v {
-            #[allow(unused_unsafe)]
-            ferret_v_ => unsafe {
-                ::core::ptr::write(&raw mut (*$crate::space::goggles::FerretResource::get())$(.$field)+, ferret_v_)
-            },
-        }
-    };
-    (&raw mut ferret$(.$field:ident)+) => {
-        match () {
-            #[allow(unused_unsafe)]
-            () => unsafe {
-                &raw mut (*$crate::space::goggles::FerretResource::get())$(.$field)+
-            },
-        }
-    };
-    (&raw const ferret$(.$field:ident)+) => {
-        match () {
-            #[allow(unused_unsafe)]
-            () => unsafe {
-                &raw const (*$crate::space::goggles::FerretResource::get())$(.$field)+
-            },
-        }
-    };
-    (*&ferret$(.$field:ident)+) => {
-        match () {
-            #[allow(unused_unsafe)]
-            () => unsafe {
-                // read_volatile shouldn't matter...
-                ::core::ptr::read(&raw const (*$crate::space::goggles::FerretResource::get())$(.$field)+)
-            },
-        }
-    };
+#[derive(Debug, Clone, Default)]
+pub struct GogglesCamera {
+    pub camera_enabled: bool,
+    pub camera_paused: bool,
+    pub camera_lost: u16,
+    pub perspective_search: bool,
+    pub dir_search: bool,
+    pub debug_toggle_up: bool,
+    pub debug_smooth: bool,
+    pub debug_interpolate: bool,
+    pub debug_interpolate_off: bool,
+    pub perspective_lost: u16,
+    pub perspective_params: (f32, f32, f32, f32),
 }
-pub(crate) use g2;
+impl GogglesCamera {
+    pub(super) fn act_map_enter(&mut self, hard: bool) {
+        self.camera_paused = false;
+        if self.camera_enabled {
+            if hard {
+                self.camera_clear();
+            } else {
+                self.reset_search();
+            }
+        }
+    }
+    /// TODO: awkwardly called by engine, hacky...
+    pub(super) fn act_render_post(&mut self) {
+        if !self.camera_enabled { return }
+
+        if CameraSearch::with_mut_unchecked(|s| s.seen_frame()) {
+            if let Some((_b, _o, _is_m43)) = GogglesShared::found_camera() {
+                let lost_cam = GogglesShared::wants_snatch_camera();
+                if lost_cam {
+                    if self.camera_lost == 0 {
+                        log::warn!("lost cambuf {:p}@{_o:#x}", _b as *mut ());
+                    }
+                    self.camera_lost = self.camera_lost.max(1);
+                    GogglesShared::clear_camera_found();
+                } else {
+                    self.camera_lost = Default::default();
+                }
+            }
+
+            if let Some((_b, _o)) = GogglesShared::found_perspective() {
+                let lost_persp = GogglesShared::wants_snatch_perspective();
+                if lost_persp {
+                    if self.perspective_lost == 0 {
+                        log::warn!("lost perspbuf {:p}@{_o:#x}", _b as *mut ());
+                    }
+                    self.perspective_lost = self.perspective_lost.max(1);
+                    GogglesShared::clear_perspective_found();
+                } else {
+                    self.perspective_lost = Default::default();
+                }
+            }
+        }
+
+        CameraSearch::with_mut_unchecked(|s| s.clear_active());
+        if !self.camera_paused {
+            if self.dir_search {
+                GogglesShared::trip_snatch_camera();
+            }
+            if self.perspective_search {
+                GogglesShared::trip_snatch_camera_smooth();
+                GogglesShared::trip_snatch_perspective();
+            }
+        }
+    }
+
+    pub(crate) fn act_pre_render(&mut self, _visible: bool) {
+        if self.camera_enabled && self.dir_search && GogglesShared::wants_camera() {
+            let mut alternatives = 0;
+            let found = CameraSearch::with_mut_unchecked(|s| {
+                alternatives = s.matches.len();
+                s.distill()
+            });
+            if let Some((buf_dest, found)) = found {
+                log::info!("found new cam at {buf_dest:p}@{:#x} out of {alternatives} choices", found.offset);
+                GogglesShared::set_camera_found(buf_dest, found.offset as _, found.is_m43);
+            }
+        }
+    }
+    #[cfg(deleteme)]
+    pub(crate) fn act_pre_render_post(&mut self, visible: bool) {
+        if visible {
+            self.camera_commit_perspective();
+        }
+    }
+    pub(crate) fn reset_search(&mut self) {
+        if self.perspective_search {
+            self.perspective_lost = self.perspective_lost.min(1);
+        }
+        if self.dir_search {
+            self.camera_lost = self.camera_lost.min(1);
+        }
+    }
+
+    pub(crate) fn camera_init(&mut self, enables: GogglesEnables) {
+        self.dir_search = enables.contains(GogglesEnables::CAMERA_DIR);
+        self.perspective_search = enables.contains(GogglesEnables::CAMERA_PERSPECTIVE);
+        self.camera_enable();
+    }
+    pub(crate) fn camera_enable(&mut self) {
+        self.camera_enabled = true;
+        self.camera_clear();
+        #[cfg(todo)]
+        let (min, max) = (0x160, 0x1b0+1);
+        #[cfg(todo)]
+        let (min, max) = (60, 0x390);
+        let (min, max) = (60, 0x5c0);
+        GogglesShared::set_size_range(min..max + 1);
+        GogglesShared::set_granularity(4);
+        //GogglesShared::set_granularity(8);
+    }
+    pub(crate) fn camera_disable(&mut self) {
+        self.camera_enabled = false;
+        self.camera_clear();
+        GogglesShared::set_size_range(CameraShared::SIZE_RANGE_EMPTY);
+    }
+    fn camera_lost_defer(lost: &mut u16, update: u8) -> bool {
+        let mut deferred = update != 0;
+        let retry = match *lost {
+            0 => return false,
+            1 => {
+                deferred = false;
+                true
+            },
+            2..=3 => true,
+            lost @ 4..=0x100 => lost & 0x0f == 0,
+            lost => lost & 0xff == 0,
+        };
+        if !deferred {
+            let next = lost.wrapping_add(1);
+            *lost = match next {
+                0 => 0x100,
+                lost => lost,
+            };
+        }
+        !retry
+    }
+    pub(crate) fn camera_setup(&mut self, cam: Option<RenderPosition<DrawSpace>>, (fov_y, aspect): (f32, f32), update: u8) {
+        self.camera_paused = false;
+        let cam = match cam {
+            Some(..) if !self.dir_search => {
+                self.camera_lost = Default::default();
+                None
+            },
+            Some(..) if Self::camera_lost_defer(&mut self.camera_lost, update) => None,
+            cam => cam,
+        };
+        if let Some((pos, dir, up)) = cam {
+            let up = up.normalize_or(RenderMachine::LOCAL_UP);
+            let cam = CameraFerret::new(pos, dir, up);
+            GogglesShared::set_camera(cam);
+        } else {
+            GogglesShared::set_camera(CameraFerret::EMPTY);
+        }
+        let update_persp = || match cam.is_some() {
+            //#[cfg(todo)]
+            true => {
+                // desynchronize updates to reduce per-frame impact of the search
+                update.wrapping_sub(1)
+            },
+            _ => update,
+        };
+        if !self.perspective_search {
+            GogglesShared::set_perspective(PerspectiveFerret::EMPTY);
+            self.perspective_lost = Default::default();
+        } else if !Self::camera_lost_defer(&mut self.perspective_lost, update_persp()) {
+            let persp = PerspectiveFerret::new(fov_y, aspect);
+            GogglesShared::set_perspective(persp);
+        } else {
+            GogglesShared::set_perspective(PerspectiveFerret::EMPTY);
+        }
+    }
+    pub(crate) fn camera_pause(&mut self, intermission: bool) {
+        self.camera_paused = !intermission;
+        if intermission {
+            let needs_persp = match () {
+                #[cfg(todo)]
+                _ => !GogglesShared::wants_perspective(),
+                _ => self.perspective_search,
+            };
+            if needs_persp {
+                let persp = GogglesShared::snatch_perspective();
+                if !persp.is_empty() {
+                    GogglesShared::set_perspective(persp.get_ferret_perspective());
+                }
+            }
+            if self.dir_search {
+                let cam = GogglesShared::snatch_camera();
+                if !cam.is_empty() {
+                    GogglesShared::set_camera(cam.get_ferret_look());
+                }
+            }
+            // TODO: else if !fallback_cam.is_empty()?
+        } else {
+            GogglesShared::set_perspective(PerspectiveFerret::EMPTY);
+            GogglesShared::set_camera(CameraFerret::EMPTY);
+        }
+    }
+    pub(super) fn camera_clear(&mut self) {
+        GogglesShared::clear_camera_found();
+        GogglesShared::clear_perspective_found();
+        GogglesShared::set_camera(CameraFerret::EMPTY);
+        GogglesShared::set_perspective(PerspectiveFerret::EMPTY);
+        CameraSearch::with_mut_unchecked(|s| s.clear());
+        self.perspective_params = Default::default();
+        self.perspective_lost = Default::default();
+        self.camera_lost = Default::default();
+    }
+    pub(crate) fn perspective_params(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.perspective_params.0.to_bits() != 0.0f32.to_bits() {
+            Some(self.perspective_params)
+        } else {
+            None
+        }
+    }
+    pub(crate) fn perspective_farz(&self) -> Option<MapProjectionDepth> {
+        let (_, _, _n, far) = self.perspective_params()?;
+        Some(MapProjectionDepth::with_far_in(far))
+    }
+    fn perspective_params_for(m: &SnatchMatrix) -> (f32, f32, f32, f32) {
+        let (h, range) = m.get_as_perspective();
+        let aspect = m.perspective_aspect_ratio();
+        (h, aspect, range.start, range.end)
+    }
+
+    pub(crate) fn has_camera_primary(&self) -> bool {
+        GogglesShared::has_found_camera() && !GogglesShared::wants_snatch_camera()
+    }
+    /// TODO
+    pub(crate) fn has_camera(&self) -> bool {
+        if !self.camera_enabled { return false }
+        match () {
+            _ if self.has_camera_primary() =>
+                true,
+            _ if self.has_camera_fallback() => true,
+            _ => false,
+        }
+    }
+    pub(crate) fn has_camera_fallback(&self) -> bool {
+        match () {
+            _ if !GogglesShared::has_found_perspective() => false,
+            _ => !GogglesShared::wants_snatch_camera_smooth(),
+        }
+    }
+    pub(crate) fn camera_commit_perspective(&mut self) {
+        if self.camera_enabled && !self.camera_paused && !GogglesShared::wants_snatch_perspective() {
+            let persp = GogglesShared::snatch_perspective();
+            #[cfg(deleteme)]
+            if self.perspective_params().is_none() {
+                let (h, range) = persp.get_as_perspective();
+                let (_near, far) = (range.start, range.end);
+                let map_id = crate::exports::runtime::mumble_link_ptr()
+                    .map(|ml| ml.read_map_id()).unwrap_or(0);
+                log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({_near}..{far}) h={h:?}");
+            }
+            self.perspective_params = Self::perspective_params_for(&persp);
+        }
+    }
+    pub(super) fn set_perspective(&mut self, on: bool) {
+        self.perspective_search = on;
+        GogglesShared::clear_perspective_found();
+        if !on {
+            GogglesShared::set_perspective(PerspectiveFerret::EMPTY);
+        }
+        self.perspective_params = Default::default();
+    }
+    pub(super) fn set_dir(&mut self, on: bool) {
+        self.dir_search = on;
+        GogglesShared::clear_camera_found();
+        if !on {
+            GogglesShared::set_camera(CameraFerret::EMPTY);
+        }
+    }
+}

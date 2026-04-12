@@ -5,7 +5,7 @@ use {
         space::{resources::ShaderLoader, ScreenSpace},
     },
     anyhow::Context,
-    glamour::Size2,
+    glamour::{Rect, Size2},
     taimi_d3d::dx11::{
         blend::{BlendState, OMBlendState, D3D11_RENDER_TARGET_BLEND_DESC},
         buffer::{SamplerState, TextureAddressMode, D3D11_SAMPLER_DESC},
@@ -155,4 +155,13 @@ impl RenderBackend {
         BorderColor: [0.0; 4],
         ..SamplerState::desc_with_address(TextureAddressMode::WRAP.to_vec3())
     };
+
+    #[inline]
+    pub fn viewport_rect(&self) -> Rect<ScreenSpace> {
+        let r = self.viewport.rect();
+        Rect::new(
+            r.origin.cast(),
+            r.size.cast(),
+        )
+    }
 }

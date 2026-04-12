@@ -99,6 +99,15 @@ pub struct OMDepthState<S = Option<DepthState>> {
     pub stencil_ref: u32,
 }
 
+impl OMDepthState {
+    pub const EMPTY: Self = Self::DEFAULT;
+}
+impl<S> OMDepthState<Option<S>> {
+    pub const DEFAULT: Self = Self {
+        state: None,
+        stencil_ref: 0,
+    };
+}
 impl<S> OMDepthState<S> {
     pub fn with_state<T: Into<S>>(state: T, stencil_ref: u32) -> Self {
         Self { state: state.into(), stencil_ref }

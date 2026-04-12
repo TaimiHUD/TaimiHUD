@@ -151,6 +151,21 @@ impl Viewport {
             bounds.max.extend(self.viewport.MaxDepth),
         )
     }
+    pub fn top_left(&self) -> Point2<f32> {
+        Point2::new(self.viewport.TopLeftX, self.viewport.TopLeftY)
+    }
+    pub fn top_right(&self) -> Point2<f32> {
+        Point2::new(self.viewport.TopLeftX + self.viewport.Width, self.viewport.TopLeftY)
+    }
+    pub fn bottom_left(&self) -> Point2<f32> {
+        Point2::new(self.viewport.TopLeftX, self.viewport.TopLeftY + self.viewport.Height)
+    }
+    pub fn bottom_right(&self) -> Point2<f32> {
+        Point2::new(self.viewport.TopLeftX + self.viewport.Width, self.viewport.TopLeftY + self.viewport.Height)
+    }
+    pub fn rect(&self) -> Rect<f32> {
+        Rect::new(self.top_left(), self.size2())
+    }
     pub fn size2(&self) -> Size2<f32> {
         Size2::new(self.viewport.Width, self.viewport.Height)
     }

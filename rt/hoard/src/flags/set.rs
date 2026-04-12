@@ -5,8 +5,10 @@ use {
         collections::TaimiSet,
         flags::{
             bitidx::BitIdx,
+            bitarray,
             bitptr,
             bitslice,
+            bitview,
             BitAddr,
             BitOrder,
             BitRef,
@@ -93,7 +95,7 @@ impl BitFlagForSet for bool {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct BitSet<V: ?Sized = BitVec, T: BitStore = usize, O: BitOrder = BitsNative> {
     pub _bits: PhantomData<bitptr::BitPtr<bitptr::Mut, T, O>>,
@@ -103,6 +105,15 @@ impl BitSet {
     #[inline]
     pub fn new_vec() -> Self {
         Self::new(BitVec::new())
+    }
+}
+impl<A: bitview::BitViewSized, O: BitOrder> BitSet<bitarray::BitArray<A, O>, A::Store, O> {
+    #[inline]
+    pub const fn new_array(data: A) -> Self {
+        Self::new(bitarray::BitArray {
+            data,
+            _ord: PhantomData,
+        })
     }
 }
 impl<V, T: BitStore, O: BitOrder> BitSet<V, T, O> {
@@ -538,6 +549,13 @@ where
         self.flags.as_mut()
     }
 }
+impl<V: Clone, T: BitStore, O: BitOrder> Clone for BitSet<V, T, O> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self::new(self.flags.clone())
+    }
+}
+impl<V: Copy, T: BitStore, O: BitOrder> Copy for BitSet<V, T, O> {}
 unsafe impl<V: ?Sized + Send, T: BitStore, O: BitOrder> Send for BitSet<V, T, O> {}
 unsafe impl<V: ?Sized + Sync, T: BitStore, O: BitOrder> Sync for BitSet<V, T, O> {}
 

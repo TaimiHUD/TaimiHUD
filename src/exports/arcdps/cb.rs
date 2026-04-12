@@ -129,7 +129,7 @@ pub fn available() -> bool {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain() -> Option<windows::Win32::Graphics::Dxgi::IDXGISwapChain> {
+pub fn dxgi_swap_chain() -> Option<rt::SwapChain> {
     let swap_chain: Option<_> = arcdps::dxgi_swap_chain().map(|sc| sc.to_owned());
 
     unsafe { core::mem::transmute(swap_chain) }

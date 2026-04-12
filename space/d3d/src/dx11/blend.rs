@@ -70,6 +70,16 @@ pub struct OMBlendState<B = BlendState> {
     pub sample_mask: Option<u32>,
 }
 
+impl OMBlendState<Option<BlendState>> {
+    pub const EMPTY: Self = Self::DEFAULT;
+}
+impl<B> OMBlendState<Option<B>> {
+    pub const DEFAULT: Self = Self {
+        state: None,
+        factor: None,
+        sample_mask: Some(BlendState::DEFAULT_MASK),
+    };
+}
 impl<B> OMBlendState<B> {
     pub fn with_state<S: Into<B>>(state: S) -> Self {
         Self::new(state.into(), None, None)

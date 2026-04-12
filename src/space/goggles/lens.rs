@@ -1,5 +1,8 @@
 use {
-    crate::render::{RenderEvent, RenderState},
+    crate::{
+        render::{RenderEvent, RenderState},
+        settings::goggles::GogglesEnables,
+    },
     core::ptr::{self, NonNull},
     retour::GenericDetour,
     std::{
@@ -41,12 +44,17 @@ pub fn lens_valid(p: *const ID3D11DepthStencilView) -> bool {
     }
 }
 
+#[cfg(todo)]
 pub fn current_lens() -> Option<InterfaceRef<'static, ID3D11DepthStencilView>> {
     match NonNull::new(read_lens()) {
         Some(lens) if lens == NonNull::dangling() => None,
         Some(lens) if lens_valid(lens.as_ptr()) => Some(unsafe { InterfaceRef::from_raw(lens.cast()) }),
         _ => None,
     }
+}
+pub fn current_lens() -> Option<InterfaceRef<'static, ID3D11DepthStencilView>> {
+    use super::class::{ClassShared, BufferClass};
+    ClassShared::query_dv(BufferClass::World)
 }
 
 pub fn clear_lens() {
@@ -341,5 +349,20 @@ pub fn classify_space_lens(engine: &Engine) {
     if let Some(view) = &engine.render_backend.depth_handler.render_target_view.depth {
         let dsview = view.as_d3d().as_raw();
         classify_lens(dsview as *mut _, LensClass::Space);
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GogglesLens {
+}
+impl GogglesLens {
+    pub(super) fn lens_init(&mut self, _enables: GogglesEnables) {
+        self.lens_enable();
+    }
+    pub fn lens_enable(&mut self) {
+        pick_lens(false);
+    }
+    pub fn lens_disable(&mut self) {
+        clear_lens();
     }
 }

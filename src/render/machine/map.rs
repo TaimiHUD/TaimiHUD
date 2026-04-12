@@ -24,7 +24,10 @@ impl RenderMachine {
             },
             open => {
                 let open = match self.map_open_timestamp {
-                    Some(ts) => open.while_elapsed(ts.elapsed().as_secs_f32()),
+                    Some(ts) => {
+                        let when = self.latest_space_timestamp();
+                        open.while_elapsed(when.saturating_duration_since(ts).as_secs_f32())
+                    },
                     None => open,
                 };
                 match self.map_open {

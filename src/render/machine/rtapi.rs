@@ -1,7 +1,7 @@
 use {
     crate::{
         exports::runtime as rt,
-        render::machine::{MumblelinkTick, RenderMachine},
+        render::machine::{MumblelinkTick, RenderMachine, RenderPositioning},
     },
     anyhow::Context,
     core::{mem, ptr},
@@ -9,11 +9,17 @@ use {
     nexus::rtapi::GameState,
     taimi_meta::{coords::LocalSpace, ui::GameplayState},
 };
+#[cfg(feature = "space")]
+use taimi_hoard::vec::vec32_eq;
 
 pub struct RenderStateRtapi {
     #[cfg(feature = "space")]
-    pub camera: (Point3<LocalSpace>, Vector3<LocalSpace>),
-    pub player: (Point3<LocalSpace>, Vector3<LocalSpace>),
+    pub camera: RenderPositioning,
+    #[cfg(feature = "space")]
+    pub camera_fov_y: f32,
+    #[cfg(feature = "space")]
+    pub camera_tick: u32,
+    pub player: RenderPositioning,
     pub gameplay: u32,
     pub prev_map_id: u32,
     pub gameplay_count: u32,
@@ -62,6 +68,57 @@ impl RenderMachine {
             res => res,
         }
     }
+
+    pub fn rtapi_camera_sync(&mut self) {
+        let render_tick = self.mumblelink_frames.latest_render_tick();
+        let render_ui_tick = self.mumblelink_frames.render_to_uitick(render_tick);
+        let upcoming_ui_tick = render_ui_tick.wrapping_add(1);
+
+        if !self.rtapi_state.has_camera() || self.rtapi_state.camera_tick == render_tick || self.mumblelink_frames.ui_skip > 0 {
+            return
+        }
+        // though RTAPI patches ML to provide similar data, it will not be bit-identical!
+        let cmp_pos = |lhs: Point3<LocalSpace>, rhs: glam::Vec3A|
+            glam::Vec3A::from(lhs.to_vector()).abs_diff_eq(rhs, 5e-5);
+        let cmp_dir = |lhs: Vector3<LocalSpace>, rhs: glam::Vec3A|
+            glam::Vec3A::from(lhs).abs_diff_eq(rhs, 2e-5);
+
+        let matches_upcoming = self.camera.mumblelink.get_at(upcoming_ui_tick)
+            .map(|cam| cmp_pos(self.rtapi_state.camera.0, cam.pos));
+        let Some(matches_upcoming) = matches_upcoming else {
+            return
+        };
+        let render_pos = self.camera.mumblelink.get_at(render_ui_tick);
+        let matches_render = || render_pos
+            .map(|cam| cmp_pos(self.rtapi_state.camera.0, cam.pos)
+                && cmp_dir(self.rtapi_state.camera.1, cam.front)
+            );
+        // if just got new ml update that != rtapi... if prior frame == rtapi then mark early. if prior missing then fill in!
+        if matches_upcoming {
+            // late or early in both cases!
+            #[cfg(todo)]
+            if self.mumblelink_frames.is_early() && matches_render() == Some(false) {
+                self.mumblelink_frames.mark_late();
+                self.camera.resync_with_frames(&self.mumblelink_frames);
+            }
+        } else {
+            // late ml but early rt
+            if render_pos.is_none() {
+                #[cfg(taimi_debug)]
+                log::debug!("RTAPI(resync) {render_pos:?} matches_render={:?}", matches_render());
+                return;
+                self.camera.record_mumblelink(render_ui_tick, (self.rtapi_state.camera.0, self.rtapi_state.camera.1, Vector3::ZERO));
+            } else if !self.mumblelink_frames.is_early() && matches_render() == Some(true) {
+                #[cfg(taimi_debug)]
+                log::debug!("RTAPI(resync) {render_pos:?}");
+                return;
+                self.mumblelink_frames.mark_early();
+                self.camera.resync_with_frames(&self.mumblelink_frames);
+            }
+        }
+
+        self.rtapi_state.camera_tick = render_tick;
+    }
 }
 
 impl RenderStateRtapi {
@@ -71,6 +128,10 @@ impl RenderStateRtapi {
             player: RenderMachine::POSITIONING_EMPTY,
             #[cfg(feature = "space")]
             camera: RenderMachine::POSITIONING_EMPTY,
+            #[cfg(feature = "space")]
+            camera_fov_y: 0.0f32,
+            #[cfg(feature = "space")]
+            camera_tick: 0,
             prev_map_id: 0,
             gameplay_count: 0,
         }
@@ -129,7 +190,9 @@ impl RenderStateRtapi {
         }
 
         let rtapi_ingame = self.gameplay == Self::GAMEPLAY_INGAME;
+        #[cfg(todo)]
         let rtapi_camera = camera_wanted;
+        let rtapi_camera = rtapi_ingame;
         let player_tick = ui_tick.map(|tick| tick.is_player()).unwrap_or(false);
 
         self.player = (rtapi_ingame && (rtapi_camera || !player_tick))
@@ -147,47 +210,22 @@ impl RenderStateRtapi {
                 true => None,
                 false => Some((pos, front)),
             })
-            .unwrap_or((Point3::INFINITY, Vector3::INFINITY));
+            .unwrap_or(RenderMachine::POSITIONING_EMPTY);
 
         #[cfg(feature = "space")]
-        #[cfg(todo)]
-        let mut camera_fov = None;
-        #[cfg(feature = "space")]
-        let camera = {
+        {
             #[cfg(todo)]
             let needs_fov = self.fov_y().is_none();
             let needs_fov = false;
-            let camera = (rtapi_ingame && (rtapi_camera || needs_fov)).then(|| {
-                (
-                    Point3::from_array(unsafe {
-                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position)
-                    }),
-                    Vector3::from_array(unsafe {
-                        ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing)
-                    }),
-                    unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_fov) },
-                )
-            });
-            if let Some((camera_pos, camera_front, _fov)) = camera {
-                #[cfg(todo)]
-                if camera_fov.to_bits() != 0 {
-                    camera_fov = Some(Vector2::ZERO.with_y(_fov));
-                }
-                match rt::vec_eq(camera_front, Vector3::ZERO) {
-                    true => None,
-                    false => Some((camera_pos, camera_front)),
+            if rtapi_ingame && (rtapi_camera || needs_fov) {
+                if self.update_camera(rtapi) {
+                    self.mark_camera_unchanged()
                 }
             } else {
-                None
+                self.clear_camera();
             }
         }
-        .unwrap_or((Point3::INFINITY, Vector3::INFINITY));
-        #[cfg(feature = "space")]
-        {
-            self.camera = camera;
-        }
 
-        // TODO: camera_fov
         gameplay_update
     }
 
@@ -211,6 +249,10 @@ impl RenderStateRtapi {
     pub fn has_camera(&self) -> bool {
         !self.camera.0.x.is_infinite()
     }
+    #[cfg(feature = "space")]
+    pub fn camera_fov_y(&self) -> Option<f32> {
+        (self.camera_fov_y.to_bits() != 0.0f32.to_bits()).then_some(self.camera_fov_y)
+    }
     /// 3 or 4 might be enough, but bleh...
     const COUNT_UNCERTAIN_LOADING: u32 = 6;
     const COUNT_AWHILE: u32 = 0x400;
@@ -229,6 +271,79 @@ impl RenderStateRtapi {
         #[cfg(feature = "space")]
         {
             self.camera = RenderMachine::POSITIONING_EMPTY;
+            self.camera_fov_y = 0.0f32;
         }
+    }
+
+    #[cfg(feature = "space")]
+    pub fn read_camera(
+        rtapi: &rt::RealTimeApi,
+    ) -> (RenderPositioning, f32) {
+        let timeofday = unsafe {
+            ptr::read_volatile(&raw const (*rtapi.as_ptr()).time_of_day)
+        };
+        let (mut pos, mut front, fov) = {
+            (
+                Point3::from_array(unsafe {
+                    ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position)
+                }),
+                Vector3::from_array(unsafe {
+                    ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing)
+                }),
+                unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_fov) },
+            )
+        };
+        for _ in 0..=2 {
+            std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+
+            let (pos_reread, front_reread) = (
+                Point3::from_array(unsafe {
+                    ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_position)
+                }),
+                Vector3::from_array(unsafe {
+                    ptr::read_volatile(&raw const (*rtapi.as_ptr()).camera_facing)
+                }),
+            );
+            if !vec32_eq(pos, pos_reread) || !vec32_eq(front, front_reread) {
+                let timeofday_reread = unsafe {
+                    ptr::read_volatile(&raw const (*rtapi.as_ptr()).time_of_day)
+                };
+                pos = pos_reread;
+                front = front_reread;
+                log::error!("RTAPI INCOMPLETE READ??? @ToD={timeofday_reread} (prev {timeofday})");
+            } else {
+                break
+            }
+        }
+        ((pos, front), fov)
+    }
+    #[cfg(feature = "space")]
+    pub fn update_camera(
+        &mut self,
+        rtapi: &rt::RealTimeApi,
+    ) -> bool {
+        let ((camera_pos, camera_front), fov) = Self::read_camera(rtapi);
+        let camera = match rt::vec_eq(camera_front, Vector3::ZERO) {
+            true => None,
+            false => Some((camera_pos, camera_front)),
+        };
+        let changed = if let Some((pos, front)) = &camera {
+            if vec32_eq(*pos, self.camera.0) && vec32_eq(*front, self.camera.1) {
+                return false
+            }
+            true
+        } else { false };
+        self.camera = camera.unwrap_or(RenderMachine::POSITIONING_EMPTY);
+        self.camera_fov_y = fov;
+        changed
+    }
+    #[cfg(feature = "space")]
+    pub fn mark_camera_unchanged(&mut self) {
+        self.camera_tick = self.camera_tick.wrapping_add(1);
+    }
+    #[cfg(feature = "space")]
+    pub fn clear_camera(&mut self) {
+        self.camera = RenderMachine::POSITIONING_EMPTY;
+        self.camera_fov_y = 0.0f32;
     }
 }

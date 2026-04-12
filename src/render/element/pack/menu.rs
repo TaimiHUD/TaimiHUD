@@ -82,6 +82,7 @@ impl<'a, 'u> DrawPackRoots<'a, 'u> {
             Some(UiAction::Primary | UiAction::RIGHT_CLICK | UiAction::LEFT_CLICK) =>
                 Some(CategoryAction::Enable(None)),
             Some(act) => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: category menu action {act:?} unexpected");
                 None
             },
@@ -124,6 +125,7 @@ impl super::PackElement {
         roots.draw_menu();
         let DrawPackRoots { mut act_cat, act_pack, .. } = roots;
         if let Some((path, CategoryAction::Open(Some(opened)))) = act_cat {
+            #[cfg(taimi_debug)]
             log::debug!("DELETEME: menu open({opened}) for {path}");
             let cats = self.state.info.category_info();
             let open_menu = &mut self.categories.open_menu;
@@ -540,6 +542,7 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
             } else if self.draw.path_stack.len() == self.act_open.len()
                 && self.draw.path_stack.last() != self.act_open.last()
             {
+                #[cfg(taimi_debug)]
                 log::debug!(
                     "DELETEME: category menu open already set? {:?} vs {:?}",
                     self.act_open,
@@ -559,6 +562,7 @@ impl<'a, 'u> DrawCategoryCollectionMenu<'a, 'u> {
             Some(UiAction::LEFT_CLICK) if !is_leaf => Some(CategoryAction::Enable(None)),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: category menu action {act:?} unexpected");
                 None
             },

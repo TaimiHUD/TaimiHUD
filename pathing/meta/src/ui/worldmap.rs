@@ -524,8 +524,8 @@ pub enum MapOpen {
 
 impl MapOpen {
     pub const DEFAULT: Self = Self::Closed;
-    pub const DURATION: Duration = Duration::from_millis(500);
-    pub const MAX_DURATION: Duration = Duration::from_millis(750);
+    pub const DURATION: Duration = Duration::from_millis(480);
+    pub const MAX_DURATION: Duration = Duration::from_millis(720);
 
     pub const fn with_open(open: bool) -> Self {
         match open {

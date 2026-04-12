@@ -882,6 +882,7 @@ impl Behaviour {
     }
 
     #[inline]
+    #[allow(non_snake_case)]
     pub fn Taimi(b: TaimiBehaviour) -> Self {
         Self::Blish(b)
     }

@@ -52,6 +52,14 @@ use {
     tokio::{select, sync::Semaphore, task::JoinSet},
     tokio_util::sync::ReusableBoxFuture,
 };
+#[cfg(feature = "space")]
+use {
+    crate::{
+        resources::shader::ShaderDescription,
+        space::pack::render,
+    },
+    taimi_d3d::shader::ShaderKind,
+};
 
 #[cfg(feature = "paths-interact")]
 pub use self::interact::InteractMessage;
@@ -147,6 +155,13 @@ pub(crate) enum PathingEvent {
     ToggleKatRender,
     ApiBypass(Option<bool>),
     ReportResourceLoaded(shared::LoadReport),
+    #[cfg(feature = "space")]
+    LoadShader {
+        kind: ShaderKind,
+        variant: render::ArcShaderVariant,
+        entity: Option<render::ShaderState>,
+        template: ShaderDescription,
+    },
     CollectGarbage {
         tick: u32,
         aggressive: bool,
@@ -741,6 +756,8 @@ impl PathingController {
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,
+            #[cfg(feature = "space")]
+            LoadShader { kind, variant, entity, template } => self.load_shader(kind, variant, entity, template),
             CollectGarbage { tick, aggressive } =>
                 self.collect_garbage(tick, aggressive, self.gameplay_map()).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
@@ -791,6 +808,7 @@ impl PathingController {
             }
         });
 
+        #[cfg(deleteme)]
         #[cfg(feature = "goggles")]
         match (context, set) {
             (None, true) =>

@@ -104,17 +104,19 @@ impl TrailRender {
                 // marked broken, ignore this section...
                 return true
             }
+            let id_storage;
             let id = match id {
                 id if path.path.path != 0 => {
                     // replace section index with 0 since we can't partially load trl data (yet?)
                     let id = id
                         .get_marker_pack_map_path()
                         .rel(MarkerIndex::with_trail_section(path.root.path, 0));
-                    MarkerId::for_marker(id)
+                    id_storage = MarkerId::for_marker(id);
+                    &id_storage
                 },
-                id => id.clone(),
+                id => id,
             };
-            draw_state.drawn_incomplete.insert(id);
+            draw_state.mark_incomplete(id);
             incomplete = true;
         }
         if matches!(
@@ -124,7 +126,9 @@ impl TrailRender {
             let id = id
                 .get_marker_pack_map_path()
                 .rel(MarkerIndex::with_trail(path.root.path));
-            draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
+            if !draw_state.mark_incomplete(&MarkerId::for_marker(id)) {
+                incomplete = true;
+            }
         }
         incomplete
     }

@@ -2,7 +2,10 @@ use {
     crate::{
         exports::{
             arcdps as exports,
-            runtime::imgui::{self, sys as imgui_sys, Ui},
+            runtime::{
+                self as rt,
+                imgui::{self, sys as imgui_sys, Ui},
+            },
         },
         settings::state::AddonHostName,
     },
@@ -316,13 +319,12 @@ pub unsafe extern "C" fn get_update_url() -> Option<CStrPtr16<'static>> {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain(
-) -> Option<windows::core::InterfaceRef<'static, windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
+pub fn dxgi_swap_chain() -> Option<&'static rt::SwapChain> {
     let sc = arc_args().and_then(|arc| match arc.d3d_version {
         0..=9 => None,
-        _ => arc.id3d,
+        _ => arc.id3d.as_ref(),
     });
-    sc.map(|sc| unsafe { windows::core::InterfaceRef::from_raw(sc) })
+    sc.map(|sc| unsafe { rt::SwapChain::from_d3d_raw_ref(sc) })
 }
 
 #[no_mangle]

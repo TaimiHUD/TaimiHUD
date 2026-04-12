@@ -28,6 +28,8 @@ use {
             self as rt,
             textures::{TextureKey, TextureSlot},
         },
+        resources::shader,
+        space::{pack::render, engine::{SpaceEvent, Engine}},
         TEXTURES,
     },
     anyhow::{anyhow, Context},
@@ -37,6 +39,7 @@ use {
         collections::{btree_map, BTreeMap, BTreeSet},
         sync::{Arc, Mutex},
     },
+    taimi_d3d::shader::{ShaderKind, ID3DInclude},
     taimi_hoard::loc::{LocationMut, LocationRef, Locator},
     taimi_meta::packs::{
         id::{MarkerId, MarkerIndexVariant},
@@ -56,7 +59,7 @@ use {
 #[doc(inline)]
 #[allow(unused_imports)]
 pub use self::{
-    pack::{SpacePack, SpacePackCollection},
+    pack::{SpaceEntities, SpacePack, SpacePackCollection},
     poi::PoiScale,
     trail::{TrailParams, TrailScale, TrailTextureMap},
 };
@@ -673,6 +676,26 @@ impl PathingController {
         log::info!("space updated");
         Self::space_publish_packs(&self.loader, Some(&self.space.packs), Some(true));
         log::info!("space shared");
+    }
+    pub(super) fn load_shader(&mut self, kind: ShaderKind, variant: render::ArcShaderVariant, entity: Option<render::ShaderState>, mut template: shader::ShaderDescription) {
+        let manager = self.loader.clone();
+        self.tasks.spawn(async move {
+            let context = format!("compiling shader {variant:?}/{kind:?} from template {}", template.identifier);
+            let id = variant.id(kind, entity)
+                .with_context(|| format!("id missing when {context}???"))?;
+            let permit = manager.load_throttle().acquire_owned().await;
+            Controller::try_run_blocking(context, move || {
+                template.defs.extend(variant.defines(kind, entity));
+                template.defs.terminate();
+                let dir = shader::ShaderDirectory::new();
+                let includes = ID3DInclude::new(&dir);
+                let source = dir.get_file_contents(&template.path)?;
+                let bytecode = template.compile(&source, Some(&*includes))?;
+                Engine::try_send(SpaceEvent::ProcessShader(id, kind, bytecode, template.identifier));
+                drop(permit);
+                Ok(PathingEvent::Nop)
+            }).await
+        });
     }
 }
 type SpaceTextureHandle = (TextureKey, Result<TextureSlot, AttrString>);

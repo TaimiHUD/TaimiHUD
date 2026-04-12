@@ -189,6 +189,8 @@ impl TaimiLog {
         if let Some(mut f) = self.log_file.get() {
             let _ = io::Write::flush(&mut f);
             let _ = f.sync_data();
+            #[cfg(todo)]
+            let _ = f.sync_all();
         }
     }
 }
@@ -312,7 +314,10 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
                 .and_then(|_| file.write(message.to_bytes()).map(drop))
                 .map_err(|_| "log file IO write failed");
             Some(match fres {
-                Ok(..) => Ok(()),
+                Ok(..) => {
+                    //logger.flush_all();
+                    Ok(())
+                },
                 Err(e) if matches!(res, Some(Ok(()))) => Err(e),
                 fres => res.unwrap_or(fres),
             })
