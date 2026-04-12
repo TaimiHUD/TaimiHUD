@@ -3,45 +3,82 @@ use {
         registry::{LoadedPoiPath, LoadedTrailPath},
         space::DrawSpace,
     },
+    crate::render::machine::RenderPosition,
     crate::space::pack::{instance::{PoiVertexBuffer, PoiVertex}, PoiRender, TrailRender, PoiCommonRenderData, PackRenderResources, PackRenderState, PackRenderData},
-    crate::resources::{ShaderLoader, ShaderPair},
-    taimi_d3d::dx11::prelude::*,
-    glamour::{Point3, Vector3},
+    crate::resources::shader::{ShaderLoader, ShaderPair, ShaderLayout},
+    arcffi::cstr::CStrBox,
+    taimi_d3d::{
+        dx11::prelude::*,
+        shader::{ShaderDefinition, ShaderKind},
+    },
+    glamour::Point3,
+    glam::Vec3A,
     std::collections::BinaryHeap,
+    std::ffi::CStr,
+    std::ops,
+    std::iter,
     taimi_hoard::cmp::CmpIgnore,
     taimi_meta::{packs::TrailSectionPath, ui::LocalContext},
-    std::ops,
 };
 
-/// BvhIter expected to produce positions, which should be [Point3::INFINITY]
+/// BvhIter expected to produce distance sort keys, or `None`
 /// for items that can ignore the distance priority queue
 pub struct RenderOrderBuilder<'a, T, BvhIter> {
     pub bvh_iter: BvhIter,
     pub draw_order_heap: &'a mut BinaryHeap<HeapEntityOf<T>>,
-    pub cam_origin: Point3<DrawSpace>,
-    pub cam_dir: Vector3<DrawSpace>,
 }
 
+pub struct RenderOrderSort {
+    pub cam_origin: Vec3A,
+    #[cfg(todo)]
+    pub cam_dir: Vector3<DrawSpace>,
+}
+impl RenderOrderSort {
+    pub fn with_camera(cam: &RenderPosition) -> Self {
+        Self {
+            cam_origin: cam.0.into(),
+            #[cfg(todo)]
+            cam_dir: cam.1,
+        }
+    }
+    #[inline(always)]
+    pub fn cam_dist_order_for(&self, position: Point3<DrawSpace>) -> i32 {
+        self.cam_dist_order3a(position.into())
+    }
+    pub fn cam_dist_order3a(&self, position: Vec3A) -> i32 {
+        #[cfg(todo)]
+        return {
+            // TODO: broken or inaccurate idk
+            let cam_dist = (position - self.cam_origin).dot(self.cam_dir);
+            let cam_dist = f32::to_bits(cam_dist) as i32;
+            let cam_dist = cam_dist ^ ((cam_dist >> 30) as u32 >> 1) as i32;
+            cam_dist
+        };
+        Self::dist_to_sort(position.distance_squared(self.cam_origin))
+    }
+    #[inline]
+    pub fn dist_to_sort(dist: f32) -> i32 {
+        Self::dist_to_sort_with(dist, Self::DIST_FACTOR)
+    }
+    #[inline(always)]
+    pub fn dist_to_sort_with(dist: f32, factor: f32) -> i32 {
+        let dist = dist * factor;
+        dist.min(0x40000000i32 as f32) as i32
+    }
+    pub const DIST_FACTOR: f32 = 1_000_000.0f32;
+    pub const DIST_FACTOR_CONSERVATIVE: f32 = Self::DIST_FACTOR * 0.15;
+}
 impl<'a, T, BvhIter> Iterator for RenderOrderBuilder<'a, T, BvhIter>
 where
-    BvhIter: Iterator<Item = (Point3<DrawSpace>, T)>,
+    BvhIter: Iterator<Item = (Option<i32>, T)>,
 {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some((position, entity)) = self.bvh_iter.next() {
-            let cam_dist = match position {
-                pos if pos.x.is_infinite() => return Some(entity),
-                #[cfg(todo)]
-                true => {
-                    // TODO: broken or inaccurate idk
-                    let cam_dist = (position - self.cam_origin).dot(self.cam_dir);
-                    let cam_dist = f32::to_bits(cam_dist) as i32;
-                    let cam_dist = cam_dist ^ ((cam_dist >> 30) as u32 >> 1) as i32;
-                    cam_dist
-                },
-                position => (position.distance_squared(self.cam_origin) * 1_000_000.0)
-                    .min(0x40000000i32 as f32) as i32,
+        while let Some((cam_dist, entity)) = self.bvh_iter.next() {
+            let cam_dist = match cam_dist {
+                None => return Some(entity),
+                Some(d) => d,
             };
             self.draw_order_heap
                 .push(HeapEntity { cam_dist, value: CmpIgnore(entity) });
@@ -60,6 +97,7 @@ pub struct HeapEntity<T> {
 }
 
 pub trait DrawSpaceEntity {
+    fn is_arcrender(&self) -> bool;
     fn draw_trail_section(&mut self, pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, path: LoadedTrailPath, section: TrailSectionPath) -> bool;
     fn draw_poi(&mut self, pack_data: &PackRenderData, space_idx: usize, poi: &PoiRender, path: LoadedPoiPath) -> bool;
     #[inline(always)]
@@ -73,10 +111,27 @@ pub trait DrawSpaceEntity {
     fn finish(&mut self);
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShaderState {
     Trail,
     Poi,
+}
+impl ShaderState {
+    pub fn type_id_c(state: Option<Self>) -> &'static CStr {
+        match state {
+            Some(Self::Poi) => c"1",
+            Some(Self::Trail) => c"2",
+            None => c"3",
+        }
+    }
+
+    pub fn for_layout(layout: &ShaderLayout) -> Option<Self> {
+        match layout {
+            ShaderLayout::SpaceTrail => Some(Self::Trail),
+            ShaderLayout::SpacePoi => Some(Self::Poi),
+            _ => None,
+        }
+    }
 }
 
 /// original renderer
@@ -118,6 +173,8 @@ impl<'a> DrawSpacePack<'a> {
     }
 }
 impl DrawSpaceEntity for DrawSpacePack<'_> {
+    #[inline]
+    fn is_arcrender(&self) -> bool { false }
     fn draw_trail_section(&mut self, _pack_data: &PackRenderData, _space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
         if self.bind_trail().is_none() { return false }
         trail.bind_texture(self.context, self.poi_common, LocalContext::World);
@@ -147,11 +204,12 @@ impl<'a> DrawSpaceArc<'a> {
     fn bind_common(&mut self) -> Option<()> {
         if self.state.is_some() { return Some(()) }
 
-        let shaderp = self.resources.shader_p.as_ref()?;
+        let _ = self.resources.shader_variant?;
+        #[cfg(todo)]
+        let shaderp = self.resources.shader_p_trail.as_ref()?;
         let ib = self.resources.entities_ib.as_ref()?;
         let cb_p = self.resources.shared_cb_p.as_ref()?;
         let cb_v = self.resources.shared_cb_v.as_ref()?;
-        shaderp.set(self.context);
         ib.set(self.context, 1);
         cb_p.set(self.context, 0);
         cb_v.set(self.context, 0);
@@ -165,6 +223,9 @@ impl<'a> DrawSpaceArc<'a> {
         }
         let (shaderv, shaderl) = self.resources.shader_trail.as_ref()?;
         self.bind_common()?;
+        if let Some(shaderp) = &self.resources.shader_p_trail {
+            shaderp.set(self.context);
+        }
 
         shaderv.set(self.context);
         shaderl.set(self.context);
@@ -178,6 +239,9 @@ impl<'a> DrawSpaceArc<'a> {
         }
         let (shaderv, shaderl) = self.resources.shader_poi.as_ref()?;
         self.bind_common()?;
+        if let Some(shaderp) = &self.resources.shader_p_poi {
+            shaderp.set(self.context);
+        }
 
         shaderv.set(self.context);
         shaderl.set(self.context);
@@ -186,6 +250,8 @@ impl<'a> DrawSpaceArc<'a> {
     }
 }
 impl DrawSpaceEntity for DrawSpaceArc<'_> {
+    #[inline]
+    fn is_arcrender(&self) -> bool { true }
     fn draw_trail_section(&mut self, _pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
         if space_idx >= self.resources.len { return false }
         let vb = trail.section_vb_ng.as_ref()
@@ -239,4 +305,86 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
     }
 
     fn finish(&mut self) {}
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ArcShaderVariant {
+    Vanilla,
+    Map,
+    #[cfg(feature = "goggles")]
+    Obscured,
+    #[cfg(feature = "goggles2-project")]
+    Shadowboxing,
+    #[cfg(feature = "goggles2-project")]
+    Reflection,
+}
+impl ArcShaderVariant {
+    pub fn template_id(self, kind: ShaderKind, entity: Option<ShaderState>) -> Option<&'static str> {
+        Some(match (self, kind, entity) {
+            (_, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-ng-v",
+            (_, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-ng-v",
+            #[cfg(todo)]
+            (_, ShaderKind::Pixel, Some(ShaderState::Poi) | _) => "poi-ng-p",
+            (_, ShaderKind::Pixel, Some(ShaderState::Trail) | _) => "trail-ng-p",
+            _ => {
+                log::warn!("unexpected shader template request for {self:?}/{kind:?} ({entity:?})");
+                return None
+            },
+        })
+    }
+    pub fn id(self, kind: ShaderKind, entity: Option<ShaderState>) -> Option<&'static str> {
+        Some(match (self, kind, entity) {
+            (Self::Vanilla, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-ng",
+            (Self::Vanilla, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-ng",
+            (Self::Vanilla, ShaderKind::Pixel, ..) => "trail-ng",
+            #[cfg(todo)]
+            (Self::Map, _, None) => None,
+            #[cfg(feature = "goggles")]
+            (Self::Obscured, k, e) => return Self::Vanilla.id(k, e),
+            #[cfg(feature = "goggles2-project")]
+            (Self::Shadowboxing, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-sbox",
+            #[cfg(feature = "goggles2-project")]
+            (Self::Shadowboxing, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-sbox",
+            #[cfg(feature = "goggles2-project")]
+            (Self::Shadowboxing, ShaderKind::Pixel, ..) => "trail-sbox",
+            #[cfg(feature = "goggles2-project")]
+            (Self::Reflection, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-reflect",
+            #[cfg(feature = "goggles2-project")]
+            (Self::Reflection, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-reflect",
+            #[cfg(feature = "goggles2-project")]
+            (Self::Reflection, ShaderKind::Pixel, ..) => "trail-reflect",
+            _ => {
+                log::warn!("unexpected shader request for {self:?}/{kind:?} ({entity:?})");
+                return None
+            },
+        })
+    }
+    pub fn defines(self, _kind: ShaderKind, entity: Option<ShaderState>) -> impl Iterator<Item = ShaderDefinition> {
+        let type_id = ShaderState::type_id_c(entity);
+        let base_ty = match self {
+            Self::Map => (c"SHADER_MAP", type_id),
+            _ => (c"SHADER_SPACE", type_id),
+        };
+        let options = match self {
+            #[cfg(feature = "goggles2-project")]
+            Self::Shadowboxing => [
+                Some((c"GOGGLES2_SHADOWBOXING", base_ty.0)),
+            ],
+            #[cfg(feature = "goggles2-project")]
+            Self::Reflection => [
+                Some((c"GOGGLES2_REFLECTING", base_ty.0)),
+            ],
+            #[cfg(feature = "goggles")]
+            Self::Obscured => [
+                Some((c"GOGGLES_OBSCURED", base_ty.0)),
+            ],
+            _ => [None],
+        };
+        iter::once(base_ty)
+            .chain(IntoIterator::into_iter(options).flatten())
+            .map(|(k, v)| ShaderDefinition {
+                name: Some(CStrBox::new(k.to_owned())),
+                definition: Some(CStrBox::new(v.to_owned())),
+            })
+    }
 }

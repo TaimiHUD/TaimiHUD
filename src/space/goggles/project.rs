@@ -1,873 +1,1185 @@
 use {
-    super::g2,
-    super::FerretResource,
-    glam::Vec4,
-    crate::render::machine::FrameState,
-    crate::render::RenderState,
-    std::collections::{btree_map, BTreeMap},
+    super::{g2, class::{ClassShared, BufferClass, BufferKind, BufferStateFlags}, lens::LensShared, GogglesFlags, GogglesShared, GogglesState, D3dPtr, D3dNn},
+    crate::{
+        exports::runtime::{
+            log::DeferredLogger,
+            statistics::{StatsCounter, StatsUnit, StatsRef, StatsDesc},
+        },
+        render::machine::{frame_log, FrameState, RenderMachine},
+        settings::goggles::GogglesEnables,
+        space::engine::{DrawDescGoggles, DrawDescSpace, FrameContext},
+        RENDER_STATE,
+    },
+    arcffi::nn,
     core::{
         ffi::c_void,
         mem,
-        ops,
-        ptr::NonNull,
+        ptr::{self, NonNull},
+        iter,
+        cell::LazyCell,
+        fmt,
     },
+    glam::Vec4,
+    glamour::{Point2, Rect, Size2},
+    std::sync::atomic::{AtomicPtr, AtomicU16, AtomicU8},
+    std::time::Instant,
     taimi_d3d::dx11::{
         prelude::*,
-        buffer::BindFlags,
         context::DeviceContext0,
-        depth::ComparisonFunc,
         RenderTargetView,
         DepthView,
-        DepthState,
     },
-    windows::{
-        core::InterfaceRef,
-        Win32::Graphics::Direct3D11::{
-            ID3D11DepthStencilView,
-            ID3D11RenderTargetView,
-        },
-    },
+    taimi_hoard::flags::{BitSlice, BitsNative},
+    taimi_meta::ui::{LocalContext, MapOpen},
+    taimi_hoard::lazyfmt,
 };
 
-pub type D3dNn = NonNull<c_void>;
-pub type D3dPtr = Option<D3dNn>;
-
-pub(super) unsafe fn draw_point(
-    context: &Dx11Context,
-    cond: ProjectCondition,
-) {
-    let shadowboxing = &mut *g2!(&raw mut ferret.project.shadowboxing);
-    let shadowboxing = {
-        shadowboxing.as_mut().and_then(|point| match point.process(cond) {
-            true => Some(point),
-            false => None,
-        })
-    };
-    if let Some(shadowboxing) = shadowboxing {
-        shadowboxing.act(context.as_ref());
-    }
-
-    let target = &mut *g2!(&raw mut ferret.project.target);
-    let target = {
-        target.as_mut().and_then(|point| match point.process(cond) {
-            true => Some(point),
-            false => None,
-        })
-    };
-    if let Some(target) = target {
-        target.act(context.as_ref());
-    }
+pub struct ProjectShared {
+    bound_render: AtomicPtr<c_void>,
+    pub drawing: AtomicU16,
+    pub map_open: AtomicU8,
+    pub method: ProjectMethod,
 }
-type SetTargetsKey = (D3dPtr, D3dPtr);
-pub(super) unsafe fn set_targets_pre(
-    context: &Dx11Context,
-    views: &[Option<RenderTargetView>],
-    depth: Option<&DepthView>,
-) -> SetTargetsKey {
-    if !FerretResource::project_enabled() {
-        return (None, None)
-    }
-
-    let depth_ptr = depth.map(|v| *v.as_d3d_raw());
-
-    let mut render_views = views.iter().flatten();
-    let target = {
-        let target = &*g2!(&raw mut ferret.project.target);
-        target.as_ref().and_then(|p| p.request.target)
-    };
-    let is_interesting_render = |v: &RenderTargetView| Some(*v.as_d3d_raw()) == target;
-    let render_ptr = match render_views.next() {
-        None => None,
-        Some(view) if render_views.clone().count() == 0 || is_interesting_render(view) =>
-            Some(view),
-        Some(view) => Some(
-            render_views.find(|v| is_interesting_render(v))
-            .unwrap_or(view)
-        ),
-    }.map(|view| *view.as_d3d_raw());
-
-    let seen = &mut *g2!(&raw mut ferret.project.seen);
-    let now = g2!(*&ferret.project.frame_count);
-    let mut cls_render = None;
-    let cls_depth = depth_ptr.and_then(|p| seen.get(&p).map(|buf| buf.classification));
-    if let Some(view_ptr) = render_ptr {
-        match seen.entry(view_ptr) {
-            btree_map::Entry::Occupied(mut e) => {
-                let buf = e.get_mut();
-                buf.last_seen = now;
-                cls_render = Some(buf.classification);
-                if buf.first_seen != now {
-                    if buf.classification == ProjectClassification::New {
-                        buf.classification = ProjectClassification::Unknown;
-                    } else if cls_depth == Some(ProjectClassification::UI) {
-                        buf.classification = ProjectClassification::UI;
-                    }
-                }
-            },
-            btree_map::Entry::Vacant(e) => {
-                e.insert(ProjectBufferInfo {
-                    classification: {
-                        let view = RenderTargetView::from_d3d_raw_ref(&view_ptr);
-                        let buf_desc = super::lens::get_view_dims(view);
-                        let format_ok = |format| match format {
-                            | dxgi::DXGI_FORMAT_A8_UNORM
-                            | dxgi::DXGI_FORMAT_R1_UNORM
-                            | dxgi::DXGI_FORMAT_R8_TYPELESS
-                            | dxgi::DXGI_FORMAT_R8_UNORM
-                            | dxgi::DXGI_FORMAT_R8_SNORM
-                            | dxgi::DXGI_FORMAT_R8_SINT
-                            | dxgi::DXGI_FORMAT_R8G8_TYPELESS
-                            | dxgi::DXGI_FORMAT_R8G8_UNORM
-                            | dxgi::DXGI_FORMAT_R8G8_SNORM
-                            | dxgi::DXGI_FORMAT_R8G8_SINT
-                            | dxgi::DXGI_FORMAT_R16_TYPELESS
-                            | dxgi::DXGI_FORMAT_R16_FLOAT
-                            | dxgi::DXGI_FORMAT_R16_UNORM
-                            | dxgi::DXGI_FORMAT_R16_UINT
-                            | dxgi::DXGI_FORMAT_R16_SNORM
-                            | dxgi::DXGI_FORMAT_R16_SINT
-                            | dxgi::DXGI_FORMAT_X24_TYPELESS_G8_UINT
-                            | dxgi::DXGI_FORMAT_D32_FLOAT_S8X24_UINT
-                            | dxgi::DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS
-                            | dxgi::DXGI_FORMAT_X32_TYPELESS_G8X24_UINT
-                            | dxgi::DXGI_FORMAT_R32G8X24_TYPELESS
-                            => false,
-                            f if f.0 >= dxgi::DXGI_FORMAT_BC1_TYPELESS.0 && f.0 <= dxgi::DXGI_FORMAT_BC5_SNORM.0 =>
-                                false,
-                            _ => true,
-                        };
-                        let size_ok = |w: u32, h: u32| {
-                            let expected = g2!(*&ferret.display_size);
-                            //dims.Width == expected.x as u32 && dims.Height == expected.y as u32
-                            ((expected.x / expected.y) - (w as f32 / h as f32)).abs() <= 2e-4f32
-                        };
-                        let mut cls = ProjectClassification::New;
-                        match &buf_desc {
-                            Some(desc) if !format_ok(desc.Format) =>
-                                cls = ProjectClassification::Unsupported,
-                            Some(desc) if !size_ok(desc.Width, desc.Height) =>
-                                cls = ProjectClassification::Unsupported,
-                            // bind&D3D11_BIND_SHADER_RESOURCE (in addition to RT) is interesting
-                            #[cfg(todo)]
-                            Some(desc) if (desc.BindFlags.0 & BindFlags::SHADER.0) == 0 =>
-                                cls = ProjectClassification::UI,
-                            _ => (),
-                        }
-                        let (mut sz, mut fmt, mut usage, mut bind, mut misc, mut cpu) = Default::default();
-                        if let Some(desc) = &buf_desc {
-                            usage = desc.Usage.0;
-                            bind = desc.BindFlags;
-                            misc = desc.MipLevels;
-                            cpu = desc.CPUAccessFlags;
-                            fmt = desc.Format.0;
-                            sz = (desc.Width, desc.Height);
-                        }
-                        #[cfg(deleteme)]
-                        if cls != ProjectClassification::Unsupported {
-                            let key = render_ptr.map(|p| p.as_ptr() as usize).unwrap_or(0);
-                            log::debug!("DELETEME: new RT {key:#x} bind={bind:#x},{usage:#x},{misc:#x},{cpu:#x} fmt={fmt:#x}, sz={}x{}", sz.0, sz.1);
-                        }
-                        cls
-                    },
-                    last_seen: now,
-                    first_seen: now,
-                    kind: ProjectBufferKind::RenderTarget,
-                });
-            },
-        }
-    }
-    if let Some(depth_ptr) = depth_ptr {
-        let buf = seen.entry(depth_ptr).or_insert_with(|| ProjectBufferInfo {
-            classification: ProjectClassification::New,
-            last_seen: now,
-            first_seen: now,
-            kind: ProjectBufferKind::DepthView,
-        });
-        buf.last_seen = now;
-        let was_new = buf.classification == ProjectClassification::New;
-        #[cfg(deleteme)]
-        if was_new {
-            let depth_view = RenderTargetView::from_d3d_raw_ref(&depth_ptr);
-            let buf_desc = super::lens::get_view_dims(depth_view);
-            let (mut sz, mut fmt, mut usage, mut bind, mut misc, mut cpu) = Default::default();
-            if let Some(desc) = &buf_desc {
-                usage = desc.Usage.0;
-                bind = desc.BindFlags;
-                misc = desc.MipLevels;
-                cpu = desc.CPUAccessFlags;
-                fmt = desc.Format.0;
-                sz = (desc.Width, desc.Height);
-            }
-            let key = depth_ptr.as_ptr() as usize;
-            log::debug!("DELETEME: new DV {key:#x} bind={bind:#x},{usage:#x},{misc:#x},{cpu:#x} fmt={fmt:#x} sz={}x{}", sz.0, sz.1);
-        }
-        if matches!(buf.classification, ProjectClassification::New | ProjectClassification::Unknown) {
-            let lens_cls = super::lens::LENSES.try_read().ok().and_then(|l| l.get(&(depth_ptr.as_ptr() as usize)).copied());
-            match lens_cls {
-                Some(super::lens::LensClass::World) if cls_render == Some(ProjectClassification::World) =>
-                    buf.classification = ProjectClassification::World,
-                Some(super::lens::LensClass::Test) if cls_render == Some(ProjectClassification::Shadowbox) =>
-                    buf.classification = ProjectClassification::Shadowbox,
-                Some(super::lens::LensClass::World) if !matches!(cls_render, None | Some(ProjectClassification::New | ProjectClassification::Unknown)) =>
-                    buf.classification = ProjectClassification::Misc,
-                Some(super::lens::LensClass::Test | super::lens::LensClass::UI) if !matches!(cls_render, None | Some(ProjectClassification::New | ProjectClassification::Unknown)) =>
-                    buf.classification = ProjectClassification::UI,
-                Some(super::lens::LensClass::Sampled) if cls_render != Some(ProjectClassification::New) => if let Some(cls) = cls_render {
-                    buf.classification = cls;
-                },
-                Some(super::lens::LensClass::Unsupported) if cls_render == Some(ProjectClassification::Unknown) =>
-                    buf.classification = ProjectClassification::Unsupported,
-                _ => (),
-            }
-        }
-        if was_new && buf.classification != ProjectClassification::New {
-            let cls = buf.classification;
-            let key = depth_ptr.as_ptr() as usize;
-            #[cfg(deleteme)]
-            log::debug!("DELETEME: DV {key:#x} cls={cls:?}");
-        }
-    }
-
-    draw_point(context, ProjectCondition::Unbind);
-
-    (render_ptr, depth_ptr)
-}
-pub(super) unsafe fn set_targets_post(
-    context: &Dx11Context,
-    (render_ptr, depth_ptr): SetTargetsKey,
-) {
-    let prev_depth = g2!(*&ferret.project.bound_depth);
-    g2!(*&mut ferret.project.bound_render = render_ptr);
-    g2!(*&mut ferret.project.bound_depth = depth_ptr);
-    draw_point(context, ProjectCondition::SetTargets);
-    if prev_depth != depth_ptr {
-        g2!(*&mut ferret.project.bound_depth_written = false);
-    }
-    // TODO: hacky
-    g2!(*&mut ferret.project.bound_depth_depthless = true);
-}
-type SetStateKey = (bool, bool);
-pub(super) unsafe fn set_state_pre(
-    context: &Dx11Context,
-    state: Option<&DepthState>,
-    stencil_ref: u32,
-) -> SetStateKey {
-    let desc = state.map(|state| state.get_desc());
-    let (mut depthless, mut writing) = (false, true);
-    if let Some(desc) = &desc {
-        depthless = desc.DepthEnable.0 == 0 || (desc.DepthWriteMask == d3d11::D3D11_DEPTH_WRITE_MASK_ZERO && desc.DepthFunc == ComparisonFunc::ALWAYS);
-        writing = desc.DepthEnable.0 != 0 && desc.DepthWriteMask != d3d11::D3D11_DEPTH_WRITE_MASK_ZERO;
-        //clobbering = desc.DepthFunc == ComparisonFunc::ALWAYS;
-        if writing && !g2!(*&ferret.project.bound_depth_written) {
-            let seen = &mut *g2!(&raw mut ferret.project.seen);
-            if let Some(render_ptr) = g2!(*&ferret.project.bound_render) {
-                if let Some(buf) = seen.get_mut(&render_ptr) {
-                    if matches!(buf.classification, ProjectClassification::New | ProjectClassification::Unknown) {
-                        let was_new = matches!(buf.classification, ProjectClassification::New);
-                        match desc.DepthFunc {
-                            ComparisonFunc::LESS if stencil_ref == 0 =>
-                                buf.classification = ProjectClassification::World,
-                            ComparisonFunc::LESS_EQUAL =>
-                                buf.classification = ProjectClassification::Shadowbox,
-                            _ => (),
-                        }
-                        #[cfg(deleteme)]
-                        if was_new {
-                            let key = render_ptr.as_ptr() as usize;
-                            let cls = buf.classification;
-                            log::debug!("DELETEME: classified {key:#x},{cls:?} with ref=0x{stencil_ref:08x}, den={}, dw={}, df={}, se={}({:#x},{:#x}), sf={},{}",
-                                desc.DepthEnable.0,
-                                desc.DepthWriteMask.0,
-                                desc.DepthFunc.0,
-                                desc.StencilEnable.0,
-                                desc.StencilReadMask,
-                                desc.StencilWriteMask,
-                                desc.FrontFace.StencilFunc.0,
-                                desc.BackFace.StencilFunc.0,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if depthless && !g2!(*&ferret.project.bound_depth_depthless) {
-        let seen = &mut *g2!(&raw mut ferret.project.seen);
-        if let Some(render_ptr) = g2!(*&ferret.project.bound_render) {
-            if let Some(buf) = seen.get_mut(&render_ptr) {
-                if matches!(buf.classification, ProjectClassification::New | ProjectClassification::Unknown) {
-                    buf.classification = ProjectClassification::Unknown;
-                }
-            }
-        }
-        draw_point(context, ProjectCondition::PreDepthless);
-    }
-
-    (depthless, writing)
-}
-pub(super) unsafe fn set_state_post(
-    context: &Dx11Context,
-    (depthless, writing): SetStateKey,
-) {
-    g2!(*&mut ferret.project.bound_depth_depthless = depthless);
-    if writing {
-        g2!(*&mut ferret.project.bound_depth_written = true);
-    }
-    if depthless {
-        draw_point(context, ProjectCondition::Depthless);
-    }
-    if writing {
-        draw_point(context, ProjectCondition::SetState);
-    }
-}
-type ClearDepthKey = ();
-#[inline]
-pub(super) unsafe fn clear_depth_pre<V>(
-    _context: &Dx11Context,
-    _view: V,
-    _flags: u32,
-    _depth: f32,
-    _fill_value: u8,
-) -> ClearDepthKey {
-    #[cfg(todo = "unnecessary")]
-    draw_point(context, ProjectCondition::ClearDepthPre);
-    ()
-}
-pub(super) unsafe fn clear_depth_post(
-    context: &Dx11Context,
-    (): ClearDepthKey,
-) {
-    g2!(*&mut ferret.project.bound_depth_cleared = true);
-    draw_point(context, ProjectCondition::ClearDepth);
-}
-
-type ClearColourKey = ();
-#[inline]
-pub(super) unsafe fn clear_colour_pre<V>(
-    _context: &Dx11Context,
-    _view: V,
-    _colour: &[f32; 4],
-) -> ClearColourKey {
-    #[cfg(todo = "unnecessary")]
-    draw_point(context, ProjectCondition::ClearColourPre);
-    ()
-}
-pub(super) unsafe fn clear_colour_post(
-    context: &Dx11Context,
-    (): ClearColourKey,
-) {
-    g2!(*&mut ferret.project.bound_render_cleared = true);
-    draw_point(context, ProjectCondition::ClearColour);
-}
-
-fn draw(
-    context: &DeviceContext0,
-    target: Option<&RenderTargetView>,
-    depth: Option<&DepthView>,
-) {
-    FrameState::TAIMI.publish_set();
-    let mut state = RenderState::lock();
-    if let Some(state) = &mut *state {
-        if let Some(Ok(engine)) = &mut state.engine {
-            engine.render_carefully(&mut state.machine, context, target, depth);
-        }
-    }
-    drop(state);
-    FrameState::TAIMI.publish_clear();
-}
-const DETECT_COLOUR: Vec4 = Vec4::new(64.0 / 255.0, 224.0 / 255.0, 208.0 / 255.0, 0.7);
-fn draw_detect(
-    context: &DeviceContext0,
-    target: &RenderTargetView,
-) {
-    FrameState::TAIMI.publish_set();
-    target.clear_rgba(context, DETECT_COLOUR);
-    FrameState::TAIMI.publish_clear();
-}
-fn shadowbox(
-    context: &DeviceContext0,
-    target: Option<&RenderTargetView>,
-    depth: Option<&DepthView>,
-) {
-    g2!(*&mut ferret.project.state_shadowbox = true);
-    draw(context, target, depth);
-    g2!(*&mut ferret.project.state_shadowbox = false);
-}
-
-pub struct ProjectFerret {
-    pub frame_count: u32,
-    seen: BTreeMap<D3dNn, ProjectBufferInfo>,
-    bound_depth: D3dPtr,
-    bound_render: D3dPtr,
-    #[cfg(todo)]
-    bound_render_written: bool,
-    bound_render_cleared: bool,
-    bound_depth_cleared: bool,
-    bound_depth_written: bool,
-    bound_depth_depthless: bool,
-    state_shadowbox: bool,
-
-    pub target: Option<ProjectPoint>,
-    pub shadowboxing: Option<ProjectPoint>,
-    pub target_report: ProjectReport,
-    pub shadowboxing_report: ProjectReport,
-}
-impl ProjectFerret {
+impl ProjectShared {
     pub const EMPTY: Self = Self {
-        frame_count: 0,
-        seen: BTreeMap::new(),
-        bound_depth: None,
-        bound_render: None,
-        #[cfg(todo)]
-        bound_render_written: false,
-        bound_render_cleared: false,
-        bound_depth_cleared: false,
-        bound_depth_written: false,
-        bound_depth_depthless: false,
-        state_shadowbox: false,
-        target: None,
-        shadowboxing: None,
-        target_report: ProjectReport::EMPTY,
-        shadowboxing_report: ProjectReport::EMPTY,
+        bound_render: AtomicPtr::new(ptr::null_mut()),
+        drawing: AtomicU16::new(0),
+        map_open: AtomicU8::new(0),
+        method: ProjectMethod::DEFAULT,
     };
-    pub fn reset_frame(&mut self) {
-        self.bound_depth = None;
-        self.bound_render = None;
-        #[cfg(todo)]
-        {
-            self.bound_render_written = false;
+    pub(super) fn reset_end() {
+        STATS_PROJECT_RENDER.reset(0);
+        Self::bound_render_ref().store(ptr::null_mut(), GogglesShared::FLAGS_ORDERING);
+        let drawing = Self::read_drawing();
+        let enabled = GogglesShared::enabled();
+        if ProjectAction::Draw.is_in(drawing) && enabled.contains(GogglesEnables::PROJECT_SHADOWBOXING) {
+            Self::insert_drawing(ProjectAction::Shadowbox.bit());
         }
-        self.bound_render_cleared = false;
-        self.bound_depth_cleared = false;
-        self.bound_depth_written = false;
-        self.bound_depth_depthless = false;
-
-        let next_frame = self.frame_count.wrapping_add(1);
-        let prev_frame = mem::replace(&mut self.frame_count, next_frame);
-        self.seen.retain(|_k, buf| {
-            if buf.is_gone(prev_frame) {
-                return false
-            }
-            true
-        });
-        if let Some(target) = &mut self.target {
-            if let (Some(key), Some(acq)) = (target.request.target, target.request.acquire) {
-                if let Some(new_key) = ProjectBufferInfo::reacquire(&self.seen, prev_frame, &key, acq) {
-                    target.request.target = Some(new_key);
-                }
-            }
-        }
-        if let Some(target) = &mut self.shadowboxing {
-            if let (Some(key), Some(acq)) = (target.request.target, target.request.acquire) {
-                if let Some(new_key) = ProjectBufferInfo::reacquire(&self.seen, prev_frame, &key, acq) {
-                    target.request.target = Some(new_key);
-                }
-            }
+        let drawing_map = ProjectAction::DrawMinimap.is_in(drawing) | ProjectAction::DrawMap.is_in(drawing);
+        if drawing_map && !enabled.contains(GogglesEnables::PROJECT_MAP) {
+            Self::mask_drawing(ProjectAction::DrawMinimap.bit() | ProjectAction::DrawMap.bit());
         }
     }
-    pub fn report_frame(&mut self) {
-        if let Some(target) = &mut self.target {
-            self.target_report = target.reset();
-        }
-        if let Some(target) = &mut self.shadowboxing {
-            self.shadowboxing_report = target.reset();
-        }
-    }
-}
-unsafe impl Sync for ProjectFerret {}
-unsafe impl Send for ProjectFerret {}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, strum::IntoStaticStr, strum::VariantArray)]
-pub enum ProjectCondition {
-    Unbind,
-    PreDepthless,
-    Depthless,
-    SetState,
-    SetTargets,
-    ClearColour,
-    ClearDepth,
-}
-impl ProjectCondition {
-    pub const DEFAULT_TARGET: Self = match () {
-        _ => Self::PreDepthless,
-        #[cfg(todo)]
-        _ => Self::Depthless,
-        #[cfg(todo)]
-        _ => Self::SetState,
-    };
-    pub const DEFAULT_SHADOWBOX: Self = match () {
-        #[cfg(todo)]
-        _ => Self::Unbind,
-        _ => Self::SetState,
-    };
+    /// TODO: frame may become invalid immediately after
+    /// (but prior to [Self::on_set_targets_pre])
     #[inline]
-    pub fn matches(self, rhs: Self) -> bool {
-        self == rhs
+    pub(super) fn on_set_targets_prior() -> Option<(D3dPtr, D3dPtr)> {
+        if !ClassShared::frame_valid() || Self::drawing() == 0 { return None }
+        Some((
+            ClassShared::bound_render_primary_ptr(),
+            ClassShared::bound_depth_ptr(),
+        ))
     }
-}
+    pub(super) fn on_set_targets_pre(
+        context: &Dx11Context,
+        views: &[Option<RenderTargetView>],
+        _depth: Option<&DepthView>,
+        _uavs: &[Option<d3d11::ID3D11UnorderedAccessView>],
+        (unbound_primary, unbound_dv): (D3dPtr, D3dPtr),
+    ) {
+        let prev_bound_render = Self::bound_render().or(unbound_primary);
 
-impl FerretResource {
-    pub fn project_reset_frame() {
-        let project = g2!(&raw mut ferret.project);
-        unsafe {
-            (&mut *project).reset_frame();
+        let rtvs = views.iter().filter_map(|v| v.as_ref());
+        let (drawing, method) = (Self::drawing(), Self::method());
+
+        let render_unbound = prev_bound_render.as_ref().and_then(|prev|
+            rtvs.clone().all(|rtv| rtv.as_d3d_raw() != prev).then_some(*prev)
+        );
+        let render_unbound = render_unbound
+            .and_then(|key| ClassShared::with_seen2(key, |buf|
+                buf.winner.then_some((key, buf.classification))
+            ).flatten());
+
+        let rtvs =  rtvs.map(|rtv| rtv.as_d3d_raw());
+        let render_view_interest = if views.len() > 1 {
+            rtvs
+                .clone()
+                .filter_map(|&key| ClassShared::with_seen2(key, |buf| {
+                    let score = match buf.classification {
+                        _ if !buf.winner => 0xf,
+                        BufferClass::World if ProjectAction::Draw.is_in(drawing) => 0,
+                        BufferClass::Pretty | BufferClass::Fallback if ProjectAction::Draw.is_in(drawing) => 1,
+                        BufferClass::Target => {
+                            #[cfg(todo)]
+                            if drawing_world.is_none() && buf.bind_count <= 1 && needs_world_fallback() {
+                                // if we missed it, sneak in a draw before it gets blitted
+                                if let Some(worldkey) = is_fallback_world_needed() {
+                                    let sort = cmp::Reverse((None, None));
+                                    drawing_world = Some((sort, worldkey));
+                                }
+                            }
+                            2
+                        },
+                        BufferClass::Minimap if ProjectAction::DrawMinimap.is_in(drawing) => 3,
+                        BufferClass::Shadowbox if ProjectAction::Shadowbox.is_in(drawing) => 4,
+                        BufferClass::World => 5,
+                        BufferClass::FrameBuffer => 5,
+                        BufferClass::Reflection => 6,
+                        _ => 7,
+                    };
+                    (key, buf.winner.then_some(buf.classification), score)
+                }))
+                    .min_by_key(|(_, _, score)| *score)
+        } else { None };
+        Self::set_bound_render(render_view_interest.map(|(k, ..)| k));
+        let draws = ProjectAction::iter_bits(drawing).filter_map(|act|
+            render_unbound.and_then(|(target, cls)|
+                method.actions_on_unbind(act, cls)
+                    .min()
+                    .and_then(|(score, action)| {
+                        let target = match action.retarget {
+                            #[cfg(todo)]
+                            Some(reach) if Some(reach) == rebound_cls => rebound,
+                            Some(reach) if reach != cls => Self::reach_for(reach),
+                            _ => Some((target, unbound_dv)),
+                        };
+                        target.map(|(target, dv)| ((cls, target), act, dv))
+                    })
+            )
+        );
+        let prev_drawn = if frame_log!(::is_enabled()) {
+            frame_log!(;"project(on=SetTargets) drawing={drawing:#x} unbound={}", render_unbound.is_some());
+            if prev_bound_render != unbound_primary {
+                Self::log_view("prev", prev_bound_render);
+            }
+            Self::log_view("unbound", unbound_primary);
+            Self::log_view("unbound", unbound_dv);
+            drawing
+        } else { !drawing };
+        let mut drawing = drawing;
+        for ((cls, target), act, dv) in draws {
+            let target = unsafe {
+                RenderTargetView::from_d3d_raw_ref(&target)
+            };
+            let dv = dv.as_ref().map(|dv| unsafe {
+                DepthView::from_d3d_raw_ref(dv)
+            });
+            Self::draw(context.as_ref(), target, dv, cls, act);
+            drawing &= !act.bit();
+        }
+        if drawing == prev_drawn {
+            for (i, view) in views.iter().enumerate() {
+                let view_ptr = view.as_ref().map(|v| *v.as_d3d_raw());
+                Self::log_view_dyn(&format_args!("bound#{i}"), view_ptr);
+            }
+            Self::log_view("bound", _depth.map(|dv| *dv.as_d3d_raw()));
+            for (i, uav) in _uavs.iter().enumerate() {
+                let uav_ptr = uav.as_ref().and_then(|v| NonNull::new(v.as_raw()));
+                Self::log_view_dyn(&format_args!("uav#{i}"), uav_ptr);
+            }
         }
     }
-    pub fn project_report_frame() {
-        let project = g2!(&raw mut ferret.project);
-        unsafe {
-            (&mut *project).report_frame();
-        }
-    }
-    pub fn project_enabled() -> bool {
-        let has_target = unsafe {
-            (&*g2!(&raw const ferret.project.target)).is_some()
+    fn log_view_of(name: &dyn core::fmt::Display, view_ptr: D3dNn, buf: &super::class::BufferInfo) {
+        let winner = buf.winner.then(|| ClassShared::seen_class(buf.kind, buf.classification)).flatten();
+        let kind = buf.kind.tag();
+        let is_winner = match winner {
+            Some(..) => " WIN",
+            _ => "",
         };
-        has_target
+        frame_log!(;"project({name}={kind}): {view_ptr:?}({:?}) ({:?}={}{is_winner}) fmt={:#x}{:?} ({:?})", buf.resource, buf.classification, buf.classification_score, buf.format.0 as u32, buf.size, buf.state.flags);
+        let bcount = lazyfmt::or_empty(winner.map(|(_, _, bcount, _)| lazyfmt::MaybeFmt::new(move |f| write!(f, "/{bcount}"))));
+        let bgen = lazyfmt::or_empty(winner.map(|(_, _, _, bgen)| lazyfmt::MaybeFmt::new(move |f| write!(f, "/{bgen}"))));
+        frame_log!(;";; binds@{}={}{bgen} (#{}{bcount}) dgen={}",
+            ClassShared::bind_generation(), buf.state.bind_generation, buf.state.bind_count, buf.state.depth_generation,
+        );
+        frame_log!(;";; dbinds={} writes={}({}) ro={}({}) disabled={}({}) null={}",
+            buf.state.depth_binds_count(),
+            buf.state.depth_binds_count_write(), buf.state.depth_binds_write,
+            buf.state.depth_binds_count_readonly(), buf.state.depth_binds_readonly,
+            buf.state.depth_binds_count_disabled(), buf.state.depth_binds_disabled,
+            buf.state.depth_binds_null,
+        );
     }
-    #[cfg(todo)]
-    pub unsafe fn project_bound_render<'a>() -> &'a Option<RenderTargetView> {
-        let raw: *const D3dPtr = g2!(&raw const ferret.project.bound_render);
-        transmute(raw)
+    #[inline(always)]
+    fn log_view(name: &str, view_ptr: D3dPtr) {
+        Self::log_view_dyn(&name, view_ptr)
     }
-    #[cfg(todo)]
-    pub unsafe fn project_bound_depth<'a>() -> &'a Option<DepthView> {
-        let raw: *const D3dPtr = g2!(&raw const ferret.project.bound_depth);
-        transmute(raw)
-    }
-    pub unsafe fn project_bound_render<'a>() -> Option<InterfaceRef<'a, ID3D11RenderTargetView>> {
-        g2!(*&ferret.project.bound_render).map(|v| InterfaceRef::from_raw(v))
-    }
-    pub unsafe fn project_bound_depth<'a>() -> Option<InterfaceRef<'a, ID3D11DepthStencilView>> {
-        g2!(*&ferret.project.bound_depth).map(|v| InterfaceRef::from_raw(v))
-    }
-    pub(crate) fn project_hack_shadowbox() -> bool {
-        g2!(*&ferret.project.state_shadowbox)
-    }
-    pub(crate) fn project_report_target() -> Option<ProjectReport> {
-        Self::project_enabled().then_some(g2!(*&ferret.project.target_report))
-    }
-    pub(super) fn project_report_drawn() -> bool {
-        let target = unsafe {
-            &*g2!(&raw const ferret.project.target)
-        };
-        target.as_ref().map(|t| t.count > *t.request.delay.start()).unwrap_or(true)
-    }
-    pub(crate) fn project_iter_ui(_target: ProjectClassification) -> impl Iterator<Item = (D3dNn, ProjectBufferInfo)> {
-        let seen = unsafe {
-            &*g2!(&raw const ferret.project.seen)
-        };
-        let now = g2!(*&ferret.project.frame_count);
-        let clsok = |cls: ProjectClassification| match cls {
-            #[cfg(todo)]
-            cls if cls == _target => true,
-            ProjectClassification::New =>
-                false,
-            _ => true,
-        };
-        let mut candidates = seen.iter()
-            .filter(|(_k, buf)| buf.age() >= ProjectBufferInfo::TIME_AGE_UI && !buf.is_lost(now) && clsok(buf.classification))
-            .map(|(k, buf)| (k.clone(), buf.clone()))
-            .collect::<Vec<_>>();
-        candidates.sort_by_key(|(_k, buf)| buf.clone());
-        candidates.into_iter()
-    }
-    fn project_set_with(target: &mut Option<ProjectPoint>, action: ProjectAction, p: D3dPtr, classification: Option<ProjectClassification>) {
-        if p.is_none() {
-            *target = None;
-        }
-        let target = target.get_or_insert_with(|| ProjectPoint {
-            request: match action {
-                ProjectAction::Draw => ProjectRequest::default_target(),
-                ProjectAction::Shadowbox => ProjectRequest::default_shadowbox(),
-                _ => ProjectRequest::fallback(),
-            },
-            count: 0,
-            depth_written: false,
-            action,
-        });
-        target.request.target = p;
-        if let Some(cls) = classification {
-            target.request.acquire = Some(cls);
-        }
-    }
-    pub(crate) fn project_set_target(p: D3dPtr, classification: Option<ProjectClassification>) {
-        let target = unsafe {
-            &mut *g2!(&raw mut ferret.project.target)
-        };
-        Self::project_set_with(target, ProjectAction::Draw, p, classification)
-    }
-    fn project_set_request_with(target: &mut Option<ProjectPoint>, action: ProjectAction, request: ProjectRequest) {
-        let target = target.get_or_insert_with(|| ProjectPoint {
-            request: ProjectRequest::fallback(),
-            count: 0,
-            depth_written: false,
-            action,
-        });
-        target.request = request;
-    }
-    pub(crate) fn project_set_target_request(request: Option<ProjectRequest>) {
-        let target = unsafe {
-            &mut *g2!(&raw mut ferret.project.target)
-        };
-        g2!(*&mut ferret.project.target_report = ProjectReport::EMPTY);
-        let Some(request) = request else {
-            *target = None;
+    fn log_view_dyn(name: &dyn fmt::Display, view_ptr: D3dPtr) {
+        let Some(view_ptr) = view_ptr else {
+            frame_log!(;"project({name}): NULL");
             return
         };
-        Self::project_set_request_with(target, ProjectAction::Draw, request);
-    }
-    pub(crate) fn project_set_shadowbox(p: D3dPtr, classification: Option<ProjectClassification>) {
-        let target = unsafe {
-            &mut *g2!(&raw mut ferret.project.shadowboxing)
-        };
-        g2!(*&mut ferret.project.shadowboxing_report = ProjectReport::EMPTY);
-        Self::project_set_with(target, ProjectAction::Shadowbox, p, classification)
-    }
-    pub(crate) fn project_set_shadowbox_request(request: Option<ProjectRequest>) {
-        let target = unsafe {
-            &mut *g2!(&raw mut ferret.project.shadowboxing)
-        };
-        let Some(request) = request else {
-            *target = None;
-            return
-        };
-        Self::project_set_request_with(target, ProjectAction::Shadowbox, request);
-    }
-    pub(crate) fn project_target_buffer() -> Option<D3dPtr> {
-        let target = unsafe {
-            &*g2!(&raw const ferret.project.target)
-        };
-        target.as_ref().map(|t| t.request.target)
-    }
-    pub(crate) fn project_target_request() -> Option<ProjectRequest> {
-        let target = unsafe {
-            &*g2!(&raw const ferret.project.target)
-        };
-        target.as_ref().map(|t| t.request.clone())
-    }
-    pub(crate) fn project_shadowbox_buffer() -> Option<D3dPtr> {
-        let target = unsafe {
-            &*g2!(&raw const ferret.project.shadowboxing)
-        };
-        target.as_ref().map(|t| t.request.target)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProjectRequest {
-    pub target: D3dPtr,
-    pub cond: ProjectCondition,
-    pub delay: ops::RangeInclusive<u32>,
-    pub empty: bool,
-    pub acquire: Option<ProjectClassification>,
-    pub patient: bool,
-    pub manual_delay: bool,
-    #[cfg(todo)]
-    pub empty_depth: bool,
-}
-impl ProjectRequest {
-    pub fn default_target() -> Self {
-        ProjectRequest {
-            target: None,
-            cond: ProjectCondition::DEFAULT_TARGET,
-            delay: 0..=0,
-            empty: false,
-            acquire: Some(ProjectClassification::World),
-            patient: false,
-            manual_delay: false,
+        let found = ClassShared::with_seen2(view_ptr, |buf| {
+            Self::log_view_of(&name, view_ptr, buf);
+            if let Some(assoc) = buf.associated() {
+                let aseen = ClassShared::with_seen2(assoc, |abuf| {
+                    Self::log_view_of(&format_args!("{name}/assoc"), assoc, abuf);
+                });
+                if aseen.is_none() {
+                    frame_log!(;"project({name}/assoc): {assoc:?}");
+                }
+            }
+        });
+        if found.is_none() {
+            frame_log!(;"project({name}): {view_ptr:?}");
         }
     }
-    pub fn default_shadowbox() -> Self {
-        ProjectRequest {
-            target: None,
-            cond: ProjectCondition::DEFAULT_SHADOWBOX,
-            delay: 0..=0,
-            empty: false,
-            acquire: Some(ProjectClassification::Shadowbox),
-            patient: false,
-            manual_delay: false,
+    fn reach_for(reach: BufferClass) -> Option<(D3dNn, Option<D3dNn>)> {
+        let mut dv = None;
+        let newtarget = ClassShared::seen_class(BufferKind::RenderTarget, reach)
+            .map(|(key, ..)| key);
+        if let Some(target) = newtarget {
+            let was_seen = ClassShared::with_seen2(target, |buf| {
+                dv = buf.associated();
+                match buf.classification {
+                    BufferClass::Minimap => buf.seen_since(ClassShared::frame_count()) <= 1,
+                    _ => buf.was_seen(),
+                }
+            });
+            if !was_seen.unwrap_or(false) {
+                return None
+            }
         }
+        newtarget.map(|r| (r, dv))
     }
-    pub fn fallback() -> Self {
-        ProjectRequest { target: None, cond: ProjectCondition::Unbind, delay: 0..=0, empty: false, acquire: None, patient: true, manual_delay: false }
+    pub(super) fn on_set_state_prior() -> Option<(
+        Option<(Option<BufferClass>, u32, u32)>,
+        D3dNn,
+        Option<(BufferClass, u32, u32)>,
+    )> {
+        if !ClassShared::frame_valid() { return None }
+        let rtv = (Self::drawing() != 0)
+            .then(|| Self::bound_render().or(ClassShared::bound_render_primary_ptr()))
+            .flatten();
+        rtv.and_then(|rtv| {
+            let dv = ClassShared::with_current_dv(|_k, buf|
+                ((buf.winner.then_some(buf.classification), buf.depth_binds_count_write(), buf.depth_binds_count_disabled()))
+            );
+            let (empty, rt) = match &dv {
+                None | Some((None, ..)) => {
+                    let rt = ClassShared::with_seen2(rtv, |buf| buf.winner.then_some(
+                        (buf.classification, buf.depth_binds_count_write(), buf.depth_binds_count_disabled() + buf.depth_binds_null)
+                    )).flatten();
+                    (rt.is_none(), rt)
+                },
+                Some(..) => (false, None),
+            };
+            (!empty).then_some((dv, rtv, rt))
+        })
     }
-    #[inline]
-    pub fn pre_match(
-        &self,
-        cond: ProjectCondition,
-    ) -> bool {
-        if !self.cond.matches(cond) { return false }
-        if !g2!(*&ferret.project.bound_render_cleared) | !g2!(*&ferret.project.bound_depth_cleared) {
-            return false
-        }
-        let render_ptr = g2!(*&ferret.project.bound_render);
-        let depth_ptr = g2!(*&ferret.project.bound_depth);
-        if let Some(target) = self.target {
-            let is_render = render_ptr == Some(target);
-            let is_depth = g2!(*&ferret.project.bound_depth) == Some(target);
-            if !is_render && !is_depth { return false }
-        } else if let Some(acquire) = self.acquire {
-            let seen = unsafe { &*g2!(&raw const ferret.project.seen) };
-            let cls = render_ptr.and_then(|p| seen.get(&p).map(|b| b.classification));
-            let cls_depth = depth_ptr.and_then(|p| seen.get(&p).map(|b| b.classification));
-            if cls != Some(acquire) || cls_depth != Some(acquire) { return false }
-        }
-
-        true
-    }
-}
-#[derive(Debug, Clone)]
-pub struct ProjectPoint {
-    pub request: ProjectRequest,
-    pub count: u32,
-    pub depth_written: bool,
-    pub action: ProjectAction,
-}
-impl ProjectPoint {
-    pub fn process(
-        &mut self,
-        cond: ProjectCondition,
-    ) -> bool {
-        if !self.request.pre_match(cond) { return false }
-        if g2!(*&ferret.project.bound_depth_written) {
-            self.depth_written = true;
-        }
-        if self.request.empty == self.depth_written {
-            return false
-        }
-        let count = self.count.saturating_add(1);
-        let prev_count = mem::replace(&mut self.count, count);
-        if !self.request.delay.contains(&prev_count) {
-            return false
-        }
-        true
-    }
-
-    pub unsafe fn act(&mut self, context: &DeviceContext0) {
-        let render = FerretResource::project_bound_render();
-        let render = render.as_ref().map(|r| RenderTargetView::from_d3d_ref(r));
-        match self.action {
-            ProjectAction::Nop => (),
-            ProjectAction::DebugDetect => {
-                let Some(target) = render else { return };
-                draw_detect(context, target)
-            },
-            ProjectAction::Draw => {
-                let Some(target) = render else { return };
-                let depth = FerretResource::project_bound_depth();
-                let depth = depth.as_ref().map(|d| d.as_ref());
-                draw(context, Some(target), depth)
-            },
-            ProjectAction::Shadowbox => {
-                let depth = FerretResource::project_bound_depth();
-                let depth = depth.as_ref().map(|d| d.as_ref());
-                shadowbox(context, render, depth)
-            },
-        }
-    }
-
-    pub fn reset(&mut self) -> ProjectReport {
-        let last_repeat = self.count.checked_sub(1);
-        let report = ProjectReport {
-            count: self.count,
-            acted: last_repeat.map(|c| c >= *self.request.delay.start()).unwrap_or(false),
-        };
-        self.count = 0;
-        self.depth_written = false;
-        self.request.delay = match last_repeat {
-            Some(c) if self.request.patient =>
-                (*self.request.delay.end()).min(c)..=c,
-            None if self.request.patient =>
-                0..=(*self.request.delay.end()).min(2),
-            _ if self.request.manual_delay =>
-                self.request.delay.clone(),
-            _ => 0..=0,
-        };
-        report
-    }
-}
-#[derive(Debug, Clone)]
-pub struct ProjectReport {
-    pub count: u32,
-    pub acted: bool,
-}
-impl ProjectReport {
-    pub const EMPTY: Self = ProjectReport {
-        count: 0,
-        acted: false,
-    };
-}
-#[derive(Debug, Copy, Clone, PartialEq, Eq, strum::IntoStaticStr, strum::VariantArray)]
-pub enum ProjectAction {
-    Nop,
-    DebugDetect,
-    Draw,
-    Shadowbox,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr)]
-pub enum ProjectClassification {
-    World,
-    Shadowbox,
-    UI,
-    Misc,
-    Unknown,
-    New,
-    Unsupported,
-}
-impl ProjectClassification {
-    pub const DEFAULT_TARGET: Self = Self::World;
-    pub const DEFAULT_SHADOWBOX: Self = Self::Shadowbox;
-}
-#[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq)]
-pub enum ProjectBufferKind {
-    DepthView,
-    RenderTarget,
-}
-#[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq)]
-pub struct ProjectBufferInfo {
-    pub classification: ProjectClassification,
-    pub kind: ProjectBufferKind,
-    pub last_seen: u32,
-    pub first_seen: u32,
-}
-impl ProjectBufferInfo {
-    const TIME_GONE: u32 = 32;
-    const TIME_LOST: u32 = 2;
-    const TIME_AGE_MIN: u32 = 2;
-    const TIME_AGE_UI: u32 = 64;
-
-    pub fn seen_since(&self, now: u32) -> u32 {
-        now.wrapping_sub(self.last_seen)
-    }
-    pub fn age(&self) -> u32 {
-        self.last_seen.wrapping_sub(self.first_seen)
-    }
-    #[inline]
-    pub fn is_gone(&self, now: u32) -> bool {
-        self.seen_since(now) >= Self::TIME_GONE
-    }
-    #[inline]
-    pub fn is_lost(&self, now: u32) -> bool {
-        self.seen_since(now) >= Self::TIME_LOST
-    }
-
-    fn reacquire<K>(seen: &BTreeMap<K, Self>, now: u32, key: &K, acquire: ProjectClassification) -> Option<K> where
-        K: Clone + Eq + Ord,
-    {
-        let buf = seen.get(key);
-        let reacquire = match buf {
-            None => true,
-            Some(buf) => buf.is_lost(now),
-        };
-        if !reacquire { return None }
-        let mut candidates = seen.iter()
-            .filter(|(_k, buf)| *_k != key && buf.classification == acquire && buf.age() >= ProjectBufferInfo::TIME_AGE_MIN && !buf.is_gone(now));
-        if let Some((cand, _)) = candidates.next() {
-            Some(cand.clone())
+    pub(super) fn on_set_state_pre(
+        context: &Dx11Context,
+        (depth_prior, rtv, rt_prior): (Option<(Option<BufferClass>, u32, u32)>, D3dNn, Option<(BufferClass, u32, u32)>),
+    ) {
+        let cls = if let Some((cls, ..)) = rt_prior {
+            cls
+        } else if let Some((Some(cls), ..)) = depth_prior {
+            cls
         } else {
-            None
+            return
+        };
+        let (drawing, method) = (Self::drawing(), Self::method());
+        let dv = LazyCell::new(
+            || ClassShared::bound_depth_ptr()
+        );
+        let after = LazyCell::new(|| dv.and_then(|dv|
+                ClassShared::with_seen2(dv, |buf|
+                    (buf.depth_binds_count_write(), buf.depth_binds_count_disabled(), buf.depth_binds_null, buf.flags)
+                )
+        ));
+        let target_is_depthless = LazyCell::new(|| {
+            let (has_written_depth, prev_disabled) = match (depth_prior, rt_prior) {
+                // after enough depth-disabled writes, assume it's drawing UI
+                (Some((_, writes, disabled)), _) if disabled.saturating_sub(writes) >= Self::DEPTHLESS_ENOUGH =>
+                    return true,
+                (_, Some((_, writes, disabled))) if disabled.saturating_sub(writes) >= Self::DEPTHLESS_ENOUGH =>
+                    return true,
+                // wait for at least one depth-enabled write...
+                (Some((_, writes @ 0..=Self::DEPTHLESS_MAX_WRITE, disabled)), _) =>
+                    (writes, disabled),
+                #[cfg(todo = "unnecessary")]
+                (_, Some((_, writes @ 0..=1, disabled))) =>
+                    (writes, disabled),
+                _ => return false,
+            };
+            let after = &*after;
+            #[cfg(todo = "unnecessary")]
+            let after = after.or_else(|| {
+                // XXX: it doesn't currently seem to unbind halfway through write, so this is irrelevant...
+                ClassShared::with_seen2(rtv, |buf|
+                    (buf.depth_binds_count_write(), buf.depth_binds_count_disabled() + buf.depth_binds_null)
+                )
+            });
+            // trigger on transition state
+            match after {
+                Some((0, _, ..)) => false,
+                Some((_, 0..=1, ..)) | Some((1, 1..=2, ..)) => false,
+                &Some((write, disabled, null, ..)) if write == has_written_depth =>
+                    disabled + null > prev_disabled,
+                _ => false,
+            }
+        });
+        let target_is_depthless1 = LazyCell::new(|| {
+            if !*target_is_depthless { return false }
+            match *after {
+                Some((0..=2, disabled, null, ..)) if disabled + null >= 4 => true,
+                _ => false,
+            }
+        });
+        let target_is_depthless2_target_map = LazyCell::new(|| {
+            if !*target_is_depthless { return false }
+            match *after {
+                Some((0..=2, disabled, null, ..)) if disabled + null > 6 => true,
+                _ => false,
+            }
+        });
+        let target_is_depthless2_target_minimap = LazyCell::new(|| {
+            // hopefully draws over minimap
+            #[cfg(todo)]
+            if !*target_is_depthless { return false }
+            match *after {
+                Some((0..=2, disabled, null, ..)) if disabled + null >= 4 => true,
+                Some((_, disabled, null, ..)) if disabled + null >= 4 => true,
+                _ => false,
+            }
+        });
+        let target_is_depthless3 = LazyCell::new(|| {
+            if !*target_is_depthless { return false }
+            match *after {
+                Some((0..=3, disabled, null, ..)) if disabled + null >= 5 => true,
+                _ => false,
+            }
+        });
+
+        let draws = ProjectAction::iter_bits(drawing).filter_map(|act|
+            method.actions_on_state(act, cls)
+                .min()
+                .and_then(|(score, action)| {
+                    if let Some((_, _, _, flags)) = *after {
+                        if !flags.contains(BufferStateFlags::CLEARED_DEPTH) { return None }
+                    }
+                    match action.after_depthless {
+                        0 => (),
+                        1 if *target_is_depthless => (),
+                        2 if *target_is_depthless2_target_map => (),
+                        3 if *target_is_depthless2_target_map => (),
+                        21 if *target_is_depthless2_target_minimap => (),
+                        3 if *target_is_depthless3 => (),
+                        _ => return None,
+                    }
+                    let target = match action.retarget {
+                        #[cfg(todo)]
+                        Some(reach) if Some(reach) == rebound_cls => rebound,
+                        Some(reach) if reach != cls => Self::reach_for(reach),
+                        _ => Some((rtv, *dv)),
+                    };
+                    target.map(|(target, dv)| (target, dv, act, cls))
+                })
+        );
+
+        for (target, dv, act, cls) in draws {
+            let rtv = unsafe {
+                RenderTargetView::from_d3d_raw_ref(&target)
+            };
+            let dv = dv.as_ref().map(|dv| unsafe {
+                DepthView::from_d3d_raw_ref(dv)
+            });
+            Self::draw(context.as_ref(), rtv, dv, cls, act);
         }
+    }
+    pub(super) fn on_new_frame() {
+        let lock_blocking = match () {
+            #[cfg(todo = "unnecessary")]
+            _ => flags.contains(GogglesFlags::PROJECT_BLOCKING),
+            _ => false,
+        };
+
+        let mut state_lock = match lock_blocking {
+            true => RENDER_STATE.lock().ok(),
+            false => RENDER_STATE.try_lock().ok(),
+        };
+        let state = match state_lock.as_mut().and_then(|s| s.as_mut()) {
+            Some(state) => if state.machine.goggles.is_enabled(GogglesEnables::PROJECT_ENABLE) {
+                Some(state)
+            } else { None },
+            _ => None,
+        };
+        if let Some(state) = state {
+            let render_slot = (&mut state.engine,);
+            state.machine.goggles_new_frame(render_slot);
+        }
+        drop(state_lock);
+    }
+    const DEPTHLESS_ENOUGH: u32 = 3;
+    const DEPTHLESS_MAX_WRITE: u32 = 3;
+    #[cfg(todo)]
+    const EARLY_MIN_WRITE: u32 = Self::DEPTHLESS_MAX_WRITE;
+    const EARLY_MIN_WRITE: u32 = 2;
+    fn draw(
+        context: &DeviceContext0,
+        target: &RenderTargetView,
+        dv: Option<&DepthView>,
+        cls: BufferClass,
+        what: ProjectAction,
+    ) {
+        #[cfg(todo = "unnecessary")]
+        if let ProjectAction::DebugDetect = what {
+            return Self::detect_clear(context, target)
+        }
+        let flags = GogglesShared::flags();
+        let metrics_pre = Instant::now();
+        let mut state_lock = match flags.contains(GogglesFlags::PROJECT_BLOCKING) {
+            true => RENDER_STATE.lock().ok(),
+            false => RENDER_STATE.try_lock().ok(),
+        };
+        let mut state = match state_lock.as_mut().and_then(|s| s.as_mut()) {
+            Some(state) => if state.machine.goggles_project_draw_start(what, cls) {
+                Some(state)
+            } else { None },
+            _ => None,
+        };
+        let draw = match (what, state.as_mut()) {
+            (_, Some(state)) if state.machine.is_ingame_paused() => None,
+            (ProjectAction::DrawMinimap, Some(state)) if cls == BufferClass::Target && state.machine.is_ui_hidden() =>
+                None,
+            (ProjectAction::Draw, Some(state)) if cls == BufferClass::Reflection && !state.machine.goggles.is_enabled(GogglesEnables::PROJECT_REFLECTIONS) =>
+                None,
+            (ProjectAction::DrawMinimap, ..) => Some(LocalContext::MINIMAP),
+            (ProjectAction::DrawMap, ..) => Some(LocalContext::MAP),
+            _ => Some(LocalContext::World),
+        };
+        let (Some(state), Some(draw)) = (state, draw) else {
+            if state_lock.is_none() {
+                log::debug!(logger: DeferredLogger::BEST_EFFORT, "project lost a race");
+            }
+            return
+        };
+        FrameState::TAIMI.publish_set();
+        let engine = match &mut state.engine {
+            Some(Ok(engine)) => if engine.project_proceed(&mut state.machine, draw) {
+                Some(engine)
+            } else { None },
+            #[cfg(todo = "unnecessary")]
+            _ if state.machine.goggles.project.debug_detect => {
+                Self::detect_clear(context, target);
+                None
+            },
+            _ => None,
+        };
+        let target_dv = match what {
+            #[cfg(todo)]
+            ProjectAction::DrawObscured if matches!(cls, BufferClass::Shadowbox) && state.machine.goggles.project.project_shadow =>
+                None,
+            ProjectAction::DrawObscured if !matches!(cls, BufferClass::Target | BufferClass::Fallback /*| BufferClass::Shadowbox*/) =>
+                dv.map(|dv| *dv.as_d3d_raw()),
+            #[cfg(todo)]
+            ProjectAction::DrawMinimap if matches!(cls, BufferClass::Minimap | BufferClass::Target) =>
+                dv.map(|dv| *dv.as_d3d_raw()),
+            #[cfg(todo)]
+            ProjectAction::DrawMap if matches!(cls, BufferClass::World) =>
+                dv.map(|dv| *dv.as_d3d_raw()),
+            ProjectAction::Draw | ProjectAction::Shadowbox if matches!(cls, BufferClass::Shadowbox | BufferClass::Reflection) =>
+                dv.map(|dv| *dv.as_d3d_raw()),
+            ProjectAction::Draw if !state.machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) => None,
+            ProjectAction::Draw => {
+                let current = match cls {
+                    BufferClass::World => dv.and_then(|dv| ClassShared::with_seen2(*dv.as_d3d_raw(), |buf|
+                        LensShared::buf_is_valid_ongoing(buf).then_some(*dv.as_d3d_raw())
+                    ).flatten()),
+                    _ => None,
+                };
+                current.or_else(|| LensShared::read_selected().and_then(|dv| ClassShared::with_seen2(dv, |buf|
+                    LensShared::buf_is_valid_ongoing(buf).then_some(dv)
+                ).flatten()))
+            },
+            _ => None,
+        };
+        let depth = target_dv.as_ref().map(|dv| unsafe {
+            DepthView::from_d3d_raw_ref(dv)
+        });
+        if let Some(engine) = engine {
+            let target_size = ClassShared::with_seen2(*target.as_d3d_raw(), |buf| buf.size()).flatten();
+            let vp = target_size.map(|(w, h)| Rect::new(Point2::ZERO, Size2::new(w as f32, h as f32)));
+            let desc = DrawDescGoggles {
+                depth_filled: target_dv.is_some(),
+                projecting: true,
+                #[cfg(todo)]
+                inherit: is_unique_sure_why_not_idk,
+                .. DrawDescGoggles::with_buffers(vp, depth, Some(target))
+            };
+            let mut desc = desc.to_space();
+            desc.goggles.buffer_compat = vp.map(|vp| vp.size) == Some(engine.render_backend.display_size) && depth.is_some();
+            desc.pass = match what {
+                ProjectAction::Shadowbox => DrawDescSpace::PASS_SHADOWBOXING,
+                ProjectAction::DrawObscured => match cls {
+                    BufferClass::Shadowbox => DrawDescSpace::PASS_OBSCURED_SHADOWED,
+                    _ => DrawDescSpace::PASS_OBSCURED,
+                },
+                ProjectAction::Draw => match cls {
+                    BufferClass::Reflection => DrawDescSpace::PASS_REFLECTING,
+                    _ => desc.pass,
+                },
+                _ => desc.pass,
+            };
+            let mut wispy = false;
+            match (what, cls, target_dv) {
+                (ProjectAction::DrawObscured, ..) => {
+                    desc.depth_write = false;
+                    if desc.goggles.target_depthview.is_none() {
+                        desc.goggles.target_depthview = LensShared::read_selected().and_then(|l| ClassShared::with_seen2(l, |buf|
+                                    LensShared::buf_is_valid_ongoing(buf).then_some(l)
+                        ).flatten());
+                    }
+                    desc.depth_read = desc.goggles.target_depthview.is_some();
+                },
+                (ProjectAction::Draw, BufferClass::World, Some(..))
+                    => {
+                    desc.depth_write = true;
+                    desc.depth_read = true;
+                    desc.goggles.buffer_compat = true;
+                },
+                (ProjectAction::Shadowbox, _, Some(..)) => {
+                    desc.depth_write = true;
+                    desc.depth_read = true;
+                    desc.colour_read = false;
+                    desc.colour_write = false;
+                },
+                (ProjectAction::Draw, BufferClass::Shadowbox, dv) => {
+                    desc.depth_write = false;
+                    desc.depth_read = dv.is_some();
+                    wispy = true;
+                },
+                (ProjectAction::Draw, BufferClass::Reflection, dv) => {
+                    desc.depth_write = false;
+                    desc.depth_read = false;
+                    wispy = true;
+                },
+                (ProjectAction::DrawMinimap | ProjectAction::DrawMap, _, Some(..)) => {
+                    desc.goggles.buffer_compat = false;
+                    //desc.depth_write = true;
+                    desc.depth_read = true;
+                },
+                (_, cls, Some(..)) => {
+                    desc.depth_write = false;
+                    desc.depth_read = true;
+                },
+                _ => {
+                    desc.depth_write = false;
+                    desc.depth_read = false;
+                },
+            }
+            #[cfg(todo)]
+            if target_dv.is_none() {
+                if let Some(dv) = dv {
+                    desc.goggles.target_depthview = Some(*dv.as_d3d_raw());
+                    desc.depth_write = false;
+                    desc.depth_read = false;
+                    desc.stencil_read = false;
+                    desc.stencil_write = false;
+                    desc.goggles.buffer_compat = false;
+                }
+            }
+            if let (ProjectAction::Draw, BufferClass::Pretty | BufferClass::Fallback) = (what, cls) {
+                desc.depth_write = false;
+            }
+            if frame_log!(::is_enabled()) {
+                frame_log!(;"project({what:?}@{cls:?}): (write={} read={})", desc.depth_write, desc.depth_read);
+                Self::log_view("project", desc.goggles.target_renderview);
+                Self::log_view("project", desc.goggles.target_depthview);
+                Self::log_view("env", Self::bound_render().or(ClassShared::bound_render_primary_ptr()));
+                Self::log_view("env", ClassShared::bound_depth_ptr());
+            }
+            if state.machine.goggles.project.debug_detect {
+                Self::draw_detect_clear(context, target, &desc.goggles, draw);
+                if !wispy {
+                    engine.drawing.set_drawn(draw, true);
+                    if !state.machine.goggles.project.debug_detect_all {
+                        ProjectShared::mask_drawing(what.bit());
+                    }
+                }
+            } else {
+                if let LocalContext::Map(..) = draw {
+                    state.machine.lastminute_mumblelink_update();
+                }
+                let wispy = wispy.then_some(engine.drawing.has_drawn_context(draw));
+                if wispy.is_some() {
+                    engine.drawing.set_drawing(draw, true);
+                    engine.drawing.set_drawn(draw, false);
+                }
+                let pass = desc.pass;
+                engine.render_carefully(&mut state.machine, context, desc, draw);
+                let succ = match what {
+                    ProjectAction::DrawMap | ProjectAction::DrawMinimap => engine.drawing.has_drawn_context(draw),
+                    ProjectAction::DrawObscured => engine.drawing.drawn.get_at(DrawDescSpace::PASS_OBSCURED) == Some(true),
+                    ProjectAction::DrawObscured | ProjectAction::Shadowbox | ProjectAction::Draw => engine.drawing.drawn.get_at(pass) == Some(true),
+                    _ => true,
+                };
+                if let Some(prev) = wispy {
+                    //engine.drawing.set_drawn(draw, prev);
+                } else if succ {
+                    ProjectShared::mask_drawing(what.bit());
+                }
+            }
+        }
+        state.machine.goggles_project_draw_end();
+        drop(state_lock);
+        FrameState::TAIMI.publish_clear();
+        let amt = metrics_pre.elapsed().as_micros() as u64;
+        STATS_PROJECT_RENDER.increment(amt);
+    }
+    const DETECT_COLOUR: Vec4 = Vec4::new(64.0 / 255.0, 224.0 / 255.0, 208.0 / 255.0, 0.7);
+    /// TODO: scissor+quad when more representative, depth writes, etc
+    fn draw_detect_clear(
+        context: &DeviceContext0,
+        target: &RenderTargetView,
+        _desc: &DrawDescGoggles,
+        _ctx: LocalContext,
+    ) {
+        Self::detect_clear(context, target);
+    }
+    fn detect_clear(
+        context: &DeviceContext0,
+        target: &RenderTargetView,
+    ) {
+        target.clear_rgba(context, Self::DETECT_COLOUR);
+    }
+
+    #[inline(always)]
+    pub fn bound_render_ref() -> &'static AtomicPtr<c_void> {
+        unsafe {
+            &*g2!(&raw const ferret.project2.bound_render)
+        }
+    }
+    fn bound_render() -> D3dPtr {
+        NonNull::new(
+            Self::bound_render_ref().load(GogglesShared::FLAGS_ORDERING)
+        )
+    }
+    fn set_bound_render(rtv: D3dPtr) {
+        Self::bound_render_ref().store(nn::nonnull_ptr_mut(rtv), GogglesShared::FLAGS_ORDERING);
+    }
+
+    #[inline(always)]
+    pub fn drawing_ref() -> &'static AtomicU16 {
+        unsafe {
+            &*g2!(&raw const ferret.project2.drawing)
+        }
+    }
+    fn read_drawing() -> u16 {
+        Self::drawing_ref().load(GogglesShared::ENABLED_ORDERING)
+    }
+    fn write_drawing(v: u16) {
+        Self::drawing_ref().store(v, GogglesShared::ENABLED_ORDERING);
+    }
+
+    fn drawing() -> u16 {
+        Self::drawing_ref().load(GogglesShared::FLAGS_ORDERING)
+    }
+    fn insert_drawing(v: u16) -> u16 {
+        Self::drawing_ref().fetch_or(v, GogglesShared::FLAGS_ORDERING)
+    }
+    fn mask_drawing(v: u16) -> u16 {
+        Self::drawing_ref().fetch_and(!v, GogglesShared::FLAGS_ORDERING)
+    }
+    pub(super) fn wants_draw() -> bool {
+        Self::drawing() != 0
+    }
+
+    fn method() -> ProjectMethod {
+        g2!(*&ferret.project2.method)
+    }
+    fn write_method(method: ProjectMethod) {
+        g2!(*&volatile mut ferret.project2.method = method)
+    }
+    fn read_method() -> ProjectMethod {
+        g2!(*&volatile const ferret.project2.method)
+    }
+
+    #[inline(always)]
+    pub fn map_open_ref() -> &'static AtomicU8 {
+        unsafe {
+            &*g2!(&raw const ferret.project2.map_open)
+        }
+    }
+    fn map_open() -> (bool, bool) {
+        let v = Self::map_open_ref().load(GogglesShared::FLAGS_ORDERING);
+        ((v & 1) != 0, (v & 2) != 0)
+    }
+    fn write_map_open((open, anim): (bool, bool)) {
+        let v = open as u8 | u8::from(anim) << 1;
+        Self::map_open_ref().store(v, GogglesShared::ENABLED_ORDERING);
+    }
+
+    pub(super) fn has_drawn_space() -> bool {
+        !ProjectAction::Draw.is_in(Self::drawing())
+    }
+}
+static STATS_PROJECT_RENDER: StatsCounter = StatsCounter::DEFAULT;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
+pub enum ProjectMethod {
+    Fuzzy,
+    Early,
+    Late,
+    Shiny,
+    Pretty,
+    Conservative,
+    Compatibility,
+}
+impl ProjectMethod {
+    pub const DEFAULT: Self = match () {
+        _ => Self::Fuzzy,
+        #[cfg(todo)]
+        _ => Self::Late,
+    };
+
+    fn actions_on_unbind(self, act: ProjectAction, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
+        let primary = match (act, cls, self) {
+            (ProjectAction::DrawObscured, BufferClass::Shadowbox, ProjectMethod::Early | ProjectMethod::Fuzzy) =>
+                Some((0, None)),
+            (ProjectAction::DrawObscured, BufferClass::World, ProjectMethod::Early | ProjectMethod::Fuzzy)
+                if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::World, |_k, buf| buf.bind_count <= 1).unwrap_or(true)
+                => None,
+            #[cfg(todo)]
+            (ProjectAction::DrawObscured, BufferClass::Fallback, ProjectMethod::Conservative) =>
+                Some((0x10, None)),
+            (ProjectAction::DrawObscured, BufferClass::Pretty, ProjectMethod::Shiny | ProjectMethod::Late) =>
+                Some((0, None)),
+            (ProjectAction::DrawObscured, BufferClass::World | BufferClass::Target, method) => {
+                let method = match method {
+                    m @ (ProjectMethod::Shiny | ProjectMethod::Pretty) => m,
+                    _ => ProjectMethod::Late,
+                };
+                return method.actions_on_unbind(ProjectAction::Draw, cls)
+            },
+            (ProjectAction::DrawObscured, ..) => None,
+            (ProjectAction::DrawMinimap, cls, method) => {
+                let method = ProjectMethodMinimap::from(method);
+                let next = match method {
+                    // cheat because we don't have this already...
+                    ProjectMethodMinimap::Eager =>
+                        ClassShared::with_current_dv(|_, buf| buf.winner.then_some(buf.classification)).flatten(),
+                    _ => None,
+                }.unwrap_or(BufferClass::Unknown);
+                return method.minimap_action_on_unbind(cls, next).map(|a| (0, a)).into_iter()
+            },
+            (ProjectAction::DrawMap, cls, method) => {
+                let method = ProjectMethodMap::from(method);
+                let (next, next_bind_count) = match (method, cls) {
+                    // cheat because we don't have this already...
+                    (ProjectMethodMap::Reliable | ProjectMethodMap::Eager, BufferClass::World) =>
+                        ClassShared::with_current_dv(|_, buf|
+                            buf.winner.then_some(buf.classification)
+                            .map(|c| (c, buf.bind_count))
+                        ).flatten(),
+                    _ => None,
+                }.unwrap_or((BufferClass::Unknown, 0));
+                return method.map_action_on_unbind(cls, next, next_bind_count).map(|a| (0, a)).into_iter()
+            },
+
+            (_, BufferClass::Fallback, _) if ClassShared::bind_generation() <= 8 => None,
+            (_, BufferClass::Pretty, _) if ClassShared::bind_generation() <= 12 => None,
+            (ProjectAction::Draw, BufferClass::Reflection, _) if GogglesShared::enabled().contains(GogglesEnables::PROJECT_REFLECTIONS) => Some((0x08, None)),
+            #[cfg(deleteme)]
+            (ProjectAction::Draw, BufferClass::Reflection, Self::Pretty | Self::Shiny) => Some((0x08, None)),
+            (ProjectAction::Draw, BufferClass::Shadowbox, Self::Pretty) => Some((0x10, None)),
+            (ProjectAction::Shadowbox, _, Self::Shiny)
+                if ClassShared::with_current_dv(|_, buf| buf.bind_count > 1 && buf.winner && matches!(buf.classification, BufferClass::World)).unwrap_or(false)
+                => Some((0x10, Some(BufferClass::Shadowbox))),
+            (ProjectAction::Shadowbox, BufferClass::Shadowbox, Self::Pretty) => None,
+            (ProjectAction::Draw, BufferClass::Pretty, Self::Pretty) =>
+                Some((0, None)),
+            (ProjectAction::Draw, _, Self::Pretty, ) => None,
+            (ProjectAction::Draw, _, Self::Conservative, ) => None,
+            (ProjectAction::Draw, BufferClass::Pretty, Self::Fuzzy | Self::Compatibility) if ClassShared::with_current_dv(|_, buf| buf.winner && matches!(buf.classification, BufferClass::Target)).unwrap_or(false) => {
+                // TODO: wouldn't be unreasonable for something to be bound in-between these two though...
+                // in which case, reach to pretty prior? idk
+                Some((0x80, None))
+            },
+            (ProjectAction::Draw, _, Self::Late)
+                if ClassShared::with_current_dv(|_, buf| buf.winner && matches!(buf.classification, BufferClass::Target)).unwrap_or(false) =>
+                Some((8, Some(BufferClass::World))),
+            (ProjectAction::Draw, BufferClass::World, Self::Compatibility)
+                if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::World, |_k, buf| buf.depth_binds_count_write() <= ProjectShared::DEPTHLESS_MAX_WRITE).unwrap_or(true)
+                => None,
+            (ProjectAction::Draw, BufferClass::World, Self::Early)
+                if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::World, |_k, buf| buf.depth_binds_count_write() <= ProjectShared::EARLY_MIN_WRITE).unwrap_or(true)
+                => None,
+            (ProjectAction::Draw, BufferClass::World, Self::Fuzzy | Self::Shiny)
+                if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::World, |_k, buf| buf.depth_binds_count_write() <= 1).unwrap_or(true)
+                => None,
+            (act, cls, Self::Fuzzy | Self::Conservative | Self::Compatibility | Self::Shiny | Self::Pretty)
+                if matches!((act, cls), (ProjectAction::Draw, BufferClass::World) | (ProjectAction::DrawMinimap, BufferClass::Minimap))
+                => Some((0x20, None)),
+            (ProjectAction::Draw, BufferClass::Fallback, _)
+                if ClassShared::can_expect_upcoming(BufferKind::RenderTarget, BufferClass::World) != Some(true)
+                => Some((0xff, None)),
+            (ProjectAction::Shadowbox, BufferClass::Shadowbox, _)
+                => Some((0x08, None)),
+            _ => None,
+        };
+        primary
+            .map(|(score, retarget)| (score, MethodAction {
+                retarget,
+                .. Default::default()
+            }))
+        .into_iter()
+        //.chain(fallback)
+    }
+    fn actions_on_state(self, act: ProjectAction, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
+        let primary = match (act, cls, self) {
+            #[cfg(todo)]
+            (ProjectAction::DrawObscured, ..) => None,
+            #[cfg(todo)]
+            (ProjectAction::DrawMinimap, cls, method) =>
+                return ProjectMethodMinimap::from(method).minimap_action_on_state(cls).map(|a| (0, a)).into_iter(),
+            #[cfg(todo)]
+            (ProjectAction::DrawMap, cls, method) =>
+                return ProjectMethodMap::from(method).map_action_on_state(cls).map(|a| (0, a)).into_iter(),
+            (ProjectAction::DrawMinimap | ProjectAction::DrawMap, ..) => None,
+            #[cfg(todo)]
+            (_, _, Self::Shiny) => None,
+            (ProjectAction::Draw, BufferClass::Reflection, Self::Pretty) => Some((0x04, None)),
+            (ProjectAction::Draw, BufferClass::World, Self::Early | Self::Shiny)
+                if ClassShared::with_current_dv(|_, buf| buf.depth_binds_count_disabled() > 1 || buf.depth_binds_count_readonly() >= 1).unwrap_or(false)
+                => Some((0x08, None)),
+            (ProjectAction::Draw, BufferClass::Target, Self::Conservative)
+            | (ProjectAction::DrawObscured, BufferClass::Target, _)
+                => Some((0, None)),
+            (ProjectAction::DrawMinimap | ProjectAction::DrawMap, BufferClass::Target, Self::Conservative)
+            | (ProjectAction::DrawMap, BufferClass::Target, Self::Late | Self::Compatibility)
+            | (ProjectAction::DrawMinimap, BufferClass::Target, Self::Compatibility)
+                => Some((0, None)),
+            _ => None,
+        };
+        primary
+            .map(move |(score, retarget)| (score, MethodAction {
+                retarget,
+                after_depthless: (cls != BufferClass::World).then_some(1).unwrap_or(0),
+                .. Default::default()
+            }))
+        .into_iter()
+        //.chain(fallback)
+    }
+}
+impl Default for ProjectMethod {
+    #[inline(always)]
+    fn default() -> Self { Self::DEFAULT }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
+pub enum ProjectMethodMinimap {
+    Eager,
+    /// reliable but delayed by 1 frame
+    Slow,
+    #[cfg(todo)]
+    Conservative,
+    #[cfg(todo)]
+    SlowShiny,
+}
+impl ProjectMethodMinimap {
+    fn minimap_action_on_unbind(self, prior: BufferClass, next: BufferClass) -> Option<MethodAction> {
+        match self {
+            Self::Eager if matches!(next, BufferClass::Target) => Some(MethodAction {
+                retarget: Some(BufferClass::Minimap),
+                .. Default::default()
+            }),
+            Self::Slow if matches!(prior, BufferClass::Minimap) => Some(MethodAction {
+                .. Default::default()
+            }),
+            _ => None,
+        }
+    }
+    #[cfg(todo)]
+    fn minimap_action_on_state(self, cls: BufferClass) -> Option<MethodAction> {
+        match (cls, self) {
+            #[cfg(todo)]
+            (BufferClass::Target, Self::Conservative) => todo(),
+            (BufferClass::Minimap, Self::SlowShiny) => todo(),
+            _ => None,
+        }
+    }
+}
+impl From<ProjectMethod> for ProjectMethodMinimap {
+    fn from(method: ProjectMethod) -> Self {
+        match method {
+            ProjectMethod::Compatibility
+                => Self::Slow,
+            #[cfg(todo)]
+            | ProjectMethod::Late
+                => Self::SlowShiny,
+            | ProjectMethod::Fuzzy | ProjectMethod::Shiny | ProjectMethod::Pretty
+            | ProjectMethod::Early
+                => Self::Eager,
+            _ => Self::Slow,
+        }
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
+pub enum ProjectMethodMap {
+    Eager,
+    Reliable,
+    #[cfg(todo)]
+    Conservative,
+    #[cfg(todo)]
+    Shiny,
+}
+impl ProjectMethodMap {
+    fn map_action_on_unbind(self, prior: BufferClass, next: BufferClass, next_bind_count: u32) -> Option<MethodAction> {
+        match (prior, next, self) {
+            (BufferClass::World, BufferClass::Target, Self::Reliable | Self::Eager)
+                if next_bind_count > 1
+                => Some(MethodAction {
+                    .. Default::default()
+                }),
+            (BufferClass::World, _, Self::Eager)
+                if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::Target, |_, buf| buf.bind_count >= 1).unwrap_or(false)
+                => Some(MethodAction {
+                    .. Default::default()
+                }),
+            _ => None,
+        }
+    }
+    #[cfg(todo)]
+    fn map_action_on_state(self, cls: BufferClass) -> Option<MethodAction> {
+        let map_open = ProjectShared::map_open();
+    }
+}
+impl From<ProjectMethod> for ProjectMethodMap {
+    fn from(method: ProjectMethod) -> Self {
+        match method {
+            #[cfg(todo)]
+            ProjectMethod::Conservative
+                => Self::Conservative,
+            ProjectMethod::Compatibility
+                => Self::Reliable,
+            | ProjectMethod::Early | ProjectMethod::Late
+                => Self::Eager,
+            #[cfg(todo)]
+            | ProjectMethod::Fuzzy | ProjectMethod::Shiny | ProjectMethod::Pretty
+                => Self::Shiny,
+            _ => Self::Reliable,
+        }
+    }
+}
+
+struct TrackingContext {
+    map_open: MapOpen,
+}
+enum FrameStage {
+    World,
+    PostProc,
+    BlitSpace,
+    BlitMap,
+}
+trait FrameLifecycleInfo {
+    fn ongoing(&self) -> bool;
+    fn world_clear(&self) -> Option<[f32; 4]>;
+    fn bind_count(&self, kind: BufferKind, cls: BufferClass) -> (u32, bool);
+    fn bind_seen(&self, kind: BufferKind, cls: BufferClass) -> bool {
+        self.bind_count(kind, cls).0 > 0
+    }
+    /// if world rebound after Target, map or something likely being drawn on top
+    fn world_in_pt2(&self) -> bool;
+}
+struct SharedInfo;
+impl FrameLifecycleInfo for SharedInfo {
+    fn ongoing(&self) -> bool {
+        ClassShared::frame_valid()
+    }
+    fn world_clear(&self) -> Option<[f32; 4]> {
+        ClassShared::with_seen_class(BufferKind::RenderTarget, BufferClass::World, |_k, buf|
+            buf.state.flags.contains(BufferStateFlags::CLEARED_COLOUR).then_some(buf.state.clear_colour)
+        ).flatten()
+    }
+    fn bind_count(&self, kind: BufferKind, cls: BufferClass) -> (u32, bool) {
+        ClassShared::with_seen_class(kind, cls, |_k, buf| {
+            let bound = buf.is_bound(ClassShared::bind_generation());
+            (buf.bind_count, bound)
+        }).unwrap_or((0, false))
+    }
+    fn world_in_pt2(&self) -> bool {
+        match self.bind_count(BufferKind::RenderTarget, BufferClass::Target) {
+            (0, _) => false,
+            (_, false) if self.bind_seen(BufferKind::RenderTarget, BufferClass::Minimap) => false,
+            (bc, false) => bc >= 1,
+            _ => false,
+        }
+    }
+}
+
+/// TODO: use a state machine to track eligibility over time
+/// (forget an enum, dyn trait list produced at start of frame, likelihood of completion can weight score, etc)
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct MethodAction {
+    #[cfg(todo = "unnecessary")]
+    what: ProjectAction,
+    retarget: Option<BufferClass>,
+    after_depthless: u8,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
+#[repr(u8)]
+pub enum ProjectAction {
+    Nop = 1,
+    DebugDetect,
+    DrawObscured,
+    Draw,
+    DrawMinimap,
+    DrawMap,
+    Shadowbox,
+}
+impl ProjectAction {
+    #[inline(always)]
+    pub const fn index(self) -> u8 {
+        self as _
+    }
+    #[inline]
+    pub const fn bit(self) -> u16 {
+        1u16 << self.index() as u32
+    }
+    pub fn iter_bits(mut bits: u16) -> impl Iterator<Item = Self> {
+        iter::from_fn(move || {
+            while bits != 0 {
+                let bit = bits.trailing_zeros();
+                bits &= !1u16.unbounded_shl(bit);
+                if let Some(v) = Self::from_index(bit as _) {
+                    return Some(v)
+                }
+            }
+            None
+        })
+    }
+    const INDEX_MIN: u8 = Self::Nop.index() as _;
+    const INDEX_MAX: u8 = Self::Shadowbox.index() as _;
+    pub const fn from_index(index: u8) -> Option<Self> {
+        match index {
+            Self::INDEX_MIN..=Self::INDEX_MAX => Some(unsafe {
+                Self::from_index_unchecked(index)
+            }),
+            _ => None,
+        }
+    }
+    #[inline]
+    pub const fn is_in(self, bits: u16) -> bool {
+        bits & self.bit() != 0
+    }
+    fn bits_from_drawing(drawing: &BitSlice<u16, BitsNative>) -> u16 {
+        drawing.iter_ones().filter_map(|i| Some(match i as u32 {
+            DrawDescSpace::PASS_SPACE => Self::Draw,
+            DrawDescSpace::PASS_MAP => Self::DrawMap,
+            DrawDescSpace::PASS_MINIMAP => Self::DrawMinimap,
+            DrawDescSpace::PASS_OBSCURED => Self::DrawObscured,
+            #[cfg(todo)]
+            DrawDescSpace::PASS_OBSCURED_SHADOWED => Self::DrawObscured,
+            DrawDescSpace::PASS_SHADOWBOXING => Self::Shadowbox,
+            #[cfg(todo)]
+            DrawDescSpace::PASS_REFLECTING => Self::Draw,
+            _ => return None,
+        })).fold(0u16, |prev, flag| prev | flag.bit())
+    }
+    #[inline(always)]
+    pub const unsafe fn from_index_unchecked(index: u8) -> Self {
+        mem::transmute(index)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GogglesProject {
+    pub debug_detect: bool,
+    pub debug_detect_all: bool,
+    pub project_depth_fill: bool,
+    pub project_viewport_force: bool,
+    pub project_shadow: bool,
+    pub project_shadowbox: bool,
+    pub project_blend_force: bool,
+    pub project_projecting: bool,
+    drawing_mask: u16,
+}
+impl GogglesProject {
+    /// TODO: here so UI can display debug stats prior to reset bleh...
+    pub(super) fn act_render_post_late(&mut self) {
+        ProjectShared::write_drawing(mem::replace(&mut self.drawing_mask, 0));
+    }
+    /// TODO: deleteme idk this is probably pointless now
+    pub(crate) fn act_pre_render_frame(&mut self, _has_context: bool, drawing: &mut FrameContext) {
+        //self.is_drawing = machine.frame_context.is_some();
+        let is_drawing = drawing.prepared && drawing.is_drawing();
+        if is_drawing {
+            self.drawing_mask = ProjectAction::bits_from_drawing(drawing.drawing.as_ref());
+            ProjectShared::write_map_open(drawing.map_anim.shape());
+        } else {
+            self.drawing_mask = 0;
+        }
+    }
+    const STATS_COUNTERS: &[StatsDesc; 1] = {
+        let sec = "stats-render";
+        &[
+            StatsDesc {
+                detailed: true,
+                .. StatsDesc::new(sec, "stats-render-time-project")
+            },
+        ]
+    };
+    fn stats_counters_ref() -> [StatsRef; 1] {
+        [
+            StatsRef::with_counter(&STATS_PROJECT_RENDER, StatsUnit::Time),
+        ]
+    }
+    pub(super) fn enable(&mut self) {
+        let counters = Self::STATS_COUNTERS.iter()
+            .zip(Self::stats_counters_ref());
+        for (desc, counter) in counters {
+            counter.register(desc.clone());
+        }
+    }
+    pub(super) fn disable(&mut self) {
+        ProjectShared::write_drawing(0);
+        STATS_PROJECT_RENDER.reset(0);
+        for desc in Self::STATS_COUNTERS {
+            StatsRef::deregister(desc);
+        }
+    }
+    pub(crate) fn is_projecting(&self) -> bool {
+        self.project_projecting
+    }
+
+    pub(crate) fn set_method(&mut self, method: ProjectMethod) {
+        ProjectShared::write_method(method);
+    }
+    pub(crate) fn method(&self) -> ProjectMethod {
+        ProjectShared::read_method()
+    }
+
+    pub(crate) fn undrawn(&self) -> impl Iterator<Item = Result<LocalContext, ProjectAction>> {
+        let undrawn = ProjectShared::read_drawing();
+        ProjectAction::iter_bits(undrawn).map(|act| Ok(match act {
+            ProjectAction::Draw => LocalContext::World,
+            ProjectAction::DrawMinimap => LocalContext::MINIMAP,
+            ProjectAction::DrawMap => LocalContext::GLOBAL,
+            act => return Err(act)
+        }))
+    }
+}
+impl GogglesState {
+    pub(crate) fn project_wants_flush(&self) -> bool {
+        self.active.contains(GogglesEnables::PROJECT_COMPAT_FLUSH)
+    }
+}
+impl RenderMachine {
+    fn goggles_project_draw_start(&mut self, what: ProjectAction, cls: BufferClass) -> bool {
+        if !self.goggles.is_enabled(GogglesEnables::PROJECT_ENABLE) { return false }
+
+        self.goggles.project.project_projecting = true;
+        self.mumblelink_frames.render_offset_space = 1;
+
+        let time_passed = match cls {
+            BufferClass::Target | BufferClass::Minimap | BufferClass::FrameBuffer =>
+                true,
+            _ => false,
+        };
+        if time_passed {
+            self.lastminute_mumblelink_update();
+        }
+
+        #[cfg(feature = "goggles2-camera")]
+        if let ProjectAction::Draw = what {
+            self.goggles_update_camera(false);
+        }
+        true
+    }
+    fn goggles_project_draw_end(&mut self) {
+        self.goggles.project.project_projecting = false;
+        self.goggles.project.project_shadowbox = false;
+        self.mumblelink_frames.render_offset_space = 0;
     }
 }

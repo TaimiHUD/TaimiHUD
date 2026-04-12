@@ -30,6 +30,9 @@
 #define DISCARD_Z 1.0
 #endif
 static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
+#ifndef UNDERWATER_VISIBILITY
+#define UNDERWATER_VISIBILITY 0.325
+#endif
 
 #if SHADER_SPACE
 #ifndef INTENSITY_PARAM_2

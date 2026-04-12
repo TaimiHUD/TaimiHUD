@@ -21,6 +21,12 @@ TrailOutputV trail_main_v(TrailInput input)
     float face_dir = dot(v_render.camera_dir, norm_tri);
     bool back_of_face = face_dir < 0.0;
 
+#if GOGGLES2_REFLECTING
+    float fade2 = pos_world.y;
+#else
+    float fade2 = 0.0;
+#endif
+
     float4 pos = mul(v_render.view, pos_world);
 #if 1
     float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
@@ -37,13 +43,21 @@ TrailOutputV trail_main_v(TrailInput input)
     float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale * v_trail.marker.anim_scale;
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
 
-    output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
+    float3 input_colour = input.marker.colour;
+#if GOGGLES_OBSCURED && 0
+    input_colour = saturate(input_colour * max(1.0, v_trail.marker.alpha));
+#endif
+    output.colour = float4(input_colour, GET_MFLAG_ALPHA(input.marker.flags) * v_trail.marker.alpha);
 #if GOGGLES2_SHADOWBOXING && 0
     if (GET_MFLAG(v_trail.marker.flags, 0x4000)) {
         output.colour.x = 0.0;
         output.colour.y = 0.0;
         output.colour.z = 0.0;
     }
+#endif
+#if GOGGLES2_REFLECTING
+    // to draw directly onto water surface
+    output.position.y *= GET_MFLAG(v_trail.marker.flags, 0x4000) ? -1.0 : 1.0;
 #endif
 
     // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
@@ -52,13 +66,13 @@ TrailOutputV trail_main_v(TrailInput input)
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags
-#if GOGGLES2_SHADOWBOXING
+#if GOGGLES2_SHADOWBOXING || GOGGLES2_REFLECTING
             | (v_trail.marker.flags & 0x4000)
 #endif
         ,
         0
     );
-    output.fade = float2(fade, 0.0);
+    output.fade = float2(fade, fade2);
 
     return output;
 }
@@ -71,6 +85,9 @@ TrailOutputP trail_main_p(TrailInputP inp)
     uint flags = vout.instance.x;
     TrailOutputP output;
     float4 colour = vout.colour * shaderTexture.Sample(SampleType, vout.tex);
+#if GOGGLES_OBSCURED
+    colour.w += (0.2 + colour.x + colour.y + colour.z) * max(0.0, vout.colour.w - 1.0);
+#endif
     float fade = vout.fade.x;
     colour.w = colour.w * fade;
 
@@ -83,6 +100,9 @@ TrailOutputP trail_main_p(TrailInputP inp)
     bool face_cull = GET_MFLAG(flags, MFLAG_FACE_CULL);
     bool face_cull_dir = GET_MFLAG(flags, MFLAG_FACE_CULL_FRONT) ^ face_front;
     float clip_face = float((!face_cull) | face_cull_dir) - 0.5f;
+#if GOGGLES2_REFLECTING
+    float clip_water_plane = vout.fade.y * (GET_MFLAG(flags, 0x4000) ? -1.0 : 1.0) + UNDERWATER_VISIBILITY;
+#endif
 
     float clip_fade = float(GET_MFLAG(flags, MFLAG_OPAQUE));
     // XXX: or just enable depth clipping?
@@ -90,21 +110,27 @@ TrailOutputP trail_main_p(TrailInputP inp)
     if ((colour.w + clip_fade) < DISCARD_ALPHA || vout.position.z < DiscardZ) { discard; }
 #else
     clip(float3(
+#if GOGGLES2_REFLECTING
+        clip_water_plane,
+#else
         clip_face,
+#endif
         colour.w + clip_fade - DISCARD_ALPHA,
         vout.position.z - DiscardZ
     ));
 #endif
 
-#if 1
+#if GOGGLES2_REFLECTING
+    float intensity = 1.0;
+#else
     float distance_squared = dot(vout.displacement, vout.displacement);
 
     float distance_intensity = saturate(1.0 - distance_squared / (p_render.distance_fade * p_render.distance_fade));
     float intensity = INTENSITY_PARAM_2 * distance_intensity * distance_intensity + INTENSITY_PARAM_1 * distance_intensity + INTENSITY_PARAM_0;
-#else
-    float intensity = 1.0;
 #endif
-#if 1
+#if GOGGLES2_REFLECTING
+    float overlap = 1.0;
+#else
     // fade out when close to the player
     float obscure_fade = float(GET_MFLAG(flags, MFLAG_OBSCURE_FADE));
     float overlap = lerp(
@@ -112,11 +138,11 @@ TrailOutputP trail_main_p(TrailInputP inp)
         1.0f,
         obscure_fade
     );
-#else
-    float overlap = 1.0;
 #endif
 
-#if 1
+#if GOGGLES2_REFLECTING
+    float3 feather3 = float3(1.0, 1.0, 1.0);
+#else
     float2 viewport_size_1 = float2(p_render.edge_viewport21.x, p_render.edge_viewport21.y);
     float3 feather_scale = float3(p_render.edge_feather.x, p_render.edge_feather.y, FEATHER_SCALE_Z);
     float3 feather_offset = float3(
@@ -124,8 +150,6 @@ TrailOutputP trail_main_p(TrailInputP inp)
         MAD(vout.position.z, -FEATHER_SIZE_Z, FeatherOffset.z)
     );
     float3 feather3 = saturate((float1(1.0).xxx - feather_offset) * feather_scale);
-#else
-    float3 feather3 = float3(1.0, 1.0, 1.0);
 #endif
 
     float feather = feather3.x * feather3.y;
@@ -234,6 +258,11 @@ PoiOutputV poi_main_v(PoiInput input)
     ) * bounce_height;
     pos.y = pos.y + bounce_y;
 #endif
+#if GOGGLES2_REFLECTING
+    float fade2 = pos.y;
+#else
+    const float fade2 = 0.0;
+#endif
 
     pos = mul(v_render.view, pos);
 #if 1
@@ -251,6 +280,10 @@ PoiOutputV poi_main_v(PoiInput input)
         output.position.z = output.position.z + 0.0015;
     }
 #endif
+#if GOGGLES2_REFLECTING
+    // to draw directly onto water surface
+    output.position.y *= GET_MFLAG(v_poi.marker.flags, 0x4000) ? -1.0 : 1.0;
+#endif
 
     output.tex = input.vertex.tex;
 
@@ -258,20 +291,24 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: max/min size
     // TODO: can-fade
     // TODO: fadenear/fadefar
-    output.colour = float4(input.marker.colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
+    float3 input_colour = input.marker.colour;
+#if GOGGLES_OBSCURED && 0
+    input_colour = saturate(input_colour * max(1.0, v_poi.marker.alpha));
+#endif
+    output.colour = float4(input_colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
     // TODO: apply+preprocess player_feather here?
 
     uint flags = input.marker.flags & (v_poi.marker.flags | ~MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags
-#if GOGGLES2_SHADOWBOXING
+#if GOGGLES2_SHADOWBOXING || GOGGLES2_REFLECTING
             | (v_poi.marker.flags & 0x4000)
 #endif
         ,
         0
     );
-    output.fade = float2(fade, 0.0);
+    output.fade = float2(fade, fade2);
 
     return output;
 }

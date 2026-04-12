@@ -1,12 +1,11 @@
-use {
-    core::{fmt, marker::PhantomData, mem, ptr::NonNull},
-    taimi_hoard::{iters::IterExt, lazyfmt},
-};
+use core::mem;
+use core::fmt;
+use core::marker::PhantomData;
+use core::ptr::NonNull;
+use taimi_hoard::{iters::IterExt, lazyfmt};
 
 pub type FrameRecordOf<T> = FrameRecord<4, T>;
-pub const fn n_len(n: usize) -> usize {
-    1 << n
-}
+pub const fn n_len(n: usize) -> usize { 1 << n }
 pub type FrameId = u32;
 #[derive(Clone, Hash)]
 pub struct FrameRecord<const N: usize, T: FrameRecordEntry> {
@@ -16,7 +15,8 @@ pub struct FrameRecord<const N: usize, T: FrameRecordEntry> {
 
 impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     pub const EMPTY: Self = match N {
-        n if !n.is_power_of_two() => panic!("^2 please"),
+        n if !n.is_power_of_two() =>
+            panic!("^2 please"),
         _ => Self {
             data: [const { T::EMPTY }; N],
             position: 0,
@@ -36,7 +36,7 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
         let tail = match () {
             #[cfg(todo = "unnecessary")]
             _ => self.iter_data_mut().rev(),
-            _ => self.iter_data_to_mut(self.position.wrapping_add(1)),
+            _ => self.iter_data_to_mut(self.position.wrapping_add(1))
         };
         for gone in tail.take(amt as usize) {
             gone.clobber();
@@ -62,7 +62,9 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     }
     pub fn get_wrapped(&self, position: FrameId) -> &T {
         let start = position as usize % Self::N_LEN;
-        unsafe { self.data.get_unchecked(start) }
+        unsafe {
+            self.data.get_unchecked(start)
+        }
     }
     pub fn get_at_mut(&mut self, position: FrameId) -> Option<&mut T> {
         self.position_in_range(position)
@@ -71,7 +73,9 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     }
     pub fn get_wrapped_mut(&mut self, position: FrameId) -> &mut T {
         let start = position as usize % Self::N_LEN;
-        unsafe { self.data.get_unchecked_mut(start) }
+        unsafe {
+            self.data.get_unchecked_mut(start)
+        }
     }
     #[inline]
     pub fn front(&self) -> &T {
@@ -111,9 +115,7 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     pub fn iter_all(&self) -> impl DoubleEndedIterator<Item = (FrameId, &T)> + ExactSizeIterator {
         self.iter_positions().zip(self.iter_data())
     }
-    pub fn iter_all_mut(
-        &mut self,
-    ) -> impl DoubleEndedIterator<Item = (FrameId, &mut T)> + ExactSizeIterator {
+    pub fn iter_all_mut(&mut self) -> impl DoubleEndedIterator<Item = (FrameId, &mut T)> + ExactSizeIterator {
         self.iter_positions().zip(self.iter_data_mut())
     }
     pub fn iter_data(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
@@ -124,8 +126,7 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     }
     pub fn iter_data_to(&self, end: FrameId) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
         (0u32..Self::N_LEN as u32).lazy_map(move |i| unsafe {
-            self.data
-                .get_unchecked(end.wrapping_add(i) as usize % Self::N_LEN)
+            self.data.get_unchecked(end.wrapping_add(i) as usize % Self::N_LEN)
         })
     }
     #[cfg(todo)]
@@ -137,16 +138,10 @@ impl<const N: usize, T: FrameRecordEntry> FrameRecord<N, T> {
     fn iter_data_from(&self, position: FrameId) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
         self.iter_data_to(position.wrapping_add(1)).rev()
     }
-    fn iter_data_to_mut(
-        &mut self,
-        end: FrameId,
-    ) -> impl DoubleEndedIterator<Item = &mut T> + ExactSizeIterator {
+    fn iter_data_to_mut(&mut self, end: FrameId) -> impl DoubleEndedIterator<Item = &mut T> + ExactSizeIterator {
         FrameIterMut::new_to(&mut self.data, end)
     }
-    pub fn iter_data_from_mut(
-        &mut self,
-        position: FrameId,
-    ) -> impl DoubleEndedIterator<Item = &mut T> + ExactSizeIterator {
+    pub fn iter_data_from_mut(&mut self, position: FrameId) -> impl DoubleEndedIterator<Item = &mut T> + ExactSizeIterator {
         self.iter_data_to_mut(position.wrapping_add(1)).rev()
     }
     pub fn iter_positions(&self) -> impl DoubleEndedIterator<Item = FrameId> + ExactSizeIterator {
@@ -173,8 +168,7 @@ impl<const N: usize, T: FrameRecordEntry + fmt::Debug> fmt::Debug for FrameRecor
                     sep = Some(", ");
                 }
                 f.write_str("]")
-            }))
-            .finish()
+            })).finish()
     }
 }
 
@@ -205,9 +199,7 @@ pub trait FrameRecordEntry: Sized {
 impl<T> FrameRecordEntry for Option<T> {
     const EMPTY: Self = None;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.is_none()
-    }
+    fn is_empty(&self) -> bool { self.is_none() }
     fn clobber(&mut self) {
         *self = None;
     }
@@ -222,9 +214,7 @@ impl<T> FrameRecordEntry for Option<T> {
 impl FrameRecordEntry for glam::Mat4 {
     const EMPTY: Self = glam::Mat4::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x_axis.is_empty()
-    }
+    fn is_empty(&self) -> bool { self.x_axis.is_empty() }
     fn clobber(&mut self) {
         self.x_axis.clobber();
     }
@@ -232,9 +222,7 @@ impl FrameRecordEntry for glam::Mat4 {
 impl FrameRecordEntry for glam::Mat3 {
     const EMPTY: Self = glam::Mat3::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x_axis.is_empty()
-    }
+    fn is_empty(&self) -> bool { self.x_axis.is_empty() }
     fn clobber(&mut self) {
         self.x_axis.clobber()
     }
@@ -242,9 +230,7 @@ impl FrameRecordEntry for glam::Mat3 {
 impl FrameRecordEntry for glam::Mat3A {
     const EMPTY: Self = glam::Mat3A::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x_axis.is_empty()
-    }
+    fn is_empty(&self) -> bool { self.x_axis.is_empty() }
     fn clobber(&mut self) {
         self.x_axis.clobber()
     }
@@ -252,9 +238,7 @@ impl FrameRecordEntry for glam::Mat3A {
 impl FrameRecordEntry for glam::Vec3A {
     const EMPTY: Self = glam::Vec3A::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x.to_bits() == Self::EMPTY.x.to_bits()
-    }
+    fn is_empty(&self) -> bool { self.x.to_bits() == Self::EMPTY.x.to_bits() }
     fn clobber(&mut self) {
         self.x = Self::EMPTY.x;
     }
@@ -262,9 +246,7 @@ impl FrameRecordEntry for glam::Vec3A {
 impl FrameRecordEntry for glam::Vec3 {
     const EMPTY: Self = glam::Vec3::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x.to_bits() == Self::EMPTY.x.to_bits()
-    }
+    fn is_empty(&self) -> bool { self.x.to_bits() == Self::EMPTY.x.to_bits() }
     fn clobber(&mut self) {
         self.x = Self::EMPTY.x;
     }
@@ -272,9 +254,7 @@ impl FrameRecordEntry for glam::Vec3 {
 impl FrameRecordEntry for glam::Vec4 {
     const EMPTY: Self = glam::Vec4::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x.to_bits() == Self::EMPTY.x.to_bits()
-    }
+    fn is_empty(&self) -> bool { self.x.to_bits() == Self::EMPTY.x.to_bits() }
     fn clobber(&mut self) {
         self.x = Self::EMPTY.x;
     }
@@ -282,15 +262,12 @@ impl FrameRecordEntry for glam::Vec4 {
 impl<T: glamour::FloatScalar> FrameRecordEntry for glamour::Matrix4<T> {
     const EMPTY: Self = glamour::Matrix4::NAN;
     #[inline]
-    fn is_empty(&self) -> bool {
-        self.x_axis.x.is_nan()
-    }
+    fn is_empty(&self) -> bool { self.x_axis.x.is_nan() }
     fn clobber(&mut self) {
         self.x_axis.x = Self::EMPTY.x_axis.x;
     }
 }
-impl<T: glamour::Unit> FrameRecordEntry for glamour::Vector3<T>
-where
+impl<T: glamour::Unit> FrameRecordEntry for glamour::Vector3<T> where
     T::Scalar: glamour::FloatScalar,
 {
     const EMPTY: Self = glamour::Vector3::NAN;
@@ -306,9 +283,7 @@ where
 
 struct FramePosIter(FrameId, FrameId);
 impl FramePosIter {
-    fn new_to<const N: usize>(
-        position: FrameId,
-    ) -> impl DoubleEndedIterator<Item = FrameId> + ExactSizeIterator {
+    fn new_to<const N: usize>(position: FrameId) -> impl DoubleEndedIterator<Item = FrameId> + ExactSizeIterator {
         Self(position.wrapping_sub(N as FrameId), position).rev()
     }
     fn new_from<const N: usize>(position: FrameId) -> Self {
@@ -324,9 +299,7 @@ impl ExactSizeIterator for FramePosIter {
 impl Iterator for FramePosIter {
     type Item = FrameId;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.0 == self.1 {
-            return None
-        }
+        if self.0 == self.1 { return None }
         let next_start = self.0.wrapping_add(1);
         self.0 = next_start;
         Some(next_start)
@@ -347,9 +320,7 @@ impl Iterator for FramePosIter {
 }
 impl DoubleEndedIterator for FramePosIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.0 == self.1 {
-            return None
-        }
+        if self.0 == self.1 { return None }
         let next_end = self.1.wrapping_sub(1);
         Some(mem::replace(&mut self.1, next_end))
     }
@@ -388,14 +359,14 @@ impl<'a, const N: usize, T> ExactSizeIterator for FrameIterMut<'a, N, T> {
 impl<'a, const N: usize, T> Iterator for FrameIterMut<'a, N, T> {
     type Item = &'a mut T;
     fn next(&mut self) -> Option<Self::Item> {
-        self.pos
-            .next()
-            .map(|position| unsafe { &mut *self.ptr_at(position) })
+        self.pos.next().map(|position| unsafe {
+            &mut *self.ptr_at(position)
+        })
     }
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.pos
-            .nth(n)
-            .map(|position| unsafe { &mut *self.ptr_at(position) })
+        self.pos.nth(n).map(|position| unsafe {
+            &mut *self.ptr_at(position)
+        })
     }
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -412,14 +383,14 @@ impl<'a, const N: usize, T> Iterator for FrameIterMut<'a, N, T> {
 }
 impl<'a, const N: usize, T> DoubleEndedIterator for FrameIterMut<'a, N, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.pos
-            .next_back()
-            .map(|position| unsafe { &mut *self.ptr_at(position) })
+        self.pos.next_back().map(|position| unsafe {
+            &mut *self.ptr_at(position)
+        })
     }
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        self.pos
-            .nth_back(n)
-            .map(|position| unsafe { &mut *self.ptr_at(position) })
+        self.pos.nth_back(n).map(|position| unsafe {
+            &mut *self.ptr_at(position)
+        })
     }
 }
 
@@ -428,12 +399,17 @@ fn frame_pos_iter() {
     const N: usize = n_len(2);
     let none = None::<bool>;
     let some = Some(true);
-    let mut data = FrameRecord::<{ N }, Option<bool>>::EMPTY;
+    let mut data = FrameRecord::<{N}, Option<bool>>::EMPTY;
     data.advance_to(2);
     data.push(some);
     data.advance_to(5);
     data.set_at(4, some);
-    let expected = [(5u32, &none), (4, &some), (3, &some), (2, &none)];
+    let expected = [
+        (5u32, &none),
+        (4, &some),
+        (3, &some),
+        (2, &none),
+    ];
     let all_positions = {
         let mut iter_pos = data.iter_positions();
         core::iter::from_fn(|| iter_pos.next()).collect::<Vec<_>>()
@@ -462,7 +438,9 @@ fn frame_pos_iter() {
     ];
     let all = data.iter_all().collect::<Vec<_>>();
     assert_eq!(&all[..], &expected[..]);
-    let all_mut = data.iter_all_mut().map(|(i, v)| (i, &*v)).collect::<Vec<_>>();
+    let all_mut = data.iter_all_mut()
+        .map(|(i, v)| (i, &*v))
+        .collect::<Vec<_>>();
     assert_eq!(&all_mut[..], &expected[..]);
 
     let mut iter_mut = data.iter_data_mut();
@@ -470,7 +448,14 @@ fn frame_pos_iter() {
     assert_eq!(iter_mut_count.count(), N);
 
     for lhs in [0, u32::MAX / 4, u32::MAX / 2, u32::MAX] {
-        for (l, r) in [(0, 9), (2, 9), (-2, 9), (-2, 0), (-2, -1), (1, 2)] {
+        for (l, r) in [
+            (0, 9),
+            (2, 9),
+            (-2, 9),
+            (-2, 0),
+            (-2, -1),
+            (1, 2),
+        ] {
             let rhs = lhs.wrapping_add_signed(r);
             let lhs = lhs.wrapping_add_signed(l);
             assert!(frame_is_lt(lhs, rhs));

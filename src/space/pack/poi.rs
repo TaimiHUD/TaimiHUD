@@ -362,7 +362,9 @@ impl PoiRender {
             self.icon,
             None | Some(TextureSlot::Reserved | TextureSlot::Loading)
         ) {
-            draw_state.drawn_incomplete.insert(id.clone());
+            if !draw_state.mark_incomplete(id) {
+                return true
+            }
         }
         false
     }

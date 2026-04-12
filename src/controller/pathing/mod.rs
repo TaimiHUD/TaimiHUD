@@ -20,7 +20,6 @@ use {
             },
         },
         settings::SettingsLock,
-        space::{engine::SpaceEvent, Engine},
         Interruption,
         InterruptionSignal,
     },
@@ -51,6 +50,14 @@ use {
     taimi_sync::watched,
     tokio::{select, sync::Semaphore, task::JoinSet},
     tokio_util::sync::ReusableBoxFuture,
+};
+#[cfg(feature = "space")]
+use {
+    crate::{
+        resources::shader::ShaderDescription,
+        space::pack::render,
+    },
+    taimi_d3d::shader::ShaderKind,
 };
 
 #[cfg(feature = "paths-interact")]
@@ -151,6 +158,13 @@ pub(crate) enum PathingEvent {
     #[cfg(feature = "paths-lua")]
     ScriptsEnable(Option<bool>),
     ReportResourceLoaded(shared::LoadReport),
+    #[cfg(feature = "space")]
+    LoadShader {
+        kind: ShaderKind,
+        variant: render::ArcShaderVariant,
+        entity: Option<render::ShaderState>,
+        template: ShaderDescription,
+    },
     CollectGarbage {
         tick: u32,
         aggressive: bool,
@@ -763,6 +777,8 @@ impl PathingController {
             #[cfg(feature = "paths-lua")]
             ScriptsEnable(en) => self.toggle_script_enable(en),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,
+            #[cfg(feature = "space")]
+            LoadShader { kind, variant, entity, template } => self.load_shader(kind, variant, entity, template),
             CollectGarbage { tick, aggressive } =>
                 self.collect_garbage(tick, aggressive, self.gameplay_map()).await,
             VisibleToggle { context, set } => self.set_visible(context, set).await,
@@ -812,14 +828,6 @@ impl PathingController {
                 false
             }
         });
-
-        #[cfg(feature = "goggles")]
-        match (context, set) {
-            (None, true) =>
-                Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) }),
-            (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
-            _ => (),
-        }
     }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {

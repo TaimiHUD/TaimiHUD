@@ -86,6 +86,10 @@ impl fmt::Debug for EntityInstanceData {
         }.finish()
     }
 }
+impl Default for EntityInstanceData {
+    #[inline]
+    fn default() -> Self { Self::INVALID }
+}
 
 unsafe impl D3dBufferData for EntityInstanceData {}
 
@@ -103,6 +107,10 @@ impl TrailInstanceData {
         marker: MarkerInstanceData::INVALID,
         _padding0: Vector2::ZERO,
     };
+}
+impl Default for TrailInstanceData {
+    #[inline]
+    fn default() -> Self { Self::INVALID }
 }
 #[derive(Debug, Copy, Clone)]
 #[repr(C, align(16))]
@@ -191,6 +199,10 @@ impl PoiInstanceData {
         self.anim_offset = start.unwrap_or(0.0);
     }
 }
+impl Default for PoiInstanceData {
+    #[inline]
+    fn default() -> Self { Self::INVALID }
+}
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct MarkerInstanceData {
@@ -278,8 +290,12 @@ impl MarkerInstanceData {
         self.anim_scale = scale;
     }
 }
+impl Default for MarkerInstanceData {
+    #[inline]
+    fn default() -> Self { Self::INVALID }
+}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C, align(16))]
 pub struct ConstantDataV {
     pub render: RenderConstantDataV,
@@ -287,14 +303,14 @@ pub struct ConstantDataV {
     pub poi: PoiConstantDataV,
 }
 unsafe impl D3dBufferData for ConstantDataV {}
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C, align(16))]
 pub struct ConstantDataP {
     pub render: RenderConstantDataP,
 }
 unsafe impl D3dBufferData for ConstantDataP {}
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct RenderConstantDataV {
     pub projection: Matrix4<f32>,
@@ -316,7 +332,7 @@ pub struct RenderConstantDataV {
     pub _padding2: Vector4,
 }
 unsafe impl D3dBufferData for RenderConstantDataV {}
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct RenderConstantDataP {
     #[cfg(todo)]
@@ -327,11 +343,11 @@ pub struct RenderConstantDataP {
     pub edge_feather: [f32; 2],
 }
 unsafe impl D3dBufferData for RenderConstantDataP {}
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct MarkerConstantDataP {
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct MarkerConstantDataV {
     pub scale: f32,
@@ -344,7 +360,7 @@ impl MarkerConstantDataV {
     pub const FLAG_POI_LIMIT_SIZE: u32 = MarkerInstanceData::FLAG_BILLBOARD;
     pub const FLAG_DISTANCE_FADE: u32 = MarkerInstanceData::FLAG_WALL;
 }
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct TrailConstantDataV {
     pub marker: MarkerConstantDataV,
@@ -353,7 +369,7 @@ pub struct TrailConstantDataV {
     pub _padding0: Vector2<f32>,
 }
 unsafe impl D3dBufferData for TrailConstantDataV {}
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct PoiConstantDataV {
     /// TODO: Mat3 or Mat43, idk what hlsl likes
@@ -389,7 +405,7 @@ fn pack_int_pair(v0: f32, v1: f32) -> u32 {
     v0 | v1
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 #[repr(C, align(16))]
 pub struct TrailVertex {
     pub position: Vector3<DrawSpace>,

@@ -19,6 +19,7 @@ use {
         space::engine::Engine,
     },
     std::{ops::Range, sync::Arc},
+    taimi_meta::map::MapProjectionDepth,
 };
 use {
     crate::{
@@ -30,7 +31,7 @@ use {
     anyhow::Context,
     core::num::NonZero,
     glamour::{Angle, Point3, Size2, Vector2, Vector3},
-    std::time::Instant,
+    std::time::{Duration, Instant},
     taimi_meta::{
         coords::{LocalSpace, ScreenSpace},
         map::MapID,
@@ -45,10 +46,10 @@ use {
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 #[cfg(feature = "space")]
-pub use self::space::GogglesState;
+pub use self::space::CameraState;
 pub use self::{
     diag::{frame_log, FrameLog, FrameState},
-    mumblelink::MumblelinkTick,
+    mumblelink::{MumblelinkTick, MumblelinkFrames},
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
 
@@ -88,23 +89,30 @@ pub struct RenderMachine {
     #[cfg(feature = "space")]
     pub depth_range: Option<Range<f32>>,
     #[cfg(feature = "space")]
+    pub map_depth: Option<MapProjectionDepth>,
+    #[cfg(feature = "space")]
+    pub map_depth_guess: Option<MapProjectionDepth>,
+    #[cfg(feature = "space")]
     fov: Vector2<Angle>,
     #[cfg(feature = "space")]
     pub fov2_tan: Angle,
     #[cfg(feature = "goggles")]
-    pub goggles: GogglesState,
+    pub goggles: crate::space::goggles::GogglesState,
     #[cfg(feature = "extension-nexus")]
     pub rtapi: Option<rt::RealTimeApi>,
     #[cfg(feature = "extension-nexus")]
     pub rtapi_state: RenderStateRtapi,
     #[cfg(feature = "extension-nexus")]
     pub rtapi_users: RenderUsers,
+    pub mumblelink_frames: MumblelinkFrames,
     pub mumblelink_frame: u32,
     pub mumblelink_frame_player: Option<(u32, Instant)>,
     pub mumblelink_frame_skip: u32,
     pub mumblelink_map: MapID,
     pub mumblelink_state: UiState,
     pub mumblelink_player: RenderPositioning,
+    #[cfg(feature = "space")]
+    pub camera: CameraState,
     #[cfg(feature = "space")]
     pub mumblelink_camera: RenderPosition,
     #[cfg(feature = "space")]
@@ -114,6 +122,7 @@ pub struct RenderMachine {
     #[cfg(feature = "space")]
     pub mumblelink_camera_prev_frame: u32,
     pub mumblelink_users: RenderUsers,
+    pub frame_duration: Option<Duration>,
     pub gameplay: GameplayState,
     #[cfg(not(any(feature = "markers", feature = "space")))]
     pub display_size: Size2<ScreenSpace>,
@@ -169,21 +178,28 @@ impl RenderMachine {
             #[cfg(feature = "space")]
             fov2_tan: Self::DEFAULT_FOV2_TAN,
             #[cfg(feature = "goggles")]
-            goggles: GogglesState::default(),
+            goggles: Default::default(),
             #[cfg(feature = "space")]
             depth_range: None,
+            #[cfg(feature = "space")]
+            map_depth: None,
+            #[cfg(feature = "space")]
+            map_depth_guess: None,
             #[cfg(feature = "extension-nexus")]
             rtapi: None,
             #[cfg(feature = "extension-nexus")]
             rtapi_state: RenderStateRtapi::new(),
             #[cfg(feature = "extension-nexus")]
             rtapi_users: Self::USERS,
+            mumblelink_frames: MumblelinkFrames::default(),
             mumblelink_frame: 0,
             mumblelink_frame_player: None,
             mumblelink_frame_skip: 0,
             mumblelink_map: 0,
             mumblelink_state: UiState::empty(),
             mumblelink_player: Self::POSITIONING_EMPTY,
+            #[cfg(feature = "space")]
+            camera: CameraState::default(),
             #[cfg(feature = "space")]
             mumblelink_camera: Self::POSITION_EMPTY,
             #[cfg(feature = "space")]
@@ -193,6 +209,7 @@ impl RenderMachine {
             #[cfg(feature = "space")]
             mumblelink_camera_prev_frame: 0,
             mumblelink_users: Self::USERS,
+            frame_duration: None,
             gameplay: GameplayState::INITIAL,
             #[cfg(not(any(feature = "markers", feature = "space")))]
             display_size: Size2::ZERO,
@@ -268,8 +285,48 @@ impl RenderMachine {
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
-            use taimi_meta::coords::MapLocalScale;
-            self.map_info = match gameplay.latest_map() {
+            let map_id = gameplay.latest_map();
+            #[cfg(feature = "goggles")]
+            if let Some(map_id) = map_id {
+                let hard = match trans {
+                    GameplayTransition::Map { prev_map_id: Some(prev), .. } => prev != map_id,
+                    GameplayTransition::Loaded { prev_map_id: Some(prev), .. } => prev != map_id,
+                    #[cfg(todo)]
+                    GameplayTransition::Map { prev_map_id: None, next_map_id } => true,
+                    _ => false,
+                };
+                self.goggles.act_map_enter(hard);
+            } else {
+                #[cfg(feature = "goggles2-camera")]
+                {
+                    let farz = trans.prev_map_id()
+                        .and_then(|map_id| self.goggles.camera.perspective_farz()
+                            .map(|farz| (map_id, farz))
+                        );
+                    let settings = farz.is_some().then(||
+                        crate::SETTINGS.get().and_then(|s| s.try_write().ok())
+                    ).flatten();
+                    if let (Some((map_id, farz)), Some(mut settings)) = (farz, settings) {
+                        let dirty = if let Some(pathing) = settings.pathing.as_mut() {
+                            pathing.space.goggles.set_map_proj_seen_depth(map_id.get(), farz)
+                        } else { false };
+                        if dirty {
+                            settings.mark_dirty();
+                            #[cfg(taimi_debug)]
+                            if let Some((h, _, near, far)) = self.goggles.camera.perspective_params() {
+                                log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({near}..{far}) h={h:?}")
+                            }
+                        }
+                    }
+                }
+                self.goggles.act_map_exit(self.gameplay, trans);
+            }
+            #[cfg(feature = "space")]
+            if let Some(map_id) = map_id {
+                self.map_depth = MapCache.lookup_map_projection(map_id.get()).map(|proj| proj.depth.clone());
+                self.map_depth_guess = None;
+            }
+            self.map_info = match map_id {
                 None => {
                     if self.map_hidden {
                         log::info!("UI toggle escape hatch - resetting hidden state due to loading screen");
@@ -284,25 +341,20 @@ impl RenderMachine {
                             self.map.calibration.local_offset = None;
                         }
                         self.map.calibration.update_from_map(&map);
+                        #[cfg(todo)]
                         #[cfg(feature = "space")]
-                        {
+                        if self.map_depth.is_none() {
+                            use taimi_meta::coords::MapLocalScale;
                             let continent = map.continent_rect().size();
                             let rect = map.map_rect();
                             let map_extents = rect.size().to_vector() + rect.center().to_vector();
                             let map_aspect = map_extents.x / map_extents.y;
                             let far = continent.height * 12.0 * map_aspect.min(Self::DEPTH_ASPECT_MAX) * MapLocalScale::METRES_PER_INCH;
-                            let near = far * Self::DEPTH_NEAR_MULT;
-                            self.depth_range = Some(near..far);
+                            self.map_depth_guess = MapProjectionDepth::with_far_in(far);
                         }
                         Some(map)
                     },
-                    None => {
-                        #[cfg(feature = "space")]
-                        {
-                            self.depth_range = None;
-                        }
-                        None
-                    },
+                    None => None,
                 },
             };
         }
@@ -364,9 +416,32 @@ impl RenderMachine {
             return
         }
 
+        let now = Instant::now();
         let mut state = RenderState::lock();
         if let Some(state) = state.as_mut() {
-            state.machine.turn_render_pre();
+            let render_timestamp = match () {
+                #[cfg(feature = "goggles")]
+                _ => state.machine.goggles.latest_frame_timestamp(),
+                #[cfg(not(feature = "goggles"))]
+                _ => None::<Instant>,
+            };
+            state.machine.frame_duration = None;
+            let prev = state.machine.mumblelink_frames.get_latest_render_timestamp().copied();
+            let render_timestamp = render_timestamp.or_else(|| {
+                let frametime = *state.machine.frame_duration.insert(now.saturating_duration_since(prev?));
+                let midpoint = (frametime <= Self::FRAMETIME_MAX_REASONABLE)
+                    .then_some(frametime / 3);
+                midpoint.and_then(|mid|
+                    now.checked_sub(mid)
+                )
+            });
+            let wants_frame_duration = state.machine.frame_duration.is_none() && state.machine.metrics_switch.contains(MetricsSwitch::COLLECT);
+            if wants_frame_duration {
+                if let (Some(prev), Some(render)) = (prev, render_timestamp) {
+                    state.machine.frame_duration = render.checked_duration_since(prev);
+                }
+            }
+            state.machine.turn_render_pre(now, render_timestamp);
             state.pre_render_ui();
 
             Self::run_tasks(state);
@@ -382,6 +457,7 @@ impl RenderMachine {
             state.machine.turn_render(render_slot);
         }
     }
+    const FRAMETIME_MAX_REASONABLE: Duration = Duration::from_millis(0x80);
 
     pub const TEXTURE_LOGO_LINES_KEY: &'static str = "taimihud_lines256";
     pub const TEXTURE_LOGO_LINES_BIN: &'static [u8] =
@@ -390,9 +466,10 @@ impl RenderMachine {
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
         include_bytes!("../../../data/textures/logotype-glow-256.png");
 
-    pub fn turn_render_pre(&mut self) {
+    pub fn turn_render_pre(&mut self, now: Instant, render_timestamp: Option<Instant>) {
         self.metrics_pre();
-        self.metrics_pre_render();
+        self.metrics_pre_render(&now);
+        self.mumblelink_frames.record_render_tick_at(render_timestamp.unwrap_or(now));
 
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
@@ -410,14 +487,9 @@ impl RenderMachine {
             }
             let _ = self.pack_map.try_read_mut();
         }
-        #[cfg(feature = "goggles")]
+        #[cfg(feature = "space")]
         {
-            let visible = self.gameplay.gameplay_map().is_some();
-            self.goggles.act_pre_render(visible);
-            if true {
-                let size = self.display_size_ref();
-                crate::space::goggles::FerretResource::set_display_size(size.to_raw());
-            }
+            self.pre_render_space();
         }
     }
 
@@ -427,20 +499,35 @@ impl RenderMachine {
 
         let (ml, mut frameskip_gameplay, frame_skip) = self.next_mumblelink_frame();
 
-        let mumble_gameplay = ml.and_then(|ml|
+        if ml.is_none() {
+            self.mumblelink_frames.record_missed_tick();
+        }
+        let mumble_gameplay = ml.and_then(|ml| {
+            let now = *self.mumblelink_frames.latest_render_timestamp();
+            self.mumblelink_frames.record_tick_at(self.mumblelink_frame, now);
             self.act_mumblelink_tick(ml)
-        );
+        });
+        #[cfg(feature = "space")]
+        {
+            self.camera.resync_with_frames(&self.mumblelink_frames);
+        }
         self.mumblelink_frame_skip = frame_skip;
+
+        #[cfg(feature = "goggles2-camera")]
+        {
+            self.goggles_update_camera(true);
+        }
 
         let ui_tick = self.ui_tick();
 
         let mut gameplay_change = None;
         #[cfg(feature = "extension-nexus")]
-        if let Some(rtapi) = self
+        let rtapi = self
             .rtapi
             .as_ref()
-            .and_then(|rtapi| rtapi.is_active().then_some(rtapi))
-        {
+            .and_then(|rtapi| rtapi.is_active().then_some(rtapi));
+        #[cfg(feature = "extension-nexus")]
+        if let Some(rtapi) = rtapi {
             let rtapi_camera = ui_tick.is_none() || !self.rtapi_users.is_empty();
             let rtapi_gameplay = self.rtapi_state.update(rtapi, ui_tick, rtapi_camera);
             if let Some(rtapi_gameplay) = rtapi_gameplay {
@@ -448,8 +535,11 @@ impl RenderMachine {
             } else {
                 frameskip_gameplay = None;
             }
+            self.camera.mumblelink_confident = true;
+            self.rtapi_camera_sync();
         } else {
             self.rtapi_state.set_inactive();
+            self.camera.mumblelink_confident = false;
         }
 
         let gameplay_change = gameplay_change
@@ -532,45 +622,9 @@ impl RenderMachine {
     fn post_render(&mut self) {
         self.metrics_post_render();
         self.act_frame_log();
-        #[cfg(feature = "goggles2-camera")]
-        if self.goggles.camera_enabled {
-            let cam = match self.get_camera_mumblelink() {
-                #[cfg(feature = "extension-nexus")]
-                _ if self.rtapi_state.is_cutscene() => Err(true),
-                #[cfg(feature = "extension-nexus")]
-                #[cfg(todo = "unnecessary")]
-                _ if self.rtapi_state.is_intermission() => Err(false),
-                _ if self.gameplay.gameplay_map().is_none() => Err(false),
-                cam => Ok(cam),
-            };
-            match cam {
-                Ok(cam) => {
-                    let persp = (
-                        self.get_fov().y,
-                        self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO),
-                    );
-                    let ml_frame = self.mumblelink_frame.wrapping_add(self.mumblelink_frame_skip);
-                    let update_mod: u32 = match self.mumblelink_state {
-                        s if !s.contains(UiState::WINDOW_FOCUS) =>
-                            0x80,
-                        s if s.contains(UiState::MAP_OPEN) => match self.get_map_open_state() {
-                            MapOpen::Closed | MapOpen::Closing { .. } =>
-                                0x08,
-                            _ => 0x80,
-                        },
-                        _ => 0x02,
-                    };
-                    let update_mask = update_mod - 1;
-                    let update = (ml_frame & update_mask) as u8;
-                    self.goggles.camera_setup(cam, persp, update);
-                },
-                Err(intermission) =>
-                    self.goggles.camera_pause(intermission),
-            }
-        }
         #[cfg(feature = "goggles")]
         {
-            self.goggles.act_render_post();
+            self.goggles_post_render();
         }
         if frame_log!(::is_enabled()) {
             if let Some((pos, dir)) = self.get_player_pos() {
@@ -578,7 +632,7 @@ impl RenderMachine {
                     "player @ {pos:?} front={dir:?}"
                 );
             }
-            if let Some((pos, dir, up)) = self.get_camera_mumblelink() {
+            if let Some((pos, dir, up)) = self.get_camera_mumblelink_verbatim() {
                 frame_log!(;
                     "camera @ {pos:?} dir={dir:?} up={up:?}"
                 );
@@ -602,15 +656,27 @@ impl RenderMachine {
     pub fn post_ui(&mut self) {
         self.metrics_post_ui();
     }
+    /// TODO: move to actual post-render (nexus callback)?
+    pub fn post_render_late(&mut self, _render_slot: RenderSlot<'_>) {
+        #[cfg(feature = "space")]
+        if let (Some(Ok(engine)),) = _render_slot {
+            engine.drawing.end_frame();
+        }
+        #[cfg(feature = "goggles")]
+        {
+            self.goggles_post_render_late(_render_slot);
+        }
+        self.post_render_mumblelink_check();
+    }
 
     #[inline]
-    fn is_cutscene(&self) -> bool {
+    pub(crate) fn is_cutscene(&self) -> bool {
         #[cfg(feature = "extension-nexus")]
         if self.rtapi_state.is_active() {
             return self.rtapi_state.is_cutscene();
         }
         #[cfg(feature = "goggles2-camera")]
-        if self.gameplay.gameplay_map().is_none() && self.goggles.camera_enabled && self.goggles.is_camera_moving() { return true }
+        if self.gameplay.gameplay_map().is_none() && self.goggles.camera.camera_enabled && self.is_camera_moving() { return true }
         false
     }
     #[inline]
@@ -627,7 +693,7 @@ impl RenderMachine {
         if self.rtapi_state.is_loading_uncertain() { return true }
         if self.is_cutscene() {
             #[cfg(feature = "goggles2-camera")]
-            if !self.goggles.has_camera() { return true }
+            if !self.goggles.camera.has_camera() { return true }
         }
         false
     }

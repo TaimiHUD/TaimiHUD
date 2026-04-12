@@ -1,4 +1,4 @@
-use {anyhow::anyhow, core::mem};
+use {anyhow::anyhow, core::mem, num_traits::AsPrimitive};
 
 pub mod gameplay;
 mod minimap;
@@ -42,17 +42,22 @@ impl UiSize {
         [small, normal, large, 1.0]
     };
 
+    pub const REPR_MIN: u32 = Self::MIN as u32;
+    pub const REPR_MAX: u32 = Self::MAX as u32;
+    pub const REPR_END: u32 = Self::REPR_MAX + 1;
     pub const fn from_repr(value: u32) -> Option<Self> {
         match value {
-            0..=3 => Some(unsafe { Self::from_repr_unchecked(value) }),
+            Self::REPR_MIN..=Self::REPR_MAX => Some(unsafe { Self::from_repr_unchecked(value) }),
             _ => None,
         }
     }
 
+    #[inline(always)]
     pub const unsafe fn from_repr_unchecked(value: u32) -> Self {
         mem::transmute(value)
     }
 
+    #[inline(always)]
     pub const fn repr(self) -> u32 {
         self as _
     }
@@ -101,8 +106,17 @@ impl UiSize {
 }
 
 impl From<UiSize> for u32 {
+    #[inline(always)]
     fn from(size: UiSize) -> Self {
         size.repr()
+    }
+}
+impl<T: Copy + 'static> AsPrimitive<T> for UiSize where
+    u32: AsPrimitive<T>,
+{
+    #[inline(always)]
+    fn as_(self) -> T {
+        self.repr().as_()
     }
 }
 
@@ -208,21 +222,59 @@ impl From<u32> for UiState {
 
 #[doc(alias = "CurrentPerspective")]
 #[derive(Debug, Default, PartialOrd, Ord, PartialEq, Eq, Clone, Copy, Hash)]
+#[cfg_attr(todo, repr(u8))]
 pub enum MapContext {
-    #[default]
-    Minimap,
     /// [UiState::MapOpen]
-    Global,
+    Global = Self::REPR_GLOBAL as _,
+    #[default]
+    Minimap = Self::REPR_MINIMAP as _,
 }
 
 impl MapContext {
     pub const DEFAULT: Self = Self::Minimap;
+    /// 1
+    pub const REPR_GLOBAL: u8 = UiState::MAP_OPEN.bits() as _;
+    /// 2
+    pub const REPR_MINIMAP: u8 = Self::REPR_GLOBAL + 1;
+    pub const REPR_MIN: u8 = Self::REPR_GLOBAL;
+    pub const REPR_MAX: u8 = Self::REPR_MINIMAP;
+    pub const REPR_END: u8 = Self::REPR_MAX + 1;
 
-    pub fn ui_flag(self) -> UiState {
+    pub const fn ui_flag(self) -> UiState {
         match self {
             MapContext::Global => UiState::MapOpen,
             MapContext::Minimap => UiState::empty(),
         }
+    }
+
+    #[inline(always)]
+    pub const fn repr(self) -> u8 {
+        self as u8
+    }
+    pub const fn from_repr(repr: u8) -> Option<Self> {
+        match repr {
+            Self::REPR_MIN..=Self::REPR_MAX => Some(unsafe {
+                Self::from_repr_unchecked(repr)
+            }),
+            _ => None,
+        }
+    }
+    #[inline]
+    pub const unsafe fn from_repr_unchecked(repr: u8) -> Self {
+        match repr {
+            Self::REPR_GLOBAL => Self::Global,
+            Self::REPR_MINIMAP => Self::Minimap,
+            _ => core::hint::unreachable_unchecked(),
+        }
+    }
+}
+
+impl<T: Copy + 'static> AsPrimitive<T> for MapContext where
+    u8: AsPrimitive<T>,
+{
+    #[inline(always)]
+    fn as_(self) -> T {
+        self.repr().as_()
     }
 }
 
@@ -236,12 +288,13 @@ impl From<UiState> for MapContext {
 }
 
 impl From<MapContext> for UiState {
+    #[inline(always)]
     fn from(ctx: MapContext) -> Self {
         ctx.ui_flag()
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum LocalContext {
     World,
     Map(MapContext),
@@ -251,11 +304,41 @@ impl LocalContext {
     pub const MAP: Self = Self::GLOBAL;
     pub const GLOBAL: Self = Self::Map(MapContext::Global);
     pub const MINIMAP: Self = Self::Map(MapContext::Minimap);
+    /// 3
+    pub const REPR_WORLD: u8 = MapContext::REPR_END;
+    pub const REPR_MIN: u8 = MapContext::REPR_MIN;
+    pub const REPR_MAX: u8 = Self::REPR_WORLD;
+    pub const REPR_END: u8 = Self::REPR_MAX + 1;
 
+    #[inline]
     pub const fn as_map(self) -> Option<MapContext> {
         match self {
             LocalContext::World => None,
             LocalContext::Map(map) => Some(map),
+        }
+    }
+
+    #[inline]
+    pub const fn repr(self) -> u8 {
+        match self {
+            LocalContext::World => Self::REPR_WORLD,
+            LocalContext::Map(map) => map.repr(),
+        }
+    }
+    pub const fn from_repr(repr: u8) -> Option<Self> {
+        match repr {
+            Self::REPR_WORLD => Some(Self::World),
+            repr => match MapContext::from_repr(repr) {
+                Some(map) => Some(Self::Map(map)),
+                None => None,
+            },
+        }
+    }
+    #[inline]
+    pub const unsafe fn from_repr_unchecked(repr: u8) -> Self {
+        match repr {
+            Self::REPR_WORLD => Self::World,
+            repr => Self::Map(MapContext::from_repr_unchecked(repr)),
         }
     }
 
@@ -269,7 +352,17 @@ impl LocalContext {
     }
 }
 
+impl<T: Copy + 'static> AsPrimitive<T> for LocalContext where
+    u8: AsPrimitive<T>,
+{
+    #[inline(always)]
+    fn as_(self) -> T {
+        self.repr().as_()
+    }
+}
+
 impl From<MapContext> for LocalContext {
+    #[inline(always)]
     fn from(map: MapContext) -> Self {
         Self::Map(map)
     }
@@ -285,6 +378,7 @@ impl From<Option<MapContext>> for LocalContext {
 }
 
 impl From<LocalContext> for Option<MapContext> {
+    #[inline(always)]
     fn from(value: LocalContext) -> Self {
         value.as_map()
     }

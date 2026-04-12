@@ -477,21 +477,23 @@ pub fn d3d11_device() -> RuntimeResult<Option<rt::Device>> {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
-    use windows::Win32::Graphics::Dxgi::IDXGISwapChain;
-
+pub(super) fn dxgi_swap_chain_ref<'a>() -> Option<&'a Option<rt::SwapChain>> {
     if !available() {
-        return Ok(None)
+        return None
     }
 
     let api: &'static AddonApi = AddonApi::get();
 
-    let swap_chain = unsafe { &*(ptr::addr_of!(api.swap_chain) as *const Option<IDXGISwapChain>) };
-    if swap_chain.is_none() {
-        return Err("DXGI swap chain unavailable")
+    let swap_chain = unsafe { &*(ptr::addr_of!(api.swap_chain) as *const Option<rt::SwapChain>) };
+    Some(swap_chain)
+}
+#[cfg(any(feature = "space", feature = "texture-loader"))]
+pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
+    match dxgi_swap_chain_ref() {
+        None => Ok(None),
+        Some(Some(sc)) => Ok(Some(sc.clone())),
+        Some(None) => Err("DXGI swap chain unavailable"),
     }
-
-    Ok(swap_chain.clone().map(Into::into))
 }
 
 pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {

@@ -58,25 +58,34 @@ impl TrailRender {
         &mut self,
         device: &Dx11Device,
         geometry: LoadedTrailGeometry,
+        arcrender: bool,
     ) -> anyhow::Result<()> {
         let trailv = geometry.vertices.iter()
             .map(|v| super::instance::TrailVertex::from(*v))
             .collect::<Vec<_>>();
-        let trailv = crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv));
+        let trailv = arcrender.then(|| crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv))).flatten();
         let model = Model::from_vertices(geometry.vertices);
         let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
         #[cfg(feature = "statistics")]
-        let prev_size = self
+        let prev_size_vb = self
             .section_vbuffer
+            .as_ref()
+            .map(|v| v.size() as isize)
+            .unwrap_or(0);
+        let prev_size_ng = self
+            .section_vb_ng
             .as_ref()
             .map(|v| v.size() as isize)
             .unwrap_or(0);
         match section_vbuffer {
             Ok(vbuffer) => {
                 #[cfg(feature = "statistics")]
-                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size);
+                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size_vb - prev_size_ng);
                 self.section_vbuffer = Some(vbuffer);
                 self.section_vb_ng = trailv;
+                if let Some(vb) = &self.section_vb_ng {
+                    STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vb.size() as isize);
+                }
                 self.vbuffer_section_end = geometry.section_lengths;
                 let mut start = 0u32;
                 for out in &mut self.vbuffer_section_end {
@@ -105,24 +114,31 @@ impl TrailRender {
         id: &MarkerId,
         draw_state: &mut PackRenderState,
         path: Locator<LoadedTrailPath, TrailSectionPath>,
+        arcrender: bool,
     ) -> bool {
         let mut incomplete = false;
-        if self.section_vbuffer.is_none() {
+        let vb_empty = match arcrender {
+            true => self.section_vb_ng.is_none(),
+            _ => self.section_vbuffer.is_none(),
+        };
+        if vb_empty {
             if !self.is_empty() {
                 // marked broken, ignore this section...
                 return true
             }
+            let id_storage;
             let id = match id {
                 id if path.path.path != 0 => {
                     // replace section index with 0 since we can't partially load trl data (yet?)
                     let id = id
                         .get_marker_pack_map_path()
                         .rel(MarkerIndex::with_trail_section(path.root.path, 0));
-                    MarkerId::for_marker(id)
+                    id_storage = MarkerId::for_marker(id);
+                    &id_storage
                 },
-                id => id.clone(),
+                id => id,
             };
-            draw_state.drawn_incomplete.insert(id);
+            draw_state.mark_incomplete(id);
             incomplete = true;
         }
         if matches!(
@@ -132,7 +148,9 @@ impl TrailRender {
             let id = id
                 .get_marker_pack_map_path()
                 .rel(MarkerIndex::with_trail(path.root.path));
-            draw_state.drawn_incomplete.insert(MarkerId::for_marker(id));
+            if !draw_state.mark_incomplete(&MarkerId::for_marker(id)) {
+                incomplete = true;
+            }
         }
         incomplete
     }
@@ -249,6 +267,9 @@ impl TrailRender {
 impl Drop for TrailRender {
     fn drop(&mut self) {
         if let Some(vbuffer) = &self.section_vbuffer {
+            STATS_TRAIL_VERTEX_SIZE.decrement_by(|| vbuffer.size());
+        }
+        if let Some(vbuffer) = &self.section_vb_ng {
             STATS_TRAIL_VERTEX_SIZE.decrement_by(|| vbuffer.size());
         }
     }

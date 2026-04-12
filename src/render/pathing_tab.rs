@@ -22,11 +22,21 @@ use {
 #[cfg(feature = "paths-interact")]
 use crate::controller::pathing::InteractMessage;
 #[cfg(feature = "goggles")]
-use crate::space::engine::{Engine, SpaceEvent};
+use {
+    crate::{
+        settings::goggles::{GogglesEnables, GogglesSettings, GogglesMapDepth},
+        space::engine::{Engine, SpaceEvent},
+        render::goggles as render_goggles,
+    },
+    std::{borrow::Cow, ops::Range},
+    taimi_meta::map::MapProjectionDepth,
+};
 
 pub struct PathingConfig {
     enables: Watched<PathingEnables>,
     arcrender_enabled: bool,
+    #[cfg(feature = "goggles")]
+    goggles: render_goggles::GogglesConfig,
 }
 
 impl PathingConfig {
@@ -34,6 +44,8 @@ impl PathingConfig {
         let mut state = Self {
             enables: Watched::EMPTY,
             arcrender_enabled: false,
+            #[cfg(feature = "goggles")]
+            goggles: Default::default(),
         };
         Controller::with_sender(|s| {
             if let Some(p) = &s.pathing {
@@ -91,13 +103,13 @@ impl PathingConfig {
             if let Some(true) = available {
                 let tree_goggles = with_i18n!("pathing-config-goggles", |label| ui
                     .begin_sidebar_tree_node(
-                        ImCondition::initial(false),
+                        ImCondition::initial(true),
                         c"pathing-config-goggles",
                         label,
                     ));
                 if let Some(_tree) = tree_goggles {
                     let _id = ui.push_id(c"goggles");
-                    Self::draw_goggles_opts(ui, machine);
+                    self.draw_goggles_opts(ui, machine);
                 }
             }
         }
@@ -279,8 +291,8 @@ impl PathingConfig {
             v if v <= 0.0 => None,
             v => Some(v),
         };
-        match Self::slider_opt_setting_with_initial(ui, label, value, range, None) {
-            Some(Some(SpaceSettings::NONE_F32)) =>
+        match Self::slider_opt_setting_with_initial(ui, label, value, range, initial) {
+            Some(Some(SpaceSettings::NONE_F32)) if range.0 > 0.0 =>
                 Some(Some(0.0)),
             res => res,
         }
@@ -295,18 +307,6 @@ impl PathingConfig {
         U: ?Sized + ImDrawWindow<'ui>,
     {
         Self::slider_opt_setting_with_initial(ui, label, value, range, None)
-    }
-
-    fn slider_opt_setting_or_min<'ui, U>(
-        ui: &mut U,
-        label: impl ImStrExt,
-        value: Option<f32>,
-        range: (f32, f32),
-    ) -> Option<Option<f32>>
-    where
-        U: ?Sized + ImDrawWindow<'ui>,
-    {
-        Self::slider_opt_setting_with_initial(ui, label, value, range, Some(range.0))
     }
 
     fn slider_opt_setting_with_initial<'ui, U>(
@@ -327,7 +327,7 @@ impl PathingConfig {
         });
         let mut res = if ui.checkbox(c"", &mut enabled) {
             Some(match enabled {
-                false if initial.is_some() => None,
+                false if matches!(initial, Some(SpaceSettings::NONE_F32)) => None,
                 false => Some(SpaceSettings::NONE_F32),
                 true => initial,
             })
@@ -377,10 +377,10 @@ impl PathingConfig {
         Settings::read_with_blocking(|s| f(&s.pathing())).ok()
     }
 
-    const RANGE_ALPHA: (f32, f32) = (0.0, 1.0);
+    const RANGE_ALPHA: (f32, f32) = (0.01, 1.0);
     const RANGE_SCALE: (f32, f32) = (0.0, 25.0);
     const RANGE_SCALE_MULT5: (f32, f32) = (0.0, 5.0);
-    const RANGE_SCALE_MULT10: (f32, f32) = (0.0, 10.0);
+    const RANGE_SCALE_MULT10: (f32, f32) = (0.1, 10.0);
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
     const RANGE_SCALE_POI: (f32, f32) = Self::RANGE_SCALE_MULT5;
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
@@ -443,6 +443,7 @@ impl PathingConfig {
 
         if ui.checkbox(fl!("pathing-render-toggle"), &mut visible_space) {
             Self::set_pathing(|s| s.space.visible_space = Some(visible_space));
+            #[cfg(deleteme)]
             #[cfg(feature = "goggles")]
             Engine::try_send(match visible_space {
                 true => SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) },
@@ -454,7 +455,11 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.trail_textured_space = Some(trail_textured_space));
         }
         if ui.checkbox("arcrender", &mut arcrender) {
-            Self::set_pathing(|s| s.space.goggles.arcrender_enabled = Some(arcrender));
+            let flag = GogglesEnables::ARCRENDER_ENABLE;
+            Self::set_pathing(|s| {
+                s.space.goggles.set_enables(arcrender.then_some(flag).unwrap_or_default(), flag);
+                machine.goggles.enabled_config.set(flag, arcrender);
+            });
         }
         self.arcrender_enabled = arcrender;
 
@@ -546,12 +551,9 @@ impl PathingConfig {
             Self::set_pathing(|s| s.space.edge_feather_scale = value);
         }
         #[cfg(feature = "goggles")]
-        if let Some(value) = Self::slider_opt_setting_or_min(
-            ui,
-            fl!("pathing-config-corner-boundary-scale"),
-            edge_scale,
-            (0.1f32, 5.0),
-        ) {
+        if let Some(value) =
+            Self::slider_opt_setting_with_initial(ui, fl!("pathing-config-corner-boundary-scale"), edge_scale, (0.1f32, 5.0), Some(GogglesSettings::DEFAULT_EDGE_SCALE))
+        {
             let mut edge_scale = value;
             Self::set_pathing(|s| {
                 s.space.goggles.edge_scale = value;
@@ -582,11 +584,7 @@ impl PathingConfig {
             }
             #[cfg(feature = "goggles2-camera")]
             if value == Some(CameraSource::Goggles2) {
-                if !machine.goggles.camera_enabled {
-                    machine.goggles.camera_enable();
-                }
-            } else if machine.goggles.camera_enabled {
-                //machine.goggles.camera_disable();
+                machine.goggles.enabled_config.insert(GogglesEnables::ENABLE | GogglesEnables::CAMERA_ENABLE | GogglesEnables::CAMERA_DIR);
             }
         }
         #[cfg(any(feature = "extension-nexus", feature = "goggles2-camera"))]
@@ -1010,14 +1008,16 @@ impl PathingConfig {
         let mut changed = false;
         let mut reset = false;
         for (i, flag) in TriggerKind::SETTINGS_GUI.into_iter().enumerate() {
-            if i % 4 != 0 {
-                ui.same_line();
-            }
-            changed |= with_i18n!(flag.flag_str().unwrap_or_default(), |msg| ui.checkbox_flags(
-                msg,
-                &mut setting,
-                flag
-            ));
+            changed |= with_i18n!(flag.flag_str().unwrap_or_default(), |msg| {
+                if i > 0 {
+                    ui.reserve_line_checkbox(&msg);
+                }
+                ui.checkbox_flags(
+                    msg,
+                    &mut setting,
+                    flag
+                )
+            });
             if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
                 reset = true;
             }
@@ -1033,158 +1033,229 @@ impl PathingConfig {
     }
 
     #[cfg(feature = "goggles")]
-    fn draw_goggles_opts<'ui, U>(ui: &mut U, machine: &mut RenderMachine) -> Option<()>
+    fn draw_goggles_opts<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine) -> Option<()>
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        use {crate::render::goggles as render_goggles, core::ops::Range};
-
         let map_id = machine.gameplay.gameplay_map();
+        let farz = machine.get_depth_calibration();
         let Range { start: near, end: far } = machine.depth_range();
-        let (mut is_enabled, obscured_alpha, obscured_distance, obscured_distance_effective) =
-            Self::get_pathing(|s| (s.space.goggles.enabled(), s.space.goggles.obscured_alpha(), s.space.goggles.obscured_distance(), s.space.obscured_distance()))?;
-
-        let (enabled, needs_setup) = render_goggles::get_state();
+        let (mut enables, obscured_alpha, obscured_distance, obscured_distance_effective, farz_set, farz_seen) =
+            Self::get_pathing(|s| (
+                s.space.goggles.enables(), s.space.goggles.obscured_alpha(), s.space.goggles.obscured_distance(), s.space.obscured_distance(),
+                map_id.and_then(|map| s.space.goggles.get_map_depth_setting(map.get())),
+                map_id.and_then(|map| s.space.goggles.map_proj_seen.get(&map.get()).cloned()),
+            ))?;
 
         ui.text_wrapped(fl!("pathing-config-goggles-notice"));
 
         ui.indent();
-        if ui.checkbox(fl!("enable"), &mut is_enabled) {
-            Self::set_pathing(|s| s.space.goggles.goggles_enabled = Some(is_enabled));
-            match is_enabled {
-                true if !Engine::is_available() => (),
-                true => {
-                    Engine::try_send(SpaceEvent::GogglesRefreshLens {
-                        force: false,
-                        delay_override: Some(2),
+        let mut enables_commit = GogglesEnables::empty();
+        for (i, &enable) in GogglesEnables::UI_ENABLES.iter().enumerate() {
+            let label = match enable {
+                GogglesEnables::ENABLE => Cow::Borrowed("enable"),
+                #[cfg(todo = "unnecessary")]
+                enable if !GogglesEnables::SUPPORTED_FEATURES.contains(enable) => continue,
+                enable if !GogglesEnables::FEATURE_ENABLES.contains(enable) => continue,
+                _ => Cow::Owned(format!("pathing-config-goggles-{enable}"))
+            };
+            let toggled = with_i18n(&label, |label| {
+                if i > 0 {
+                    ui.reserve_line_checkbox(&label);
+                }
+                ui.checkbox_flags(&label, &mut enables, enable)
+            });
+            let toggled = match (toggled, enable) {
+                (false, GogglesEnables::ENABLE) if ui.is_item_clicked_with_button(imgui::MouseButton::Right) => {
+                    Self::set_pathing(|s| {
+                        s.space.goggles.reset_enables();
+                        enables = s.space.goggles.enables();
                     });
+                    machine.goggles.enabled_config = enables;
+                    enable
                 },
-                false if !enabled => (),
-                false => {
-                    log::debug!("Goggles setup: disabling...");
-                    render_goggles::disable();
+                (toggled, enable) => {
+                    let toggled = toggled.then_some(enable).unwrap_or(GogglesEnables::empty());
+                    enables_commit.insert(toggled);
+                    toggled
                 },
-            }
+            };
         }
+
         #[cfg(feature = "goggles2-project")]
-        {
-            let mut project_enabled = machine.goggles.project_enabled;
-            ui.same_line();
-            if ui.checkbox("Projector", &mut project_enabled) {
-                Self::set_pathing(|s| s.space.goggles.project_enabled = Some(project_enabled));
-                if project_enabled {
-                    machine.goggles.project_enable();
-                } else {
-                    machine.goggles.project_disable();
+        if enables.contains(GogglesEnables::PROJECT_ENABLE) {
+            self.goggles.draw_project_options(ui, machine);
+            let mut options_commit = Self::goggles_feature_opts(ui, &mut enables, GogglesEnables::PROJECT_ENABLE, GogglesEnables::OPTIONS_PROJECT.difference(GogglesEnables::OPTIONS_PROJECT_COMPAT));
+            // split for visual separation/grouping
+            options_commit |= Self::goggles_feature_opts(ui, &mut enables, GogglesEnables::PROJECT_ENABLE, GogglesEnables::OPTIONS_PROJECT_COMPAT);
+            enables_commit.insert(options_commit);
+        }
+
+        if enables.contains(GogglesEnables::LENS_ENABLE) {
+            if let Some(value) = Self::slider_opt_alpha(ui, "x-ray opacity", obscured_alpha, None) {
+                Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
+            }
+            if !matches!(obscured_alpha, 0.0f32 | SpaceSettings::NONE_F32) {
+                if let Some(value) = Self::slider_setting(ui, "x-ray distance", obscured_distance, (0.1, 1.0)) {
+                    Self::set_pathing(|s| s.space.goggles.obscured_distance = value);
+                }
+                if ui.is_item_hovered() {
+                    ui.tooltip(|| {
+                        ui.text(format!("{obscured_distance_effective}m @ {:.01}%", obscured_distance * 100.0));
+                        with_i18n!("pathing-config-goggles-distance-notice", |msg| ui.text(&msg));
+                    });
                 }
             }
         }
 
-        if !needs_setup {
+        #[cfg(feature = "goggles2-camera")]
+        if enables.contains(GogglesEnables::CAMERA_ENABLE) {
+            let options_commit = Self::goggles_feature_opts_all(ui, &mut enables, GogglesEnables::CAMERA_ENABLE);
+            enables_commit.insert(options_commit);
+        }
+        if !machine.goggles.is_enabled(GogglesEnables::CAMERA_ENABLE | GogglesEnables::CAMERA_PERSPECTIVE) {
             ui.unindent();
-            let _font = NexusLinkFont::Big.push_font(ui);
+            #[cfg(todo)]
+            {
+                let _font = NexusLinkFont::Big.push_font(ui);
+                ui.text_wrapped(
+                    "For good goggles, you will need to adjust the \"near\" slider for each new map you visit.",
+                );
+            }
             ui.text_wrapped(
-                c"For good goggles, you will need to adjust the \"near\" slider for each new map you visit.",
+                c"Try sliding focus down until paths stop disappearing under the ground"
             );
-            drop(_font);
-            ui.text_wrapped(concat!(
-                "Try sliding it down until paths disappear under the ground, then back off a bit.",
-                "\n(the sweet spot is usually when you can see the path but grass is slightly covering it)",
-                "\nif you see flickering/z-fighting during movement, back off a little more or tweak far",
-            ));
             ui.indent();
         }
+        if enables.intersects(GogglesEnables::PROJECT_ENABLE | GogglesEnables::LENS_ENABLE | GogglesEnables::CAMERA_PERSPECTIVE) {
+            if let Some(map_id) = map_id {
+                let map_id = map_id.get();
+                let map_scale = machine.map.calibration.local_space();
 
-        if let Some(value) = Self::slider_opt_alpha(ui, c"x-ray opacity", obscured_alpha, None) {
-            Self::set_pathing(|s| s.space.goggles.obscured_alpha = value);
-        }
-        if obscured_alpha > 0.0 {
-            if let Some(value) = Self::slider_setting(ui, "x-ray distance", obscured_distance, (0.1, 1.0)) {
-                Self::set_pathing(|s| s.space.goggles.obscured_distance = value);
-            }
-            if ui.is_item_hovered() {
-                ui.tooltip(|| {
-                    ui.text(format!("{obscured_distance_effective}m @ {:.01}%", obscured_distance * 100.0));
-                    with_i18n!("pathing-config-goggles-distance-notice", |msg| ui.text(&msg));
-                });
-            }
-        }
-
-        if let Some(map_id) = map_id {
-            use crate::settings::pathing::GogglesSettings;
-            let map_id = map_id.get();
-
-            //RenderState::font_text("ui", ui, "Goggles");
-            if let Some(Some(value)) = Self::slider_setting(ui, c"near", near, /*(0.15, 1.2)*/(4.0, 32.0)) {
-                Self::set_pathing(|s| {
-                    #[cfg(deleteme)]
-                    let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
-                    #[cfg(deleteme)]
-                    let e = map_depth_calibration
-                        .entry(map_id)
-                        .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
-                    #[cfg(deleteme)]
-                    let prev = e.0;
-                    #[cfg(deleteme)]
-                    {
-                        e.0 = value / RenderMachine::GOGGLES_DEPTH_RANGE.start;
+                let v2 = farz_set.and_then(|v| v.as_v2_preset());
+                let value = v2.clone()
+                    .or_else(|| farz_set.and_then(|v|
+                        machine.fov_y().and_then(|fovy| v.reinterpret_v1_as_v2(fovy, &map_scale))
+                    ))
+                ;
+                let has_farz = farz.is_some();
+                let mut new_depth = {
+                    let farz_set = value.clone().or(farz).unwrap_or(MapProjectionDepth::DEFAULT_FALLBACK);
+                    with_i18n!("pathing-config-goggles-depth", |label| Self::slider_setting(ui, &label, farz_set.farz, (GogglesMapDepth::V2_FARZ_SLIDER_START, GogglesMapDepth::V2_FARZ_SLIDER_END)))
+                };
+                let remove_msg = match (farz_set, v2) {
+                    (Some(..), None) => Some("legacy"),
+                    (Some(..), Some(..)) => Some("manual"),
+                    _ if farz_seen.is_some() => Some("saved"),
+                    _ if has_farz && machine.goggles.is_enabled(GogglesEnables::CAMERA_ENABLE | GogglesEnables::CAMERA_PERSPECTIVE) => Some("detected"),
+                    _ if has_farz => Some("cached"),
+                    _ => None,
+                };
+                if let Some(msg) = remove_msg {
+                    // far slider maybe idk
+                    if ui.small_button(format!("remove {msg} map calibration")) {
+                        new_depth = Some(None);
                     }
-                    let mut near = value;
-                    near *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
-                    #[cfg(deleteme)]
-                    let mut far = far;
-                    #[cfg(deleteme)]
-                    if e.1 == 1.0 || e.1 == prev {
-                        e.1 = e.0;
-                        far = e.1 * RenderMachine::GOGGLES_DEPTH_RANGE.end;
-                    }
-                    machine.depth_range = Some(near..far);
-                });
-            }
-            near *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
-            let mut far = far * taimi_meta::coords::MapLocalScale::INCHES_PER_METRE;
-            if let Some(Some(value)) = Self::slider_setting(ui, c"far", far, /*(500.0, 2500.0)*/(2114.0f32 * 8.0, 2114.0f32 * 48.0)) {
-                Self::set_pathing(|s| {
-                    #[cfg(deleteme)]
-                    let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
-                    #[cfg(deleteme)]
-                    let e = map_depth_calibration
-                        .entry(map_id)
-                        .or_insert(GogglesSettings::DEFAULT_DEPTH_CALIBRATION);
-                    #[cfg(deleteme)]
-                    {
-                    e.1 = value / RenderMachine::GOGGLES_DEPTH_RANGE.end;
-                    }
-                    let mut far = value;
-                    far *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
-                    machine.depth_range = Some(near..far);
-                });
-            }
-            far *= taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
-            if ui.button(c"distance reset") {
-                Self::set_pathing(|s| {
-                    #[cfg(deleteme)]
-                    {
-                    let map_depth_calibration = s.space.goggles.map_depth_calibration_mut();
-                    map_depth_calibration.remove(&map_id);
-                    }
-                    machine.depth_range = None;
-                });
+                }
+                if let Some(v) = new_depth {
+                    let value = v.map(MapProjectionDepth::with_farz)
+                        .map(GogglesMapDepth::from);
+                    Self::set_pathing(|s| {
+                        match value {
+                            Some(value) => {
+                                machine.set_depth_range(&value);
+                                let dest = s.space.goggles.map_depth_calibration_mut();
+                                dest.insert(map_id, value.into());
+                            },
+                            None => {
+                                machine.depth_range = None;
+                                if farz_set.is_some() {
+                                    let dest = s.space.goggles.map_depth_calibration_mut();
+                                    dest.remove(&map_id);
+                                } else if farz_seen.is_some() {
+                                    let dest = s.space.goggles.map_proj_seen_mut();
+                                    dest.remove(&map_id);
+                                } else {
+                                    machine.map_depth_guess = None;
+                                    if machine.map_depth.is_some() {
+                                        machine.map_depth = None;
+                                        machine.goggles.enabled_config.remove(GogglesEnables::CAMERA_PERSPECTIVE);
+                                    }
+                                }
+                            },
+                        }
+                    });
+                }
+                let map_scale_i2m = machine.depth_scale_i2m();
+                let map_scale_m2i = map_scale_i2m.recip();
+                ui.text(format!("{:.04}\"..{:.02}\" / {near:.06}m..{far:.03}m", near * map_scale_m2i, far * map_scale_m2i));
+                if let Some((_, _, n, f)) = machine.goggles.camera.perspective_params() {
+                    ui.same_line();
+                    let farz_det = MapProjectionDepth::with_far_in(f);
+                    ui.text(format!(" (detected {:.02}: {n:.04}\"..{f:.02}\" / {:.06}m..{:.03}m)", farz_det.farz, n * map_scale_i2m, f * map_scale_i2m));
+                }
             }
         }
-
-        let lenses_tree = ui.begin_sidebar_tree_node(
-            ImCondition::startup(false),
-            c"pathing-config-goggles-advanced",
-            c"advanced lens config",
-        );
-        if let Some(_tree) = lenses_tree {
-            let _id = ui.push_id(c"lens");
-            render_goggles::options_ui_lenses(ui, machine);
+        if machine.goggles.is_classifying() {
+            #[cfg(taimi_debug)]
+            let info_tree = ui.begin_sidebar_tree_node(
+                ImCondition::startup(false),
+                c"pathing-config-goggles-info",
+                c"debug lens info",
+            );
+            if let Some(_node) = info_tree {
+                let _id = ui.push_id(c"debug lens info");
+                self.goggles.draw_debug_lens2(ui, machine);
+            }
+        }
+        #[cfg(any(feature = "goggles2-project", feature = "goggles2-camera"))]
+        if enables.intersects(GogglesEnables::FEATURE_ENABLES) {
+            let lenses_tree = ui.begin_sidebar_tree_node(
+                ImCondition::startup(false),
+                c"pathing-config-goggles-debug",
+                c"debug controls",
+            );
+            if let Some(_tree) = lenses_tree {
+                let _id = ui.push_id(c"debug controls");
+                self.goggles.draw_debug_toggles(ui, machine);
+            }
         }
 
         ui.unindent();
 
+        if !enables_commit.is_empty() {
+            Self::set_pathing(|s| {
+                s.space.goggles.set_enables(enables, enables_commit);
+                enables = s.space.goggles.enables();
+            });
+            match enables_commit {
+                #[cfg(todo)]
+                commit =>
+                    machine.goggles.enabled_config ^= enables_commit,
+                _commit =>
+                    machine.goggles.enabled_config = enables,
+            }
+        }
+
         Some(())
+    }
+    #[cfg(feature = "goggles")]
+    fn goggles_feature_opts_all(ui: &Ui, enables: &mut GogglesEnables, enable: GogglesEnables) -> GogglesEnables {
+        Self::goggles_feature_opts(ui, enables, enable, enable.options_mask())
+    }
+    #[cfg(feature = "goggles")]
+    fn goggles_feature_opts(ui: &Ui, enables: &mut GogglesEnables, _enable: GogglesEnables, opts: GogglesEnables) -> GogglesEnables {
+        let mut commit = GogglesEnables::empty();
+        for (i, opt) in opts.iter().enumerate() {
+            let label = Cow::Owned(format!("pathing-config-goggles-{opt}"));
+            let toggled = with_i18n(&label, |label| {
+                if i > 0 {
+                    ui.reserve_line_checkbox(&label);
+                }
+                ui.checkbox_flags(&label, enables, opt)
+            });
+            commit |= opt.r#if(toggled)
+        }
+        commit
     }
 }
