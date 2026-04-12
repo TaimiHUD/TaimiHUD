@@ -61,7 +61,7 @@ impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
     pub const DEFAULT_ENABLED_PROJECT: bool = false;
     pub const DEFAULT_ARCRENDER: bool = false;
-    pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.15;
+    pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.10;
     pub const DEFAULT_OBSCURED_DISTANCE: f32 = 0.45;
     pub const MIN_OBSCURED_DISTANCE: f32 = 64.0;
     pub const DEFAULT_DEPTH_CALIBRATION: (f32, f32) = (1.0, 1.0);

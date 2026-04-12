@@ -1614,7 +1614,7 @@ impl ArcrenderSettings {
     }
     pub const VIEWPORT_NONE: f32 = 1.0 / 10000.0;
     pub fn edge_viewport(&self, viewport_size: Size2) -> Vector2 {
-        self.feather_scale.is_some().then_some(viewport_size)
+        self.feather_scale1.is_some().then_some(viewport_size)
             .map(|size| size.to_vector().recip() * 2.0)
             .unwrap_or(Vector2::splat(Self::VIEWPORT_NONE))
     }
@@ -1646,7 +1646,7 @@ impl ArcrenderSettings {
         }
         match space.edge_feather_scale() {
             s if self.feather_scale1 == s => (),
-            s => self.set_feather_scale(space.edge_feather_scale(), display_size),
+            s => self.set_feather_scale(s, display_size),
         }
     }
 

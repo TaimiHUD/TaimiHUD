@@ -3,7 +3,7 @@ use {
         controller::{
             pathing::{
                 space::{PoiScale, TrailScale, TrailTextureMap},
-                PathingController, PathingEvent,
+                PathingEvent,
             },
             Controller,
         },
@@ -1386,6 +1386,16 @@ impl Engine {
         };
         self.arcdata.apply_v(&mut self.packs.shared_v);
         self.arcdata.apply_p(&mut self.packs.shared_p, self.render_backend.viewport.size2().cast());
+        #[cfg(todo = "unnecessary")]
+        #[cfg(feature = "goggles2-project")]
+        match desc.pass {
+            //| DrawDescSpace::PASS_OBSCURED_SHADOWED
+            | DrawDescSpace::PASS_REFLECTING | DrawDescSpace::PASS_REFLECTING_BELOW => {
+                self.packs.shared_p.render.edge_feather = Vector2::<f32>::splat(ArcrenderSettings::FEATHER_SCALE_NONE).to_array();
+                self.packs.shared_p.render.edge_feather_viewport = Vector2::splat(ArcrenderSettings::VIEWPORT_NONE);
+            },
+            _ => (),
+        }
         let legacy_alpha = match () {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
@@ -1422,7 +1432,7 @@ impl Engine {
 
         #[cfg(feature = "goggles")]
         let (cull_alt, cam_alt);
-        let (camera, cull) = match desc.pass {
+        let (cam, cull) = match desc.pass {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
                 let cull = match goggles_2pass {
@@ -1438,7 +1448,7 @@ impl Engine {
                 (&camera, cull)
             },
             #[cfg(feature = "goggles2-project")]
-            _pass @ DrawDescSpace::PASS_REFLECTING => {
+            DrawDescSpace::PASS_REFLECTING => {
                 let (pos, dir, _up) = camera;
                 let angle = camera.1.y.asin();
                 let angle_edge = angle - machine.get_fov().y.copysign(pos.y) * 0.5;
@@ -1501,7 +1511,7 @@ impl Engine {
                 (&cam_alt, &cull_alt)
             },
             #[cfg(feature = "goggles2-project")]
-            _pass @ DrawDescSpace::PASS_REFLECTING_BELOW => {
+            DrawDescSpace::PASS_REFLECTING_BELOW => {
                 let (pos, _dir, _up) = camera;
                 if pos.y < 0.0 { return }
                 self.packs.shared_v.trail.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
@@ -1540,12 +1550,20 @@ impl Engine {
                 &mut self.packs.shared_v,
                 self.render_backend.viewport_rect().size,
                 &machine.map.calibration,
-                camera,
+                cam,
                 machine.get_player_pos().map(|(p, ..)| p),
                 machine.get_space_perspective().matrix,
-                RenderMachine::space_view(*camera).matrix,
+                RenderMachine::space_view(*cam).matrix,
                 self.packs.resources.anim_timestamp,
             );
+            #[cfg(feature = "goggles2-project")]
+            match desc.pass {
+                DrawDescSpace::PASS_REFLECTING | DrawDescSpace::PASS_REFLECTING_BELOW => {
+                    // XXX: beware, this + camera_dir are used for culling as well as misc distance calc!
+                    self.packs.shared_v.render.camera_pos = camera.0.to_vector().cast();
+                },
+                _ => (),
+            }
             self.packs.resources.update_shared(
                 &device_context, &self.render_backend.device,
                 &self.packs.shared_v, &self.packs.shared_p
@@ -1570,7 +1588,7 @@ impl Engine {
 
             self.render_backend
                 .perspective_handler
-                .update_perspective(machine, *camera, Vec3::splat(self.arcdata.poi_expansion.scale()));
+                .update_perspective(machine, *cam, Vec3::splat(self.arcdata.poi_expansion.scale()));
             self.render_backend
                 .perspective_handler
                 .set_feather_scale(self.arcdata.feather_scale1, self.render_backend.display_size);
@@ -1582,7 +1600,7 @@ impl Engine {
             #[cfg(feature = "goggles")]
             pass if desc.pass_is_obscured() => {
                 self.packs
-                    .draw_obscured(camera, cull, &self.render_backend, &device_context, arcrender);
+                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
                 #[cfg(deleteme)]
                 unsafe {
                     self.drawing.drawn.set_unchecked(FrameContext::DRAW_INDEX_OBSCURED as usize, true);
@@ -1625,7 +1643,7 @@ impl Engine {
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
                 self.packs
-                    .draw_obscured(camera, cull, &self.render_backend, &device_context, arcrender);
+                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
                 unsafe {
                     self.drawing.drawn.set_unchecked(pass as usize, true);
                 }
@@ -1658,7 +1676,7 @@ impl Engine {
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
                 self.packs
-                    .draw_obscured(camera, cull, &self.render_backend, &device_context, arcrender);
+                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
                 unsafe {
                     self.drawing.drawn.set_unchecked(pass as usize, true);
                 }
@@ -1666,7 +1684,7 @@ impl Engine {
             #[cfg(feature = "goggles2-project")]
             pass if pass != DrawDescSpace::PASS_SPACE => {
                 self.packs
-                    .draw_obscured(camera, cull, &self.render_backend, &device_context, arcrender);
+                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
                 unsafe {
                     self.drawing.drawn.set_unchecked(pass as usize, true);
                 }
@@ -1677,7 +1695,7 @@ impl Engine {
             },
             _ => {
                 self.packs
-                    .draw(camera, cull, &self.render_backend, &device_context, arcrender);
+                    .draw(cam, cull, &self.render_backend, &device_context, arcrender);
                 self.drawing.set_drawn(LocalContext::World, true);
                 self.drawing.tarnish_depth_ours(desc);
             },
@@ -1687,7 +1705,9 @@ impl Engine {
     const UNDERWATER_VISIBILITY: f32 = match () {
         #[cfg(todo)]
         _ => 0.0f32,
-        _ => 0.385f32,
+        #[cfg(todo)]
+        _ => 0.225f32,
+        _ => 0.325f32 + 0.05,
     };
     #[cfg(feature = "space-ecs")]
     pub fn draw_ecs(
@@ -2916,94 +2936,6 @@ impl DrawStateSpace {
         if self.bound_shader_p.is_empty() { return }
         self.bound_shader_p = Default::default();
         None::<dx11::ShaderP>.set(context);
-    }
-    #[cfg(deleteme)]
-    pub fn set_shader_arc(
-        &mut self,
-        context: &Dx11Context,
-        backend: &RenderBackend,
-        draw_state: &mut pack::PackRenderState,
-        variant: pack::render::ArcShaderVariant,
-        entity: Option<pack::render::ShaderState>,
-    ) -> bool {
-        let id_v = match variant.id(ShaderKind::Vertex, entity) {
-            None => return false,
-            Some(id) if self.bound_shader_v == id => None,
-            Some(id) => Some(id),
-        };
-        let id_p = match variant.id(ShaderKind::Pixel, entity) {
-            None => Some(None),
-            Some(id) if self.bound_shader_p == id => None,
-            Some(id) => Some(Some(id)),
-        };
-        let mut succ = true;
-        let shader_v = id_v.map(|id| backend.shaders.vertex.get(id));
-        if let (Some(None), Some(id_v)) = (shader_v, id_v) {
-            let template = variant.template_id(ShaderKind::Vertex, entity)
-                .and_then(|pid| backend.shaders.partial.get(pid));
-            if draw_state.shaders_incomplete.insert((ShaderKind::Vertex, id_v)) {
-                let req = template.map(|t| PathingEvent::LoadShader {
-                    kind: ShaderKind::Vertex,
-                    variant,
-                    entity,
-                    template: t.clone(),
-                });
-                match req.map(PathingController::try_send) {
-                    None =>
-                        log::warn!("shader {id_v} missing"),
-                    Some(true) =>
-                        log::debug!("requesting shader {id_v}"),
-                    Some(false) => {
-                        draw_state.shaders_incomplete.remove(&(ShaderKind::Vertex, id_v));
-                    },
-                }
-            }
-            succ = false;
-        }
-        let shader_p = id_p.map(|id| id.and_then(|id|
-            backend.shaders.pixel.get(id)
-        ));
-        if let (Some(None), Some(id_p)) = (shader_v, id_p) {
-            let template = variant.template_id(ShaderKind::Pixel, entity)
-                .and_then(|pid| backend.shaders.partial.get(pid));
-            if draw_state.shaders_incomplete.insert((ShaderKind::Pixel, id_p)) {
-                let req = template.map(|t| PathingEvent::LoadShader {
-                    kind: ShaderKind::Pixel,
-                    variant,
-                    entity,
-                    template: t.clone(),
-                });
-                match req.map(PathingController::try_send) {
-                    None =>
-                        log::warn!("shader {id_p} missing"),
-                    Some(true) =>
-                        log::debug!("requesting shader {id_p}"),
-                    Some(false) => {
-                        draw_state.shaders_incomplete.remove(&(ShaderKind::Pixel, id_p));
-                    },
-                }
-            }
-            succ = false;
-        }
-        if succ {
-            match (shader_v, id_v) {
-                (Some(Some(shader)), Some(id)) => {
-                    self.bound_shader_v = id;
-                    shader.set(context);
-                },
-                _ => (),
-            }
-            match (shader_p, id_p) {
-                (Some(Some(Some(shader_p))), Some(Some(id))) => {
-                    self.bound_shader_p = id;
-                    shader_p.set(context);
-                },
-                (None, ..) => (),
-                _ =>
-                    self.unset_shader_p(context, backend),
-            }
-        }
-        succ
     }
 
     pub fn set_minimap_scissor(

@@ -1132,6 +1132,7 @@ impl PathingConfig {
             }
         }
         if machine.goggles.is_classifying() {
+            #[cfg(taimi_debug)]
             let _lenses = TreeNode::new("debug lens info")
                 .flags(TreeNodeFlags::FRAMED)
                 .opened(false, Condition::Once)

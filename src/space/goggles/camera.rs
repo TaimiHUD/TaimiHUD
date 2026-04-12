@@ -1098,7 +1098,7 @@ impl GogglesCamera {
                 let lost_cam = GogglesShared::wants_snatch_camera();
                 if lost_cam {
                     if self.camera_lost == 0 {
-                        log::warn!("lost cambuf {:p}@{_o:#x}", _b as *mut ());
+                        log::debug!("lost cambuf {:p}@{_o:#x}", _b as *mut ());
                     }
                     self.camera_lost = self.camera_lost.max(1);
                     GogglesShared::clear_camera_found();
@@ -1111,7 +1111,7 @@ impl GogglesCamera {
                 let lost_persp = GogglesShared::wants_snatch_perspective();
                 if lost_persp {
                     if self.perspective_lost == 0 {
-                        log::warn!("lost perspbuf {:p}@{_o:#x}", _b as *mut ());
+                        log::debug!("lost perspbuf {:p}@{_o:#x}", _b as *mut ());
                     }
                     self.perspective_lost = self.perspective_lost.max(1);
                     GogglesShared::clear_perspective_found();

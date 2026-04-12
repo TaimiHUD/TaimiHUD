@@ -237,17 +237,18 @@ impl GogglesConfig {
             }
         }
 
+        selected_lens = new_selection.or(selected_lens);
         if let Some(lens) = new_selection {
             self.view_lens = lens.as_ptr() as usize;
             self.view_lens_info.clear();
-        } else if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+        } else if ui.is_item_clicked_with_button(MouseButton::Right) {
             self.view_lens = 0;
             self.view_lens_info = String::new();
+            selected_lens = None;
         }
-        let selected_lens = new_selection.or(selected_lens);
 
         let mut new_class = None;
-        if let (Some(lens), Some(info)) = (selected_lens, &selected_info) {
+        if let Some(info) = &selected_info {
             let preview = format!("{:?}", info.classification);
             if let Some(combo) = ui.begin_combo("reclassify", preview) {
                 for &cls in goggles::class::BufferClass::VARIANTS {
@@ -321,41 +322,49 @@ impl GogglesConfig {
                     None => (),
                 }
             }
-            ui.text(format!("binds={} dbinds={} ubinds={} state={:#06x} {:?}", info.state.bind_count, info.state.depth_binds.len(), info.state.bind_count_uavs, info.state.flags, info.state.flags));
-            let last_bind_generation = ClassShared::read_bind_generation();
-            ui.text(format!("final bind@{}/{last_bind_generation} depthstate@{}", info.state.bind_generation, info.state.depth_generation));
-            if info.state.is_bound(last_bind_generation) {
-                ui.same_line();
-                ui.text("REMAINS BOUND!");
+            #[cfg(taimi_debug)]
+            {
+                ui.text(format!("binds={} dbinds={} ubinds={} state={:#06x} {:?}", info.state.bind_count, info.state.depth_binds.len(), info.state.bind_count_uavs, info.state.flags, info.state.flags));
+                let last_bind_generation = ClassShared::read_bind_generation();
+                ui.text(format!("final bind@{}/{last_bind_generation} depthstate@{}", info.state.bind_generation, info.state.depth_generation));
+                if info.state.is_bound(last_bind_generation) {
+                    ui.same_line();
+                    ui.text("REMAINS BOUND!");
+                }
             }
             let now = ClassShared::read_frame_count();
             let lifetime = info.age();
             let seen = info.seen_since(now);
-            ui.text(format!("seen={seen} age={lifetime} format={:#x}", info.format.0));
-            if let Some((w, h)) = info.size() {
-                ui.same_line();
-                ui.text(format!("size={}x{}", w, h));
-            }
-            if info.state.flags.contains(goggles::class::BufferStateFlags::CLEARED_COLOUR) {
-                ui.text(format!("clear({}): {:?}", goggles::class::BufferKind::RenderTarget.tag(), info.state.clear_colour));
+            #[cfg(taimi_debug)]
+            {
+                ui.text(format!("seen={seen} age={lifetime} format={:#x}", info.format.0));
+                if let Some((w, h)) = info.size() {
+                    ui.same_line();
+                    ui.text(format!("size={}x{}", w, h));
+                }
+                if info.state.flags.contains(goggles::class::BufferStateFlags::CLEARED_COLOUR) {
+                    ui.text(format!("clear({}): {:?}", goggles::class::BufferKind::RenderTarget.tag(), info.state.clear_colour));
+                }
             }
             #[cfg(todo)]
             if info.state.flags.contains(goggles::class::BufferStateFlags::CLEARED_DEPTH) {
                 ui.text(format!("clear({}): {:?}", goggles::class::BufferKind::DepthView.tag(), info.state.clears_depth));
             }
 
-            let mut scores = info.classify_scores().collect::<Vec<_>>();
-            scores.sort_by_key(|(_, score)| core::cmp::Reverse(*score));
-            for (i, (cls, score)) in scores.iter().enumerate() {
-                let clsname: &str = cls.into();
-                if i > 0 {
-                    ui.reserve_line_checkbox(&clsname);
-                }
-                ui.text(format!("{clsname}={score}"));
-            }
             #[cfg(taimi_debug)]
-            for (i, (depth, sref)) in info.state.depth_binds.iter().enumerate() {
-                ui.text(format!(":: dep#{i} sref={sref} depth={depth:?}"));
+            {
+                let mut scores = info.classify_scores().collect::<Vec<_>>();
+                scores.sort_by_key(|(_, score)| core::cmp::Reverse(*score));
+                for (i, (cls, score)) in scores.iter().enumerate() {
+                    let clsname: &str = cls.into();
+                    if i > 0 {
+                        ui.reserve_line_checkbox(&clsname);
+                    }
+                    ui.text(format!("{clsname}={score}"));
+                }
+                for (i, (depth, sref)) in info.state.depth_binds.iter().enumerate() {
+                    ui.text(format!(":: dep#{i} sref={sref} depth={depth:?}"));
+                }
             }
         }
         if !self.view_lens_info.is_empty() {
