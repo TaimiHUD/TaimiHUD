@@ -137,6 +137,11 @@ impl FestivalFixup {
             Festival::LunarNewYear,
             FestivalWindow::with_timestamp(1770134400, 1771959600),
         ),
+        // Super Adventure Box 2026: 2026-04-14 — 2026-05-05
+        (
+            Festival::SuperAdventureBox,
+            FestivalWindow::with_timestamp(1776182400, 1778007600),
+        ),
     ];
 }
 
