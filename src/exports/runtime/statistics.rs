@@ -58,6 +58,11 @@ impl StatsRef {
             reg.insert(desc, self);
         }
     }
+    pub fn deregister(desc: &StatsDesc) {
+        if let Ok(mut reg) = Self::registry().write() {
+            reg.remove(desc);
+        }
+    }
 
     pub const fn empty(unit: StatsUnit) -> Self {
         Self { counter: None, unit }
@@ -138,7 +143,7 @@ impl StatsUnit {
                     write!(f, "{:.03}MB", value as f64 / Self::SIZE_MB as f64)
                 },
             Self::Time => {
-                if value <= Self::TIME_MS * 32 {
+                if value < Self::TIME_MS {
                     return write!(f, "0.{value:03}ms")
                 }
                 let time = (value / Self::TIME_MS) as f64;

@@ -30,6 +30,9 @@
 #define DISCARD_Z 1.0
 #endif
 static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
+#ifndef UNDERWATER_VISIBILITY
+#define UNDERWATER_VISIBILITY 0.325
+#endif
 
 #if SHADER_SPACE
 #ifndef INTENSITY_PARAM_2
@@ -106,6 +109,9 @@ struct PoiInput {
 #endif
 
 struct SpaceOutputV {
+#if SHADER_P && 0
+    linear centroid sample
+#endif
     float4 position: SV_Position;
     float4 colour: COLOR0;
     float2 tex: TEXCOORD0;
@@ -129,6 +135,7 @@ struct SpaceInputP {
 
 struct SpaceOutputP {
     float4 colour: SV_Target0;
+    //float depth_push: SV_DepthGreaterEqual;
 };
 #define TrailOutputP SpaceOutputP
 #define PoiOutputP SpaceOutputP

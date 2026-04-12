@@ -477,6 +477,20 @@ pub unsafe fn notify_render_reinit() {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
+pub fn with_dxgi_swap_chain<R, F: FnOnce(&SwapChain) -> R>(f: F) -> Option<R> {
+    #[cfg(feature = "extension-nexus")]
+    if let Some(Some(swap_chain)) = exports::nexus::dxgi_swap_chain_ref() {
+        return Some(f(swap_chain))
+    }
+    // TODO: f.take() if need additional callbacks besides this...
+    #[cfg(feature = "extension-arcdps")]
+    if let Some(res) = exports::arcdps::with_dxgi_swap_chain(f) {
+        return Some(res)
+    }
+
+    None
+}
+#[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<SwapChain>> {
     #[cfg(feature = "extension-nexus")]
     if let Some(swap_chain) = exports::nexus::dxgi_swap_chain()? {

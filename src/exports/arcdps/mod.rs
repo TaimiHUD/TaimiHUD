@@ -1156,6 +1156,19 @@ pub fn ui_modifiers() -> ModifierKeys {
 }
 
 #[cfg(any(feature = "space", feature = "texture-loader"))]
+pub fn with_dxgi_swap_chain<R, F: FnOnce(&rt::SwapChain) -> R>(f: F) -> Option<R> {
+    if !available() {
+        return None
+    }
+
+    match () {
+        #[cfg(feature = "extension-arcdps-extern")]
+        () => r#extern::dxgi_swap_chain().map(f),
+        #[cfg(feature = "extension-arcdps-codegen")]
+        () => cb::dxgi_swap_chain().map(|sc| f(&sc)),
+    }
+}
+#[cfg(any(feature = "space", feature = "texture-loader"))]
 pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
     if !available() {
         return Ok(None)
@@ -1163,7 +1176,7 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
 
     Ok(match () {
         #[cfg(feature = "extension-arcdps-extern")]
-        () => r#extern::dxgi_swap_chain().map(|sc| sc.to_owned()),
+        () => r#extern::dxgi_swap_chain().map(|sc| sc.clone()),
         #[cfg(feature = "extension-arcdps-codegen")]
         () => cb::dxgi_swap_chain(),
     }

@@ -607,7 +607,10 @@ impl super::PackElement {
                 } => {
                     *context_menu = Some(None);
                 },
-                act => log::error!("DELETEME TODO: {} {act:?}", self.state.info),
+                act => {
+                    #[cfg(taimi_debug)]
+                    log::error!("DELETEME TODO: {} {act:?}", self.state.info);
+                },
             }
             if let Some(msg) = msg {
                 msg.try_send();
@@ -1231,6 +1234,7 @@ where
             Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::ContextMenu),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
+                #[cfg(taimi_debug)]
                 log::debug!("DELETEME: category action {act:?} unexpected");
                 None
             },

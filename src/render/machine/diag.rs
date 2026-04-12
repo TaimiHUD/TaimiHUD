@@ -35,6 +35,16 @@ impl RenderMachine {
                 StatsDesc::new(sec, "stats-render-time-ui"),
                 true,
             ),
+            (
+                StatsRef::with_counter(&STATS_FRAME_TIME_INTERVAL, StatsUnit::Time),
+                StatsDesc::new(sec, "stats-render-time-interval"),
+                true,
+            ),
+            (
+                StatsRef::with_counter(&STATS_FRAME_TIME_LATENCY, StatsUnit::Time),
+                StatsDesc::new(sec, "stats-render-time-latency"),
+                true,
+            ),
         ];
         for &(counter, mut desc, detailed) in stats_counters {
             desc.detailed = detailed;
@@ -46,9 +56,9 @@ impl RenderMachine {
         FrameState::TAIMI.publish_set();
         FrameState::GAME.publish_clear();
     }
-    pub(super) fn metrics_pre_render(&mut self) {
+    pub(super) fn metrics_pre_render(&mut self, now: &Instant) {
         if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
-            self.metrics_checkpoint_render = Some(Instant::now());
+            self.metrics_checkpoint_render = Some(*now);
             if self.metrics_checkpoint.is_none() {
                 self.metrics_checkpoint = self.metrics_checkpoint_render;
             }
@@ -74,6 +84,22 @@ impl RenderMachine {
         if let Some(checkpoint) = self.metrics_checkpoint_ui.take() {
             let amt = checkpoint.elapsed().as_micros() as u64;
             STATS_FRAME_TIME_UI.reset(amt);
+            let frame_start = self.mumblelink_frames.latest_render_timestamp();
+            let interval = if let Some(frametime) = self.frame_duration {
+                Some(frametime)
+            } else {
+                let prior_frame = self
+                    .mumblelink_frames
+                    .render_to_uitick(self.mumblelink_frames.latest_render_tick().wrapping_sub(1));
+                self.mumblelink_frames
+                    .timestamp_at(prior_frame)
+                    .map(|prev| frame_start.saturating_duration_since(*prev))
+            };
+            if let Some(interval) = interval {
+                STATS_FRAME_TIME_INTERVAL.reset(interval.as_micros() as u64);
+            }
+            STATS_FRAME_TIME_LATENCY
+                .reset_with(|| checkpoint.saturating_duration_since(*frame_start).as_micros() as u64);
             if let Some(checkpoint) = &self.metrics_checkpoint {
                 let total = checkpoint.elapsed().as_micros() as u64 / 0x20;
                 let amt = (amt / 0x20) as u32;
@@ -112,6 +138,8 @@ impl RenderMachine {
 
 static STATS_FRAME_TIME_RENDER: StatsCounter = StatsCounter::DEFAULT;
 static STATS_FRAME_TIME_UI: StatsCounter = StatsCounter::DEFAULT;
+static STATS_FRAME_TIME_INTERVAL: StatsCounter = StatsCounter::DEFAULT;
+static STATS_FRAME_TIME_LATENCY: StatsCounter = StatsCounter::DEFAULT;
 static STATS_FRAME_TIME_SLICE: StatsCounter = StatsCounter::DEFAULT;
 
 pub struct FrameLog {
@@ -140,7 +168,7 @@ impl FrameLog {
     pub fn commit(&self) {
         let records = self.take_records();
         for record in records.into_iter().flatten() {
-            log::debug!("{record}");
+            log::debug!(target: "framelog", "{record}");
         }
     }
 }

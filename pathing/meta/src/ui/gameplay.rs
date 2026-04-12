@@ -245,4 +245,12 @@ impl GameplayTransition {
     pub const fn was_initial(&self) -> bool {
         matches!(self, Self::Loaded { initial: true, .. })
     }
+
+    pub fn prev_map_id(&self) -> Option<NonZero<MapID>> {
+        match self {
+            &Self::Map { prev_map_id, .. } => prev_map_id,
+            &Self::Loaded { prev_map_id, .. } => prev_map_id,
+            &Self::Intermission { prev_map_id, .. } => prev_map_id,
+        }
+    }
 }

@@ -14,13 +14,17 @@ use {
             prelude::*,
             shader::{InputLayout, InputLayoutElement, D3D11_INPUT_ELEMENT_DESC},
         },
-        shader::{compile, ID3DInclude, ShaderDefinitions, ShaderTarget},
+        shader::{compile, ID3DInclude, ShaderDefinition, ShaderDefinitions, ShaderTarget},
     },
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ShaderDescription {
     pub identifier: String,
+    /// incomplete so it can be used as a base to construct a configured shader,
+    /// disabling any sort of auto-load
+    #[serde(default)]
+    pub partial: bool,
     #[serde(rename = "kind")]
     pub target: ShaderTarget,
     #[serde(default, skip_serializing_if = "ShaderDefinitions::is_empty")]
@@ -75,9 +79,9 @@ impl ShaderDescription {
         }
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(taimi_debug))]
     pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_OPTIMIZATION_LEVEL3;
-    #[cfg(debug_assertions)]
+    #[cfg(taimi_debug)]
     pub const COMPILE_FLAGS1: u32 = d3d::Fxc::D3DCOMPILE_DEBUG | d3d::Fxc::D3DCOMPILE_ENABLE_STRICTNESS;
     pub const COMPILE_FLAGS2: u32 = 0;
 
@@ -106,6 +110,16 @@ impl ShaderDescription {
         }
 
         Ok(blob)
+    }
+
+    /// TODO: remove duplicates if overridden
+    pub fn append_defs<D>(&mut self, defs: D)
+    where
+        D: IntoIterator<Item = ShaderDefinition>,
+    {
+        #[cfg(todo)]
+        let prior = self.defs.len();
+        self.defs.extend(defs);
     }
 
     const INPUT_LAYOUT_INSTANCED: [D3D11_INPUT_ELEMENT_DESC; 9] = [

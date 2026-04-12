@@ -324,6 +324,7 @@ impl Buffer {
         let (bufs, strides, offsets) = match buflen {
             count if count <= Self::SET_VERTEX_LIMIT => (&mut bufs[..], &mut strides[..], &mut offsets[..]),
             count => {
+                // TODO: game binds 32 slots or is vec snapshot count wrong?
                 //log::info!("binding {count} vertex buffer slots, consider reducing!");
                 bufs_storage = vec![ptr::null_mut(); count];
                 strides_storage = vec![0u32; count];
