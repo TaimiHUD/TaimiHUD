@@ -20,7 +20,6 @@ use {
             },
         },
         settings::SettingsLock,
-        space::{engine::SpaceEvent, Engine},
         Interruption,
         InterruptionSignal,
     },
@@ -807,15 +806,6 @@ impl PathingController {
                 false
             }
         });
-
-        #[cfg(deleteme)]
-        #[cfg(feature = "goggles")]
-        match (context, set) {
-            (None, true) =>
-                Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) }),
-            (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
-            _ => (),
-        }
     }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {

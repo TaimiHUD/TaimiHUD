@@ -1,5 +1,6 @@
 use {
     crate::{
+        exports::runtime as rt,
         render::machine::{frame_log, FrameState},
         settings::{
             goggles::GogglesEnables,
@@ -8,6 +9,7 @@ use {
         space::engine::FrameContext,
     },
     super::class::ClassShared,
+    anyhow::Context,
     core::{ffi::c_void, ptr},
     glam::Vec2,
     std::collections::BTreeSet,
@@ -269,23 +271,13 @@ impl GogglesState {
         self.active.contains(flag)
     }
     fn enable(&mut self) {
-        let (enabled, needs_setup) = crate::render::goggles::get_state();
-        let enabled = match enabled {
-            #[cfg(todo = "unnecessary")]
-            false if needs_setup && self.active.contains(GogglesEnables::ENABLE) =>
-                return true,
-            false => {
-                if needs_setup {
-                    log::debug!("Goggles setup: enabling...");
-                }
-                crate::render::goggles::enable(needs_setup)
-            },
-            e => e,
-        };
-        if enabled {
+        log::debug!("Goggles setup: enabling...");
+        let res = super::enable().context("goggles setup");
+        if rt::log::error_ok(res).is_some() {
             self.active.insert(GogglesEnables::ENABLE);
             self.available.insert(GogglesEnables::SUPPORTED_FEATURES);
         } else {
+            let _ = rt::log::debug_ok(super::disable().context("goggles cleanup"));
             self.active.remove(GogglesEnables::ENABLE);
             self.available.remove(GogglesEnables::ENABLE);
             self.enabled_config.remove(GogglesEnables::ENABLE);
@@ -300,7 +292,7 @@ impl GogglesState {
             };
             frame_buffers.clear();
         }
-        crate::render::goggles::disable();
+        let _ = rt::log::debug_ok(super::disable().context("goggles cleanup"));
         self.active.remove(GogglesEnables::ENABLE);
         self.available.remove(GogglesEnables::FEATURE_ENABLES);
     }
@@ -348,8 +340,11 @@ impl GogglesState {
         }
         let enabled_config = self.enabled_config_effective();
         let new_enables = enabled_config ^ self.active;
-        frame_log!("effective={enabled_config:?}; new(on)={new_enables:?}");
         if new_enables.is_empty() { return }
+        if new_enables.contains(GogglesEnables::ENABLE) && super::needs_setup() {
+            frame_log!("goggles; waiting for setup...");
+            return
+        }
         for flag in new_enables {
             let on = enabled_config.contains(flag);
             let enabled = match (flag, on) {
@@ -449,13 +444,26 @@ impl GogglesState {
         GogglesShared::reset_end(self.active);
     }
     pub(crate) fn act_pre_render_frame(&mut self, context: Option<&Dx11Context>, target: Option<&RenderTargetView>, drawing: &mut FrameContext) {
+        match context {
+            Some(context) if !self.is_enabled(GogglesEnables::ENABLE) && (self.available & self.enabled_config).contains(GogglesEnables::ENABLE) && super::needs_setup() => {
+                log::debug!("Goggles setup: preparing...");
+                let vtable = context.vtable();
+                // XXX: TODO, unused atm
+                let vtbl_dv = None;
+                let res = super::setup(vtable, vtbl_dv).context("goggles init");
+                if rt::log::warn_ok(res).is_none() {
+                    self.available.remove(GogglesEnables::ENABLE);
+                }
+            },
+            _ => (),
+        }
         GogglesShared::set_dx11_context(context);
         {
             let frame_buffers = unsafe {
                 &mut *g2!(&raw mut ferret.frame_buffers)
             };
             if let Some(target) = target {
-                if true /* is_drawing && self.enabled_config.contains(GogglesEnables::ENABLE)*/ {
+                if self.is_classifying() {
                     if let Ok(res) = target.get_resource() {
                         frame_buffers.insert(res.as_d3d_raw().as_ptr());
                     }
@@ -477,8 +485,8 @@ impl GogglesState {
     }
     pub(crate) fn wants_d3d_context(&self, drawing: &FrameContext) -> bool {
         if frame_log!(::is_enabled()) { return true }
-        if !self.active.contains(GogglesEnables::ENABLE) {
-            return false
+        if self.enabled_config.contains(GogglesEnables::ENABLE) && !self.is_enabled(GogglesEnables::ENABLE) {
+            return true
         }
         match drawing.is_drawing() {
             #[cfg(todo)]
@@ -525,31 +533,6 @@ impl GogglesState {
     }
     pub(crate) fn act_enable(&mut self, enables: GogglesEnables) {
         self.enabled_config = enables;
-        #[cfg(deleteme)]
-        {
-            if enables.contains(GogglesEnables::ENABLE) {
-                super::enable();
-            } else {
-                super::disable();
-                return
-            }
-            #[cfg(todo)]
-            if enables.contains(GogglesEnables::ENABLE) {
-                goggles::clear_lens();
-            }
-            #[cfg(feature = "goggles2-camera")]
-            if enables.contains(GogglesEnables::CAMERA_ENABLE) {
-                self.camera.camera_init(self.enabled_config);
-            } else if self.active.contains(GogglesEnables::CAMERA_ENABLE) {
-                self.camera.camera_disable();
-            }
-            #[cfg(feature = "goggles2-project")]
-            if enables.contains(GogglesEnables::PROJECT_ENABLE) {
-                self.project.project_init(self.enabled_config);
-            } else if self.active.contains(GogglesEnables::PROJECT_ENABLE) {
-                self.project.project_disable();
-            }
-        }
     }
     #[cfg(feature = "space")]
     pub(crate) fn setup_engine(&mut self, engine: &Engine, enables: GogglesEnables) {

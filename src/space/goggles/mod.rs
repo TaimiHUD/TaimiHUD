@@ -27,6 +27,7 @@ use {
             ID3D11Buffer,
             ID3D11DepthStencilState,
             ID3D11DepthStencilView,
+            ID3D11DepthStencilView_Vtbl,
             ID3D11DeviceContext,
             ID3D11DeviceContext_Vtbl,
             ID3D11RenderTargetView,
@@ -41,8 +42,6 @@ pub use self::{
     class::{D3dNn, D3dPtr},
     tracking::{GogglesShared, GogglesState, GogglesFlags},
 };
-#[cfg(deleteme)]
-pub use self::lens::{current_lens, clear_lens, pick_lens};
 pub(crate) use self::tracking::{
     g2,
     GogglesShared as FerretResource,
@@ -60,6 +59,7 @@ pub mod camera;
 pub struct Goggles {
     pub set_targets: GenericDetour<SetTargets>,
     pub set_targets_uavs: GenericDetour<SetTargetsAndUAVs>,
+    #[cfg(todo)]
     pub release_depth_view: Option<GenericDetour<Release>>,
     pub update_subresource: GenericDetour<UpdateSubresource>,
     pub set_depth_state: GenericDetour<SetDepthState>,
@@ -120,21 +120,11 @@ type UpdateSubresource = unsafe extern "system" fn(
 
 pub(crate) static GOGGLES: OnceLock<Goggles> = OnceLock::new();
 
-#[inline]
-#[cfg(deleteme)]
-pub fn is_enabled() -> bool {
-    !lens::read_lens().is_null()
-}
-
 unsafe extern "system" fn taimi_set_depth_state(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
     state: Option<InterfaceRef<'static, ID3D11DepthStencilState>>,
     stencil_ref: u32,
 ) {
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    let mut project = None;
-
     if GogglesShared::is_game_dx11(&*this) {
         let state = state.as_ref()
             .map(|s| DepthState::from_d3d_ref(s));
@@ -142,16 +132,9 @@ unsafe extern "system" fn taimi_set_depth_state(
         #[cfg(feature = "goggles2-project")]
         let project2 = project::ProjectShared::on_set_state_prior();
         class::set_state(this.as_ref(), state, stencil_ref);
-        #[cfg(deleteme)]
-        lens::set_depth_state(this.as_ref(), state, stencil_ref);
         #[cfg(feature = "goggles2-project")]
         if let Some(cont) = project2 {
             project::ProjectShared::on_set_state_pre(this.as_ref(), cont);
-        }
-        #[cfg(deleteme)]
-        #[cfg(feature = "goggles2-project")]
-        {
-            project = Some(project::set_state_pre(&this, state, stencil_ref));
         }
     }
 
@@ -162,12 +145,6 @@ unsafe extern "system" fn taimi_set_depth_state(
             return
         },
     };
-
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    if let Some(project) = project {
-        project::set_state_post(this.as_ref(), project);
-    }
 
     res
 }
@@ -205,9 +182,6 @@ unsafe extern "system" fn taimi_set_targets(
     views_ptr: *const Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
     depth_view: Option<InterfaceRef<'static, ID3D11DepthStencilView>>,
 ) {
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    let mut project = None;
     if GogglesShared::is_game_dx11(&*this) {
         let depth = depth_view.as_ref().map(|v| DepthView::from_d3d_ref(v));
         let views = match count as usize {
@@ -217,16 +191,8 @@ unsafe extern "system" fn taimi_set_targets(
         frame_log!("D3D11DeviceContext::OMSetRenderTargets({views:?}, {depth:?})");
         if let Some(_lock) = GogglesShared::acquire_write() {
             #[cfg(feature = "goggles2-project")]
-            #[cfg(deleteme)]
-            {
-                project = Some(project::set_targets_pre(this.as_ref(), views, depth, &[]));
-            }
-
-            #[cfg(feature = "goggles2-project")]
             let project2 = project::ProjectShared::on_set_targets_prior();
             class::set_targets(this.as_ref(), views, depth, &[]);
-            #[cfg(deleteme)]
-            lens::set_targets(this.as_ref(), depth);
             #[cfg(feature = "goggles2-project")]
             if let Some(cont) = project2 {
                 project::ProjectShared::on_set_targets_pre(this.as_ref(), views, depth, &[], cont);
@@ -239,14 +205,6 @@ unsafe extern "system" fn taimi_set_targets(
             log::warn!(logger: DeferredLogger::BEST_EFFORT, "set_targets in place without original?");
         },
     };
-
-    #[cfg(deleteme)]
-    #[cfg(feature = "goggles2-project")]
-    if let Some(project) = project {
-        if let Some(_lock) = GogglesShared::acquire_write() {
-            project::set_targets_post(this.as_ref(), project);
-        }
-    }
 }
 unsafe extern "system" fn taimi_set_targets_uavs(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
@@ -258,9 +216,6 @@ unsafe extern "system" fn taimi_set_targets_uavs(
     uavs_ptr: *const Option<InterfaceRef<'static, ID3D11UnorderedAccessView>>,
     uav_initial_counts: *const u32,
 ) {
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    let mut project = None;
     if GogglesShared::is_game_dx11(&*this) {
         let depth = depth_view.as_ref().map(|v| DepthView::from_d3d_ref(v));
         let views = match count as usize {
@@ -274,16 +229,8 @@ unsafe extern "system" fn taimi_set_targets_uavs(
         frame_log!("D3D11DeviceContext::OMSetRenderTargetsAndUAVs({views:?}, {depth:?}, {uav_slot}, {uavs:?})");
         if let Some(_lock) = GogglesShared::acquire_write() {
             #[cfg(feature = "goggles2-project")]
-            #[cfg(deleteme)]
-            {
-                project = Some(project::set_targets_pre(this.as_ref(), views, depth, uavs));
-            }
-
-            #[cfg(feature = "goggles2-project")]
             let project2 = project::ProjectShared::on_set_targets_prior();
             class::set_targets(this.as_ref(), views, depth, uavs);
-            #[cfg(deleteme)]
-            lens::set_targets(this.as_ref(), depth);
             #[cfg(feature = "goggles2-project")]
             if let Some(cont) = project2 {
                 project::ProjectShared::on_set_targets_pre(this.as_ref(), views, depth, uavs, cont);
@@ -296,14 +243,6 @@ unsafe extern "system" fn taimi_set_targets_uavs(
             log::warn!(logger: DeferredLogger::BEST_EFFORT, "set_targets_uavs in place without original?");
         },
     };
-
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    if let Some(project) = project {
-        if let Some(_lock) = GogglesShared::acquire_write() {
-            project::set_targets_post(this.as_ref(), project);
-        }
-    }
 }
 unsafe extern "system" fn taimi_update_subresource(
     this: InterfaceRef<'static, ID3D11DeviceContext>,
@@ -456,17 +395,16 @@ unsafe extern "system" fn taimi_update_subresource(
     };
 }
 
+#[cfg(todo)]
 unsafe extern "system" fn taimi_release_depth_view(this: InterfaceRef<'static, IUnknown>) -> u32 {
     //log::trace!("IUnknown::Release({this:?}, {views:?}, {depth_view:?})");
 
     if let Some(release) = GOGGLES.get().and_then(|o| o.release_depth_view.as_ref()) {
         // TODO: GogglesShared::acquire?
-        #[cfg(deleteme)]
         let lens_key = lens::release_depth_view_pre(this, release);
 
         let refcount = release.call(this);
 
-        #[cfg(deleteme)]
         if let Some(key) = lens_key {
             lens::release_depth_view(refcount, key);
         }
@@ -484,20 +422,12 @@ unsafe extern "system" fn taimi_clear_depth(
     depth: f32,
     fill_value: u8,
 ) {
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    let mut project = None;
     if GogglesShared::is_game_dx11(&*this) {
         let view = view.as_ref().map(|v| DepthView::from_d3d_ref(&*v));
         frame_log!("D3D11DeviceContext::ClearDepthStencilView({view:?}, {flags:?}, {depth:?}, {fill_value:?})");
         if let Some(view) = view {
             if let Some(_lock) = GogglesShared::acquire_write() {
                 class::clear_depth(&this, view, flags, depth, fill_value);
-                #[cfg(feature = "goggles2-project")]
-                #[cfg(deleteme)]
-                {
-                    project = Some(project::clear_depth_pre(&this, view, flags, depth, fill_value));
-                }
             }
         }
     }
@@ -510,14 +440,6 @@ unsafe extern "system" fn taimi_clear_depth(
         },
     };
 
-    #[cfg(deleteme)]
-    #[cfg(feature = "goggles2-project")]
-    if let Some(project) = project {
-        if let Some(_lock) = GogglesShared::acquire_write() {
-            project::clear_depth_post(this.as_ref(), project);
-        }
-    }
-
     res
 }
 unsafe extern "system" fn taimi_clear_colour(
@@ -525,9 +447,6 @@ unsafe extern "system" fn taimi_clear_colour(
     view: Option<InterfaceRef<'static, ID3D11RenderTargetView>>,
     colour: *const [f32; 4],
 ) {
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    let mut project = None;
     if GogglesShared::is_game_dx11(&*this) {
         let colour = &*colour;
         let view = view.as_ref().map(|v| RenderTargetView::from_d3d_ref(&*v));
@@ -535,11 +454,6 @@ unsafe extern "system" fn taimi_clear_colour(
         if let Some(view) = view {
             if let Some(_lock) = GogglesShared::acquire_write() {
                 class::clear_colour(&this, view, colour);
-                #[cfg(feature = "goggles2-project")]
-                #[cfg(deleteme)]
-                {
-                    project = Some(project::clear_colour_pre(&this, view, colour));
-                }
             }
         }
     }
@@ -552,19 +466,14 @@ unsafe extern "system" fn taimi_clear_colour(
         },
     };
 
-    #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    if let Some(project) = project {
-        if let Some(_lock) = GogglesShared::acquire_write() {
-            project::clear_colour_post(this.as_ref(), project);
-        }
-    }
-
     res
 }
 
-// TODO: pass ID3D11DepthStencilView_Vtbl .-.
-pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
+#[inline(always)]
+pub fn needs_setup() -> bool {
+    GOGGLES.get().is_none()
+}
+pub fn setup(vtable: &ID3D11DeviceContext_Vtbl, _vtable_dv: Option<&ID3D11DepthStencilView_Vtbl>) -> anyhow::Result<()> {
     let set_depth_state: unsafe extern "system" fn(*mut c_void, *mut c_void, u32) =
         vtable.OMSetDepthStencilState;
     let set_depth_state: SetDepthState = unsafe { transmute(set_depth_state) };
@@ -600,11 +509,12 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
     ) = vtable.UpdateSubresource;
     let update_subresource: UpdateSubresource = unsafe { transmute(update_subresource) };
 
-    let release_depth_view: unsafe extern "system" fn(*mut c_void) -> u32 =
-        crate::space::dx11::DepthHandler::depth_stencil_view_vtbl()
-            .map(|vtbl| vtbl.base__.base__.base__.Release)
-            .ok_or_else(|| anyhow!("can't find ID3D11DepthStencilView template"))?;
-    let release_depth_view: Release = unsafe { transmute(release_depth_view) };
+    #[cfg(todo)]
+    let release_depth_view: Option<Release> = {
+        let release_depth_view: Option<unsafe extern "system" fn(*mut c_void) -> u32> =
+            vtable_dv.map(|vtbl| vtbl.base__.base__.base__.Release);
+        release_depth_view.map(|release| unsafe { transmute(release) })
+    };
 
     let orig = unsafe {
         Goggles {
@@ -615,7 +525,16 @@ pub fn setup(vtable: &ID3D11DeviceContext_Vtbl) -> anyhow::Result<()> {
             set_targets: GenericDetour::new(set_targets, taimi_set_targets)?,
             set_targets_uavs: GenericDetour::new(set_targets_uavs, taimi_set_targets_uavs)?,
             update_subresource: GenericDetour::new(update_subresource, taimi_update_subresource)?,
-            release_depth_view: Some(GenericDetour::new(release_depth_view, taimi_release_depth_view)?),
+            #[cfg(todo)]
+            release_depth_view: {
+                let release_depth_view = release_depth_view.map(|release_depth_view|
+                    GenericDetour::new(release_depth_view, taimi_release_depth_view)
+                );
+                if release_depth_view.is_none() {
+                    log::debug!("missing ID3D11DepthStencilView template");
+                }
+                rt::log::debug_ok(release_depth_view.transpose()).flatten()
+            },
         }
     };
     GOGGLES.set(orig).map_err(|_| anyhow!("goggles already set up?"))
@@ -628,6 +547,7 @@ pub fn enable() -> anyhow::Result<()> {
 
     unsafe {
         orig.set_targets.enable()?;
+        #[cfg(todo)]
         if let Some(release_depth_view) = &orig.release_depth_view {
             release_depth_view.enable()?;
         }
@@ -642,9 +562,9 @@ pub fn enable() -> anyhow::Result<()> {
 }
 
 pub fn disable() -> anyhow::Result<()> {
-    let orig = GOGGLES
-        .get()
-        .ok_or_else(|| anyhow!("can't disable what hasn't been set up first"))?;
+    let Some(orig) = GOGGLES.get() else {
+        return Ok(())
+    };
 
     let mut res: anyhow::Result<()> = Ok(());
 
@@ -652,6 +572,7 @@ pub fn disable() -> anyhow::Result<()> {
         if let Err(e) = orig.set_targets.disable() {
             res = Err(e.into());
         }
+        #[cfg(todo)]
         if let Some(Err(e)) = orig.release_depth_view.as_ref().map(|r| r.disable()) {
             res = Err(e.into());
         }
@@ -669,14 +590,6 @@ pub fn disable() -> anyhow::Result<()> {
         }
         if let Err(e) = orig.update_subresource.disable() {
             res = Err(e.into());
-        }
-    }
-
-    #[cfg(todo = "unnecessary")]
-    #[cfg(feature = "goggles")]
-    {
-        if let Ok(mut lenses) = LENSES.try_write() {
-            lenses.clear();
         }
     }
 
