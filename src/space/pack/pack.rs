@@ -246,6 +246,16 @@ impl PackRender {
                 self.draw_state.prev_map_id = map_id;
                 self.resources.dirty = true;
                 space_dirty = true;
+                STATS_ENTITY_COUNT.reset_with(|| {
+                    match &self.render_list.spacepacks {
+                        #[cfg(todo)]
+                        space => space.render_entities.entities.iter().filter(|e| !e.is_invalid()).count(),
+                        space => space.loaded_packs.values().flat_map(|p| [
+                            p.populated_pois.count_ones() as u32,
+                            p.populated_trails.count_ones() as u32,
+                        ]).sum::<u32>(),
+                    }
+                });
             }
         }
         let packs_map_changed = {
@@ -715,7 +725,6 @@ impl PackRender {
             },
         }
         self.draw_state.primary_draw = false;
-        STATS_ENTITY_COUNT.reset_with(|| spacepacks.render_entities.entities.len());
     }
     #[cfg(feature = "goggles")]
     pub fn draw_obscured(
@@ -1730,63 +1739,6 @@ impl ArcrenderSettings {
         }
         shared_v.poi.billboard = taimi_meta::coords::billboard_from_look(view.into());
         shared_v.poi.map_scale = map_calibration.local_space().scale.abs().y;
-    }
-    #[cfg(deleteme)]
-    #[inline]
-    pub fn set_v(
-        &self,
-        shared_v: &mut instance::ConstantDataV,
-        viewport_size: Size2<ScreenSpace>,
-        map_calibration: &MapCalibration,
-        (camera_pos, camera_dir, _camera_up): RenderPosition,
-        player_pos: Option<Point3<DrawSpace>>,
-        projection: Matrix4<f32>,
-        view: Matrix4<f32>,
-        anim_timestamp: Option<f32>,
-    ) {
-        let billboard = taimi_meta::coords::billboard_from_look(view.into());
-        shared_v.render = instance::RenderConstantDataV {
-            player_pos: player_pos.unwrap_or(Point3::splat(taimi_meta::spatial::IRRELEVANT_MID)).to_vector().cast(),
-            anim_timestamp: anim_timestamp.unwrap_or(0.0),
-            camera_pos: camera_pos.to_vector().cast(),
-            camera_dir: camera_dir.cast(),
-            view,
-            projection,
-            _padding0: 0.0,
-            viewport_pixel_scale: 1.0 / viewport_size.height,
-            #[cfg(todo = "unnecessary")]
-            viewport_pixel_scale: viewport_size.dot(viewport_size).sqrt() * 2.0,
-            _padding2: glamour::Vector4::ZERO,
-        };
-        shared_v.poi = instance::PoiConstantDataV {
-            marker: instance::MarkerConstantDataV {
-                alpha: self.poi_alpha,
-                scale: self.poi_expansion.scale(),
-                anim_scale: self.poi_anim_speed,
-                flags:
-                    self.poi_distance_fade.then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE).unwrap_or(0) |
-                    (!self.poi_can_fade).then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE).unwrap_or(0) |
-                    self.poi_limit_size.then_some(instance::MarkerConstantDataV::FLAG_POI_LIMIT_SIZE).unwrap_or(0) |
-                    self.poi_flags,
-            },
-            billboard,
-            map_scale: map_calibration.local_space().scale.abs().y,
-            _padding0: glamour::Vector3::ZERO,
-        };
-        shared_v.trail = instance::TrailConstantDataV {
-            marker: instance::MarkerConstantDataV {
-                alpha: self.trail_alpha,
-                scale: self.trail_expansion.normal_expansion,
-                anim_scale: self.trail_anim_speed,
-                flags:
-                    self.trail_distance_fade.then_some(instance::MarkerConstantDataV::FLAG_DISTANCE_FADE).unwrap_or(0) |
-                    (!self.trail_can_fade).then_some(instance::MarkerConstantDataV::FLAG_OBSCURE_FADE).unwrap_or(0) |
-                    self.trail_flags,
-            },
-            tex_scale: self.trail_texture.v_scale,
-            tex_offset: self.trail_texture.v_offset,
-            _padding0: glamour::Vector2::ZERO,
-        };
     }
 }
 
