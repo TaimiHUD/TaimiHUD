@@ -50,8 +50,8 @@ pub(crate) use self::tracking::{
 
 pub(super) mod tracking;
 pub mod class;
+#[path = "lens2.rs"]
 pub mod lens;
-pub mod lens2;
 #[cfg(feature = "goggles2-project")]
 pub mod project;
 #[cfg(feature = "goggles2-camera")]
@@ -687,7 +687,6 @@ pub fn shutdown() -> anyhow::Result<()> {
     if GOGGLES.get().is_none() {
         return Ok(())
     }
-    lens::shutdown();
 
     disable()
 }

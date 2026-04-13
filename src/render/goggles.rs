@@ -6,11 +6,11 @@ use {
             machine::RenderMachine,
         },
         settings::goggles::GogglesEnables,
-        space::goggles::{self, class::ClassShared, lens::{LensClass, LENSES, LENS_PTR}},
+        space::goggles::{self, class::ClassShared, D3dPtr},
     },
     anyhow::Context,
     nexus::imgui,
-    std::{mem, ptr, sync::atomic::Ordering, thread},
+    std::{mem, thread},
     strum::VariantArray,
     taimi_hoard::lazyfmt,
     windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl},
@@ -18,7 +18,7 @@ use {
 
 #[derive(Default)]
 pub(super) struct GogglesConfig {
-    pub view_lens: usize,
+    pub view_lens: D3dPtr,
     pub view_lens_info: String,
 }
 impl GogglesConfig {
@@ -211,7 +211,7 @@ impl GogglesConfig {
         let mut new_selection = None;
         let mut selected_info = None;
         if let Some(_list) = list.begin(ui) {
-            selected_lens = core::ptr::NonNull::new(self.view_lens as *mut core::ffi::c_void);
+            selected_lens = self.view_lens;
             for (key, info) in ClassShared::iter_ui() {
                 let ty = info.kind.tag();
                 let is_selected = selected_lens == Some(key);
@@ -239,17 +239,17 @@ impl GogglesConfig {
 
         selected_lens = new_selection.or(selected_lens);
         if let Some(lens) = new_selection {
-            self.view_lens = lens.as_ptr() as usize;
+            self.view_lens = Some(lens);
             self.view_lens_info.clear();
         } else if ui.is_item_clicked_with_button(MouseButton::Right) {
-            self.view_lens = 0;
+            self.view_lens = None;
             self.view_lens_info = String::new();
             selected_lens = None;
         }
 
         let mut new_class = None;
         if let Some(info) = &selected_info {
-            let preview = format!("{:?}", info.classification);
+            let preview: &str = info.classification.into();
             if let Some(combo) = ui.begin_combo("reclassify", preview) {
                 for &cls in goggles::class::BufferClass::VARIANTS {
                     let name: &str = cls.into();
@@ -267,6 +267,7 @@ impl GogglesConfig {
             new_class = Some(None);
         }
 
+        #[cfg(taimi_debug)]
         if self.view_lens_info.is_empty() {
             use taimi_d3d::dx11::{DepthView, RenderTargetView, View};
             let mut rview = None;
@@ -288,14 +289,14 @@ impl GogglesConfig {
                 };
                 view.map(|v| (v, info))
             } else { None };
-            if let Some((view, _info)) = view {
+            let desc = view.and_then(|(view, ..)|
+                view.get_resource().ok().and_then(|r| r.as_texture2().map(|t2| t2.desc())),
+            );
+            if let Some(desc) = desc {
                 use core::fmt::Write;
                 let out = &mut self.view_lens_info;
-                let dims = goggles::lens::get_view_dims(view);
-                if let Some(buf_desc) = dims {
-                    let _ = write!(out, "size=({},{}) mips={}({})", buf_desc.Width, buf_desc.Height, buf_desc.MipLevels, buf_desc.SampleDesc.Count);
-                    let _ = write!(out, "format={:#x} usage={:#x} bind={:#x} misc={:#x}", buf_desc.Format.0, buf_desc.Usage.0, buf_desc.BindFlags, buf_desc.MiscFlags);
-                }
+                let _ = write!(out, "size={}x{} mips={}({})", desc.Width, desc.Height, desc.MipLevels, desc.SampleDesc.Count);
+                let _ = write!(out, "format={:#x} usage={:#x} bind={:#x} misc={:#x}", desc.Format.0, desc.Usage.0, desc.BindFlags, desc.MiscFlags);
             }
         }
         if let (Some(lens), Some(info)) = (selected_lens, &selected_info) {
@@ -305,7 +306,8 @@ impl GogglesConfig {
                 ui.text(format!("assoc {assoc:p}"));
                 goggles::class::ClassShared::with_seen2(assoc, |abuf| {
                     ui.same_line();
-                    ui.text(format!("({:?})", abuf.classification));
+                    let cls: &str = abuf.classification.into();
+                    ui.text(format!("({cls})"));
                 });
                 match info.state.associated {
                     Some(assoc2) if assoc2 == assoc => {
@@ -316,7 +318,8 @@ impl GogglesConfig {
                         ui.text(format!("assoc the 2nd: {assocmismatch:p}"));
                         goggles::class::ClassShared::with_seen2(assocmismatch, |abuf| {
                             ui.same_line();
-                            ui.text(format!("({:?})", abuf.classification));
+                            let cls: &str = abuf.classification.into();
+                            ui.text(format!("({cls})"));
                         });
                     },
                     None => (),
@@ -376,6 +379,8 @@ impl GogglesConfig {
         }
     }
 }
+unsafe impl Sync for GogglesConfig {}
+unsafe impl Send for GogglesConfig {}
 
 #[cfg(todo = "unused")]
 pub fn options_ui(ui: &imgui::Ui) {
@@ -393,46 +398,6 @@ pub fn options_ui(ui: &imgui::Ui) {
     }
 
     options_ui_lenses(ui);
-}
-
-pub fn options_ui_lenses(ui: &imgui::Ui, machine: &mut super::machine::RenderMachine) {
-    if let Ok(lenses) = LENSES.read() {
-        let selected_lens = LENS_PTR.load(Ordering::Relaxed);
-        let preview = match selected_lens {
-            l if l.is_null() => "Default".into(),
-            key => match lenses.get(&(key as usize)) {
-                Some(clss) => format!("{clss:?} ({key:?})"),
-                None => format!("{key:?}"),
-            },
-        };
-        let mut new_lens = None;
-        if let Some(combo) = ui.begin_combo("Lens", preview) {
-            for (&key, &clss) in lenses.iter() {
-                if matches!(clss, LensClass::Unknown) {
-                    continue
-                }
-                let selected = imgui::Selectable::new(format!("{clss:?} ({key:08x})"))
-                    .selected(selected_lens as usize == key)
-                    .build(ui);
-                if selected {
-                    new_lens = Some((key, clss));
-                }
-            }
-            combo.end();
-        }
-        match new_lens {
-            None if ui.is_item_clicked_with_button(MouseButton::Right) => {
-                LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-            },
-            None => (),
-            Some((_, LensClass::Space)) => {
-                LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-            },
-            Some((key, _)) => {
-                LENS_PTR.store(key as *mut _, Ordering::Relaxed);
-            },
-        }
-    }
 }
 
 #[cfg(taimi_debug)]
@@ -569,13 +534,6 @@ pub fn enable(needs_setup: bool) -> bool {
         if let Err(e) = res {
             log::error!("{e:#}");
             let _ = goggles::disable();
-        } else {
-            let _ = LENS_PTR.compare_exchange(
-                ptr::null_mut(),
-                ptr::dangling_mut(),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
         }
     });
     true
@@ -585,10 +543,5 @@ pub fn disable() {
     let res = goggles::disable().context("failed to disable goggles");
     if let Err(e) = res {
         log::error!("{e:#}");
-    } else {
-        let _ = LENS_PTR.store(ptr::null_mut(), Ordering::Relaxed);
-    }
-    if let Ok(mut lenses) = LENSES.try_write() {
-        lenses.clear();
     }
 }

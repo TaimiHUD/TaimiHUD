@@ -771,7 +771,9 @@ impl Engine {
                 device_context.Flush();
             }
         }
+        #[cfg(todo)]
         let target = desc.goggles.render_view();
+        #[cfg(todo)]
         let depth_view = desc.goggles.depth_view();
         let _state_prim = device_context.get_snapshot::<taimi_d3d::state::PrimitiveTopology>();
         let _state_blend = device_context.get_snapshot::<dx11::OMBlendState<Option<dx11::BlendState>>>();
@@ -794,39 +796,55 @@ impl Engine {
         let _srvp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewP>>>();
         #[cfg(todo = "unnecessary")]
         let _srvv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewV>>>();
-        let aspect = self.render_backend.viewport.viewport.Width / self.render_backend.viewport.viewport.Height;
-        let vp = _viewport.state.iter()
-            .zip(_rendertarget.state.views.iter())
-            .find(|(_, rt)| desc.goggles.target_renderview.is_some() && rt.as_ref().map(|rt| *rt.as_d3d_raw()) == desc.goggles.target_renderview)
-            .and_then(|(vp, _)| vp.get());
-        let vp_size = vp.map(|vp| (vp, vp.size2()))
-            .and_then(|(vp, sz)| match sz {
-                Size2 { width: 0.0f32, .. } | Size2 { height: 0.0f32, .. } => None,
-                _ => Some((vp, sz)),
-            });
-        let vp_size_valid = vp_size.and_then(|(vp, size)| {
-            if vp.viewport.TopLeftX != 0.0 || vp.viewport.TopLeftY != 0.0 { return None }
-            if (aspect - (size.width / size.height)).abs() > 2e-3 {
-                return None
-            }
-            Some(size.cast())
-        });
-        // we already know this via class but the lookup should be cheap? idk
-        let rt_size_u32 = target.and_then(|rt|
-            goggles::lens::get_view_dims(&rt)
-        ).map(|desc| (desc.Width, desc.Height))
-        .and_then(|sz| match sz {
-            (0, _) | (_, 0) => None,
-            sz => Some(sz),
-        });
-        let rt_size = rt_size_u32.map(|(w, h)| Size2::<ScreenSpace>::new(w as f32, h as f32));
-        let rt_size_valid = || rt_size
-            .and_then(|size| {
-                if (aspect - (size.width / size.height)).abs() > 2e-3 {
-                    return None
-                }
-                Some(size)
-            });
+        let vp_rect = match desc.goggles.target_viewport {
+            vp @ Some(..) => Some(vp),
+            None if desc.goggles.buffer_compat => Some(None),
+            None => {
+                let vp = _viewport.state.iter()
+                    .zip(_rendertarget.state.views.iter())
+                    .find(|(_, rt)| desc.goggles.target_renderview.is_some() && rt.as_ref().map(|rt| *rt.as_d3d_raw()) == desc.goggles.target_renderview)
+                    .and_then(|(vp, _)| vp.get());
+                let vp_size = vp.map(|vp| (vp, vp.size2()))
+                    .and_then(|(vp, sz)| match sz {
+                        Size2 { width: 0.0f32, .. } | Size2 { height: 0.0f32, .. } => None,
+                        _ => Some((vp, sz)),
+                    });
+                match desc.goggles.inherit {
+                    #[cfg(todo = "unnecessary")]
+                    false => {
+                        let aspect = self.render_backend.viewport.viewport.Width / self.render_backend.viewport.viewport.Height;
+                        let vp_size_valid = vp_size.and_then(|(vp, size)| {
+                            if vp.viewport.TopLeftX != 0.0 || vp.viewport.TopLeftY != 0.0 { return None }
+                            if (aspect - (size.width / size.height)).abs() > 2e-3 {
+                                return None
+                            }
+                            Some(vp)
+                        });
+                        vp_size_valid
+                    },
+                    false => None,
+                    _ => vp_size.map(|(vp, ..)| vp),
+                }.map(|vp| Rect::new(vp.top_left().cast(), vp.size2().cast()))
+            }.map(Some),
+        };
+        let Some(vp_rect) = vp_rect else {
+            frame_log!("viewport missing");
+            return
+        };
+        let can_inherit = match () {
+            #[cfg(todo)]
+            _ => {
+                let mut rtviews = _rendertarget.state.views.iter().filter_map(|v| v.as_ref());
+                let unique_rt = rtviews.next();
+                desc.goggles.target_renderview.is_some() && unique_rt.map(|rtv| *rtv.as_d3d_raw()) == desc.goggles.target_renderview
+                    && rtviews.next().is_none()
+                    && _rendertarget.state.depth.as_ref().map(|dv| *dv.as_d3d_raw()) == desc.goggles.target_depthview
+            },
+            _ => false,
+        };
+        if can_inherit {
+            desc.goggles.inherit = true;
+        }
         #[cfg(deleteme)]
         {
         self.render_backend.depth_handler.inherit_depth = match machine.goggles.project.inherit_render {
@@ -842,77 +860,23 @@ impl Engine {
             false => None,
         }.map(|v| v.as_d3d_raw().as_ptr() as usize).unwrap_or(0);
         }
-        let (display_size, viewport) = (self.render_backend.display_size, self.render_backend.viewport);
-        let rt_size_minimap = match rt_size_u32 {
-            Some((w, h)) if matches!(ctx, LocalContext::MINIMAP) && w == h => rt_size,
-            _ => None,
-        };
-        if let Some(rt_size) = rt_size_minimap {
-            self.render_backend.display_size = rt_size;
-            self.render_backend.viewport.viewport.Width = rt_size.width;
-            self.render_backend.viewport.viewport.Height = rt_size.height;
-        } else if let Some(vp_size) = vp_size_valid.or_else(rt_size_valid) {
-            self.render_backend.display_size = vp_size;
-            self.render_backend.viewport.viewport.Width = vp_size.width;
-            self.render_backend.viewport.viewport.Height = vp_size.height;
-        } else if let (Some(vp), false) = (vp, machine.goggles.project.project_viewport_force) {
-            let vp_extent = match () {
-                #[cfg(todo)]
-                _ => vp.bottom_right().to_vector().cast().to_size(),
-                _ => vp.size2().cast(),
-            };
-            self.render_backend.display_size = match vp_extent {
-                #[cfg(todo)]
-                sz => rt_size.unwrap_or(sz),
-                sz => sz,
-            };
-            self.render_backend.viewport.viewport.TopLeftX = vp.viewport.TopLeftX;
-            self.render_backend.viewport.viewport.TopLeftY = vp.viewport.TopLeftY;
-            self.render_backend.viewport.viewport.Width = vp.viewport.Width;
-            self.render_backend.viewport.viewport.Height = vp.viewport.Height;
-        }
         let mut buffer_compat = desc.goggles.buffer_compat;
-        match rt_size_u32 {
-            Some((w, h)) if w != self.render_backend.viewport.viewport.Width as u32 || h != self.render_backend.viewport.viewport.Height as u32 =>
-                buffer_compat = false,
-            None if desc.goggles.target_renderview.is_some() =>
-                buffer_compat = false,
-            _ => (),
-        }
-        #[cfg(deleteme)]
-        #[cfg(feature = "goggles")]
-        let lens_storage;
-        #[cfg(deleteme)]
-        #[cfg(feature = "goggles")]
-        let depth_view = {
-            let mut depth_view = depth_view;
-            if depth_view.is_none() /* && !machine.goggles.project.inherit_render */ && machine.goggles.active.contains(GogglesEnables::LENS_ENABLE) && matches!(ctx, LocalContext::World) {
-                if let Some(lens) = goggles::current_lens() {
-                    lens_storage = lens;
-                    depth_view = Some(lens_storage.as_ref());
-                }
+        let (display_size, viewport) = (self.render_backend.display_size, self.render_backend.viewport);
+        if let Some(vp_rect) = vp_rect {
+            if vp_rect.size != display_size {
+                buffer_compat = false;
             }
-            depth_view
-        };
-        let dv_size_u32 = depth_view.and_then(|rt|
-            goggles::lens::get_view_dims(&rt)
-        ).map(|desc| (desc.Width, desc.Height));
-        match dv_size_u32 {
-            Some((w, h)) if w != self.render_backend.viewport.viewport.Width as u32 || h != self.render_backend.viewport.viewport.Height as u32 =>
-                buffer_compat = false,
-            None if desc.goggles.target_depthview.is_some() =>
-                buffer_compat = false,
-            _ => (),
+            self.render_backend.display_size = match vp_rect {
+                #[cfg(todo)]
+                vp => vp.max().to_vector().to_size(),
+                vp => vp.size,
+            };
+            self.render_backend.viewport.viewport.Width = vp_rect.size.width;
+            self.render_backend.viewport.viewport.Height = vp_rect.size.height;
+            self.render_backend.viewport.viewport.TopLeftX = vp_rect.origin.x;
+            self.render_backend.viewport.viewport.TopLeftY = vp_rect.origin.y;
         }
-        let mut rtviews = _rendertarget.state.views.iter().filter_map(|v| v.as_ref());
-        let unique_rt = rtviews.next();
-        let can_inherit = desc.goggles.target_renderview.is_some() && unique_rt.map(|rtv| *rtv.as_d3d_raw()) == desc.goggles.target_renderview
-            && rtviews.next().is_none()
-            && _rendertarget.state.depth.as_ref().map(|dv| *dv.as_d3d_raw()) == desc.goggles.target_depthview;
-        let can_inherit = false;
-        if can_inherit {
-            desc.goggles.inherit = true;
-        }
+        #[cfg(deleteme)]
         match dv_size_u32 {
             Some((w, h)) if rt_size_u32.is_some() && rt_size_u32 != dv_size_u32 => {
                 frame_log!("depth buffer incompatible!");
@@ -947,6 +911,7 @@ impl Engine {
             }
             LocalContext::MINIMAP
         } else { ctx };
+        #[cfg(deleteme)]
         if let LocalContext::Map(..) = ctx {
             desc.depth_write = false;
             desc.depth_read = false;
@@ -1875,8 +1840,14 @@ impl Engine {
         #[cfg(feature = "goggles")]
         if render_world.is_some() && machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) {
             machine.goggles.lens.with_selected_lens(|lens| if let Some(lens) = lens {
-                let mut g = DrawDescGoggles::with_buffers(Some(lens), None);
-                g.buffer_compat = machine.goggles.lens.lens_compatible();
+                let buffer_compat = machine.goggles.lens.lens_compatible();
+                let vp = match buffer_compat {
+                    #[cfg(todo)]
+                    false => machine.goggles.lens.vp_idk,
+                    _ => None,
+                };
+                let mut g = DrawDescGoggles::with_buffers(vp, Some(lens), None);
+                g.buffer_compat = buffer_compat;
                 desc = g.to_space();
                 if desc.stencil_write || is_rendering_world {
                     // DV fill is dumb if all we're doing is drawing the obscured paths...
@@ -2450,6 +2421,8 @@ pub struct DrawDescGoggles {
 
     #[cfg(feature = "goggles2-project")]
     pub(super) target_renderview: goggles::D3dPtr,
+    #[cfg(feature = "goggles2-project")]
+    pub target_viewport: Option<Rect<ScreenSpace>>,
     /// whether target views are both already bound (RTV must be in first slot)
     #[cfg(feature = "goggles2-project")]
     pub inherit: bool,
@@ -2464,10 +2437,11 @@ pub struct DrawDescGoggles {
 #[cfg(feature = "goggles")]
 impl DrawDescGoggles {
     pub fn empty() -> Self {
-        Self::with_buffers(None, None)
+        Self::with_buffers(None, None, None)
     }
 
     pub fn with_buffers(
+        viewport: Option<Rect<ScreenSpace>>,
         depth_view: Option<&dx11::DepthView>,
         _target: Option<&dx11::RenderTargetView>,
     ) -> Self {
@@ -2477,6 +2451,8 @@ impl DrawDescGoggles {
             depth_invert: false,
             #[cfg(feature = "goggles2-project")]
             target_renderview: _target.map(|v| *v.as_d3d_raw()),
+            #[cfg(feature = "goggles2-project")]
+            target_viewport: viewport,
             #[cfg(feature = "goggles2-project")]
             inherit: false,
             #[cfg(feature = "goggles2-project")]

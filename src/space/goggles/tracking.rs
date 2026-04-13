@@ -42,7 +42,7 @@ pub struct GogglesShared {
     pub frame_buffers: BTreeSet<*mut c_void>,
     pub class: ClassShared,
     pub class2: super::class::ClassShared2,
-    pub lens: super::lens2::LensShared,
+    pub lens: super::lens::LensShared,
     #[cfg(feature = "goggles2-camera")]
     pub cam: super::camera::CameraShared,
     #[cfg(feature = "goggles2-project")]
@@ -61,7 +61,7 @@ impl GogglesShared {
         frame_buffers: BTreeSet::new(),
         class: ClassShared::EMPTY,
         class2: super::class::ClassShared2::EMPTY,
-        lens: super::lens2::LensShared::EMPTY,
+        lens: super::lens::LensShared::EMPTY,
         #[cfg(feature = "goggles2-camera")]
         cam: super::camera::CameraShared::EMPTY,
         #[cfg(deleteme)]
@@ -256,7 +256,7 @@ pub struct GogglesState {
     /// mask of usable features
     pub available: GogglesEnables,
     pub active: GogglesEnables,
-    pub lens: super::lens2::GogglesLens,
+    pub lens: super::lens::GogglesLens,
     pub class: super::class::GogglesClass,
     #[cfg(feature = "goggles2-camera")]
     pub camera: super::camera::GogglesCamera,
@@ -457,7 +457,7 @@ impl GogglesState {
             if let Some(target) = target {
                 if true /* is_drawing && self.enabled_config.contains(GogglesEnables::ENABLE)*/ {
                     if let Ok(res) = target.get_resource() {
-                        frame_buffers.insert(res.as_raw());
+                        frame_buffers.insert(res.as_d3d_raw().as_ptr());
                     }
                     frame_buffers.insert(target.as_d3d_raw().as_ptr());
                 }
@@ -553,7 +553,7 @@ impl GogglesState {
     }
     #[cfg(feature = "space")]
     pub(crate) fn setup_engine(&mut self, engine: &Engine, enables: GogglesEnables) {
-        super::lens::classify_space_lens(engine);
+        self.class.setup_engine(engine, enables);
         self.act_enable(enables);
     }
 

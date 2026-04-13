@@ -42,11 +42,12 @@ impl_d3d! {
 }
 
 impl View {
-    pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
+    pub fn get_resource(&self) -> anyhow::Result<Resource> {
         unsafe {
             self.as_d3d()
                 .GetResource()
                 .context("ID3D11ShaderResourceView::GetResource")
+                .map(Resource::from_d3d)
         }
     }
 }

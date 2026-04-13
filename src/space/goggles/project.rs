@@ -1,5 +1,5 @@
 use {
-    super::{g2, class::{ClassShared, BufferClass, BufferKind, BufferStateFlags}, lens2::LensShared, GogglesFlags, GogglesShared, GogglesState, D3dPtr, D3dNn},
+    super::{g2, class::{ClassShared, BufferClass, BufferKind, BufferStateFlags}, lens::LensShared, GogglesFlags, GogglesShared, GogglesState, D3dPtr, D3dNn},
     crate::{
         exports::runtime::{
             log::DeferredLogger,
@@ -20,6 +20,7 @@ use {
         fmt,
     },
     glam::Vec4,
+    glamour::{Point2, Rect, Size2},
     std::sync::atomic::{AtomicPtr, AtomicU16, AtomicU8},
     std::time::Instant,
     taimi_d3d::dx11::{
@@ -487,15 +488,17 @@ impl ProjectShared {
             DepthView::from_d3d_raw_ref(dv)
         });
         if let Some(engine) = engine {
+            let target_size = ClassShared::with_seen2(*target.as_d3d_raw(), |buf| buf.size()).flatten();
+            let vp = target_size.map(|(w, h)| Rect::new(Point2::ZERO, Size2::new(w as f32, h as f32)));
             let desc = DrawDescGoggles {
                 depth_filled: target_dv.is_some(),
                 projecting: true,
                 #[cfg(todo)]
                 inherit: is_unique_sure_why_not_idk,
-                .. DrawDescGoggles::with_buffers(depth, Some(target))
+                .. DrawDescGoggles::with_buffers(vp, depth, Some(target))
             };
             let mut desc = desc.to_space();
-            desc.goggles.buffer_compat = desc.goggles.target_depthview.is_some();
+            desc.goggles.buffer_compat = vp.map(|vp| vp.size) == Some(engine.render_backend.display_size) && depth.is_some();
             desc.pass = match what {
                 ProjectAction::Shadowbox => DrawDescSpace::PASS_SHADOWBOXING,
                 ProjectAction::DrawObscured => match cls {

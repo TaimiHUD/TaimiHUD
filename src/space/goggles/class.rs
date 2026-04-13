@@ -29,6 +29,8 @@ use {
     },
     taimi_hoard::vec::vec32_eq,
 };
+#[cfg(feature = "space")]
+use crate::space::Engine;
 
 pub type D3dNn = NonNull<c_void>;
 pub type D3dPtr = Option<D3dNn>;
@@ -87,7 +89,7 @@ pub(super) unsafe fn set_targets(
                 buf
             },
             btree_map::Entry::Vacant(e) => {
-                let resource = view.get_resource().ok().map(Resource::from_d3d);
+                let resource = view.get_resource().ok();
                 let buf_desc = resource.as_ref().and_then(|r| r.as_texture2()).map(|t2| t2.desc());
                 e.insert(BufferInfo {
                     classification: BufferClass::New,
@@ -447,7 +449,7 @@ impl ClassShared {
         seen.retain(|key, buf| {
             let winprev = (buf.kind, buf.classification);
             let since = buf.seen_since(prev_frame);
-            if since > BufferInfo::TIME_GONE {
+            if !matches!(buf.classification, BufferClass::Taimi) && since > BufferInfo::TIME_GONE {
                 if buf.state.winner {
                     match winners.entry(winprev) {
                         btree_map::Entry::Occupied(e) if e.get().0 == *key => {
@@ -671,6 +673,7 @@ impl ClassShared {
         let clsok = |cls: BufferClass| match cls {
             #[cfg(todo)]
             cls if cls == _target => true,
+            BufferClass::Taimi => false,
             BufferClass::New =>
                 false,
             _ => true,
@@ -845,7 +848,8 @@ impl BufferInfo {
     const TIME_GONE: u32 = 32;
     const TIME_LOST: u32 = 3;
     const TIME_AGE_MIN: u32 = 2;
-    const TIME_AGE_UI: u32 = 64;
+    const TIME_AGE_NEW: u32 = 64;
+    const TIME_AGE_UI: u32 = 48;
     const TIME_AGE_RECLASSIFY: u32 = 128;
 
     const EMPTY_STATE: BufferState = BufferState::EMPTY;
@@ -920,7 +924,7 @@ impl BufferInfo {
         match self.classification {
             BufferClass::New if age >= Self::TIME_AGE_MIN =>
                 self.classification = BufferClass::Unknown,
-            BufferClass::Unknown if commit || (is_ingame && age <= BufferInfo::TIME_AGE_UI) => {
+            BufferClass::Unknown if commit || (is_ingame && age <= BufferInfo::TIME_AGE_NEW) => {
                 self.classify_commit(is_ingame);
             },
             BufferClass::Antialiasing => (),
@@ -1699,6 +1703,69 @@ impl GogglesClass {
         [
             StatsRef::with_counter(&STATS_GAME_RENDER, StatsUnit::Time),
         ]
+    }
+
+    #[cfg(feature = "space")]
+    pub(super) fn setup_engine(&mut self, engine: &Engine, _enables: GogglesEnables) {
+        let rtv = &engine.render_backend.depth_handler.render_target_view.views;
+        let dv = engine.render_backend.depth_handler.render_target_view.depth.as_ref();
+
+        let now = ClassShared::bind_generation();
+        let buf_rt = BufferInfo {
+            classification: BufferClass::Taimi,
+            associated: dv.map(|v| *v.as_d3d_raw()),
+            resource: rtv.get_resource().ok().map(|r| *r.as_d3d_raw()),
+            size: (engine.render_backend.display_size.width as _, engine.render_backend.display_size.height as _),
+            format: BufferInfo::EMPTY_FORMAT,
+            last_seen: now,
+            first_seen: now,
+            kind: BufferKind::RenderTarget,
+            state: BufferState {
+                classification_score: BufferState::SCORE_MANUAL,
+                .. BufferInfo::EMPTY_STATE
+            },
+        };
+        let buf_dv = dv.map(|dv| BufferInfo {
+            classification: BufferClass::Taimi,
+            associated: Some(*rtv.as_d3d_raw()),
+            resource: dv.get_resource().ok().map(|r| *r.as_d3d_raw()),
+            size: (engine.render_backend.display_size.width as _, engine.render_backend.display_size.height as _),
+            format: BufferInfo::EMPTY_FORMAT,
+            last_seen: now,
+            first_seen: now,
+            kind: BufferKind::RenderTarget,
+            state: BufferState {
+                classification_score: BufferState::SCORE_MANUAL,
+                .. BufferInfo::EMPTY_STATE
+            },
+        });
+
+        fn copy_buf(out: &mut BufferInfo, buf: &BufferInfo) {
+            out.classification = buf.classification;
+            out.associated = buf.associated;
+            out.resource = buf.resource;
+            out.size = buf.size;
+            out.kind = buf.kind;
+            out.state.classification_score = buf.state.classification_score;
+        }
+        ClassShared::with_mut(move |c| {
+            match c.seen.entry(*rtv.as_d3d_raw()) {
+                btree_map::Entry::Vacant(e) => {
+                    e.insert(buf_rt);
+                },
+                btree_map::Entry::Occupied(e) =>
+                    copy_buf(e.into_mut(), &buf_rt),
+            }
+            if let (Some(dv), Some(buf_dv)) = (dv, buf_dv) {
+                match c.seen.entry(*dv.as_d3d_raw()) {
+                    btree_map::Entry::Vacant(e) => {
+                        e.insert(buf_dv);
+                    },
+                    btree_map::Entry::Occupied(e) =>
+                        copy_buf(e.into_mut(), &buf_dv),
+                }
+            }
+        });
     }
 }
 static STATS_GAME_RENDER: StatsCounter = StatsCounter::DEFAULT;
