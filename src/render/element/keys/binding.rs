@@ -31,8 +31,9 @@ impl KeyBindSelection {
             .copied()
             .unwrap_or(KeyInput::EMPTY);
 
-        let current_key = match SaveState::read_with(|state| state.game_binds.get(control, None)) {
-            Some((vk, mods)) => Some(KeyInput::new(vk, mods, true)),
+        let current_key = SaveState::read_with(|state| state.game_binds.get_slot(control, None));
+        let current_key = match current_key {
+            Some(((vk, mods), idx)) => Some(KeyInput::new(vk, mods, true)),
             None => None,
         }
         .unwrap_or(KeyInput::EMPTY);
