@@ -232,6 +232,7 @@ impl PackRender {
                 self.resources.dirty = true;
             }
         }
+        let arcrender = || settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
         let mut ibs_dirty = self.poi_common.is_empty();
         let map_id = match self.render_list.spacepacks.map_id {
             map_id if map_id != machine.is_ingame() => None,
@@ -410,7 +411,7 @@ impl PackRender {
                     geometry if geometry.is_empty() => None,
                     geometry => rt::log::error_ok(
                         trail
-                            .setup_geometry(device, geometry)
+                            .setup_geometry(device, geometry, arcrender())
                             .context("loading trail geometry"),
                     ),
                 };
@@ -531,8 +532,7 @@ impl PackRender {
             self.trail_rx.request_many(incomplete_trail_geometry);
             self.texture_rx.request_many(incomplete_textures);
             if self.resources.dirty {
-                let arcrender = settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
-                if arcrender {
+                if arcrender() {
                     let res = self.resources.prepare(device, self.pack_data.map_ref_as_slice(), &mut self.draw_state, self.spacepacks.render_entities.entities.iter().map(|e| e.id)).context("RenderResources::prepare");
                     rt::log::error_ok(res);
                 }
@@ -802,7 +802,7 @@ impl PackRender {
                     if !ltrail.visibility.is_visible_for_space() {
                         continue
                     }
-                    if trail.report_incomplete(&marker_id, draw_state, path) {
+                    if trail.report_incomplete(&marker_id, draw_state, path, draw.is_arcrender()) {
                         continue
                     }
                     if draw.draw_trail_section(pack_data, space_idx, trail, path.root, path.path) {
@@ -883,7 +883,7 @@ impl PackRender {
                     if !ltrail.visibility.is_visible_for_map(map) {
                         continue
                     }
-                    if trail.report_incomplete(&marker_id, draw_state, path) {
+                    if trail.report_incomplete(&marker_id, draw_state, path, false) {
                         continue
                     }
                     if shader_state == ShaderState::None {

@@ -1526,6 +1526,24 @@ impl Engine {
                 DrawDescSpace::PASS_REFLECTING | DrawDescSpace::PASS_REFLECTING_BELOW => {
                     // XXX: beware, this + camera_dir are used for culling as well as misc distance calc!
                     self.packs.shared_v.render.camera_pos = camera.0.to_vector().cast();
+                    if desc.pass == DrawDescSpace::PASS_REFLECTING {
+                        self.packs.shared_v.poi.billboard = match camera {
+                            #[cfg(todo)]
+                            cam_orig => {
+                                // this looks too silly despite seeming "correct"
+                                let orig_view = RenderMachine::space_view(cam_orig).matrix;
+                                taimi_meta::coords::billboard_from_look(orig_view.into())
+                            },
+                            _ => {
+                                let mut cam_below = *cam;
+                                cam_below.0.y *= 0.5;
+                                cam_below.1.y *= 0.5;
+                                //cam_below.1 = cam_below.1.normalize_or(camera.1);
+                                let orig_view = RenderMachine::space_view(cam_below).matrix;
+                                taimi_meta::coords::billboard_from_look(orig_view.into())
+                            },
+                        };
+                    }
                 },
                 _ => (),
             }

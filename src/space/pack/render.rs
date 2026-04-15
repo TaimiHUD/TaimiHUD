@@ -97,6 +97,7 @@ pub struct HeapEntity<T> {
 }
 
 pub trait DrawSpaceEntity {
+    fn is_arcrender(&self) -> bool;
     fn draw_trail_section(&mut self, pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, path: LoadedTrailPath, section: TrailSectionPath) -> bool;
     fn draw_poi(&mut self, pack_data: &PackRenderData, space_idx: usize, poi: &PoiRender, path: LoadedPoiPath) -> bool;
     #[inline(always)]
@@ -172,6 +173,8 @@ impl<'a> DrawSpacePack<'a> {
     }
 }
 impl DrawSpaceEntity for DrawSpacePack<'_> {
+    #[inline]
+    fn is_arcrender(&self) -> bool { false }
     fn draw_trail_section(&mut self, _pack_data: &PackRenderData, _space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
         if self.bind_trail().is_none() { return false }
         trail.bind_texture(self.context, self.poi_common, LocalContext::World);
@@ -247,6 +250,8 @@ impl<'a> DrawSpaceArc<'a> {
     }
 }
 impl DrawSpaceEntity for DrawSpaceArc<'_> {
+    #[inline]
+    fn is_arcrender(&self) -> bool { true }
     fn draw_trail_section(&mut self, _pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
         if space_idx >= self.resources.len { return false }
         let vb = trail.section_vb_ng.as_ref()
