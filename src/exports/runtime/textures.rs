@@ -255,7 +255,7 @@ impl TextureLoader {
         }
     }
     #[cfg(feature = "texture-loader")]
-    pub fn collect_garbage(&self) {
+    pub fn collect_garbage(&self) -> Vec<TextureKey> {
         #[derive(Copy, Clone)]
         enum SlotStatus {
             Unused,
@@ -305,11 +305,15 @@ impl TextureLoader {
                 })),
             }));
         }
-        if !deceased.is_empty() {
-            if let Ok(mut textures) = self.textures.write() {
-                for key in deceased {
-                    textures.remove(&key);
-                }
+        deceased
+    }
+    #[cfg(feature = "texture-loader")]
+    pub fn cleanup_garbage<'a, I>(&self, deceased: I) where
+        I: IntoIterator<Item = &'a TextureKey>,
+    {
+        if let Ok(mut textures) = self.textures.write() {
+            for key in deceased {
+                textures.remove(key);
             }
         }
     }
