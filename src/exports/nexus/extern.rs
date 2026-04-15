@@ -191,7 +191,7 @@ const ADDON_DESC_C: &'static CStr = match built_info::IS_TAGGED_RELEASE {
     _ => ADDON_DESC_EN,
 };
 const ADDON_DESC_EN: &'static CStr = c"Pathing, encounter timers and markers";
-const ADDON_DESC_RC: &'static CStr = c"Give us your feedback via GitHub or Discord! Disable pre-releases if you need to opt out of beta-testing the newest features - basic pathing is now widely available (if that's all you're here for)";
+const ADDON_DESC_RC: &'static CStr = c"Give us your feedback via GitHub or Discord! Disable pre-releases if you need to opt out of beta-testing the newest features";
 const ERROR_INCOMPLETE_UNLOAD: &'static CStr = c"unload incomplete, game restart may be required";
 const NEXUS_VERSION_ZERO: AddonVersion = AddonVersion {
     major: 0,
