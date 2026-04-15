@@ -2,7 +2,7 @@ use {
     crate::{
         attributes::{AttrString, MarkerAttributes},
         category::id::IdNameBox,
-        pack::{taco_safe_name, taco_xml_to_guid},
+        pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
     },
     anyhow::Context,
     glamour::Point3,
@@ -22,6 +22,7 @@ pub struct Poi {
 
 impl Poi {
     pub fn from_xml(
+        warnings: &mut PackBuilderMarkerWarnings,
         asset_parent: Option<&AttrString>,
         attrs: Vec<xml::attribute::OwnedAttribute>,
     ) -> anyhow::Result<Poi> {
@@ -53,12 +54,18 @@ impl Poi {
                 Ok(())
             } else if attr.name.local_name.starts_with("bh-") {
                 match attributes_bh.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::debug!("unrecognized POI attribute `{}`", attr.name)),
+                    Ok(false) => {
+                        warnings.attr_warning(&attr.name, &"POI");
+                        Ok(())
+                    },
                     res => res.map(drop),
                 }
             } else {
                 match attributes.try_add(attr.name.borrow(), attr.value) {
-                    Ok(false) => Ok(log::info!("unrecognized POI attribute `{}`", attr.name)),
+                    Ok(false) => {
+                        warnings.attr_warning(&attr.name, &"POI");
+                        Ok(())
+                    },
                     res => res.map(drop),
                 }
             }
@@ -120,9 +127,10 @@ impl Poi {
 impl fmt::Display for Poi {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let guid = &self.guid;
+        let category = &self.category;
         match &self.parent_path {
-            Some(parent) => write!(f, "{parent}/{guid}"),
-            None => write!(f, "{guid}"),
+            Some(parent) => write!(f, "{parent}{category}/{guid}"),
+            None => write!(f, "{category}/{guid}"),
         }
     }
 }

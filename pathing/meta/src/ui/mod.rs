@@ -120,6 +120,62 @@ impl TryFrom<u32> for UiSize {
     }
 }
 
+/// rounds to intended degree value (nearest ~0.1° - please see [realign_fov])
+pub fn realign_fov_to_degree(fov_y: f32) -> f32 {
+    const PREC: f32 = 10.0;
+    const OFFSET: f32 = 50.0;
+    const UNOFFSET: f32 = OFFSET * PREC;
+    let deg = ((fov_y.to_degrees() - OFFSET) * PREC).round_ties_even();
+    (deg + UNOFFSET) / PREC
+}
+
+/// Mumble link identity payload contains vertical FoV
+/// rounded to fewer significant digits than we'd like
+///
+/// Clamp it to degrees and recompute radians to match the real underlying value.
+///
+/// Examples: 0.855(49°), 0.873(50°), 0.890(51°), 0.908(52°)
+pub fn realign_fov(fov_y: f32) -> f32 {
+    realign_fov_to_degree(fov_y).to_radians()
+}
+#[test]
+fn mumble_identity_fov() {
+    use std::collections::BTreeSet;
+
+    fn assert_mumble_fov(fov_y: f32, deg: f32) {
+        let fixed_deg = realign_fov_to_degree(fov_y);
+        let fixed = fixed_deg.to_radians();
+        let fixed_deg = fixed.to_degrees();
+        let exp_rad = deg.to_radians();
+        let prev = (fov_y - exp_rad).abs();
+        let inacc = (fixed - exp_rad).abs();
+        let improvement = (prev - inacc).to_degrees();
+        let fov_y_deg = fov_y.to_degrees();
+        println!("fov.y={fov_y:?}({fov_y_deg:?}°) -> {fixed:?}({fixed_deg}°), expect={deg}° improvement={improvement:?}°");
+        if improvement <= 0.0 {
+            assert_eq!(fixed_deg, deg);
+            unreachable!();
+        }
+    }
+    assert_mumble_fov(0.855, 49.0);
+    assert_mumble_fov(0.873, 50.0);
+    assert_mumble_fov(0.890, 51.0);
+    assert_mumble_fov(0.908, 52.0);
+    assert_mumble_fov(0.909, 52.1);
+    assert_mumble_fov(1.222, 70.0);
+    assert_mumble_fov(0.436, 25.0);
+    let mut dedupe = BTreeSet::new();
+    for deg in 20u32..=75 {
+        let deg = deg as f32;
+        let fov_y = deg.to_radians();
+        let trunc: f32 = format!("{fov_y:.03}").parse().unwrap();
+        assert_mumble_fov(trunc, deg);
+        if !dedupe.insert(trunc.to_bits()) {
+            panic!("fov clash at {deg}° = {trunc}");
+        }
+    }
+}
+
 bitflags::bitflags! {
     #[derive(Debug, Default, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
     pub struct UiState: u32 {

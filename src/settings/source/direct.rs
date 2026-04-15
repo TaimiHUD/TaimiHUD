@@ -13,6 +13,7 @@ use {
         path::{Path, PathBuf},
         pin::Pin,
     },
+    taimi_hoard::is_false_ref,
     url::Url,
 };
 
@@ -29,6 +30,8 @@ pub struct DirectSource {
     pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub homepage_url: Option<String>,
+    #[serde(rename = "deprecated", default, skip_serializing_if = "is_false_ref")]
+    pub is_deprecated: bool,
 }
 
 impl DirectSource {
@@ -54,6 +57,7 @@ impl Source for DirectSource {
             MetadataKey::Description => self.description.as_ref().map(|v| Cow::Borrowed(&v[..])),
             MetadataKey::DisplayName => self.display_name.as_ref().map(|v| Cow::Borrowed(&v[..])),
             MetadataKey::HomepageUrl => self.homepage_url.as_ref().map(|v| Cow::Borrowed(&v[..])),
+            MetadataKey::IsDeprecated => Some(Cow::Borrowed(MetadataKey::bool_value(self.is_deprecated))),
             _ => None,
         }
     }
@@ -63,8 +67,12 @@ impl Source for DirectSource {
             MetadataKey::Description => self.description.is_some(),
             MetadataKey::DisplayName => self.display_name.is_some(),
             MetadataKey::HomepageUrl => self.homepage_url.is_some(),
+            MetadataKey::IsDeprecated => self.is_deprecated,
             _ => false,
         }
+    }
+    fn is_deprecated(&self) -> bool {
+        self.is_deprecated
     }
 
     fn download_latest(

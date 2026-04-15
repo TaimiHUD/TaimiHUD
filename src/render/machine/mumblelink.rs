@@ -14,7 +14,10 @@ use {
     },
 };
 #[cfg(any(feature = "markers", feature = "space"))]
-use {arcloader_mumblelink::identity::MumbleIdentity, taimi_meta::ui::MapOpen};
+use {
+    arcloader_mumblelink::identity::MumbleIdentity,
+    taimi_meta::ui::{realign_fov, MapOpen},
+};
 
 impl RenderMachine {
     pub const LOCAL_UP: Vector3<LocalSpace> = Vector3::Y;
@@ -106,7 +109,10 @@ impl RenderMachine {
 
         #[cfg(any(feature = "markers", feature = "space"))]
         if let (Some(update), true) = (identity, self.map_users.contains(RenderUsers::SPACE)) {
-            self.set_fov(Vector2::ZERO.with_y(update.fov));
+            let fov_y = realign_fov(update.fov);
+            #[cfg(todo)]
+            let changed = fov_y.to_bits() != self.fov.y.to_bits();
+            self.set_fov(Vector2::ZERO.with_y(fov_y));
         }
 
         if !self.mumblelink_users.is_empty() {
