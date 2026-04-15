@@ -355,6 +355,13 @@ impl GameBinds {
         control: C,
         index: Option<ControlIndex>,
     ) -> Option<(VIRTUAL_KEY, KeyState)> {
+        self.get_slot(control, index).map(|(c, _)| c)
+    }
+    pub fn get_slot<C: Into<Control>>(
+        &self,
+        control: C,
+        index: Option<ControlIndex>,
+    ) -> Option<((VIRTUAL_KEY, KeyState), ControlIndex)> {
         let control = control.into();
         let bind = self
             .key_binds
@@ -364,12 +371,13 @@ impl GameBinds {
                 Some(index) if index != i => false,
                 _ => c == control,
             });
-        bind.map(|(&(vk, mods), _)| (VIRTUAL_KEY(vk), mods))
+        bind.map(|(&(vk, mods), &(_, sloti))| ((VIRTUAL_KEY(vk), mods), sloti))
     }
 
     pub fn set<C: Into<Control>>(&mut self, control: C, index: ControlIndex, bind: KeyBind) {
         let (vk, _) = bind;
         let slot = (control.into(), index);
+        self.remove(slot);
         match Self::vk_is_button(VIRTUAL_KEY(vk)) {
             true => {
                 self.mouse_binds.insert(bind, slot);
@@ -390,17 +398,25 @@ impl<'de> Deserialize<'de> for GameBinds {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let binds = <Vec<((u16, u32), (i32, ControlIndex))> as Deserialize>::deserialize(deserializer)?;
 
+        let mut seen = BTreeMap::new();
         let mut out = Self::default();
         for ((vk, mods), (control, index)) in binds {
             let control =
                 Control::try_from(control).map_err(|e| <D::Error as serde::de::Error>::custom(e))?;
             let mods = KeyState::from_bits_retain(mods);
+            let slot = (control, index);
+            let bind = (vk, mods);
+            let slot_seen = *seen.entry(slot).or_insert(bind);
+            if slot_seen != bind {
+                log::warn!("discarding overlapping keybind for {control}({index}): {bind:?}");
+                continue
+            }
             match Self::vk_is_button(VIRTUAL_KEY(vk)) {
                 false => {
-                    out.key_binds.insert((vk, mods), (control, index));
+                    out.key_binds.insert(bind, slot);
                 },
                 true => {
-                    out.mouse_binds.insert((vk, mods), (control, index));
+                    out.mouse_binds.insert(bind, slot);
                 },
             }
         }
