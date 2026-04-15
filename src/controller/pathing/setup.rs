@@ -329,23 +329,33 @@ impl PathingController {
             packs => *packs = Arc::new(Default::default()),
         };
         if probably_loading {
+            self.collect_garbage_textures();
             self.maps.prune(Some(&self.map_info));
             #[cfg(feature = "paths-interact")]
             {
                 let now = WallInstant::now_timestamp_system_checked();
                 Self::prune_hidden_guids_settings(&now);
             }
+        } else {
+            self.map_info.age_tick(None);
+            self.maps.age_tick(None);
         }
         #[cfg(feature = "paths-interact")]
         {
             self.interact.handle_map_suspend(&mut self.rx, gameplay);
         }
+        self.collect_garbage_in(None);
     }
     pub(super) fn handle_map_leave(&mut self) {
-        self.map_info.age_tick(None);
-        self.map_info.prune(Some(&self.packs));
-        self.maps.age_tick(None);
+        let next_map = self.gameplay_map();
+        self.map_info.age_tick(next_map);
+        #[cfg(todo)]
+        {
+            self.map_info.prune(Some(&self.packs));
+        }
+        self.maps.age_tick(next_map);
         self.maps.prune(Some(&self.map_info));
+        self.collect_garbage_in(None);
         // TODO: shared map update to None ig
         #[cfg(feature = "paths-interact")]
         {
@@ -360,8 +370,14 @@ impl PathingController {
         // TODO: could use a `pack_data_for(path).await` here instead of scheduling for load,
         // but would want to spawn it anwyay to avoid blocking event loop so kinda irrelevant
         let map_packs = self.packs.on_map(map_id).map(|(p, _)| p).collect::<PackSet>();
-        self.map_info.prune(Some(&self.packs));
-        self.maps.prune(Some(&self.map_info));
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => {
+                self.map_info.prune(Some(&self.packs));
+                self.maps.prune(Some(&self.map_info));
+            },
+            _ => self.collect_garbage_in(None),
+        }
         #[cfg(feature = "paths-filter")]
         let hidden_guids = Self::clone_hidden_guids();
         #[cfg(feature = "paths-filter")]
