@@ -104,29 +104,30 @@ impl SharedPacks {
         self.packs.send_if_modified(|shared| {
             let mut changed = false;
             for (path, loaded) in loaded {
-                match &loaded {
-                    Err(None) => {
-                        log::debug!("marked {path}: deactivated");
-                    },
-                    Err(Some(
-                        reason @ (UnloadedReason::Pending
-                        | UnloadedReason::Loading
-                        | UnloadedReason::Disabled
-                        | UnloadedReason::Gravestone),
-                    )) => {
-                        log::debug!("marked {path}: {reason}");
-                    },
-                    Ok(..) => {
-                        log::debug!("marked {path}: loaded");
-                    },
-                    Err(Some(reason)) => {
-                        log::error!("failed to load {path}: {reason}");
-                    },
-                }
                 let Some(pack) = shared.lookup_mut(&path) else {
                     log::warn!("nonexistent pack update for {path}?");
                     continue
                 };
+                match &loaded {
+                    Err(Some(
+                        reason @ (UnloadedReason::UnknownFormat | UnloadedReason::LoadingFailed(..)),
+                    )) => {
+                        log::error!("failed to load {}: {reason}", pack.info);
+                    },
+                    Err(None) => {
+                        log::debug!("offloaded {}", pack.info);
+                    },
+                    #[cfg(taimi_debug)]
+                    Err(Some(reason)) => {
+                        log::debug!("marked {path}: {reason}");
+                    },
+                    #[cfg(taimi_debug)]
+                    Ok(..) => {
+                        log::debug!("marked {path}: loaded");
+                    },
+                    #[cfg(not(taimi_debug))]
+                    _ => (),
+                }
 
                 changed |= match loaded {
                     Ok(loaded) => pack.set_loaded(loaded),
@@ -220,6 +221,22 @@ impl SharedPackInfo {
         let _ = self.datasource.take();
     }
 
+    pub fn path_name(&self) -> &Path {
+        let fallback = || {
+            let relpath = rt::relative_path(&self.path);
+            relpath.strip_prefix("addons/Taimi/pathing/").unwrap_or(relpath)
+        };
+        let addon_dir = rt::ADDON_DIR.try_read().ok().and_then(|d| *d);
+        addon_dir
+            .and_then(|d| {
+                self.path
+                    .strip_prefix(d)
+                    .ok()
+                    .map(|p| p.strip_prefix("pathing/").unwrap_or(p))
+            })
+            .unwrap_or_else(fallback)
+    }
+
     /// unique texture names
     pub fn key_for_subresource(&self, resource: &AttrString) -> Arc<str> {
         if let Ok(keys) = self.allocated_keys.try_read() {
@@ -237,7 +254,7 @@ impl SharedPackInfo {
             .clone()
     }
     pub fn gen_key_for_subresource(&self, resource: &AttrString) -> String {
-        let packname = rt::relative_path(&self.path);
+        let packname = self.path_name();
         let resource = &resource[..];
         let storage;
         let resourceid = match resource.len() {
@@ -430,7 +447,7 @@ impl SharedPackLoad {
         }
 
         self.loaded.send_if_modified(|shared| {
-            let dirty = shared.unloaded != reason;
+            let dirty = shared.pack.is_some() || shared.unloaded != reason;
             shared.unload(reason);
             dirty
         });

@@ -606,7 +606,7 @@ impl LoadedPacks {
     pub fn expired_packs(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
         self.packs
             .iter()
-            .filter(|(_, i)| i.used.is_elderly(Self::USED_THRESHOLD) && i.is_loaded())
+            .filter(|(_, i)| i.used.is_elderly(Self::USED_THRESHOLD) && i.is_loaded() && i.data_loaded)
     }
 
     pub fn clear(&mut self) {
