@@ -140,7 +140,7 @@ impl StatsUnit {
                 if value <= Self::SIZE_MB {
                     write!(f, "{:.03}KB", value as f64 / Self::SIZE_KB as f64)
                 } else {
-                    write!(f, "{:.03}MB", value as f64 / Self::SIZE_MB as f64)
+                    write!(f, "{:.03}MB", value as i64 as f64 / Self::SIZE_MB as f64)
                 },
             Self::Time => {
                 if value < Self::TIME_MS {
