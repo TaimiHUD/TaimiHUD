@@ -225,6 +225,7 @@ pub(crate) struct PathingController {
     pack_configs_sig: PackPath,
     packs_rx: watched::Rx<shared::SharedLoaderPacksInfo>,
     now_loading_timeout: ReusableBoxFuture<'static, ()>,
+    gc_timeout: ReusableBoxFuture<'static, ()>,
 }
 
 impl PathingController {
@@ -251,6 +252,7 @@ impl PathingController {
             maps: Default::default(),
             pack_configs: Box::new(stream::pending()),
             now_loading_timeout: ReusableBoxFuture::new(future::pending()),
+            gc_timeout: ReusableBoxFuture::new(future::pending()),
             pack_configs_sig: PackPath::default(),
             filter_state: Default::default(),
             filter_state_signal: None,
@@ -506,6 +508,10 @@ impl PathingController {
                 // TODO: give interact its own watcher to use in its poll etc
                 self.interact_entity_updates();
             },
+            _ = &mut self.gc_timeout => {
+                self.collect_garbage(1, false, gameplay_prev.gameplay_map()).await;
+                self.collect_garbage_in(Some(Self::GC_DELAY_ONGOING));
+            }
             controls = self.controls.wait() => match controls {
                 Err(e) => log::error!("Control bindings error! {e:#}"),
                 Ok((&controls_state, controls_changed)) => {
@@ -921,6 +927,22 @@ impl PathingController {
                     .await;
             }
         }
+        self.collect_garbage_textures();
+    }
+    #[cfg(not(taimi_debug))]
+    const GC_DELAY_INITIAL: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() * 2);
+    #[cfg(not(taimi_debug))]
+    const GC_DELAY_ONGOING: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() * 8);
+    #[cfg(taimi_debug)]
+    const GC_DELAY_INITIAL: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() / 2);
+    #[cfg(taimi_debug)]
+    const GC_DELAY_ONGOING: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() * 2);
+    pub(super) fn collect_garbage_in(&mut self, override_delay: Option<Duration>) {
+        let delay = override_delay.unwrap_or(Self::GC_DELAY_INITIAL);
+        self.gc_timeout.set(tokio::time::sleep(delay));
+    }
+    fn collect_garbage_textures(&mut self) {
+        crate::TEXTURES.collect_garbage();
     }
 
     const LOAD_PERIOD_TIMEOUT_MULT: Duration = Duration::from_secs(1);

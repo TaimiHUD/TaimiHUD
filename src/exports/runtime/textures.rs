@@ -4,6 +4,7 @@ pub use nexus::texture::Texture as NexusTexture;
 use {
     anyhow::{anyhow, Context},
     std::{io, sync::Weak, thread},
+    taimi_hoard::collections::lru::RecentlyUsed,
     taimi_sync::arcs::weak_is_null,
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
@@ -25,9 +26,13 @@ pub use crate::resources::Texture;
 
 pub type TextureKey = Arc<str>;
 pub type TextureMap = HashMap<TextureKey, TextureSlot>;
+#[cfg(feature = "texture-loader")]
+type GarbageMap = HashMap<TextureKey, RecentlyUsed>;
 
 pub struct TextureLoader {
     pub textures: StdRwLock<TextureMap>,
+    #[cfg(feature = "texture-loader")]
+    garbage: StdRwLock<GarbageMap>,
     #[cfg(feature = "texture-loader")]
     loader: StdRwLock<Option<TextureLoaderHandle>>,
 }
@@ -36,6 +41,7 @@ impl TextureLoader {
     pub fn new() -> Self {
         Self {
             textures: Default::default(),
+            garbage: Default::default(),
             #[cfg(feature = "texture-loader")]
             loader: Default::default(),
         }
@@ -218,8 +224,98 @@ impl TextureLoader {
     }
 
     pub fn lookup_imgui(&self, key: &str) -> Option<Option<ImguiTexture>> {
-        self.lookup_with(key, |t| t.imgui_texture())
+        let res = self.lookup_with(key, |t| t.imgui_texture());
+        #[cfg(feature = "texture-loader")]
+        if let Some(Some(..)) = res {
+            self.mark_used(key);
+        }
+        res
     }
+
+    #[cfg(feature = "texture-loader")]
+    pub fn mark_used(&self, key: &str) {
+        match self.garbage.read() {
+            Ok(garbage)
+                if garbage.get(key).map(|used| used.generation).unwrap_or(0) != 0 =>
+                (),
+            _ => return,
+        }
+        if let Ok(mut garbage) = self.garbage.write() {
+            garbage.remove(key);
+        }
+    }
+    #[cfg(feature = "texture-loader")]
+    pub fn mark_used_many<'a, I>(&self, keys: I) where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let keys = keys.into_iter();
+        if let Ok(mut garbage) = self.garbage.write() {
+            for key in keys {
+                garbage.remove(key);
+            }
+        }
+    }
+    #[cfg(feature = "texture-loader")]
+    pub fn collect_garbage(&self) {
+        #[derive(Copy, Clone)]
+        enum SlotStatus {
+            Unused,
+            Dead,
+            Weak,
+        }
+        let mut unused = HashMap::new();
+        if let Ok(textures) = self.textures.read() {
+            unused.extend(textures.iter().filter_map(|(key, slot)| match slot {
+                TextureSlot::Loaded(tex) if Arc::strong_count(tex) == 1 =>
+                    Some((key.clone(), SlotStatus::Unused)),
+                TextureSlot::Inactive(weak) if weak.strong_count() == 0 =>
+                    Some((key.clone(), SlotStatus::Dead)),
+                TextureSlot::Inactive(..) =>
+                    Some((key.clone(), SlotStatus::Weak)),
+                _ => None,
+            }));
+        }
+        let mut deceased = Vec::new();
+        if let Ok(mut garbage) = self.garbage.write() {
+            garbage.retain(|key, used| {
+                let retain = match unused.remove(key) {
+                    None if matches!(Arc::strong_count(key), 1 | 2) =>
+                        return false,
+                    None => {
+                        used.mark_used();
+                        true
+                    },
+                    #[cfg(todo)]
+                    Some(SlotStatus::Dead) => false,
+                    Some(_) => {
+                        used.mark_unused();
+                        !used.is_elderly(Self::GC_MAX_AGE)
+                    }
+                };
+                if !retain {
+                    deceased.push(key.clone());
+                }
+                retain
+            });
+            garbage.extend(unused.into_iter().filter_map(|(key, status)| match status {
+                SlotStatus::Dead | SlotStatus::Weak => Some((key, RecentlyUsed {
+                    generation: Self::GC_MID_AGE,
+                })),
+                SlotStatus::Unused => Some((key, RecentlyUsed {
+                    generation: 1,
+                })),
+            }));
+        }
+        if !deceased.is_empty() {
+            if let Ok(mut textures) = self.textures.write() {
+                for key in deceased {
+                    textures.remove(&key);
+                }
+            }
+        }
+    }
+    const GC_MID_AGE: u32 = 2;
+    const GC_MAX_AGE: u32 = 4;
 
     /// produces a texture slot unless newly reserved
     pub fn reserve_key_mut(&self, key: &mut TextureKey) -> Option<TextureSlot> {
@@ -678,7 +774,7 @@ impl TextureSlot {
     pub fn diag_texture_byte_size(&self) -> usize {
         match self {
             Self::Loaded(tex) => tex.texture_byte_size(),
-            Self::Inactive(tex) if Weak::strong_count(tex) > 0 =>
+            Self::Inactive(tex) if tex.strong_count() > 0 =>
                 Weak::upgrade(tex).map(|tex| tex.texture_byte_size()).unwrap_or(0),
             Self::Nexus(tex) => {
                 use taimi_d3d::dx11::buffer::ShaderResourceView;
