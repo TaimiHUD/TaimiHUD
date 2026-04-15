@@ -100,11 +100,14 @@ impl Texture {
         };
         let texture = Texture2::new_with_desc(device, &desc, Some(samples))?;
         let view = TextureView2::new_with_texture2(device, &texture, None)?;
-        Ok(Self {
+        let texture = Self {
             texture,
             view,
             dimensions: dimensions.into(),
-        })
+        };
+        STATS_TEXTURE_COUNT.increment(1);
+        STATS_TEXTURE_SIZE.increment_by(|| texture.texture_byte_size());
+        Ok(texture)
     }
 
     #[cfg(feature = "extension-nexus")]

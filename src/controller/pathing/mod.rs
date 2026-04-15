@@ -19,6 +19,7 @@ use {
                 CONTROLS,
             },
         },
+        render::RenderEvent,
         settings::{pathing::ToggleGranularity, SettingsLock},
         Interruption,
         InterruptionSignal,
@@ -1027,7 +1028,10 @@ impl PathingController {
         self.gc_timeout.set(tokio::time::sleep(delay));
     }
     fn collect_garbage_textures(&mut self) {
-        crate::TEXTURES.collect_garbage();
+        let deceased = crate::TEXTURES.collect_garbage();
+        if !deceased.is_empty() {
+            RenderEvent::CleanupTextures(deceased).try_send();
+        }
     }
 
     const LOAD_PERIOD_TIMEOUT_MULT: Duration = Duration::from_secs(1);

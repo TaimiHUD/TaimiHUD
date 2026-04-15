@@ -40,6 +40,8 @@ use {
 
 #[cfg(feature = "markers-edit")]
 use super::edit_marker_window::EditMarkerWindowState;
+#[cfg(feature = "texture-loader")]
+use crate::exports::runtime::textures::TextureKey;
 #[cfg(feature = "markers")]
 use crate::marker::format::MarkerSet;
 #[cfg(feature = "extension-nexus")]
@@ -74,6 +76,8 @@ pub enum RenderEvent {
     GiveMarkerPaths(Vec<PathBuf>),
     ProgressBarUpdate(ProgressBarSettings),
     SendToClipboard(String),
+    #[cfg(feature = "texture-loader")]
+    CleanupTextures(Vec<TextureKey>),
     Reload,
     ReloadAll,
     /// user pressed "quit" button, which should initiate shutdown as much as
@@ -98,6 +102,11 @@ impl RenderEvent {
         () => Interruption::Shutdown,
         () => Interruption::Unspecified,
     };
+
+    #[inline(always)]
+    pub fn try_send(self) {
+        RenderState::try_send(self)
+    }
 }
 
 #[derive(
@@ -196,6 +205,10 @@ impl RenderState {
                     },
                     SendToClipboard(data) => {
                         ui.set_clipboard_text(data);
+                    },
+                    #[cfg(feature = "texture-loader")]
+                    CleanupTextures(deceased) => {
+                        TEXTURES.cleanup_garbage(deceased.iter());
                     },
                     CheckingForUpdates { checking, downloading } => {
                         let sources = &mut self.primary_window.data_sources_tab;
