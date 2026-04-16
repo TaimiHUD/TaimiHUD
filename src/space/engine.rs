@@ -1118,8 +1118,9 @@ impl Engine {
         let depth = machine.depth_range();
         let camera = machine.get_camera(camera_source);
         let cull = MapFrustum::from_camera_data(
+            machine.get_fov().y,
             camera,
-            // TODO: machine.get_aspect_ratio(),
+            machine.get_aspect_ratio(),
             depth.start..depth.end.min(distance_max),
         );
         (camera, depth, cull)
@@ -1403,7 +1404,9 @@ impl Engine {
                 let cull = match goggles_2pass {
                     Some((_, obscured_dist)) if obscured_dist > depth.end => {
                         cull_alt = MapFrustum::from_camera_data(
+                            machine.get_fov().y,
                             camera,
+                            machine.get_aspect_ratio(),
                             depth.start..obscured_dist,
                         );
                         &cull_alt
@@ -1472,7 +1475,7 @@ impl Engine {
                 let near = pos.y.abs().max(depth.start);
                 // TODO: reuse obscured distance setting for this
                 let far = (depth.end - depth.start) * 0.5 + near;
-                cull_alt = MapFrustum::from_camera_data(cam_alt, near..far);
+                cull_alt = MapFrustum::from_camera_data(machine.get_fov().y, cam_alt, machine.get_aspect_ratio(), near..far);
                 (&cam_alt, &cull_alt)
             },
             #[cfg(feature = "goggles2-project")]
@@ -1484,7 +1487,7 @@ impl Engine {
                 let near = pos.y/*.abs()*/.max(depth.start);
                 let far = depth.end - depth.start + near;
                 // TODO: slight angle adjustment for refraction or something idk how light works sorry
-                cull_alt = MapFrustum::from_camera_data(camera, near..far);
+                cull_alt = MapFrustum::from_camera_data(machine.get_fov().y, camera, machine.get_aspect_ratio(), near..far);
                 (&camera, &cull_alt)
             },
             #[cfg(feature = "goggles2")]

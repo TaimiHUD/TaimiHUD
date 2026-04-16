@@ -254,6 +254,11 @@ impl RenderMachine {
             ratio => Some(ratio),
         }
     }
+    #[cfg(feature = "space")]
+    #[inline]
+    pub fn get_aspect_ratio(&self) -> f32 {
+        self.aspect_ratio().unwrap_or(Self::DEFAULT_ASPECT_RATIO)
+    }
 
     pub fn get_player_pos(&self) -> Option<RenderPositioning<LocalSpace>> {
         match self.mumblelink_player.0.x.is_infinite() {
