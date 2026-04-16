@@ -1109,19 +1109,27 @@ impl Engine {
         machine: &mut RenderMachine,
         _desc: &DrawDescSpace,
     ) -> (RenderPosition, ops::Range<f32>, MapFrustum) {
-        let (camera_source, distance_max) = self.settings.as_ref().map(|s|
+        let (camera_source, distance_max, znear_fade, windshield) = self.settings.as_ref().map(|s|
             (
                 s.space.camera_source(),
                 s.space.distance_max(),
+                s.space.edge_feather_scale().is_some(),
+                s.space.goggles.arcrender_enabled() && s.space.poi_limit_size(),
             )
-        ).unwrap_or((SpaceSettings::DEFAULT_CAMERA_SOURCE, SpaceSettings::DEFAULT_DISTANCE_MAX));
+        ).unwrap_or((SpaceSettings::DEFAULT_CAMERA_SOURCE, SpaceSettings::DEFAULT_DISTANCE_MAX, true, false));
         let depth = machine.depth_range();
         let camera = machine.get_camera(camera_source);
+        let cull_near = match (znear_fade, windshield) {
+            (false, false) => 1.0,
+            (false, true) => 0.25,
+            (true, false) => 0.15,
+            (true, true) => 0.075,
+        };
         let cull = MapFrustum::from_camera_data(
             machine.get_fov().y,
             camera,
             machine.get_aspect_ratio(),
-            depth.start..depth.end.min(distance_max),
+            depth.start * cull_near..depth.end.min(distance_max),
         );
         (camera, depth, cull)
     }
@@ -1402,7 +1410,7 @@ impl Engine {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
                 let cull = match goggles_2pass {
-                    Some((_, obscured_dist)) if obscured_dist > depth.end => {
+                    Some((_, obscured_dist)) if obscured_dist < depth.end => {
                         cull_alt = MapFrustum::from_camera_data(
                             machine.get_fov().y,
                             camera,

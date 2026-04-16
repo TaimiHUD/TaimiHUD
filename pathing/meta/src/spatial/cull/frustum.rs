@@ -216,6 +216,7 @@ impl MapFrustum {
     }
 
     const PLANES: usize = 6;
+    #[inline(always)]
     pub fn planes(&self) -> &[FrustumPlane; MapFrustum::PLANES] {
         unsafe { &*(self as *const Self as *const [FrustumPlane; MapFrustum::PLANES]) }
     }
@@ -234,7 +235,7 @@ impl MapFrustum {
             corners.clone().into_iter().any(|corner| plane.dot(corner) >= 0.0)
         )
     }
-    /// all corners of our frustum are outside any plane of the aabb...
+    #[cfg(todo = "unnecessary")]
     pub fn aabb_axis_intersection_filter(&self, aabb: &Aabb<f32, 3>) -> bool {
         if self.corners.iter().all(|corner| corner.x < aabb.min.x) { return false }
         if self.corners.iter().all(|corner| corner.x > aabb.max.x) { return false }
@@ -244,11 +245,10 @@ impl MapFrustum {
         if self.corners.iter().all(|corner| corner.z > aabb.max.z) { return false }
         true
     }
-    #[cfg(todo)]
+    /// all corners of our frustum are outside any plane of the aabb...
     pub fn aabb_axis_intersection_filter(&self, aabb: &Aabb<f32, 3>) -> bool {
         let aabb = aabb3box::<f32>(*aabb);
         let min = aabb.min.to_vec3a();
-        let min = Vec3A::from(crate::spatial::MintConv::into_glamour(aabb.min));
         let below = self.corners.iter().map(|&corner| Vec3A::from_vec4(corner).cmpge(min))
             .fold(glam::BVec3A::FALSE, |prev, cmp| prev | cmp);
         if !below.any() { return false }
