@@ -30,10 +30,10 @@
     "defs": {
       "SHADER_P": "1",
       "DISCARD_ALPHA": "0.01",
-      "DISCARD_Z": "1.1",
+      "DISCARD_Z": "(FEATHER_SIZE_Z / 11.0)",
       "FEATHER_OFFSET": "float3(1.0, 0.945, 0.42)",
       "FEATHER_SIZE_Z": "2.8",
-      "FEATHER_SCALE_Z": "p_render.edge_feather.y / 6.9",
+      "FEATHER_SCALE_Z": "(p_render.edge_feather.y / 6.9)",
     }
   },
 ]

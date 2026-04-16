@@ -82,7 +82,7 @@ use {
             PoiIndex,
             TrailSectionPath,
         },
-        spatial::box3aabb,
+        spatial::{box3aabb, cull::BvhQuery},
         ui::{LocalContext, MapCalibration, MapContext},
     },
     taimi_pack::attributes::{keys, BounceBehavior},
@@ -1388,7 +1388,7 @@ impl PackRender {
     pub fn draw(
         &mut self,
         camera: &RenderPosition,
-        frustum: &impl aabb::IntersectsAabb<f32, 3>,
+        frustum: &impl BvhQuery<3>,
         backend: &RenderBackend,
         context: &Dx11Context,
         arcrender: bool,
@@ -1427,7 +1427,7 @@ impl PackRender {
     pub fn draw_obscured(
         &mut self,
         camera: &RenderPosition,
-        frustum: &impl aabb::IntersectsAabb<f32, 3>,
+        frustum: &impl BvhQuery<3>,
         backend: &RenderBackend,
         context: &Dx11Context,
         arcrender: bool,
@@ -2252,7 +2252,7 @@ impl PackRenderList {
         box3aabb(bounds)
     }
     /// TODO: filter by visibility flags here?
-    pub fn iter_markers_map<'a, 'e, Q: aabb::IntersectsAabb<f32, 3>>(
+    pub fn iter_markers_map<'a, 'e, Q: BvhQuery<3>>(
         &'a mut self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
         _map: MapContext,
@@ -2291,7 +2291,7 @@ impl PackRenderList {
             pack.map(|p| (p, id))
         })
     }
-    pub fn iter_markers_visible<'a, 'e, Q: aabb::IntersectsAabb<f32, 3>>(
+    pub fn iter_markers_visible<'a, 'e, Q: BvhQuery<3>>(
         &'a mut self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
         query: &'a Q,
@@ -2320,7 +2320,7 @@ impl PackRenderList {
         mut filter: F,
     ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a
     where
-        Q: aabb::IntersectsAabb<f32, 3>,
+        Q: BvhQuery<3>,
         F: FnMut(&SpaceEntities, usize, &MarkerId) -> Option<(Option<i32>, usize)> + 'a,
     {
         let entities = &self.spacepacks.render_entities;
