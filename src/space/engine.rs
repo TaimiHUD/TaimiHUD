@@ -1613,10 +1613,22 @@ impl Engine {
                 impl bvh::aabb::IntersectsAabb<f32, 3> for PlaneCull {
                     fn intersects_aabb(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
                         match aabb.max.y {
-                            #[cfg(deleteme)]
-                            _ => false,
                             y if y < -Engine::UNDERWATER_VISIBILITY => false,
                             _ => self.0.intersects_aabb(aabb),
+                        }
+                    }
+                }
+                impl taimi_meta::spatial::cull::BvhQuery<3> for PlaneCull {
+                    fn intersects_aabb_poi(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
+                        match aabb.max.y {
+                            y if y < -Engine::UNDERWATER_VISIBILITY => false,
+                            _ => self.0.intersects_aabb_poi(aabb),
+                        }
+                    }
+                    fn intersects_aabb_shape(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
+                        match aabb.max.y {
+                            y if y < -Engine::UNDERWATER_VISIBILITY => false,
+                            _ => self.0.intersects_aabb_shape(aabb),
                         }
                     }
                 }
@@ -1650,6 +1662,20 @@ impl Engine {
                         match aabb.min.y {
                             y if y > Engine::UNDERWATER_VISIBILITY => false,
                             _ => self.0.intersects_aabb(aabb),
+                        }
+                    }
+                }
+                impl taimi_meta::spatial::cull::BvhQuery<3> for PlaneCull {
+                    fn intersects_aabb_poi(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
+                        match aabb.max.y {
+                            y if y > Engine::UNDERWATER_VISIBILITY => false,
+                            _ => self.0.intersects_aabb_poi(aabb),
+                        }
+                    }
+                    fn intersects_aabb_shape(&self, aabb: &bvh::aabb::Aabb<f32, 3>) -> bool {
+                        match aabb.max.y {
+                            y if y > Engine::UNDERWATER_VISIBILITY => false,
+                            _ => self.0.intersects_aabb_shape(aabb),
                         }
                     }
                 }

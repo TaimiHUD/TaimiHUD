@@ -1,7 +1,11 @@
 use glamour::{Box3, Intersection};
 use {
     crate::coords::LocalSpace as DrawSpace,
-    crate::spatial::aabb3box,
+    crate::spatial::{
+        aabb3box,
+        cull::BvhQuery,
+        MintConv,
+    },
     bvh::aabb::{Aabb, IntersectsAabb},
     core::{mem, ops::{self, Range}},
     glamour::{Point3, Vector3},
@@ -27,6 +31,8 @@ pub struct MapFrustum {
     pub down: FrustumPlane,
     #[cfg(feature = "spatial")]
     pub corners: FrustumCorners,
+    pub camera_up: Vec3A,
+    pub camera_right: Vec3A,
 }
 
 impl MapFrustum {
@@ -98,6 +104,8 @@ impl MapFrustum {
         let left_plane = points_to_plane4(ftl, ntl, fbl);
 
         Self {
+            camera_up: up,
+            camera_right: right,
             near: near_plane.into(),
             #[cfg(feature = "spatial")]
             far: far_plane.into(),
@@ -202,6 +210,11 @@ impl MapFrustum {
         }
     }
 
+    #[inline]
+    pub fn camera_dir(&self) -> Vec3A {
+        Vec3A::from_vec4(self.near)
+    }
+
     const PLANES: usize = 6;
     pub fn planes(&self) -> &[FrustumPlane; MapFrustum::PLANES] {
         unsafe { &*(self as *const Self as *const [FrustumPlane; MapFrustum::PLANES]) }
@@ -257,6 +270,25 @@ impl IntersectsAabb<f32, 3> for MapFrustum {
         }
         // filter out false positives
         self.aabb_axis_intersection_filter(aabb)
+    }
+}
+impl BvhQuery<3> for MapFrustum {
+    fn intersects_aabb_shape(&self, aabb: &Aabb<f32, 3>) -> bool {
+        self.planes_intersect_aabb(aabb)
+    }
+    /// TODO: can simplify near/far plane checks if we assume billboard?
+    fn intersects_aabb_poi(&self, aabb: &Aabb<f32, 3>) -> bool {
+        let pos = glamour::Point3::<f32>::from_nalg(aabb.center()).to_vec3a();
+        let icon_size = (aabb.max.x - aabb.min.x).powi(2) * 0.5;
+        let right = self.camera_right * icon_size;
+        let up = self.camera_up * icon_size;
+        let corners = [
+            (pos + up - right).extend(1.0),
+            (pos - up - right).extend(1.0),
+            (pos - up + right).extend(1.0),
+            (pos + up + right).extend(1.0),
+        ];
+        Self::planes_intersect_all(self.planes().iter().copied(), corners)
     }
 }
 

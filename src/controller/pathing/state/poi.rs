@@ -119,13 +119,14 @@ impl LoadedPoi {
         unsafe { overrides.poi.as_mut().unwrap_unchecked() }
     }
 
+    /// TODO: diagonal only relevant if rotation isn't axis-aligned,
+    /// also billboards will always be aligned to the near/far clip planes btw...
     pub fn bounds(&self) -> Box3<DrawSpace> {
         let max_diagonal = match self.poi_attrs().icon_size {
             Some(edge_len) => (edge_len.powi(2) * 2.0).sqrt(),
             None => {
                 const DEFAULT_DIAG: f32 = match taimi_pack::attributes::keys::IconSize::DEFAULT.0 {
-                    // 2.0.sqrt()
-                    1.0 => 1.41421,
+                    1.0 => core::f32::consts::SQRT_2,
                     #[cfg(todo = "unnecessary")]
                     ohno => (ohno.powi(2) * 2.0).sqrt(),
                     _ => panic!("default poi size changed!"),
@@ -133,7 +134,9 @@ impl LoadedPoi {
                 DEFAULT_DIAG
             },
         };
-        Box3::from_origin_and_size(self.position(), Size3::splat(max_diagonal))
+        let size = Size3::splat(max_diagonal * 0.5).to_vector();
+        let origin = self.position();
+        Box3::new(origin - size, origin + size)
     }
     pub fn position(&self) -> Point3<DrawSpace> {
         self.marker_position + self.offset()
