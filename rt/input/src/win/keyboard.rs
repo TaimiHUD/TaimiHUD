@@ -800,6 +800,12 @@ impl fmt::Display for DisplayAddonApi<&'_ KeyInput> {
         if let Ok(name) = vk_name(vk) {
             return fmt::Display::fmt(&name, f)
         }
+        let as_mod = self.0.vk_as_mod();
+        match as_mod.as_name_addonapi() {
+            _ if !as_mod.intersects(KeyState::BUTTON) => (),
+            n if n.is_empty() => (),
+            name => return f.write_str(name),
+        }
 
         fmt::Display::fmt(&vk.0, f)
     }
