@@ -36,7 +36,7 @@ use {
             PackRegistryNs,
             TrailSectionPath,
         },
-        spatial::{box3aabb, irrelevant_box3, BvhShape, MintConv},
+        spatial::{box3aabb, cull::BvhQuery, irrelevant_box3, BvhShape, MintConv},
     },
 };
 
@@ -1029,7 +1029,7 @@ impl SpacePackCollection {
         })
     }
     #[inline]
-    pub fn bvh_iter<'a, Q: aabb::IntersectsAabb<f32, 3>>(
+    pub fn bvh_iter<'a, Q: BvhQuery<3>>(
         &'a self,
         query: &'a Q,
     ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a {
@@ -1040,7 +1040,7 @@ impl SpacePackCollection {
                 match &shape.value.bounds {
                     #[cfg(todo = "unnecessary")]
                     _ if shape.is_invalid() => None,
-                    bounds if !query.intersects_aabb(bounds) => None,
+                    bounds if !query.intersects_aabb_marker(bounds, &shape.value.id) => None,
                     _ => Some((idx, &shape.value.id)),
                 }
             }))

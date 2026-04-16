@@ -29,7 +29,6 @@
 #ifndef DISCARD_Z
 #define DISCARD_Z 1.0
 #endif
-static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
 #ifndef UNDERWATER_VISIBILITY
 #define UNDERWATER_VISIBILITY 0.325
 #endif
@@ -48,6 +47,7 @@ static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
 #define FEATHER_SCALE_Z 5.0
 #endif
 static const float3 FeatherOffset = float3(FEATHER_OFFSET.xy, 1.0 + FEATHER_OFFSET.z * FEATHER_SIZE_Z);
+static const float DiscardZ = FEATHER_OFFSET.z * DISCARD_Z;
 #endif
 
 #endif

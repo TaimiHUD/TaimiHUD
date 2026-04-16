@@ -1144,7 +1144,7 @@ impl PathingConfig {
             }
             if !matches!(obscured_alpha, 0.0f32 | SpaceSettings::NONE_F32) {
                 if let Some(value) =
-                    Self::slider_setting(ui, "x-ray distance", obscured_distance, (0.1, 1.0))
+                    Self::slider_setting(ui, "x-ray distance", obscured_distance, (0.01, 1.0))
                 {
                     Self::set_pathing(|s| s.space.goggles.obscured_distance = value);
                 }
