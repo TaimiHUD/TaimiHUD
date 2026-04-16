@@ -247,17 +247,21 @@ impl PackRender {
                 self.draw_state.prev_map_id = map_id;
                 self.resources.dirty = true;
                 space_dirty = true;
-                STATS_ENTITY_COUNT.reset_with(|| {
-                    match &self.render_list.spacepacks {
-                        #[cfg(todo)]
-                        space => space.render_entities.entities.iter().filter(|e| !e.is_invalid()).count(),
-                        space => space.loaded_packs.values().flat_map(|p| [
-                            p.populated_pois.count_ones() as u32,
-                            p.populated_trails.count_ones() as u32,
-                        ]).sum::<u32>(),
-                    }
-                });
+            } else {
+                STATS_ENTITY_COUNT.reset(0);
             }
+        }
+        if space_dirty {
+            STATS_ENTITY_COUNT.reset_with(|| if map_id.is_some() {
+                match &self.render_list.spacepacks {
+                    #[cfg(todo)]
+                    space => space.render_entities.entities.iter().filter(|e| !e.is_invalid()).count(),
+                    space => space.loaded_packs.values().flat_map(|p| [
+                        p.populated_pois.count_ones() as u32,
+                        p.populated_trails.count_ones() as u32,
+                    ]).sum::<u32>(),
+                }
+            } else { 0 });
         }
         let packs_map_changed = {
             let packs_changed = match self.packs_map.as_mut() {
@@ -567,7 +571,6 @@ impl PackRender {
         STATS_ENTITY_DRAW_PASS.reset(0);
         STATS_ENTITY_DRAW_ALL.reset(0);
         STATS_ENTITY_DRAW_MAP.reset(0);
-        STATS_ENTITY_COUNT.reset(0);
     }
     #[inline]
     pub fn setup_frame(
