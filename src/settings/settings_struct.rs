@@ -3,6 +3,7 @@ use {
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
+        fl,
         settings::{
             state::{save_state_backup, UiState},
             IconStyle,
@@ -50,10 +51,22 @@ impl fmt::Display for NeedsUpdate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use NeedsUpdate::*;
         match &self {
-            Unknown => write!(f, "Unknown"),
-            Error(e) => write!(f, "Error: {e}!"),
-            Known(true, id) => write!(f, "Available: {}", id),
-            Known(false, _id) => write!(f, "Up to date!"),
+            Unknown => {
+                let translation = fl!("unknown");
+                write!(f, "{}", translation)
+            },
+            Error(e) => {
+                let translation = fl!("error");
+                write!(f, "{}: {}", translation, e)
+            },
+            Known(true, id) => {
+                let translation = fl!("available");
+                write!(f, "{}: {}", translation, id)
+            },
+            Known(false, _id) => {
+                let translation = fl!("up-to-date");
+                write!(f, "{}", translation)
+            },
         }
     }
 }
@@ -111,10 +124,22 @@ impl fmt::Display for SquadCondition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SquadCondition::*;
         match &self {
-            Always => write!(f, "Always do action"),
-            IfCommander => write!(f, "Do action if squad commander"),
-            IfLieutenantOrAbove => write!(f, "Do action if lieutenant or commander"),
-            Never => write!(f, "Never do action"),
+            Always => {
+                let translation = fl!("always-do-action");
+                write!(f, "{}", translation)
+            },
+            IfCommander => {
+                let translation = fl!("do-action-if-commander");
+                write!(f, "{}", translation)
+            },
+            IfLieutenantOrAbove => {
+                let translation = fl!("do-action-if-lieutenant");
+                write!(f, "{}", translation)
+            },
+            Never => {
+                let translation = fl!("never-do-action");
+                write!(f, "{}", translation)
+            },
         }
     }
 }
@@ -123,9 +148,18 @@ impl fmt::Display for MarkerAutoPlaceSettings {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use MarkerAutoPlaceSettings::*;
         match &self {
-            OpenWindow(_t) => write!(f, "Open the markers window"),
-            Place(_t) => write!(f, "Place markers automatically"),
-            DoNothing => write!(f, "Do nothing"),
+            OpenWindow(_t) => {
+                let translation = fl!("open-markers-window");
+                write!(f, "{}", translation)
+            },
+            Place(_t) => {
+                let translation = fl!("place-markers-automatically");
+                write!(f, "{}", translation)
+            },
+            DoNothing => {
+                let translation = fl!("do-nothing");
+                write!(f, "{}", translation)
+            },
         }
     }
 }

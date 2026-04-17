@@ -1,5 +1,6 @@
 use {
     crate::{
+        fl,
         settings::{source, DirectSource, GitHubSource, Source},
         ADDON_DIR,
     },
@@ -18,9 +19,7 @@ use {
     },
 };
 
-#[derive(
-    Clone, Copy, Deserialize, Display, Serialize, Hash, Debug, Default, PartialEq, Eq, PartialOrd, Ord,
-)]
+#[derive(Clone, Copy, Deserialize, Serialize, Hash, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SourceKind {
     #[default]
     Timers,
@@ -32,6 +31,37 @@ pub enum SourceKind {
     /// such as https://github.com/TaimiHUD/DataSources
     DataSources,
     Unspecified,
+}
+
+impl std::fmt::Display for SourceKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timers => {
+                let translation = fl!("timers");
+                write!(f, "{}", translation)
+            },
+            Self::Pathing => {
+                let translation = fl!("pathing");
+                write!(f, "{}", translation)
+            },
+            Self::Markers => {
+                let translation = fl!("markers");
+                write!(f, "{}", translation)
+            },
+            Self::Addon => {
+                let translation = fl!("addon");
+                write!(f, "{}", translation)
+            },
+            Self::DataSources => {
+                let translation = fl!("data-sources");
+                write!(f, "{}", translation)
+            },
+            Self::Unspecified => {
+                let translation = fl!("unspecified");
+                write!(f, "{}", translation)
+            },
+        }
+    }
 }
 
 impl SourceKind {

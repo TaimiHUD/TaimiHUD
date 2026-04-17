@@ -22,6 +22,10 @@ error = Error
 remove = Remove
 unknown = Unknown
 update = Update
+auto-update = Auto-update
+always = Always
+ask = Ask
+never = Never
 unset = Unset
 add = Add
 create-arg = Create new { $arg }
@@ -83,9 +87,11 @@ filename-empty = No filename provided.
 count = Count
 actions = Actions
 module = Module
+unspecified = Unspecified
 
 ## Addon
 
+addon = Addon
 primary-window-toggle = Taimi Window Toggle
 context-menu-primary = { menu }
 timer-window-toggle = Timer Window Toggle
@@ -124,6 +130,9 @@ addonbinds = Shortcuts
 gamebinds = Game Bindings
 keybind = Keybind
 gamebind-notice = Set these to match your Controls settings in-game. These may be automatically detected when arcdps-unofficial-extras is installed.
+precise-markers = Precise Markers
+bind = Bind
+press-key = press a key
 
 ## Windows
 
@@ -150,7 +159,8 @@ open-error = { error } opening { $kind }: { $path }
 ## Data sources
 
 intro-to-data-sources = Please make sure you refresh the repository before checking for updates.
-data-sources-tab = Data Sources
+data-sources = Data Sources
+data-sources-tab = { data-sources }
 data-source-repo-update = Refresh sources
 data-source-repo-update-tooltip = Fetch the upstream data sources repository to see downloadable items.
 checking-for-updates = Checking for updates...
@@ -173,6 +183,8 @@ download = Download
 install = Install
 attempt-update = Attempt to update anyway?
 settings-unloaded = Settings have not yet loaded!
+available = Available
+up-to-date = Up to date!
 
 ## Info tab
 
@@ -231,6 +243,13 @@ no-markers-for-map = No markers found for current map.
 cant-place-markers = Can't place
 autoplacement-disable = Disable auto-placement
 autoplacement-enable = Enable auto-placement
+always-do-action = Always do action
+do-action-if-commander = Do action if commander
+do-action-if-lieutenant = Do action if lieutenant or commander
+never-do-action = Never do action
+open-markers-window = Open the markers window
+place-markers-automatically = Place markers automatically
+do-nothing = Do nothing
 
 ## Markers window
 clear-markers = { clear } { markers }
@@ -322,7 +341,12 @@ pathing-config-goggles-notice = This currently requires setting Render Sampling 
 pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (active)
 pathing-config-reset-notice = Right-click any slider below to restore its default setting.
+pathing-config-edge-feather-scale = edge feather scale
+pathing-config-corner-boundary-scale = corner boundary scale
 pathing-notice-space = {space} is required for pathing functionality.
+pathing-notice-mumblelink = if you experience stuttering, try changing Vertical Sync under the in-game graphical settings
+pathing-notice-rtapi-missing = RTAPI is a separate addon that must be installed via Nexus
+pathing-notice-rtapi = if you experience stuttering, try changing Vertical Sync or switching to MumbleLink
 mumblelink = MumbleLink
 rtapi = Nexus RealTime API
 

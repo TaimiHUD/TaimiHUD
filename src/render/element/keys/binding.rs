@@ -4,6 +4,7 @@ use {
             bindings::{self, Control, KeyIntercept},
             imgui,
         },
+        fl,
         settings::{state::SaveState, ArcVk},
         with_i18n,
     },
@@ -43,7 +44,19 @@ impl KeyBindSelection {
             control => format!("{control}"),
         };
         let _id_token = ui.push_id(&keyname);
-        self.draw_bind(ui, key, current_key, default_key, &keyname)
+
+        log::debug!(
+            "Looking up translation for {}",
+            keyname.to_lowercase().replace(" ", "-").as_str()
+        );
+
+        with_i18n!(keyname.as_str(), |msg| self.draw_bind(
+            ui,
+            key,
+            current_key,
+            default_key,
+            &msg
+        ))
     }
 
     pub fn draw_keybind<'a, F: FnOnce(&ArcVk)>(
@@ -289,9 +302,10 @@ impl KeyBindState {
     }
 
     pub fn draw_bind_prompt(&mut self, ui: &imgui::Ui) -> bool {
+        let press_key_translation = fl!("press-key");
         match bindings::held_mods() {
-            mods if mods.is_empty() => ui.text_disabled("press a key"),
-            mods => ui.text(format!("press a key: {mods}+")),
+            mods if mods.is_empty() => ui.text_disabled(press_key_translation),
+            mods => ui.text(format!("{press_key_translation}: {mods}+")),
         };
         match KeyIntercept::intercept_take() {
             None => {
@@ -320,7 +334,7 @@ impl KeyBindState {
 
     pub fn draw_bind_button(&mut self, ui: &imgui::Ui) {
         debug_assert!(!KeyIntercept::intercept_ready());
-        if ui.button("bind") {
+        if ui.button(fl!("bind")) {
             KeyIntercept::intercept_restart();
             self.configuring = true;
             self.pending = None;

@@ -24,6 +24,7 @@ use {
     },
     anyhow::Context,
     nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
+    std::borrow::Cow,
     strum::IntoEnumIterator,
     tokio::sync::watch,
 };
@@ -373,7 +374,8 @@ impl ConfigTabState {
         #[cfg(feature = "extension-nexus")]
         if let Some(gamebind_invoke) = &mut self.gamebind_invoke {
             // TODO: InvokeMethod dropdown
-            if crate::exports::runtime::nexus_available() && ui.checkbox("Precise Markers", gamebind_invoke)
+            if crate::exports::runtime::nexus_available()
+                && ui.checkbox(fl!("precise-markers"), gamebind_invoke)
             {
                 let _ = Settings::write_with_blocking(|settings| {
                     settings.arc_mut().gamebind_invoke = gamebind_invoke.then_some(Default::default())
@@ -432,9 +434,12 @@ impl ConfigUpdateState {
             .iter()
             .position(|opt| opt == &self.preference.as_option())
             .unwrap_or(0);
-        let auto_update = ui.combo("Auto-update", &mut index, &UpdatePreference::OPTIONS, |option| {
-            option.as_str().into()
-        });
+        let auto_update = ui.combo(
+            fl!("auto-update"),
+            &mut index,
+            &UpdatePreference::OPTIONS,
+            |option| with_i18n(option.as_str().to_lowercase().as_str(), |msg| msg.to_string()).into(),
+        );
         let mut new_pref = None;
         if auto_update {
             new_pref = UpdatePreference::OPTIONS.get(index).cloned();
