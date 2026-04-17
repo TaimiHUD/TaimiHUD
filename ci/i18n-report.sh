@@ -29,6 +29,8 @@ ftl_value() {
 	while read -r ftl_line; do
 		if [[ $ftl_lineno -eq 0 ]]; then
 			ftl_line=$(cut -d= -f2- <<<"$ftl_line")
+		elif [[ $ftl_line = \#* ]]; then
+			continue
 		elif [[ $ftl_line =~ ^[-a-zA-Z0-9_]+\ *= ]]; then
 			break
 		fi
