@@ -1,7 +1,6 @@
 ## Common
 
 join-discord = Rejoins le Discord
-discord-link = "https://discord.gg/dKpaphTMGS"
 having-issues = Si vous rencontrez des problèmes avec TaimiHUD, n'hésitez pas à nous contacter sur Discord ou via GitHub !
 height = Taille
 font = Police
