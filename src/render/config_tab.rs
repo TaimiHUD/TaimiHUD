@@ -195,85 +195,6 @@ impl ConfigTabState {
             .tree_push_on_open(true)
             .build(ui, || self.update_state.draw(ui));
 
-        let markers_window_closure = || {
-            if let Some(settings) = Settings::try_read() {
-                self.dpi_scaling = settings.dpi_scaling.clone();
-                self.marker_autoplace = settings.marker_autoplace.clone();
-                self.marker_autoplace_inner = match &self.marker_autoplace {
-                    MarkerAutoPlaceSettings::OpenWindow(t) => Some(t.clone()),
-                    MarkerAutoPlaceSettings::Place(t) => Some(t.clone()),
-                    _ => None,
-                };
-            }
-            ui.dummy([4.0, 4.0]);
-            ui.text_wrapped(&fl!("autoplace-warning"));
-            ui.dummy([4.0, 4.0]);
-            let autoplace_closure = || {
-                let mut selected = None;
-                for autoplace in MarkerAutoPlaceSettings::iter() {
-                    if Selectable::new(autoplace.to_string())
-                        .selected(autoplace == self.marker_autoplace)
-                        .build(ui)
-                    {
-                        selected = Some(autoplace);
-                    }
-                }
-                selected
-            };
-            if let Some(Some(selection)) = ComboBox::new(&fl!("marker-trigger"))
-                .preview_value(&self.marker_autoplace.to_string())
-                .build(ui, autoplace_closure)
-            {
-                self.marker_autoplace = selection;
-                MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
-                    self.marker_autoplace.clone(),
-                ));
-            }
-            if let Some(inner) = &self.marker_autoplace_inner {
-                let autoplace_inner_closure = || {
-                    let mut selected = None;
-                    for autoplace_inner in SquadCondition::iter() {
-                        if Selectable::new(autoplace_inner.to_string())
-                            .selected(autoplace_inner == *inner)
-                            .build(ui)
-                        {
-                            selected = Some(autoplace_inner);
-                        }
-                    }
-                    selected
-                };
-                if let Some(Some(selection)) = ComboBox::new(&fl!("marker-condition"))
-                    .preview_value(inner.to_string())
-                    .build(ui, autoplace_inner_closure)
-                {
-                    match &mut self.marker_autoplace {
-                        MarkerAutoPlaceSettings::OpenWindow(ref mut t) => {
-                            *t = selection.clone();
-                        },
-                        MarkerAutoPlaceSettings::Place(ref mut t) => {
-                            *t = selection.clone();
-                        },
-                        _ => (),
-                    };
-                    MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
-                        self.marker_autoplace.clone(),
-                    ));
-                }
-            }
-            ui.dummy([4.0, 4.0]);
-            let mut dpi_scaling = self.dpi_scaling.is_none();
-            if ui.checkbox(&fl!("dpi-scaling"), &mut dpi_scaling) {
-                use taimi_meta::ui::MapCalibration;
-
-                // TODO: controller event
-                let _ = Settings::write_with_blocking(|settings| {
-                    settings.dpi_scaling = (!dpi_scaling).then_some(MapCalibration::DPI_REFERENCE);
-                    self.dpi_scaling = settings.dpi_scaling.clone();
-                });
-                machine.act_display_size();
-            }
-            ui.text_wrapped(&fl!("dpi-notice"));
-        };
         let timers_window_closure = || {
             ui.dummy([4.0, 4.0]);
             if let Some(settings) = Settings::try_read() {
@@ -337,7 +258,7 @@ impl ConfigTabState {
             .flags(TreeNodeFlags::FRAMED)
             .opened(true, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, markers_window_closure);
+            .build(ui, || self.draw_markers_window(ui, machine));
         let _language = TreeNode::new(&fl!("language"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(!self.language.is_default(), Condition::Once)
@@ -348,6 +269,91 @@ impl ConfigTabState {
             .opened(true, Condition::Once)
             .tree_push_on_open(true)
             .build(ui, || self.draw_gamebinds(ui)));
+    }
+
+    fn draw_markers_window(&mut self, ui: &Ui, machine: &mut RenderMachine) {
+        if let Some(settings) = Settings::try_read() {
+            self.dpi_scaling = settings.dpi_scaling.clone();
+            self.marker_autoplace = settings.marker_autoplace.clone();
+            self.marker_autoplace_inner = match &self.marker_autoplace {
+                MarkerAutoPlaceSettings::OpenWindow(t) => Some(t.clone()),
+                MarkerAutoPlaceSettings::Place(t) => Some(t.clone()),
+                _ => None,
+            };
+        }
+        ui.dummy([4.0, 4.0]);
+        ui.text_wrapped(&fl!("autoplace-warning"));
+        ui.dummy([4.0, 4.0]);
+        let autoplace_closure = || {
+            let mut selected = None;
+            for autoplace in MarkerAutoPlaceSettings::iter() {
+                let select = with_i18n!(autoplace.label_ident(), |label| Selectable::new(label)
+                    .selected(autoplace == self.marker_autoplace)
+                    .build(ui));
+                if select {
+                    selected = Some(autoplace);
+                }
+            }
+            selected
+        };
+        let current = self.marker_autoplace.label_ident();
+        let autoplace = with_i18n!(("marker-trigger", current), |(label, current)| {
+            ComboBox::new(&label)
+                .preview_value(&current)
+                .build(ui, autoplace_closure)
+        });
+        if let Some(Some(selection)) = autoplace {
+            self.marker_autoplace = selection;
+            MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
+                self.marker_autoplace.clone(),
+            ));
+        }
+        if let Some(inner) = &self.marker_autoplace_inner {
+            let autoplace_inner_closure = || {
+                let mut selected = None;
+                for autoplace_inner in SquadCondition::iter() {
+                    let select = with_i18n!(autoplace_inner.label_ident(), |label| Selectable::new(label)
+                        .selected(autoplace_inner == *inner)
+                        .build(ui));
+                    if select {
+                        selected = Some(autoplace_inner);
+                    }
+                }
+                selected
+            };
+            let condition = with_i18n!(("marker-condition", inner.label_ident()), |(label, current)| {
+                ComboBox::new(&label)
+                    .preview_value(&current)
+                    .build(ui, autoplace_inner_closure)
+            });
+            if let Some(Some(selection)) = condition {
+                match &mut self.marker_autoplace {
+                    MarkerAutoPlaceSettings::OpenWindow(ref mut t) => {
+                        *t = selection.clone();
+                    },
+                    MarkerAutoPlaceSettings::Place(ref mut t) => {
+                        *t = selection.clone();
+                    },
+                    _ => (),
+                };
+                MarkersController::try_send(MarkersEvent::MarkerAutoPlaceSettings(
+                    self.marker_autoplace.clone(),
+                ));
+            }
+        }
+        ui.dummy([4.0, 4.0]);
+        let mut dpi_scaling = self.dpi_scaling.is_none();
+        if with_i18n!("dpi-scaling", |label| ui.checkbox(&label, &mut dpi_scaling)) {
+            use taimi_meta::ui::MapCalibration;
+
+            // TODO: controller event
+            let _ = Settings::write_with_blocking(|settings| {
+                settings.dpi_scaling = (!dpi_scaling).then_some(MapCalibration::DPI_REFERENCE);
+                self.dpi_scaling = settings.dpi_scaling.clone();
+            });
+            machine.act_display_size();
+        }
+        with_i18n!("dpi-notice", |msg| ui.text_wrapped(&msg));
     }
 
     pub fn draw_language(&mut self, ui: &Ui) {
@@ -375,7 +381,7 @@ impl ConfigTabState {
         if let Some(gamebind_invoke) = &mut self.gamebind_invoke {
             // TODO: InvokeMethod dropdown
             if crate::exports::runtime::nexus_available()
-                && ui.checkbox(fl!("precise-markers"), gamebind_invoke)
+                && with_i18n!("precise-markers", |label| ui.checkbox(&label, gamebind_invoke))
             {
                 let _ = Settings::write_with_blocking(|settings| {
                     settings.arc_mut().gamebind_invoke = gamebind_invoke.then_some(Default::default())
@@ -434,12 +440,12 @@ impl ConfigUpdateState {
             .iter()
             .position(|opt| opt == &self.preference.as_option())
             .unwrap_or(0);
-        let auto_update = ui.combo(
-            fl!("auto-update"),
+        let auto_update = with_i18n!("auto-update", |label| ui.combo(
+            &label,
             &mut index,
             &UpdatePreference::OPTIONS,
             |option| with_i18n(option.as_str().to_lowercase().as_str(), |msg| msg.to_string()).into(),
-        );
+        ));
         let mut new_pref = None;
         if auto_update {
             new_pref = UpdatePreference::OPTIONS.get(index).cloned();

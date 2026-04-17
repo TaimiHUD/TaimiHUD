@@ -115,13 +115,7 @@ impl ArcVk {
         }
     }
 
-    pub fn get_name(&self) -> String {
-        if let Some(id) = self.id.strip_prefix("timer-key-trigger-") {
-            return crate::fl!("timer-key-trigger", id = id)
-        }
-
-        crate::LANGUAGE_LOADER.get(self.id)
-    }
+    pub const TIMER_KEY_TRIGGER_PREFIX: &'static str = "timer-key-trigger-";
 
     pub fn control(&self) -> Option<TaimiControls> {
         Some(match *self {

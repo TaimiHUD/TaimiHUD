@@ -218,7 +218,7 @@ anyhow = "1"
 env_logger = { version = "0.11", default-features = false, optional = true }
 log = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.43.0", features = [ "fs", "macros" ], default-features = false }
-arcdps = { workspace = true, features = ["extras"] }
+arcdps = { workspace = true, features = ["extras", "strum"] }
 glam = { workspace = true, features = [ "serde", "mint" ] }
 glamour = { workspace = true, features = ["mint"] }
 palette = { version = "0.7.6", features = [ "serde" ] }

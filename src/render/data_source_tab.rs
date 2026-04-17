@@ -260,7 +260,7 @@ impl DataSourceTabState {
             RenderState::draw_open_button(ui, fl!("open-button", kind = "homepage"), url, url);
         }
         ui.table_next_column();
-        ui.text(format!("{}", kind));
+        with_i18n!(kind.label_ident(), |label| ui.text(&label));
         ui.table_next_column();
         if let Some(description) = source.get_metadata_str(MetadataKey::Description) {
             ui.text_wrapped(description);

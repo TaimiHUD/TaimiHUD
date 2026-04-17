@@ -3,11 +3,11 @@ use {
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
-        fl,
         settings::{
             state::{save_state_backup, UiState},
             IconStyle,
         },
+        with_i18n,
         SETTINGS,
     },
     anyhow::Context,
@@ -49,24 +49,11 @@ pub enum NeedsUpdate {
 
 impl fmt::Display for NeedsUpdate {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use NeedsUpdate::*;
         match &self {
-            Unknown => {
-                let translation = fl!("unknown");
-                write!(f, "{}", translation)
-            },
-            Error(e) => {
-                let translation = fl!("error");
-                write!(f, "{}: {}", translation, e)
-            },
-            Known(true, id) => {
-                let translation = fl!("available");
-                write!(f, "{}: {}", translation, id)
-            },
-            Known(false, _id) => {
-                let translation = fl!("up-to-date");
-                write!(f, "{}", translation)
-            },
+            Self::Unknown => with_i18n!("unknown", |msg| f.write_str(&msg)),
+            Self::Error(e) => with_i18n!("error", |msg| write!(f, "{msg}: {e}")),
+            Self::Known(true, id) => with_i18n!("available", |msg| write!(f, "{msg}: {id}")),
+            Self::Known(false, ..) => with_i18n!("up-to-date", |msg| f.write_str(&msg)),
         }
     }
 }
@@ -112,6 +99,17 @@ pub enum SquadCondition {
     Never,
 }
 
+impl SquadCondition {
+    pub fn label_ident(&self) -> &'static str {
+        match self {
+            Self::Always => "always-do-action",
+            Self::IfCommander => "do-action-if-commander",
+            Self::IfLieutenantOrAbove => "do-action-if-lieutenant",
+            Self::Never => "never-do-action",
+        }
+    }
+}
+
 #[derive(PartialEq, Deserialize, Serialize, Default, Debug, Clone, EnumIter)]
 pub enum MarkerAutoPlaceSettings {
     OpenWindow(SquadCondition),
@@ -120,46 +118,12 @@ pub enum MarkerAutoPlaceSettings {
     DoNothing,
 }
 
-impl fmt::Display for SquadCondition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use SquadCondition::*;
-        match &self {
-            Always => {
-                let translation = fl!("always-do-action");
-                write!(f, "{}", translation)
-            },
-            IfCommander => {
-                let translation = fl!("do-action-if-commander");
-                write!(f, "{}", translation)
-            },
-            IfLieutenantOrAbove => {
-                let translation = fl!("do-action-if-lieutenant");
-                write!(f, "{}", translation)
-            },
-            Never => {
-                let translation = fl!("never-do-action");
-                write!(f, "{}", translation)
-            },
-        }
-    }
-}
-
-impl fmt::Display for MarkerAutoPlaceSettings {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use MarkerAutoPlaceSettings::*;
-        match &self {
-            OpenWindow(_t) => {
-                let translation = fl!("open-markers-window");
-                write!(f, "{}", translation)
-            },
-            Place(_t) => {
-                let translation = fl!("place-markers-automatically");
-                write!(f, "{}", translation)
-            },
-            DoNothing => {
-                let translation = fl!("do-nothing");
-                write!(f, "{}", translation)
-            },
+impl MarkerAutoPlaceSettings {
+    pub fn label_ident(&self) -> &'static str {
+        match self {
+            MarkerAutoPlaceSettings::OpenWindow(..) => "open-markers-window",
+            MarkerAutoPlaceSettings::Place(..) => "place-markers-automatically",
+            MarkerAutoPlaceSettings::DoNothing => "do-nothing",
         }
     }
 }

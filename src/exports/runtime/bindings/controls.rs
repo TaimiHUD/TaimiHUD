@@ -43,6 +43,16 @@ impl Control {
     pub fn as_control(self) -> Option<GameControl> {
         GameControl::try_from(self.index as i32).ok()
     }
+
+    pub fn label_ident(&self) -> &'static str {
+        match self.as_control() {
+            Some(control) => control.into(),
+            None => {
+                log::warn!("unrecognized control {self}");
+                "unknown"
+            },
+        }
+    }
 }
 
 impl From<GameControl> for Control {
@@ -79,7 +89,7 @@ impl TryFrom<Control> for GameControl {
 impl fmt::Debug for Control {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.as_control() {
-            Some(c) => fmt::Debug::fmt(&c, f),
+            Some(c) => f.write_str(c.into()),
             None => f.debug_tuple("GameControl").field(&self.index).finish(),
         }
     }
@@ -87,7 +97,7 @@ impl fmt::Debug for Control {
 impl fmt::Display for Control {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.as_control() {
-            Some(c) => f.write_str(&format!("{c:?}").replace("_", " ")),
+            Some(c) => f.write_str(c.into()),
             None => write!(f, "#{}", self.index),
         }
     }
@@ -408,7 +418,7 @@ impl<'de> Deserialize<'de> for GameBinds {
             let bind = (vk, mods);
             let slot_seen = *seen.entry(slot).or_insert(bind);
             if slot_seen != bind {
-                log::warn!("discarding overlapping keybind for {control}({index}): {bind:?}");
+                log::warn!("discarding overlapping keybind for {control:?}({index}): {bind:?}");
                 continue
             }
             match Self::vk_is_button(VIRTUAL_KEY(vk)) {

@@ -430,12 +430,13 @@ impl PathingConfig {
         }
         #[cfg(feature = "extension-nexus")]
         match camera_source {
-            CameraSource::MumbleLink => ui.text_wrapped(fl!("pathing-notice-mumblelink")),
+            CameraSource::MumbleLink =>
+                with_i18n!("pathing-notice-mumblelink", |msg| ui.text_wrapped(&msg)),
             CameraSource::RealTimeAPI => {
                 if machine.rtapi.is_none() {
-                    ui.text_wrapped(fl!("pathing-notice-rtapi-missing"));
+                    with_i18n!("pathing-notice-rtapi-missing", |msg| ui.text_wrapped(&msg));
                 }
-                ui.text_wrapped(fl!("pathing-notice-rtapi"));
+                with_i18n!("pathing-notice-rtapi", |msg| ui.text_wrapped(&msg));
             },
         }
 

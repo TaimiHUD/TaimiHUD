@@ -1,13 +1,14 @@
 use {
     crate::{
-        fl,
         settings::{source, DirectSource, GitHubSource, Source},
+        with_i18n,
         ADDON_DIR,
     },
     anyhow::Context,
     serde::{Deserialize, Serialize},
     std::{
         collections::BTreeMap,
+        fmt,
         fs::read_to_string as sync_read_to_string,
         path::{Path, PathBuf},
         sync::LazyLock,
@@ -19,7 +20,21 @@ use {
     },
 };
 
-#[derive(Clone, Copy, Deserialize, Serialize, Hash, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    Deserialize,
+    Serialize,
+    Hash,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    strum::IntoStaticStr,
+)]
+#[strum(serialize_all = "kebab-case")]
 pub enum SourceKind {
     #[default]
     Timers,
@@ -33,34 +48,15 @@ pub enum SourceKind {
     Unspecified,
 }
 
-impl std::fmt::Display for SourceKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Timers => {
-                let translation = fl!("timers");
-                write!(f, "{}", translation)
-            },
-            Self::Pathing => {
-                let translation = fl!("pathing");
-                write!(f, "{}", translation)
-            },
-            Self::Markers => {
-                let translation = fl!("markers");
-                write!(f, "{}", translation)
-            },
-            Self::Addon => {
-                let translation = fl!("addon");
-                write!(f, "{}", translation)
-            },
-            Self::DataSources => {
-                let translation = fl!("data-sources");
-                write!(f, "{}", translation)
-            },
-            Self::Unspecified => {
-                let translation = fl!("unspecified");
-                write!(f, "{}", translation)
-            },
-        }
+impl SourceKind {
+    #[inline]
+    pub fn label_ident(&self) -> &'static str {
+        self.into()
+    }
+}
+impl fmt::Display for SourceKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        with_i18n!(self.label_ident(), |label| f.write_str(&label))
     }
 }
 

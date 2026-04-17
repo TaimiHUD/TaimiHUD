@@ -191,6 +191,14 @@ macro_rules! with_i18n {
             }
         }
     };
+    (($message_id:expr, $($rest_id:tt)+), |($arg:ident, $($rest_arg:tt)*)| $closure:expr) => {
+        $crate::with_i18n! {
+            $message_id, |$arg| $crate::with_i18n! {
+                $($rest_id)*,
+                |$($rest_arg)*| $closure
+            }
+        }
+    };
     ($message_id:expr, $closure:expr) => {
         {
             $crate::with_i18n($message_id, $closure)

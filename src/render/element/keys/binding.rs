@@ -40,17 +40,10 @@ impl KeyBindSelection {
         .unwrap_or(KeyInput::EMPTY);
         let key = i32::from(control) as usize;
 
-        let keyname = match control {
-            control => format!("{control}"),
-        };
+        let keyname = control.label_ident();
         let _id_token = ui.push_id(&keyname);
 
-        log::debug!(
-            "Looking up translation for {}",
-            keyname.to_lowercase().replace(" ", "-").as_str()
-        );
-
-        with_i18n!(keyname.as_str(), |msg| self.draw_bind(
+        with_i18n!(keyname, |msg| self.draw_bind(
             ui,
             key,
             current_key,
@@ -66,13 +59,16 @@ impl KeyBindSelection {
         action: Option<F>,
     ) -> Option<&'a mut KeyBindState> {
         let _id_token = ui.push_id(vk.id);
-        let name = vk.get_name();
-        match action {
+        let action = move |name: &str| match action {
             Some(action) =>
                 if ui.button(name) {
                     action(vk)
                 },
             None => ui.text(name),
+        };
+        match vk.id.strip_prefix(ArcVk::TIMER_KEY_TRIGGER_PREFIX) {
+            Some(id) => action(&fl!("timer-key-trigger", id = id)),
+            None => with_i18n!(vk.id, |name| action(&name)),
         }
         ui.same_line();
 
@@ -138,19 +134,24 @@ impl KeyBindSelection {
         let changed = self.draw_gamebind(ui, control);
 
         if let Some(new) = changed {
-            let mut saved = true;
+            let mut saved = false;
             SaveState::write_with(|state| {
+                let Some(Ok(new)) = new.take_pending() else { return };
                 let game_binds = state.game_binds_mut();
-                match new.take_pending() {
-                    Some(Ok(new)) if new.is_empty() => game_binds.remove((control.into(), i8::MIN)),
-                    Some(Ok(new)) => game_binds.set(control, i8::MIN, (new.vk.0, new.mods)),
-                    Some(Err(..)) | None => {
-                        saved = false;
-                        return
-                    },
+                if new.is_empty() {
+                    game_binds.remove((control.into(), i8::MIN));
+                } else {
+                    game_binds.set(control, i8::MIN, (new.vk.0, new.mods));
                 }
+                saved = true;
             });
-            bindings::populate_bind_controls();
+            if saved {
+                let key = i32::from(control) as usize;
+                if let Some(buf) = self.binding_buffers.get_mut(&key) {
+                    buf.clear();
+                }
+                bindings::populate_bind_controls();
+            }
         }
     }
     pub fn do_gamebinds<I: IntoIterator>(&mut self, ui: &imgui::Ui, controls: I)
@@ -242,7 +243,7 @@ impl KeyBindState {
             binding
         });
 
-        if binding_buffer.current_name.is_empty() {
+        if binding_buffer.current_name.is_empty() && !current.is_empty() {
             Self::vk_name_into(current, &mut binding_buffer.current_name);
         }
         if is_fresh {
@@ -252,19 +253,20 @@ impl KeyBindState {
     }
 
     pub fn draw_input(&mut self, ui: &imgui::Ui, key: usize, label: &str) -> bool {
-        let input = ui
-            .input_text(label, &mut self.name_buffer)
-            .read_only(self.configuring)
-            .auto_select_all(true)
-            .always_insert_mode(true)
-            .enter_returns_true(true)
-            .no_undo_redo(true)
-            .no_horizontal_scroll(true);
-        let input = match &self.default_name {
-            Some(name) => input.hint(&name[..]),
-            _ => input,
+        let mut changed = {
+            let input = ui
+                .input_text(label, &mut self.name_buffer)
+                .read_only(self.configuring)
+                .auto_select_all(true)
+                .always_insert_mode(true)
+                .enter_returns_true(true)
+                .no_undo_redo(true)
+                .no_horizontal_scroll(true);
+            match &self.default_name {
+                Some(name) => input.hint(&name[..]).build(),
+                _ => with_i18n!("unset", |unbound| input.hint(&unbound[..]).build()),
+            }
         };
-        let mut changed = input.build();
 
         if changed {
             self.pending = Some(Self::binding_from_input(&self.name_buffer).map_err(|e| {
@@ -302,11 +304,14 @@ impl KeyBindState {
     }
 
     pub fn draw_bind_prompt(&mut self, ui: &imgui::Ui) -> bool {
-        let press_key_translation = fl!("press-key");
-        match bindings::held_mods() {
-            mods if mods.is_empty() => ui.text_disabled(press_key_translation),
-            mods => ui.text(format!("{press_key_translation}: {mods}+")),
-        };
+        with_i18n!("press-key", |msg| match bindings::held_mods() {
+            mods if mods.is_empty() => ui.text_disabled(&msg),
+            mods => {
+                ui.text(&msg);
+                ui.same_line();
+                ui.text(format!(":: {mods}+"));
+            },
+        });
         match KeyIntercept::intercept_take() {
             None => {
                 log::info!("key bind cancelled");
@@ -334,7 +339,7 @@ impl KeyBindState {
 
     pub fn draw_bind_button(&mut self, ui: &imgui::Ui) {
         debug_assert!(!KeyIntercept::intercept_ready());
-        if ui.button(fl!("bind")) {
+        if with_i18n!("bind", |label| ui.button(&label)) {
             KeyIntercept::intercept_restart();
             self.configuring = true;
             self.pending = None;
@@ -348,18 +353,11 @@ impl KeyBindState {
     }
 
     fn vk_name_into(key: KeyInput, out: &mut Cow<'static, str>) {
-        match key.any() {
-            Some(key) => {
-                use std::fmt::Write;
-                let mut out = out.to_mut();
-                out.clear();
+        use std::fmt::Write;
+        let mut out = out.to_mut();
+        out.clear();
 
-                let _ = write!(&mut out, "{}", key.display_addonapi());
-            },
-            None => {
-                *out = Cow::Borrowed("(unbound)");
-            },
-        }
+        let _ = write!(&mut out, "{}", key.display_addonapi());
     }
 
     fn key_is_shortcut(key: usize) -> bool {
