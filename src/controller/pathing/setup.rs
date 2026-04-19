@@ -330,6 +330,7 @@ impl PathingController {
         };
         if probably_loading {
             self.collect_garbage_textures();
+            self.map_info.prune(Some(&self.packs));
             self.maps.prune(Some(&self.map_info));
             #[cfg(feature = "paths-interact")]
             {
@@ -349,10 +350,6 @@ impl PathingController {
     pub(super) fn handle_map_leave(&mut self) {
         let next_map = self.gameplay_map();
         self.map_info.age_tick(next_map);
-        #[cfg(todo)]
-        {
-            self.map_info.prune(Some(&self.packs));
-        }
         self.maps.age_tick(next_map);
         self.maps.prune(Some(&self.map_info));
         self.collect_garbage_in(None);
@@ -965,19 +962,26 @@ impl PathingController {
 }
 impl PackLoader {
     pub(super) fn cleanup_pack_subresources(&self, path: PackPath, reason: Option<&UnloadedReason>) {
+        let cleanup = match reason {
+            Some(UnloadedReason::Pending | UnloadedReason::Loading) => false,
+            Some(reason) if !reason.can_reactivate(false) => true,
+            #[cfg(todo)]
+            _ if self
+                .latest_map()
+                .map(|map_id| self.map_info.map_info.contains_key(&path.rel(map_id)))
+                == Some(false) =>
+                true,
+            _ => false,
+        };
         let keys = {
             let packs = self.shared.packs.packs.borrow();
             packs
                 .lookup_ref(&path)
-                .map(|pack| pack.info.drain_subresource_keys())
+                .map(|pack| pack.info.iter_subresource_keys(cleanup))
         };
         let Some(keys) = keys else {
             log::warn!("can't cleanup missing {path}");
             return
-        };
-        let cleanup = match reason {
-            Some(reason) if !reason.can_reactivate(false) => true,
-            _ => false,
         };
         let mut keys = keys.into_iter().peekable();
         if keys.peek().is_none() {
