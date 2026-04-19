@@ -1,3 +1,6 @@
+#[cfg(feature = "paths-filter")]
+use std::cell::LazyCell;
+
 #[doc(no_inline)]
 pub use taimi_meta::coords::LocalSpace as PackSpace;
 use {
@@ -32,7 +35,10 @@ use {
     },
     std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
     strum::Display,
-    taimi_hoard::{loc::LocationRef, time::Timestamp},
+    taimi_hoard::{
+        loc::{LocationMut, LocationRef},
+        time::Timestamp,
+    },
     taimi_meta::{
         packs::{
             collections::{CategorySet, PackSet},
@@ -224,6 +230,7 @@ pub(crate) struct PathingController {
     interact: InteractReactor,
     // watchers...
     pack_configs: watched::WatchStreamBox<PackPath, shared::SharedPackConfig>,
+    pack_loads: watched::WatchStreamBox<PackPath, shared::SharedPackLoaded>,
     /// we only need to regen if a new pack slot is allocated
     pack_configs_sig: PackPath,
     packs_rx: watched::Rx<shared::SharedLoaderPacksInfo>,
@@ -254,6 +261,7 @@ impl PathingController {
             map_info: Default::default(),
             maps: Default::default(),
             pack_configs: Box::new(stream::pending()),
+            pack_loads: Box::new(stream::pending()),
             now_loading_timeout: ReusableBoxFuture::new(future::pending()),
             gc_timeout: ReusableBoxFuture::new(future::pending()),
             pack_configs_sig: PackPath::default(),
@@ -358,39 +366,20 @@ impl PathingController {
                 if self.pack_configs_sig < pack_count {
                     // we only need to resubscribe when length changes...
                     let additions = mem::replace(&mut self.pack_configs_sig, pack_count);
-                    self.pack_configs = self.loader.shared.watch_config_changes(Either::Right(additions..));
+                    let additions = Either::Right(additions..);
+                    self.pack_configs = self.loader.shared.watch_config_changes(additions.clone());
+                    // we mostly handle them inline above, but...
+                    #[cfg(todo)]
+                    let additions = Either::Left(false);
+                    self.pack_loads = self.loader.shared.watch_loaded_changes(additions);
                 }
                 self.load_grace_period_update(fresh_load.unwrap_or(false));
-                let map_id = gameplay_prev.gameplay_map();
-                #[cfg(feature = "paths-filter")]
-                let hidden_guids = (map_id.is_some() && !packs_dirty.is_empty())
-                    .then(Self::clone_hidden_guids)
-                    .flatten();
-                #[cfg(feature = "paths-filter")]
-                let hidden_ctx = hidden_guids.as_ref().map(|h| (&**h, WallInstant::now_timestamp_mono()));
-                #[cfg(not(feature = "paths-filter"))]
-                let hidden_ctx = None;
-                for path in &packs_dirty {
-                    if let Some(map_path) = map_id.map(|map| path.rel(map)) {
-                        if let Some(pack) = self.packs.lookup_ref(&map_path.root) {
-                            match &pack.unloaded {
-                                None if pack.data_loaded => (),
-                                #[cfg(todo)]
-                                Some(UnloadedReason::Pending) => (),
-                                _ => continue,
-                            }
-                            if !pack.info.has_map(map_path.path) {
-                                continue
-                            }
-                        }
-                        let _ = self.prepare_for_pack_map(map_path, true, hidden_ctx);
-                    }
-                }
+                self.process_dirty_packs(gameplay_prev.gameplay_map(), &packs_dirty);
                 #[cfg(todo)]
                 for path in &configs_dirty {
                     self.reload_config_for(path);
                 }
-            }
+            },
             enables = self.rx.enables.when_changed() => {
                 let changed = *enables ^ enables_prev;
                 if changed.contains(PathingEnables::ENGINE) && enables.contains(PathingEnables::ENGINE) {
@@ -512,9 +501,15 @@ impl PathingController {
                 self.interact_entity_updates();
             },
             _ = &mut self.gc_timeout => {
-                self.collect_garbage(1, false, gameplay_prev.gameplay_map()).await;
-                self.collect_garbage_in(Some(Self::GC_DELAY_ONGOING));
-            }
+                let period = match self.loader.shared.packs.is_quiet() {
+                    true => {
+                        self.collect_garbage(1, false, gameplay_prev.gameplay_map()).await;
+                        Self::GC_DELAY_ONGOING
+                    },
+                    false => Self::GC_DELAY_RETRY,
+                };
+                self.collect_garbage_in(Some(period));
+            },
             controls = self.controls.wait() => match controls {
                 Err(e) => log::error!("Control bindings error! {e:#}"),
                 Ok((&controls_state, controls_changed)) => {
@@ -529,6 +524,38 @@ impl PathingController {
             },
             Some((pack, config)) = self.pack_configs.next() => {
                 self.handle_config_change(pack, &config).await
+            },
+            Some((pack_path, loaded)) = self.pack_loads.next() => {
+                let mut fresh_load = None;
+                let dirty = self.packs.packs.lookup_mut(&pack_path).and_then(|pack| {
+                    let dirty = pack.update_with_loaded(&loaded.borrow());
+                    fresh_load = dirty.then_some(matches!(&pack.unloaded, Some(UnloadedReason::Loading)));
+                    dirty.then_some(pack)
+                });
+                let map_path = gameplay_prev.gameplay_map()
+                    .map(|map_id| pack_path.rel(map_id));
+                let missing_map = match (dirty, map_path) {
+                    (_, None) | (None, _) => None,
+                    (Some(pack), Some(..)) if !pack.data_loaded || pack.unloaded.is_some() => None,
+                    (Some(pack), Some(map)) if !pack.info.has_map(map.path) => None,
+                    (Some(..), Some(map_path)) if self.maps.maps.contains_key(&map_path) => None,
+                    #[cfg(todo)]
+                    (Some(..), Some(map_path)) if self.map_info.map_info.contains_key(&map_path) && !just_loaded => None,
+                    (Some(..), Some(map_path)) => Some(map_path),
+                };
+                if let Some(fresh_load) = fresh_load {
+                    self.load_grace_period_update(fresh_load);
+                }
+                if let Some(map_path) = missing_map {
+                    #[cfg(feature = "paths-filter")]
+                    let hidden_guids = Self::clone_hidden_guids();
+                    #[cfg(feature = "paths-filter")]
+                    let hidden_ctx = hidden_guids.as_ref().map(|h| (&**h, WallInstant::now_timestamp_mono()));
+                    #[cfg(not(feature = "paths-filter"))]
+                    let hidden_ctx = None;
+
+                    let _ = self.prepare_for_pack_map(map_path, true, hidden_ctx);
+                }
             },
         }
         None
@@ -814,6 +841,38 @@ impl PathingController {
         }
     }
 
+    fn process_dirty_packs(&mut self, map_id: Option<MapIndex>, packs_dirty: &PackSet) {
+        #[cfg(feature = "paths-filter")]
+        let hidden_guids =
+            LazyCell::new(|| Self::clone_hidden_guids().map(|h| (h, WallInstant::now_timestamp_mono())));
+        #[cfg(not(feature = "paths-filter"))]
+        let hidden_ctx = None;
+        for path in packs_dirty {
+            if let Some(map_path) = map_id.map(|map| path.rel(map)) {
+                if let Some(pack) = self.packs.lookup_ref(&map_path.root) {
+                    match &pack.unloaded {
+                        None if pack.data_loaded => (),
+                        #[cfg(todo)]
+                        Some(UnloadedReason::Pending) => (),
+                        reason => {
+                            #[cfg(taimi_debug)]
+                            log::warn!("dirty pack ignoring map {map_path:?} due to {reason:?}");
+                            continue
+                        },
+                    }
+                    if !pack.info.has_map(map_path.path) {
+                        #[cfg(taimi_debug)]
+                        log::warn!("dirty pack ignoring map {map_path:?} due to offmap");
+                        continue
+                    }
+                }
+                #[cfg(feature = "paths-filter")]
+                let hidden_ctx = hidden_guids.as_ref().map(|(h, w)| (&**h, *w));
+                let _ = self.prepare_for_pack_map(map_path, true, hidden_ctx);
+            }
+        }
+    }
+
     pub(crate) async fn set_visible_with(
         &mut self,
         context: Option<MapContext>,
@@ -1023,6 +1082,7 @@ impl PathingController {
     const GC_DELAY_INITIAL: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() / 2);
     #[cfg(taimi_debug)]
     const GC_DELAY_ONGOING: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() * 2);
+    const GC_DELAY_RETRY: Duration = Duration::from_secs(Timestamp::MINUTE.as_secs() * 3 / 5);
     pub(super) fn collect_garbage_in(&mut self, override_delay: Option<Duration>) {
         let delay = override_delay.unwrap_or(Self::GC_DELAY_INITIAL);
         self.gc_timeout.set(tokio::time::sleep(delay));

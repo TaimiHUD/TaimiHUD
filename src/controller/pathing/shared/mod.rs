@@ -265,6 +265,26 @@ impl PathingShared {
             },
         }
     }
+    pub fn watch_loaded_changes(
+        &self,
+        mark_changed: Either<bool, ops::RangeFrom<PackPath>>,
+    ) -> watched::WatchStreamBox<PackPath, SharedPackLoaded> {
+        let packs = self.packs.packs.borrow();
+        let loads = packs.iter().map(|(path, load)| (path, &load.loaded));
+        match mark_changed {
+            Either::Left(mark_changed) => watched::stream::stream_watch_changes_of(loads, mark_changed),
+            Either::Right(mark_changed) => {
+                let recv = loads.map(|(path, tx)| {
+                    let mut rx = tx.subscribe();
+                    if mark_changed.contains(&path) {
+                        rx.mark_changed();
+                    }
+                    (path, rx)
+                });
+                Box::new(watched::stream::stream_watch_changes(recv))
+            },
+        }
+    }
 }
 
 bitflags::bitflags! {

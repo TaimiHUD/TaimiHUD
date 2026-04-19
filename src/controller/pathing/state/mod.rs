@@ -448,6 +448,12 @@ impl LoadedPackInfo {
     pub fn is_loaded(&self) -> bool {
         self.unloaded.is_none()
     }
+    pub fn is_pending(&self) -> bool {
+        matches!(
+            self.unloaded,
+            Some(UnloadedReason::Pending | UnloadedReason::Loading)
+        ) && self.info.info.is_none()
+    }
     pub fn can_reload(&self) -> bool {
         self.unloaded
             .as_ref()
@@ -538,7 +544,7 @@ impl LoadedPacks {
                     pack.used.mark_for_death();
                     continue
                 },
-                _ => false,
+                _ => pack.is_pending(),
             };
             pack.used.mark_if(used);
         }
