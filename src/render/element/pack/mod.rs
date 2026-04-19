@@ -390,8 +390,7 @@ impl PackElement {
             ui.text_with_font(NexusLinkFont::Big, title);
             ui.spacing();
         }
-        let path = rt::relative_path(&self.state.info.path);
-        let path = path.strip_prefix("addons/Taimi/pathing/").unwrap_or(path);
+        let path = self.state.info.path_name();
         ui.text_wrapped(format!("{}", path.display()));
 
         if let Some(unloaded) = &self.state.unloaded {

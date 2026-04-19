@@ -218,6 +218,20 @@ impl SharedPackInfo {
         let _ = self.datasource.take();
     }
 
+    pub fn path_name(&self) -> &Path {
+        let fallback = || {
+            let relpath = rt::relative_path(&self.path);
+            relpath.strip_prefix("addons/Taimi/pathing/")
+            .unwrap_or(relpath)
+        };
+        let addon_dir = rt::ADDON_DIR.try_read().ok().and_then(|d| *d);
+        addon_dir
+            .and_then(|d|
+                self.path.strip_prefix(d).ok()
+                .map(|p| p.strip_prefix("pathing/").unwrap_or(p))
+            ).unwrap_or_else(fallback)
+    }
+
     /// unique texture names
     pub fn key_for_subresource(&self, resource: &AttrString) -> Arc<str> {
         if let Ok(keys) = self.allocated_keys.try_read() {
@@ -235,7 +249,7 @@ impl SharedPackInfo {
             .clone()
     }
     pub fn gen_key_for_subresource(&self, resource: &AttrString) -> String {
-        let packname = rt::relative_path(&self.path);
+        let packname = self.path_name();
         let resource = &resource[..];
         let storage;
         let resourceid = match resource.len() {
