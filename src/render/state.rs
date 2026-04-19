@@ -753,6 +753,11 @@ impl RenderState {
         if !Self::is_running() {
             return
         }
+        #[cfg(feature = "texture-loader")]
+        {
+            let builtin = [RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_LINES_KEY];
+            TEXTURES.mark_immortal(builtin);
+        }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_LINES_KEY, RenderMachine::TEXTURE_LOGO_LINES_BIN);
         rt::setup_stats();

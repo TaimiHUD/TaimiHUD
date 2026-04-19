@@ -255,6 +255,13 @@ impl SharedPackInfo {
         let mut keys = self.allocated_keys.write().unwrap_or_else(|e| e.into_inner());
         keys.drain().collect::<Vec<_>>()
     }
+    pub fn iter_subresource_keys(&self, drain: bool) -> impl IntoIterator<Item = (AttrString, Arc<str>)> + 'static {
+        let mut keys = self.allocated_keys.write().unwrap_or_else(|e| e.into_inner());
+        match drain {
+            true => keys.drain().collect::<Vec<_>>(),
+            false => keys.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>(),
+        }
+    }
     pub(crate) fn shared_subresources(&self) -> &Arc<RwLock<FxHashMap<AttrString, Arc<str>>>> {
         &self.allocated_keys
     }
@@ -668,5 +675,13 @@ impl SharedPacks {
         let v = self.load_period.load(Ordering::Acquire);
         let state = v & Self::GRACE_BIT_WAITING != 0;
         (state, v & Self::GRACE_COUNT_MASK)
+    }
+    #[inline]
+    pub(crate) fn is_still_waiting(&self) -> bool {
+        self.load_period.load(Ordering::Relaxed) & Self::GRACE_BIT_WAITING != 0
+    }
+    #[inline]
+    pub(crate) fn is_quiet(&self) -> bool {
+        self.load_period.load(Ordering::Relaxed) & (Self::GRACE_BIT_WAITING | Self::GRACE_COUNT_MASK) == 0
     }
 }

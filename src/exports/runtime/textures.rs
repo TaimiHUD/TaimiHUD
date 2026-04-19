@@ -256,6 +256,20 @@ impl TextureLoader {
         }
     }
     #[cfg(feature = "texture-loader")]
+    pub fn mark_immortal<'a, K, I>(&self, keys: I) where
+        I: IntoIterator<Item = K>,
+        K: Into<TextureKey>,
+    {
+        if let Ok(mut garbage) = self.garbage.write() {
+            garbage.extend(keys.into_iter().map(|key| {
+                let immortal = RecentlyUsed {
+                    generation: u32::MAX,
+                };
+                (key.into(), immortal)
+            }));
+        }
+    }
+    #[cfg(feature = "texture-loader")]
     pub fn collect_garbage(&self) -> Vec<TextureKey> {
         #[derive(Copy, Clone)]
         enum SlotStatus {
@@ -279,6 +293,7 @@ impl TextureLoader {
         if let Ok(mut garbage) = self.garbage.write() {
             garbage.retain(|key, used| {
                 let retain = match unused.remove(key) {
+                    _ if used.generation == u32::MAX => return true,
                     None if matches!(Arc::strong_count(key), 1 | 2) =>
                         return false,
                     None => {
