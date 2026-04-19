@@ -230,13 +230,18 @@ impl PackCategoryMaskState {
     pub fn update_loaded(
         &mut self,
         category_info: Option<&PackCategoryInfo>,
-        map_info: Option<&SharedMapPackLoaded>,
+        map_info: Result<&SharedMapPackLoaded, bool>,
     ) {
         let loaded = self.loaded.get_or_insert_default();
         loaded.clear();
-        self.loaded_sig = map_info.map(|info| info.path.path);
-        let (Some(category_info), Some(map_info)) = (category_info, map_info) else {
-            return
+        self.loaded_sig = map_info.ok().map(|info| info.path.path);
+        let (category_info, map_info) = match (category_info, map_info) {
+            (Some(c), Ok(m)) => (c, m),
+            (Some(category_info), Err(true)) => {
+                loaded.extend(category_info.root_paths());
+                return
+            },
+            _ => return,
         };
         let paths = CategoryLoadedFilterInfo { category_info, loaded: &map_info.info };
         loaded.extend(paths);
