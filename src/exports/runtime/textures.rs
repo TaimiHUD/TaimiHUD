@@ -329,6 +329,8 @@ impl TextureLoader {
     {
         if let Ok(mut textures) = self.textures.write() {
             for key in deceased {
+                #[cfg(taimi_debug)]
+                log::debug!("Cleaning up unused texture: {key}");
                 textures.remove(key);
             }
         }
