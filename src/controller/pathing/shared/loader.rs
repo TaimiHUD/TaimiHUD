@@ -100,29 +100,31 @@ impl SharedPacks {
         self.packs.send_if_modified(|shared| {
             let mut changed = false;
             for (path, loaded) in loaded {
-                match &loaded {
-                    Err(None) => {
-                        log::debug!("marked {path}: deactivated");
-                    },
-                    Err(Some(
-                        reason @ (UnloadedReason::Pending
-                        | UnloadedReason::Loading
-                        | UnloadedReason::Disabled
-                        | UnloadedReason::Gravestone),
-                    )) => {
-                        log::debug!("marked {path}: {reason}");
-                    },
-                    Ok(..) => {
-                        log::debug!("marked {path}: loaded");
-                    },
-                    Err(Some(reason)) => {
-                        log::error!("failed to load {path}: {reason}");
-                    },
-                }
                 let Some(pack) = shared.lookup_mut(&path) else {
                     log::warn!("nonexistent pack update for {path}?");
                     continue
                 };
+                match &loaded {
+                    Err(Some(reason @ (
+                        UnloadedReason::UnknownFormat
+                        | UnloadedReason::LoadingFailed(..)
+                    ))) => {
+                        log::error!("failed to load {}: {reason}", pack.info);
+                    },
+                    Err(None) => {
+                        log::debug!("offloaded {}", pack.info);
+                    },
+                    #[cfg(taimi_debug)]
+                    Err(Some(reason)) => {
+                        log::debug!("marked {path}: {reason}");
+                    },
+                    #[cfg(taimi_debug)]
+                    Ok(..) => {
+                        log::debug!("marked {path}: loaded");
+                    },
+                    #[cfg(not(taimi_debug))]
+                    _ => (),
+                }
 
                 changed |= match loaded {
                     Ok(loaded) => pack.set_loaded(loaded),
@@ -433,7 +435,7 @@ impl SharedPackLoad {
         }
 
         self.loaded.send_if_modified(|shared| {
-            let dirty = shared.unloaded != reason;
+            let dirty = shared.pack.is_some() || shared.unloaded != reason;
             shared.unload(reason);
             dirty
         });
