@@ -25,7 +25,7 @@ use {
     },
     std::{collections::BTreeMap, iter, sync::Arc},
     taimi_hoard::{flags::BitSet, iters::tree::DfsPre, loc::LocationRef, str_opt, str_opt_ref},
-    taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, VisibilityFlags},
+    taimi_meta::packs::{collections::CategorySet, CategoryIndex, CategoryPath, MapIndex, VisibilityFlags},
     taimi_pack::{
         attributes::InteractionAttributes,
         category::{id::AsFullId, Category, CategoryFlags, CategoryId},
@@ -1362,7 +1362,19 @@ impl CategoryCollectionState {
             .then_some(pack.map_info.as_ref());
         if pack_damage.map.is_some() || self.filter_state.is_dirty_loaded(loaded_map_info) {
             match loaded_map_info {
-                Some(map_info) => self.filter_state.update_loaded(category_info, map_info),
+                Some(map_info) => {
+                    let map_info = match map_info {
+                        Some(map_info) => Ok(map_info),
+                        None if pack.pack.is_some() => Err(false),
+                        None => Err({
+                            let map_id = rt::mumble_link_ptr()
+                                .ok()
+                                .and_then(|ml| MapIndex::new(ml.read_map_id()));
+                            map_id.map(|map_id| pack.info.has_map(map_id)).unwrap_or(false)
+                        }),
+                    };
+                    self.filter_state.update_loaded(category_info, map_info)
+                },
                 _ => self.filter_state.clear_loaded(),
             }
             filter_dirty |= !self.filter_state.is_dirty_loaded(loaded_map_info);
