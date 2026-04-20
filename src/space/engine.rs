@@ -1519,13 +1519,13 @@ impl Engine {
                 &desc,
             );
 
-            backend.perspective_handler.update_map_cb(&device_context);
+            backend.perspective_handler.update_map_cb(device_context);
 
             state.setup_depth(device_context, &*backend, machine, desc);
             state.setup_blend(device_context, &*backend, machine, desc);
             backend
                 .perspective_handler
-                .set_map_cb(&device_context, Self::PERSPECTIVE_SLOT);
+                .set_map_cb(device_context, Self::PERSPECTIVE_SLOT);
 
             let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
             let entities = self.packs.render_list.iter_markers_map(
@@ -1535,8 +1535,8 @@ impl Engine {
             );
             PackRender::draw_map_entities(
                 &mut self.packs.draw_state,
-                &self.packs.poi_common,
-                &device_context,
+                &self.packs.resources,
+                device_context,
                 &backend,
                 map_ctx,
                 entities,
@@ -1850,15 +1850,10 @@ impl Engine {
                 .perspective_handler
                 .set_feather_scale(self.arcdata.feather_scale1, self.render_backend.display_size);
             self.setup_draw_space_legacy(machine, device_context, desc);
-            self.render_backend.perspective_handler.update_cb(&device_context);
+            self.render_backend.perspective_handler.update_cb(device_context);
         }
 
         match desc.pass.get_pass() {
-            #[cfg(feature = "goggles")]
-            pass if desc.pass_is_obscured() => {
-                self.packs
-                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-            },
             #[cfg(feature = "goggles2-project")]
             Drawing::REFLECT => {
                 /// TODO: frustums have planes so this is dumb
@@ -1897,8 +1892,19 @@ impl Engine {
                     cull => MapFrustum { bottom: y_axis_aligned_plane, ..*cull },
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
-                self.packs
-                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
+                let entities = self.packs.render_list.iter_markers_visible(
+                    self.packs.pack_data.map_ref_as_slice(),
+                    cull,
+                    cam,
+                );
+                PackRender::draw_markers(
+                    &mut self.packs.draw_state,
+                    &self.packs.resources,
+                    device_context,
+                    &self.render_backend,
+                    entities,
+                    arcrender,
+                );
             },
             #[cfg(feature = "goggles2-project")]
             Drawing::REFLECT_BELOW => {
@@ -1938,22 +1944,47 @@ impl Engine {
                     cull => MapFrustum { bottom: y_axis_aligned_plane, ..*cull },
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
-                self.packs
-                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-            },
-            #[cfg(feature = "goggles2-project")]
-            Drawing::OBSCURED | Drawing::OBSCURED_SHADOWED => {
-                self.packs
-                    .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-                #[cfg(todo)]
-                {
-                    self.drawing.tarnish_depth_ours(desc);
-                }
+                let entities = self.packs.render_list.iter_markers_visible(
+                    self.packs.pack_data.map_ref_as_slice(),
+                    cull,
+                    cam,
+                );
+                PackRender::draw_markers(
+                    &mut self.packs.draw_state,
+                    &self.packs.resources,
+                    device_context,
+                    &self.render_backend,
+                    entities,
+                    arcrender,
+                );
             },
             _ => {
-                self.packs
-                    .draw(cam, cull, &self.render_backend, &device_context, arcrender);
-                self.drawing.tarnish_depth_ours(desc);
+                let primary_draw = match desc.pass.get_pass() {
+                    #[cfg(all(todo, feature = "goggles2-project"))]
+                    _ if desc.goggles.is_project() => false,
+                    Drawing::SPACE => true,
+                    _ => false,
+                };
+                if primary_draw {
+                    self.packs.draw_state.primary_draw = true;
+                }
+                let entities = self.packs.render_list.iter_markers_visible(
+                    self.packs.pack_data.map_ref_as_slice(),
+                    cull,
+                    cam,
+                );
+                PackRender::draw_markers(
+                    &mut self.packs.draw_state,
+                    &self.packs.resources,
+                    device_context,
+                    &self.render_backend,
+                    entities,
+                    arcrender,
+                );
+                self.packs.draw_state.primary_draw = false;
+                if primary_draw {
+                    self.drawing.tarnish_depth_ours(desc);
+                }
             },
         }
         self.drawing.drawn.insert(desc.pass.to_drawn());
