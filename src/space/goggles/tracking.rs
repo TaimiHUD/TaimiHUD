@@ -480,7 +480,7 @@ impl GogglesState {
         if self.is_enabled(GogglesEnables::PROJECT_ENABLE) {
             self.project.act_pre_render_frame(context.is_some(), drawing);
         }
-        let is_ingame = drawing.is_drawing_context(LocalContext::World);
+        let is_ingame = drawing.drawing.has(LocalContext::World);
         g2!(*&mut ferret.is_ingame = is_ingame);
     }
     pub(crate) fn wants_d3d_context(&self, drawing: &FrameContext) -> bool {

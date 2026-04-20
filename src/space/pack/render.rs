@@ -16,9 +16,10 @@ use {
     std::collections::BinaryHeap,
     std::ffi::CStr,
     std::ops,
+    std::fmt::{self, Write},
     std::iter,
     taimi_hoard::cmp::CmpIgnore,
-    taimi_meta::{packs::TrailSectionPath, ui::LocalContext},
+    taimi_meta::{packs::TrailSectionPath, ui::{LocalContext, MapContext}},
 };
 
 /// BvhIter expected to produce distance sort keys, or `None`
@@ -386,5 +387,170 @@ impl ArcShaderVariant {
                 name: Some(CStrBox::new(k.to_owned())),
                 definition: Some(CStrBox::new(v.to_owned())),
             })
+    }
+}
+bitflags::bitflags! {
+    #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct Drawing: u32 {
+        const SPACE = 0x0001;
+        const MINIMAP = 0x0002;
+        const GLOBALMAP = 0x0004;
+
+        #[cfg(feature = "goggles")]
+        /// first pass at reduced opacity
+        const OBSCURED = 0x0010;
+        #[cfg(feature = "goggles2-project")]
+        const OBSCURED_SHADOWED = 0x0020;
+
+        #[cfg(feature = "goggles2-project")]
+        const REFLECT = 0x0100;
+        #[cfg(feature = "goggles2-project")]
+        const REFLECT_BELOW = 0x0200;
+        #[cfg(feature = "goggles2-project")]
+        const SHADOWBOX = 0x0400;
+
+        const FLAG_SPACE_POI = 0x1000_0000;
+        const FLAG_SPACE_TRAIL = 0x2000_0000;
+        const FLAG_MAP_POI = 0x4000_0000;
+        const FLAG_MAP_TRAIL = 0x8000_0000;
+    }
+}
+impl Drawing {
+    pub const FLAGS: Self = Self::from_bits_retain(
+        Self::FLAGS_SPACE.bits() | Self::FLAGS_MAP.bits()
+    );
+    pub const FLAGS_SPACE: Self = Self::from_bits_retain(
+        Self::FLAG_SPACE_POI.bits() | Self::FLAG_SPACE_TRAIL.bits()
+    );
+    pub const FLAGS_MAP: Self = Self::from_bits_retain(
+        Self::FLAG_MAP_POI.bits() | Self::FLAG_MAP_TRAIL.bits()
+    );
+    pub const PASSES: Self = Self::from_bits_truncate(0x00ff_ffff);
+    pub const PRIMARY: Self = Self::from_bits_retain(
+        Self::SPACE.bits()
+        | Self::MINIMAP.bits()
+        | Self::GLOBALMAP.bits()
+    );
+    #[cfg(feature = "goggles")]
+    pub const PASSES_OBSCURED: Self = Self::from_bits_retain({
+        let obscured_proj = match () {
+            #[cfg(feature = "goggles2-project")]
+            _ => Self::OBSCURED_SHADOWED,
+            #[cfg(not(feature = "goggles2-project"))]
+            _ => Self::empty(),
+        };
+        Self::OBSCURED.bits()
+        | obscured_proj.bits()
+    });
+    #[cfg(feature = "goggles2-project")]
+    pub const PASSES_PROJECT: Self = Self::from_bits_retain(
+        Self::PASSES_REFLECT.bits()
+        | Self::SHADOWBOX.bits()
+    );
+    #[cfg(feature = "goggles2-project")]
+    pub const PASSES_REFLECT: Self = Self::from_bits_retain(
+        Self::REFLECT.bits()
+        | Self::REFLECT_BELOW.bits()
+    );
+    #[cfg(feature = "goggles2-project")]
+    pub const PASSES_INCOMPAT_LEGACY: Self = Self::from_bits_retain(
+        Self::REFLECT_BELOW.bits()
+        | Self::OBSCURED_SHADOWED.bits()
+        | Self::SHADOWBOX.bits()
+    );
+
+    #[inline(always)]
+    pub const fn index(self) -> u8 {
+        self.bits().trailing_zeros() as u8
+    }
+    #[inline(always)]
+    pub const fn from_index(index: u8) -> Self {
+        Self::from_bits_retain(1u32 << index)
+    }
+    #[inline(always)]
+    pub const fn get_flags(self) -> Self {
+        Self::from_bits_retain(self.bits() & Self::FLAGS.bits())
+    }
+    #[inline(always)]
+    pub const fn get_pass(self) -> Self {
+        Self::from_bits_retain(self.bits() & Self::PASSES.bits())
+    }
+    pub const fn from_local_context(ctx: LocalContext) -> Self {
+        match ctx {
+            LocalContext::World => Self::SPACE,
+            LocalContext::MINIMAP => Self::MINIMAP,
+            LocalContext::GLOBAL => Self::GLOBALMAP,
+        }
+    }
+    #[inline(always)]
+    pub fn from_context(ctx: impl Into<LocalContext>) -> Self {
+        Self::from_local_context(ctx.into())
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::empty();
+    }
+    pub fn set_pass(&mut self, pass: Self) {
+        self.remove(Self::PASSES);
+        self.insert(pass);
+    }
+
+    pub fn iter_passes(self) -> impl Iterator<Item = Self> {
+        self.get_pass().into_iter()
+    }
+
+    #[inline(always)]
+    pub fn has(&self, ctx: impl Into<Self>) -> bool {
+        self.contains(ctx.into())
+    }
+    #[inline(always)]
+    pub fn mark(&mut self, ctx: impl Into<Self>) {
+        self.insert(ctx.into())
+    }
+    pub fn to_drawn(self) -> Self {
+        match self.get_pass() {
+            Self::SPACE => self & (Self::PASSES | Self::FLAGS_SPACE),
+            Self::MINIMAP | Self::GLOBALMAP => self & (Self::PASSES | Self::FLAGS_MAP),
+            pass => pass,
+        }
+    }
+
+    pub fn pass_name(self) -> Option<&'static str> {
+        Some(match self.get_pass() {
+            Self::SPACE => "space",
+            Self::MINIMAP => "minimap",
+            Self::GLOBALMAP => "map",
+            #[cfg(feature = "goggles")]
+            Self::OBSCURED => "obscured",
+            #[cfg(feature = "goggles2-project")]
+            Self::OBSCURED_SHADOWED => "obscured(shadowed)",
+            #[cfg(feature = "goggles2-project")]
+            Self::REFLECT => "reflect",
+            #[cfg(feature = "goggles2-project")]
+            Self::REFLECT_BELOW => "reflect(below)",
+            #[cfg(feature = "goggles2-project")]
+            Self::SHADOWBOX => "shadowbox",
+            _ => return None,
+        })
+    }
+}
+impl From<LocalContext> for Drawing {
+    #[inline]
+    fn from(ctx: LocalContext) -> Self {
+        Self::from_local_context(ctx)
+    }
+}
+impl From<MapContext> for Drawing {
+    #[inline]
+    fn from(ctx: MapContext) -> Self {
+        Self::from_context(ctx)
+    }
+}
+impl fmt::Display for Drawing {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.pass_name() {
+            Some(name) => f.write_str(name),
+            None => write!(f, "pass{:#x}", self.bits()),
+        }
     }
 }

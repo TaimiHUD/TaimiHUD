@@ -21,7 +21,7 @@ use {
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
-            pack::{self, ArcrenderSettings, PackRender, PackRenderList},
+            pack::{self, render::Drawing, ArcrenderSettings, PackRender, PackRenderList},
             DrawSpace,
         },
         timer::{PhaseState, TimerDirection, TimerFile, TimerMarker},
@@ -864,11 +864,11 @@ impl Engine {
         };
 
         self.drawing.prepare_present(machine);
-        frame_log!("engine; frame/render vis={:x} enabled={:x} drawing={:x} drawn={:x}",
-            self.drawing.visible.flags,
-            self.drawing.enabled.flags,
-            self.drawing.drawing.flags,
-            self.drawing.drawn.flags,
+        frame_log!("engine; frame/render vis={:?} enabled={:?} drawing={:?} drawn={:?}",
+            self.drawing.visible,
+            self.drawing.enabled,
+            self.drawing.drawing,
+            self.drawing.drawn,
         );
         if self.drawing.is_drawing() {
             self.draw0(machine, &*device_context);
@@ -883,7 +883,7 @@ impl Engine {
         ctx: LocalContext,
     ) -> bool {
         if !self.drawing.prepared { return false }
-        match (ctx, self.drawing.has_drawn_context(ctx)) {
+        match (ctx, self.drawing.drawn.has(ctx)) {
             #[cfg(todo)]
             (LocalContext::World, true) if desc.shadowboxing => (),
             (LocalContext::MAP, true) => return false,
@@ -901,13 +901,13 @@ impl Engine {
         ctx: LocalContext,
     ) {
         #[cfg(todo)]
-        if self.drawing.has_drawn_context(ctx) {
+        if self.drawing.drawn.has(ctx) {
             // TODO: repeats aren't necessarily bad as long as fallback behaviour is well defined...
             // but maybe not needed if we can confirm success after a draw?
             return
         }
 
-        match self.drawing.is_drawing_context(ctx) {
+        match self.drawing.drawing.has(ctx) {
             false => return,
             true => (),
         }
@@ -1131,14 +1131,15 @@ impl Engine {
                 }
 
                 state.set_minimap_scissor(device_context, &self.render_backend, None);
-                if desc.pass == DrawDescSpace::PASS_REFLECTING {
-                    desc.pass = DrawDescSpace::PASS_REFLECTING_BELOW;
+                if desc.pass.get_pass() == Drawing::REFLECT {
+                    let prev = desc.pass;
+                    desc.pass.set_pass(Drawing::REFLECT_BELOW);
                     // TODO: reading depth here from shadowbox (and maybe world?) would interact with terrain properly,
                     // but this is usually just to see a little bit below the water's surface anyway so...
                     let prev_write = mem::replace(&mut desc.depth_write, false);
                     let prev_read = mem::replace(&mut desc.depth_read, false);
                     self.draw_space(machine, device_context, &desc, &mut state, camera, depth.clone(), &cull);
-                    desc.pass = DrawDescSpace::PASS_REFLECTING;
+                    desc.pass = prev;
                     desc.depth_write = prev_write;
                     desc.depth_read = prev_read;
                 }
@@ -1238,7 +1239,7 @@ impl Engine {
         map_ctx: MapContext,
     ) -> Option<Box3<DrawSpace>> {
         if desc.is_nop() { return None }
-        if !self.drawing.is_drawing_context(map_ctx) { return None }
+        if !self.drawing.drawing.has(map_ctx) { return None }
         Some(self.get_map_bounds(machine, map_ctx))
     }
     fn get_map_bounds(
@@ -1254,7 +1255,7 @@ impl Engine {
         desc: &DrawDescSpace,
     ) -> Option<(RenderPosition, ops::Range<f32>, MapFrustum)> {
         if desc.is_nop() { return None }
-        if !self.drawing.is_drawing_context(LocalContext::World) { return None }
+        if !self.drawing.drawing.has(LocalContext::World) { return None }
         Some(self.get_space_bounds(machine, desc))
     }
     fn get_space_bounds(
@@ -1474,7 +1475,7 @@ impl Engine {
                 entities,
             );
         }
-        self.drawing.set_drawn(map_ctx, true);
+        self.drawing.drawn.mark(map_ctx);
         self.drawing.tarnish_depth_ours(desc);
     }
     pub fn draw_space(
@@ -1531,9 +1532,9 @@ impl Engine {
                 } else {
                     state.setup_depth(device_context, &self.render_backend, machine, desc);
                 }
-                let obscured_alpha = match (desc.pass, goggles_2pass) {
+                let obscured_alpha = match (desc.pass.get_pass(), goggles_2pass) {
                     #[cfg(feature = "goggles2-project")]
-                    (DrawDescSpace::PASS_OBSCURED_SHADOWED, Some((obscured_alpha, _))) => match obscured_alpha * 7.0 {
+                    (Drawing::OBSCURED_SHADOWED, Some((obscured_alpha, _))) => match obscured_alpha * 7.0 {
                         #[cfg(todo)]
                         a if a <= 1.0 => a,
                         #[cfg(todo)]
@@ -1559,7 +1560,7 @@ impl Engine {
 
         #[cfg(feature = "goggles")]
         let (cull_alt, cam_alt);
-        let (cam, cull) = match desc.pass {
+        let (cam, cull) = match desc.pass.get_pass() {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
                 let cull = match goggles_2pass {
@@ -1577,7 +1578,7 @@ impl Engine {
                 (&camera, cull)
             },
             #[cfg(feature = "goggles2-project")]
-            DrawDescSpace::PASS_REFLECTING => {
+            Drawing::REFLECT => {
                 let (pos, dir, _up) = camera;
                 let angle = camera.1.y.asin();
                 let angle_edge = angle - machine.get_fov().y.copysign(pos.y) * 0.5;
@@ -1588,10 +1589,7 @@ impl Engine {
                 if ang_edge >= 0.0f32 {
                     frame_log!("reflection surface invisible");
                     // TODO: move this to prepare check and disable earlier!
-                    #[cfg(todo)]
-                    unsafe {
-                        self.drawing.drawn.set_unchecked(pass as usize, true);
-                    }
+                    self.drawing.drawn.insert(desc.pass.to_drawn());
                     return
                 }
                 let magnitude = match () {
@@ -1640,7 +1638,7 @@ impl Engine {
                 (&cam_alt, &cull_alt)
             },
             #[cfg(feature = "goggles2-project")]
-            DrawDescSpace::PASS_REFLECTING_BELOW => {
+            Drawing::REFLECT_BELOW => {
                 let (pos, _dir, _up) = camera;
                 if pos.y < 0.0 { return }
                 self.packs.shared_v.trail.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
@@ -1652,7 +1650,7 @@ impl Engine {
                 (&camera, &cull_alt)
             },
             #[cfg(feature = "goggles2")]
-            DrawDescSpace::PASS_SHADOWBOXING => {
+            Drawing::SHADOWBOX => {
                 self.packs.shared_v.trail.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
                 self.packs.shared_v.poi.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
                 (&camera, cull)
@@ -1660,11 +1658,11 @@ impl Engine {
             _ => (&camera, cull),
         };
 
-        let arcrender = arcrender.then(|| match desc.pass {
+        let arcrender = arcrender.then(|| match desc.pass.get_pass() {
             #[cfg(feature = "goggles2")]
-            DrawDescSpace::PASS_REFLECTING | DrawDescSpace::PASS_REFLECTING_BELOW => pack::render::ArcShaderVariant::Reflection,
+            Drawing::REFLECT | Drawing::REFLECT_BELOW => pack::render::ArcShaderVariant::Reflection,
             #[cfg(feature = "goggles2")]
-            DrawDescSpace::PASS_SHADOWBOXING => pack::render::ArcShaderVariant::Shadowboxing,
+            Drawing::SHADOWBOX => pack::render::ArcShaderVariant::Shadowboxing,
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => pack::render::ArcShaderVariant::Obscured,
             _ => pack::render::ArcShaderVariant::Vanilla,
@@ -1686,11 +1684,11 @@ impl Engine {
                 self.packs.resources.anim_timestamp,
             );
             #[cfg(feature = "goggles2-project")]
-            match desc.pass {
-                DrawDescSpace::PASS_REFLECTING | DrawDescSpace::PASS_REFLECTING_BELOW => {
+            match desc.pass.get_pass() {
+                pass @ (Drawing::REFLECT | Drawing::REFLECT_BELOW) => {
                     // XXX: beware, this + camera_dir are used for culling as well as misc distance calc!
                     self.packs.shared_v.render.camera_pos = camera.0.to_vector().cast();
-                    if desc.pass == DrawDescSpace::PASS_REFLECTING {
+                    if pass == Drawing::REFLECT {
                         self.packs.shared_v.poi.billboard = match camera {
                             #[cfg(todo)]
                             cam_orig => {
@@ -1717,12 +1715,9 @@ impl Engine {
             );
         } else {
             #[cfg(feature = "goggles2-project")]
-            match desc.pass {
-                DrawDescSpace::PASS_REFLECTING_BELOW | DrawDescSpace::PASS_OBSCURED_SHADOWED | DrawDescSpace::PASS_SHADOWBOXING => {
-                    frame_log!("pass#{} not supported by legacy renderer", desc.pass);
-                    return
-                },
-                _ => (),
+            if desc.pass.intersects(Drawing::PASSES_INCOMPAT_LEGACY) {
+                frame_log!("{} not supported by legacy renderer", desc.pass);
+                return
             }
             self.render_backend.perspective_handler.set_alpha(legacy_alpha);
             let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
@@ -1743,25 +1738,14 @@ impl Engine {
             self.render_backend.perspective_handler.update_cb(&device_context);
         }
 
-        match desc.pass {
+        match desc.pass.get_pass() {
             #[cfg(feature = "goggles")]
             pass if desc.pass_is_obscured() => {
                 self.packs
                     .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-                #[cfg(deleteme)]
-                unsafe {
-                    self.drawing.drawn.set_unchecked(FrameContext::DRAW_INDEX_OBSCURED as usize, true);
-                }
-                let pass = match pass {
-                    DrawDescSpace::PASS_OBSCURED_SHADOWED => DrawDescSpace::PASS_OBSCURED,
-                    p => p,
-                };
-                unsafe {
-                    self.drawing.drawn.set_unchecked(pass as usize, true);
-                }
             },
             #[cfg(feature = "goggles2-project")]
-            pass @ DrawDescSpace::PASS_REFLECTING => {
+            Drawing::REFLECT => {
                 /// TODO: frustums have planes so this is dumb
                 #[repr(transparent)]
                 struct PlaneCull(MapFrustum);
@@ -1803,12 +1787,9 @@ impl Engine {
                 };
                 self.packs
                     .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-                unsafe {
-                    self.drawing.drawn.set_unchecked(pass as usize, true);
-                }
             },
             #[cfg(feature = "goggles2-project")]
-            pass @ DrawDescSpace::PASS_REFLECTING_BELOW => {
+            Drawing::REFLECT_BELOW => {
                 /// TODO: frustums have planes so this is dumb
                 #[repr(transparent)]
                 struct PlaneCull(MapFrustum);
@@ -1850,17 +1831,11 @@ impl Engine {
                 };
                 self.packs
                     .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-                unsafe {
-                    self.drawing.drawn.set_unchecked(pass as usize, true);
-                }
             },
             #[cfg(feature = "goggles2-project")]
-            pass if pass != DrawDescSpace::PASS_SPACE => {
+            Drawing::OBSCURED | Drawing::OBSCURED_SHADOWED => {
                 self.packs
                     .draw_obscured(cam, cull, &self.render_backend, &device_context, arcrender);
-                unsafe {
-                    self.drawing.drawn.set_unchecked(pass as usize, true);
-                }
                 #[cfg(todo)]
                 {
                     self.drawing.tarnish_depth_ours(desc);
@@ -1869,10 +1844,10 @@ impl Engine {
             _ => {
                 self.packs
                     .draw(cam, cull, &self.render_backend, &device_context, arcrender);
-                self.drawing.set_drawn(LocalContext::World, true);
                 self.drawing.tarnish_depth_ours(desc);
             },
         }
+        self.drawing.drawn.insert(desc.pass.to_drawn());
     }
     /// overlap threshold to display paths just barely under the water's surface
     const UNDERWATER_VISIBILITY: f32 = match () {
@@ -2064,7 +2039,7 @@ impl Engine {
         let mut state = DrawStateSpace::default();
         let mut desc = DrawDescSpace::empty();
 
-        let is_rendering_world = self.drawing.is_drawing_context(LocalContext::World);
+        let is_rendering_world = self.drawing.drawing.has(LocalContext::World);
 
         let minimap_bounds =
             self.minimap_bounds_screen(machine);
@@ -2097,7 +2072,7 @@ impl Engine {
         }
 
         let desc_map = desc.to_map();
-        let minimap_bounds = (!self.drawing.has_drawn_context(MapContext::Minimap))
+        let minimap_bounds = (!self.drawing.drawn.has(MapContext::Minimap))
             .then(|| self.map_bounds(machine, &desc_map, MapContext::Minimap))
             .flatten();
         if let Some(bounds) = minimap_bounds {
@@ -2143,13 +2118,13 @@ impl Engine {
             self.world.query::<(Entity, &Render, &Position)>().is_empty(&self.world, tick_prev, tick)
         };
         #[cfg(feature = "goggles")]
-        let is_rendering_obscured = is_rendering_world && self.drawing.drawing.get_at(FrameContext::DRAW_INDEX_OBSCURED).unwrap_or(false);
+        let is_rendering_obscured = is_rendering_world && self.drawing.drawing.has(Drawing::OBSCURED);
         #[cfg(feature = "goggles")]
-        let has_drawn_obscured = !is_rendering_obscured || self.drawing.drawn.get_at(FrameContext::DRAW_INDEX_OBSCURED).unwrap_or(true);
+        let has_drawn_obscured = !is_rendering_obscured || self.drawing.drawn.has(Drawing::OBSCURED);
         let is_rendering_world = match is_rendering_world {
             #[cfg(feature = "space-ecs")]
             true if !ecs_empty => true,
-            true => !self.drawing.has_drawn_context(LocalContext::World),
+            true => !self.drawing.drawn.has(LocalContext::World),
             v => v,
         };
         let render_world = match is_rendering_world {
@@ -2184,7 +2159,7 @@ impl Engine {
         if let Some((camera, depth, ref cull)) = render_world {
             let drawing_world = match () {
                 #[cfg(feature = "space-ecs")]
-                _ => !self.drawing.has_drawn_context(LocalContext::World),
+                _ => !self.drawing.drawn.has(LocalContext::World),
                 #[cfg(not(feature = "space-ecs"))]
                 _ => true,
             };
@@ -2193,7 +2168,7 @@ impl Engine {
             if !has_drawn_obscured && desc.goggles.target_depthview.is_some() && desc.goggles.buffer_compat && desc.depth_read {
                 let obscured_desc = DrawDescSpace {
                     depth_write: false,
-                    pass: DrawDescSpace::PASS_OBSCURED,
+                    pass: Drawing::OBSCURED,
                     ..desc
                 };
                 state.setup_target(device_context, &self.render_backend, &obscured_desc);
@@ -2210,7 +2185,7 @@ impl Engine {
             }
         }
 
-        let map_bounds = (!self.drawing.has_drawn_context(MapContext::Global))
+        let map_bounds = (!self.drawing.drawn.has(MapContext::Global))
             .then(|| self.map_bounds(machine, &desc_map, MapContext::Global))
             .flatten();
         if let Some(bounds) = map_bounds {
@@ -2605,7 +2580,7 @@ pub struct DrawDescSpace {
     /// draw solid pixels in a first pass, then blend the rest in after
     #[cfg(todo)]
     pub opaque_pass: bool,
-    pub pass: u32,
+    pub pass: Drawing,
     /// whether to write back to depth buffer or not
     pub depth_write: bool,
     pub depth_read: bool,
@@ -2690,23 +2665,9 @@ impl DrawDescSpace {
 
     #[inline]
     pub fn pass_is_obscured(&self) -> bool {
-        matches!(self.pass, Self::PASS_OBSCURED | Self::PASS_OBSCURED_SHADOWED)
+        self.pass.get_pass().intersects(Drawing::OBSCURED | Drawing::OBSCURED_SHADOWED)
     }
-    pub const PASS_DEFAULT: u32 = Self::PASS_SPACE;
-    pub const PASS_SPACE: u32 = LocalContext::REPR_WORLD as _;
-    pub const PASS_MAP: u32 = MapContext::REPR_GLOBAL as _;
-    pub const PASS_MINIMAP: u32 = MapContext::REPR_MINIMAP as _;
-    /// first pass at reduced opacity
-    #[cfg(feature = "goggles")]
-    pub const PASS_OBSCURED: u32 = LocalContext::REPR_END as _;
-    #[cfg(feature = "goggles")]
-    pub const PASS_OBSCURED_SHADOWED: u32 = Self::PASS_OBSCURED + 1;
-    #[cfg(feature = "goggles2-project")]
-    pub const PASS_SHADOWBOXING: u32 = Self::PASS_OBSCURED_SHADOWED + 1;
-    #[cfg(feature = "goggles2-project")]
-    pub const PASS_REFLECTING: u32 = Self::PASS_SHADOWBOXING + 1;
-    #[cfg(feature = "goggles2-project")]
-    pub const PASS_REFLECTING_BELOW: u32 = Self::PASS_REFLECTING + 1;
+    pub const PASS_DEFAULT: Drawing = Drawing::SPACE;
 }
 impl Default for DrawDescSpace {
     fn default() -> Self { Self::empty() }
@@ -2847,10 +2808,10 @@ pub struct FrameContext {
     pub frame_count: u32,
     pub frame_index: u32,
     pub prepared: bool,
-    pub visible: DrawContexts,
-    pub enabled: DrawContexts,
-    pub drawing: DrawContexts,
-    pub drawn: DrawContexts,
+    pub visible: Drawing,
+    pub enabled: Drawing,
+    pub drawing: Drawing,
+    pub drawn: Drawing,
     /// map entry timestamp
     pub scene_start: Option<Instant>,
     /// anim reference timestamp
@@ -2865,10 +2826,10 @@ impl FrameContext {
             frame_count: 0,
             frame_index: 0,
             prepared: false,
-            visible: BitSet::new_array([0; 1]),
-            enabled: BitSet::new_array([0; 1]),
-            drawing: BitSet::new_array([0; 1]),
-            drawn: BitSet::new_array([0; 1]),
+            visible: Default::default(),
+            enabled: Default::default(),
+            drawing: Default::default(),
+            drawn: Default::default(),
             map_anim: MapOpen::Closed,
             scene_start: None,
             frame_start: None,
@@ -2881,7 +2842,7 @@ impl FrameContext {
     }
     /// whatever was there is long gone now
     fn discard_frame(&mut self) {
-        self.drawn.fill(false);
+        self.drawn.clear();
     }
     pub fn end_frame(&mut self) {
         self.frame_index = self.frame_count;
@@ -2929,18 +2890,17 @@ impl FrameContext {
         self.prepare_visible(machine);
     }
     pub fn prepare_present(&mut self, machine: &mut RenderMachine) {
-        if self.is_drawing_context(LocalContext::MINIMAP) && machine.is_ui_hidden() {
-            self.set_drawn(LocalContext::MINIMAP, true);
+        if self.drawing.has(LocalContext::MINIMAP) && machine.is_ui_hidden() {
+            self.drawn.insert(Drawing::MINIMAP);
         }
     }
     fn prepare_visible(&mut self, machine: &mut RenderMachine) {
-        self.visible.fill(false);
+        self.visible.clear();
         if let Some(..) = machine.gameplay.gameplay_map() {
             self.map_anim = machine.map_open();
             let vis_space = !matches!(self.map_anim, MapOpen::Open);
-            self.set_visible(LocalContext::World, vis_space);
-            self.set_visible(LocalContext::MINIMAP, vis_space);
-            self.set_visible(LocalContext::GLOBAL, self.map_anim.is_visible());
+            self.visible.set(Drawing::SPACE | Drawing::MINIMAP, vis_space);
+            self.visible.set(Drawing::GLOBALMAP, self.map_anim.is_visible());
         } else {
             #[cfg(feature = "goggles2-camera")]
             {
@@ -2949,7 +2909,7 @@ impl FrameContext {
                 let cutscene_enable = cutscene_enable | GogglesEnables::CAMERA_ENABLE;
                 let can_render_cutscene = machine.goggles.is_enabled(cutscene_enable);
                 if can_render_cutscene && machine.is_cutscene() {
-                    self.set_visible(LocalContext::World, true);
+                    self.visible.insert(Drawing::SPACE);
                 }
             }
             self.map_anim = MapOpen::Closed;
@@ -2957,11 +2917,11 @@ impl FrameContext {
         self.prepare_drawing();
         #[cfg(feature = "goggles")]
         if !machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) {
-            unsafe { self.drawing.set_unchecked(Self::DRAW_INDEX_OBSCURED as usize, false) }
+            self.drawing.remove(Drawing::PASSES_OBSCURED);
         }
     }
     fn prepare_enabled(&mut self, settings: &PathingSettings) {
-        self.enabled.fill(false);
+        self.enabled.clear();
         let space = &settings.space;
         for ctx in FrameContext::draw_contexts() {
             let vis = match ctx {
@@ -2975,13 +2935,26 @@ impl FrameContext {
                 ),
             };
             // TODO: consider thresholds around map open anim overlap edges?
-            self.set_enabled(ctx, vis);
+            self.enabled.set(Drawing::from_context(ctx), vis);
         }
         #[cfg(feature = "goggles")]
-        if self.is_enabled_context(LocalContext::World) {
+        if self.enabled.contains(Drawing::SPACE) {
+            let enables = space.goggles.enables();
             let obscured_enabled = space.goggles.obscured_alpha() > 0.0;
-            if obscured_enabled {
-                unsafe { self.enabled.set_unchecked(Self::DRAW_INDEX_OBSCURED as usize, true) }
+            if enables.contains(GogglesEnables::LENS_ENABLE) && obscured_enabled {
+                self.enabled.insert(Drawing::OBSCURED);
+            }
+            #[cfg(feature = "goggles2-project")]
+            if self.enabled.contains(Drawing::OBSCURED) && enables.contains(GogglesEnables::PROJECT_ENABLE) {
+                self.enabled.insert(Drawing::OBSCURED_SHADOWED);
+            }
+            #[cfg(feature = "goggles2-project")]
+            if enables.contains(GogglesEnables::PROJECT_ENABLE | GogglesEnables::PROJECT_SHADOWBOXING) {
+                self.enabled.insert(Drawing::SHADOWBOX);
+            }
+            #[cfg(feature = "goggles2-project")]
+            if enables.contains(GogglesEnables::PROJECT_ENABLE | GogglesEnables::PROJECT_REFLECTIONS) {
+                self.enabled.insert(Drawing::PASSES_REFLECT);
             }
         }
         self.prepare_drawing();
@@ -2989,10 +2962,14 @@ impl FrameContext {
     fn prepare_drawing(&mut self) {
         let mut visible = self.visible;
         #[cfg(feature = "goggles")]
-        if self.is_visible_context(LocalContext::World) {
-            unsafe { visible.set_unchecked(Self::DRAW_INDEX_OBSCURED as usize, true) }
+        if self.visible.contains(Drawing::SPACE) {
+            visible.insert(Drawing::PASSES_OBSCURED);
+            #[cfg(feature = "goggles2-project")]
+            {
+                visible.insert(Drawing::PASSES_PROJECT);
+            }
         }
-        visible.flags &= self.enabled.flags;
+        visible &= self.enabled;
         self.drawing = visible;
     }
     fn alpha_visible(alpha: f32) -> bool {
@@ -3012,9 +2989,8 @@ impl FrameContext {
     }
 }
 impl FrameContext {
-    pub const DRAW_INDEX_OBSCURED: u8 = DrawDescSpace::PASS_OBSCURED as _;
-
     #[inline]
+    #[cfg(deleteme)]
     pub fn drawing_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
         unsafe {
@@ -3022,6 +2998,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn drawing_map_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = MapContext::REPR_MIN as usize..MapContext::REPR_END as usize;
         unsafe {
@@ -3029,6 +3006,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn drawn_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
         unsafe {
@@ -3036,6 +3014,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn visible_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
         unsafe {
@@ -3043,6 +3022,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn visible_map_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = MapContext::REPR_MIN as usize..MapContext::REPR_END as usize;
         unsafe {
@@ -3050,6 +3030,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn enabled_bits(&self) -> &BitSlice<u16, BitsNative> {
         let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
         unsafe {
@@ -3057,6 +3038,7 @@ impl FrameContext {
         }
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn iter_drawing(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
         let bits = self.drawing_bits();
         bits.iter_ones()
@@ -3065,6 +3047,7 @@ impl FrameContext {
             })
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn iter_drawing_map(&self) -> impl ExactSizeIterator<Item = MapContext> + '_ {
         let bits = self.drawing_map_bits();
         bits.iter_ones()
@@ -3073,6 +3056,7 @@ impl FrameContext {
             })
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn iter_drawn(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
         let bits = self.drawn_bits();
         bits.iter_ones()
@@ -3081,6 +3065,7 @@ impl FrameContext {
             })
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn iter_visible(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
         let bits = self.visible_bits();
         bits.iter_ones()
@@ -3089,6 +3074,7 @@ impl FrameContext {
             })
     }
     #[inline]
+    #[cfg(deleteme)]
     pub fn iter_visible_map(&self) -> impl ExactSizeIterator<Item = MapContext> + '_ {
         let bits = self.visible_map_bits();
         bits.iter_ones()
@@ -3096,57 +3082,30 @@ impl FrameContext {
                 MapContext::from_repr_unchecked(MapContext::REPR_MIN + i as u8)
             })
     }
+    #[inline]
     pub fn is_drawing(&self) -> bool {
-        self.drawing.any()
+        !self.drawing.is_empty()
     }
+    #[cfg(deleteme)]
     pub fn is_drawing_map(&self) -> bool {
         self.drawing_map_bits().any()
     }
     #[cfg(todo)]
+    #[cfg(deleteme)]
     pub fn is_visible(&self) -> bool {
         self.visible_bits().any()
     }
     pub fn is_enabled(&self) -> bool {
-        self.enabled.any()
+        !self.enabled.is_empty()
     }
+    #[cfg(deleteme)]
     pub fn is_map_visible(&self) -> bool {
         self.visible_map_bits().any()
     }
     #[cfg(todo)]
+    #[cfg(deleteme)]
     pub fn has_drawn(&self) -> bool {
         self.drawn_bits().any()
-    }
-    #[inline]
-    pub fn is_drawing_context(&self, ctx: impl Into<LocalContext>) -> bool {
-        unsafe { *self.drawing.get_unchecked(ctx.into().repr() as usize) }
-    }
-    #[inline]
-    pub fn has_drawn_context(&self, ctx: impl Into<LocalContext>) -> bool {
-        unsafe { *self.drawn.get_unchecked(ctx.into().repr() as usize) }
-    }
-    #[inline]
-    pub fn is_visible_context(&self, ctx: impl Into<LocalContext>) -> bool {
-        unsafe { *self.visible.get_unchecked(ctx.into().repr() as usize) }
-    }
-    #[inline]
-    pub fn is_enabled_context(&self, ctx: impl Into<LocalContext>) -> bool {
-        unsafe { *self.enabled.get_unchecked(ctx.into().repr() as usize) }
-    }
-    #[inline]
-    pub fn set_drawing(&mut self, ctx: impl Into<LocalContext>, v: bool) {
-        unsafe { self.drawing.set_unchecked(ctx.into().repr() as usize, v) }
-    }
-    #[inline]
-    pub fn set_drawn(&mut self, ctx: impl Into<LocalContext>, v: bool) {
-        unsafe { self.drawn.set_unchecked(ctx.into().repr() as usize, v) }
-    }
-    #[inline]
-    pub fn set_visible(&mut self, ctx: impl Into<LocalContext>, v: bool) {
-        unsafe { self.visible.set_unchecked(ctx.into().repr() as usize, v) }
-    }
-    #[inline]
-    pub fn set_enabled(&mut self, ctx: impl Into<LocalContext>, v: bool) {
-        unsafe { self.enabled.set_unchecked(ctx.into().repr() as usize, v) }
     }
 
     #[inline]

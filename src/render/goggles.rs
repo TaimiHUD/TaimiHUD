@@ -187,7 +187,6 @@ impl GogglesConfig {
 
         #[cfg(feature = "goggles2-project")]
         {
-            use taimi_meta::ui::LocalContext;
             let mut prefix = "drawfail";
             for ctx in machine.goggles.project.undrawn() {
                 if !prefix.is_empty() {
@@ -195,17 +194,7 @@ impl GogglesConfig {
                 }
                 prefix = "";
                 ui.same_line();
-                let actname;
-                let msg = match ctx {
-                    Ok(LocalContext::World) => "space",
-                    Ok(LocalContext::MINIMAP) => "mini",
-                    Ok(LocalContext::GLOBAL) => "worldmap",
-                    Err(act) => {
-                        actname = format!("{act:?}");
-                        &actname[..]
-                    },
-                };
-                ui.text(msg);
+                ui.text(ctx.to_string());
             }
         }
     }
