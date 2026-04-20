@@ -124,7 +124,8 @@ pub struct PoiInstanceData {
     pub anim_offset: f32,
     /// TODO: Vec2?
     pub map_scale: f32,
-    pub _padding0: Vector2<f32>,
+    pub billboard_scale: f32,
+    pub _padding0: f32,
 }
 impl PoiInstanceData {
     const SIZE: usize = MarkerInstanceData::SIZE + mem::size_of::<f32>() * (2 + 4 * 4 + 2 + 2);
@@ -136,7 +137,8 @@ impl PoiInstanceData {
             bounce: 0,
             anim_offset: 0.0,
             map_scale: 0.0,
-            _padding0: Vector2::ZERO,
+            billboard_scale: 0.0,
+            _padding0: 0.0,
         };
         match mem::size_of::<Self>() {
             PoiInstanceData::SIZE => invalid,
@@ -551,7 +553,7 @@ pub const INPUT_LAYOUT_TRAIL_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 7] = [
     #[cfg(todo = "unused")]
     InputLayout::for_instance(1, c"TPADDING", 0, dxgi::DXGI_FORMAT_R32G32_FLOAT, Some(offset_of!(TrailInstanceData, x))),
 ];
-pub const INPUT_LAYOUT_POI_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 15] = [
+pub const INPUT_LAYOUT_POI_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 16] = [
     TrailVertex::INPUT_LAYOUT[0], // POSITION0
     // TODO: remove! offset will deal with it
     TrailVertex::INPUT_LAYOUT[1], // NORMAL0
@@ -570,6 +572,7 @@ pub const INPUT_LAYOUT_POI_INSTANCE: [D3D11_INPUT_ELEMENT_DESC; 15] = [
     InputLayout::for_instance(1, c"PMODEL", 3, dxgi::DXGI_FORMAT_R32G32B32A32_FLOAT, None),
     InputLayout::for_instance(1, c"PDISP", 0, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(PoiInstanceData, anim_offset))),
     InputLayout::for_instance(1, c"PDISP", 1, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(PoiInstanceData, map_scale))),
+    InputLayout::for_instance(1, c"PDISP", 2, dxgi::DXGI_FORMAT_R32_FLOAT, Some(offset_of!(PoiInstanceData, billboard_scale))),
     #[cfg(todo = "unused")]
     InputLayout::for_instance(1, c"PPADDING", 0, dxgi::DXGI_FORMAT_R32G32_FLOAT, Some(offset_of!(PoiInstanceData, x))),
 ];

@@ -201,7 +201,7 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: cross with camera plane instead of this
     float cam_dist = distance(midpoint, v_render.camera_pos);
     // TODO: just like, use vfov angle to calculate projected height???
-    float4 sz4 = mul(v_render.projection, float4(1.0, 1.0, cam_dist, 1.0));
+    float4 sz4 = mul(v_render.projection, float4(input.billboard_scale, input.billboard_scale, cam_dist, 1.0));
     float2 sz = sz4.xy / sz4.w;
 #endif
     //float size_screen_screen = RECIP(sqrt(dot(sz, sz)));

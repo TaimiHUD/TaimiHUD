@@ -93,6 +93,7 @@ struct PoiInput {
     column_major float4x4 model: PMODEL;
     float anim_offset: PDISP0;
     float map_scale: PDISP1;
+    float billboard_scale: PDISP2;
     //float2 _padding;
 };
 #define BOUNCE_HEIGHT_RESOLUTION 16.0f
