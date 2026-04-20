@@ -140,7 +140,6 @@ impl PackRenderData {
 
 pub struct PackRender {
     pub pack_data: PackVecOf<PackRenderData>,
-    pub poi_common: PoiCommonRenderData,
 
     pub spacepacks: Watched<Arc<SpacePackCollection>>,
     pub trail_rx: TrailGeometryRequests,
@@ -167,15 +166,19 @@ impl PackRender {
             pack_data: Default::default(),
             render_list: Default::default(),
             draw_state: Default::default(),
-            resources: Default::default(),
             shared_v: Default::default(),
             shared_p: Default::default(),
-            poi_common,
+            resources: PackRenderResources {
+                poi_common: Some(poi_common),
+                .. PackRenderResources::default()
+            },
         })
     }
 
     fn mark_buffers_dirty(&mut self) {
-        self.poi_common.clear();
+        if let Some(poi_common) = &mut self.resources.poi_common {
+            poi_common.clear();
+        }
         for pack in self.pack_data.values_mut() {
             pack.render_poi_bookmark = 0;
         }
@@ -233,7 +236,7 @@ impl PackRender {
             }
         }
         let arcrender = || settings.map(|s| s.goggles.arcrender_enabled()).unwrap_or(false);
-        let mut ibs_dirty = self.poi_common.is_empty();
+        let mut ibs_dirty = self.resources.poi_common.as_ref().map(|c| c.is_empty()).unwrap_or(false);
         let map_id = match self.render_list.spacepacks.map_id {
             map_id if map_id != machine.is_ingame() => None,
             map_id => map_id,
@@ -383,8 +386,10 @@ impl PackRender {
                     }
                 }
                 if !ibs_dirty {
-                    let ib_pack_len = self.poi_common.ib_len_for_packs(&self.pack_data);
-                    let ib_len = self.poi_common.ib_len();
+                    let (ib_pack_len, ib_len) = self.resources.poi_common.as_ref().map(|c| (
+                        c.ib_len_for_packs(&self.pack_data),
+                        c.ib_len(),
+                    )).unwrap_or((0, 0));
                     if !ibs_dirty {
                         ibs_dirty |= ib_pack_len != ib_len;
                     }
@@ -546,7 +551,9 @@ impl PackRender {
         }
         self.draw_state.clear_active();
         if map_id.is_some() {
-            self.poi_common.update_fallback(device, machine);
+            if let Some(poi_common) = &mut self.resources.poi_common {
+                poi_common.update_fallback(device, machine);
+            }
             if ibs_dirty {
                 self.recreate_buffers(device, machine)?;
             }
@@ -656,7 +663,9 @@ impl PackRender {
         machine: &RenderMachine,
     ) -> anyhow::Result<()> {
         self.allocate_poi_buffers(1);
-        self.poi_common.rebuild_ib(device, machine, &self.pack_data)?;
+        if let Some(poi_common) = &mut self.resources.poi_common {
+            poi_common.rebuild_ib(device, machine, &self.pack_data)?;
+        }
 
         Ok(())
     }
@@ -683,31 +692,27 @@ impl PackRender {
         }
     }
 
-    pub fn draw(
-        &mut self,
-        camera: &RenderPosition,
-        frustum: &impl BvhQuery<3>,
-        backend: &RenderBackend,
+    pub fn draw_markers<'e, E>(
+        draw_state: &mut PackRenderState,
+        resources: &PackRenderResources,
         context: &Dx11Context,
+        backend: &RenderBackend,
+        entities: E,
         arcrender: bool,
-    ) {
-        let Some(spacepacks) = self.spacepacks.cached.as_ref() else { return };
-        let entities =
-            self.render_list
-                .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
-        self.draw_state.primary_draw = true;
+    ) where
+        E: IntoIterator<Item = (&'e PackRenderData, usize, &'e MarkerId)>,
+    {
         match arcrender {
-            true if self.resources.shader_variant.is_none() => (),
+            true if resources.shader_variant.is_none() => (),
             true => {
                 let mut draw = render::DrawSpaceArc {
                     context,
-                    resources: &self.resources,
-                    poi_common: &self.poi_common,
+                    resources,
                     state: None,
                     last_quad: None,
                 };
                 Self::draw_entities(
-                    &mut self.draw_state,
+                    draw_state,
                     &mut draw,
                     entities,
                 );
@@ -716,57 +721,15 @@ impl PackRender {
                 let mut draw = render::DrawSpacePack {
                     context,
                     shaders: &backend.shaders,
-                    poi_common: &self.poi_common,
+                    poi_common: match &resources.poi_common {
+                        Some(poi_common) => poi_common,
+                        None => return,
+                    },
                     state: None,
                     shader_trail: None,
                 };
                 Self::draw_entities(
-                    &mut self.draw_state,
-                    &mut draw,
-                    entities,
-                );
-            },
-        }
-        self.draw_state.primary_draw = false;
-    }
-    #[cfg(feature = "goggles")]
-    pub fn draw_obscured(
-        &mut self,
-        camera: &RenderPosition,
-        frustum: &impl BvhQuery<3>,
-        backend: &RenderBackend,
-        context: &Dx11Context,
-        arcrender: bool,
-    ) {
-        let entities =
-            self.render_list
-                .iter_markers_visible(self.pack_data.map_ref_as_slice(), frustum, camera);
-        match arcrender {
-            true if self.resources.shader_variant.is_none() => (),
-            true => {
-                let mut draw = render::DrawSpaceArc {
-                    context,
-                    resources: &self.resources,
-                    poi_common: &self.poi_common,
-                    state: None,
-                    last_quad: None,
-                };
-                Self::draw_entities(
-                    &mut self.draw_state,
-                    &mut draw,
-                    entities,
-                );
-            },
-            false => {
-                let mut draw = render::DrawSpacePack {
-                    context,
-                    shaders: &backend.shaders,
-                    poi_common: &self.poi_common,
-                    state: None,
-                    shader_trail: None,
-                };
-                Self::draw_entities(
-                    &mut self.draw_state,
+                    draw_state,
                     &mut draw,
                     entities,
                 );
@@ -851,7 +814,7 @@ impl PackRender {
     }
     pub fn draw_map_entities<'e, E>(
         draw_state: &mut PackRenderState,
-        poi_common: &PoiCommonRenderData,
+        resources: &PackRenderResources,
         device_context: &Dx11Context,
         backend: &RenderBackend,
         map: MapContext,
@@ -859,6 +822,7 @@ impl PackRender {
     ) where
         E: IntoIterator<Item = (&'e PackRenderData, usize, &'e MarkerId)>,
     {
+        let Some(poi_common) = &resources.poi_common else { return };
         draw_state.primary_draw_map = true;
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0usize;
@@ -956,15 +920,16 @@ impl PackRender {
     pub fn stop(&mut self) {
         self.clear_packs();
         self.cleanup_textures();
-        self.poi_common.clear();
+        if let Some(poi_common) = &mut self.resources.poi_common {
+            poi_common.clear();
+        }
         self.resources.clear();
     }
     /// See [crate::space::engine::Engine::cleanup_background]
     ///
     /// TODO: revisit, avoid, etc
     pub fn cleanup_background(self) {
-        let Self { pack_data, poi_common, resources, .. } = self;
-        poi_common.cleanup_background();
+        let Self { pack_data, resources, .. } = self;
         resources.cleanup_background();
         for pack in pack_data.data.into_iter() {
             pack.cleanup_background();
@@ -978,6 +943,8 @@ impl PackRender {
 
 #[derive(Debug, Default)]
 pub struct PackRenderResources {
+    pub poi_common: Option<PoiCommonRenderData>,
+
     pub len: usize,
     pub dirty: bool,
     pub anim_timestamp: Option<f32>,
@@ -1320,6 +1287,9 @@ impl PackRenderResources {
         mem::forget(self.poi_vb_trans.take());
         mem::forget(self.shared_cb_v.take());
         mem::forget(self.shared_cb_p.take());
+        if let Some(poi_common) = self.poi_common.take() {
+            poi_common.cleanup_background();
+        }
     }
 }
 

@@ -17,7 +17,7 @@ use {
     anyhow::Context,
     glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles},
     glamour::Vector2,
-    std::mem,
+    std::{fmt, mem},
     taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
@@ -288,6 +288,14 @@ impl PoiCommonRenderData {
     #[inline]
     pub fn cleanup_background(self) {
         mem::forget(self);
+    }
+}
+impl fmt::Debug for PoiCommonRenderData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("PoiCommonRenderData")
+            .field("world_ib", &self.world_ib)
+            .field("map_ib", &self.map_ib)
+            .finish()
     }
 }
 

@@ -196,7 +196,6 @@ impl DrawSpaceEntity for DrawSpacePack<'_> {
 /// arcrender
 pub struct DrawSpaceArc<'a> {
     pub state: Option<Option<ShaderState>>,
-    pub poi_common: &'a PoiCommonRenderData,
     pub resources: &'a PackRenderResources,
     pub context: &'a Dx11Context,
     pub last_quad: Option<&'a PoiVertexBuffer>,
@@ -214,7 +213,9 @@ impl<'a> DrawSpaceArc<'a> {
         ib.set(self.context, 1);
         cb_p.set(self.context, 0);
         cb_v.set(self.context, 0);
-        self.poi_common.set_primitive(self.context);
+        if let Some(poi_common) = &self.resources.poi_common {
+            poi_common.set_primitive(self.context);
+        }
         self.state = Some(None);
         Some(())
     }
@@ -259,7 +260,8 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
             .and_then(|vb| trail.section_geometry_vertices(section.path).map(|range| (vb, range)));
         let Some((vb, ops::Range { start, end })) = vb else { return false };
         if self.bind_trail().is_none() { return false }
-        trail.bind_texture(self.context, self.poi_common, LocalContext::MAP);
+        let Some(poi_common) = &self.resources.poi_common else { return false };
+        trail.bind_texture(self.context, poi_common, LocalContext::MAP);
         vb.set(self.context, 0);
         unsafe {
             self.context.DrawInstanced(end - start, 1, start, space_idx as u32);
@@ -284,7 +286,8 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
             self.last_quad = Some(vb);
         }
 
-        poi.bind_texture(self.context, self.poi_common, LocalContext::MAP);
+        let Some(poi_common) = &self.resources.poi_common else { return false };
+        poi.bind_texture(self.context, poi_common, LocalContext::MAP);
         unsafe {
             self.context.DrawInstanced(PoiVertex::POI_QUAD.len() as u32, 1, 0, space_idx as u32);
         }
