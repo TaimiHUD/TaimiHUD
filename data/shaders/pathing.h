@@ -217,3 +217,5 @@ SamplerState SampleType : register(s0);
 
 //#define MAD(v, m, a) mad(v, m, a)
 #define MAD(v, m, a) ((v) * (m) + (a))
+//#define RECIP(v) (rcp(v))
+#define RECIP(v) (1.0 / (v))
