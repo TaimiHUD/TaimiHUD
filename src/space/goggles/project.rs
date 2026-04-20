@@ -7,7 +7,10 @@ use {
         },
         render::machine::{frame_log, FrameState, RenderMachine},
         settings::goggles::GogglesEnables,
-        space::engine::{DrawDescGoggles, DrawDescSpace, FrameContext},
+        space::{
+            engine::{DrawDescGoggles, DrawDescSpace, FrameContext},
+            pack::render::Drawing,
+        },
         RENDER_STATE,
     },
     arcffi::nn,
@@ -15,13 +18,12 @@ use {
         ffi::c_void,
         mem,
         ptr::{self, NonNull},
-        iter,
         cell::LazyCell,
         fmt,
     },
     glam::Vec4,
     glamour::{Point2, Rect, Size2},
-    std::sync::atomic::{AtomicPtr, AtomicU16, AtomicU8},
+    std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8},
     std::time::Instant,
     taimi_d3d::dx11::{
         prelude::*,
@@ -36,14 +38,14 @@ use {
 
 pub struct ProjectShared {
     bound_render: AtomicPtr<c_void>,
-    pub drawing: AtomicU16,
+    pub drawing: AtomicU32,
     pub map_open: AtomicU8,
     pub method: ProjectMethod,
 }
 impl ProjectShared {
     pub const EMPTY: Self = Self {
         bound_render: AtomicPtr::new(ptr::null_mut()),
-        drawing: AtomicU16::new(0),
+        drawing: AtomicU32::new(0),
         map_open: AtomicU8::new(0),
         method: ProjectMethod::DEFAULT,
     };
@@ -52,8 +54,13 @@ impl ProjectShared {
         Self::bound_render_ref().store(ptr::null_mut(), GogglesShared::FLAGS_ORDERING);
         let drawing = Self::read_drawing();
         let enabled = GogglesShared::enabled();
-        if ProjectAction::Draw.is_in(drawing) && enabled.contains(GogglesEnables::PROJECT_SHADOWBOXING) {
-            Self::insert_drawing(ProjectAction::Shadowbox.bit());
+        if Drawing::SPACE.is_in(drawing) {
+            if enabled.contains(GogglesEnables::PROJECT_SHADOWBOXING) {
+                Self::insert_drawing(ProjectAction::Shadowbox.bit());
+            }
+            if enabled.contains(GogglesEnables::PROJECT_REFLECTIONS) {
+                Self::insert_drawing(Drawing::REFLECT | Drawing::REFLECT_BELOW);
+            }
         }
         let drawing_map = ProjectAction::DrawMinimap.is_in(drawing) | ProjectAction::DrawMap.is_in(drawing);
         if drawing_map && !enabled.contains(GogglesEnables::PROJECT_MAP) {
@@ -64,7 +71,7 @@ impl ProjectShared {
     /// (but prior to [Self::on_set_targets_pre])
     #[inline]
     pub(super) fn on_set_targets_prior() -> Option<(D3dPtr, D3dPtr)> {
-        if !ClassShared::frame_valid() || Self::drawing() == 0 { return None }
+        if !ClassShared::frame_valid() || Self::drawing().is_empty() { return None }
         Some((
             ClassShared::bound_render_primary_ptr(),
             ClassShared::bound_depth_ptr(),
@@ -238,7 +245,7 @@ impl ProjectShared {
         Option<(BufferClass, u32, u32)>,
     )> {
         if !ClassShared::frame_valid() { return None }
-        let rtv = (Self::drawing() != 0)
+        let rtv = (!Self::drawing().is_empty())
             .then(|| Self::bound_render().or(ClassShared::bound_render_primary_ptr()))
             .flatten();
         rtv.and_then(|rtv| {
@@ -410,7 +417,7 @@ impl ProjectShared {
         target: &RenderTargetView,
         dv: Option<&DepthView>,
         cls: BufferClass,
-        what: ProjectAction,
+        what: Drawing,
     ) {
         #[cfg(todo = "unnecessary")]
         if let ProjectAction::DebugDetect = what {
@@ -432,7 +439,7 @@ impl ProjectShared {
             (_, Some(state)) if state.machine.is_ingame_paused() => None,
             (ProjectAction::DrawMinimap, Some(state)) if cls == BufferClass::Target && state.machine.is_ui_hidden() =>
                 None,
-            (ProjectAction::Draw, Some(state)) if cls == BufferClass::Reflection && !state.machine.goggles.is_enabled(GogglesEnables::PROJECT_REFLECTIONS) =>
+            (Drawing::REFLECT | Drawing::REFLECT_BELOW, Some(state)) if cls == BufferClass::Reflection && !state.machine.goggles.is_enabled(GogglesEnables::PROJECT_REFLECTIONS) =>
                 None,
             (ProjectAction::DrawMinimap, ..) => Some(LocalContext::MINIMAP),
             (ProjectAction::DrawMap, ..) => Some(LocalContext::MAP),
@@ -468,7 +475,7 @@ impl ProjectShared {
             #[cfg(todo)]
             ProjectAction::DrawMap if matches!(cls, BufferClass::World) =>
                 dv.map(|dv| *dv.as_d3d_raw()),
-            ProjectAction::Draw | ProjectAction::Shadowbox if matches!(cls, BufferClass::Shadowbox | BufferClass::Reflection) =>
+            Drawing::REFLECT | Drawing::REFLECT_BELOW | ProjectAction::Shadowbox if matches!(cls, BufferClass::Shadowbox | BufferClass::Reflection) =>
                 dv.map(|dv| *dv.as_d3d_raw()),
             ProjectAction::Draw if !state.machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) => None,
             ProjectAction::Draw => {
@@ -499,18 +506,7 @@ impl ProjectShared {
             };
             let mut desc = desc.to_space();
             desc.goggles.buffer_compat = vp.map(|vp| vp.size) == Some(engine.render_backend.display_size) && depth.is_some();
-            desc.pass = match what {
-                ProjectAction::Shadowbox => DrawDescSpace::PASS_SHADOWBOXING,
-                ProjectAction::DrawObscured => match cls {
-                    BufferClass::Shadowbox => DrawDescSpace::PASS_OBSCURED_SHADOWED,
-                    _ => DrawDescSpace::PASS_OBSCURED,
-                },
-                ProjectAction::Draw => match cls {
-                    BufferClass::Reflection => DrawDescSpace::PASS_REFLECTING,
-                    _ => desc.pass,
-                },
-                _ => desc.pass,
-            };
+            desc.pass = what;
             let mut wispy = false;
             match (what, cls, target_dv) {
                 (ProjectAction::DrawObscured, ..) => {
@@ -539,10 +535,10 @@ impl ProjectShared {
                     desc.depth_read = dv.is_some();
                     wispy = true;
                 },
-                (ProjectAction::Draw, BufferClass::Reflection, dv) => {
+                (Drawing::REFLECT | Drawing::REFLECT_BELOW, BufferClass::Reflection, dv) => {
                     desc.depth_write = false;
                     desc.depth_read = false;
-                    wispy = true;
+                    //wispy = true;
                 },
                 (ProjectAction::DrawMinimap | ProjectAction::DrawMap, _, Some(..)) => {
                     desc.goggles.buffer_compat = false;
@@ -582,7 +578,7 @@ impl ProjectShared {
             if state.machine.goggles.project.debug_detect {
                 Self::draw_detect_clear(context, target, &desc.goggles, draw);
                 if !wispy {
-                    engine.drawing.set_drawn(draw, true);
+                    engine.drawing.drawn.insert(what);
                     if !state.machine.goggles.project.debug_detect_all {
                         ProjectShared::mask_drawing(what.bit());
                     }
@@ -591,21 +587,16 @@ impl ProjectShared {
                 if let LocalContext::Map(..) = draw {
                     state.machine.lastminute_mumblelink_update();
                 }
-                let wispy = wispy.then_some(engine.drawing.has_drawn_context(draw));
+                let wispy = wispy.then_some(engine.drawing.drawn.contains(what));
                 if wispy.is_some() {
-                    engine.drawing.set_drawing(draw, true);
-                    engine.drawing.set_drawn(draw, false);
+                    engine.drawing.drawing.insert(what);
+                    engine.drawing.drawn.remove(what);
                 }
                 let pass = desc.pass;
                 engine.render_carefully(&mut state.machine, context, desc, draw);
-                let succ = match what {
-                    ProjectAction::DrawMap | ProjectAction::DrawMinimap => engine.drawing.has_drawn_context(draw),
-                    ProjectAction::DrawObscured => engine.drawing.drawn.get_at(DrawDescSpace::PASS_OBSCURED) == Some(true),
-                    ProjectAction::DrawObscured | ProjectAction::Shadowbox | ProjectAction::Draw => engine.drawing.drawn.get_at(pass) == Some(true),
-                    _ => true,
-                };
+                let succ = engine.drawing.drawn.contains(what);
                 if let Some(prev) = wispy {
-                    //engine.drawing.set_drawn(draw, prev);
+                    engine.drawing.drawn.set(what, prev);
                 } else if succ {
                     ProjectShared::mask_drawing(what.bit());
                 }
@@ -650,29 +641,37 @@ impl ProjectShared {
     }
 
     #[inline(always)]
-    pub fn drawing_ref() -> &'static AtomicU16 {
+    pub fn drawing_ref() -> &'static AtomicU32 {
         unsafe {
             &*g2!(&raw const ferret.project2.drawing)
         }
     }
-    fn read_drawing() -> u16 {
-        Self::drawing_ref().load(GogglesShared::ENABLED_ORDERING)
+    fn read_drawing() -> Drawing {
+        Drawing::from_bits_retain(
+            Self::drawing_ref().load(GogglesShared::ENABLED_ORDERING)
+        )
     }
-    fn write_drawing(v: u16) {
-        Self::drawing_ref().store(v, GogglesShared::ENABLED_ORDERING);
+    fn write_drawing(v: Drawing) {
+        Self::drawing_ref().store(v.bits(), GogglesShared::ENABLED_ORDERING);
     }
 
-    fn drawing() -> u16 {
-        Self::drawing_ref().load(GogglesShared::FLAGS_ORDERING)
+    fn drawing() -> Drawing {
+        Drawing::from_bits_retain(
+            Self::drawing_ref().load(GogglesShared::FLAGS_ORDERING)
+        )
     }
-    fn insert_drawing(v: u16) -> u16 {
-        Self::drawing_ref().fetch_or(v, GogglesShared::FLAGS_ORDERING)
+    fn insert_drawing(v: Drawing) -> Drawing {
+        Drawing::from_bits_retain(
+            Self::drawing_ref().fetch_or(v.bits(), GogglesShared::FLAGS_ORDERING)
+        )
     }
-    fn mask_drawing(v: u16) -> u16 {
-        Self::drawing_ref().fetch_and(!v, GogglesShared::FLAGS_ORDERING)
+    fn mask_drawing(v: Drawing) -> Drawing {
+        Drawing::from_bits_retain(
+            Self::drawing_ref().fetch_and(!v.bits(), GogglesShared::FLAGS_ORDERING)
+        )
     }
     pub(super) fn wants_draw() -> bool {
-        Self::drawing() != 0
+        !Self::drawing().is_empty()
     }
 
     fn method() -> ProjectMethod {
@@ -723,9 +722,9 @@ impl ProjectMethod {
         _ => Self::Late,
     };
 
-    fn actions_on_unbind(self, act: ProjectAction, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
+    fn actions_on_unbind(self, act: Drawing, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
         let primary = match (act, cls, self) {
-            (ProjectAction::DrawObscured, BufferClass::Shadowbox, ProjectMethod::Early | ProjectMethod::Fuzzy) =>
+            (Drawing::OBSCURED_SHADOWED, BufferClass::Shadowbox, ProjectMethod::Early | ProjectMethod::Fuzzy) =>
                 Some((0, None)),
             (ProjectAction::DrawObscured, BufferClass::World, ProjectMethod::Early | ProjectMethod::Fuzzy)
                 if ClassShared::with_seen_class(BufferKind::DepthView, BufferClass::World, |_k, buf| buf.bind_count <= 1).unwrap_or(true)
@@ -769,9 +768,7 @@ impl ProjectMethod {
 
             (_, BufferClass::Fallback, _) if ClassShared::bind_generation() <= 8 => None,
             (_, BufferClass::Pretty, _) if ClassShared::bind_generation() <= 12 => None,
-            (ProjectAction::Draw, BufferClass::Reflection, _) if GogglesShared::enabled().contains(GogglesEnables::PROJECT_REFLECTIONS) => Some((0x08, None)),
-            #[cfg(deleteme)]
-            (ProjectAction::Draw, BufferClass::Reflection, Self::Pretty | Self::Shiny) => Some((0x08, None)),
+            (Drawing::REFLECT | Drawing::REFLECT_BELOW, BufferClass::Reflection, _) => Some((0x08, None)),
             (ProjectAction::Draw, BufferClass::Shadowbox, Self::Pretty) => Some((0x10, None)),
             (ProjectAction::Shadowbox, _, Self::Shiny)
                 if ClassShared::with_current_dv(|_, buf| buf.bind_count > 1 && buf.winner && matches!(buf.classification, BufferClass::World)).unwrap_or(false)
@@ -816,7 +813,7 @@ impl ProjectMethod {
         .into_iter()
         //.chain(fallback)
     }
-    fn actions_on_state(self, act: ProjectAction, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
+    fn actions_on_state(self, act: Drawing, cls: BufferClass) -> impl Iterator<Item = (i32, MethodAction)> {
         let primary = match (act, cls, self) {
             #[cfg(todo)]
             (ProjectAction::DrawObscured, ..) => None,
@@ -829,7 +826,7 @@ impl ProjectMethod {
             (ProjectAction::DrawMinimap | ProjectAction::DrawMap, ..) => None,
             #[cfg(todo)]
             (_, _, Self::Shiny) => None,
-            (ProjectAction::Draw, BufferClass::Reflection, Self::Pretty) => Some((0x04, None)),
+            (Drawing::REFLECT | Drawing::REFLECT_BELOW, BufferClass::Reflection, Self::Pretty) => Some((0x04, None)),
             (ProjectAction::Draw, BufferClass::World, Self::Early | Self::Shiny)
                 if ClassShared::with_current_dv(|_, buf| buf.depth_binds_count_disabled() > 1 || buf.depth_binds_count_readonly() >= 1).unwrap_or(false)
                 => Some((0x08, None)),
@@ -1002,13 +999,14 @@ impl FrameLifecycleInfo for SharedInfo {
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct MethodAction {
     #[cfg(todo = "unnecessary")]
-    what: ProjectAction,
+    what: Drawing,
     retarget: Option<BufferClass>,
     after_depthless: u8,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
 #[repr(u8)]
+#[cfg(deleteme)]
 pub enum ProjectAction {
     Nop = 1,
     DebugDetect,
@@ -1018,6 +1016,7 @@ pub enum ProjectAction {
     DrawMap,
     Shadowbox,
 }
+#[cfg(deleteme)]
 impl ProjectAction {
     #[inline(always)]
     pub const fn index(self) -> u8 {
@@ -1053,23 +1052,44 @@ impl ProjectAction {
     pub const fn is_in(self, bits: u16) -> bool {
         bits & self.bit() != 0
     }
-    fn bits_from_drawing(drawing: &BitSlice<u16, BitsNative>) -> u16 {
-        drawing.iter_ones().filter_map(|i| Some(match i as u32 {
-            DrawDescSpace::PASS_SPACE => Self::Draw,
-            DrawDescSpace::PASS_MAP => Self::DrawMap,
-            DrawDescSpace::PASS_MINIMAP => Self::DrawMinimap,
-            DrawDescSpace::PASS_OBSCURED => Self::DrawObscured,
-            #[cfg(todo)]
-            DrawDescSpace::PASS_OBSCURED_SHADOWED => Self::DrawObscured,
-            DrawDescSpace::PASS_SHADOWBOXING => Self::Shadowbox,
-            #[cfg(todo)]
-            DrawDescSpace::PASS_REFLECTING => Self::Draw,
-            _ => return None,
-        })).fold(0u16, |prev, flag| prev | flag.bit())
-    }
     #[inline(always)]
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
         mem::transmute(index)
+    }
+}
+/// TODO: deleteme
+pub struct ProjectAction;
+/// TODO: deleteme
+#[allow(non_upper_case_globals)]
+impl ProjectAction {
+    const DrawMap: Drawing = Drawing::GLOBALMAP;
+    const DrawMinimap: Drawing = Drawing::MINIMAP;
+    const Draw: Drawing = Drawing::SPACE;
+    const Shadowbox: Drawing = Drawing::SHADOWBOX;
+    const DrawObscured: Drawing = Drawing::OBSCURED;
+    #[inline(always)]
+    pub fn iter_bits(bits: Drawing) -> impl Iterator<Item = Drawing> {
+        bits.iter_passes()
+    }
+}
+/// TODO: deleteme
+impl Drawing {
+    #[deprecated] #[inline(always)]
+    fn is_in(self, other: Self) -> bool { other.contains(self) }
+    #[deprecated] #[inline(always)]
+    fn bit(self) -> Self { self }
+    #[cfg(deleteme)]
+    fn to_pass(self) -> u32 {
+        match self.get_pass() {
+            Drawing::GLOBALMAP => DrawDescSpace::PASS_MAP,
+            Drawing::MINIMAP => DrawDescSpace::PASS_MINIMAP,
+            Drawing::OBSCURED => DrawDescSpace::PASS_OBSCURED,
+            Drawing::OBSCURED_SHADOWED => DrawDescSpace::PASS_OBSCURED_SHADOWED,
+            Drawing::SHADOWBOX => DrawDescSpace::PASS_SHADOWBOXING,
+            Drawing::REFLECT => DrawDescSpace::PASS_REFLECTING,
+            Drawing::REFLECT_BELOW => DrawDescSpace::PASS_REFLECTING_BELOW,
+            Drawing::SPACE | _ => DrawDescSpace::PASS_SPACE,
+        }
     }
 }
 
@@ -1083,22 +1103,22 @@ pub struct GogglesProject {
     pub project_shadowbox: bool,
     pub project_blend_force: bool,
     pub project_projecting: bool,
-    drawing_mask: u16,
+    drawing_mask: Drawing,
 }
 impl GogglesProject {
     /// TODO: here so UI can display debug stats prior to reset bleh...
     pub(super) fn act_render_post_late(&mut self) {
-        ProjectShared::write_drawing(mem::replace(&mut self.drawing_mask, 0));
+        ProjectShared::write_drawing(mem::replace(&mut self.drawing_mask, Drawing::empty()));
     }
     /// TODO: deleteme idk this is probably pointless now
     pub(crate) fn act_pre_render_frame(&mut self, _has_context: bool, drawing: &mut FrameContext) {
         //self.is_drawing = machine.frame_context.is_some();
         let is_drawing = drawing.prepared && drawing.is_drawing();
         if is_drawing {
-            self.drawing_mask = ProjectAction::bits_from_drawing(drawing.drawing.as_ref());
+            self.drawing_mask = drawing.drawing;
             ProjectShared::write_map_open(drawing.map_anim.shape());
         } else {
-            self.drawing_mask = 0;
+            self.drawing_mask = Drawing::empty();
         }
     }
     const STATS_COUNTERS: &[StatsDesc; 1] = {
@@ -1123,7 +1143,7 @@ impl GogglesProject {
         }
     }
     pub(super) fn disable(&mut self) {
-        ProjectShared::write_drawing(0);
+        ProjectShared::write_drawing(Drawing::empty());
         STATS_PROJECT_RENDER.reset(0);
         for desc in Self::STATS_COUNTERS {
             StatsRef::deregister(desc);
@@ -1140,14 +1160,8 @@ impl GogglesProject {
         ProjectShared::read_method()
     }
 
-    pub(crate) fn undrawn(&self) -> impl Iterator<Item = Result<LocalContext, ProjectAction>> {
-        let undrawn = ProjectShared::read_drawing();
-        ProjectAction::iter_bits(undrawn).map(|act| Ok(match act {
-            ProjectAction::Draw => LocalContext::World,
-            ProjectAction::DrawMinimap => LocalContext::MINIMAP,
-            ProjectAction::DrawMap => LocalContext::GLOBAL,
-            act => return Err(act)
-        }))
+    pub(crate) fn undrawn(&self) -> Drawing {
+        ProjectShared::read_drawing()
     }
 }
 impl GogglesState {
@@ -1156,7 +1170,7 @@ impl GogglesState {
     }
 }
 impl RenderMachine {
-    fn goggles_project_draw_start(&mut self, what: ProjectAction, cls: BufferClass) -> bool {
+    fn goggles_project_draw_start(&mut self, what: Drawing, cls: BufferClass) -> bool {
         if !self.goggles.is_enabled(GogglesEnables::PROJECT_ENABLE) { return false }
 
         self.goggles.project.project_projecting = true;
