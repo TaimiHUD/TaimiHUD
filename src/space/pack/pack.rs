@@ -1879,6 +1879,7 @@ impl PackRenderResources {
                     }
                     // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
                     ib.map_scale = attrs.map_display_size() / 2.0;
+                    ib.billboard_scale = attrs.icon_size();
                     ib.set_size_range(attrs.min_size(), attrs.max_size());
                     Some((&mut ib.marker, poi.lpoi_info().marker_info()))
                 },

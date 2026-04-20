@@ -183,15 +183,9 @@ PoiOutputV poi_main_v(PoiInput input)
     //bool is_size_limited = is_billboard &* GET_MFLAG(v_poi.marker.flags, MFLAG_BILLBOARD);
     bool is_size_limited = bool(is_billboard_bit & v_poi.marker.flags);
     if (is_size_limited) {
-    // TODO: viewport in cb_v!
-    float2 viewport = float2(3840.0, 2160.0);
-    float aspect = viewport.y / viewport.x;
-#if 0
-    //float vpscale = sqrt(dot(viewport, viewport)) * 2.0;
-#else
     // bhud just treats it as a max height rather than size?
     float vpscale = v_render.viewport_pixel_scale;
-#endif
+    //float vpscale = sqrt(dot(viewport, viewport));
 
     float size_min = GET_PAIR0f(input.size_range) * vpscale;
     float size_max = GET_PAIR1f(input.size_range) * vpscale;
@@ -207,22 +201,14 @@ PoiOutputV poi_main_v(PoiInput input)
     // TODO: cross with camera plane instead of this
     float cam_dist = distance(midpoint, v_render.camera_pos);
     // TODO: just like, use vfov angle to calculate projected height???
-    float4 sz4 = mul(v_render.projection, float4(1.0, 1.0, cam_dist, 1.0));
+    float4 sz4 = mul(v_render.projection, float4(input.billboard_scale, input.billboard_scale, cam_dist, 1.0));
     float2 sz = sz4.xy / sz4.w;
 #endif
-    //float size_screen_screen = sqrt(dot(sz, sz));
-    float size_screen_screen = sz.y * 2.0;
-    float limit_max = saturate(size_max / size_screen_screen);
-    float limit_min = saturate(size_screen_screen / size_min);
-#if 0
-    vertex.xy = vertex.xy * lerp(
-        1.0,
-        clamp(1.0, (1.0 / limit_min), limit_max),
-        is_size_limited
-    );
-#else
-    vertex.xy = vertex.xy * clamp(1.0, (1.0 / limit_min), limit_max);
-#endif
+    //float size_screen_screen = RECIP(sqrt(dot(sz, sz)));
+    float size_screen_screen = RECIP(sz.y);
+    float limit_min = size_min * size_screen_screen;
+    float limit_max = size_max * size_screen_screen;
+    vertex.xy = vertex.xy * clamp(1.0, limit_min, limit_max);
     }
 #endif
     bool is_billboard = bool(is_billboard_bit);
