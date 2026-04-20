@@ -93,6 +93,7 @@ struct PoiInput {
     column_major float4x4 model: PMODEL;
     float anim_offset: PDISP0;
     float map_scale: PDISP1;
+    float billboard_scale: PDISP2;
     //float2 _padding;
 };
 #define BOUNCE_HEIGHT_RESOLUTION 16.0f
@@ -217,3 +218,5 @@ SamplerState SampleType : register(s0);
 
 //#define MAD(v, m, a) mad(v, m, a)
 #define MAD(v, m, a) ((v) * (m) + (a))
+//#define RECIP(v) (rcp(v))
+#define RECIP(v) (1.0 / (v))
