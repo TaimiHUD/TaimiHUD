@@ -32,7 +32,7 @@ use {
         exports::runtime::{self as rt,
             textures::TextureSlot,
         },
-        render::machine::{RenderMachine, RenderPosition},
+        render::machine::{frame_log, RenderMachine, RenderPosition},
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             pack::{instance::{self, EntityInstanceBuffer, EntityInstanceData, PoiVertexBuffer}, PoiRender, TrailRender},
@@ -43,10 +43,10 @@ use {
     },
     anyhow::Context,
     bvh::aabb,
+    futures::future::Either,
     glamour::{Size2, Vector2, Box3, Point3, Matrix4},
     rustc_hash::FxHashSet,
-    std::{collections::{BTreeSet, BTreeMap}, mem, ops, sync::Arc},
-    std::time::Instant,
+    std::{collections::{BTreeSet, BTreeMap}, iter, mem, num::NonZero, ops, sync::Arc, time::Instant},
     taimi_d3d::{
         dx11::{
             self,
@@ -667,6 +667,7 @@ impl PackRender {
             self.texture_rx.subscribe_to(&pathing.space.texture_loads);
         }
         if packs_rx.has_changed().unwrap_or(false) {
+            self.render_list.mark_dirty();
             let packs = packs_rx.borrow_and_update();
             if self.pack_data.len() < packs.len() {
                 self.pack_data.data.resize_with(packs.len(), PackRenderData::new);
@@ -702,9 +703,11 @@ impl PackRender {
                 self.draw_state.clear();
                 self.draw_state.prev_map_id = map_id;
                 self.resources.dirty = true;
+                self.render_list.mark_dirty();
                 space_dirty = true;
             } else {
                 STATS_ENTITY_COUNT.reset(0);
+                self.render_list.cleanup();
             }
         }
         if space_dirty {
@@ -748,9 +751,13 @@ impl PackRender {
             );
             log::info!("Loaded {trails} trails and {pois} POIs");
         }
+        if prev_waiting && !self.draw_state.prev_waiting {
+            self.render_list.mark_dirty();
+        }
         if let Some(map_id) = map_id {
             if let Some(packs_map) = &packs_map_changed {
                 log::trace!("gameplay maps rx @ {map_id}");
+                self.render_list.mark_dirty();
                 if let Some(maps) = packs_map.get_ref(map_id) {
                     for (pack_path, pack) in self.pack_data.iter_mut() {
                         let Some((packmap_path, map_info)) = maps.get_info_for(pack_path) else {
@@ -882,6 +889,8 @@ impl PackRender {
                 };
                 if res.is_none() {
                     trail.disable();
+                } else {
+                    self.render_list.mark_dirty();
                 }
             }
             for (marker_path, texture) in self.texture_rx.try_recv_fulfilled() {
@@ -1030,6 +1039,7 @@ impl PackRender {
         } else {
             self.draw_state.clear_anims();
         }
+        self.render_list.prepare_frame();
         STATS_ENTITY_DRAW.reset(0);
         STATS_ENTITY_DRAW_PASS.reset(0);
         STATS_ENTITY_DRAW_ALL.reset(0);
@@ -2107,25 +2117,52 @@ impl PackRenderState {
 
 #[derive(Default)]
 pub struct PackRenderList {
-    spacepacks: Arc<SpacePackCollection>,
+    pub(crate) spacepacks: Arc<SpacePackCollection>,
     draw_order_heap: render::RenderOrderHeap<usize>,
+    draw_order_cache: Vec<usize>,
+    draw_unorder_cache: Vec<usize>,
+    pub(crate) draw_order_cache_id: Option<NonZero<usize>>,
     dirty: bool,
+    pub(crate) unordered_last: bool,
 }
 impl PackRenderList {
     #[inline]
     pub fn setup_frame(&mut self) {
+        #[cfg(todo = "unnecessary")]
+        {
+            self.draw_order_heap.clear();
+        }
+    }
+    #[inline]
+    pub fn prepare_frame(&mut self) {
         if mem::replace(&mut self.dirty, false) {
             let shapes = self.spacepacks.render_entities.entities.len();
             let min_cap = shapes / 8;
             self.draw_order_heap.clear();
             self.draw_order_heap.reserve(min_cap);
+            self.draw_order_cache.clear();
+            self.draw_order_cache.reserve(min_cap);
+            self.draw_unorder_cache.clear();
+            self.draw_unorder_cache.reserve(min_cap / 2);
+            self.draw_order_cache_id = None;
         }
+    }
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+    pub fn cleanup(&mut self) {
+        self.draw_order_heap = Default::default();
+        self.draw_order_cache = Default::default();
+        self.draw_unorder_cache = Default::default();
+        self.draw_order_cache_id = None;
+        self.dirty = true;
     }
 
     /// TODO: actual dirty check?
     pub fn update_space(&mut self, spacepacks: &Arc<SpacePackCollection>) -> bool {
         let dirty = ArcPtrCmp::from_mut(&mut self.spacepacks).clone_from_arc(spacepacks);
         self.dirty |= dirty;
+        self.draw_order_cache_id = None;
         true
     }
 
@@ -2147,7 +2184,7 @@ impl PackRenderList {
         _map: MapContext,
         query: &'a Q,
     ) -> impl Iterator<Item = (&'e PackRenderData, usize, &'a MarkerId)> {
-        self.iter_entities_visible(query, move |e, idx, id| {
+        self.iter_entities_visible(None, query, move |e, idx, id| {
             let pos = match e.extra.get(idx) {
                 _ if id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL =>
                     None,
@@ -2180,11 +2217,12 @@ impl PackRenderList {
     pub fn iter_markers_visible<'a, 'e, Q: BvhQuery<3>>(
         &'a mut self,
         pack_data: &'e IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
+        query_id: Option<NonZero<usize>>,
         query: &'a Q,
         camera: &'_ RenderPosition,
     ) -> impl Iterator<Item = (&'e PackRenderData, usize, &'a MarkerId)> {
         let key = render::RenderOrderSort::with_camera(camera);
-        self.iter_entities_visible(query, move |e, idx, id| {
+        self.iter_entities_visible(query_id, query, move |e, idx, id| {
             let ignore_draw_order = id.get_marker_index().namespace() == MarkerIndex::NS_TRAIL;
             e.extra.get(idx).map(|extra| {
                 let pos = match ignore_draw_order {
@@ -2201,6 +2239,7 @@ impl PackRenderList {
     }
     pub(crate) fn iter_entities_visible<'a, Q, F>(
         &'a mut self,
+        query_id: Option<NonZero<usize>>,
         query: &'a Q,
         mut filter: F,
     ) -> impl Iterator<Item = (usize, &'a MarkerId)> + 'a where
@@ -2209,20 +2248,88 @@ impl PackRenderList {
     {
         let entities = &self.spacepacks.render_entities;
         let shapes = &entities.entities[..];
-        self.draw_order_heap.clear();
-
-        let bvh_iter = self.spacepacks.bvh_iter(query).filter_map(move |(idx, id)|
+        let mut bvh_iter = Either::Left(self.spacepacks.bvh_iter(query).filter_map(move |(idx, id)|
             filter(entities, idx, id)
-        );
-        let ordered = render::RenderOrderBuilder {
-            bvh_iter,
-            draw_order_heap: &mut self.draw_order_heap,
+        ));
+        let reverse = self.unordered_last;
+        let mut cache = match query_id {
+            None => None,
+            id @ Some(_id) if id == self.draw_order_cache_id && !self.draw_order_cache.is_empty() => {
+                frame_log!("space; ordercache@{_id} reused");
+                let (start, end) = match reverse {
+                    true => (
+                        self.draw_order_cache.iter(),
+                        self.draw_unorder_cache.iter(),
+                    ),
+                    _ => (
+                        self.draw_unorder_cache.iter(),
+                        self.draw_order_cache.iter(),
+                    ),
+                };
+                bvh_iter = Either::Right(
+                    start.chain(end).copied()
+                );
+                None
+            },
+            Some(id) => {
+                frame_log!("space; ordercache@{id} populate");
+                self.draw_order_cache.clear();
+                self.draw_unorder_cache.clear();
+                self.draw_order_cache_id = None;
+                Some((&mut self.draw_order_cache, &mut self.draw_unorder_cache))
+            },
         };
-        let iter = ordered.map(move |idx| {
+        self.draw_order_heap.clear();
+        let cache_id = &mut self.draw_order_cache_id;
+
+        let mut ordered = match bvh_iter {
+            Either::Left(bvh_iter) => Either::Left(render::RenderOrderBuilder {
+                bvh_iter,
+                draw_order_heap: &mut self.draw_order_heap,
+            }),
+            Either::Right(c) => Either::Right(c),
+        };
+        let mut reverse = reverse.then_some(0usize);
+        iter::from_fn(move || {
+            match &mut ordered {
+                Either::Left(..) if !matches!(reverse, None | Some(0)) => (),
+                Either::Left(ordered) => loop {
+                    let cache = &mut cache;
+                    let ordered = ordered.next().map(|(dist, idx)| {
+                        if let Some((cache, unordered)) = &mut *cache {
+                            match dist {
+                                None => unordered.push(idx),
+                                Some(_dist) => cache.push(idx),
+                            }
+                        }
+                        (dist, idx)
+                    });
+                    match query_id {
+                        Some(id) if ordered.is_none() && cache.is_some() =>
+                            *cache_id = Some(id),
+                        _ => (),
+                    }
+                    match ordered {
+                        Some((None, ..)) if reverse.is_some() => continue,
+                        Some((_, idx)) => return Some(idx),
+                        None if reverse.is_some() => break,
+                        None => break,
+                    }
+                },
+                Either::Right(cache) => return cache.next(),
+            }
+            let rev = reverse.and_then(|i| match cache {
+                Some((_, ref unordered)) => unordered.get(i).copied(),
+                _ => None,
+            });
+            if let Some(i) = &mut reverse {
+                *i += 1;
+            }
+            rev
+        }).map(move |idx| {
             let mid = unsafe { shapes.get_unchecked(idx) };
             (idx, &mid.value.id)
-        });
-        iter
+        })
     }
 }
 
@@ -2449,6 +2556,14 @@ impl ArcrenderSettings {
         }
         shared_v.poi.billboard = taimi_meta::coords::billboard_from_look(view.into());
         shared_v.poi.map_scale = map_calibration.local_space().scale.abs().y;
+    }
+    #[inline]
+    pub fn setup_p(
+        shared_p: &mut instance::ConstantDataP,
+        blending: Option<(f32, f32)>,
+    ) {
+        shared_p.poi.marker.set_blend_factors(blending.map(|(bp, _)| bp));
+        shared_p.trail.marker.set_blend_factors(blending.map(|(_, bt)| bt));
     }
 }
 

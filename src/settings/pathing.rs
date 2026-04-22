@@ -180,6 +180,8 @@ pub struct SpaceSettings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance_max: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance_ordering: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distance_fade_intensity: Option<f32>,
@@ -248,6 +250,7 @@ impl SpaceSettings {
     pub const DEFAULT_TRAIL_RESOLUTION: f32 = 1.0 / 20.0;
     pub const DEFAULT_TRAIL_WIDTH: f32 = 1.016;
     pub const DEFAULT_DISTANCE_MAX: f32 = 700.0;
+    pub const DEFAULT_DISTANCE_ORDERING: bool = true;
     pub const DEFAULT_POI_LIMIT_SIZE: bool = true;
     pub const DEFAULT_POI_ALPHA: f32 = 1.0;
     pub const DEFAULT_POI_SCALE: f32 = 1.0;
@@ -283,6 +286,7 @@ impl SpaceSettings {
                 visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
                 map_open: None | Some(Self::DEFAULT_MAP_OPEN),
                 distance_max: None,
+                distance_ordering: None | Some(Self::DEFAULT_DISTANCE_ORDERING),
                 distance_fade_intensity: None,
                 distance_fade_range: None,
                 player_overlap_threshold: None,
@@ -361,6 +365,9 @@ impl SpaceSettings {
 
     pub fn distance_max(&self) -> f32 {
         self.distance_max.unwrap_or(Self::DEFAULT_DISTANCE_MAX)
+    }
+    pub fn distance_ordering(&self) -> bool {
+        self.distance_ordering.unwrap_or(Self::DEFAULT_DISTANCE_ORDERING)
     }
 
     pub fn distance_fade_intensity(&self) -> Option<f32> {

@@ -69,6 +69,8 @@ TrailOutputV trail_main_v(TrailInput input)
 #if GOGGLES2_SHADOWBOXING || GOGGLES2_REFLECTING
             | (v_trail.marker.flags & 0x4000)
 #endif
+            | (v_trail.marker.flags & (0x40000 | 0x80000))
+            | MFLAG_IS_TRAIL
         ,
         0
     );
@@ -164,8 +166,23 @@ TrailOutputP trail_main_p(TrailInputP inp)
         discard;
     }
 #endif
-    output.colour = colour;
-
+    float blend_factor, blend_const;
+    if (GET_MFLAG(flags, MFLAG_IS_TRAIL)) {
+        blend_factor = p_trail.marker.blend_factor;
+        blend_const = p_trail.marker.blend_const;
+    } else {
+        blend_factor = p_poi.marker.blend_factor;
+        blend_const = p_poi.marker.blend_const;
+    }
+    float alpha = colour.w * RECIP(MAD(colour.w, blend_factor, blend_const));
+    output.colour = float4(
+#if SHADER_P_PREMUL
+        colour.xyz * alpha,
+#else
+        colour.xyz,
+#endif
+        alpha
+    );
     return output;
 }
 #endif
@@ -291,6 +308,7 @@ PoiOutputV poi_main_v(PoiInput input)
 #if GOGGLES2_SHADOWBOXING || GOGGLES2_REFLECTING
             | (v_poi.marker.flags & 0x4000)
 #endif
+            | (v_poi.marker.flags & (0x40000 | 0x80000))
         ,
         0
     );
