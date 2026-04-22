@@ -421,6 +421,7 @@ pathing-config-player-overlap-poi = Fade Billboards
 pathing-config-distance-fade-intensity = Intensity
 pathing-config-distance-fade-range = Distance fade
 pathing-config-distance-max = Distance
+pathing-config-distance-order = Distance ordering
 pathing-config-textured = Textured trails
 pathing-config-textured-minimap = Textured trails
 pathing-config-textured-worldmap = Textured trails

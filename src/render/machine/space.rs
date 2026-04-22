@@ -4,14 +4,14 @@ use {
         settings::pathing::CameraSource,
         space::{engine::Engine, DrawSpace},
     },
-    core::ops::Range,
+    core::{num::NonZero, ops::Range},
     glam::{Vec3A, Quat},
     glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
     taimi_meta::{
         spatial::record::{frame_is_lt, FrameRecordOf, FrameRecordEntry},
         coords::{camera_view, MapLocalScale, ScreenSpace},
         map::MapProjectionDepth,
-        ui::MapOpen,
+        ui::{gameplay::{GameplayState, GameplayTransition}, MapOpen},
     },
 };
 #[cfg(feature = "goggles")]
@@ -388,6 +388,14 @@ impl RenderMachine {
         }
     }
 
+    pub(super) fn space_map_exit(&mut self, gameplay: GameplayState, trans: GameplayTransition) {
+        #[cfg(feature = "goggles")]
+        {
+            self.goggles.act_map_exit(gameplay, trans);
+        }
+        self.camera.reset();
+    }
+
     /// If we have suddenly
     /// lost or gained a depth buffer, it typically means something!
     #[cfg(feature = "goggles")]
@@ -412,6 +420,10 @@ impl RenderMachine {
     #[cfg(feature = "goggles")]
     pub fn goggles_new_frame(&mut self, (engine,): super::RenderSlot) {
         let Some(Ok(engine)) = engine else { return };
+
+        if !self.goggles.is_enabled(GogglesEnables::CAMERA_ENABLE) {
+            self.camera.record_goggles_unavail();
+        }
 
         // re-read prior to render since a non-trivial amount of time has passed since present/prerender!
         // (and it will still be a while until next one)
@@ -519,11 +531,15 @@ pub struct CameraState {
     pub mumblelink: FrameRecordOf<CameraPosition>,
     /// apparently more accurate when RTAPI patches are present
     pub mumblelink_confident: bool,
+    mumblelink_movement: f32,
     #[cfg(feature = "goggles2-camera")]
     pub goggles: FrameRecordOf<CameraPosition>,
     /// whether sourced from the "smooth" camera or not
     #[cfg(feature = "goggles2-camera")]
     pub goggles_confident: bool,
+    #[cfg(feature = "goggles2-camera")]
+    goggles_movement: f32,
+    movement_frame: u32,
     pub up: FrameRecordOf<Vector3<DrawSpace>>,
     render_offset: u32,
 }
@@ -775,6 +791,13 @@ impl CameraState {
     const SKIP_TICK_THRESHOLD: u32 = 3;
     pub(super) fn record_mumblelink(&mut self, frame: u32, (pos, front, up): RenderPosition) {
         let entry = (pos, front).into();
+        if let Some(prev) = self.mumblelink.front().get_opt() {
+            let movement = prev.pos.distance_squared(pos.to_vec3a());
+            self.mumblelink_movement = self.mumblelink_movement * Self::MOVEMENT0 + movement * Self::MOVEMENT1;
+        }
+        if self.mumblelink_movement > Self::MOVEMENT_THRESHOLD {
+            self.movement_frame = frame;
+        }
         self.mumblelink.set_at(frame, entry);
         #[cfg(todo)]
         if !vec32_eq(up, Vector3::ZERO) {
@@ -782,11 +805,30 @@ impl CameraState {
             self.up.set_at(render_frame, up);
         }
     }
+    const MOVEMENT0: f32 = 0.4;
+    const MOVEMENT1: f32 = 1.0 - Self::MOVEMENT0;
+    const MOVEMENT_THRESHOLD: f32 = 2e-4f32;
     #[cfg(feature = "goggles2-camera")]
     pub(super) fn record_goggles(&mut self, frame: u32, cam: &SnatchMatrix, include_up: bool) {
-        self.goggles.set_at(frame, cam.get_as_look().into());
+        let pos = CameraPosition::from(cam.get_as_look());
+        if let Some(prev) = self.goggles.front().get_opt() {
+            let movement = prev.pos.distance_squared(pos.pos);
+            self.goggles_movement = self.goggles_movement * Self::MOVEMENT0 + movement * Self::MOVEMENT1;
+            if self.goggles_movement > Self::MOVEMENT_THRESHOLD {
+                self.movement_frame = frame;
+            }
+        }
+        self.goggles.set_at(frame, pos);
         if include_up /*&& self.up.get_at(frame).is_none()*/ {
             self.up.set_at(frame, cam.get_look_up());
+        }
+    }
+    #[cfg(feature = "goggles2-camera")]
+    pub(super) fn record_goggles_unavail(&mut self) {
+        if !self.goggles.front().is_empty() | !self.goggles.back().is_empty() {
+            for (_, pos) in self.goggles.iter_all_mut() {
+                pos.clobber();
+            }
         }
     }
 
@@ -795,6 +837,28 @@ impl CameraState {
         #[cfg(feature = "goggles2-camera")]
         let pos = pos.max(self.goggles.position);
         pos
+    }
+    /// TODO: ?
+    pub fn id(&self) -> Option<NonZero<usize>> {
+        let id = self.movement_frame as usize;
+        NonZero::new(id)
+    }
+    pub fn reset(&mut self) {
+        self.movement_frame = 0;
+        self.mumblelink_movement = 0.0;
+        self.mumblelink.advance_to(self.mumblelink.position.wrapping_add(4));
+        #[cfg(feature = "goggles2-camera")]
+        {
+            self.goggles_movement = 0.0;
+            self.goggles.advance_to(self.goggles.position.wrapping_add(4));
+        }
+    }
+
+    pub fn movement(&self) -> f32 {
+        let movement = self.mumblelink_movement;
+        #[cfg(feature = "goggles2-camera")]
+        let movement = movement.max(self.goggles_movement);
+        movement
     }
 }
 #[derive(Debug, Copy, Clone, Default)]

@@ -16,7 +16,7 @@ use {
     std::collections::BinaryHeap,
     std::ffi::CStr,
     std::ops,
-    std::fmt::{self, Write},
+    std::fmt,
     std::iter,
     taimi_hoard::cmp::CmpIgnore,
     taimi_meta::{packs::TrailSectionPath, ui::{LocalContext, MapContext}},
@@ -64,7 +64,7 @@ impl RenderOrderSort {
     #[inline(always)]
     pub fn dist_to_sort_with(dist: f32, factor: f32) -> i32 {
         let dist = dist * factor;
-        dist.min(0x40000000i32 as f32) as i32
+        dist as i32
     }
     pub const DIST_FACTOR: f32 = 1_000_000.0f32;
     pub const DIST_FACTOR_CONSERVATIVE: f32 = Self::DIST_FACTOR * 0.15;
@@ -73,19 +73,19 @@ impl<'a, T, BvhIter> Iterator for RenderOrderBuilder<'a, T, BvhIter>
 where
     BvhIter: Iterator<Item = (Option<i32>, T)>,
 {
-    type Item = T;
+    type Item = (Option<i32>, T);
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some((cam_dist, entity)) = self.bvh_iter.next() {
             let cam_dist = match cam_dist {
-                None => return Some(entity),
+                dist @ None => return Some((dist, entity)),
                 Some(d) => d,
             };
             self.draw_order_heap
                 .push(HeapEntity { cam_dist, value: CmpIgnore(entity) });
         }
 
-        self.draw_order_heap.pop().map(|he| he.value.0)
+        self.draw_order_heap.pop().map(|he| (Some(he.cam_dist), he.value.0))
     }
 }
 
@@ -399,11 +399,13 @@ bitflags::bitflags! {
         const MINIMAP = 0x0002;
         const GLOBALMAP = 0x0004;
 
+        /// a depth buffer is like an onion
+        const ONION = 0x0010;
         #[cfg(feature = "goggles")]
         /// first pass at reduced opacity
-        const OBSCURED = 0x0010;
+        const OBSCURED = 0x0020;
         #[cfg(feature = "goggles2-project")]
-        const OBSCURED_SHADOWED = 0x0020;
+        const OBSCURED_SHADOWED = 0x0040;
 
         #[cfg(feature = "goggles2-project")]
         const REFLECT = 0x0100;
@@ -411,6 +413,8 @@ bitflags::bitflags! {
         const REFLECT_BELOW = 0x0200;
         #[cfg(feature = "goggles2-project")]
         const SHADOWBOX = 0x0400;
+        #[cfg(feature = "goggles2-project")]
+        const SHADOWBOX_OUTLINE = 0x0800;
 
         const FLAG_SPACE_POI = 0x1000_0000;
         const FLAG_SPACE_TRAIL = 0x2000_0000;
@@ -429,11 +433,23 @@ impl Drawing {
         Self::FLAG_MAP_POI.bits() | Self::FLAG_MAP_TRAIL.bits()
     );
     pub const PASSES: Self = Self::from_bits_truncate(0x00ff_ffff);
-    pub const PRIMARY: Self = Self::from_bits_retain(
+    pub const PASSES_PRIMARY: Self = Self::from_bits_retain(
         Self::SPACE.bits()
-        | Self::MINIMAP.bits()
+        | Self::PASSES_MAP.bits()
+    );
+    pub const PASSES_MAP: Self = Self::from_bits_retain(
+        Self::MINIMAP.bits()
         | Self::GLOBALMAP.bits()
     );
+    pub const PASSES_SPACE_POST: Self = Self::from_bits_retain({
+        let obscured = match () {
+            #[cfg(feature = "goggles")]
+            _ => Self::OBSCURED,
+            #[cfg(not(feature = "goggles"))]
+            _ => Self::empty(),
+        };
+        obscured.bits() | Self::ONION.bits()
+    });
     #[cfg(feature = "goggles")]
     pub const PASSES_OBSCURED: Self = Self::from_bits_retain({
         let obscured_proj = match () {
@@ -449,18 +465,24 @@ impl Drawing {
     pub const PASSES_PROJECT: Self = Self::from_bits_retain(
         Self::PASSES_REFLECT.bits()
         | Self::SHADOWBOX.bits()
+        | Self::SHADOWBOX_OUTLINE.bits()
     );
     #[cfg(feature = "goggles2-project")]
     pub const PASSES_REFLECT: Self = Self::from_bits_retain(
         Self::REFLECT.bits()
         | Self::REFLECT_BELOW.bits()
     );
-    #[cfg(feature = "goggles2-project")]
-    pub const PASSES_INCOMPAT_LEGACY: Self = Self::from_bits_retain(
-        Self::REFLECT_BELOW.bits()
-        | Self::OBSCURED_SHADOWED.bits()
-        | Self::SHADOWBOX.bits()
-    );
+    pub const PASSES_INCOMPAT_LEGACY: Self = Self::from_bits_retain({
+        let incompat_proj = match () {
+            #[cfg(feature = "goggles2-project")]
+            _ => Self::REFLECT_BELOW.bits()
+                | Self::OBSCURED_SHADOWED.bits()
+                | Self::SHADOWBOX.bits(),
+            #[cfg(not(feature = "goggles2-project"))]
+            _ => 0,
+        };
+        incompat_proj | Self::ONION.bits()
+    });
 
     #[inline(always)]
     pub const fn index(self) -> u8 {
@@ -517,12 +539,16 @@ impl Drawing {
             pass => pass,
         }
     }
+    pub fn remove_pass(&mut self) {
+        self.remove(Self::PASSES);
+    }
 
     pub fn pass_name(self) -> Option<&'static str> {
         Some(match self.get_pass() {
             Self::SPACE => "space",
             Self::MINIMAP => "minimap",
             Self::GLOBALMAP => "map",
+            Self::ONION => "onion",
             #[cfg(feature = "goggles")]
             Self::OBSCURED => "obscured",
             #[cfg(feature = "goggles2-project")]
@@ -553,7 +579,13 @@ impl fmt::Display for Drawing {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.pass_name() {
             Some(name) => f.write_str(name),
-            None => write!(f, "pass{:#x}", self.bits()),
+            None => write!(f, "pass{:#x}", self.get_pass().bits()),
+        }?;
+        #[cfg(taimi_debug)]
+        match self.get_flags() {
+            flags if !flags.is_empty() => write!(f, "+{flags:#x}")?,
+            _ => (),
         }
+        Ok(())
     }
 }

@@ -23,6 +23,9 @@
 
 #if SHADER_P
 
+#ifndef SHADER_P_PREMUL
+#define SHADER_P_PREMUL 0
+#endif
 #ifndef DISCARD_ALPHA
 #define DISCARD_ALPHA 0.01
 #endif
@@ -163,6 +166,18 @@ struct TrailSharedV {
     float _padding0;
     float _padding1;
 };
+struct MarkerSharedP {
+    float blend_factor;
+    float blend_const;
+    float _padding0;
+    float _padding0_1;
+};
+struct TrailSharedP {
+    MarkerSharedP marker;
+};
+struct PoiSharedP {
+    MarkerSharedP marker;
+};
 struct RenderSharedP {
 #if TODO && 0
     float2 viewport;
@@ -171,6 +186,8 @@ struct RenderSharedP {
     float player_feather;
     float distance_fade;
     float2 edge_feather;
+    float _padding0;
+    float _padding0_1;
 };
 struct RenderSharedV {
     column_major float4x4 projection;
@@ -195,6 +212,8 @@ cbuffer EntitySharedV : register(b0) {
 #if SHADER_P
 cbuffer EntitySharedP : register(b0) {
     RenderSharedP p_render;
+    TrailSharedP p_trail;
+    PoiSharedP p_poi;
 }
 Texture2D shaderTexture : register(t0);
 SamplerState SampleType : register(s0);

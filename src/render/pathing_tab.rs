@@ -366,6 +366,7 @@ impl PathingConfig {
             mut player_overlap_poi,
             mut distance_fade_range,
             distance_fade_intensity,
+            mut distance_ordering,
             distance_max,
             trail_y_offset,
             trail_resolution,
@@ -389,6 +390,7 @@ impl PathingConfig {
                 s.space.player_overlap_poi(),
                 s.space.distance_fade_range(),
                 s.space.distance_fade_intensity(),
+                s.space.distance_ordering(),
                 s.space.distance_max(),
                 s.space.trail_y_offset(),
                 s.space.trail_resolution(),
@@ -487,6 +489,11 @@ impl PathingConfig {
             }
             ui.unindent();
         }
+        if arcrender {
+            if with_i18n!("pathing-config-distance-order", |label| ui.checkbox(&label, &mut distance_ordering)) {
+                Self::set_pathing(|s| s.space.distance_ordering = Some(distance_ordering));
+            }
+        }
         if let Some(value) = Self::slider_opt_setting(
             ui,
             &fl!("pathing-config-distance-fade-intensity"),
@@ -522,7 +529,7 @@ impl PathingConfig {
         }
         #[cfg(feature = "goggles")]
         if let Some(value) =
-            Self::slider_opt_setting_with_initial(ui, "corner boundary scale", edge_scale, (0.1f32, 5.0), Some(GogglesSettings::DEFAULT_EDGE_SCALE))
+            Self::slider_opt_mult(ui, "corner boundary scale", edge_scale.unwrap_or(0.0), (0.1f32, 5.0), Some(/*GogglesSettings::DEFAULT_EDGE_SCALE*/ 0.5))
         {
             let mut edge_scale = value;
             Self::set_pathing(|s| {

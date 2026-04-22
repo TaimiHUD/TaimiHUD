@@ -13,6 +13,8 @@ use {
         viewport::Viewport,
     },
 };
+#[cfg(feature = "goggles2")]
+use taimi_d3d::dx11::blend::{BlendFactor, BlendOp};
 
 #[allow(unused)]
 pub struct RenderBackend {
@@ -133,8 +135,14 @@ impl RenderBackend {
 
     const BLEND_STATE_DESC_RT: D3D11_RENDER_TARGET_BLEND_DESC =
         D3D11_RENDER_TARGET_BLEND_DESC {
-            #[cfg(feature = "goggles2")]
-            RenderTargetWriteMask: (d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0 | d3d11::D3D11_COLOR_WRITE_ENABLE_GREEN.0 | d3d11::D3D11_COLOR_WRITE_ENABLE_BLUE.0) as _,
+            //#[cfg(feature = "goggles2")]
+            RenderTargetWriteMask: BlendState::WRITE_RGB.0 as _,
+            #[cfg(todoo)]
+            SrcBlend: BlendFactor::ONE,
+            #[cfg(todo)]
+            SrcBlend: BlendFactor::BLEND_FACTOR,
+            #[cfg(todo)]
+            SrcBlendAlpha: BlendFactor::BLEND_FACTOR,
             ..BlendState::TARGET_DESC_ADDITIVE
         };
 

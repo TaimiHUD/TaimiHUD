@@ -34,6 +34,15 @@ impl BlendState {
         DestBlend: BlendFactor::INV_SRC_ALPHA,
         ..Self::TARGET_DESC_DEFAULT_OFF
     };
+    pub const WRITE_RGB: d3d11::D3D11_COLOR_WRITE_ENABLE = d3d11::D3D11_COLOR_WRITE_ENABLE(
+        d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0
+        | d3d11::D3D11_COLOR_WRITE_ENABLE_GREEN.0
+        | d3d11::D3D11_COLOR_WRITE_ENABLE_BLUE.0
+    );
+    pub const WRITE_RA: d3d11::D3D11_COLOR_WRITE_ENABLE = d3d11::D3D11_COLOR_WRITE_ENABLE(
+        d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0
+        | d3d11::D3D11_COLOR_WRITE_ENABLE_ALPHA.0
+    );
 
     pub const fn desc_for_target(
         rt_desc: D3D11_RENDER_TARGET_BLEND_DESC,

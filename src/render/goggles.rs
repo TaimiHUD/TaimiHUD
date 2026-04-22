@@ -182,14 +182,23 @@ impl GogglesConfig {
 
         #[cfg(feature = "goggles2-project")]
         {
+            let undrawn = machine.goggles.project.undrawn();
             let mut prefix = "drawfail";
-            for ctx in machine.goggles.project.undrawn() {
+            for ctx in undrawn.iter_passes() {
                 if !prefix.is_empty() {
                     ui.text(prefix);
                 }
                 prefix = "";
                 ui.same_line();
                 ui.text(ctx.to_string());
+            }
+            let flags = undrawn.get_flags();
+            if !flags.is_empty() {
+                ui.same_line();
+                if !prefix.is_empty() {
+                    ui.text(prefix);
+                }
+                ui.text(flags.to_string());
             }
         }
     }

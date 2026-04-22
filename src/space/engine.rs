@@ -40,6 +40,7 @@ use {
     },
     taimi_meta::{
         coords::ScreenSpace,
+        packs::MarkerIndex,
         spatial::cull::MapFrustum,
         ui::{
             gameplay::{GameplayState, GameplayTransition},
@@ -939,12 +940,9 @@ impl Engine {
         }
     }
     pub fn draw2(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, mut desc: DrawDescSpace, ctx: LocalContext) {
-        if machine.goggles.project.project_depth_fill {
+        if desc.pass.get_pass() == Drawing::ONION {
+            desc.draw_pois = None;
             desc.depth_write = false;
-            #[cfg(deleteme)]
-            {
-                desc.depth_read = false;
-            }
         }
         let mut state = DrawStateSpace::default();
         #[cfg(deleteme)]
@@ -970,6 +968,13 @@ impl Engine {
                     textured: textured_pois,
                 });
                 let Some((camera, depth, cull)) = self.space_bounds(machine, &desc) else { return };
+                match (machine.goggles.project.project_depth_fill, desc.pass.get_pass()) {
+                    (false, Drawing::SPACE) /*| (true, Drawing::SHADOWBOX)*/ =>
+                        desc.depth_write = false,
+                    (true, Drawing::REFLECT) if desc.goggles.target_depthview.is_some() =>
+                        desc.depth_write = false,
+                    _ => (),
+                }
                 self.setup_frame(machine, device_context);
                 state.setup_target(device_context, &self.render_backend, &desc);
                 #[cfg(deleteme)]
@@ -978,17 +983,31 @@ impl Engine {
                 }
 
                 state.set_minimap_scissor(device_context, &self.render_backend, None);
-                if desc.pass.get_pass() == Drawing::REFLECT {
-                    let prev = desc.pass;
-                    desc.pass.set_pass(Drawing::REFLECT_BELOW);
-                    // TODO: reading depth here from shadowbox (and maybe world?) would interact with terrain properly,
-                    // but this is usually just to see a little bit below the water's surface anyway so...
-                    let prev_write = mem::replace(&mut desc.depth_write, false);
-                    let prev_read = mem::replace(&mut desc.depth_read, false);
-                    self.draw_space(machine, device_context, &desc, &mut state, camera, depth.clone(), &cull);
-                    desc.pass = prev;
-                    desc.depth_write = prev_write;
-                    desc.depth_read = prev_read;
+                match desc.pass.get_pass() {
+                    Drawing::REFLECT => {
+                        let prev = desc.pass;
+                        desc.pass.set_pass(Drawing::REFLECT_BELOW);
+                        // TODO: reading depth here from shadowbox (and maybe world?) would interact with terrain properly,
+                        // but this is usually just to see a little bit below the water's surface anyway so...
+                        let prev_write = mem::replace(&mut desc.depth_write, false);
+                        let prev_read = mem::replace(&mut desc.depth_read, false);
+                        self.draw_space(machine, device_context, &desc, &mut state, camera, depth.clone(), &cull);
+                        desc.pass = prev;
+                        desc.depth_write = prev_write;
+                        desc.depth_read = prev_read;
+                    },
+                    Drawing::OBSCURED if (!desc.goggles.is_project() || !desc.depth_read) && self.drawing.wants_onion(&self.arcdata) => {
+                        desc.depth_read = false;
+                    },
+                    Drawing::SPACE if self.drawing.wants_onion(&self.arcdata) && desc.depth_read && desc.depth_write => {
+                        let prev = desc.pass;
+                        let prev_write = mem::replace(&mut desc.depth_write, false);
+                        desc.pass.set_pass(Drawing::ONION);
+                        self.draw_space(machine, device_context, &desc, &mut state, camera, depth.clone(), &cull);
+                        desc.pass = prev;
+                        desc.depth_write = prev_write;
+                    },
+                    _ => (),
                 }
                 self.draw_space(machine, device_context, &desc, &mut state, camera, depth, &cull);
             },
@@ -1353,7 +1372,8 @@ impl Engine {
                 return
             },
             g @ Some(..) if desc.goggles.is_project() => g,
-            Some(..) if !desc.goggles.is_project() && !desc.depth_read || desc.goggles.target_depthview.is_none() => {
+            #[cfg(taimi_debug)]
+            Some(..) if !desc.goggles.is_project() && (!desc.depth_read || desc.goggles.target_depthview.is_none()) && !self.drawing.wants_onion(&self.arcdata) => {
                 frame_log!("bad obscured draw config");
                 return
             },
@@ -1371,7 +1391,7 @@ impl Engine {
             },
             _ => (),
         }
-        let legacy_alpha = match () {
+        match desc.pass.get_pass() {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
                 if desc.depth_read {
@@ -1394,15 +1414,20 @@ impl Engine {
                 let poi_alpha = &mut self.packs.shared_v.poi.marker.alpha;
                 let trail_alpha = &mut self.packs.shared_v.trail.marker.alpha;
                 let bigalpha = obscured_alpha * 2.0 / (*trail_alpha + *poi_alpha);
-                *poi_alpha *= bigalpha;
-                *trail_alpha *= bigalpha;
-                obscured_alpha
+                *poi_alpha = (*poi_alpha * bigalpha).min(*poi_alpha);
+                *trail_alpha = (*trail_alpha * bigalpha).min(*trail_alpha);
+            },
+            Drawing::ONION => {
+                let poi_alpha = &mut self.packs.shared_v.poi.marker.alpha;
+                let trail_alpha = &mut self.packs.shared_v.trail.marker.alpha;
+                *poi_alpha *= FrameContext::BLEND_ACCUM_TARGET;
+                *trail_alpha *= FrameContext::BLEND_ACCUM_TARGET;
+                state.setup_depth(device_context, &self.render_backend, machine, desc);
             },
             _ => {
                 state.setup_depth(device_context, &self.render_backend, machine, desc);
-                self.packs.shared_v.poi.marker.alpha * self.packs.shared_v.trail.marker.alpha
             },
-        };
+        }
         state.setup_blend(device_context, &self.render_backend, machine, desc);
 
         #[cfg(feature = "goggles")]
@@ -1530,42 +1555,97 @@ impl Engine {
                 RenderMachine::space_view(*cam).matrix,
                 self.packs.resources.anim_timestamp,
             );
-            #[cfg(feature = "goggles2-project")]
-            match desc.pass.get_pass() {
-                pass @ (Drawing::REFLECT | Drawing::REFLECT_BELOW) => {
-                    // XXX: beware, this + camera_dir are used for culling as well as misc distance calc!
-                    self.packs.shared_v.render.camera_pos = camera.0.to_vector().cast();
-                    if pass == Drawing::REFLECT {
-                        self.packs.shared_v.poi.billboard = match camera {
-                            #[cfg(todo)]
-                            cam_orig => {
-                                // this looks too silly despite seeming "correct"
-                                let orig_view = RenderMachine::space_view(cam_orig).matrix;
-                                taimi_meta::coords::billboard_from_look(orig_view.into())
-                            },
-                            _ => {
-                                let mut cam_below = *cam;
-                                cam_below.0.y *= 0.5;
-                                cam_below.1.y *= 0.5;
-                                //cam_below.1 = cam_below.1.normalize_or(camera.1);
-                                let orig_view = RenderMachine::space_view(cam_below).matrix;
-                                taimi_meta::coords::billboard_from_look(orig_view.into())
-                            },
-                        };
+            self.packs.render_list.unordered_last = false;
+            let blending = match desc.pass.get_pass() {
+                #[cfg(feature = "goggles")]
+                Drawing::OBSCURED if !desc.depth_read => Some(FrameContext::BLEND_ACCUM_TARGET),
+                Drawing::ONION => Some(FrameContext::BLEND_ACCUM_TARGET),
+                Drawing::SPACE if self.drawing.blend_accum_poi == 0.0 && self.drawing.blend_accum_trail == 0.0 => {
+                    if self.arcdata.poi_alpha - self.arcdata.trail_alpha > 0.2 {
+                        self.packs.render_list.unordered_last = true;
                     }
+                    None
                 },
-                _ => (),
-            }
+                Drawing::SPACE => Some(match () {
+                    _ if desc.depth_write => {
+                        self.packs.render_list.unordered_last = true;
+                        1.0
+                    },
+                    _ => 1.0,
+                }),
+                _ => None,
+            };
+            let blending = blending.map(|target| {
+                let target_poi = target * self.arcdata.poi_alpha;
+                let target_trail = target * self.arcdata.trail_alpha;
+                let delta_poi = target_poi - self.packs.shared_v.poi.marker.alpha;
+                let delta_trail = target_trail - self.packs.shared_v.trail.marker.alpha;
+                if self.packs.shared_v.poi.marker.alpha > 0.0 && matches!(delta_poi, 0.0..0.15) {
+                    self.packs.shared_v.poi.marker.alpha = target_poi;
+                }
+                if self.packs.shared_v.trail.marker.alpha > 0.0 && matches!(delta_trail, 0.0..0.15) {
+                    self.packs.shared_v.trail.marker.alpha = target_trail;
+                }
+                let poi = self.drawing.blend_accum_poi / self.packs.shared_v.poi.marker.alpha;
+                let trail = self.drawing.blend_accum_trail / self.packs.shared_v.trail.marker.alpha;
+                #[cfg(taimi_debug)]
+                frame_log!("onion blending target={target:?} poi={poi:?} trail={trail:?}; depth:r={},w={}", desc.depth_read, desc.depth_write);
+                if !poi.is_infinite() && poi >= 1.0 {
+                    frame_log!("ONION(POI) TOO BIG");
+                    self.packs.shared_v.poi.marker.alpha = 0.0;
+                }
+                if !trail.is_infinite() && trail >= 1.0 {
+                    frame_log!("ONION(TRL) TOO BIG");
+                    self.packs.shared_v.trail.marker.alpha = 0.0;
+                }
+                (poi, trail)
+            });
+            ArcrenderSettings::setup_p(
+                &mut self.packs.shared_p,
+                blending,
+            );
+        }
+        let primary_draw = match desc.pass.get_pass() {
+            #[cfg(feature = "goggles2-project")]
+            pass @ (Drawing::REFLECT | Drawing::REFLECT_BELOW) if arcrender => {
+                // XXX: beware, this + camera_dir are used for culling as well as misc distance calc!
+                self.packs.shared_v.render.camera_pos = camera.0.to_vector().cast();
+                if pass == Drawing::REFLECT {
+                    self.packs.shared_v.poi.billboard = match camera {
+                        #[cfg(todo)]
+                        cam_orig => {
+                            // this looks too silly despite seeming "correct"
+                            let orig_view = RenderMachine::space_view(cam_orig).matrix;
+                            taimi_meta::coords::billboard_from_look(orig_view.into())
+                        },
+                        _ => {
+                            let mut cam_below = *cam;
+                            cam_below.0.y *= 0.5;
+                            cam_below.1.y *= 0.5;
+                            //cam_below.1 = cam_below.1.normalize_or(camera.1);
+                            let orig_view = RenderMachine::space_view(cam_below).matrix;
+                            taimi_meta::coords::billboard_from_look(orig_view.into())
+                        },
+                    };
+                }
+                false
+            },
+            #[cfg(all(todo, feature = "goggles2-project"))]
+            _ if desc.goggles.is_project() => false,
+            Drawing::SPACE => true,
+            _ => false,
+        };
+        if arcrender {
             self.packs.resources.update_shared(
                 &device_context, &self.render_backend.device,
                 &self.packs.shared_v, &self.packs.shared_p
             );
         } else {
-            #[cfg(feature = "goggles2-project")]
             if desc.pass.intersects(Drawing::PASSES_INCOMPAT_LEGACY) {
                 frame_log!("{} not supported by legacy renderer", desc.pass);
                 return
             }
+            let legacy_alpha = self.packs.shared_v.poi.marker.alpha * self.packs.shared_v.trail.marker.alpha;
             self.render_backend.perspective_handler.set_alpha(legacy_alpha);
             let vdata = &mut self.render_backend.perspective_handler.constant_buffer_data;
             vdata.poi_expansion = self.arcdata.poi_expansion;
@@ -1628,8 +1708,38 @@ impl Engine {
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
                 let entities = self.packs.render_list.iter_markers_visible(
-                    self.packs.pack_data.map_ref_as_slice(), cull, cam
+                    self.packs.pack_data.map_ref_as_slice(), None, cull, cam
+                ).filter(|(_, _, id)| match id.get_marker_index().namespace() {
+                    MarkerIndex::NS_TRAIL => desc.draw_trails.is_some(),
+                    MarkerIndex::NS_POI => desc.draw_pois.is_some(),
+                    _ => true,
+                });
+                PackRender::draw_markers(
+                    &mut self.packs.draw_state,
+                    &self.packs.resources,
+                    device_context,
+                    &self.render_backend,
+                    entities,
+                    arcrender,
                 );
+            },
+            #[cfg(feature = "goggles2-project")]
+            Drawing::REFLECT_BELOW if self.packs.render_list.draw_order_cache_id.is_some() && self.packs.render_list.draw_order_cache_id == machine.camera.id() => {
+                let spacepacks = self.packs.render_list.spacepacks.clone();
+                let shapes = &spacepacks.render_entities.entities[..];
+                let camera_id = machine.camera.id();
+                let entities = self.packs.render_list.iter_markers_visible(
+                    self.packs.pack_data.map_ref_as_slice(), camera_id, cull, cam
+                ).filter(|(data, idx, id)| match id.get_marker_index().namespace() {
+                    MarkerIndex::NS_TRAIL if desc.draw_trails.is_none() => false,
+                    MarkerIndex::NS_POI if desc.draw_pois.is_none() => false,
+                    _ => {
+                        let bottom = unsafe {
+                            shapes.get_unchecked(*idx)
+                        }.bounds.min.y;
+                        bottom <= Engine::UNDERWATER_VISIBILITY
+                    },
+                });
                 PackRender::draw_markers(
                     &mut self.packs.draw_state,
                     &self.packs.resources,
@@ -1681,8 +1791,12 @@ impl Engine {
                     cull => PlaneCull::with_frustum_ref(cull),
                 };
                 let entities = self.packs.render_list.iter_markers_visible(
-                    self.packs.pack_data.map_ref_as_slice(), cull, cam
-                );
+                    self.packs.pack_data.map_ref_as_slice(), None, cull, cam
+                ).filter(|(_, _, id)| match id.get_marker_index().namespace() {
+                    MarkerIndex::NS_TRAIL => desc.draw_trails.is_some(),
+                    MarkerIndex::NS_POI => desc.draw_pois.is_some(),
+                    _ => true,
+                });
                 PackRender::draw_markers(
                     &mut self.packs.draw_state,
                     &self.packs.resources,
@@ -1692,19 +1806,18 @@ impl Engine {
                     arcrender,
                 );
             },
-            _ => {
-                let primary_draw = match desc.pass.get_pass() {
-                    #[cfg(all(todo, feature = "goggles2-project"))]
-                    _ if desc.goggles.is_project() => false,
-                    Drawing::SPACE => true,
-                    _ => false,
-                };
+            pass => {
                 if primary_draw {
                     self.packs.draw_state.primary_draw = true;
                 }
+                let camera_id = machine.camera.id();
                 let entities = self.packs.render_list.iter_markers_visible(
-                    self.packs.pack_data.map_ref_as_slice(), cull, cam
-                );
+                    self.packs.pack_data.map_ref_as_slice(), camera_id, cull, cam
+                ).filter(|(_, _, id)| match id.get_marker_index().namespace() {
+                    MarkerIndex::NS_TRAIL => desc.draw_trails.is_some(),
+                    MarkerIndex::NS_POI => desc.draw_pois.is_some(),
+                    _ => true,
+                });
                 PackRender::draw_markers(
                     &mut self.packs.draw_state,
                     &self.packs.resources,
@@ -1717,9 +1830,48 @@ impl Engine {
                 if primary_draw {
                     self.drawing.tarnish_depth_ours(desc);
                 }
+                self.packs.render_list.unordered_last = false;
+                let accumulates = match pass {
+                    Drawing::SPACE | Drawing::ONION => true,
+                    Drawing::OBSCURED if !desc.depth_read => true,
+                    _ => false,
+                };
+                if accumulates && desc.draw_trails.is_some() {
+                    #[cfg(taimi_debug)]
+                    frame_log!("onion factors(trl): {:?}", self.packs.shared_p.trail.marker.blend_factors.to_array());
+                    let accum = self.packs.shared_p.trail.marker.cumulative_alpha(self.packs.shared_v.trail.marker.alpha, self.drawing.blend_accum_trail);
+                    self.drawing.blend_accum_trail = self.drawing.blend_accum_trail.max(accum);
+                }
+                if accumulates && desc.draw_pois.is_some() {
+                    #[cfg(taimi_debug)]
+                    frame_log!("onion factors(poi): {:?}", self.packs.shared_p.poi.marker.blend_factors.to_array());
+                    let accum = self.packs.shared_p.poi.marker.cumulative_alpha(self.packs.shared_v.poi.marker.alpha, self.drawing.blend_accum_poi);
+                    self.drawing.blend_accum_poi = self.drawing.blend_accum_poi.max(accum);
+                }
+                #[cfg(taimi_debug)]
+                if accumulates {
+                    frame_log!("onion accumulation poi={:?} trail={:?}", self.drawing.blend_accum_poi, self.drawing.blend_accum_trail);
+                }
             },
         }
-        self.drawing.drawn.insert(desc.pass.to_drawn());
+        self.drawing.drawn.insert({
+            let mut drawn = desc.pass.to_drawn();
+            if primary_draw {
+                let incomplete = (self.drawing.drawing ^ self.drawing.drawn) & drawn;
+                if desc.draw_pois.is_none() {
+                    drawn.remove(Drawing::FLAG_SPACE_POI);
+                }
+                if desc.draw_trails.is_none() {
+                    drawn.remove(Drawing::FLAG_SPACE_TRAIL);
+                }
+                if incomplete & drawn != incomplete {
+                    drawn.remove_pass();
+                }
+            } else {
+                drawn.remove(Drawing::FLAGS_SPACE);
+            }
+            drawn
+        });
     }
     /// overlap threshold to display paths just barely under the water's surface
     const UNDERWATER_VISIBILITY: f32 = match () {
@@ -1813,22 +1965,25 @@ impl Engine {
             );
         }
         self.drawing.stencil.set_minimap(minimap_bounds);
-        let clear_stencil = stencil_prev != self.drawing.stencil;
+        let mut clear_stencil = stencil_prev != self.drawing.stencil;
         let clear_depth = self.drawing.depth_dirty_ours;
         let clear = (clear_depth | clear_stencil).then_some(
             IntoIterator::into_iter([
                 clear_depth.then_some(ClearFlags::DEPTH),
                 clear_stencil.then_some(ClearFlags::STENCIL),
-            ]).flatten().collect()
+            ]).flatten().collect::<ClearFlags>()
         );
         if let Some(flags) = clear {
+            // XXX: clear flags don't work individually afaict, draw a quad if preserving
+            // the mask across frames actually matters in any way...
             self.render_backend.depth_handler.render_target_view.clear_depth(
                 &*device_context,
-                flags,
+                ClearFlags::DEPTH_STENCIL,
                 DrawDescSpace::CLEAR_DEPTH,
                 DrawStateSpace::STENCIL_CLEAR,
             );
             self.drawing.depth_dirty_ours = false;
+            clear_stencil = true;
         }
 
         let desc_map = desc.to_map();
@@ -1878,9 +2033,7 @@ impl Engine {
             self.world.query::<(Entity, &Render, &Position)>().is_empty(&self.world, tick_prev, tick)
         };
         #[cfg(feature = "goggles")]
-        let is_rendering_obscured = is_rendering_world && self.drawing.drawing.has(Drawing::OBSCURED);
-        #[cfg(feature = "goggles")]
-        let has_drawn_obscured = !is_rendering_obscured || self.drawing.drawn.has(Drawing::OBSCURED);
+        let post_needed = (self.drawing.drawing ^ self.drawing.drawn) & Drawing::PASSES_SPACE_POST;
         let is_rendering_world = match is_rendering_world {
             #[cfg(feature = "space-ecs")]
             true if !ecs_empty => true,
@@ -1889,7 +2042,7 @@ impl Engine {
         };
         let render_world = match is_rendering_world {
             #[cfg(feature = "goggles")]
-            _ if !has_drawn_obscured => true,
+            _ if !post_needed.is_empty() => true,
             v => v,
         }.then(|| self.get_space_bounds(machine, &desc));
         #[cfg(feature = "goggles")]
@@ -1901,18 +2054,20 @@ impl Engine {
                     false => machine.goggles.lens.vp_idk,
                     _ => None,
                 };
-                let mut g = DrawDescGoggles::with_buffers(vp, Some(lens), None);
-                g.buffer_compat = buffer_compat;
-                desc = g.to_space();
-                if desc.stencil_write || is_rendering_world {
-                    // DV fill is dumb if all we're doing is drawing the obscured paths...
-                    state.setup_target(device_context, &self.render_backend, &desc);
-                    self.drawing.stencil.apply_masks(
-                        device_context,
-                        &self.render_backend,
-                        &desc,
-                        &mut state,
-                    );
+                if buffer_compat {
+                    let mut g = DrawDescGoggles::with_buffers(vp, Some(lens), None);
+                    g.buffer_compat = buffer_compat;
+                    desc = g.to_space();
+                    if desc.stencil_write || is_rendering_world {
+                        // DV fill is dumb if all we're doing is drawing the obscured paths...
+                        state.setup_target(device_context, &self.render_backend, &desc);
+                        self.drawing.stencil.apply_masks(
+                            device_context,
+                            &self.render_backend,
+                            &desc,
+                            &mut state,
+                        );
+                    }
                 }
             });
         }
@@ -1924,23 +2079,50 @@ impl Engine {
                 _ => true,
             };
             state.set_minimap_scissor(device_context, &self.render_backend, None);
+            let mut wants_onion = post_needed.contains(Drawing::ONION) && self.drawing.wants_onion(&self.arcdata);
             #[cfg(feature = "goggles")]
-            if !has_drawn_obscured && desc.goggles.target_depthview.is_some() && desc.goggles.buffer_compat && desc.depth_read {
-                let obscured_desc = DrawDescSpace {
+            if post_needed.contains(Drawing::OBSCURED) && desc.goggles.target_depthview.is_some() && desc.goggles.buffer_compat && desc.depth_read {
+                let mut obscured_desc = DrawDescSpace {
                     depth_write: false,
-                    pass: Drawing::OBSCURED,
-                    ..desc
+                    pass: Drawing::OBSCURED | self.drawing.drawing.get_flags(),
+                    ..desc.clone()
                 };
+                if wants_onion {
+                    obscured_desc.depth_read = false;
+                    obscured_desc.stencil_read = true;
+                    obscured_desc.goggles.target_depthview = None;
+                    obscured_desc.goggles.buffer_compat = false;
+                }
                 state.setup_target(device_context, &self.render_backend, &obscured_desc);
                 self.draw_space(machine, device_context, &obscured_desc, &mut state, camera, depth.clone(), cull);
+                wants_onion = self.drawing.wants_onion(&self.arcdata);
             }
-            state.setup_target(device_context, &self.render_backend, &desc);
+            if wants_onion {
+                let onion_desc = DrawDescSpace {
+                    depth_write: false,
+                    pass: Drawing::ONION | self.drawing.drawing.get_flags(),
+                    draw_pois: None,
+                    #[cfg(feature = "goggles")]
+                    #[cfg(todo)]
+                    depth_read: desc.goggles.target_depthview.is_some() && desc.depth_read,
+                    stencil_read: true,
+                    ..desc.clone()
+                };
+                state.setup_target(device_context, &self.render_backend, &onion_desc);
+                self.draw_space(machine, device_context, &onion_desc, &mut state, camera, depth.clone(), cull);
+            }
             if drawing_world {
+                #[cfg(feature = "goggles")]
+                if desc.goggles.target_depthview.is_some() && desc.depth_read {
+                    desc.depth_write = true;
+                }
+                state.setup_target(device_context, &self.render_backend, &desc);
                 self.draw_space(machine, device_context, &desc, &mut state, camera, depth.clone(), cull);
             }
 
             #[cfg(feature = "space-ecs")]
             if !ecs_empty {
+                state.setup_target(device_context, &self.render_backend, &desc);
                 self.draw_ecs(machine, device_context, &desc, &mut state, camera, depth, cull)
             }
         }
@@ -2568,6 +2750,8 @@ pub struct FrameContext {
     pub map_anim: MapOpen,
     pub depth_dirty_ours: bool,
     pub stencil: FrameStencil,
+    pub blend_accum_trail: f32,
+    pub blend_accum_poi: f32,
 }
 impl FrameContext {
     pub fn empty() -> Self {
@@ -2584,6 +2768,8 @@ impl FrameContext {
             frame_start: None,
             depth_dirty_ours: true,
             stencil: FrameStencil::default(),
+            blend_accum_trail: 0.0f32,
+            blend_accum_poi: 0.0f32,
         }
     }
     pub fn is_stale_frame(&self) -> bool {
@@ -2592,6 +2778,8 @@ impl FrameContext {
     /// whatever was there is long gone now
     fn discard_frame(&mut self) {
         self.drawn.clear();
+        self.blend_accum_trail = 0.0f32;
+        self.blend_accum_poi = 0.0f32;
     }
     pub fn end_frame(&mut self) {
         self.frame_index = self.frame_count;
@@ -2668,29 +2856,48 @@ impl FrameContext {
         if !machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) {
             self.drawing.remove(Drawing::PASSES_OBSCURED);
         }
+        if !machine.goggles.is_enabled(GogglesEnables::PROJECT_ENABLE) {
+            self.drawing.remove(Drawing::PASSES_PROJECT);
+        }
     }
     fn prepare_enabled(&mut self, settings: &PathingSettings) {
         self.enabled.clear();
         let space = &settings.space;
         for ctx in FrameContext::draw_contexts() {
             let vis = match ctx {
-                LocalContext::World => space.visible_space() && (
-                    Self::alpha_visible(space.trail_alpha())
-                    | Self::alpha_visible(space.poi_alpha())
-                ),
-                LocalContext::Map(map_ctx) => space.visible_map(map_ctx) && (
-                    Self::alpha_visible(space.trail_alpha_map(map_ctx))
-                    | Self::alpha_visible(space.poi_alpha_map(map_ctx))
-                ),
+                LocalContext::World => space.visible_space(),
+                LocalContext::Map(map_ctx) if !space.visible_map(map_ctx) => false,
+                LocalContext::Map(map_ctx) => {
+                    let mut vis = false;
+                    if Self::alpha_visible(space.poi_alpha_map(map_ctx)) {
+                        self.enabled.insert(Drawing::FLAG_MAP_POI);
+                        vis = true;
+                    }
+                    if Self::alpha_visible(space.trail_alpha_map(map_ctx)) {
+                        self.enabled.insert(Drawing::FLAG_MAP_TRAIL);
+                        vis = true;
+                    }
+                    vis
+                },
             };
             // TODO: consider thresholds around map open anim overlap edges?
             self.enabled.set(Drawing::from_context(ctx), vis);
         }
-        #[cfg(feature = "goggles")]
         if self.enabled.contains(Drawing::SPACE) {
-            let enables = space.goggles.enables();
-            let obscured_enabled = space.goggles.obscured_alpha() > 0.0;
-            if enables.contains(GogglesEnables::LENS_ENABLE) && obscured_enabled {
+            let (poi_alpha, trail_alpha) = (
+                space.poi_alpha(),
+                space.trail_alpha(),
+            );
+            self.enabled.set(Drawing::FLAG_SPACE_POI, Self::alpha_visible(poi_alpha));
+            self.enabled.set(Drawing::FLAG_SPACE_TRAIL, Self::alpha_visible(trail_alpha));
+            self.enabled.set(Drawing::ONION, space.distance_ordering());
+            #[cfg(feature = "goggles")]
+            let (enables, obscured_alpha) = (
+                space.goggles.enables(),
+                space.goggles.obscured_alpha(),
+            );
+            #[cfg(feature = "goggles")]
+            if enables.contains(GogglesEnables::LENS_ENABLE) && Self::alpha_visible(obscured_alpha) {
                 self.enabled.insert(Drawing::OBSCURED);
             }
             #[cfg(feature = "goggles2-project")]
@@ -2710,13 +2917,19 @@ impl FrameContext {
     }
     fn prepare_drawing(&mut self) {
         let mut visible = self.visible;
-        #[cfg(feature = "goggles")]
-        if self.visible.contains(Drawing::SPACE) {
-            visible.insert(Drawing::PASSES_OBSCURED);
+        if visible.contains(Drawing::SPACE) {
+            visible.insert(Drawing::FLAGS_SPACE | Drawing::ONION);
+            #[cfg(feature = "goggles")]
+            {
+                visible.insert(Drawing::PASSES_OBSCURED);
+            }
             #[cfg(feature = "goggles2-project")]
             {
                 visible.insert(Drawing::PASSES_PROJECT);
             }
+        }
+        if visible.intersects(Drawing::PASSES_MAP) {
+            visible.insert(Drawing::FLAGS_MAP);
         }
         visible &= self.enabled;
         self.drawing = visible;
@@ -2735,6 +2948,15 @@ impl FrameContext {
         let tarnished = desc.depth_write;
         self.depth_dirty_ours |= tarnished;
         tarnished
+    }
+
+    pub const BLEND_ACCUM_MID: f32 = 0.5f32;
+    pub const BLEND_ACCUM_TARGET: f32 = 0.68f32;
+    pub fn wants_onion(&self, arcdata: &ArcrenderSettings) -> bool {
+        if !self.drawing.contains(Drawing::ONION) { return false }
+
+        (self.enabled.contains(Drawing::FLAG_SPACE_POI) && self.blend_accum_poi * arcdata.poi_alpha < Self::BLEND_ACCUM_MID)
+         || (self.enabled.contains(Drawing::FLAG_SPACE_TRAIL) && self.blend_accum_trail * arcdata.trail_alpha < Self::BLEND_ACCUM_MID)
     }
 }
 impl FrameContext {
@@ -2896,15 +3118,16 @@ impl DrawStateSpace {
     /// for drawing maps
     pub const DEPTH_IGNORE: DrawStateId = 3;
     pub const DEPTH_ON: DrawStateId = 4;
+    pub const DEPTH_OFF: DrawStateId = 5;
     /// write [FrameStencil::STENCIL_MASK_MINIMAP]
-    pub const DEPTH_MASK_FILL_OPAQUE: DrawStateId = 5;
+    pub const DEPTH_MASK_FILL_OPAQUE: DrawStateId = 6;
     /// fill depth instead of [Self::DEPTH_MASK_FILL_OPAQUE] for compatibility with low-bpp buffers
     #[cfg(feature = "goggles")]
-    pub const DEPTH_MASK_FILL_FALLBACK: DrawStateId = 6;
+    pub const DEPTH_MASK_FILL_FALLBACK: DrawStateId = 7;
     #[cfg(feature = "goggles")]
-    pub const DEPTH_READONLY: DrawStateId = 7;
+    pub const DEPTH_READONLY: DrawStateId = 8;
     #[cfg(feature = "goggles")]
-    pub const DEPTH_OBSCURED: DrawStateId = 8;
+    pub const DEPTH_OBSCURED: DrawStateId = 9;
     #[cfg(feature = "goggles")]
     pub const DEPTH_WRITEONLY: DrawStateId = Self::DEPTH_MASK_FILL_FALLBACK;
 
@@ -2996,6 +3219,7 @@ impl DrawStateSpace {
         let state = match id {
             Self::DEPTH_IGNORE => &backend.depth_handler.depth_stencil_state_map,
             Self::DEPTH_ON => &backend.depth_handler.depth_stencil_state,
+            Self::DEPTH_OFF => &backend.depth_handler.depth_stencil_state_off,
             Self::DEPTH_MASK_FILL_OPAQUE => &backend.depth_handler.depth_stencil_state_mask,
             #[cfg(feature = "goggles")]
             Self::DEPTH_MASK_FILL_FALLBACK => &backend.depth_handler.depth_stencil_state_write,
@@ -3177,10 +3401,13 @@ impl DrawStateSpace {
         let id = if desc.null_depth_view() {
             Self::DEPTH_IGNORE
         } else if !desc.depth_write {
-            if !desc.depth_read {
-                Self::DEPTH_IGNORE
-            } else {
-                Self::DEPTH_READONLY
+            match desc.depth_read {
+                true => Self::DEPTH_READONLY,
+                false if desc.stencil_write =>
+                    Self::DEPTH_MASK_FILL_OPAQUE,
+                false if desc.stencil_read =>
+                    Self::DEPTH_OFF,
+                false => Self::DEPTH_IGNORE,
             }
         } else if !desc.depth_read {
             Self::DEPTH_WRITEONLY
@@ -3201,7 +3428,7 @@ impl DrawStateSpace {
         };
         let blend_state = set_blend.then_some(match () {
             #[cfg(feature = "goggles2-project")]
-            _ if desc.goggles.is_project() && machine.goggles.project.project_shadow => Self::BLEND_SHADOW,
+            _ if /*desc.goggles.is_project() &&*/ machine.goggles.project.project_shadow => Self::BLEND_SHADOW,
             _ => Self::BLEND_ALPHA,
         });
         if let Some(id) = blend_state {

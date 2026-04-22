@@ -285,10 +285,9 @@ impl RenderMachine {
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
-            #[cfg(feature = "goggles")]
             let map_left = match trans {
                 GameplayTransition::Map { prev_map_id: Some(prev), .. } if Some(prev) == gameplay.gameplay_map() => false,
-                #[cfg(not(feature = "goggles2-project"))]
+                #[cfg(all(feature = "goggles", not(feature = "goggles2-project")))]
                 GameplayTransition::Intermission { .. } if !self.goggles.active.is_empty() => false,
                 #[cfg(todo)]
                 GameplayTransition::Intermission { .. } if !self.is_cutscene() && !self.is_ingame_paused() => true,
@@ -316,9 +315,11 @@ impl RenderMachine {
                     }
                 }
             }
-            #[cfg(feature = "goggles")]
             if map_left {
-                self.goggles.act_map_exit(gameplay, trans);
+                #[cfg(feature = "space")]
+                {
+                    self.space_map_exit(gameplay, trans);
+                }
             }
             let map_id = gameplay.latest_map();
             #[cfg(feature = "goggles")]
