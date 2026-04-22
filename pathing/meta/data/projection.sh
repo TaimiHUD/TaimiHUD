@@ -5,9 +5,10 @@ calc() {
 	command calc -D:0 -qd "$@" | tr -d '[:blank:]'
 }
 
+ZFACTOR=3072
 do_convjson() {
 	local projcsv=projection.csv line mapid \
-		zfar zfari prec=12 factor=3072 first=
+		zfar zfari prec=12 factor=$ZFACTOR first=
 	if [[ $# -gt 0 ]]; then
 		projcsv=$1
 		shift
@@ -24,8 +25,15 @@ do_convjson() {
 		#printf '"far":%d,' "$zfari"
 		printf '"farz":%s' "$zfar"
 		printf '}}'
-	done < $projcsv
+	done < <(sort -ugt, <(settingsproj "${ZSETTINGS-}") $projcsv)
 	printf '\n}\n'
+}
+
+settingsproj() {
+	local settings
+	settings=$1
+	if [[ -z $settings ]]; then return; fi
+	jq -er --argjson zfactor "$ZFACTOR" '.pathing.space.goggles0.map_proj_seen | . as $proj | keys | .[] | . as $key | "\($key),\($proj[$key].z.farz * $zfactor)"' "$settings"
 }
 
 CMD=convjson
