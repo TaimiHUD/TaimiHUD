@@ -80,6 +80,8 @@ pub(super) unsafe fn set_targets(
     let views = views.chain(
         uaviews.map(|v| (View::from_d3d_ref(v), BufferKind::UnorderedAccessView))
     );
+    let flags = GogglesShared::flags();
+    let mut is_early_bind = false;
     for (view, kind) in views.clone() {
         let view_ptr = *view.as_d3d_raw();
         let buf = match seen.entry(view_ptr) {
@@ -106,13 +108,15 @@ pub(super) unsafe fn set_targets(
         };
         buf.state.mark_bound(next_bind_generation);
         match (buf.winner, buf.kind, buf.classification) {
+            (_, _, BufferClass::Reflection | BufferClass::Shadowbox) =>
+                is_early_bind = buf.bind_count == 1,
             (true, kind @ BufferKind::RenderTarget, cls @ BufferClass::Target)
                 if Some(buf.bind_count) == ClassShared::seen_class(kind, cls).map(|(_, _, bcount, ..)| bcount)
                 => {
                     // your days are numbered...
                     ClassShared::bind_generation_limit_ref().store(next_bind_generation.wrapping_add(ClassShared::FRAME_END_BREATHING_ROOM), GogglesShared::FLAGS_ORDERING);
                 },
-                _ => (),
+            _ => (),
         }
         match kind {
             BufferKind::RenderTarget => {
@@ -136,6 +140,22 @@ pub(super) unsafe fn set_targets(
     ClassShared::bound_depth_ref().store(nn::nonnull_ptr_mut(depth_ptr), GogglesShared::FLAGS_ORDERING);
     let render_primary_ptr = render_primary.map(|v| *v.as_d3d_raw());
     ClassShared::bound_render_primary_ref().store(nn::nonnull_ptr_mut(render_primary_ptr), GogglesShared::FLAGS_ORDERING);
+
+    if is_early_bind && flags.class_cleared_inconsistent() {
+        frame_log!("goggles; fallback frame trigger");
+        GogglesShared::flags_insert(ClassShared::FLAGS_CLEARS);
+        ClassShared::mark_new_frame();
+    }
+}
+impl GogglesFlags {
+    /// if game doesn't clear framebuffers at start of each frame,
+    /// fall back to triggering frame start when early buffers bound
+    ///
+    /// clearing behaviour seems to depend on time of day, maybe combined with shadow or shader settings being set high?
+    /// maybe the hook or present check just fails sometimes idk...
+    fn class_cleared_inconsistent(self) -> bool {
+        (self & (ClassShared::FLAGS_CLEARS | GogglesFlags::CLASS_CLEARED_INCONSISTENT)) == GogglesFlags::CLASS_CLEARED_INCONSISTENT
+    }
 }
 pub(super) unsafe fn set_state(
     _context: &Dx11Context,
@@ -247,6 +267,7 @@ pub(super) unsafe fn clear_colour(
 pub struct ClassShared2 {
     expect_present_count: AtomicU32,
     frame_count: AtomicU32,
+    inconsistent_clears: AtomicU32,
     bind_generation: AtomicU32,
     bind_generation_limit: AtomicU32,
     bound_depth: AtomicPtr<c_void>,
@@ -258,6 +279,7 @@ impl ClassShared2 {
         frame_count: AtomicU32::new(0),
         bind_generation: AtomicU32::new(0),
         bind_generation_limit: AtomicU32::new(0),
+        inconsistent_clears: AtomicU32::new(0),
         bound_depth: AtomicPtr::new(ptr::null_mut()),
         bound_render_primary: AtomicPtr::new(ptr::null_mut()),
     };
@@ -337,7 +359,19 @@ impl ClassShared {
         )
     }
 
+    #[inline(always)]
+    fn inconsistent_clears_ref() -> &'static AtomicU32 {
+        unsafe {
+            &*g2!(&raw const ferret.class2.inconsistent_clears)
+        }
+    }
+    const INCONSISTENT_CLEARS_THRESHOLD: u32 = 28;
+
     fn mark_new_frame() {
+        if !g2!(*&volatile const ferret.class.game_time) {
+            // leave as an invalid frame while between maps
+            return
+        }
         GogglesShared::flags_insert(GogglesFlags::CLASS_FRAME_ONGOING);
         g2!(*&volatile mut ferret.class.frame_start = Some(Instant::now()));
         frame_log!("goggles; world/start");
@@ -360,6 +394,8 @@ type WinnerInfo = (D3dNn, i32, u32, u32);
 pub struct ClassShared {
     pub frame_start: Option<Instant>,
     pub classify_tick: bool,
+    pub cleanup_time: bool,
+    pub game_time: bool,
     pub(super) seen: BTreeMap<D3dNn, BufferInfo>,
     pub(super) winners: BTreeMap<(BufferKind, BufferClass), WinnerInfo>,
     assoc: BTreeMap<D3dNn, D3dNn>,
@@ -368,11 +404,18 @@ impl ClassShared {
     pub const EMPTY: Self = Self {
         frame_start: None,
         classify_tick: false,
+        cleanup_time: false,
+        game_time: false,
         seen: BTreeMap::new(),
         winners: BTreeMap::new(),
         assoc: BTreeMap::new(),
     };
+    #[cfg(todo)]
     pub const ENABLES: GogglesEnables = GogglesEnables::ENABLE;
+    pub const ENABLES: GogglesEnables = GogglesEnables::from_bits_retain(
+        GogglesEnables::LENS_ENABLE.bits()
+        | GogglesEnables::PROJECT_ENABLE.bits()
+    );
     const FRAME_END_BREATHING_ROOM: u32 = 3;
     const FLAGS_FRAME_VALID: GogglesFlags = GogglesFlags::from_bits_retain(
         GogglesFlags::CLASS_CLEARED_COLOUR.bits()
@@ -437,7 +480,8 @@ impl ClassShared {
         let order = GogglesShared::ENABLED_ORDERING;
         let prev_frame = Self::frame_count_ref().fetch_add(1, order);
 
-        let is_ingame = g2!(*&volatile const ferret.is_ingame);
+        let is_ingame_world = g2!(*&volatile const ferret.is_ingame);
+        let is_ingame = g2!(*&volatile const ferret.class.game_time);
         let seen = unsafe {
             &mut *g2!(&raw mut ferret.class.seen)
         };
@@ -445,11 +489,17 @@ impl ClassShared {
             &mut *g2!(&raw mut ferret.class.winners)
         };
         let classify_tick = Self::read_classify_tick();
+        let cleanup_time = Self::take_cleanup_time();
 
         seen.retain(|key, buf| {
             let winprev = (buf.kind, buf.classification);
             let since = buf.seen_since(prev_frame);
-            if !matches!(buf.classification, BufferClass::Taimi) && since > BufferInfo::TIME_GONE {
+            let forget = match buf.classification {
+                BufferClass::Taimi | BufferClass::Target | BufferClass::New => false,
+                _ if since > BufferInfo::TIME_GONE || cleanup_time => true,
+                _ => false,
+            };
+            if forget {
                 if buf.state.winner {
                     match winners.entry(winprev) {
                         btree_map::Entry::Occupied(e) if e.get().0 == *key => {
@@ -460,11 +510,12 @@ impl ClassShared {
                 }
                 return false
             }
-            if since <= 1 {
-                buf.prepare_state(classify_tick, is_ingame);
+            if since <= 1 && is_ingame {
+                buf.prepare_state(classify_tick, is_ingame_world);
             }
             let winkey = (buf.kind, buf.classification);
             let cls_is_competitive = || match winkey {
+                _ if !is_ingame => false,
                 (_, BufferClass::World | BufferClass::Target | BufferClass::Minimap) => true,
                 (_, BufferClass::Shadowbox) => true,
                 (_, BufferClass::Reflection) => true,
@@ -476,7 +527,7 @@ impl ClassShared {
             if buf.winner {
                 if winprev.1 == winkey.1 {
                     let bind_count_changed = false;
-                    if classify_tick || (bind_count_changed && g2!(*&ferret.is_ingame)) {
+                    if classify_tick || (bind_count_changed && is_ingame) {
                         if let Some(winner) = winners.get_mut(&winkey) {
                             if winner.0 == *key {
                                 winner.2 = buf.bind_count;
@@ -528,14 +579,14 @@ impl ClassShared {
         }
 
         Self::bind_generation_ref().store(0, order);
-        let next_classify_tick = {
-            let mut classify_tick = is_ingame && (Self::read_frame_count() & 0x7f) == 0x7f;
+        let next_classify_tick = is_ingame && {
+            let mut classify_tick = is_ingame_world && (Self::read_frame_count() & 0x7f) == 0x7f;
             let enabled = GogglesShared::enabled();
-            if enabled.contains(GogglesEnables::LENS_ENABLE) && is_ingame {
+            if enabled.contains(GogglesEnables::LENS_ENABLE) && is_ingame_world {
                 classify_tick |= !winners.contains_key(&(BufferKind::DepthView, BufferClass::World));
             }
             if enabled.contains(GogglesEnables::PROJECT_ENABLE) {
-                if is_ingame {
+                if is_ingame_world {
                     classify_tick |= !winners.contains_key(&(BufferKind::RenderTarget, BufferClass::World));
                     classify_tick |= !winners.contains_key(&(BufferKind::RenderTarget, BufferClass::Minimap));
                 }
@@ -547,11 +598,28 @@ impl ClassShared {
         Self::bind_generation_limit_ref().store(u32::MAX, order);
         let expect_present_count = Self::expect_present_count_ref().load(order);
         frame_log!("goggles; SC frame#{expect_present_count}");
-        if Self::expect_present_count_ref().load(order) == Self::PRESENT_COUNT_DISABLED {
-            GogglesShared::flags_insert(GogglesFlags::CLASS_FRAME_ONGOING);
-        } else {
+        let has_present_count = Self::expect_present_count_ref().load(order) != Self::PRESENT_COUNT_DISABLED;
+        if has_present_count {
             Self::bound_render_primary_ref().store(ptr::null_mut(), order);
             Self::bound_depth_ref().store(ptr::null_mut(), order);
+        } else if is_ingame {
+            GogglesShared::flags_insert(GogglesFlags::CLASS_FRAME_ONGOING);
+        }
+        let flags = GogglesShared::flags();
+        if flags.contains(GogglesFlags::CLASS_CLEARED_INCONSISTENT) {
+            #[cfg(todo)]
+            if !has_present_count && !winners.contains_key(&(BufferKind::DepthView, BufferClass::Shadowbox)) | !winners.contains_key(&(BufferKind::DepthView, BufferClass::Reflection)) {
+                GogglesShared::flags_insert(Self::FLAGS_CLEARS);
+            }
+        } else if is_ingame_world {
+            if flags.contains(Self::FLAGS_CLEARS) {
+                Self::inconsistent_clears_ref().store(0, order);
+            } else {
+                let streak = Self::inconsistent_clears_ref().fetch_add(1, order);
+                if streak >= Self::INCONSISTENT_CLEARS_THRESHOLD {
+                    GogglesShared::flags_insert(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
+                }
+            }
         }
     }
     pub(super) fn reset_frame(&mut self) {
@@ -595,6 +663,11 @@ impl ClassShared {
     pub fn read_classify_tick() -> bool {
         g2!(*&volatile const ferret.class.classify_tick)
     }
+    pub fn take_cleanup_time() -> bool {
+        let cleanup = g2!(*&volatile const ferret.class.cleanup_time);
+        g2!(*&volatile mut ferret.class.cleanup_time = false);
+        cleanup
+    }
 
     #[inline(always)]
     fn with_mut<F: FnOnce(&mut ClassShared)>(f: F) {
@@ -608,6 +681,7 @@ impl ClassShared {
     }
     #[inline(always)]
     pub(crate) fn with_seen2<R, F: FnOnce(&BufferInfo) -> R>(key: D3dNn, f: F) -> Option<R> {
+        if g2!(*&ferret.class.cleanup_time) { return None }
         let seen = unsafe {
             &*g2!(&raw const ferret.class.seen)
         };
@@ -632,12 +706,14 @@ impl ClassShared {
         )
     }
     pub(super) fn seen_class(kind: BufferKind, cls: BufferClass) -> Option<WinnerInfo> {
+        if g2!(*&ferret.class.cleanup_time) { return None }
         let winners = unsafe {
             &*g2!(&raw const ferret.class.winners)
         };
         winners.get(&(kind, cls)).copied()
     }
     pub(super) fn query_candidate(kind: BufferKind, cls: BufferClass) -> D3dPtr {
+        if !g2!(*&volatile const ferret.class.game_time) { return None }
         Self::seen_class(kind, cls).map(|(key, ..)| key)
     }
     const BIND_GEN_HYSTERESIS: u32 = 3;
@@ -1009,16 +1085,14 @@ impl BufferInfo {
             (BufferClass::UI, self.classify_score_ui()),
         ];
         let size = self.size();
-        let sized = size.map(|size| [
+        let sized = size.map(|_size| [
             (BufferClass::Fallback, self.classify_score_fallback()),
             (BufferClass::Pretty, self.classify_score_pretty()),
             (BufferClass::Minimap, self.classify_score_minimap()),
             (BufferClass::Unsupported, self.classify_score_unsupported()),
         ]).into_iter().flatten();
-        let fallback = size.is_none().then(||
-            (BufferClass::Unsupported, 64)
-        );
-        IntoIterator::into_iter(base).chain(sized).chain(fallback)
+        IntoIterator::into_iter(base).chain(sized)
+            //.chain(size.is_none().then(|| (BufferClass::Unsupported, 64)))
     }
     fn classify_is_framebuffer(&self) -> bool {
         self.resource.map(|r| unsafe {
@@ -1097,7 +1171,9 @@ impl BufferInfo {
     }
     fn classify_score_space(&self) -> i32 {
         let mut confidence = match self.flags.contains(BufferStateFlags::CLEARED_DEPTH) {
+            #[cfg(todo)]
             false => -64i32,
+            false => -18i32,
             true => 4,
         };
         if self.flags.contains(BufferStateFlags::DEPTH_STENCIL_REF) {
@@ -1107,7 +1183,9 @@ impl BufferInfo {
             (true, [_, _, _, a]) if a != 0.0 => confidence -= 6,
             (true, colour) if vec32_eq(colour, [0.0f32; 4]) => confidence -= 2,
             (true, _) => confidence += 18,
+            #[cfg(todo)]
             (false, _) => confidence -= 14,
+            (false, _) => confidence -= 10,
         }
         match self.depth_binds_count_readonly() {
             0 => confidence -= 4,
@@ -1635,6 +1713,9 @@ impl DepthSummary {
 
 #[derive(Debug, Clone, Default)]
 pub struct GogglesClass {
+    pub compat_present_count: bool,
+    pub compat_clear_inconsistent: bool,
+    pub active: bool,
 }
 impl GogglesClass {
     pub(super) fn act_render_post(&mut self) {
@@ -1645,6 +1726,22 @@ impl GogglesClass {
             ClassShared::mark_end_frame();
         }
     }
+    pub(super) fn act_pre_render_frame(&mut self, ingame: bool) {
+        if !ingame {
+            g2!(*&volatile mut ferret.class.game_time = false);
+        } else if self.active {
+            g2!(*&volatile mut ferret.class.game_time = true);
+        }
+    }
+    pub(super) fn act_map_exit(&mut self) {
+        g2!(*&volatile mut ferret.class.game_time = false);
+        self.active = false;
+    }
+    pub(super) fn act_map_enter(&mut self) {
+        g2!(*&volatile mut ferret.class.game_time = false);
+        g2!(*&volatile mut ferret.class.cleanup_time = true);
+        self.active = true;
+    }
     #[inline]
     pub(super) fn enable(&mut self) {
         let counters = Self::STATS_COUNTERS.iter()
@@ -1654,6 +1751,7 @@ impl GogglesClass {
         }
 
         g2!(*&volatile mut ferret.class.classify_tick = false);
+        self.active = true;
     }
     #[inline]
     pub(super) fn disable(&mut self) {
@@ -1661,11 +1759,14 @@ impl GogglesClass {
         for desc in Self::STATS_COUNTERS {
             StatsRef::deregister(desc);
         }
+        GogglesShared::clear_flags(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
 
         // TODO: cleanup seen etc
         ClassShared::expect_present_count_ref().store(ClassShared::PRESENT_COUNT_DISABLED, GogglesShared::ENABLED_ORDERING);
         g2!(*&volatile mut ferret.class.classify_tick = false);
+        g2!(*&volatile mut ferret.class.game_time = false);
         g2!(*&volatile mut ferret.class.frame_start = None);
+        self.active = false;
         unsafe {
             let seen = &mut *g2!(&raw mut ferret.class.seen);
             seen.clear();
@@ -1678,6 +1779,7 @@ impl GogglesClass {
 
     pub fn record_present_count(&mut self, count: u32) {
         let value = match count.wrapping_add(1) {
+            _ if self.compat_present_count => ClassShared::PRESENT_COUNT_DISABLED,
             // if 0 is used as sentinel, record one behind as long as threshold allows for it
             ClassShared::PRESENT_COUNT_DISABLED => count,
             next => next,
@@ -1767,6 +1869,18 @@ impl GogglesClass {
             }
         });
     }
+
+    pub fn compat_clear_inconsistent(&self) -> bool {
+        GogglesShared::read_flags().contains(GogglesFlags::CLASS_CLEARED_INCONSISTENT)
+    }
+    pub fn set_compat_clear_inconsistent(&mut self, v: bool) {
+        if v {
+            GogglesShared::flags_insert(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
+            ClassShared::inconsistent_clears_ref().store(ClassShared::INCONSISTENT_CLEARS_THRESHOLD, GogglesShared::ENABLED_ORDERING);
+        } else {
+            GogglesShared::clear_flags(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
+        }
+    }
 }
 static STATS_GAME_RENDER: StatsCounter = StatsCounter::DEFAULT;
 
@@ -1774,5 +1888,17 @@ impl super::GogglesState {
     #[inline(always)]
     pub fn is_classifying(&self) -> bool {
         self.active.intersects(ClassShared::ENABLES)
+    }
+    pub fn class_offer_clear_inconsistent(&self) -> bool {
+        #[cfg(feature = "goggles2-project")]
+        use crate::space::pack::render::Drawing;
+
+        if self.class.compat_clear_inconsistent() { return true }
+        if !self.is_classifying() { return false }
+        #[cfg(feature = "goggles2-project")]
+        if self.project.undrawn().contains(Drawing::SPACE) {
+            return true
+        }
+        !GogglesShared::read_flags().contains(ClassShared::FLAGS_CLEARS)
     }
 }

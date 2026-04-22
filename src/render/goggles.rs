@@ -69,9 +69,19 @@ impl GogglesConfig {
                 let _ = ui.checkbox("all", &mut machine.goggles.project.debug_detect_all);
             }
         }
+        if machine.goggles.enabled_config.intersects(GogglesEnables::LENS_ENABLE | GogglesEnables::PROJECT_ENABLE) {
+            let _ = ui.checkbox("compat/pre", &mut machine.goggles.class.compat_present_count);
+            if machine.goggles.class_offer_clear_inconsistent() {
+                let mut clear_inconsistent = machine.goggles.class.compat_clear_inconsistent();
+                ui.same_line();
+                if ui.checkbox("compat/clr", &mut clear_inconsistent) {
+                    machine.goggles.class.set_compat_clear_inconsistent(clear_inconsistent);
+                }
+            }
+        }
         #[cfg(feature = "goggles2-project")]
         {
-            if machine.goggles.enabled_config.contains(GogglesEnables::PROJECT_ENABLE) {
+            if machine.goggles.enabled_config.intersects(GogglesEnables::LENS_ENABLE | GogglesEnables::PROJECT_ENABLE) {
                 ui.same_line();
             }
             if ui.checkbox("shad", &mut machine.goggles.project.project_shadow) {

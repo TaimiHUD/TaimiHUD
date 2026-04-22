@@ -249,7 +249,7 @@ impl PackRender {
                 self.draw_state.clear();
                 self.draw_state.prev_map_id = map_id;
                 self.resources.dirty = true;
-                self.render_list.dirty = true;
+                self.render_list.mark_dirty();
                 space_dirty = true;
             } else {
                 STATS_ENTITY_COUNT.reset(0);
@@ -298,7 +298,7 @@ impl PackRender {
             log::info!("Loaded {trails} trails and {pois} POIs");
         }
         if prev_waiting && !self.draw_state.prev_waiting {
-            self.render_list.dirty = true;
+            self.render_list.mark_dirty();
         }
         if let Some(map_id) = map_id {
             if let Some(packs_map) = &packs_map_changed {
@@ -432,7 +432,7 @@ impl PackRender {
                 if res.is_none() {
                     trail.disable();
                 } else {
-                    self.render_list.dirty = true;
+                    self.render_list.mark_dirty();
                 }
             }
             for (marker_path, texture) in self.texture_rx.try_recv_fulfilled() {
@@ -1409,6 +1409,9 @@ impl PackRenderList {
         self.draw_order_cache_id = None;
         }
     }
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
     pub fn cleanup(&mut self) {
         self.draw_order_heap = Default::default();
         self.draw_order_cache = Default::default();
@@ -1421,6 +1424,7 @@ impl PackRenderList {
     pub fn update_space(&mut self, spacepacks: &Arc<SpacePackCollection>) -> bool {
         let dirty = ArcPtrCmp::from_mut(&mut self.spacepacks).clone_from_arc(spacepacks);
         self.dirty |= dirty;
+        self.draw_order_cache_id = None;
         true
     }
 
@@ -1533,6 +1537,7 @@ impl PackRenderList {
                 frame_log!("space; ordercache@{id} populate");
                 self.draw_order_cache.clear();
                 self.draw_unorder_cache.clear();
+                self.draw_order_cache_id = None;
                 Some((&mut self.draw_order_cache, &mut self.draw_unorder_cache))
             },
         };

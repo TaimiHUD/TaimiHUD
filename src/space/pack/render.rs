@@ -201,7 +201,7 @@ pub struct DrawSpaceArc<'a> {
     pub last_quad: Option<&'a PoiVertexBuffer>,
 }
 impl<'a> DrawSpaceArc<'a> {
-    fn bind_common(&mut self) -> Option<()> {
+    pub(crate) fn bind_common(&mut self) -> Option<()> {
         if self.state.is_some() { return Some(()) }
 
         let _ = self.resources.shader_variant?;
@@ -219,7 +219,7 @@ impl<'a> DrawSpaceArc<'a> {
         self.state = Some(None);
         Some(())
     }
-    fn bind_trail(&mut self) -> Option<()> {
+    pub(crate) fn bind_trail(&mut self) -> Option<()> {
         if matches!(self.state, Some(Some(ShaderState::Trail))) {
             return Some(())
         }
@@ -235,7 +235,7 @@ impl<'a> DrawSpaceArc<'a> {
         self.state = Some(Some(ShaderState::Trail));
         Some(())
     }
-    fn bind_poi(&mut self) -> Option<()> {
+    pub(crate) fn bind_poi(&mut self) -> Option<()> {
         if matches!(self.state, Some(Some(ShaderState::Poi))) {
             return Some(())
         }

@@ -249,13 +249,12 @@ impl RenderMachine {
                 const NEAR_FACTOR: f32 = DEFAULT_INCHES_PER_METRE * MapProjectionDepth::NEAR_FACTOR;
                 let far = near * NEAR_FACTOR;
                 let near = near * DEFAULT_INCHES_PER_METRE;
-                //Some(near..far)
-                Some(2.0..3.0)
+                Some(near..far)
             },
             (Some(near), Some(far)) => {
                 let near = near * DEFAULT_INCHES_PER_METRE;
                 let far = far * DEFAULT_INCHES_PER_METRE;
-                Some(4.0..5.0)
+                Some(near..far)
             },
             _ => None,
         };

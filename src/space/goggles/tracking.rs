@@ -6,7 +6,7 @@ use {
             goggles::GogglesEnables,
             pathing::SpaceSettings,
         },
-        space::engine::FrameContext,
+        space::{engine::FrameContext, pack::render::Drawing},
     },
     super::class::ClassShared,
     anyhow::Context,
@@ -20,9 +20,12 @@ use {
         prelude::*,
         raster::RenderTargetView,
     },
-    taimi_meta::ui::{
-        gameplay::{GameplayState, GameplayTransition},
-        LocalContext,
+    taimi_meta::{
+        packs::MapIndex,
+        ui::{
+            gameplay::{GameplayState, GameplayTransition},
+            LocalContext,
+        },
     },
 };
 #[cfg(feature = "goggles2-camera")]
@@ -233,9 +236,10 @@ bitflags::bitflags! {
     pub struct GogglesFlags: u32 {
         const CLASS_CLEARED_COLOUR = 0x0001;
         const CLASS_CLEARED_DEPTH = 0x0002;
-        const CLASS_FRAME_ONGOING = 0x0004;
-        const PROJECT_BLOCKING = 0x0008;
-        const PROJECT_REACH_WORLD = 0x0010;
+        const CLASS_CLEARED_INCONSISTENT = 0x0004;
+        const CLASS_FRAME_ONGOING = 0x0008;
+        const PROJECT_BLOCKING = 0x0010;
+        const PROJECT_REACH_WORLD = 0x0020;
     }
 }
 
@@ -406,14 +410,26 @@ impl GogglesState {
         }
     }
 
-    pub(crate) fn act_map_enter(&mut self, hard: bool) {
+    pub(crate) fn act_map_enter(&mut self, hard: bool, _map_id: MapIndex) {
+        if self.is_classifying() {
+            self.class.act_map_enter();
+        }
+        self.lens.act_map_enter(hard);
         #[cfg(feature = "goggles2-camera")]
         {
-            self.camera.act_map_enter(hard);
+            self.camera.act_map_enter(hard, _map_id);
         }
     }
     /// TODO: doesn't track cutscene states very well, so ignore for now...
     pub(crate) fn act_map_exit(&mut self, _gameplay: GameplayState, _trans: GameplayTransition) {
+        if self.is_classifying() {
+            self.class.act_map_exit();
+        }
+        self.lens.act_map_exit();
+        #[cfg(feature = "goggles2-camera")]
+        {
+            self.camera.act_map_exit();
+        }
     }
     pub(crate) fn act_render_post(&mut self) {
         #[cfg(todo)]
@@ -479,6 +495,9 @@ impl GogglesState {
         #[cfg(feature = "goggles2-project")]
         if self.is_enabled(GogglesEnables::PROJECT_ENABLE) {
             self.project.act_pre_render_frame(context.is_some(), drawing);
+        }
+        if self.is_classifying() {
+            self.class.act_pre_render_frame(drawing.visible.intersects(Drawing::PASSES_PRIMARY));
         }
         let is_ingame = drawing.drawing.has(LocalContext::World);
         g2!(*&mut ferret.is_ingame = is_ingame);

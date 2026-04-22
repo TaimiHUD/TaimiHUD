@@ -1188,6 +1188,18 @@ impl PathingConfig {
                 }
                 ui.checkbox_flags(&label, enables, opt)
             });
+            let tooltip_id = match opt {
+                _ if !ui.is_item_hovered() => None,
+                GogglesEnables::CAMERA_PERSPECTIVE =>
+                    Some(format!("pathing-config-goggles-{opt}-tip")),
+                _ => None,
+            };
+            if let Some(tip) = tooltip_id {
+                with_i18n!(&tip, |msg| match &msg[..] {
+                    id if id == &tip[..] => (),
+                    msg => ui.tooltip_text(&msg),
+                });
+            }
             commit |= opt.r#if(toggled)
         }
         commit

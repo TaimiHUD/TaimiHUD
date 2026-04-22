@@ -168,6 +168,7 @@ pub struct Engine {
 
     settings: Option<PathingSettings>,
     settings_dirty: bool,
+    frustum_timestamp: (Option<f32>, Option<f32>),
 }
 
 impl Engine {
@@ -244,6 +245,7 @@ impl Engine {
             interact_rx: None,
             settings: None,
             settings_dirty: true,
+            frustum_timestamp: (None, None),
         };
 
         #[cfg(feature = "space-ecs")]
@@ -632,6 +634,7 @@ impl Engine {
         };
         if settings_dirty {
             let _ = self.fill_settings();
+            self.packs.render_list.mark_dirty();
             if let Some(settings) = &self.settings {
                 self.drawing.prepare_enabled(settings);
                 let display_size = match self.render_backend.display_size {
@@ -640,6 +643,13 @@ impl Engine {
                     _ => None,
                 };
                 self.arcdata.set_from(settings, display_size);
+                match (self.frustum_timestamp.1, settings.space.distance_max()) {
+                    (Some(prev), dist) if prev != dist =>
+                        self.frustum_timestamp = (self.packs.resources.anim_timestamp, Some(dist)),
+                    (None, dist) =>
+                        self.frustum_timestamp = (None, Some(dist)),
+                    _ => (),
+                }
             }
         }
         let settings = self.settings.as_ref()
@@ -1352,7 +1362,7 @@ impl Engine {
         state: &mut DrawStateSpace,
         camera: RenderPosition,
         depth: ops::Range<f32>,
-        cull: &MapFrustum,
+        frustum: &MapFrustum,
     ) {
         frame_log!("engine; draw/Space#{}", desc.pass);
         let arcrender = self.settings.as_ref().map(|s|
@@ -1363,7 +1373,11 @@ impl Engine {
             .flatten()
             .and_then(|s| {
                 let alpha = s.space.goggles.obscured_alpha();
-                (alpha > 0.0).then_some((alpha, s.space.obscured_distance()))
+                let dist = match s.space.obscured_distance() {
+                    dist if dist == s.space.distance_max() => None,
+                    dist => Some(dist),
+                };
+                (alpha > 0.0).then_some((alpha, dist))
             });
         #[cfg(feature = "goggles")]
         let goggles_2pass = match goggles_2pass {
@@ -1436,7 +1450,7 @@ impl Engine {
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => {
                 let cull = match goggles_2pass {
-                    Some((_, obscured_dist)) if obscured_dist < depth.end => {
+                    Some((_, Some(obscured_dist))) if obscured_dist >= depth.start => {
                         cull_alt = MapFrustum::from_camera_data(
                             machine.get_fov().y,
                             camera,
@@ -1445,7 +1459,7 @@ impl Engine {
                         );
                         &cull_alt
                     },
-                    _ => cull,
+                    _ => frustum,
                 };
                 (&camera, cull)
             },
@@ -1525,9 +1539,9 @@ impl Engine {
             Drawing::SHADOWBOX => {
                 self.packs.shared_v.trail.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
                 self.packs.shared_v.poi.marker.flags |= pack::instance::MarkerInstanceData::FLAG_RESERVED_14;
-                (&camera, cull)
+                (&camera, frustum)
             },
-            _ => (&camera, cull),
+            _ => (&camera, frustum),
         };
 
         let arcrender = arcrender.then(|| match desc.pass.get_pass() {
@@ -1729,8 +1743,8 @@ impl Engine {
                 let shapes = &spacepacks.render_entities.entities[..];
                 let camera_id = machine.camera.id();
                 let entities = self.packs.render_list.iter_markers_visible(
-                    self.packs.pack_data.map_ref_as_slice(), camera_id, cull, cam
-                ).filter(|(data, idx, id)| match id.get_marker_index().namespace() {
+                    self.packs.pack_data.map_ref_as_slice(), camera_id, frustum, cam
+                ).filter(|(_, idx, id)| match id.get_marker_index().namespace() {
                     MarkerIndex::NS_TRAIL if desc.draw_trails.is_none() => false,
                     MarkerIndex::NS_POI if desc.draw_pois.is_none() => false,
                     _ => {
@@ -1810,7 +1824,15 @@ impl Engine {
                 if primary_draw {
                     self.packs.draw_state.primary_draw = true;
                 }
-                let camera_id = machine.camera.id();
+                let main_filter = match primary_draw {
+                    true => true,
+                    #[cfg(todo = "unnecessary")]
+                    false if desc.pass_is_obscured() => goggles_2pass.map(|(_, dist)| dist >= 1.0).unwrap_or(false),
+                    false => cull as *const _ == frustum as *const _,
+                };
+                let camera_id = main_filter
+                    .then_some(machine.camera.id())
+                    .flatten();
                 let entities = self.packs.render_list.iter_markers_visible(
                     self.packs.pack_data.map_ref_as_slice(), camera_id, cull, cam
                 ).filter(|(_, _, id)| match id.get_marker_index().namespace() {
@@ -2079,6 +2101,9 @@ impl Engine {
                 _ => true,
             };
             state.set_minimap_scissor(device_context, &self.render_backend, None);
+
+            self.draw_frustum_indicator(device_context, machine, &desc, &mut state);
+
             let mut wants_onion = post_needed.contains(Drawing::ONION) && self.drawing.wants_onion(&self.arcdata);
             #[cfg(feature = "goggles")]
             if post_needed.contains(Drawing::OBSCURED) && desc.goggles.target_depthview.is_some() && desc.goggles.buffer_compat && desc.depth_read {
@@ -2254,6 +2279,96 @@ impl Engine {
         state.set_minimap_scissor(device_context, &self.render_backend, scissor.as_ref());
         self.draw_map(machine, device_context, &desc, state, map_ctx, render_bounds, local_bounds);
     }
+    fn draw_frustum_indicator(
+        &mut self,
+        device_context: &Dx11Context,
+        machine: &mut RenderMachine,
+        desc: &DrawDescSpace,
+        state: &mut DrawStateSpace,
+    ) {
+        if !self.settings.as_ref().map(|s| s.space.goggles.arcrender_enabled()).unwrap_or(false) {
+            return
+        }
+        let frustum_elapsed = self.frustum_timestamp.0
+            .and_then(|when| self.packs.resources.anim_timestamp.map(|now| now - when));
+        let elapsed = match frustum_elapsed {
+            e @ None => {
+                self.frustum_timestamp.0 = None;
+                e
+            },
+            Some(seconds) if seconds > Self::FRUSTUM_INDICATOR_DURATION => {
+                self.frustum_timestamp.0 = None;
+                None
+            },
+            Some(..) if !desc.depth_read => None,
+            Some(..) if self.packs.resources.shader_poi.is_none() => None,
+            e => e,
+        };
+        let Some(elapsed) = elapsed else { return };
+        let prev_flags = self.packs.shared_v.poi.marker.flags;
+        let prev_alpha = mem::replace(&mut self.packs.shared_v.poi.marker.alpha, 1.0);
+        let prev_scale = mem::replace(&mut self.packs.shared_v.poi.marker.scale, 10.0);
+        self.packs.shared_v.poi.marker.flags &= !pack::instance::MarkerInstanceData::FLAG_BILLBOARD;
+        self.packs.resources.update_shared(
+            device_context, &self.render_backend.device,
+            &self.packs.shared_v, &self.packs.shared_p
+        );
+        self.packs.shared_v.poi.marker.flags = prev_flags;
+        self.packs.shared_v.poi.marker.alpha = prev_alpha;
+        self.packs.shared_v.poi.marker.scale = prev_scale;
+        let far = self.settings.as_ref().map(|s| s.space.distance_max()).unwrap_or(0.0);
+        let pos = machine.get_camera_mumblelink_verbatim().map(|(pos, dir, ..)| pos.to_vec3a() + dir.to_vec3a() * far).unwrap_or(glam::Vec3A::ZERO.with_z(far));
+        let alpha = 1.4 - elapsed / Self::FRUSTUM_INDICATOR_DURATION;
+        let billboard_scale = 64.0f32;
+        let mut ib = pack::instance::PoiInstanceData {
+            marker: pack::instance::MarkerInstanceData {
+                colour: glamour::Vector3::new(64.0 / 255.0, 224.0 / 255.0, 208.0 / 255.0),
+                flags: pack::instance::MarkerInstanceData::FLAG_BILLBOARD,
+                .. pack::instance::MarkerInstanceData::INVALID
+            },
+            model: glamour::Matrix4::from_scale_rotation_translation(glamour::Vector3::splat(billboard_scale), Default::default(), pos.into()),
+            billboard_scale,
+            .. pack::instance::PoiInstanceData::INVALID
+        };
+        ib.marker.set_alpha(alpha);
+        let ib = pack::instance::EntityInstanceData::new_poi(ib);
+        let ib = pack::instance::EntityInstanceData::alloc_populated(&self.render_backend.device, core::slice::from_ref(&ib));
+
+        let desc = DrawDescSpace {
+            depth_write: true,
+            ..*desc
+        };
+        state.setup_target(device_context, &self.render_backend, &desc);
+        state.setup_depth(device_context, &self.render_backend, machine, &desc);
+        state.setup_blend(device_context, &self.render_backend, machine, &desc);
+        let mut draw = pack::render::DrawSpaceArc {
+            state: None,
+            resources: &self.packs.resources,
+            context: device_context,
+            last_quad: None,
+        };
+        if draw.bind_poi().is_some() {
+            if let Ok(ib) = ib.as_ref() {
+                ib.set(device_context, 1);
+            }
+            let tex = self.packs.resources.poi_common.as_ref()
+                .and_then(|pc| pc.fallback_texture.as_ref());
+            if let Some(tex) = tex {
+                tex.set(device_context, 0);
+            }
+            let vb = self.packs.resources.poi_vb.as_ref();
+            vb.set(device_context, pack::PoiCommonRenderData::SLOT_VB);
+            unsafe {
+                device_context.DrawInstanced(
+                    pack::PoiCommonRenderData::VERTEX_COUNT as u32,
+                    1,
+                    0,
+                    0,
+                );
+            }
+        }
+    }
+    const FRUSTUM_INDICATOR_DURATION: f32 = 4.0f32;
 
     pub fn sender() -> Option<Sender<SpaceEvent>> {
         crate::SPACE_SENDER
