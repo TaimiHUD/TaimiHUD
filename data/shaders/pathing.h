@@ -23,6 +23,9 @@
 
 #if SHADER_P
 
+#ifndef SHADER_P_PREMUL
+#define SHADER_P_PREMUL 0
+#endif
 #ifndef DISCARD_ALPHA
 #define DISCARD_ALPHA 0.01
 #endif
@@ -163,6 +166,18 @@ struct TrailSharedV {
     float _padding0;
     float _padding1;
 };
+struct MarkerSharedP {
+    float blend_factor;
+    float blend_const;
+    float _padding0;
+    float _padding0_1;
+};
+struct TrailSharedP {
+    MarkerSharedP marker;
+};
+struct PoiSharedP {
+    MarkerSharedP marker;
+};
 struct RenderSharedP {
 #if TODO && 0
     float2 viewport;
@@ -171,6 +186,8 @@ struct RenderSharedP {
     float player_feather;
     float distance_fade;
     float2 edge_feather;
+    float _padding0;
+    float _padding0_1;
 };
 struct RenderSharedV {
     column_major float4x4 projection;
@@ -195,6 +212,8 @@ cbuffer EntitySharedV : register(b0) {
 #if SHADER_P
 cbuffer EntitySharedP : register(b0) {
     RenderSharedP p_render;
+    TrailSharedP p_trail;
+    PoiSharedP p_poi;
 }
 Texture2D shaderTexture : register(t0);
 SamplerState SampleType : register(s0);
@@ -215,6 +234,22 @@ SamplerState SampleType : register(s0);
 #define GET_MFLAG(flags, flag) bool(GET_MFLAG_BIT(flags, flag))
 #define GET_MFLAG_BIT(flags, flag) ((flags) & (flag))
 #define GET_MFLAG_ALPHA(flags) (float(GET_MFLAG_BIT(flags, MFLAG_ALPHA_MASK)) / 255.0f)
+// TODO: frac() * copysign?
+#define GET_SCALE_ANIM(scale) ((scale % 1.0f) * 64.0f)
+// TODO: modf()?
+#define GET_SCALE_BIAS(scale) (abs(trunc(scale)))
+#define GET_SCALE_BIAS24(s) ((-(int)GET_SCALE_BIAS(s)) % 0x800)
+#define GET_SCALE_BIAS24U(s) ((uint)GET_SCALE_BIAS(s) & 0x7ff)
+//static const float DepthBufScale = 0x0.1p-23; // 1/2^23
+//static const float DepthBufScale = 0x1.8p-23; // 1/(2^24*3/4)
+static const float DepthBufScale = 1.0 / 12582912.0; // 1/(2^24*3/4)
+//static const float DepthBufScaleT = 1.0 / 4194304.0; // 1/(2^24*3/4)
+static const float DepthBufScaleT = 1.19209290e-7f; // 1/(2^24*3/4)
+//static const float DepthBufOffset = DepthBufScale / 2.0;
+//static const float DepthBiasMax = 0x0.1p-15; // ~ 1/6144?
+//static const float DepthBiasMax = 1.0 / 2048.0;
+static const float DepthBiasMax = 1.0 / 4096.0;
+static const float DepthBiasMin = -DepthBiasMax;
 
 //#define MAD(v, m, a) mad(v, m, a)
 #define MAD(v, m, a) ((v) * (m) + (a))

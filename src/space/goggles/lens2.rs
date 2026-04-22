@@ -5,41 +5,15 @@ use {
         D3dPtr,
         GogglesShared,
     },
-    crate::{
-        render::{RenderEvent, RenderState},
-        settings::goggles::GogglesEnables,
-        space::engine::FrameContext,
-    },
+    crate::space::{engine::FrameContext, pack::render::Drawing},
     arcffi::nn,
     core::{
         ffi::c_void,
         ptr::{self, NonNull},
     },
     glam::Vec2,
-    retour::GenericDetour,
-    std::{
-        cell::Cell,
-        collections::BTreeMap,
-        sync::{
-            atomic::{AtomicBool, AtomicPtr, Ordering},
-            RwLock,
-        },
-    },
-    taimi_d3d::dx11::{
-        buffer::{Resource, View, D3D11_TEXTURE2D_DESC},
-        prelude::*,
-        DepthState,
-        DepthView,
-    },
-    windows::{
-        core::{IUnknown, Interface, InterfaceRef},
-        Win32::Graphics::Direct3D11::{
-            ID3D11DepthStencilView,
-            D3D11_COMPARISON_LESS,
-            D3D11_COMPARISON_LESS_EQUAL,
-            D3D11_DEPTH_WRITE_MASK_ZERO,
-        },
-    },
+    std::sync::atomic::{AtomicBool, AtomicPtr},
+    taimi_d3d::dx11::DepthView,
 };
 
 pub struct LensShared {
@@ -142,9 +116,17 @@ impl GogglesLens {
     }
     pub fn enable(&mut self) {}
     pub fn disable(&mut self) {
+        self.deselect();
+    }
+    fn deselect(&mut self) {
         self.available = false;
+        LensShared::write_selected(None);
+        LensShared::write_compatible(false);
     }
     pub fn act_pre_render_frame(&mut self, drawing: &mut FrameContext) {
+        if !drawing.visible.contains(Drawing::SPACE) {
+            return
+        }
         let lens = match ClassShared::query_candidate(BufferKind::DepthView, BufferClass::World) {
             Some(lens) => {
                 let (available, compatible) = ClassShared::with_seen2(lens, |buf| {
@@ -163,5 +145,11 @@ impl GogglesLens {
         };
         LensShared::write_selected(lens);
         self.available = lens.is_some();
+    }
+    pub(super) fn act_map_enter(&mut self, _hard: bool) {
+        self.deselect();
+    }
+    pub(super) fn act_map_exit(&mut self) {
+        self.deselect();
     }
 }

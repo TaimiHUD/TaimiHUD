@@ -290,12 +290,11 @@ impl RenderMachine {
         let gameplay = self.gameplay.clone();
         #[cfg(any(feature = "markers", feature = "space"))]
         {
-            #[cfg(feature = "goggles")]
             let map_left = match trans {
                 GameplayTransition::Map { prev_map_id: Some(prev), .. }
                     if Some(prev) == gameplay.gameplay_map() =>
                     false,
-                #[cfg(not(feature = "goggles2-project"))]
+                #[cfg(all(feature = "goggles", not(feature = "goggles2-project")))]
                 GameplayTransition::Intermission { .. } if !self.goggles.active.is_empty() => false,
                 #[cfg(todo)]
                 GameplayTransition::Intermission { .. }
@@ -303,46 +302,25 @@ impl RenderMachine {
                     true,
                 _ => true,
             };
-            #[cfg(feature = "goggles2-camera")]
-            if let (true, Some(map_id)) = (map_left, trans.prev_map_id()) {
-                let farz = self.goggles.camera.perspective_farz().map(|farz| (map_id, farz));
-                log::debug!("saving? {:?}", self.goggles.camera.perspective_params());
-                let settings = farz
-                    .is_some()
-                    .then(|| crate::SETTINGS.get().and_then(|s| s.try_write().ok()))
-                    .flatten();
-                if let (Some((map_id, farz)), Some(mut settings)) = (farz, settings) {
-                    let dirty = if let Some(pathing) = settings.pathing.as_mut() {
-                        pathing.space.goggles.set_map_proj_seen_depth(map_id.get(), farz)
-                    } else {
-                        false
-                    };
-                    if dirty {
-                        settings.mark_dirty();
-                        #[cfg(taimi_debug)]
-                        if let Some((h, _, near, far)) = self.goggles.camera.perspective_params() {
-                            log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({near}..{far}) h={h:?}")
-                        }
-                    }
-                }
-            }
-            #[cfg(feature = "goggles")]
             if map_left {
-                self.goggles.act_map_exit(gameplay, trans);
+                #[cfg(feature = "space")]
+                {
+                    self.space_map_exit(gameplay, trans);
+                }
             }
             let map_id = gameplay.latest_map();
             #[cfg(feature = "goggles")]
             if let Some(map_id) = map_id {
                 let map_entered = match trans {
-                    GameplayTransition::Map { prev_map_id: Some(prev), .. } => Some(prev != map_id),
-                    GameplayTransition::Loaded { prev_map_id: Some(prev), .. } => Some(prev != map_id),
+                    GameplayTransition::Map { prev_map_id: prev, .. } => Some(prev != Some(map_id)),
+                    GameplayTransition::Loaded { prev_map_id: prev, .. } => Some(prev != Some(map_id)),
                     GameplayTransition::Intermission { .. } => None,
                     #[cfg(todo)]
                     GameplayTransition::Map { prev_map_id: None, next_map_id } => true,
                     _ => Some(false),
                 };
                 if let Some(hard) = map_entered {
-                    self.goggles.act_map_enter(hard);
+                    self.goggles.act_map_enter(hard, map_id);
                 }
             }
             #[cfg(feature = "space")]

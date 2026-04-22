@@ -168,12 +168,15 @@ impl GogglesSettings {
         match self.map_proj_seen_mut().entry(map_id) {
             btree_map::Entry::Vacant(e) => {
                 e.insert(z.into());
+                true
             },
             btree_map::Entry::Occupied(e) => {
-                e.into_mut().depth = z;
+                let e = e.into_mut();
+                let delta = (e.depth.farz - z.farz).abs();
+                e.depth = z;
+                delta > 1e-1f32
             },
         }
-        true
     }
 
     #[cfg(feature = "goggles")]

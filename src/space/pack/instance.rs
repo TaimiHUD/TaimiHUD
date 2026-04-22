@@ -252,6 +252,8 @@ impl MarkerInstanceData {
     pub const FLAG_FACE_CULL: u32 = 0x0002_0000;
     /// cull front faces
     pub const FLAG_FACE_CULL_FRONT: u32 = 0x0001_0000;
+    pub const FLAG_RESERVED_19: u32 = 0x0004_0000;
+    pub const FLAG_RESERVED_20: u32 = 0x0008_0000;
 
     pub const FADE_RESOLUTION_NEAR: f32 = 8.0;
     pub const FADE_RESOLUTION_FAR: f32 = 4.0;
@@ -285,7 +287,11 @@ impl MarkerInstanceData {
     }
 
     pub fn set_anim_scale(&mut self, scale: f32) {
-        self.anim_scale = scale;
+        let bias = self.anim_scale.abs().trunc();
+        self.anim_scale = (scale / 64.0).clamp(-1.0 + f32::EPSILON, 1.0 - f32::EPSILON) + bias;
+    }
+    pub fn set_depth_bias(&mut self, bias: u32) {
+        self.anim_scale = self.anim_scale.fract() + bias as f32;
     }
 }
 impl Default for MarkerInstanceData {
@@ -307,6 +313,8 @@ unsafe impl D3dBufferData for ConstantDataV {}
 #[repr(C, align(16))]
 pub struct ConstantDataP {
     pub render: RenderConstantDataP,
+    pub trail: TrailConstantDataP,
+    pub poi: PoiConstantDataP,
 }
 unsafe impl D3dBufferData for ConstantDataP {}
 
@@ -341,11 +349,64 @@ pub struct RenderConstantDataP {
     pub player_feather: f32,
     pub distance_fade: f32,
     pub edge_feather: [f32; 2],
+    pub _padding0: Vector2,
 }
 unsafe impl D3dBufferData for RenderConstantDataP {}
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
-pub struct MarkerConstantDataP {}
+pub struct MarkerConstantDataP {
+    pub blend_factors: Vector2<f32>,
+    pub _padding0: Vector2<f32>,
+}
+impl MarkerConstantDataP {
+    pub const INVALID: Self = Self {
+        blend_factors: Self::ALPHA_FACTORS_NOP,
+        _padding0: Vector2::ZERO,
+    };
+    /// [Self::alpha_factors(0.0)](Self::alpha_factors),
+    /// nothing but plain alpha blending
+    const ALPHA_FACTORS_NOP: Vector2<f32> = Vector2::new(0.0f32, 1.0f32);
+    /// blend factors in order to achieve a target opacity, after partially applied
+    ///
+    /// example series of alpha-blended passes to achieve 80% effective opacity:
+    /// 1. blend at 30%
+    /// 2. blend at 80% using `alpha_factors(0.3 / 0.8)` to "fill in" the rest
+    ///
+    /// meant to be used like: `output.a *= 1/(output.a * factor.0 + factor.1)`,
+    /// (alternatively `1/(factor.0 + factor.1/output.a)`?)
+    pub fn alpha_factors(applied: f32) -> Vector2<f32> {
+        Vector2::new(applied / (applied - 1.0), 1.0 / (1.0 - applied))
+    }
+    pub fn set_blend_factors(&mut self, applied: Option<f32>) {
+        let applied = match applied {
+            Some(amt) if amt.is_nan() => None,
+            Some(amt) if amt >= 1.0 => None,
+            Some(0.0) => None,
+            a => a,
+        };
+        self.blend_factors = applied
+            .map(Self::alpha_factors)
+            .unwrap_or(Self::ALPHA_FACTORS_NOP);
+    }
+    pub fn effective_alpha(&self, alpha: f32) -> f32 {
+        let [blend_factor, blend_const] = self.blend_factors.to_array();
+        alpha / (alpha * blend_factor + blend_const)
+    }
+    pub fn cumulative_alpha(&self, latest: f32, prior: f32) -> f32 {
+        let latest = self.effective_alpha(latest);
+        prior * (1.0 - latest) + latest
+    }
+}
+#[derive(Debug, Copy, Clone, Default)]
+#[repr(C)]
+pub struct TrailConstantDataP {
+    pub marker: MarkerConstantDataP,
+}
+#[derive(Debug, Copy, Clone, Default)]
+#[repr(C)]
+pub struct PoiConstantDataP {
+    pub marker: MarkerConstantDataP,
+}
 #[derive(Debug, Copy, Clone, Default)]
 #[repr(C)]
 pub struct MarkerConstantDataV {

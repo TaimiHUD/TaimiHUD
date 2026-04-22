@@ -24,6 +24,7 @@ type OMDepthState = taimi_d3d::dx11::OMDepthState<DepthState>;
 pub struct DepthHandler {
     pub render_target_view: RenderTargetViews<RenderTargetView>,
     pub depth_stencil_state: OMDepthState,
+    pub depth_stencil_state_off: OMDepthState,
     #[cfg(feature = "goggles2")]
     pub depth_stencil_state_readonly: OMDepthState,
     pub depth_stencil_state_map: OMDepthState,
@@ -51,6 +52,7 @@ impl DepthHandler {
     ) -> anyhow::Result<Self> {
         let framebuffer = swap_chain.get_framebuffer11(0)?;
         let depth_stencil_state = DepthState::new_with_desc(device, &Self::DEPTH_DESC_ON)?;
+        let depth_stencil_state_off = DepthState::new_with_desc(device, &Self::DEPTH_DESC_OFF)?;
         #[cfg(feature = "goggles2")]
         let depth_stencil_state_readonly = DepthState::new_with_desc(device, &Self::DEPTH_DESC_READONLY)?;
         let depth_stencil_state_map = DepthState::new_with_desc(device, &Self::DEPTH_DESC_MAP)?;
@@ -83,6 +85,7 @@ impl DepthHandler {
         Ok(Self {
             render_target_view,
             depth_stencil_state: OMDepthState::with_state(depth_stencil_state, Self::STENCIL_REF),
+            depth_stencil_state_off: OMDepthState::with_state(depth_stencil_state_off, Self::STENCIL_REF),
             #[cfg(feature = "goggles2")]
             depth_stencil_state_readonly: OMDepthState::with_state(
                 depth_stencil_state_readonly,
@@ -127,8 +130,15 @@ impl DepthHandler {
         BackFace: Self::STENCILOP_ON,
         ..DepthState::DESC_DEFAULT
     };
+    const DEPTH_DESC_OFF: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        DepthEnable: BOOL(0),
+        DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
+        DepthFunc: ComparisonFunc::ALWAYS,
+        ..Self::DEPTH_DESC_ON
+    };
     #[cfg(feature = "goggles2")]
     const DEPTH_DESC_READONLY: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
+        #[cfg(todo)]
         StencilEnable: BOOL(0),
         DepthWriteMask: d3d11::D3D11_DEPTH_WRITE_MASK_ZERO,
         ..Self::DEPTH_DESC_ON
@@ -147,6 +157,7 @@ impl DepthHandler {
         DepthFunc: ComparisonFunc::ALWAYS,
         DepthEnable: BOOL(1),
         StencilEnable: BOOL(0),
+        StencilWriteMask: 0,
         ..DepthState::DESC_DEFAULT
     };
     const DEPTH_DESC_FILL_OPAQUE: D3D11_DEPTH_STENCIL_DESC = D3D11_DEPTH_STENCIL_DESC {
@@ -154,7 +165,7 @@ impl DepthHandler {
         DepthEnable: BOOL(0),
         StencilEnable: BOOL(1),
         StencilReadMask: 0,
-        //StencilWriteMask: 0xff,
+        StencilWriteMask: 0xff,
         FrontFace: Self::STENCILOP_FILL,
         BackFace: Self::STENCILOP_FILL,
         ..Self::DEPTH_DESC_FILL
@@ -169,7 +180,7 @@ impl DepthHandler {
         ..Self::DEPTH_DESC_ON
     };
     const STENCILOP_ON: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
-        StencilFunc: ComparisonFunc::GREATER,
+        StencilFunc: ComparisonFunc::GREATER_EQUAL,
         ..DepthState::STENCILOP_DEFAULT
     };
     const STENCILOP_FILL: d3d11::D3D11_DEPTH_STENCILOP_DESC = d3d11::D3D11_DEPTH_STENCILOP_DESC {
