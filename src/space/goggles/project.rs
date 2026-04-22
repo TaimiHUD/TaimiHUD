@@ -528,52 +528,65 @@ impl ProjectShared {
             },
             _ => None,
         };
-        let target_dv = match what {
-            #[cfg(todo)]
-            ProjectAction::DrawObscured
-                if matches!(cls, BufferClass::Shadowbox)
-                    && state.machine.goggles.project.project_shadow =>
-                None,
-            ProjectAction::DrawObscured
-                if !matches!(
-                    cls,
-                    BufferClass::Target | BufferClass::Fallback /*| BufferClass::Shadowbox*/
-                ) =>
-                dv.map(|dv| *dv.as_d3d_raw()),
-            #[cfg(todo)]
-            ProjectAction::DrawMinimap if matches!(cls, BufferClass::Minimap | BufferClass::Target) =>
-                dv.map(|dv| *dv.as_d3d_raw()),
-            #[cfg(todo)]
-            ProjectAction::DrawMap if matches!(cls, BufferClass::World) => dv.map(|dv| *dv.as_d3d_raw()),
-            Drawing::REFLECT | Drawing::REFLECT_BELOW | ProjectAction::Shadowbox
-                if matches!(cls, BufferClass::Shadowbox | BufferClass::Reflection) =>
-                dv.map(|dv| *dv.as_d3d_raw()),
-            ProjectAction::Draw if !state.machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) => None,
-            ProjectAction::Draw => {
-                let current = match cls {
-                    BufferClass::World => dv.and_then(|dv| {
-                        ClassShared::with_seen2(*dv.as_d3d_raw(), |buf| {
-                            LensShared::buf_is_valid_ongoing(buf).then_some(*dv.as_d3d_raw())
-                        })
-                        .flatten()
-                    }),
-                    _ => None,
-                };
-                current.or_else(|| {
-                    LensShared::read_selected().and_then(|dv| {
-                        ClassShared::with_seen2(dv, |buf| {
-                            LensShared::buf_is_valid_ongoing(buf).then_some(dv)
-                        })
-                        .flatten()
-                    })
-                })
-            },
-            _ => None,
-        };
-        let depth = target_dv
-            .as_ref()
-            .map(|dv| unsafe { DepthView::from_d3d_raw_ref(dv) });
         if let Some(engine) = engine {
+            let what = match (what, cls) {
+                (Drawing::SPACE, BufferClass::Shadowbox) => Drawing::SHADOWBOX_OUTLINE,
+                (what, _) => what,
+            };
+            let target_dv = match what {
+                #[cfg(todo)]
+                ProjectAction::DrawObscured
+                    if matches!(cls, BufferClass::Shadowbox)
+                        && state.machine.goggles.project.project_shadow =>
+                    None,
+                ProjectAction::DrawObscured
+                    if !matches!(
+                        cls,
+                        BufferClass::Target | BufferClass::Fallback /*| BufferClass::Shadowbox*/
+                    ) =>
+                    dv.map(|dv| *dv.as_d3d_raw()),
+                #[cfg(todo)]
+                ProjectAction::DrawMinimap => i_wish,
+                #[cfg(todo)]
+                ProjectAction::DrawMap => i_wish,
+                ProjectAction::DrawObscured
+                    if matches!(cls, BufferClass::Target)
+                        && engine.drawing.wants_onion(&engine.arcdata) =>
+                    None,
+                Drawing::REFLECT | Drawing::REFLECT_BELOW | ProjectAction::Shadowbox
+                    if matches!(cls, BufferClass::Shadowbox | BufferClass::Reflection) =>
+                    dv.map(|dv| *dv.as_d3d_raw()),
+                ProjectAction::Draw | Drawing::ONION
+                    if !state.machine.goggles.is_enabled(GogglesEnables::LENS_ENABLE) =>
+                    None,
+                ProjectAction::Draw | Drawing::ONION => {
+                    let current = match cls {
+                        BufferClass::World => dv.and_then(|dv| {
+                            ClassShared::with_seen2(*dv.as_d3d_raw(), |buf| {
+                                let ok = match LensShared::buf_is_valid_ongoing(buf) {
+                                false if what == Drawing::ONION /*|| method == Early*/ => true,
+                                valid => valid,
+                            };
+                                ok.then_some(*dv.as_d3d_raw())
+                            })
+                            .flatten()
+                        }),
+                        _ => None,
+                    };
+                    current.or_else(|| {
+                        LensShared::read_selected().and_then(|dv| {
+                            ClassShared::with_seen2(dv, |buf| {
+                                LensShared::buf_is_valid_ongoing(buf).then_some(dv)
+                            })
+                            .flatten()
+                        })
+                    })
+                },
+                _ => None,
+            };
+            let depth = target_dv
+                .as_ref()
+                .map(|dv| unsafe { DepthView::from_d3d_raw_ref(dv) });
             let target_size = ClassShared::with_seen2(*target.as_d3d_raw(), |buf| buf.size()).flatten();
             let vp = target_size.map(|(w, h)| Rect::new(Point2::ZERO, Size2::new(w as f32, h as f32)));
             let desc = DrawDescGoggles {
@@ -587,8 +600,11 @@ impl ProjectShared {
             desc.goggles.buffer_compat =
                 vp.map(|vp| vp.size) == Some(engine.render_backend.display_size) && depth.is_some();
             desc.pass = what;
-            let mut wispy = false;
             match (what, cls, target_dv) {
+                (ProjectAction::DrawObscured, BufferClass::Target, None) => {
+                    desc.depth_write = false;
+                    desc.depth_read = false;
+                },
                 (ProjectAction::DrawObscured, ..) => {
                     desc.depth_write = false;
                     if desc.goggles.target_depthview.is_none() {
@@ -601,6 +617,11 @@ impl ProjectShared {
                     }
                     desc.depth_read = desc.goggles.target_depthview.is_some();
                 },
+                (Drawing::ONION, BufferClass::World, ..) => {
+                    desc.depth_write = false;
+                    desc.depth_read = desc.goggles.target_depthview.is_some();
+                    desc.goggles.buffer_compat = true;
+                },
                 (ProjectAction::Draw, BufferClass::World, Some(..)) => {
                     desc.depth_write = true;
                     desc.depth_read = true;
@@ -612,15 +633,13 @@ impl ProjectShared {
                     desc.colour_read = false;
                     desc.colour_write = false;
                 },
-                (ProjectAction::Draw, BufferClass::Shadowbox, dv) => {
+                (Drawing::SHADOWBOX_OUTLINE, /*BufferClass::Shadowbox*/ _, dv) => {
                     desc.depth_write = false;
                     desc.depth_read = dv.is_some();
-                    wispy = true;
                 },
                 (Drawing::REFLECT | Drawing::REFLECT_BELOW, BufferClass::Reflection, dv) => {
                     desc.depth_write = false;
                     desc.depth_read = false;
-                    //wispy = true;
                 },
                 (ProjectAction::DrawMinimap | ProjectAction::DrawMap, _, Some(..)) => {
                     desc.goggles.buffer_compat = false;
@@ -661,29 +680,18 @@ impl ProjectShared {
                 Self::log_view("env", ClassShared::bound_depth_ptr());
             }
             if state.machine.goggles.project.debug_detect {
-                Self::draw_detect_clear(context, target, &desc.goggles, draw);
-                if !wispy {
-                    engine.drawing.drawn.insert(what);
-                    if !state.machine.goggles.project.debug_detect_all {
-                        ProjectShared::mask_drawing(what.bit());
-                    }
+                Self::draw_detect_clear(context, target, &desc.goggles, what);
+                engine.drawing.drawn.insert(what);
+                if !state.machine.goggles.project.debug_detect_all {
+                    ProjectShared::mask_drawing(what);
                 }
             } else {
                 if let LocalContext::Map(..) = draw {
                     state.machine.lastminute_mumblelink_update();
                 }
-                let wispy = wispy.then_some(engine.drawing.drawn.contains(what));
-                if wispy.is_some() {
-                    engine.drawing.drawing.insert(what);
-                    engine.drawing.drawn.remove(what);
-                }
-                let pass = desc.pass;
                 engine.render_carefully(&mut state.machine, context, desc, draw);
-                let succ = engine.drawing.drawn.contains(what);
-                if let Some(prev) = wispy {
-                    engine.drawing.drawn.set(what, prev);
-                } else if succ {
-                    ProjectShared::mask_drawing(what.bit());
+                if engine.drawing.drawn.contains(what) {
+                    ProjectShared::mask_drawing(what);
                 }
             }
         }
@@ -699,7 +707,7 @@ impl ProjectShared {
         context: &DeviceContext0,
         target: &RenderTargetView,
         _desc: &DrawDescGoggles,
-        _ctx: LocalContext,
+        _what: Drawing,
     ) {
         Self::detect_clear(context, target);
     }
@@ -809,7 +817,10 @@ impl ProjectMethod {
             .unwrap_or(true) =>
                 None,
             #[cfg(todo)]
-            (ProjectAction::DrawObscured, BufferClass::Fallback, ProjectMethod::Conservative) => Some((0x10, None)),
+            (ProjectAction::DrawObscured, BufferClass::Fallback, ProjectMethod::Conservative) => {
+                todo?;
+                Some((0x10, None))
+            },
             (
                 ProjectAction::DrawObscured,
                 BufferClass::Pretty,
@@ -896,7 +907,7 @@ impl ProjectMethod {
                 )
                 .unwrap_or(true) =>
                 None,
-            (ProjectAction::Draw, BufferClass::World, Self::Early)
+            (Drawing::ONION, BufferClass::World, Self::Early)
                 if ClassShared::with_seen_class(
                     BufferKind::DepthView,
                     BufferClass::World,
@@ -955,7 +966,7 @@ impl ProjectMethod {
             (_, _, Self::Shiny) => None,
             (Drawing::REFLECT | Drawing::REFLECT_BELOW, BufferClass::Reflection, Self::Pretty) =>
                 Some((0x04, None)),
-            (ProjectAction::Draw, BufferClass::World, Self::Early | Self::Shiny)
+            (Drawing::ONION, BufferClass::World, Self::Early | Self::Shiny)
                 if ClassShared::with_current_dv(|_, buf| {
                     buf.depth_binds_count_disabled() > 1 || buf.depth_binds_count_readonly() >= 1
                 })

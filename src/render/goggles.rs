@@ -76,12 +76,29 @@ impl GogglesConfig {
                 let _ = ui.checkbox("all", &mut machine.goggles.project.debug_detect_all);
             }
         }
+        if machine
+            .goggles
+            .enabled_config
+            .intersects(GogglesEnables::LENS_ENABLE | GogglesEnables::PROJECT_ENABLE)
+        {
+            let _ = ui.checkbox("compat/pre", &mut machine.goggles.class.compat_present_count);
+            if machine.goggles.class_offer_clear_inconsistent() {
+                let mut clear_inconsistent = machine.goggles.class.compat_clear_inconsistent();
+                ui.same_line();
+                if ui.checkbox("compat/clr", &mut clear_inconsistent) {
+                    machine
+                        .goggles
+                        .class
+                        .set_compat_clear_inconsistent(clear_inconsistent);
+                }
+            }
+        }
         #[cfg(feature = "goggles2-project")]
         {
             if machine
                 .goggles
                 .enabled_config
-                .contains(GogglesEnables::PROJECT_ENABLE)
+                .intersects(GogglesEnables::LENS_ENABLE | GogglesEnables::PROJECT_ENABLE)
             {
                 ui.same_line();
             }
@@ -209,14 +226,23 @@ impl GogglesConfig {
 
         #[cfg(feature = "goggles2-project")]
         {
+            let undrawn = machine.goggles.project.undrawn();
             let mut prefix = "drawfail";
-            for ctx in machine.goggles.project.undrawn() {
+            for ctx in undrawn.iter_passes() {
                 if !prefix.is_empty() {
                     ui.text(prefix);
                 }
                 prefix = "";
                 ui.same_line();
                 ui.text(ctx.to_string());
+            }
+            let flags = undrawn.get_flags();
+            if !flags.is_empty() {
+                ui.same_line();
+                if !prefix.is_empty() {
+                    ui.text(prefix);
+                }
+                ui.text(flags.to_string());
             }
         }
     }

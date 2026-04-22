@@ -21,6 +21,7 @@ use {
     taimi_meta::{
         coords::{self, GameSpace, LocalSpace},
         map::MapProjectionDepth,
+        packs::MapIndex,
     },
     windows::core::Interface,
 };
@@ -1128,17 +1129,25 @@ pub struct GogglesCamera {
     pub debug_interpolate_off: bool,
     pub perspective_lost: u16,
     pub perspective_params: (f32, f32, f32, f32),
+    pub save_map: Option<MapIndex>,
 }
 impl GogglesCamera {
-    pub(super) fn act_map_enter(&mut self, hard: bool) {
+    pub(super) fn act_map_enter(&mut self, hard: bool, map_id: MapIndex) {
         self.camera_paused = false;
         if self.camera_enabled {
             if hard {
                 self.camera_clear();
+                self.save_map = Some(map_id);
             } else {
                 self.reset_search();
+                if self.save_map != Some(map_id) {
+                    self.save_map = None;
+                }
             }
         }
+    }
+    pub(super) fn act_map_exit(&mut self) {
+        self.save_map = None;
     }
     /// TODO: awkwardly called by engine, hacky...
     pub(super) fn act_render_post(&mut self) {
@@ -1237,6 +1246,7 @@ impl GogglesCamera {
     pub(crate) fn camera_disable(&mut self) {
         self.camera_enabled = false;
         self.camera_clear();
+        self.save_map = None;
         GogglesShared::set_size_range(CameraShared::SIZE_RANGE_EMPTY);
     }
     fn camera_lost_defer(lost: &mut u16, update: u8) -> bool {
@@ -1337,7 +1347,7 @@ impl GogglesCamera {
         self.camera_lost = Default::default();
     }
     pub(crate) fn perspective_params(&self) -> Option<(f32, f32, f32, f32)> {
-        if self.perspective_params.0.to_bits() != 0.0f32.to_bits() {
+        if self.has_persp() {
             Some(self.perspective_params)
         } else {
             None
@@ -1373,7 +1383,11 @@ impl GogglesCamera {
             _ => !GogglesShared::wants_snatch_camera_smooth(),
         }
     }
+    pub(crate) fn has_persp(&self) -> bool {
+        self.perspective_params.0.to_bits() != 0.0f32.to_bits()
+    }
     pub(crate) fn camera_commit_perspective(&mut self) {
+        let had_persp = self.has_persp();
         if self.camera_enabled && !self.camera_paused && !GogglesShared::wants_snatch_perspective() {
             let persp = GogglesShared::snatch_perspective();
             #[cfg(deleteme)]
@@ -1386,6 +1400,32 @@ impl GogglesCamera {
                 log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({_near}..{far}) h={h:?}");
             }
             self.perspective_params = Self::perspective_params_for(&persp);
+        }
+
+        if self.has_persp() && !had_persp {
+            if let Some(map_id) = self.save_map.take() {
+                let farz = self.perspective_farz().map(|farz| (map_id, farz));
+                #[cfg(taimi_debug)]
+                log::debug!("saving? {:?}", self.perspective_params);
+                let settings = farz
+                    .is_some()
+                    .then(|| crate::SETTINGS.get().and_then(|s| s.try_write().ok()))
+                    .flatten();
+                if let (Some((map_id, farz)), Some(mut settings)) = (farz, settings) {
+                    let dirty = if let Some(pathing) = settings.pathing.as_mut() {
+                        pathing.space.goggles.set_map_proj_seen_depth(map_id.get(), farz)
+                    } else {
+                        false
+                    };
+                    if dirty {
+                        settings.mark_dirty();
+                        #[cfg(taimi_debug)]
+                        if let Some((h, _, near, far)) = self.perspective_params() {
+                            log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({near}..{far}) h={h:?}")
+                        }
+                    }
+                }
+            }
         }
     }
     pub(super) fn set_perspective(&mut self, on: bool) {
