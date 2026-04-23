@@ -291,7 +291,11 @@ impl MarkerInstanceData {
     }
 
     pub fn set_anim_scale(&mut self, scale: f32) {
-        self.anim_scale = scale;
+        let bias = self.anim_scale.abs().trunc();
+        self.anim_scale = (scale / 64.0).clamp(-1.0 + f32::EPSILON, 1.0 - f32::EPSILON) + bias;
+    }
+    pub fn set_depth_bias(&mut self, bias: u32) {
+        self.anim_scale = self.anim_scale.fract() + bias as f32;
     }
 }
 impl Default for MarkerInstanceData {

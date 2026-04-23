@@ -31,16 +31,18 @@ pub struct RenderOrderBuilder<'a, T, BvhIter> {
 
 pub struct RenderOrderSort {
     pub cam_origin: Vec3A,
-    #[cfg(todo)]
-    pub cam_dir: Vector3<DrawSpace>,
+    pub cam_dir: Vec3A,
 }
 impl RenderOrderSort {
     pub fn with_camera(cam: &RenderPosition) -> Self {
         Self {
             cam_origin: cam.0.into(),
-            #[cfg(todo)]
-            cam_dir: cam.1,
+            cam_dir: cam.1.into(),
         }
+    }
+    #[inline(always)]
+    pub fn cam_dist_order_biased(&self, position: Point3<DrawSpace>, bias: u32) -> i32 {
+        self.cam_dist_order_for(position).saturating_add((-(bias as i32)) % 0x800)
     }
     #[inline(always)]
     pub fn cam_dist_order_for(&self, position: Point3<DrawSpace>) -> i32 {
@@ -55,7 +57,7 @@ impl RenderOrderSort {
             let cam_dist = cam_dist ^ ((cam_dist >> 30) as u32 >> 1) as i32;
             cam_dist
         };
-        Self::dist_to_sort(position.distance_squared(self.cam_origin))
+        Self::dist_to_sort((position - self.cam_origin).dot(self.cam_dir))
     }
     #[inline]
     pub fn dist_to_sort(dist: f32) -> i32 {

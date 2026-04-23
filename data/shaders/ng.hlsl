@@ -27,6 +27,8 @@ TrailOutputV trail_main_v(TrailInput input)
     float fade2 = 0.0;
 #endif
 
+    // TODO: if GET_MFLAG(input.marker.flags, MFLAG_WALL) adjust x+y or z-bias after transform to camera or something
+    pos_world.y += (float)GET_SCALE_BIAS24U(input.marker.anim_scale) * pow(dot(pos_world.xyz - v_render.camera_pos, v_render.camera_dir), 2.0) * DepthBufScaleT;
     float4 pos = mul(v_render.view, pos_world);
 #if 1
     float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
@@ -40,7 +42,7 @@ TrailOutputV trail_main_v(TrailInput input)
     }
 #endif
 
-    float texoff = v_trail.tex_offset - v_render.anim_timestamp * input.marker.anim_scale * v_trail.marker.anim_scale;
+    float texoff = v_trail.tex_offset - v_render.anim_timestamp * GET_SCALE_ANIM(input.marker.anim_scale) * v_trail.marker.anim_scale;
     output.tex = float2(input.vertex.tex.x, 1.0 - MAD(input.vertex.tex.y, v_trail.tex_scale, texoff));
 
     float3 input_colour = input.marker.colour;
@@ -253,7 +255,7 @@ PoiOutputV poi_main_v(PoiInput input)
 
 #if 1
     float bounce_height = GET_BOUNCE_DIST(input.bounce);
-    float bounce_anim = (v_render.anim_timestamp - input.anim_offset) * input.marker.anim_scale * v_poi.marker.anim_scale;
+    float bounce_anim = (v_render.anim_timestamp - input.anim_offset) * GET_SCALE_ANIM(input.marker.anim_scale) * v_poi.marker.anim_scale;
     float bounce_y = lerp(
         min(bounce_anim, 1.0),
         0.5f - cos(bounce_anim) * 0.5,
@@ -282,6 +284,8 @@ PoiOutputV poi_main_v(PoiInput input)
     if (GET_MFLAG(v_poi.marker.flags, 0x4000)) {
         output.position.z = output.position.z + 0.0015;
     }
+#else
+    output.position.z += (float)GET_SCALE_BIAS24(input.marker.anim_scale) * DepthBufScaleT;
 #endif
 #if GOGGLES2_REFLECTING
     // to draw directly onto water surface

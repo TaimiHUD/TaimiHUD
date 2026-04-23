@@ -1720,7 +1720,7 @@ impl PackRenderResources {
 
         let markers = markers.into_iter();
         let mut out = Vec::with_capacity(markers.size_hint().1.unwrap_or(0));
-        for mid in markers {
+        for (idx, mid) in markers.enumerate() {
             let path = mid.marker_path::<PackMapPath>()
                 .and_then(|path|
                     pack_data.lookup_ref(&path.root.root).map(|p| (p, path))
@@ -1816,6 +1816,7 @@ impl PackRenderResources {
                     ib.map_scale = attrs.map_display_size() / 2.0;
                     ib.billboard_scale = attrs.icon_size();
                     ib.set_size_range(attrs.min_size(), attrs.max_size());
+                    ib.marker.set_depth_bias(idx as u32);
                     Some((&mut ib.marker, poi.lpoi_info().marker_info()))
                 },
                 Some((LoadedMarkerRef::Trail(trail), _pack_data)) => {
@@ -1824,6 +1825,7 @@ impl PackRenderResources {
                         .. instance::TrailInstanceData::INVALID
                     });
                     ib.marker.set_anim_scale(attrs.anim_speed());
+                    ib.marker.set_depth_bias(idx as u32);
                     if attrs.is_wall() {
                         ib.marker.flags |= instance::MarkerInstanceData::FLAG_WALL;
                     }
@@ -2228,7 +2230,7 @@ impl PackRenderList {
                 let pos = match ignore_draw_order {
                     true => None,
                     false if extra.position.x.is_infinite() => None,
-                    false => Some(key.cam_dist_order_for(extra.position)),
+                    false => Some(key.cam_dist_order_biased(extra.position, idx as u32)),
                 };
                 (pos, idx)
             })
