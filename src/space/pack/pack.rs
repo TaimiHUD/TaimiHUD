@@ -214,6 +214,7 @@ impl PackRender {
             self.texture_rx.subscribe_to(&pathing.space.texture_loads);
         }
         if packs_rx.has_changed().unwrap_or(false) {
+            self.render_list.mark_dirty();
             let packs = packs_rx.borrow_and_update();
             if self.pack_data.len() < packs.len() {
                 self.pack_data.data.resize_with(packs.len(), PackRenderData::new);
@@ -303,6 +304,7 @@ impl PackRender {
         if let Some(map_id) = map_id {
             if let Some(packs_map) = &packs_map_changed {
                 log::trace!("gameplay maps rx @ {map_id}");
+                self.render_list.mark_dirty();
                 if let Some(maps) = packs_map.get_ref(map_id) {
                     for (pack_path, pack) in self.pack_data.iter_mut() {
                         let Some((packmap_path, map_info)) = maps.get_info_for(pack_path) else {
@@ -1390,6 +1392,13 @@ pub struct PackRenderList {
 impl PackRenderList {
     #[inline]
     pub fn setup_frame(&mut self) {
+        #[cfg(todo = "unnecessary")]
+        {
+            self.draw_order_heap.clear();
+        }
+    }
+    #[inline]
+    pub fn prepare_frame(&mut self) {
         if mem::replace(&mut self.dirty, false) {
             let shapes = self.spacepacks.render_entities.entities.len();
             let min_cap = shapes / 8;
@@ -1400,13 +1409,6 @@ impl PackRenderList {
             self.draw_unorder_cache.clear();
             self.draw_unorder_cache.reserve(min_cap / 2);
             self.draw_order_cache_id = None;
-        }
-    }
-    pub fn prepare_frame(&mut self) {
-        #[cfg(deleteme)] {
-        self.draw_order_cache.clear();
-        self.draw_unorder_cache.clear();
-        self.draw_order_cache_id = None;
         }
     }
     pub fn mark_dirty(&mut self) {

@@ -368,12 +368,12 @@ impl ClassShared {
     const INCONSISTENT_CLEARS_THRESHOLD: u32 = 28;
 
     fn mark_new_frame() {
+        g2!(*&volatile mut ferret.class.frame_start = Some(Instant::now()));
         if !g2!(*&volatile const ferret.class.game_time) {
             // leave as an invalid frame while between maps
             return
         }
         GogglesShared::flags_insert(GogglesFlags::CLASS_FRAME_ONGOING);
-        g2!(*&volatile mut ferret.class.frame_start = Some(Instant::now()));
         frame_log!("goggles; world/start");
         #[cfg(feature = "goggles2-project")]
         if super::project::ProjectShared::wants_draw() {
@@ -1729,7 +1729,7 @@ impl GogglesClass {
     pub(super) fn act_pre_render_frame(&mut self, ingame: bool) {
         if !ingame {
             g2!(*&volatile mut ferret.class.game_time = false);
-        } else if self.active {
+        } else if self.active && !g2!(*&ferret.class.cleanup_time) {
             g2!(*&volatile mut ferret.class.game_time = true);
         }
     }
