@@ -277,34 +277,67 @@ impl GogglesConfig {
 
         #[cfg(taimi_debug)]
         if self.view_lens_info.is_empty() {
-            use taimi_d3d::dx11::{DepthView, RenderTargetView, View};
+            use crate::space::goggles::class::BufferKind;
+            use taimi_d3d::dx11::{buffer::{ShaderResourceView, UnorderedAccessView}, DepthView, RenderTargetView, View};
+            use core::fmt::Write;
+
             let mut rview = None;
             let mut dview = None;
             let mut uview = None;
+            let mut sview = None;
+            let out = self.view_lens_info.is_empty().then_some(&mut self.view_lens_info);
             let view = if let (Some(lens), Some(info)) = (&selected_lens, &selected_info) {
                 let view: Option<&View> = match (&lens, info.kind) {
                     _ if !info.was_seen() || ClassShared::read_frame_count().wrapping_sub(info.last_seen) >= 1 || machine.mumblelink_frame_skip > 0 || machine.is_ingame().is_none() =>
                         None,
-                    (p, goggles::class::BufferKind::DepthView) => Some({
-                        &*dview.insert(unsafe { DepthView::from_d3d_raw_ref(p) })
+                    (p, BufferKind::DepthView) => Some({
+                        let dview = dview.insert(unsafe { DepthView::from_d3d_raw_ref(p) });
+                        let desc = dview.get_desc();
+                        let mip = unsafe { desc.Anonymous.Texture2D.MipSlice };
+                        if let Some(&mut ref mut out) = out {
+                            let _ = write!(out, "vformat={:#x} vflags={:#x} vdim={:#x} subr(mip)={mip}", desc.Format.0, desc.Flags, desc.ViewDimension.0);
+                        }
+                        &*dview
                     }),
-                    (p, goggles::class::BufferKind::RenderTarget) => Some({
-                        &*rview.insert(unsafe { RenderTargetView::from_d3d_raw_ref(p) })
+                    (p, BufferKind::RenderTarget) => Some({
+                        let rview = rview.insert(unsafe { RenderTargetView::from_d3d_raw_ref(p) });
+                        let desc = rview.get_desc();
+                        let mip = unsafe { desc.Anonymous.Texture2D.MipSlice };
+                        if let Some(&mut ref mut out) = out {
+                            let _ = write!(out, "vformat={:#x} vdim={:#x} subr(mip)={mip}", desc.Format.0, desc.ViewDimension.0);
+                        }
+                        &*rview
                     }),
-                    (p, goggles::class::BufferKind::UnorderedAccessView) => Some({
-                        &*uview.insert(unsafe { View::from_d3d_raw_ref(p) })
+                    (p, BufferKind::UnorderedAccessView) => Some({
+                        let uview = uview.insert(unsafe { UnorderedAccessView::from_d3d_raw_ref(p) });
+                        let desc = uview.get_desc();
+                        let mip = unsafe { desc.Anonymous.Texture2D.MipSlice };
+                        if let Some(&mut ref mut out) = out {
+                            let _ = write!(out, "vformat={:#x} vdim={:#x} subr(mip)={mip}", desc.Format.0, desc.ViewDimension.0);
+                        }
+                        &*uview
+                    }),
+                    (p, BufferKind::ShaderResourceView) => Some({
+                        let sview = sview.insert(unsafe { ShaderResourceView::from_d3d_raw_ref(p) });
+                        let desc = sview.get_desc();
+                        let (mip, mips) = unsafe { (
+                            desc.Anonymous.Texture2D.MostDetailedMip,
+                            desc.Anonymous.Texture2D.MipLevels,
+                        ) };
+                        if let Some(&mut ref mut out) = out {
+                            let _ = write!(out, "vformat={:#x} vdim={:#x} subr(mip)={mip}/{mips}", desc.Format.0, desc.ViewDimension.0);
+                        }
+                        &*sview
                     }),
                 };
                 view.map(|v| (v, info))
             } else { None };
-            let desc = view.and_then(|(view, ..)|
+            let desc = view.as_ref().and_then(|(view, ..)|
                 view.get_resource().ok().and_then(|r| r.as_texture2().map(|t2| t2.desc())),
             );
-            if let Some(desc) = desc {
-                use core::fmt::Write;
-                let out = &mut self.view_lens_info;
-                let _ = write!(out, "size={}x{} mips={}({})", desc.Width, desc.Height, desc.MipLevels, desc.SampleDesc.Count);
-                let _ = write!(out, "format={:#x} usage={:#x} bind={:#x} misc={:#x}", desc.Format.0, desc.Usage.0, desc.BindFlags, desc.MiscFlags);
+            if let (Some(out), Some(desc)) = (out, desc) {
+                let _ = write!(out, "texsize={}x{} mips={}({})", desc.Width, desc.Height, desc.MipLevels, desc.SampleDesc.Count);
+                let _ = write!(out, "texformat={:#x} usage={:#x} bind={:#x} misc={:#x}", desc.Format.0, desc.Usage.0, desc.BindFlags, desc.MiscFlags);
             }
         }
         if let (Some(lens), Some(info)) = (selected_lens, &selected_info) {
@@ -373,13 +406,16 @@ impl GogglesConfig {
                     }
                     ui.text(format!("{clsname}={score}"));
                 }
-                for (i, (depth, sref)) in info.state.depth_binds.iter().enumerate() {
-                    ui.text(format!(":: dep#{i} sref={sref} depth={depth:?}"));
-                }
             }
         }
         if !self.view_lens_info.is_empty() {
             ui.text(&self.view_lens_info);
+        }
+        #[cfg(taimi_debug)]
+        if let Some(info) = &selected_info {
+            for (i, (depth, sref)) in info.state.depth_binds.iter().enumerate() {
+                ui.text(format!(":: dep#{i} sref={sref} depth={depth:?}"));
+            }
         }
 
         if let (Some(key), Some(cls)) = (selected_lens, new_class) {

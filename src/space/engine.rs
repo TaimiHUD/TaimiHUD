@@ -12,6 +12,7 @@ use {
             runtime::statistics::{StatsDesc, StatsRef, StatsUnit},
         },
         render::machine::{frame_log, RenderMachine, RenderPosition},
+        resources::ShaderLoader,
         settings::{pathing::SpaceSettings, PathingSettings, Settings},
         space::{
             dx11::RenderBackend,
@@ -109,6 +110,7 @@ pub enum SpaceEvent {
     SettingsDirty,
     UiResize(Option<Size2<ScreenSpace>>),
     ProcessShader(&'static str, ShaderKind, taimi_d3d::blob::Blob, String),
+    ReloadShaders(bool),
     #[cfg(deleteme)]
     #[cfg(feature = "goggles")]
     GogglesRefreshLens {
@@ -466,6 +468,37 @@ impl Engine {
                             #[cfg(taimi_debug)]
                             log::debug!("TODO: resize event to {sz:?}");
                         },
+                    },
+                    ReloadShaders(all) => {
+                        let reloaded = match all {
+                            true => {
+                                let reloaded = ShaderLoader::load_bundled(&self.render_backend.device)
+                                    .context("reloading shaders");
+                                if let Some(shaders) = rt::log::warn_ok(reloaded) {
+                                    self.render_backend.shaders = shaders;
+                                    if let Some(pois) = &mut self.packs.resources.poi_common {
+                                        let pair = self.render_backend.shaders.pair_named("poi")
+                                            .context("POI shaders");
+                                        if let Some(pair) = rt::log::warn_ok(pair) {
+                                            pois.shaders = pair;
+                                        }
+                                    }
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                            false => {
+                                for id in pack::render::ArcShaderVariant::all_ids() {
+                                    self.render_backend.shaders.unload_named(id);
+                                }
+                                true
+                            },
+                        };
+                        if reloaded {
+                            self.packs.resources.clear_shaders();
+                            self.packs.draw_state.clear_shaders();
+                        }
                     },
                     ProcessShader(id, kind, bytecode, partial_id) => {
                         let res = self.render_backend.shaders.load_partial(&self.render_backend.device, &id, &bytecode, &partial_id);

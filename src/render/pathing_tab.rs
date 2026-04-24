@@ -22,11 +22,12 @@ use {
 
 #[cfg(feature = "paths-interact")]
 use crate::controller::pathing::InteractMessage;
+#[cfg(feature = "paths")]
+use crate::space::engine::{Engine, SpaceEvent};
 #[cfg(feature = "goggles")]
 use {
     crate::{
         settings::goggles::{GogglesEnables, GogglesSettings, GogglesMapDepth},
-        space::engine::{Engine, SpaceEvent},
         render::goggles as render_goggles,
     },
     std::{borrow::Cow, ops::Range},
@@ -80,7 +81,7 @@ impl PathingConfig {
                 Self::draw_space_error(ui, machine, None);
             }
 
-            self.draw_pathing_opts(ui, machine);
+            self.draw_pathing_opts(ui, machine, available);
             if available && self.katrender() {
                 ui.separator();
                 let label = fl!("pathing-window");
@@ -106,7 +107,7 @@ impl PathingConfig {
             self.draw_map_opts(ui);
 
             #[cfg(feature = "goggles")]
-            if let Some(Some(..)) = _active {
+            if let Some(Some(..) | None) = _active {
                 let _goggles = TreeNode::new(&fl!("pathing-config-goggles"))
                     .flags(TreeNodeFlags::FRAMED)
                     .opened(true, Condition::Once)
@@ -357,7 +358,7 @@ impl PathingConfig {
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
     const RANGE_SCALE_POI: (f32, f32) = Self::RANGE_SCALE_MULT5;
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
-    fn draw_pathing_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) -> Option<()> {
+    fn draw_pathing_opts(&mut self, ui: &Ui, machine: &mut RenderMachine, available: bool) -> Option<()> {
         let (
             load_simultaneous,
             camera_source,
@@ -657,6 +658,7 @@ impl PathingConfig {
             {
                 Self::set_pathing(|s| s.space.trail_width = value);
             }
+            self.draw_advanced_opts(ui, machine, available);
         };
         let _trail_advanced = TreeNode::new(&fl!("pathing-config-advanced"))
             .flags(TreeNodeFlags::FRAMED)
@@ -837,6 +839,24 @@ impl PathingConfig {
         }
         if let Some((festival, change)) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
+        }
+    }
+
+    fn draw_advanced_opts(&mut self, ui: &Ui, _machine: &RenderMachine, available: bool) {
+        let debug_token = with_i18n!("config-debug-controls", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(false)
+            .push(ui));
+        if let Some(_token) = debug_token {
+            if available && self.katrender() {
+                if ui.button("invalidate shaders") {
+                    let all = !self.arcrender_enabled;
+                    Engine::try_send(SpaceEvent::ReloadShaders(all));
+                }
+            } else {
+                with_i18n!("inactive", |msg| ui.text_disabled(&msg));
+            }
         }
     }
 
@@ -1138,14 +1158,6 @@ impl PathingConfig {
                 }
             }
         }
-        if machine.goggles.is_classifying() {
-            #[cfg(taimi_debug)]
-            let _lenses = TreeNode::new("debug lens info")
-                .flags(TreeNodeFlags::FRAMED)
-                .opened(false, Condition::Once)
-                .tree_push_on_open(true)
-                .build(ui, || self.goggles.draw_debug_lens2(ui, machine));
-        }
         #[cfg(any(feature = "goggles2-project", feature = "goggles2-camera"))]
         if enables.intersects(GogglesEnables::FEATURE_ENABLES) {
             let _lenses = TreeNode::new("debug controls")
@@ -1153,6 +1165,14 @@ impl PathingConfig {
                 .opened(false, Condition::Once)
                 .tree_push_on_open(true)
                 .build(ui, || self.goggles.draw_debug_toggles(ui, machine));
+        }
+        if machine.goggles.is_classifying() {
+            #[cfg(taimi_debug)]
+            let _lenses = TreeNode::new("debug lens info")
+                .flags(TreeNodeFlags::FRAMED)
+                .opened(false, Condition::Once)
+                .tree_push_on_open(true)
+                .build(ui, || self.goggles.draw_debug_lens2(ui, machine));
         }
 
         ui.unindent();

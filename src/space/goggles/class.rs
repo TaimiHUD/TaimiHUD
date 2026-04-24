@@ -132,7 +132,7 @@ pub(super) unsafe fn set_targets(
                     buf.record_association(*view.as_d3d_raw(), view_ptr, Some(false));
                 }
             },
-            BufferKind::UnorderedAccessView => (),
+            BufferKind::UnorderedAccessView | BufferKind::ShaderResourceView => (),
         }
     }
 
@@ -898,6 +898,7 @@ pub enum BufferKind {
     DepthView,
     RenderTarget,
     UnorderedAccessView,
+    ShaderResourceView,
 }
 impl BufferKind {
     pub fn tag(self) -> &'static str {
@@ -905,6 +906,7 @@ impl BufferKind {
             Self::DepthView => "DV",
             Self::RenderTarget => "RT",
             Self::UnorderedAccessView => "UA",
+            Self::ShaderResourceView => "SR",
         }
     }
 }

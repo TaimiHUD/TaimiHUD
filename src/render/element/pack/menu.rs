@@ -13,6 +13,7 @@ use {
     crate::{
         controller::pathing::PathingEvent,
         exports::runtime::imgui::{MenuItem, MenuToken, MouseButton, Selectable, StyleVar, Ui},
+        space::engine::{Engine, SpaceEvent},
         with_i18n,
     },
     glam::Vec2,
@@ -310,6 +311,17 @@ impl super::PackElements {
         }
         if let Some(pmsg) = act_pathing {
             pmsg.try_send();
+        }
+        ui.separator();
+        let mut act_space = None;
+        if MenuItem::new("invalidate shaders").build(ui) {
+            act_space = Some(SpaceEvent::ReloadShaders(false));
+        }
+        if MenuItem::new("reload all shaders").build(ui) {
+            act_space = Some(SpaceEvent::ReloadShaders(true));
+        }
+        if let Some(emsg) = act_space {
+            Engine::try_send(emsg)
         }
         ui.separator();
         for (_pack_path, pack) in self.pack_state.iter() {

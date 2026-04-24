@@ -16,9 +16,18 @@ pub use crate::{
     d3d::D3D_SRV_DIMENSION,
     dx11::d3d11::{
         ID3D11ShaderResourceView,
+        ID3D11ShaderResourceView1,
+        ID3D11UnorderedAccessView,
+        ID3D11UnorderedAccessView1,
         ID3D11View,
         D3D11_SHADER_RESOURCE_VIEW_DESC,
         D3D11_SHADER_RESOURCE_VIEW_DESC_0,
+        D3D11_SHADER_RESOURCE_VIEW_DESC1,
+        D3D11_SHADER_RESOURCE_VIEW_DESC1_0,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC_0,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC1,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC1_0,
         D3D11_TEX2D_SRV,
     },
 };
@@ -40,6 +49,36 @@ impl_d3d! {
     @into()
     @deref(View);
 }
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11ShaderResourceView1;
+
+    @[transparent(Dx11Child <= ID3D11ShaderResourceView1)]
+    pub struct ShaderResourceView1 {
+        pub srv0: ShaderResourceView,
+    }
+    @into()
+    @deref(ShaderResourceView);
+}
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11UnorderedAccessView;
+
+    @[transparent(Dx11Child <= ID3D11UnorderedAccessView)]
+    pub struct UnorderedAccessView {
+        pub view: View,
+    }
+    @into()
+    @deref(View);
+}
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11UnorderedAccessView1;
+
+    @[transparent(Dx11Child <= ID3D11UnorderedAccessView1)]
+    pub struct UnorderedAccessView1 {
+        pub uav0: UnorderedAccessView,
+    }
+    @into()
+    @deref(UnorderedAccessView);
+}
 
 impl View {
     pub fn get_resource(&self) -> anyhow::Result<Resource> {
@@ -49,6 +88,25 @@ impl View {
                 .context("ID3D11ShaderResourceView::GetResource")
                 .map(Resource::from_d3d)
         }
+    }
+}
+
+impl UnorderedAccessView {
+    pub fn get_desc(&self) -> D3D11_UNORDERED_ACCESS_VIEW_DESC {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc(&mut desc);
+        }
+        desc
+    }
+}
+impl UnorderedAccessView1 {
+    pub fn get_desc1(&self) -> D3D11_UNORDERED_ACCESS_VIEW_DESC1 {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc1(&mut desc);
+        }
+        desc
     }
 }
 
@@ -139,6 +197,15 @@ impl ShaderResourceView {
     }
     pub fn slice_as_raw_mut(views: &mut [Option<Self>]) -> &mut [Option<ID3D11ShaderResourceView>] {
         unsafe { mem::transmute(views) }
+    }
+}
+impl ShaderResourceView1 {
+    pub fn get_desc1(&self) -> D3D11_SHADER_RESOURCE_VIEW_DESC1 {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc1(&mut desc);
+        }
+        desc
     }
 }
 
