@@ -808,7 +808,9 @@ impl PathingController {
             ScriptsEnable(en) => self.toggle_script_enable(en),
             ReportResourceLoaded(loaded) => self.report_load(loaded).await,
             #[cfg(feature = "space")]
-            LoadShader { kind, variant, entity, template } => self.load_shader(kind, variant, entity, template),
+            LoadShader { kind, variant, entity, template } => {
+                self.load_shader(kind, variant, entity, template);
+            },
             CollectGarbage { tick, aggressive } =>
                 self.collect_garbage(tick, aggressive, self.gameplay_map()).await,
             VisibleToggle { context, set, ui } => self.set_visible_with(context, set, ui).await,

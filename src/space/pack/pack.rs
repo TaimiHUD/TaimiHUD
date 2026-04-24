@@ -2107,14 +2107,17 @@ impl PackRenderResources {
         self.clear_buffers();
         self.poi_vb = None;
         self.poi_vb_trans = None;
+        self.shared_cb_v = None;
+        self.shared_cb_p = None;
+        STATS_ENTITY_INSTANCE_SIZE.reset(0);
+        self.clear_shaders();
+    }
+    pub fn clear_shaders(&mut self) {
         self.shader_variant = None;
         self.shader_trail = None;
         self.shader_poi = None;
         self.shader_p_trail = None;
         self.shader_p_poi = None;
-        self.shared_cb_v = None;
-        self.shared_cb_p = None;
-        STATS_ENTITY_INSTANCE_SIZE.reset(0);
     }
     pub fn clear_buffers(&mut self) {
         self.len = 0;
@@ -2161,6 +2164,9 @@ impl PackRenderState {
         {
             self.drawn_visible = Default::default();
         }
+    }
+    pub fn clear_shaders(&mut self) {
+        self.shaders_incomplete.clear();
     }
     pub fn clear_active(&mut self) {
         self.drawn_incomplete.clear();

@@ -19,7 +19,14 @@ use {
     arcffi::cstr::CStrBox,
     glam::Vec3A,
     glamour::Point3,
-    std::{collections::BinaryHeap, ffi::CStr, fmt, iter, ops},
+    std::{
+        collections::{BTreeSet, BinaryHeap},
+        ffi::CStr,
+        fmt,
+        iter,
+        ops,
+    },
+    strum::VariantArray,
     taimi_d3d::{
         dx11::prelude::*,
         shader::{ShaderDefinition, ShaderKind},
@@ -411,7 +418,7 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
     fn finish(&mut self) {}
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, VariantArray)]
 pub enum ArcShaderVariant {
     Vanilla,
     Map,
@@ -488,6 +495,38 @@ impl ArcShaderVariant {
                 name: Some(CStrBox::new(k.to_owned())),
                 definition: Some(CStrBox::new(v.to_owned())),
             })
+    }
+    pub fn all_ids() -> BTreeSet<&'static str> {
+        let states = [Some(ShaderState::Trail), Some(ShaderState::Poi), None];
+        let kinds = [ShaderKind::Vertex, ShaderKind::Pixel];
+        let state_kinds = IntoIterator::into_iter(kinds)
+            .flat_map(|k| IntoIterator::into_iter(states).map(move |e| (k, e)));
+        state_kinds
+            .flat_map(|(k, e)| IntoIterator::into_iter(Self::VARIANTS).flat_map(move |v| v.id(k, e)))
+            .collect()
+    }
+    #[cfg(todo)]
+    pub fn all_template_ids() -> impl IntoIterator<Item = &'static str> {
+        let states = [Some(ShaderState::Trail), Some(ShaderState::Poi), None];
+        let kinds = [ShaderKind::Vertex, ShaderKind::Pixel];
+        let state_kinds =
+            IntoIterator::into_iter(kinds).flat_map(|k| IntoIterator::into_iter(states).map(|e| (k, e)));
+        state_kinds
+            .flat_map(|(k, e)| {
+                IntoIterator::into_iter(Self::VARIANTS)
+                    .flat_map(|v| [v.template_id(k, e), v.id(k, e)])
+                    .flatten()
+            })
+            .collect()
+    }
+    pub fn all_template_ids() -> impl IntoIterator<Item = &'static str> {
+        [
+            "poi-ng-v",
+            "trail-ng-v",
+            "trail-ng-p",
+            #[cfg(todo)]
+            "poi-ng-p",
+        ]
     }
 }
 bitflags::bitflags! {

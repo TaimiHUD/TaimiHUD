@@ -23,7 +23,6 @@ use {
     crate::{
         render::goggles as render_goggles,
         settings::goggles::{GogglesEnables, GogglesMapDepth, GogglesSettings},
-        space::engine::{Engine, SpaceEvent},
     },
     std::{borrow::Cow, ops::Range},
     taimi_meta::map::MapProjectionDepth,
@@ -31,6 +30,8 @@ use {
 
 #[cfg(feature = "paths-interact")]
 use crate::controller::pathing::InteractMessage;
+#[cfg(feature = "paths")]
+use crate::space::engine::{Engine, SpaceEvent};
 
 pub struct PathingConfig {
     enables: Watched<PathingEnables>,
@@ -83,7 +84,7 @@ impl PathingConfig {
                 Self::draw_space_error(ui, machine, None);
             }
 
-            self.draw_pathing_opts(ui, machine);
+            self.draw_pathing_opts(ui, machine, available);
             if available && self.katrender() {
                 #[cfg(todo)]
                 {
@@ -389,7 +390,12 @@ impl PathingConfig {
     //const RANGE_SCALE_POI: (f32, f32) = (-1.0, 10.0);
     const RANGE_SCALE_POI: (f32, f32) = Self::RANGE_SCALE_MULT5;
     const RANGE_SCALE_MAP: (f32, f32) = Self::RANGE_SCALE;
-    fn draw_pathing_opts<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine) -> Option<()>
+    fn draw_pathing_opts<'ui, U>(
+        &mut self,
+        ui: &mut U,
+        machine: &mut RenderMachine,
+        available: bool,
+    ) -> Option<()>
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
@@ -750,6 +756,7 @@ impl PathingConfig {
                     ));
                 }
             }
+            self.draw_advanced_opts(ui, machine, available);
         }
 
         Some(())
@@ -929,6 +936,27 @@ impl PathingConfig {
         }
         if let Some((festival, change)) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
+        }
+    }
+
+    fn draw_advanced_opts<'ui, U>(&mut self, ui: &mut U, _machine: &RenderMachine, available: bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let debug_token = with_i18n!("config-debug-controls", |label| ui.begin_sidebar_tree_node(
+            ImCondition::startup(false),
+            c"config-debug-controls",
+            label,
+        ));
+        if let Some(_token) = debug_token {
+            if available && self.katrender() {
+                if ui.button("invalidate shaders") {
+                    let all = !self.arcrender_enabled;
+                    Engine::try_send(SpaceEvent::ReloadShaders(all));
+                }
+            } else {
+                with_i18n!("inactive", |msg| ui.text_disabled(&msg));
+            }
         }
     }
 
@@ -1289,18 +1317,6 @@ impl PathingConfig {
                 }
             }
         }
-        if machine.goggles.is_classifying() {
-            #[cfg(taimi_debug)]
-            let info_tree = ui.begin_sidebar_tree_node(
-                ImCondition::startup(false),
-                c"pathing-config-goggles-info",
-                c"debug lens info",
-            );
-            if let Some(_node) = info_tree {
-                let _id = ui.push_id(c"debug lens info");
-                self.goggles.draw_debug_lens2(ui, machine);
-            }
-        }
         #[cfg(any(feature = "goggles2-project", feature = "goggles2-camera"))]
         if enables.intersects(GogglesEnables::FEATURE_ENABLES) {
             let lenses_tree = ui.begin_sidebar_tree_node(
@@ -1311,6 +1327,19 @@ impl PathingConfig {
             if let Some(_tree) = lenses_tree {
                 let _id = ui.push_id(c"debug controls");
                 self.goggles.draw_debug_toggles(ui, machine);
+            }
+        }
+        if machine.goggles.is_classifying() {
+            #[cfg(taimi_debug)]
+            let info_tree = ui.begin_sidebar_tree_node(
+                ImCondition::startup(false),
+                c"pathing-config-goggles-info",
+                c"debug lens info",
+            );
+            #[cfg(taimi_debug)]
+            if let Some(_node) = info_tree {
+                let _id = ui.push_id(c"debug lens info");
+                self.goggles.draw_debug_lens2(ui, machine);
             }
         }
 
