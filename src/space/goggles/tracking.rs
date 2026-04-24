@@ -179,8 +179,8 @@ impl GogglesShared {
         GogglesFlags::from_bits_retain(Self::flags_ref().load(Self::ENABLED_ORDERING))
     }
     #[inline]
-    pub(super) fn clear_flags(mask: GogglesFlags) {
-        Self::flags_ref().fetch_and(!mask.bits(), Self::ENABLED_ORDERING);
+    pub(super) fn clear_flags(mask: GogglesFlags) -> GogglesFlags {
+        GogglesFlags::from_bits_retain(Self::flags_ref().fetch_and(!mask.bits(), Self::ENABLED_ORDERING))
     }
     #[inline]
     pub(super) fn flags() -> GogglesFlags {
@@ -214,10 +214,10 @@ impl GogglesShared {
     pub(super) const FLAGS_ORDERING: Ordering = Ordering::Relaxed;
 
     pub(super) fn reset_end(enables: GogglesEnables) {
-        GogglesShared::clear_flags(GogglesFlags::DISCARD_FRAME_END);
+        let flags_prev = GogglesShared::clear_flags(GogglesFlags::DISCARD_FRAME_END);
         frame_log!("goggles; post-render/end flags={:?}", Self::flags());
         if enables.intersects(ClassShared::ENABLES) {
-            ClassShared::reset_end();
+            ClassShared::reset_end(flags_prev);
         }
         #[cfg(feature = "goggles2-project")]
         if enables.contains(GogglesEnables::PROJECT_ENABLE) {
