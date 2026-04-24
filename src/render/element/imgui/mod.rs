@@ -50,6 +50,23 @@ pub trait AsUi<'ui> {
         };
         f(style)
     }
+    #[inline]
+    #[cfg(todo = "unnecessary")]
+    fn with_io<R, F: FnOnce(&imgui::Io) -> R>(&self, f: F) -> R {
+        unsafe {
+            let io = imgui::sys::igGetIO() as *const imgui::sys::ImGuiIO;
+            debug_assert_eq!(io, self.ui().io().raw());
+            let io = imgui::Io::from_raw(&*io);
+            f(io)
+        }
+    }
+    #[inline]
+    unsafe fn with_io_mut<R, F: FnOnce(&mut imgui::Io) -> R>(&self, f: F) -> R {
+        let io = imgui::sys::igGetIO();
+        debug_assert_eq!(io as *const imgui::sys::ImGuiIO, self.ui().io().raw());
+        let io = imgui::Io::from_raw_mut(&mut *io);
+        f(io)
+    }
 
     fn is_cursor_inline(&self) -> Option<f32> {
         let ui = self.ui();

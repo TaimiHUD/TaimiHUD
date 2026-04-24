@@ -460,7 +460,15 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
         return
     }
 
+    let mut selfish_fix = true;
     if let Some(render_ready) = RenderState::pre_render(AddonHostName::ArcDPS) {
+        selfish_fix = crate::space::goggles::GogglesShared::enabled().is_empty();
+        if selfish_fix {
+            use crate::render::element::im::prelude::*;
+            // if we have no other frame boundary callbacks, just be selfish
+            unsafe { ui.with_io_mut(|io| rt::render_pre(io)); }
+        }
+
         RenderMachine::turn_render_entry();
 
         if !render_ready {
@@ -473,6 +481,9 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     }
 
     RenderState::post_render(AddonHostName::ArcDPS);
+    if selfish_fix {
+        unsafe { rt::render_post(); }
+    }
 }
 
 fn imgui_options_tab(ui: &imgui::Ui) {
