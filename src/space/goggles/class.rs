@@ -368,6 +368,9 @@ impl ClassShared {
     const INCONSISTENT_CLEARS_THRESHOLD: u32 = 28;
 
     fn mark_new_frame() {
+        unsafe { if rt::arcdps_available() {
+            rt::render_post();
+        } }
         g2!(*&volatile mut ferret.class.frame_start = Some(Instant::now()));
         if !g2!(*&volatile const ferret.class.game_time) {
             // leave as an invalid frame while between maps
@@ -388,6 +391,11 @@ impl ClassShared {
         });
         Self::bound_render_primary_ref().store(ptr::null_mut(), GogglesShared::FLAGS_ORDERING);
         Self::bound_depth_ref().store(ptr::null_mut(), GogglesShared::FLAGS_ORDERING);
+        unsafe { if rt::arcdps_available() {
+            if NonNull::new(rt::imgui::sys::igGetCurrentContext()) == crate::exports::arcdps::r#extern::arc_imgui_context_ptr() {
+                rt::im_io_mut(|io| rt::render_pre(io));
+            }
+        } }
     }
 }
 type WinnerInfo = (D3dNn, i32, u32, u32);

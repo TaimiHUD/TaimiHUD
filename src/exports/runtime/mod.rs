@@ -669,8 +669,70 @@ pub fn window_send_inputs<I: Into<KeyboardAndMouse::INPUT>>(
     Ok(())
 }
 
+use {
+    imgui::internal::RawCast,
+    glam::Vec2,
+};
+pub(crate) unsafe fn im_io_mut<R, F: FnOnce(&mut imgui::Io) -> R>(f: F) -> Option<R> {
+    let io = imgui::sys::igGetIO();
+    (!io.is_null()).then(|| f(imgui::Io::from_raw_mut(&mut *io)))
+}
+pub(crate) unsafe fn render_pre(io: &mut imgui::Io) {
+    if let Ok(mut buf) = INPUT_BUFFER.try_lock() {
+        let (buf, wheel) = &mut *buf;
+        for c in buf.drain(..) {
+            imgui::sys::ImGuiIO_AddInputCharacterUTF16(io.raw_mut(), c);
+        }
+        io.mouse_wheel += mem::take(&mut wheel.y);
+        io.mouse_wheel_h += mem::take(&mut wheel.x);
+    }
+    render_mark(&*io);
+}
+pub(crate) fn render_mark(io: &imgui::Io) {
+    let wants_input = io.want_text_input | io.want_capture_mouse;
+    DANGER_ZONE.store(wants_input as i32, Ordering::SeqCst);
+}
+/// unnecessary but here for fun
+pub(crate) static DANGER_ZONE: AtomicI32 = AtomicI32::new(0);
+fn danger_zone() -> bool {
+    DANGER_ZONE.load(Ordering::SeqCst) != 0
+}
+pub(crate) unsafe fn render_post() {
+    DANGER_ZONE.store(0, Ordering::SeqCst);
+}
+pub(crate) static INPUT_BUFFER: Mutex<(Vec<u16>, Vec2)> = Mutex::new((Vec::new(), Vec2::ZERO));
 pub fn handle_wnd_event(_hwnd: HWND, msg: u32, w: usize, l: isize) -> u32 {
     match msg {
+        WindowsAndMessaging::WM_MOUSEWHEEL | WindowsAndMessaging::WM_MOUSEHWHEEL | WindowsAndMessaging::WM_CHAR
+            if !danger_zone() =>
+                // nexus is allowed to know about events that happen during game rendering
+                return msg,
+        WindowsAndMessaging::WM_MOUSEWHEEL | WindowsAndMessaging::WM_MOUSEHWHEEL => unsafe {
+            const WHEEL_DELTA: f32 = (WindowsAndMessaging::WHEEL_DELTA as f32).recip();
+            let wants_mouse = im_io_mut(|io| io.want_capture_mouse);
+            let buf = wants_mouse.unwrap_or(false).then(|| INPUT_BUFFER.try_lock().ok()).flatten();
+            if let Some(mut buf) = buf {
+                let delta = (w >> 16) as u16 as i16 as f32 * WHEEL_DELTA;
+                match msg {
+                    WindowsAndMessaging::WM_MOUSEHWHEEL =>
+                        buf.1.x += delta,
+                    _ =>
+                        buf.1.y += delta,
+                }
+                ::log::info!(logger: log::DeferredLogger::BEST_EFFORT, "compensating for lost mice: {:?}", buf.1);
+                return 0
+            }
+        },
+        WindowsAndMessaging::WM_CHAR if w > 0 && w < 0x10000 => unsafe {
+            let wants_text = im_io_mut(|io| io.want_text_input);
+            let buf = wants_text.unwrap_or(false).then(|| INPUT_BUFFER.try_lock().ok()).flatten();
+            if let Some(mut buf) = buf {
+                buf.0.push(w as u16);
+                let c = char::try_from(w as u32).unwrap_or(char::REPLACEMENT_CHARACTER);
+                ::log::info!(logger: log::DeferredLogger::BEST_EFFORT, "compensating for lost taps: {c:?}");
+                return 0
+            }
+        },
         WindowsAndMessaging::WM_KEYDOWN
         | WindowsAndMessaging::WM_SYSKEYDOWN
         | WindowsAndMessaging::WM_KEYUP

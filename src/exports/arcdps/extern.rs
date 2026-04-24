@@ -72,7 +72,7 @@ unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
     ptr::write(ARC_IMGUI_CONTEXT.get() as *mut usize, context as usize);
     Some(&*context)
 }
-pub(super) fn arc_imgui_context_ptr() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+pub(crate) fn arc_imgui_context_ptr() -> Option<NonNull<imgui_sys::ImGuiContext>> {
     arc_args().and_then(|arc| arc.imgui_ctx.map(NonNull::cast))
 }
 

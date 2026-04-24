@@ -150,6 +150,12 @@ extern "C-unwind" fn unsafe_render_pre() {
         let Some(render_ready) = RenderState::pre_render(AddonHostName::Nexus) else {
             return
         };
+        if let Some(ui) = r#extern::imgui_ui() {
+            use crate::render::element::im::prelude::*;
+            ui.with_io_mut(|io| {
+                rt::render_pre(io);
+            });
+        }
         RenderMachine::turn_render_entry();
         if !render_ready {
             RenderState::render_setup();
@@ -159,6 +165,9 @@ extern "C-unwind" fn unsafe_render_pre() {
 extern "C-unwind" fn unsafe_render_post() {
     unsafe {
         RenderState::post_render(AddonHostName::Nexus);
+        if let Some(ui) = r#extern::imgui_ui() {
+            rt::render_post();
+        }
     }
 }
 extern "C-unwind" fn unsafe_render() {
