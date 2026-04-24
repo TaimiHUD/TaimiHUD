@@ -143,7 +143,7 @@ pub(super) unsafe fn set_targets(
                     buf.record_association(*view.as_d3d_raw(), view_ptr, Some(false));
                 }
             },
-            BufferKind::UnorderedAccessView => (),
+            BufferKind::UnorderedAccessView | BufferKind::ShaderResourceView => (),
         }
     }
 
@@ -464,7 +464,7 @@ impl ClassShared {
     fn classifying_render() -> bool {
         Self::classifying_depth()
     }
-    pub(super) fn reset_end() {
+    pub(super) fn reset_end(flags_prev: GogglesFlags) {
         let order = GogglesShared::ENABLED_ORDERING;
         let prev_frame = Self::frame_count_ref().fetch_add(1, order);
 
@@ -591,8 +591,7 @@ impl ClassShared {
         } else if is_ingame {
             GogglesShared::flags_insert(GogglesFlags::CLASS_FRAME_ONGOING);
         }
-        let flags = GogglesShared::flags();
-        if flags.contains(GogglesFlags::CLASS_CLEARED_INCONSISTENT) {
+        if flags_prev.contains(GogglesFlags::CLASS_CLEARED_INCONSISTENT) {
             #[cfg(todo)]
             if !has_present_count
                 && !winners.contains_key(&(BufferKind::DepthView, BufferClass::Shadowbox))
@@ -601,7 +600,7 @@ impl ClassShared {
                 GogglesShared::flags_insert(Self::FLAGS_CLEARS);
             }
         } else if is_ingame_world {
-            if flags.contains(Self::FLAGS_CLEARS) {
+            if flags_prev.contains(Self::FLAGS_CLEARS) {
                 Self::inconsistent_clears_ref().store(0, order);
             } else {
                 let streak = Self::inconsistent_clears_ref().fetch_add(1, order);
@@ -918,6 +917,7 @@ pub enum BufferKind {
     DepthView,
     RenderTarget,
     UnorderedAccessView,
+    ShaderResourceView,
 }
 impl BufferKind {
     pub fn tag(self) -> &'static str {
@@ -925,6 +925,7 @@ impl BufferKind {
             Self::DepthView => "DV",
             Self::RenderTarget => "RT",
             Self::UnorderedAccessView => "UA",
+            Self::ShaderResourceView => "SR",
         }
     }
 }
@@ -1757,6 +1758,9 @@ impl GogglesClass {
     pub(super) fn act_map_exit(&mut self) {
         g2!(*&volatile mut ferret.class.game_time = false);
         self.active = false;
+        if !self.compat_clear_inconsistent {
+            self.set_compat_clear_inconsistent(false);
+        }
     }
     pub(super) fn act_map_enter(&mut self) {
         g2!(*&volatile mut ferret.class.game_time = false);
@@ -1902,15 +1906,15 @@ impl GogglesClass {
         GogglesShared::read_flags().contains(GogglesFlags::CLASS_CLEARED_INCONSISTENT)
     }
     pub fn set_compat_clear_inconsistent(&mut self, v: bool) {
-        if v {
+        self.compat_clear_inconsistent = v;
+        let reset = if v {
             GogglesShared::flags_insert(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
-            ClassShared::inconsistent_clears_ref().store(
-                ClassShared::INCONSISTENT_CLEARS_THRESHOLD,
-                GogglesShared::ENABLED_ORDERING,
-            );
+            ClassShared::INCONSISTENT_CLEARS_THRESHOLD
         } else {
             GogglesShared::clear_flags(GogglesFlags::CLASS_CLEARED_INCONSISTENT);
-        }
+            0
+        };
+        ClassShared::inconsistent_clears_ref().store(reset, GogglesShared::ENABLED_ORDERING);
     }
 }
 static STATS_GAME_RENDER: StatsCounter = StatsCounter::DEFAULT;

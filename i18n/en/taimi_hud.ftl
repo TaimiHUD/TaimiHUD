@@ -119,6 +119,8 @@ timer-key-reset = Reset Timers
 
 config-tab = Config
 config-advanced = Advanced Settings
+config-debug-controls = Debug Controls
+config-debug-info = Debug Info
 stock-imgui-progress-bar = Stock Imgui Progress Bar
 shadow = Shadow
 centre-text-after-icon = Centre text after icon

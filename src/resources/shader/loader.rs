@@ -179,6 +179,14 @@ impl ShaderLoader {
         let pixel = self.pixel.get(name).with_context(context)?;
         Ok(ShaderPair(vertex.clone(), pixel.clone()))
     }
+    pub fn unload_named(&mut self, name: &str) -> bool {
+        let unloaded_p = matches!(self.pixel.remove(name), Some(Some(..)));
+        let unloaded_v = matches!(self.vertex.remove(name), Some(..));
+        unloaded_p | unloaded_v
+    }
+    pub fn unload_partial(&mut self, name: &str) {
+        let _ = self.partial.remove(name);
+    }
 
     pub fn set_named(&self, context: &Dx11Context, name: &str) {
         let vertex = self.vertex.get(name);
