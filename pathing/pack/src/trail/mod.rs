@@ -265,7 +265,11 @@ impl TrailSection {
     };
 
     /// Zero-height trail bounds are common, but empty boxes are invalid...
-    pub const BOUNDS_MIN_SIZE: Size3 = Size3::new(f32::EPSILON, f32::EPSILON, f32::EPSILON);
+    pub const BOUNDS_MIN_SIZE: Size3 = {
+        // ~2^(1-13) to account for distances up to ~9k?
+        let eps = 2e-4;
+        Size3::new(eps, eps, eps)
+    };
 
     pub fn with_points<P: Into<Box<[Point3]>>>(points: P) -> Self {
         let points = points.into();
@@ -275,6 +279,7 @@ impl TrailSection {
                 mut bounds if bounds.is_empty() => {
                     let size = bounds.size();
                     bounds.max = bounds.min + size.max(Self::BOUNDS_MIN_SIZE).to_vector();
+                    debug_assert!(!bounds.is_empty());
                     bounds
                 },
                 bounds => bounds,
