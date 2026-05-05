@@ -1,0 +1,120 @@
+[package]
+name = "taimi_ui"
+authors = [ "kittywitch" ]
+description = "TaimiHUD ui utilities"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = [
+  "windows",
+  "imgui-nexus",
+  "imgui-arcdps",
+]
+serde = [
+  "dep:serde",
+  "glam/serde",
+]
+windows = [
+  "dep:windows",
+  "arcffi/windows-061",
+  "arcffi/winerror",
+]
+imgui-nexus = [
+  "imgui-arcdps-legacy",
+]
+imgui-arcdps-legacy = [
+  "imgui180-imp",
+  "imgui180",
+]
+imgui-arcdps = [
+  "imgui192-imp",
+  "imgui192",
+  # not necessary but shrug it's compiled without removing them so...
+  "imgui192-obsolete",
+]
+cimgui-struct-return = []
+imgui180 = [
+  "dep:imgui180-sys",
+  "imgui180-rs"
+]
+imgui180-rs = [
+  "dep:imgui180", # TODO
+]
+imgui180-obsolete = [
+  #"imgui180-sys/obsolete",
+]
+imgui180-imp = [
+  #"imgui180-sys/internal",
+]
+imgui192 = [
+  "dep:imgui192-sys",
+  #"imgui192-rs"
+  #"cimgui-struct-return", # required for bindings generated via cimgui 1.92.7 or later
+]
+imgui192-obsolete = [
+  #"imgui192-sys/obsolete",
+]
+imgui192-imp = [
+  #"imgui192-sys/internal",
+]
+imgui192-rs = [
+  #"dep:imgui192", # TODO
+]
+
+[dependencies]
+#taimi_hoard = { path = "../hoard", default-features = false }
+anyhow = "1"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"], optional = true }
+arcffi = { path = "../ffi", package = "taimi_ffi", default-features = false }
+bitflags = { workspace = true }
+glam = { workspace = true, features = [ "mint" ] }
+glamour = { workspace = true, features = ["mint"] }
+mint = { workspace = true }
+num-traits = { workspace = true }
+
+[dependencies.imgui180-sys]
+git = "https://codeberg.org/TaimiHUD/libimgui"
+#branch = "symver" # TODO
+version = "0.8"
+package = "arcdps-imgui-sys"
+optional = true
+
+[dependencies.imgui180]
+git = "https://codeberg.org/TaimiHUD/imgui-rs"
+branch = "libimgui-18000"
+version = "0.8"
+package = "arcdps-imgui"
+optional = true
+features = ["tables-api"]
+
+[dependencies.imgui192-sys]
+git = "https://codeberg.org/TaimiHUD/libimgui"
+branch = "symver"
+version = "0.12"
+package = "imgui-sys"
+optional = true
+
+#[dependencies.imgui192]
+#git = "https://codeberg.org/TaimiHUD/imgui-rs"
+#branch = "libimgui-19270"
+#version = "0.12"
+#package = "imgui"
+#optional = true
+#features = ["tables-api"]
+
+[target.'cfg(windows)'.dependencies.windows]
+optional = true
+version = "0.61"
+features = [
+  "System",
+  "Foundation",
+]

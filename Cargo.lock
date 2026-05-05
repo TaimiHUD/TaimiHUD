@@ -181,7 +181,7 @@ dependencies = [
 [[package]]
 name = "arcdps-imgui-sys"
 version = "0.8.0"
-source = "git+https://codeberg.org/TaimiHUD/libimgui#518813ab3eb09d4dde65d9e3b5e1a63b0fae24ce"
+source = "git+https://codeberg.org/TaimiHUD/libimgui#8bab608feb747af55fab08a989c04b9dcfbdf8f6"
 dependencies = [
  "cty",
  "mint",
@@ -1801,6 +1801,17 @@ dependencies = [
  "tiff",
  "zune-core",
  "zune-jpeg",
+]
+
+[[package]]
+name = "imgui-sys"
+version = "0.12.0"
+source = "git+https://codeberg.org/TaimiHUD/libimgui?branch=symver#8bab608feb747af55fab08a989c04b9dcfbdf8f6"
+dependencies = [
+ "cfg-if",
+ "cty",
+ "mint",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3612,7 +3623,6 @@ dependencies = [
  "anyhow",
  "arc-atomic",
  "arcdps",
- "arcdps-imgui",
  "arcloader-mumblelink",
  "async-compression",
  "bevy_ecs",
@@ -3672,6 +3682,7 @@ dependencies = [
  "taimi_meta",
  "taimi_pack",
  "taimi_sync",
+ "taimi_ui",
  "tempfile",
  "tobj",
  "tokio",
@@ -3758,6 +3769,25 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "type-map",
+]
+
+[[package]]
+name = "taimi_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcdps-imgui",
+ "arcdps-imgui-sys",
+ "bitflags 2.9.0",
+ "glam 0.30.1",
+ "glamour",
+ "imgui-sys",
+ "log",
+ "mint",
+ "num-traits",
+ "serde",
+ "taimi_ffi",
+ "windows 0.61.1",
 ]
 
 [[package]]
