@@ -8,7 +8,9 @@ members = [
   "rt/ffi",
   "rt/input",
   "rt/sync",
-  "space/d3d",
+  "rt/ui",
+  # TODO? "rt/ui/shim/180",
+  # TODO? "rt/ui/shim/192",
   "space/d3d",
 ]
 
@@ -133,6 +135,7 @@ extension-arcdps = [
   #"extension-arcdps-codegen",
   "extension-arcdps-extern",
   "extension-arcdps-extras",
+  #"extension-arcdps-imgui",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/gw2_mumble",
   "taimi_meta?/mumblelink-arcloader",
@@ -162,9 +165,13 @@ extension-arcdps-extern = [
   "dpsapi",
   "dpsapi/embed",
 ]
+extension-arcdps-imgui = [
+  "taimi_ui/imgui-arcdps",
+]
 extension-nexus = [
   #"extension-nexus-codegen",
   "extension-nexus-extern-todo",
+  "extension-nexus-imgui",
   "nexus/arc",
   "nexus/extras",
   "nexus/rtapi",
@@ -183,6 +190,9 @@ extension-nexus-extern-todo = [
   # TODO: remove all use of the dep (and __macro)!
   "nexus/codegen-globals",
   "extension-nexus-extern",
+]
+extension-nexus-imgui = [
+  "taimi_ui/imgui-nexus",
 ]
 dpsapi = [
   "dep:dpsapi",
@@ -205,6 +215,7 @@ windows = [
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
   "taimi_input?/windows",
+  "taimi_ui/windows",
   "arcdps/windows",
   "nexus/windows",
 ]
@@ -270,7 +281,7 @@ chrono = { version = "0.4.40", features = [ "serde", "alloc" ] }
 indexmap = { workspace = true }
 relative-path = { version = "1.9.3", features = [ "serde" ] }
 bitflags = { workspace = true }
-mint = "0.5.9"
+mint = { workspace = true }
 itertools = { optional = true, version = "0.14.0" }
 tobj = { optional = true, version = "4.0.3", features = [ "reordering" ] }
 bevy_ecs = { optional = true, version = "0.16.0" }
@@ -308,6 +319,7 @@ taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, f
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
+taimi_ui = { path = "./rt/ui", default-features = false, features = ["serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
@@ -318,13 +330,6 @@ jit-allocator2 = { version = "0.2", optional = true }
 nexus = { workspace = true, features = ["imgui"] }
 arcloader-mumblelink = { workspace = true, optional = true }
 dpsapi = { workspace = true, optional = true }
-
-[dependencies.imgui180]
-git = "https://codeberg.org/TaimiHUD/imgui-rs"
-branch = "libimgui-18000"
-package = "arcdps-imgui"
-version = "0.8"
-features = ["tables-api"]
 
 [dependencies.image]
 optional = true
@@ -362,6 +367,7 @@ nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi
 #gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }
 glam = "0.30"
 glamour = "0.18"
+mint = "0.5"
 num-traits = { version = "0.2", default-features = false }
 bytemuck = { version = "1", default-features = false, features = ["extern_crate_std", "derive"] }
 indexmap = "2.9"
@@ -382,3 +388,4 @@ bitflags = "2"
 
 [patch.crates-io]
 gw2lib-model = { git = "https://github.com/greaka/gw2lib" }
+#arcdps-imgui = { path = "rt/ui/shim/180", version = "0.8.0" }

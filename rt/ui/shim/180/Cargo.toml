@@ -1,0 +1,23 @@
+[package]
+name = "arcdps-imgui"
+authors = [ "kittywitch" ]
+description = "TaimiHUD imgui compat shim"
+version = "0.8.0"
+edition = "2021"
+autobins = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+taimi_ui = { path = "../../", default-features = false, features = ["imgui180"] }
+
+[features]
+default = ["min-const-generics"]
+min-const-generics = []
+freetype = []
+wasm = []
+tables-api = []
