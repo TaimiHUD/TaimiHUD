@@ -56,8 +56,8 @@ pub use taimi_meta::ui::mumblelink::{MumbleLink, MumblePtr, UIState as UiState};
 pub use {
     self::{alert::send_alert, mouse::MousePosition, statistics::Counter, textures::TextureLoader},
     arcdps::Language as GameLanguage,
-    imgui180 as imgui,
     taimi_meta::coords::vec_eq,
+    taimi_ui::im::im180::imgui,
     unic_langid_impl::subtags::Language,
 };
 #[cfg(not(feature = "extension-nexus"))]
