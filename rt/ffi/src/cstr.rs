@@ -56,7 +56,7 @@ impl Str0 {
     }
     #[inline(always)]
     pub fn as_bytes_with_nul(&self) -> &[u8] {
-        self.0.to_bytes_with_nul()
+        self.0.as_bytes_with_nul()
     }
     #[inline(always)]
     pub fn as_c_str(&self) -> &CStr {

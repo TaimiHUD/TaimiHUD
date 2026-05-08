@@ -339,9 +339,9 @@ impl RenderState {
         .unwrap_or_default();
         let size = match height {
             Some(height) => [height, height],
-            None => icon.size,
+            None => icon.im_size(),
         };
-        Image::new(icon.id, size).build(ui);
+        Image::new(icon.im_id(), size).build(ui);
         ui.same_line();
     }
 
@@ -363,9 +363,9 @@ impl RenderState {
         .unwrap_or_default();
         let size = match height {
             Some(height) => [height, height],
-            None => icon.size,
+            None => icon.im_size(),
         };
-        Image::new(icon.id, size).build(ui);
+        Image::new(icon.im_id(), size).build(ui);
         ui.same_line();
     }
     pub fn draw_open_path_button<S: AsRef<str> + Display>(ui: &Ui, text: S, path: &Path) {
@@ -659,7 +659,7 @@ impl RenderState {
         }
     }
 
-    pub fn render_setup(_ui: &Ui) {
+    pub fn render_setup() {
         if !Self::is_running() {
             return
         }
@@ -710,6 +710,7 @@ impl RenderState {
         );
         true
     }
+    #[cfg(feature = "extension-arcdps")]
     pub fn render_options_fallback(ui: &Ui, host: AddonHostName) {
         use crate::{render::arc::ArcRenderState, settings::state::BootstrapState};
 
@@ -718,6 +719,10 @@ impl RenderState {
                 .and_then(|save| BootstrapState::write_file(&save));
             rt::log::error_ok(res);
         }
+    }
+    #[cfg(not(feature = "extension-arcdps"))]
+    pub fn render_options_fallback(ui: &Ui, _host: AddonHostName) {
+        ui.text("TODO: offline");
     }
 
     pub fn is_render_thread() -> bool {

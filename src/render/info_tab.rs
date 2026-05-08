@@ -65,7 +65,7 @@ impl InfoTabState {
             let heading_right = ui.item_rect_max()[0];
             let cursor_restore = Vec2::from_array(ui.cursor_screen_pos());
             let avail = Vec2::from_array(ui.content_region_avail());
-            let logo_size = Vec2::from_array(logo.size) * LOGO_UV1;
+            let logo_size = logo.size.to_raw() * LOGO_UV1;
             let size = match avail.x * 0.4 {
                 max_logo_width if max_logo_width < MIN_LOGO_WIDTH => None,
                 max_logo_width if max_logo_width < logo_size.x => Some(Vec2::new(
@@ -88,7 +88,7 @@ impl InfoTabState {
                     #[cfg(todo)]
                     _ => StyleColor::TextDisabled,
                 };
-                Image::new(logo.id, size.to_array())
+                Image::new(logo.im_id(), size.to_array())
                     .uv1(LOGO_UV1.to_array())
                     .tint_col(ui.style_color(logo_tint))
                     .build(ui);
