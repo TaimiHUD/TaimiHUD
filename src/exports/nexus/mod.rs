@@ -52,6 +52,7 @@ pub use self::r#extern::with_ui;
 #[cfg(feature = "extension-nexus-codegen")]
 pub(crate) mod cb;
 #[allow(dead_code)]
+#[cfg(feature = "extension-arcdps")]
 pub mod datalink;
 #[cfg(feature = "extension-nexus-extern")]
 pub(crate) mod r#extern;
@@ -150,7 +151,7 @@ extern "C-unwind" fn unsafe_render_pre() {
         };
         RenderMachine::turn_render_entry();
         if !render_ready {
-            exports::nexus::with_ui(RenderState::render_setup);
+            RenderState::render_setup();
         }
     }
 }
@@ -477,7 +478,8 @@ fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {
 }
 
 static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
-    TEXTURES.report_load(id, nexus_texture_ok(texture));
+    let texture = nexus_texture_ok(texture).map(rt::textures::NexusTexture::from_nexus);
+    TEXTURES.report_load(id, texture);
 });
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {

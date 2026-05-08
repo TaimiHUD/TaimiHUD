@@ -205,7 +205,6 @@ pub(crate) mod serde_imp {
                 D3D11_INPUT_CLASSIFICATION,
             },
             crate::prelude::*,
-            arcffi::cstr::{CStrBox, CStrRef},
             serde::{Deserialize, Deserializer, Serialize, Serializer},
             std::borrow::Cow,
         };
@@ -220,7 +219,7 @@ pub(crate) mod serde_imp {
                 skip_serializing_if = "crate::macros::serde::cstr_box::cow::is_empty",
                 with = "crate::macros::serde::cstr_box::cow"
             )]
-            semantic_name: Cow<'c, CStrRef>,
+            semantic_name: Cow<'c, cstr::CStrRef>,
             #[serde(rename = "index", default, skip_serializing_if = "super::is_zero")]
             semantic_index: u32,
             #[serde(
@@ -276,7 +275,7 @@ pub(crate) mod serde_imp {
         impl From<InputLayoutElement<'_>> for InputLayoutElementDesc {
             fn from(input: InputLayoutElement) -> Self {
                 InputLayoutElementDesc {
-                    semantic_name: CStrBox::with_cstring(input.semantic_name.into_owned()),
+                    semantic_name: input.semantic_name.into_owned().into(),
                     semantic_index: input.semantic_index,
                     format: input.format,
                     input_slot: input.input_slot,

@@ -365,7 +365,7 @@ fn curious(op: &str) {
 
 unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
     let aapi = addon_api()?;
-    let ctx = ptr::NonNull::new(aapi.imgui_context)?;
+    let ctx = ptr::NonNull::new(aapi.imgui_context)?.cast::<imgui_sys::ImGuiContext>();
     if imgui_sys::igGetCurrentContext() != ctx.as_ptr() as *mut _ {
         imgui_sys::igSetCurrentContext(ctx.as_ptr());
         imgui_sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
@@ -374,12 +374,11 @@ unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
     Some(ctx)
 }
 
-pub(super) unsafe fn new_imgui_frame() {}
 #[cfg(feature = "extension-nexus-extern-todo")]
-pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a imgui::Ui<'u>> {
-    imgui_bind_context()?;
-    Some(nexus::ui())
-}
 pub unsafe fn with_ui<'u, R, F: FnOnce(&imgui::Ui<'u>) -> R>(f: F) -> Option<R> {
-    imgui_ui().map(f)
+    imgui_bind_context()?;
+    Some(nexus::__macro::with_ui(|ui| {
+        let ui = mem::transmute::<&imgui::Ui<'static>, &imgui::Ui<'u>>(ui);
+        f(ui)
+    }))
 }

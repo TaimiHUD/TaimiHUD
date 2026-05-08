@@ -16,10 +16,14 @@ path = "src/lib.rs"
 default = [
   "windows",
   "fnalloc",
+  "mmap",
 ]
 fnalloc = [
   "closure-ffi",
   "jit-allocator2",
+  "mmap",
+]
+mmap = [
   "windows?/Win32_System_Memory",
 ]
 serde = [
@@ -43,7 +47,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 closure-ffi = { version = "3", default-features = false, features = ["std"], optional = true }
 jit-allocator2 = { version = "0.2", optional = true }
 num-traits = { workspace = true }
-arcffi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["std"] }
+arcffi = { workspace = true }
 
 [target.'cfg(windows)'.dependencies.windows]
 optional = true

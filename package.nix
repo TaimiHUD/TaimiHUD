@@ -6,6 +6,7 @@
   windows,
   libgit2,
   pkg-config,
+  arcdps-imgui_18000,
   builtInfo ? {},
   features ? [],
   doCheck ? false,
@@ -138,6 +139,7 @@ in
       buildInputs = [
         stdenv.cc
         windows.pthreads
+        arcdps-imgui_18000.cimgui-static
       ];
 
       depsBuildBuild =
@@ -150,6 +152,7 @@ in
       nativeBuildInputs =
         [
           buildPackages.stdenv.cc
+          pkg-config
         ]
         ++ optional enableLibgit libgit2'build;
 

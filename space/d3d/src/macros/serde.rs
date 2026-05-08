@@ -21,9 +21,7 @@ pub mod cstr_box {
             deserializer: D,
         ) -> Result<Cow<'de, CStrRef>, D::Error> {
             // XXX: borrowed bytes are possible but unlikely
-            super::deserialize(deserializer)
-                .map(|s| s.into_cstring())
-                .map(Cow::Owned)
+            super::deserialize(deserializer).map(|s| s.into()).map(Cow::Owned)
         }
 
         pub fn empty<'a>() -> Cow<'a, CStrRef> {

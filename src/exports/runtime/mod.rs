@@ -48,16 +48,15 @@ pub mod mouse;
 pub mod statistics;
 pub mod textures;
 pub mod update;
-#[cfg(feature = "extension-arcdps")]
-pub use arcloader_mumblelink::gw2_mumble::{LinkedMem as MumbleLink, MumblePtr, UiState};
-#[cfg(not(feature = "extension-arcdps"))]
-pub use nexus::data_link::mumble::{MumbleLink, MumblePtr, UiState};
+// TODO: decide and use consistent UIState casing
 #[cfg(feature = "extension-nexus")]
 pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use taimi_meta::ui::mumblelink::{MumbleLink, MumblePtr, UIState as UiState};
 pub use {
     self::{alert::send_alert, mouse::MousePosition, statistics::Counter, textures::TextureLoader},
     arcdps::Language as GameLanguage,
-    nexus::imgui,
+    imgui180 as imgui,
     taimi_meta::coords::vec_eq,
     unic_langid_impl::subtags::Language,
 };

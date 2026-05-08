@@ -23,7 +23,10 @@ use {
     anyhow::Context,
     arcdps::extras::{ExtrasVersion, UserInfoIter},
     arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
-    dpsapi::combat::{CombatArgs, CombatEvent},
+    dpsapi::{
+        api::header::ExtensionLoadResult,
+        combat::{CombatArgs, CombatEvent},
+    },
     log::Level,
     std::{
         ffi::{c_void, CStr, CString, OsStr},
@@ -371,7 +374,9 @@ fn add_self() -> RuntimeResult<bool> {
         #[cfg(feature = "extension-arcdps-codegen")]
         () if !arcdps::exports::has_add_extension() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
-        () => Some(unsafe { arcdps::exports::raw::add_extension(own_handle.own_handle) as usize }),
+        () => Some(ExtensionLoadResult::from(unsafe {
+            arcdps::exports::raw::add_extension(own_handle.own_handle) as usize
+        })),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args()
             .and_then(|arc| unsafe { arc.module.arc_extension_add2(own_handle.own_handle.into()) }.ok()),
@@ -386,8 +391,8 @@ fn add_self() -> RuntimeResult<bool> {
         });
     }
 
-    match res? {
-        0 => {
+    match res?.ok() {
+        Ok(_res) => {
             // arc leaks a handle here iirc x.x
             // own_handle.ref_count += 1;
             // in case we're wrong+crash, delay reclaiming this handle until later
@@ -395,8 +400,8 @@ fn add_self() -> RuntimeResult<bool> {
             Ok(true)
         },
         // duplicate sig means we're probably already loaded
-        4 => Ok(false),
-        e => {
+        Err(ExtensionLoadResult::ALREADY_LOADED) => Ok(false),
+        Err(e) => {
             log::warn!("addextension2 failed with code {e}");
             Err("addextension2")
         },
@@ -467,7 +472,7 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     RenderMachine::turn_render_entry();
 
     if !render_ready {
-        RenderState::render_setup(ui);
+        RenderState::render_setup();
     }
 
     RenderMachine::turn_ui_entry(ui);
