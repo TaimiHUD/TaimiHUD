@@ -173,7 +173,7 @@ in {
       nixpkgs = {
         # see https://github.com/arcnmx/nixexprs-rust/issues/10
         args.config.checkMetaRecursively = false;
-        version = "24.11";
+        version = "26.05";
       };
     };
     jobs = {
@@ -186,6 +186,7 @@ in {
           ];
           cache.inputs = [
             taimiHUD.cargoArtifacts
+            legacyPackages.arcdps-imgui_18000.cimgui-static
             legacyPackages.fenixToolchain
             legacyPackages.git-hooks.package
             legacyPackages.formatter

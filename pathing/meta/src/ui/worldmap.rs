@@ -33,7 +33,6 @@ use {
 
 #[cfg(feature = "taimi_mumblelink")]
 use crate::ui::mumblelink::gw2_mumble::{Context, Identity};
-#[cfg(feature = "taimi_mumblelink")]
 
 /// [MumbleLink context](https://wiki.guildwars2.com/wiki/API:MumbleLink#context)
 #[derive(Debug, Clone, PartialEq)]
@@ -301,7 +300,7 @@ impl<M: MapUnit> MapState<M> {
         self.rotation = M::rotation_from(rotation);
     }
 
-    #[cfg(feature = "mumblelink-arcloader")]
+    #[cfg(feature = "taimi_mumblelink")]
     pub unsafe fn update_from_mumblelink_context_ptr(&mut self, context: *const Context) {
         use core::ptr::read_volatile;
 
@@ -451,7 +450,7 @@ impl UiMap {
     /// Update context data
     ///
     /// Excludes [identity data](self.update_from_mumblelink_identity)
-    #[cfg(feature = "mumblelink-arcloader")]
+    #[cfg(feature = "taimi_mumblelink")]
     pub unsafe fn update_from_mumblelink_context_ptr(&mut self, context: *const Context) {
         use core::ptr::read_volatile;
 
@@ -480,18 +479,15 @@ impl UiMap {
         }
     }
 
-    #[cfg(feature = "nexus")]
-    pub fn update_from_mumblelink_nexus(
-        &mut self,
-        mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr,
-    ) {
+    #[cfg(all(feature = "nexus", feature = "mumblelink-nexus"))]
+    pub fn update_from_mumblelink_nexus(&mut self, mumblelink: crate::ui::mumblelink::nexus::MumblePtr) {
         if mumblelink.read_ui_version() == 0 {
             return
         }
 
         unsafe {
             let context = &raw const (*mumblelink.as_ptr()).context;
-            self.update_from_mumblelink_context_ptr(context)
+            self.update_from_mumblelink_context_ptr(context as *const Context)
         }
     }
 

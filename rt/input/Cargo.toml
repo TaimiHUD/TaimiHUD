@@ -34,7 +34,7 @@ glam = { workspace = true }
 glamour = { workspace = true }
 arcffi = { path = "../ffi", package = "taimi_ffi", default-features = false, optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-arcdps = { git = "https://github.com/zerthox/arcdps-rs", default-features = false, optional = true }
+arcdps = { workspace = true, default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies.windows]
 optional = true

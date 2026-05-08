@@ -4,7 +4,6 @@ use {
     crate::exports::runtime::Counter,
     anyhow::{anyhow, Context as _},
     glam::Vec4,
-    nexus::texture::Texture as NexusTexture,
     std::{fmt, path::Path, sync::Arc},
     taimi_d3d::{
         dx11::{
@@ -14,6 +13,9 @@ use {
         D3dContextBindableSlot,
     },
 };
+
+#[cfg(feature = "extension-nexus")]
+use crate::exports::runtime::textures::NexusTexture;
 
 #[derive(Debug, PartialEq)]
 pub struct Texture {
@@ -107,11 +109,11 @@ impl Texture {
 
     #[cfg(feature = "extension-nexus")]
     pub fn with_nexus(texture: NexusTexture) -> anyhow::Result<Self> {
-        let [w, h] = texture.size();
-        let view = TextureView2::from_d3d(texture.resource);
+        let size = texture.size_u32();
+        let view = texture.resource().clone().context("nexus texture view null")?;
         let texture = view.get_resource()?;
         let texture = Self {
-            dimensions: [w as u32, h as u32],
+            dimensions: size.to_array(),
             texture,
             view,
         };
@@ -121,13 +123,10 @@ impl Texture {
         Ok(texture)
     }
 
+    #[cfg(feature = "extension-nexus")]
     pub fn to_nexus(&self) -> Option<NexusTexture> {
         let resource = self.view.clone().into();
-        Some(NexusTexture {
-            resource,
-            width: self.dimensions[0],
-            height: self.dimensions[1],
-        })
+        Some(NexusTexture::new(resource, self.dimensions.into()))
     }
 
     #[cfg(feature = "image")]

@@ -1,5 +1,3 @@
-#[cfg(any(feature = "markers", feature = "space"))]
-pub use nexus::event::MumbleIdentityUpdate;
 use {
     crate::{
         controller::{timers::TimersController, Controller, ControllerEvent},
@@ -17,7 +15,7 @@ use {
 };
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
-    arcloader_mumblelink::identity::MumbleIdentity,
+    arcloader_mumblelink::identity::NexusIdentityShare,
     taimi_meta::ui::{realign_fov, MapOpen},
 };
 
@@ -77,9 +75,8 @@ impl RenderMachine {
 
         #[cfg(any(feature = "markers", feature = "space"))]
         let identity = if !self.identity_users.is_empty() || !self.map_users.is_empty() {
-            let update = match self.identity.update(&ml) {
-                true if !MumbleIdentity::update_is_empty(&self.identity.identity) =>
-                    Some(&*self.identity.identity),
+            let update = match self.identity.update(&mut self.identity_changes, &ml) {
+                Some(true) if !self.identity.is_empty() => Some(&self.identity.identity),
                 _ => None,
             };
 
