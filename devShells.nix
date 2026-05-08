@@ -21,6 +21,7 @@
     inherit (taimiHUD) LD_LIBRARY_PATH;
   in
     mkShell {
+      allowSubstitutes = false;
       buildInputs =
         [
           stdenv.cc
