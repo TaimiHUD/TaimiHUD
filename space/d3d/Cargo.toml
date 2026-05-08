@@ -38,7 +38,7 @@ glam = { workspace = true }
 glamour = { workspace = true }
 indexmap = { workspace = true }
 bitvec = { workspace = true }
-arcffi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["std"], optional = true }
+arcffi = { workspace = true, optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 
 [target.'cfg(windows)'.dependencies.windows]

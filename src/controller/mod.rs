@@ -559,7 +559,6 @@ impl Controller {
         }
         use arcdps::StateChange;
         let propagate = match evt.get_statechange() {
-            StateChange::None => None,
             StateChange::EnterCombat => {
                 log::trace!("ArcDPS: Combat begins at {}!", evt.time);
                 Some(CombatState::Entered)

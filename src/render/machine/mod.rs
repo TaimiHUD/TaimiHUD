@@ -1,7 +1,9 @@
 #[cfg(any(feature = "markers", feature = "space"))]
+pub use arcloader_mumblelink::identity::NexusIdentityUpdate as MumbleIdentityUpdate;
+#[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
-    arcloader_mumblelink::identity::MumbleIdentity,
+    arcloader_mumblelink::identity::{MumbleIdentityTracker, NexusIdentityShare},
     std::borrow::Cow,
     taimi_meta::{
         coords::SignObtainer,
@@ -33,8 +35,6 @@ use {
     },
 };
 
-#[cfg(any(feature = "markers", feature = "space"))]
-pub use self::mumblelink::MumbleIdentityUpdate;
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
@@ -54,7 +54,9 @@ mod tasks;
 
 pub struct RenderMachine {
     #[cfg(any(feature = "markers", feature = "space"))]
-    pub identity: MumbleIdentity,
+    pub identity: NexusIdentityShare,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub identity_changes: MumbleIdentityTracker,
     pub identity_users: RenderUsers,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub map: UiMap,
@@ -109,7 +111,9 @@ impl RenderMachine {
     pub fn new() -> Self {
         Self {
             #[cfg(any(feature = "markers", feature = "space"))]
-            identity: MumbleIdentity::new(),
+            identity: NexusIdentityShare::EMPTY,
+            #[cfg(any(feature = "markers", feature = "space"))]
+            identity_changes: MumbleIdentityTracker::new(),
             identity_users: Self::USERS,
             #[cfg(any(feature = "markers", feature = "space"))]
             map: {
