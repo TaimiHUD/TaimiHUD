@@ -408,7 +408,7 @@ pub fn classify_current_lens(cls: LensClass) {
 #[cfg(feature = "space")]
 pub fn classify_space_lens(engine: &Engine) {
     if let Some(view) = &engine.render_backend.depth_handler.render_target_view.depth {
-        let dsview = view.view.as_raw();
+        let dsview = view.as_d3d_raw().as_ptr();
         classify_lens(dsview as *mut _, LensClass::Space);
     }
 }

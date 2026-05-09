@@ -5,9 +5,10 @@ use {
             buffer::{BindFlags, BufferFlags, Resource, Usage},
             prelude::*,
         },
+        shader::ShaderKind,
         D3dContextBindableSlot,
     },
-    std::marker::PhantomData,
+    std::{fmt, marker::PhantomData},
 };
 
 pub use crate::dx11::d3d11::{ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA};
@@ -24,7 +25,11 @@ impl_d3d! {
 }
 
 impl Buffer {
+    /// 32?
     pub const VERTEX_SLOT_COUNT: usize = d3d11::D3D11_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT as usize;
+    /// 14?
+    pub const CONSTANT_SLOT_COUNT: usize =
+        d3d11::D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT as usize;
 
     pub fn desc(&self) -> D3D11_BUFFER_DESC {
         let mut desc = D3D11_BUFFER_DESC::default();
@@ -300,8 +305,10 @@ impl Buffer {
         }
     }
 
-    pub fn set_all_vertex<B>(buffers: &[B], device_context: &Dx11Context, slot: u32)
+    pub fn set_all_vertex<B, I>(buffers: I, device_context: &Dx11Context, slot: u32)
     where
+        I: IntoIterator<Item = B>,
+        I::IntoIter: ExactSizeIterator,
         B: D3dContextBindableVertexBuffer<Dx11Context>,
     {
         let mut bufs = [ptr::null_mut(); Self::SET_VERTEX_LIMIT];
@@ -310,7 +317,9 @@ impl Buffer {
         let mut bufs_storage;
         let mut strides_storage;
         let mut offsets_storage;
-        let (bufs, strides, offsets) = match buffers.len() {
+        let buffers = buffers.into_iter();
+        let buflen = buffers.len();
+        let (bufs, strides, offsets) = match buflen {
             count if count <= Self::SET_VERTEX_LIMIT => (&mut bufs[..], &mut strides[..], &mut offsets[..]),
             count => {
                 log::info!("binding {count} vertex buffer slots, consider reducing!");
@@ -325,7 +334,7 @@ impl Buffer {
             },
         };
         let outputs = bufs.iter_mut().zip(strides.iter_mut()).zip(offsets.iter_mut());
-        for (buffer, ((ptr, stride), offset)) in buffers.iter().zip(outputs) {
+        for (buffer, ((ptr, stride), offset)) in buffers.into_iter().zip(outputs) {
             *ptr = buffer.vertex_buffer_ptr();
             *stride = buffer.vertex_buffer_stride();
             *offset = buffer.vertex_buffer_offset();
@@ -333,7 +342,7 @@ impl Buffer {
         unsafe {
             device_context.IASetVertexBuffers(
                 slot,
-                buffers.len() as u32,
+                buflen as u32,
                 Some(bufs.as_ptr() as *const Option<ID3D11Buffer>),
                 Some(strides.as_ptr()),
                 Some(offsets.as_ptr()),
@@ -359,9 +368,38 @@ impl Buffer {
             );
         }
     }
+
+    pub fn new_snapshot_in<'v, V: ?Sized>(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: u32,
+        out: &'v mut V,
+    ) where
+        V: AsMut<[Option<Self>]>,
+    {
+        let out = out.as_mut();
+        match kind {
+            ShaderKind::Vertex => {
+                use super::ConstantBufferV;
+                ConstantBufferV::new_snapshot_in(context, slot, ConstantBufferV::slice_from_buffer_mut(out))
+            },
+            ShaderKind::Pixel => {
+                use super::ConstantBufferP;
+                ConstantBufferP::new_snapshot_in(context, slot, ConstantBufferP::slice_from_buffer_mut(out))
+            },
+        }
+    }
+    pub fn new_snapshot_vec(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: ops::Range<u32>,
+    ) -> Vec<Option<Self>> {
+        let mut views = vec![None::<Self>; slot.len()];
+        Self::new_snapshot_in(kind, context, slot.start, &mut views[..]);
+        views
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct BufferOf<D: D3dBufferData, const OFF: usize = 0> {
     pub buffer: Buffer,
@@ -404,7 +442,14 @@ impl<const OFF: usize, D: D3dBufferData> BufferOf<D, OFF> {
 impl<const OFF: usize, D: D3dBufferData> ops::Deref for BufferOf<D, OFF> {
     type Target = Buffer;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+impl<const OFF: usize, D: D3dBufferData> AsRef<Buffer> for BufferOf<D, OFF> {
+    #[inline]
+    fn as_ref(&self) -> &Buffer {
         &self.buffer
     }
 }
@@ -479,35 +524,6 @@ unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<D
         OFF as u32
     }
 }
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
-    for Option<BufferOf<D, OFF>>
-{
-    fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
-        D3dContextBindableVertexBuffer::vertex_buffer_ptr(&self.as_ref())
-    }
-    fn vertex_buffer_stride(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_stride(&self.as_ref())
-    }
-    fn vertex_buffer_offset(&self) -> u32 {
-        D3dContextBindableVertexBuffer::vertex_buffer_offset(&self.as_ref())
-    }
-}
-unsafe impl<const OFF: usize, D: D3dBufferData> D3dContextBindableVertexBuffer<Dx11Context>
-    for Option<&'_ BufferOf<D, OFF>>
-{
-    fn vertex_buffer_ptr(&self) -> *mut std::ffi::c_void {
-        self.map(D3dContextBindableVertexBuffer::vertex_buffer_ptr)
-            .unwrap_or(ptr::null_mut())
-    }
-    fn vertex_buffer_stride(&self) -> u32 {
-        //self.map(D3dContextBindableVertexBuffer::vertex_buffer_stride).unwrap_or(0)
-        D::stride() as u32
-    }
-    fn vertex_buffer_offset(&self) -> u32 {
-        //self.map(D3dContextBindableVertexBuffer::vertex_buffer_offset).unwrap_or(0)
-        OFF as u32
-    }
-}
 impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context> for BufferOf<D, OFF> {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_one_vertex(self, device_context, slot)
@@ -556,17 +572,32 @@ impl<const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
         Buffer::set_all_vertex(self, device_context, slot)
     }
 }
-impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
-    for [BufferOf<D, OFF>; N]
-{
-    fn set(&self, device_context: &Dx11Context, slot: u32) {
-        D3dContextBindableSlot::<Dx11Context>::set(&self[..], device_context, slot)
+
+impl<const OFF: usize, D: D3dBufferData> Clone for BufferOf<D, OFF> {
+    fn clone(&self) -> Self {
+        Self::with_buffer(Clone::clone(&self.buffer))
+    }
+    fn clone_from(&mut self, other: &Self) {
+        self.buffer.clone_from(&other.buffer)
     }
 }
-impl<const N: usize, const OFF: usize, D: D3dBufferData> D3dContextBindableSlot<Dx11Context>
-    for [Option<BufferOf<D, OFF>>; N]
+
+impl<const OFF: usize, D: D3dBufferData, B> PartialEq<B> for BufferOf<D, OFF>
+where
+    B: AsRef<Buffer>,
 {
-    fn set(&self, device_context: &Dx11Context, slot: u32) {
-        D3dContextBindableSlot::<Dx11Context>::set(&self[..], device_context, slot)
+    fn eq(&self, rhs: &B) -> bool {
+        self.buffer.eq(rhs.as_ref())
+    }
+}
+impl<const OFF: usize, D: D3dBufferData> Eq for BufferOf<D, OFF> {}
+
+impl<const OFF: usize, D: D3dBufferData> fmt::Debug for BufferOf<D, OFF> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut f = f.debug_struct("BufferOf");
+        if OFF > 0 {
+            f.field("offset", &OFF);
+        }
+        f.field("buffer", &self.buffer).finish()
     }
 }

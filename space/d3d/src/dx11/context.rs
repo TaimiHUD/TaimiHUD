@@ -29,6 +29,7 @@ impl_d3d! {
     pub struct DeviceContext1 {
         pub context0: DeviceContext0,
     }
+    @into()
     @deref(DeviceContext0);
 }
 
@@ -37,6 +38,7 @@ impl_d3d! {
     pub struct DeviceContext2 {
         pub context1: DeviceContext1,
     }
+    @into()
     @deref(DeviceContext1);
 }
 
@@ -45,6 +47,7 @@ impl_d3d! {
     pub struct DeviceContext3 {
         pub context2: DeviceContext2,
     }
+    @into()
     @deref(DeviceContext2);
 }
 
@@ -53,6 +56,7 @@ impl_d3d! {
     pub struct DeviceContext4 {
         pub context3: DeviceContext3,
     }
+    @into()
     @deref(DeviceContext3);
 }
 

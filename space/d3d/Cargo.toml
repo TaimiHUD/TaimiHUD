@@ -32,6 +32,7 @@ windows = [
 anyhow = "1"
 log = "0.4"
 relative-path = "1"
+num-traits = { workspace = true }
 bitflags = { workspace = true }
 glam = { workspace = true }
 glamour = { workspace = true }

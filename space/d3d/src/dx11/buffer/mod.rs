@@ -1,5 +1,6 @@
 mod buffer;
 mod constant;
+mod index;
 mod resource;
 mod sampler;
 mod texture2;
@@ -10,6 +11,7 @@ pub use {
     self::{
         buffer::{Buffer, BufferOf, ID3D11Buffer, D3D11_BOX, D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA},
         constant::{ConstantBufferP, ConstantBufferV},
+        index::{D3d11ContextBindableIndexBuffer, IndexBuffer},
         resource::{ID3D11Resource, Resource, ResourceDimension, D3D11_RESOURCE_DIMENSION},
         sampler::{
             Filter,
@@ -24,13 +26,27 @@ pub use {
         vertex::{D3d11ContextBindableVertexBuffer, VertexBuffer},
         view::{
             ID3D11ShaderResourceView,
+            ID3D11ShaderResourceView1,
+            ID3D11UnorderedAccessView,
+            ID3D11UnorderedAccessView1,
             ID3D11View,
             ShaderResourceView,
+            ShaderResourceView1,
+            ShaderResourceViewP,
+            ShaderResourceViewV,
             TextureView2,
+            UnorderedAccessView,
+            UnorderedAccessView1,
             View,
             D3D11_SHADER_RESOURCE_VIEW_DESC,
+            D3D11_SHADER_RESOURCE_VIEW_DESC1,
+            D3D11_SHADER_RESOURCE_VIEW_DESC1_0,
             D3D11_SHADER_RESOURCE_VIEW_DESC_0,
             D3D11_TEX2D_SRV,
+            D3D11_UNORDERED_ACCESS_VIEW_DESC,
+            D3D11_UNORDERED_ACCESS_VIEW_DESC1,
+            D3D11_UNORDERED_ACCESS_VIEW_DESC1_0,
+            D3D11_UNORDERED_ACCESS_VIEW_DESC_0,
             D3D_SRV_DIMENSION,
         },
     },

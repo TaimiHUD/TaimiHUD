@@ -40,6 +40,7 @@ pub mod prelude {
             Intersection as _,
             Point2,
             Point3,
+            Rect,
             Scalar,
             Size2,
             Size3,

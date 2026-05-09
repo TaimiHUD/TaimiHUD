@@ -34,6 +34,14 @@ impl BlendState {
         DestBlend: BlendFactor::INV_SRC_ALPHA,
         ..Self::TARGET_DESC_DEFAULT_OFF
     };
+    pub const WRITE_RGB: d3d11::D3D11_COLOR_WRITE_ENABLE = d3d11::D3D11_COLOR_WRITE_ENABLE(
+        d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0
+            | d3d11::D3D11_COLOR_WRITE_ENABLE_GREEN.0
+            | d3d11::D3D11_COLOR_WRITE_ENABLE_BLUE.0,
+    );
+    pub const WRITE_RA: d3d11::D3D11_COLOR_WRITE_ENABLE = d3d11::D3D11_COLOR_WRITE_ENABLE(
+        d3d11::D3D11_COLOR_WRITE_ENABLE_RED.0 | d3d11::D3D11_COLOR_WRITE_ENABLE_ALPHA.0,
+    );
 
     pub const fn desc_for_target(
         rt_desc: D3D11_RENDER_TARGET_BLEND_DESC,
@@ -70,6 +78,16 @@ pub struct OMBlendState<B = BlendState> {
     pub sample_mask: Option<u32>,
 }
 
+impl OMBlendState<Option<BlendState>> {
+    pub const EMPTY: Self = Self::DEFAULT;
+}
+impl<B> OMBlendState<Option<B>> {
+    pub const DEFAULT: Self = Self {
+        state: None,
+        factor: None,
+        sample_mask: Some(BlendState::DEFAULT_MASK),
+    };
+}
 impl<B> OMBlendState<B> {
     pub fn with_state<S: Into<B>>(state: S) -> Self {
         Self::new(state.into(), None, None)
@@ -88,7 +106,7 @@ impl<B> OMBlendState<B> {
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
     where
-        B: From<Option<ID3D11BlendState>>,
+        B: From<Option<BlendState>>,
     {
         let mut state = None;
         let mut factor = BlendState::DEFAULT_FACTOR.to_array();
@@ -96,6 +114,7 @@ impl<B> OMBlendState<B> {
         unsafe { context.OMGetBlendState(Some(&mut state), Some(&mut factor), Some(&mut sample_mask)) }
         let factor = Vec4::from_array(factor);
         //let factor = (factor != Self::DEFAULT_FACTOR).then(factor);
+        let state = state.map(BlendState::from_d3d);
         Self::new(state.into(), Some(factor), Some(sample_mask))
     }
 
@@ -131,7 +150,7 @@ where
 
 impl<B> D3dState<Dx11Context> for OMBlendState<B>
 where
-    B: From<Option<ID3D11BlendState>>,
+    B: From<Option<BlendState>>,
     Self: D3dContextBindable<Dx11Context>,
 {
     fn empty_state(_: &Dx11Device) -> anyhow::Result<Self> {

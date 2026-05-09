@@ -57,7 +57,10 @@ impl DepthHandler {
         let depth_stencil_view =
             DepthView::new_with_texture2(device, &depth_stencil_buffer, Default::default(), 0)?;
         #[cfg(feature = "goggles")]
-        let _ = DEPTH_STENCIL_VIEW_VTABLE.set(unsafe { &*(depth_stencil_view.view.vtable() as *const _) });
+        let _ = DEPTH_STENCIL_VIEW_VTABLE.set(unsafe {
+            let vtbl = depth_stencil_view.as_d3d().vtable();
+            &*(vtbl as *const _)
+        });
 
         let fill_quad = Self::new_fill_quad(device, None)?;
         let rasterizer_state = RasterizerState::new_with_desc(device, &Self::RASTER_DESC)?;

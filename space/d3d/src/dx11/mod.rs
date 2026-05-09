@@ -4,6 +4,7 @@ pub mod context;
 pub mod depth;
 pub mod device;
 pub mod raster;
+pub mod scissor;
 pub mod shader;
 pub mod viewport;
 #[cfg(feature = "serde")]
@@ -42,6 +43,7 @@ pub use {
         buffer::{Buffer, Resource, Texture2, VertexBuffer, View},
         depth::{DepthState, DepthView, OMDepthState},
         raster::{RasterizerState, RenderTargetView, RenderTargetViews},
+        scissor::ScissorRect,
         shader::{ShaderP, ShaderV},
         viewport::Viewport,
     },

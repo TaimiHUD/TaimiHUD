@@ -1,5 +1,5 @@
 use {
-    crate::{prelude::*, D3dContext, D3dContextBindableSlot, D3dDevice},
+    crate::{prelude::*, D3dContext, D3dContextBindable, D3dContextBindableSlot, D3dDevice},
     std::{ffi, mem, ptr::NonNull},
 };
 
@@ -35,6 +35,90 @@ unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableVertexBuffer<D3DC>>
         &self,
     ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
         D3dContextBindableVertexBuffer::vertex_buffer_buffer(*self)
+    }
+}
+unsafe impl<D3DC: D3dContext, B: D3dContextBindableVertexBuffer<D3DC>> D3dContextBindableVertexBuffer<D3DC>
+    for Option<B>
+where
+    Self: D3dContextBindableSlot<D3DC>,
+{
+    fn vertex_buffer_ptr(&self) -> *mut ffi::c_void {
+        self.as_ref()
+            .map(D3dContextBindableVertexBuffer::vertex_buffer_ptr)
+            .unwrap_or(ptr::null_mut())
+    }
+    fn vertex_buffer_stride(&self) -> u32 {
+        self.as_ref()
+            .map(D3dContextBindableVertexBuffer::vertex_buffer_stride)
+            .unwrap_or(0)
+    }
+    fn vertex_buffer_offset(&self) -> u32 {
+        self.as_ref()
+            .map(D3dContextBindableVertexBuffer::vertex_buffer_offset)
+            .unwrap_or(0)
+    }
+    unsafe fn vertex_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+        self.as_ref()
+            .and_then(|b| unsafe { D3dContextBindableVertexBuffer::vertex_buffer_buffer(b) })
+    }
+}
+
+pub unsafe trait D3dContextBindableIndexBuffer<D3DC: D3dContext>: D3dContextBindable<D3DC> {
+    fn index_buffer_ptr(&self) -> *mut ffi::c_void;
+    fn index_buffer_format(&self) -> dxgi::DXGI_FORMAT;
+    fn index_buffer_offset(&self) -> u32;
+
+    unsafe fn index_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+        NonNull::new(self.index_buffer_ptr() as *mut _).map(|raw| InterfaceRef::from_raw(raw))
+    }
+}
+unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableIndexBuffer<D3DC>>
+    D3dContextBindableIndexBuffer<D3DC> for &'_ B
+{
+    fn index_buffer_ptr(&self) -> *mut ffi::c_void {
+        D3dContextBindableIndexBuffer::index_buffer_ptr(*self)
+    }
+    fn index_buffer_format(&self) -> dxgi::DXGI_FORMAT {
+        D3dContextBindableIndexBuffer::index_buffer_format(*self)
+    }
+    fn index_buffer_offset(&self) -> u32 {
+        D3dContextBindableIndexBuffer::index_buffer_offset(*self)
+    }
+    unsafe fn index_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+        D3dContextBindableIndexBuffer::index_buffer_buffer(*self)
+    }
+}
+unsafe impl<D3DC: D3dContext, B: D3dContextBindableIndexBuffer<D3DC>> D3dContextBindableIndexBuffer<D3DC>
+    for Option<B>
+where
+    Self: D3dContextBindable<D3DC>,
+{
+    fn index_buffer_ptr(&self) -> *mut ffi::c_void {
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_ptr)
+            .unwrap_or(ptr::null_mut())
+    }
+    fn index_buffer_format(&self) -> dxgi::DXGI_FORMAT {
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_format)
+            .unwrap_or(crate::dxgi::DXGI_FORMAT_R32_UINT)
+    }
+    fn index_buffer_offset(&self) -> u32 {
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_offset)
+            .unwrap_or(0)
+    }
+    unsafe fn index_buffer_buffer(
+        &self,
+    ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
+        self.as_ref()
+            .and_then(|b| unsafe { D3dContextBindableIndexBuffer::index_buffer_buffer(b) })
     }
 }
 

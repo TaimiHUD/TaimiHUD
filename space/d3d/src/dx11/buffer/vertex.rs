@@ -5,11 +5,13 @@ use {
             buffer::{BindFlags, Buffer, BufferFlags, D3D11_BUFFER_DESC},
             prelude::*,
         },
+        D3dContextBindable,
         D3dContextBindableSlot,
     },
     std::{ffi, mem, slice},
 };
 
+/// TODO: non-pub fields
 #[derive(Debug, Clone, PartialEq)]
 pub struct VertexBuffer {
     pub buffer: Buffer,
@@ -19,6 +21,8 @@ pub struct VertexBuffer {
 }
 
 impl VertexBuffer {
+    pub const MAX_COUNT: usize = Buffer::VERTEX_SLOT_COUNT;
+
     pub unsafe fn with_parts<B>(buffer: B, stride: usize, count: usize, offset: usize) -> Self
     where
         B: Into<Buffer>,
@@ -69,21 +73,42 @@ impl VertexBuffer {
     }
 
     pub fn new_snapshot<const N: usize>(context: &Dx11Context, slot: u32) -> [Option<Self>; N] {
-        let mut buffers = [const { None::<Dx11Buffer> }; N];
+        let mut buffers = [const { None }; N];
         let mut strides = [0u32; N];
         let mut offsets = [0u32; N];
+        unsafe {
+            let mut out = mem::MaybeUninit::<[Option<VertexBuffer>; N]>::uninit();
+            let out_slice = out.as_mut_ptr() as *mut [mem::MaybeUninit<Option<Self>>; N];
+            Self::new_snapshot_in(
+                context,
+                slot,
+                &mut buffers,
+                &mut strides,
+                &mut offsets,
+                &mut *out_slice,
+            );
+            out.assume_init()
+        }
+    }
+    unsafe fn new_snapshot_in(
+        context: &Dx11Context,
+        slot: u32,
+        buffers: &mut [Option<Buffer>],
+        strides: &mut [u32],
+        offsets: &mut [u32],
+        out: &mut [mem::MaybeUninit<Option<Self>>],
+    ) {
         unsafe {
             context.IAGetVertexBuffers(
                 slot,
                 buffers.len() as u32,
-                Some(buffers.as_mut_ptr()),
+                Some(buffers.as_mut_ptr() as *mut Option<Dx11Buffer>),
                 Some(strides.as_mut_ptr()),
                 Some(offsets.as_mut_ptr()),
             );
 
             let buffers = buffers.iter_mut().zip(strides.iter().zip(offsets.iter()));
 
-            let mut out = mem::MaybeUninit::<[Option<VertexBuffer>; N]>::uninit();
             let mut b = out.as_mut_ptr() as *mut Option<VertexBuffer>;
             for (buffer, (&stride, &offset)) in buffers {
                 b.write(buffer.take().map(Buffer::from).map(|buffer| VertexBuffer {
@@ -94,7 +119,25 @@ impl VertexBuffer {
                 }));
                 b = b.add(1);
             }
-            out.assume_init()
+        }
+    }
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+        let len = slot.len() as usize;
+        let mut buffers = vec![const { None }; len];
+        let mut strides = vec![0u32; len];
+        let mut offsets = vec![0u32; len];
+        unsafe {
+            let mut out = Vec::with_capacity(len);
+            Self::new_snapshot_in(
+                context,
+                slot.start,
+                &mut buffers,
+                &mut strides,
+                &mut offsets,
+                out.spare_capacity_mut(),
+            );
+            out.set_len(len);
+            out
         }
     }
 
@@ -130,6 +173,16 @@ impl D3dContextBindableSlot<Dx11Context> for VertexBuffer {
         Buffer::set_one_vertex(self, device_context, slot)
     }
 }
+impl D3dContextBindableSlot<Dx11Context> for Option<VertexBuffer> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_one_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for Option<&'_ VertexBuffer> {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_one_vertex(self, device_context, slot)
+    }
+}
 impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [&'_ VertexBuffer; N] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
@@ -138,6 +191,21 @@ impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [&'_ VertexBuffer; 
 impl<const N: usize> D3dContextBindableSlot<Dx11Context> for [VertexBuffer; N] {
     fn set(&self, device_context: &Dx11Context, slot: u32) {
         Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<&'_ VertexBuffer>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<VertexBuffer>] {
+    fn set(&self, device_context: &Dx11Context, slot: u32) {
+        Buffer::set_all_vertex(self, device_context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<VertexBuffer>; VertexBuffer::MAX_COUNT] {
+    fn set(&self, device_context: &Dx11Context) {
+        Buffer::set_all_vertex(self, device_context, 0)
     }
 }
 

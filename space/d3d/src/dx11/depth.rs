@@ -12,7 +12,7 @@ pub use crate::dx11::d3d11::{
 };
 use crate::{
     dx11::{
-        buffer::{self, Resource, Texture2, D3D11_TEXTURE2D_DESC},
+        buffer::{self, Resource, Texture2, View, D3D11_TEXTURE2D_DESC},
         prelude::*,
     },
     D3dContextBindable,
@@ -82,6 +82,14 @@ impl DepthState {
             .context("CreateDepthStencilState")
             .map(Into::into)
     }
+
+    pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_DESC {
+        let mut out = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc(&mut out);
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +98,12 @@ pub struct OMDepthState<S = Option<DepthState>> {
     pub stencil_ref: u32,
 }
 
+impl OMDepthState {
+    pub const EMPTY: Self = Self::DEFAULT;
+}
+impl<S> OMDepthState<Option<S>> {
+    pub const DEFAULT: Self = Self { state: None, stencil_ref: 0 };
+}
 impl<S> OMDepthState<S> {
     pub fn with_state<T: Into<S>>(state: T, stencil_ref: u32) -> Self {
         Self { state: state.into(), stencil_ref }
@@ -97,13 +111,14 @@ impl<S> OMDepthState<S> {
 
     pub fn new_snapshot(context: &Dx11Context) -> Self
     where
-        S: From<Option<ID3D11DepthStencilState>>,
+        S: From<Option<DepthState>>,
     {
         let mut state = None;
         let mut stencil_ref = 0;
         unsafe {
             context.OMGetDepthStencilState(Some(&mut state), Some(&mut stencil_ref));
         }
+        let state = state.map(DepthState::from_d3d);
 
         Self::with_state(state, stencil_ref)
     }
@@ -131,7 +146,11 @@ impl_d3d! {
     unsafe impl Dx11Child for ID3D11DepthStencilView;
 
     @[transparent(Dx11Child <= ID3D11DepthStencilView)]
-    pub struct DepthView.view;
+    pub struct DepthView {
+        pub view: View,
+    }
+    @into()
+    @deref(View);
 }
 
 impl_d3d! { impl bitflags for
@@ -146,7 +165,7 @@ impl ClearFlags {
 
 impl DepthView {
     pub fn clear(&self, context: &Dx11Context, flags: ClearFlags, depth: f32, stencil: u8) {
-        unsafe { context.ClearDepthStencilView(&self.view, flags.to_raw(), depth, stencil) }
+        unsafe { context.ClearDepthStencilView(self.as_d3d(), flags.to_raw(), depth, stencil) }
     }
 
     pub const fn desc_for_texture2(
@@ -206,12 +225,8 @@ impl DepthView {
     pub fn get_desc(&self) -> D3D11_DEPTH_STENCIL_VIEW_DESC {
         let mut out = Default::default();
         unsafe {
-            self.view.GetDesc(&mut out);
+            self.as_d3d().GetDesc(&mut out);
         }
         out
-    }
-
-    pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
-        unsafe { self.view.GetResource() }.context("ID3D11DepthStencilView::GetResource")
     }
 }

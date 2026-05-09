@@ -44,3 +44,35 @@ where
         D3dContextBindableSlot::set(*self, device_context, slot)
     }
 }
+impl<T, D3DC: D3dContext> D3dContextBindable<D3DC> for Vec<T>
+where
+    [T]: D3dContextBindable<D3DC>,
+{
+    fn set(&self, device_context: &D3DC) {
+        D3dContextBindable::set(&self[..], device_context)
+    }
+}
+impl<T, D3DC: D3dContext> D3dContextBindableSlot<D3DC> for Vec<T>
+where
+    [T]: D3dContextBindableSlot<D3DC>,
+{
+    fn set(&self, device_context: &D3DC, slot: u32) {
+        D3dContextBindableSlot::set(&self[..], device_context, slot)
+    }
+}
+impl<T, D3DC: D3dContext, const N: usize> D3dContextBindableSlot<D3DC> for [T; N]
+where
+    [T]: D3dContextBindableSlot<D3DC>,
+{
+    fn set(&self, device_context: &D3DC, slot: u32) {
+        D3dContextBindableSlot::set(&self[..], device_context, slot)
+    }
+}
+impl<T, D3DC: D3dContext, const N: usize> D3dContextBindable<D3DC> for [T; N]
+where
+    [T]: D3dContextBindable<D3DC>,
+{
+    fn set(&self, device_context: &D3DC) {
+        D3dContextBindable::set(&self[..], device_context)
+    }
+}

@@ -1,6 +1,6 @@
 pub use {
     self::target::{ShaderKind, ShaderTarget},
-    crate::d3d::{Fxc::D3DCompile, ID3DInclude, D3D_SHADER_MACRO},
+    crate::d3d::{Fxc::D3DCompile, ID3DInclude, ID3DInclude_Impl, ID3DInclude_Vtbl, D3D_SHADER_MACRO},
 };
 #[cfg(feature = "arcffi")]
 use {
@@ -243,6 +243,10 @@ mod defs {
             ShaderDefinition::slice_as_d3d_macros(&self.defs)
         }
 
+        pub fn unterminate(&mut self) -> bool {
+            self.defs.pop_if(|d| d.is_empty()).is_some()
+        }
+
         pub fn try_from_str<N, D, I>(defs: I) -> anyhow::Result<Self>
         where
             N: Into<Vec<u8>>,
@@ -283,7 +287,11 @@ mod defs {
     {
         fn extend<T: IntoIterator<Item = D>>(&mut self, iter: T) {
             let iter = iter.into_iter().map(Into::into);
-            self.defs.extend(iter)
+            let was_terminated = self.unterminate();
+            self.defs.extend(iter);
+            if was_terminated {
+                self.terminate();
+            }
         }
     }
 

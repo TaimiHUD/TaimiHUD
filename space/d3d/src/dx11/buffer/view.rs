@@ -1,19 +1,34 @@
+use {
+    crate::{
+        dx11::{
+            buffer::{Resource, Texture2},
+            prelude::*,
+        },
+        shader::ShaderKind,
+        D3dContextBindable,
+        D3dContextBindableSlot,
+    },
+    std::mem,
+};
+
 pub use crate::{
     d3d::D3D_SRV_DIMENSION,
     dx11::d3d11::{
         ID3D11ShaderResourceView,
+        ID3D11ShaderResourceView1,
+        ID3D11UnorderedAccessView,
+        ID3D11UnorderedAccessView1,
         ID3D11View,
         D3D11_SHADER_RESOURCE_VIEW_DESC,
+        D3D11_SHADER_RESOURCE_VIEW_DESC1,
+        D3D11_SHADER_RESOURCE_VIEW_DESC1_0,
         D3D11_SHADER_RESOURCE_VIEW_DESC_0,
         D3D11_TEX2D_SRV,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC1,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC1_0,
+        D3D11_UNORDERED_ACCESS_VIEW_DESC_0,
     },
-};
-use crate::{
-    dx11::{
-        buffer::{Resource, Texture2},
-        prelude::*,
-    },
-    D3dContextBindableSlot,
 };
 
 impl_d3d! {
@@ -33,18 +48,71 @@ impl_d3d! {
     @into()
     @deref(View);
 }
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11ShaderResourceView1;
+
+    @[transparent(Dx11Child <= ID3D11ShaderResourceView1)]
+    pub struct ShaderResourceView1 {
+        pub srv0: ShaderResourceView,
+    }
+    @into()
+    @deref(ShaderResourceView);
+}
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11UnorderedAccessView;
+
+    @[transparent(Dx11Child <= ID3D11UnorderedAccessView)]
+    pub struct UnorderedAccessView {
+        pub view: View,
+    }
+    @into()
+    @deref(View);
+}
+impl_d3d! {
+    unsafe impl Dx11Child for ID3D11UnorderedAccessView1;
+
+    @[transparent(Dx11Child <= ID3D11UnorderedAccessView1)]
+    pub struct UnorderedAccessView1 {
+        pub uav0: UnorderedAccessView,
+    }
+    @into()
+    @deref(UnorderedAccessView);
+}
 
 impl View {
-    pub fn get_resource(&self) -> anyhow::Result<Dx11Resource> {
+    pub fn get_resource(&self) -> anyhow::Result<Resource> {
         unsafe {
             self.as_d3d()
                 .GetResource()
                 .context("ID3D11ShaderResourceView::GetResource")
+                .map(Resource::from_d3d)
         }
     }
 }
 
+impl UnorderedAccessView {
+    pub fn get_desc(&self) -> D3D11_UNORDERED_ACCESS_VIEW_DESC {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc(&mut desc);
+        }
+        desc
+    }
+}
+impl UnorderedAccessView1 {
+    pub fn get_desc1(&self) -> D3D11_UNORDERED_ACCESS_VIEW_DESC1 {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc1(&mut desc);
+        }
+        desc
+    }
+}
+
 impl ShaderResourceView {
+    /// up to 128
+    pub const MAX_SLOTS: usize = d3d11::D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT as usize;
+
     pub fn new_with_desc<R: AsRef<Resource>>(
         device: &Dx11Device,
         resource: R,
@@ -59,13 +127,59 @@ impl ShaderResourceView {
             .map(Into::into)
     }
 
-    pub fn bind_set<V>(views: V, context: &Dx11Context, slot: u32)
+    pub fn new_snapshot_in<V: ?Sized>(kind: ShaderKind, context: &Dx11Context, slot: u32, out: &mut V)
+    where
+        V: AsMut<[Option<Self>]>,
+    {
+        let out = out.as_mut();
+        match kind {
+            ShaderKind::Vertex => ShaderResourceViewP::new_snapshot_in(
+                context,
+                slot,
+                ShaderResourceViewP::slice_from_view_mut(out),
+            ),
+            ShaderKind::Pixel => ShaderResourceViewV::new_snapshot_in(
+                context,
+                slot,
+                ShaderResourceViewV::slice_from_view_mut(out),
+            ),
+        }
+    }
+    pub fn new_snapshot_vec(
+        kind: ShaderKind,
+        context: &Dx11Context,
+        slot: ops::Range<u32>,
+    ) -> Vec<Option<Self>> {
+        let mut views = vec![None::<Self>; slot.len()];
+        Self::new_snapshot_in(kind, context, slot.start, &mut views[..]);
+        views
+    }
+    pub fn bind_set<V>(kind: ShaderKind, views: V, context: &Dx11Context, slot: u32)
+    where
+        V: ID3D11ResourceOf<ID3D11ShaderResourceView>,
+    {
+        match kind {
+            ShaderKind::Vertex => Self::bind_set_vertex(views, context, slot),
+            ShaderKind::Pixel => Self::bind_set_pixel(views, context, slot),
+        }
+    }
+
+    pub fn bind_set_pixel<V>(views: V, context: &Dx11Context, slot: u32)
     where
         V: ID3D11ResourceOf<ID3D11ShaderResourceView>,
     {
         let views = views.as_params_of();
         unsafe {
             context.PSSetShaderResources(slot, Some(views));
+        }
+    }
+    pub fn bind_set_vertex<V>(views: V, context: &Dx11Context, slot: u32)
+    where
+        V: ID3D11ResourceOf<ID3D11ShaderResourceView>,
+    {
+        let views = views.as_params_of();
+        unsafe {
+            context.VSSetShaderResources(slot, Some(views));
         }
     }
 
@@ -76,11 +190,105 @@ impl ShaderResourceView {
         }
         desc
     }
+
+    pub fn vec_from_raw(views: Vec<Option<ID3D11ShaderResourceView>>) -> Vec<Option<Self>> {
+        unsafe { mem::transmute(views) }
+    }
+    pub fn slice_as_raw_mut(views: &mut [Option<Self>]) -> &mut [Option<ID3D11ShaderResourceView>] {
+        unsafe { mem::transmute(views) }
+    }
+}
+impl ShaderResourceView1 {
+    pub fn get_desc1(&self) -> D3D11_SHADER_RESOURCE_VIEW_DESC1 {
+        let mut desc = Default::default();
+        unsafe {
+            self.as_d3d().GetDesc1(&mut desc);
+        }
+        desc
+    }
 }
 
-impl D3dContextBindableSlot<Dx11Context> for ShaderResourceView {
+#[cfg(todo)]
+pub struct VertexShaderResourceViews {
+    views: V,
+}
+#[cfg(todo)]
+pub struct PixelShaderResourceViews {
+    views: V,
+}
+
+impl_d3d! {
+    @[transparent(Dx11Child <= ID3D11ShaderResourceView)]
+    pub struct ShaderResourceViewP {
+        pub view: ShaderResourceView,
+    }
+    @from()
+    @into()
+    @deref(ShaderResourceView);
+}
+
+impl ShaderResourceViewP {
+    #[inline(always)]
+    pub const fn from_resource_view(view: ShaderResourceView) -> Self {
+        Self { view }
+    }
+
+    #[inline(always)]
+    pub const fn from_resource_view_ref(view: &ID3D11ShaderResourceView) -> &Self {
+        unsafe { mem::transmute(view) }
+    }
+
+    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V)
+    where
+        V: AsMut<[Option<Self>]>,
+    {
+        let views = Self::slice_as_view_mut(out.as_mut());
+        unsafe { context.PSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views))) }
+    }
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+        let mut views = vec![None::<Self>; slot.len()];
+        Self::new_snapshot_in(context, slot.start, &mut views[..]);
+        views
+    }
+
+    #[inline(always)]
+    pub fn slice_as_view_mut(views: &mut [Option<Self>]) -> &mut [Option<ShaderResourceView>] {
+        unsafe { mem::transmute(views) }
+    }
+    #[inline(always)]
+    pub fn slice_from_view_mut(views: &mut [Option<ShaderResourceView>]) -> &mut [Option<Self>] {
+        unsafe { mem::transmute(views) }
+    }
+}
+
+impl D3dContextBindableSlot<Dx11Context> for Option<ShaderResourceViewP> {
+    #[inline]
     fn set(&self, context: &Dx11Context, slot: u32) {
-        Self::bind_set(self, context, slot)
+        ShaderResourceView::bind_set_pixel(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<ShaderResourceViewP>] {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_pixel(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for ShaderResourceViewP {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_pixel(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [ShaderResourceViewP] {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_pixel(self, context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<ShaderResourceViewP>; ShaderResourceView::MAX_SLOTS] {
+    #[inline]
+    fn set(&self, context: &Dx11Context) {
+        ShaderResourceView::bind_set_pixel(self, context, 0)
     }
 }
 
@@ -100,6 +308,79 @@ impl From<ID3D11ShaderResourceView> for View {
 
 impl_d3d! {
     @[transparent(Dx11Child <= ID3D11ShaderResourceView)]
+    pub struct ShaderResourceViewV {
+        pub view: ShaderResourceView,
+    }
+    @from()
+    @into()
+    @deref(ShaderResourceView);
+}
+
+impl ShaderResourceViewV {
+    #[inline(always)]
+    pub const fn from_resource_view(view: ShaderResourceView) -> Self {
+        Self { view }
+    }
+
+    #[inline(always)]
+    pub const fn from_resource_view_ref(view: &ID3D11ShaderResourceView) -> &Self {
+        unsafe { mem::transmute(view) }
+    }
+
+    pub fn new_snapshot_in<V: ?Sized>(context: &Dx11Context, slot: u32, out: &mut V)
+    where
+        V: AsMut<[Option<Self>]>,
+    {
+        let views = Self::slice_as_view_mut(out.as_mut());
+        unsafe { context.VSGetShaderResources(slot, Some(ShaderResourceView::slice_as_raw_mut(views))) }
+    }
+    pub fn new_snapshot_vec(context: &Dx11Context, slot: ops::Range<u32>) -> Vec<Option<Self>> {
+        let mut views = vec![None::<Self>; slot.len()];
+        Self::new_snapshot_in(context, slot.start, &mut views[..]);
+        views
+    }
+
+    #[inline(always)]
+    pub fn slice_as_view_mut(views: &mut [Option<Self>]) -> &mut [Option<ShaderResourceView>] {
+        unsafe { mem::transmute(views) }
+    }
+    #[inline(always)]
+    pub fn slice_from_view_mut(views: &mut [Option<ShaderResourceView>]) -> &mut [Option<Self>] {
+        unsafe { mem::transmute(views) }
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for ShaderResourceViewV {
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_vertex(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for Option<ShaderResourceViewV> {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_vertex(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [Option<ShaderResourceViewV>] {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_vertex(self, context, slot)
+    }
+}
+impl D3dContextBindableSlot<Dx11Context> for [ShaderResourceViewV] {
+    #[inline]
+    fn set(&self, context: &Dx11Context, slot: u32) {
+        ShaderResourceView::bind_set_vertex(self, context, slot)
+    }
+}
+impl D3dContextBindable<Dx11Context> for [Option<ShaderResourceViewV>; ShaderResourceView::MAX_SLOTS] {
+    #[inline]
+    fn set(&self, context: &Dx11Context) {
+        ShaderResourceView::bind_set_vertex(self, context, 0)
+    }
+}
+
+impl_d3d! {
+    @[transparent(Dx11Child <= ID3D11ShaderResourceView)]
     pub struct TextureView2 {
         pub view: ShaderResourceView,
     }
@@ -110,6 +391,11 @@ impl_d3d! {
 impl TextureView2 {
     pub fn with_view(view: ShaderResourceView) -> Self {
         Self { view }
+    }
+
+    #[inline(always)]
+    pub fn as_pixel_view(&self) -> &ShaderResourceViewP {
+        ShaderResourceViewP::from_resource_view_ref(self.view.as_d3d())
     }
 
     pub const DESC_DEFAULT: D3D11_TEX2D_SRV = D3D11_TEX2D_SRV {
@@ -160,8 +446,9 @@ impl TextureView2 {
 }
 
 impl D3dContextBindableSlot<Dx11Context> for TextureView2 {
+    #[inline]
     fn set(&self, context: &Dx11Context, slot: u32) {
-        self.view.set(context, slot)
+        self.as_pixel_view().set(context, slot)
     }
 }
 

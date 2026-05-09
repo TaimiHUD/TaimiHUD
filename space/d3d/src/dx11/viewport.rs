@@ -1,6 +1,7 @@
 use {
     crate::{dx11::prelude::*, D3dContextBindable},
-    std::{mem, slice},
+    num_traits::AsPrimitive,
+    std::{mem, ops, slice},
 };
 
 pub use crate::dx11::d3d11::D3D11_VIEWPORT;
@@ -32,7 +33,7 @@ impl Viewport {
         unsafe { mem::transmute(viewport) }
     }
 
-    pub fn new_snapshot<const N: usize>(context: &Dx11Context) -> [Viewport; N] {
+    pub fn new_snapshot<const N: usize>(context: &Dx11Context) -> [Self; N] {
         let mut viewports = [D3D11_VIEWPORT::default(); N];
         let mut viewport_count = viewports.len() as _;
         unsafe {
@@ -40,9 +41,60 @@ impl Viewport {
         }
         Self::array_from_raw(viewports)
     }
+    /// TODO: unclear if null arg is required to get full/untruncated count or not
+    pub fn new_snapshot_vec(context: &Dx11Context) -> Vec<Self> {
+        let mut capacity = 8.min(Self::MAX_VIEWPORTS) as u32;
+        let mut viewports = Vec::<D3D11_VIEWPORT>::with_capacity(capacity as usize);
+        let mut viewport_count = capacity;
+        for _ in 0..2 {
+            unsafe {
+                let uninit = viewports.spare_capacity_mut();
+                capacity = viewport_count;
+                debug_assert!(uninit.len() >= viewport_count as usize);
+                context.RSGetViewports(
+                    &mut viewport_count,
+                    Some(uninit.as_mut_ptr() as *mut D3D11_VIEWPORT),
+                );
+                match viewport_count {
+                    #[cfg(todo)]
+                    viewport_count if viewport_count == capacity => {
+                        // docs are unclear, so double-check?
+                        viewports.reserve_exact(Self::snapshot_count(context) as usize);
+                        viewport_count = Self::snapshot_count(context) as u32;
+                    },
+                    #[cfg(debug_assertions)]
+                    viewport_count if viewport_count == capacity => {
+                        // double-check that it doesn't truncate to our len...
+                        debug_assert_eq!(Self::snapshot_count(context), viewport_count as usize);
+                    },
+                    _ => (),
+                }
+                if viewport_count > capacity {
+                    viewports.reserve_exact(viewport_count as usize);
+                } else {
+                    break
+                }
+            }
+        }
+        unsafe {
+            viewports.set_len(viewport_count as usize);
+            Self::vec_from_raw(viewports)
+        }
+    }
+    pub fn snapshot_count(context: &Dx11Context) -> usize {
+        let mut viewport_count = 0u32;
+        unsafe {
+            context.RSGetViewports(&mut viewport_count, None);
+        }
+        viewport_count as usize
+    }
 
     /// Aligned to top-left origin (0, 0, 0)
-    pub const fn with_size<U: Unit<Scalar = f32>>(size: Size3<U>) -> Self {
+    pub fn with_size<U: Unit>(size: Size3<U>) -> Self
+    where
+        U::Scalar: AsPrimitive<f32>,
+    {
+        let size = size.as_::<f32>();
         Self::with_viewport(D3D11_VIEWPORT {
             Width: size.width,
             Height: size.height,
@@ -51,18 +103,23 @@ impl Viewport {
         })
     }
 
+    #[cfg(todo)]
     pub fn with_bounds<U: Unit>(bounds: Box3<U>) -> Self
     where
-        U::Scalar: Into<f32>,
+        U::Scalar: AsPrimitive<f32>,
     {
-        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate()).size();
+        let top_left = bounds.min.with_y(bounds.max.y).as_::<f32>();
+        let bottom_right_z = AsPrimitive::as_(bounds.max.z);
+        let size = Box2::new(bounds.min.truncate(), bounds.max.truncate())
+            .size()
+            .as_::<f32>();
         let viewport = D3D11_VIEWPORT {
-            TopLeftX: bounds.min.x.into(),
-            TopLeftY: bounds.max.y.into(),
-            Width: size.width.into(),
-            Height: size.height.into(),
-            MinDepth: bounds.min.z.into(),
-            MaxDepth: bounds.max.z.into(),
+            TopLeftX: top_left.x,
+            TopLeftY: top_left.y,
+            Width: size.width,
+            Height: size.height,
+            MinDepth: top_left.z,
+            MaxDepth: bottom_right_z,
         };
         Self { viewport }
     }
@@ -70,17 +127,74 @@ impl Viewport {
     pub fn is_empty(&self) -> bool {
         *self == Viewport::EMPTY
     }
-
+    pub fn get(&self) -> Option<&Self> {
+        (!self.is_empty()).then_some(self)
+    }
+    #[cfg(todo)]
+    pub fn box2(&self) -> Box2<f32> {
+        let min = Point2::new(
+            self.viewport.TopLeftX,
+            self.viewport.TopLeftY + self.viewport.Height,
+        );
+        let max = Point2::new(
+            self.viewport.TopLeftX + self.viewport.Width,
+            self.viewport.TopLeftY,
+        );
+        Box2::new(min, max)
+    }
+    #[cfg(todo)]
+    pub fn box2(&self) -> Box2<f32> {
+        Box2::new(self.top_left(), self.bottom_right())
+    }
+    #[cfg(todo)]
+    pub fn box3(&self) -> Box3<f32> {
+        let bounds = self.box2();
+        Box3::new(
+            bounds.min.extend(self.viewport.MinDepth),
+            bounds.max.extend(self.viewport.MaxDepth),
+        )
+    }
+    pub fn top_left(&self) -> Point2<f32> {
+        Point2::new(self.viewport.TopLeftX, self.viewport.TopLeftY)
+    }
+    pub fn top_right(&self) -> Point2<f32> {
+        Point2::new(
+            self.viewport.TopLeftX + self.viewport.Width,
+            self.viewport.TopLeftY,
+        )
+    }
+    pub fn bottom_left(&self) -> Point2<f32> {
+        Point2::new(
+            self.viewport.TopLeftX,
+            self.viewport.TopLeftY + self.viewport.Height,
+        )
+    }
+    pub fn bottom_right(&self) -> Point2<f32> {
+        Point2::new(
+            self.viewport.TopLeftX + self.viewport.Width,
+            self.viewport.TopLeftY + self.viewport.Height,
+        )
+    }
+    pub fn rect(&self) -> Rect<f32> {
+        Rect::new(self.top_left(), self.size2())
+    }
     pub fn size2(&self) -> Size2<f32> {
         Size2::new(self.viewport.Width, self.viewport.Height)
+    }
+    pub fn depth_range(&self) -> ops::RangeInclusive<f32> {
+        self.viewport.MinDepth..=self.viewport.MaxDepth
+    }
+    pub fn size3(&self) -> Size3<f32> {
+        self.size2()
+            .extend(self.viewport.MaxDepth - self.viewport.MinDepth)
     }
 
     pub fn slice_truncate(viewports: &[Self]) -> &[Self] {
         let len = match viewports.iter().rposition(|vp| !vp.is_empty()) {
             Some(len) => len,
-            None => return viewports,
+            None => return &[],
         };
-        unsafe { viewports.get_unchecked(..len) }
+        unsafe { viewports.get_unchecked(..=len) }
     }
 
     pub fn slice_as_raw(viewports: &[Self]) -> &[D3D11_VIEWPORT] {
@@ -97,6 +211,9 @@ impl Viewport {
     }
     pub fn array_from_raw<const N: usize>(viewports: [D3D11_VIEWPORT; N]) -> [Self; N] {
         unsafe { mem::transmute_copy(&viewports) }
+    }
+    pub fn vec_from_raw(viewports: Vec<D3D11_VIEWPORT>) -> Vec<Self> {
+        unsafe { mem::transmute(viewports) }
     }
 
     pub fn bind_set<V: AsRef<[D3D11_VIEWPORT]>>(context: &Dx11Context, viewports: V) {
@@ -141,6 +258,43 @@ impl From<D3D11_VIEWPORT> for Viewport {
 impl From<Viewport> for D3D11_VIEWPORT {
     fn from(viewport: Viewport) -> Self {
         viewport.viewport
+    }
+}
+impl<U: Unit> From<Size3<U>> for Viewport
+where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Size3<U>) -> Self {
+        Self::with_size(viewport)
+    }
+}
+#[cfg(todo)]
+impl<U: Unit> From<Box3<U>> for Viewport
+where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Box3<U>) -> Self {
+        Self::with_bounds(viewport)
+    }
+}
+impl<U: Unit> From<Size2<U>> for Viewport
+where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Size2<U>) -> Self {
+        Self::with_size(viewport.extend(num_traits::One::one()))
+    }
+}
+#[cfg(todo)]
+impl<U: Unit> From<Box2<U>> for Viewport
+where
+    U::Scalar: AsPrimitive<f32>,
+{
+    fn from(viewport: Box2<U>) -> Self {
+        Self::with_bounds(Box3::new(
+            viewport.min.extend(num_traits::Zero::zero()),
+            viewport.max.extend(num_traits::One::one()),
+        ))
     }
 }
 
