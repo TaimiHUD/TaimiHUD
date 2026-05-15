@@ -62,7 +62,7 @@ num-traits = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
-arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, optional = true }
 # keep version in sync with nexus dependency
 gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false, optional = true }
 nexus = { git = "https://github.com/zerthox/nexus-rs", optional = true }

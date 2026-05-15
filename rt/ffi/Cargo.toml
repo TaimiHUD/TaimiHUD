@@ -28,7 +28,13 @@ serde = [
 windows = [
   "dep:windows",
   "arcffi/windows-061",
+  "arcffi/winerror",
 ]
+# compat with arcffi features for package alias
+windows-061 = ["windows"]
+winerror = ["arcffi/winerror"]
+library = ["arcffi/library"]
+com = ["arcffi/com"]
 
 [dependencies]
 anyhow = "1"
@@ -36,7 +42,7 @@ log = "0.4"
 serde = { version = "1.0", features = ["derive"], optional = true }
 closure-ffi = { version = "3", default-features = false, features = ["std"], optional = true }
 jit-allocator2 = { version = "0.2", optional = true }
-arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false }
+arcffi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies.windows]
 optional = true

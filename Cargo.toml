@@ -139,7 +139,7 @@ extension-arcdps = [
   "texture-loader",
 ]
 extension-arcdps-extras = [
-  "taimi_ffi/fnalloc",
+  "arcffi/fnalloc",
   "closure-ffi",
   "jit-allocator2",
   "nexus/extras",
@@ -157,7 +157,6 @@ extension-arcdps-extern = [
   "dpsapi",
   "dpsapi/embed",
   #"extension-arcdps-extern-cleanup"
-  "arcffi",
 ]
 extension-arcdps-extern-cleanup = [
 ]
@@ -175,7 +174,6 @@ extension-nexus = [
 extension-nexus-codegen = []
 extension-nexus-extern = [
   "dep:sync-unsafe-cell",
-  "arcffi",
 ]
 extension-nexus-extern-todo = [
   # TODO: remove all use of the dep (and __macro)!
@@ -187,10 +185,6 @@ dpsapi = [
   "dpsapi/nexus",
 ]
 
-arcffi = [
-  "dep:arcffi",
-  "taimi_d3d?/arcffi",
-]
 image = [
   "dep:image",
 ]
@@ -203,10 +197,9 @@ texture-loader = [
 ]
 windows = [
   "dep:windows",
-  "arcffi?/windows-061",
+  "arcffi/windows-061",
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
-  "taimi_ffi/windows",
   "taimi_input?/windows",
 ]
 
@@ -301,11 +294,11 @@ regex = "1"
 croner = "3"
 bitvec = { workspace = true }
 
+arcffi = { path = "rt/ffi", package = "taimi_ffi", default-features = false, features = ["serde"] }
 taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
-taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
-taimi_ffi = { path = "./rt/ffi", default-features = false, features = ["serde"] }
+taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde", "arcffi"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
@@ -317,9 +310,8 @@ closure-ffi = { version = "3", default-features = false, features = ["std"], opt
 jit-allocator2 = { version = "0.2", optional = true }
 
 nexus = { workspace = true }
-arcloader-mumblelink = { git = "https://github.com/arcnmx/arcloader", default-features = false, features = ["log", "identity"], optional = true }
-arcffi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
-dpsapi = { git = "https://github.com/arcnmx/arcloader", default-features = false, optional = true }
+arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["log", "identity"], optional = true }
+dpsapi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, optional = true }
 
 [dependencies.image]
 optional = true

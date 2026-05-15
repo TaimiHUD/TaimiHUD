@@ -230,7 +230,7 @@ dependencies = [
 [[package]]
 name = "arcffi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "windows 0.60.0",
  "windows 0.61.1",
@@ -244,7 +244,7 @@ dependencies = [
 [[package]]
 name = "arcloader-mumblelink"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcffi",
  "gw2_mumble 0.2.5",
@@ -961,7 +961,7 @@ checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 [[package]]
 name = "dpsapi"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcdps 0.16.0",
  "arcffi",
@@ -974,7 +974,7 @@ dependencies = [
 [[package]]
 name = "dyload"
 version = "0.1.0"
-source = "git+https://github.com/arcnmx/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
 dependencies = [
  "arcffi",
  "windows 0.60.0",
@@ -3707,7 +3707,6 @@ dependencies = [
  "anyhow",
  "arc-atomic",
  "arcdps 0.16.0",
- "arcffi",
  "arcloader-mumblelink",
  "async-compression",
  "bevy_ecs",
@@ -3788,12 +3787,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arcdps 0.16.0",
- "arcffi",
  "bitflags 2.9.0",
  "glam 0.30.1",
  "glamour",
  "log",
  "serde",
+ "taimi_ffi",
  "windows 0.61.1",
 ]
 

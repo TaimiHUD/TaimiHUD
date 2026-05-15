@@ -1,8 +1,8 @@
 use {
     crate::exports::runtime as rt,
     anyhow::Context,
+    arcffi::win32::mmap::{FileMapping, FILE_MAP},
     std::{ffi::CString, fmt, process},
-    taimi_ffi::win32::mmap::{FileMapping, FILE_MAP},
 };
 
 pub fn check_for_data(name: &str) -> bool {

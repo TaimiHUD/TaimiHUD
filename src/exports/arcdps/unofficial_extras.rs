@@ -158,6 +158,7 @@ mod hotload {
         super::ExtrasCallbackFns,
         crate::{exports::runtime as rt, Interruption},
         anyhow::{anyhow, Context},
+        arcffi::fnalloc::stub_template_bytes,
         closure_ffi::{
             cc::CUnwind as C,
             jit_alloc::{JitAlloc, JitAllocError, ProtectJitAccess},
@@ -174,7 +175,6 @@ mod hotload {
             slice,
             sync::{LazyLock, Mutex},
         },
-        taimi_ffi::fnalloc::stub_template_bytes,
     };
     pub unsafe fn extras_release() {
         let mut callbacks = match CALLBACKS.lock() {
