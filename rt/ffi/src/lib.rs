@@ -1,6 +1,7 @@
 //! most of this hopefully is just a temporary staging ground for things
 //! before they're ready to be pulled into [arcffi]...
 
+pub mod cstr;
 pub mod data;
 #[cfg(feature = "fnalloc")]
 pub mod fnalloc;
@@ -10,7 +11,7 @@ pub mod win32;
 // allow this to serve as a package alias for convenience
 #[rustfmt::skip]
 pub use ::arcffi::{
-    cstr,
+    self,
     nn::{self, nonnull_ref, nonnull_unwrap, nonnull_unwrap_mut},
     // ptr::*
     transmute_unchecked, write_copy_of_slice, write_clone_of_slice,
