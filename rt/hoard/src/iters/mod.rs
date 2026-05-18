@@ -1,8 +1,14 @@
+use core::iter;
+
 pub use self::{collect::FlatCollect, macros::impl_iter_wrap, mapfn::LazyMapFn};
 
 mod collect;
 mod macros;
 mod mapfn;
+
+fn filter_map_if<U>((item, cond): (U, bool)) -> Option<U> {
+    cond.then_some(item)
+}
 
 pub trait IterExt: Sized + Iterator {
     /// [LazyMapFn]
@@ -17,6 +23,13 @@ pub trait IterExt: Sized + Iterator {
         I: Clone,
     {
         self.lazy_map(I::clone)
+    }
+    #[inline]
+    fn filter_map_if<T>(self) -> iter::FilterMap<Self, impl Fn((T, bool)) -> Option<T> + Copy>
+    where
+        Self: Iterator<Item = (T, bool)>,
+    {
+        self.filter_map(filter_map_if)
     }
     fn unzip_flatten<FromA, FromB, A, B>(self) -> (FromA, FromB)
     where
