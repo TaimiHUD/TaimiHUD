@@ -9,6 +9,7 @@ pub struct TimerAction {
     pub name: String,
     #[serde(rename = "type", default)]
     pub kind: TimerActionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sets: Option<Vec<String>>,
     pub trigger: TimerTrigger,
 }

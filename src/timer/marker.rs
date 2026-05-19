@@ -36,6 +36,8 @@ pub struct BlishMarker {
     pub duration: f32,
     #[serde(default)]
     pub timestamps: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set: Option<String>,
 }
 
 impl BlishMarker {

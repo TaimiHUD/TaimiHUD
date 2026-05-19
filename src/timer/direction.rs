@@ -9,12 +9,17 @@ use {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct BlishDirection {
-    name: String,
-    destination: BlishVec3,
-    texture: RelativePathBuf,
-    anim_speed: f32,
-    duration: f32,
-    timestamps: Vec<f32>,
+    pub name: String,
+    pub destination: BlishVec3,
+    pub texture: RelativePathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anim_speed: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f32>,
+    pub duration: f32,
+    pub timestamps: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -23,8 +28,10 @@ impl BlishDirection {
         let destination = self.destination.to_vec3();
         TimerDirection {
             name: self.name.clone(),
+            uid: self.uid.clone(),
             texture: self.texture.clone(),
-            anim_speed: self.anim_speed,
+            anim_speed: self.anim_speed.unwrap_or(1.0),
+            opacity: self.opacity.unwrap_or(0.8),
             duration: self.duration,
             destination,
             timestamp,
@@ -39,12 +46,14 @@ impl BlishDirection {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct TimerDirection {
-    name: String,
-    destination: Vec3,
-    texture: RelativePathBuf,
-    anim_speed: f32,
-    duration: f32,
-    timestamp: f32,
+    pub name: String,
+    pub uid: Option<String>,
+    pub destination: Vec3,
+    pub texture: RelativePathBuf,
+    pub anim_speed: f32,
+    pub opacity: f32,
+    pub duration: f32,
+    pub timestamp: f32,
 }
 
 #[allow(dead_code)]

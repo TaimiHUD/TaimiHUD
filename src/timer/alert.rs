@@ -27,6 +27,10 @@ pub struct BlishAlert {
     pub fill_color: Option<BlishColour>,
     #[serde(default)]
     pub timestamps: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uid: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Display, Copy)]
@@ -40,6 +44,8 @@ impl BlishAlert {
         Some(TimerAlert {
             kind: TimerAlertType::Alert,
             text: self.alert.clone()?,
+            set: self.set.clone(),
+            uid: self.uid.clone(),
             colour: self.alert_color,
             duration: self.alert_duration?,
             fill_colour: self.fill_color,
@@ -52,6 +58,8 @@ impl BlishAlert {
         Some(TimerAlert {
             kind: TimerAlertType::Warning,
             text: self.warning.clone()?,
+            set: self.set.clone(),
+            uid: self.uid.clone(),
             colour: self.warning_color,
             duration: self.warning_duration?,
             fill_colour: self.fill_color,
@@ -71,6 +79,8 @@ impl BlishAlert {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TimerAlert {
     pub kind: TimerAlertType,
+    pub set: Option<String>,
+    pub uid: Option<String>,
     pub text: String,
     pub colour: Option<BlishColour>,
     pub fill_colour: Option<BlishColour>,

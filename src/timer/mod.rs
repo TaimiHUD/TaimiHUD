@@ -6,6 +6,7 @@ pub mod file;
 pub mod geometry;
 pub mod marker;
 pub mod phase;
+pub mod sound;
 pub mod state_machine;
 pub mod trigger;
 
@@ -18,6 +19,7 @@ pub use {
     geometry::{BlishPosition, BlishVec3, Polytope, Position},
     marker::{BlishMarker, RotationType, TimerMarker},
     phase::TimerPhase,
+    sound::{BlishSound, BlishSoundText, TimerSound},
     state_machine::{PhaseState, TextAlert, TimerKeybinds, TimerMachine},
     trigger::{CombatState, TimerTrigger, TimerTriggerType},
 };

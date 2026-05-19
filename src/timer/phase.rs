@@ -1,12 +1,11 @@
 use {
-    super::{direction::BlishDirection, BlishMarker, TimerMarker},
+    super::{direction::BlishDirection, BlishMarker, BlishSound, TimerMarker},
     crate::timer::{BlishAlert, TimerAction, TimerAlert, TimerTrigger},
     serde::{
         de::{self, Error as _, MapAccess, Visitor},
         Deserialize,
         Serialize,
     },
-    serde_json::Value,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -25,6 +24,7 @@ pub struct TimerPhase {
      * - directions
      * - markers
      * - sounds
+     * - actions (SkipTime)
      */
     #[serde(skip, default)]
     #[allow(dead_code)]
@@ -33,7 +33,7 @@ pub struct TimerPhase {
     pub markers: BlishMarkers,
     #[serde(skip, default)]
     #[allow(dead_code)]
-    sounds: Value,
+    sounds: Vec<BlishSound>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
