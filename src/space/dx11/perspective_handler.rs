@@ -120,11 +120,17 @@ impl PerspectiveHandler {
         self.constant_buffer_pixel_data.set_feather_scale(feather_scale);
     }
 
-    pub fn update_cb(&self, device_context: &Dx11Context) {
+    pub fn update_cb_v(&self, device_context: &Dx11Context) {
         self.constant_buffer
             .update_singleton(device_context, &self.constant_buffer_data);
+    }
+    pub fn update_cb_p(&self, device_context: &Dx11Context) {
         self.constant_buffer_pixel
             .update_singleton(device_context, &self.constant_buffer_pixel_data);
+    }
+    pub fn update_cb(&self, device_context: &Dx11Context) {
+        self.update_cb_v(device_context);
+        self.update_cb_p(device_context);
     }
 
     const HEIGHT_OFFSET_BELOW: f32 = -200.0;

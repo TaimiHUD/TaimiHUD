@@ -1,10 +1,13 @@
 use {
     crate::space::{
         dx11::InstanceBufferData,
-        resources::{Model, ObjMaterial, ShaderPair},
+        resources::{obj_format::material::ColouredMaterialTexture, ObjMaterial, ShaderPair},
     },
-    glam::Mat4,
-    std::cell::UnsafeCell,
+    glam::{Mat4, Vec3},
+    std::{
+        cell::UnsafeCell,
+        sync::{Arc, OnceLock},
+    },
     taimi_d3d::{
         dx11::{
             buffer::{Buffer, BufferOf, VertexBuffer},
@@ -24,8 +27,10 @@ pub struct ObjectRenderBacking {
 
 #[allow(unused)]
 pub struct ObjectRenderMetadata {
+    #[cfg(todo)]
     pub model: Model,
-    pub material: ObjMaterial,
+    pub material: OnceLock<ObjMaterial>,
+    pub texture_key: Option<Arc<str>>,
     pub model_matrix: Mat4,
     pub topology: PrimitiveTopology,
 }
@@ -60,7 +65,18 @@ impl ObjectRenderBacking {
     }
 
     pub fn set_texture(&self, slot: u32, device_context: &Dx11Context) {
-        if let Some(diffuse) = &self.metadata.material.diffuse {
+        let mut diffuse = self.metadata.material.get();
+        if let (false, Some(key)) = (diffuse.is_some(), &self.metadata.texture_key) {
+            match crate::TEXTURES.lookup_resource(key) {
+                Some(Some(texture)) =>
+                    diffuse = Some(self.metadata.material.get_or_init(move || {
+                        ObjMaterial::new_diffuse(ColouredMaterialTexture { texture, colour: Vec3::ONE })
+                    })),
+                _ => (),
+            }
+        }
+
+        if let Some(diffuse) = diffuse.and_then(|m| m.diffuse.as_ref()) {
             diffuse.texture.set(device_context, slot);
         }
     }
@@ -89,7 +105,7 @@ impl ObjectRenderBacking {
         self.set_shaders(device_context);
         self.set_texture(slot, device_context);
         self.set_buffers(slot, device_context);
-        self.draw(slot, device_context);
+        self.draw(0, device_context);
         Ok(())
     }
 }

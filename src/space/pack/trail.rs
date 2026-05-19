@@ -10,7 +10,8 @@ use {
     },
     anyhow::Context,
     core::f32,
-    glamour::{Box3, Point2, Vec3Swizzles, Vector3},
+    glam::Vec3,
+    glamour::{Box3, Point2, Point3, Vec3Swizzles, Vector3},
     std::sync::Arc,
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
     taimi_meta::ui::LocalContext,
@@ -127,65 +128,14 @@ impl ActiveTrail {
                 points.len(),
             );
 
-            let mut cur_point = points[0];
-            let mut last_offset = Vector3::ZERO;
-            let mut flip_over = 1.0f32;
-            let normal_offset = trail_width * trail.scale() / 2.0;
-            let mut mod_distance = Vector3::ZERO;
-
-            let mut distance = 0.0f32;
-            for &next_point in points.iter().skip(1) {
-                let path_direction = next_point - cur_point;
-                let offset = path_direction.cross(Vector3::Y);
-                let offset = if is_wall { path_direction.cross(offset) } else { offset };
-                let offset = offset.normalize();
-
-                if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
-                    flip_over *= -1.0;
-                }
-
-                mod_distance = offset * normal_offset * flip_over;
-                let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                    glam::vec3(1.0, 0.0, 1.0)
-                        .normalize()
-                        .copysign(mod_distance.to_raw()),
-                );
-
-                vertices.push(Vertex {
-                    position: (cur_point - mod_distance).into(),
-                    colour,
-                    normal: -normal_scale_dir,
-                    texture: glam::vec2(1.0, distance / trail_width - 1.0),
-                });
-                vertices.push(Vertex {
-                    position: (cur_point + mod_distance).into(),
-                    colour,
-                    normal: normal_scale_dir,
-                    texture: glam::vec2(0.0, distance / trail_width - 1.0),
-                });
-
-                distance += path_direction.length();
-                last_offset = offset;
-                cur_point = next_point;
-            }
-
-            let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                glam::vec3(1.0, 0.0, 1.0)
-                    .normalize()
-                    .copysign(mod_distance.to_raw()),
+            Self::gen_points(
+                &mut vertices,
+                &points[..],
+                trail_width,
+                trail.scale(),
+                is_wall,
+                colour,
             );
-            vertices.push(Vertex {
-                position: (cur_point - mod_distance).into(),
-                colour,
-                normal: -normal_scale_dir,
-                texture: glam::vec2(1.0, distance / trail_width - 1.0),
-            });
-            vertices.push(Vertex {
-                position: (cur_point + mod_distance).into(),
-                colour,
-                normal: normal_scale_dir,
-                texture: glam::vec2(0.0, distance / trail_width - 1.0),
-            });
 
             section_bookmarks.push(vertices.len() as u32);
             let bounds = match section.bounds() {
@@ -222,6 +172,75 @@ impl ActiveTrail {
             render_bookmark,
             y_offset,
         })
+    }
+
+    pub(crate) fn gen_points(
+        vertices: &mut Vec<Vertex>,
+        points: &[Point3],
+        trail_width: f32,
+        trail_scale: f32,
+        is_wall: bool,
+        colour: Vec3,
+    ) {
+        let mut cur_point = points[0];
+        let mut last_offset = Vector3::ZERO;
+        let mut flip_over = 1.0f32;
+        let normal_offset = trail_width * trail_scale / 2.0;
+        let mut mod_distance = Vector3::ZERO;
+
+        let mut distance = 0.0f32;
+        for &next_point in points.iter().skip(1) {
+            let path_direction = next_point - cur_point;
+            let offset = path_direction.cross(Vector3::Y);
+            let offset = if is_wall { path_direction.cross(offset) } else { offset };
+            let offset = offset.normalize();
+
+            if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
+                flip_over *= -1.0;
+            }
+
+            mod_distance = offset * normal_offset * flip_over;
+            let normal_scale_dir = mod_distance.to_raw().normalize_or(
+                glam::vec3(1.0, 0.0, 1.0)
+                    .normalize()
+                    .copysign(mod_distance.to_raw()),
+            );
+
+            vertices.push(Vertex {
+                position: (cur_point - mod_distance).into(),
+                colour,
+                normal: -normal_scale_dir,
+                texture: glam::vec2(1.0, distance / trail_width - 1.0),
+            });
+            vertices.push(Vertex {
+                position: (cur_point + mod_distance).into(),
+                colour,
+                normal: normal_scale_dir,
+                texture: glam::vec2(0.0, distance / trail_width - 1.0),
+            });
+
+            distance += path_direction.length();
+            last_offset = offset;
+            cur_point = next_point;
+        }
+
+        let normal_scale_dir = mod_distance.to_raw().normalize_or(
+            glam::vec3(1.0, 0.0, 1.0)
+                .normalize()
+                .copysign(mod_distance.to_raw()),
+        );
+        vertices.push(Vertex {
+            position: (cur_point - mod_distance).into(),
+            colour,
+            normal: -normal_scale_dir,
+            texture: glam::vec2(1.0, distance / trail_width - 1.0),
+        });
+        vertices.push(Vertex {
+            position: (cur_point + mod_distance).into(),
+            colour,
+            normal: normal_scale_dir,
+            texture: glam::vec2(0.0, distance / trail_width - 1.0),
+        });
     }
 
     pub fn update(pack: &mut ActivePack, trail_idx: usize) {

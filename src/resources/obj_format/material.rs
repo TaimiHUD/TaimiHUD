@@ -27,6 +27,15 @@ pub struct ObjMaterial {
     pub shininess: Option<AttributedMaterialTexture>,
     pub dissolve: Option<AttributedMaterialTexture>,
 }
+impl ObjMaterial {
+    #[inline]
+    pub fn new_diffuse(diffuse: ColouredMaterialTexture) -> Self {
+        Self {
+            diffuse: Some(diffuse),
+            ..Default::default()
+        }
+    }
+}
 
 pub struct ObjMaterials {
     pub materials: Vec<tobjMaterial>,

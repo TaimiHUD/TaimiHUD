@@ -89,6 +89,7 @@ goggles = [
 ]
 
 timers = [
+  "space-ecs",
 ]
 
 markers = [

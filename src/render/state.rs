@@ -197,7 +197,7 @@ impl RenderState {
                         self.timer_window.new_phase(phase_state);
                     },
                     AlertReset(timer) => {
-                        self.timer_window.remove_phase(timer);
+                        self.timer_window.remove_phase(&timer);
                     },
                     #[cfg(any(feature = "markers", feature = "space"))]
                     UiMapOpen(open) =>

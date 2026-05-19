@@ -1,13 +1,20 @@
 use {
-    super::TimerMarker,
     crate::{
         controller::RtSender,
         render::{RenderEvent, RenderState},
         settings::Settings,
-        timer::{CombatState, Position, TimerAlert, TimerFile, TimerPhase},
+        timer::{CombatState, Position, TimerAction, TimerFile, TimerFileAction, TimerFilePhase},
     },
     bitflags::bitflags,
-    std::{fmt::Display, ops::Deref, sync::Arc},
+    std::{
+        collections::HashMap,
+        fmt::Display,
+        sync::{
+            atomic::{AtomicIsize, Ordering},
+            Arc,
+            RwLock,
+        },
+    },
     tokio::{
         sync::Mutex,
         task::JoinHandle,
@@ -124,63 +131,34 @@ impl Display for TimerMachineState {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TimerFilePhase {
-    timer: Arc<TimerFile>,
-    phase: usize,
-}
-
-impl TimerFilePhase {
-    fn new(timer: Arc<TimerFile>) -> Option<Self> {
-        match timer.phases.is_empty() {
-            true => None,
-            false => Some(Self { timer, phase: 0 }),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn reset(mut self) -> Self {
-        self.phase = 0;
-        self
-    }
-
-    fn next(self) -> Option<Self> {
-        let phase_len = self.timer.phases.len();
-        let phase = (self.phase + 1..phase_len).next()?;
-        Some(Self { timer: self.timer, phase })
-    }
-
-    pub fn phase(&self) -> &TimerPhase {
-        &self.timer.phases[self.phase]
-    }
-}
-
-impl Deref for TimerFilePhase {
-    type Target = TimerPhase;
-
-    fn deref(&self) -> &Self::Target {
-        self.phase()
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TimerMachine {
     state: TimerMachineState,
     pub timer: Arc<TimerFile>,
     alert_sem: Arc<Mutex<()>>,
     sender: RtSender,
     combat_state: CombatState,
-    tasks: Vec<Arc<JoinHandle<()>>>,
+    tasks: Vec<JoinHandle<()>>,
     key_pressed: TimerKeybinds,
+    /// skipTime adjustments
+    offsets: Arc<SharedTimeOffsets>,
 }
 
 #[derive(Clone)]
 pub struct PhaseState {
-    pub timer: Arc<TimerFile>,
     pub start: Instant,
     pub phase: TimerFilePhase,
-    pub alerts: Vec<TimerAlert>,
-    pub markers: Vec<TimerMarker>,
+    pub offsets: Arc<SharedTimeOffsets>,
+}
+impl PhaseState {
+    #[inline]
+    pub fn timer(&self) -> &Arc<TimerFile> {
+        &self.phase.timer
+    }
+    #[inline]
+    pub fn start_for_set(&self, set: &str) -> Instant {
+        self.offsets.adjust_start_for(set, self.start)
+    }
 }
 
 #[derive(Clone)]
@@ -199,6 +177,7 @@ impl TimerMachine {
             combat_state: CombatState::Outside,
             tasks: Default::default(),
             key_pressed: Default::default(),
+            offsets: Default::default(),
         }
     }
 
@@ -297,16 +276,31 @@ impl TimerMachine {
         reset_event.send().await;
     }
 
-    async fn start_tasks(&self, phase: &TimerFilePhase) {
-        let alerts = phase.get_alerts();
-        let markers = phase.get_markers();
+    async fn start_tasks(&mut self, phase: &TimerFilePhase) {
         let phase_state = PhaseState {
-            timer: self.timer.clone(),
             start: Instant::now(),
             phase: phase.clone(),
-            alerts,
-            markers,
+            offsets: self.offsets.clone(),
         };
+        let alert_sounds = phase
+            .sounds
+            .iter()
+            .flat_map(|sound| {
+                sound.timestamps.iter().map(|&ts| {
+                    // TODO: actually tie to a clock that obeys the machine!
+                    let when = phase_state
+                        .offsets
+                        .adjust_reference_for(sound.offset_set(), phase_state.start)
+                        + Duration::from_secs_f32(ts);
+                    self.text_alert(
+                        sound.text.clone(),
+                        when.saturating_duration_since(phase_state.start),
+                        Duration::from_secs_f32(super::marker::default_duration()),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        self.tasks.extend(alert_sounds);
         let feed_event = EventMapper::feed(phase_state.clone());
         feed_event.send().await;
     }
@@ -326,6 +320,23 @@ impl TimerMachine {
             self.start_tasks(phase).await;
         }
         self.state = final_state;
+    }
+
+    /// TODO: show feedback when pressed (`action.name`)?
+    async fn apply_action(&mut self, action: TimerFileAction) {
+        if let Some((duration, sets)) = action.as_skip_time() {
+            let fallback = match sets.is_empty() {
+                false => None,
+                true => Some(TimerAction::DEFAULT_SET),
+            };
+            let sets = fallback.into_iter().chain(sets.iter().map(|set| &set[..]));
+            for set in sets {
+                self.offsets.adjust_forward(set, duration);
+            }
+        } else {
+            // unreachable, no other action types are defined!
+            debug_assert_eq!(action.kind, crate::timer::TimerActionType::SkipTime);
+        }
     }
 
     /**
@@ -357,9 +368,28 @@ impl TimerMachine {
             // within a phase (nth)
             OnPhase(phase) => {
                 // handle the finish check
-                if let Some(trigger) = &phase.finish {
-                    if trigger.check(pos, self.combat_state, &mut self.key_pressed) {
-                        self.state_change(FinishedPhase(phase.clone())).await;
+                let finished = match &phase.finish {
+                    Some(trigger) => trigger.check(pos, self.combat_state, &mut self.key_pressed),
+                    _ => false,
+                };
+                if finished {
+                    self.state_change(FinishedPhase(phase.clone())).await
+                } else {
+                    // check for action triggers otherwise...
+                    let triggered = {
+                        let combat_state = self.combat_state.clone();
+                        let key_pressed = &mut self.key_pressed;
+                        phase
+                            .actions
+                            .iter()
+                            .enumerate()
+                            .filter(move |(_, action)| action.trigger.check(pos, combat_state, key_pressed))
+                            .map(|(idx, _)| TimerFileAction::new(phase.clone(), idx))
+                            .flatten()
+                    }
+                    .collect::<Vec<_>>();
+                    for action in triggered {
+                        self.apply_action(action).await;
                     }
                 }
             },
@@ -396,6 +426,69 @@ impl TimerMachine {
         } else {
             log::info!("Off map with ID \"{}\" for \"{}\"", map_id, self.timer.name());
             self.state = TimerMachineState::OffMap;
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SharedTimeOffset {
+    offset: AtomicIsize,
+}
+impl SharedTimeOffset {
+    /// milliseconds
+    pub const SCALE: f32 = 1000.0f32;
+    pub fn read_seconds(&self) -> f32 {
+        self.offset.load(Ordering::Relaxed) as f32 / Self::SCALE
+    }
+    pub fn adjust_forward(&self, amt: Duration) {
+        self.adjust_seconds(-amt.as_secs_f32())
+    }
+    pub fn adjust_seconds(&self, amt: f32) {
+        let ms = (amt * Self::SCALE) as isize;
+        self.offset.fetch_add(ms, Ordering::Release);
+    }
+}
+#[derive(Debug, Default)]
+pub struct SharedTimeOffsets {
+    /// global/default skipTime
+    pub global: SharedTimeOffset,
+    /// split-mechanics offsets
+    pub for_set: RwLock<HashMap<String, Arc<SharedTimeOffset>>>,
+}
+impl SharedTimeOffsets {
+    pub fn offset_seconds_for(&self, set: &str) -> f32 {
+        match set {
+            "" | TimerAction::DEFAULT_SET => self.global.read_seconds(),
+            set => self
+                .for_set
+                .read()
+                .ok()
+                .and_then(|offsets| offsets.get(set).map(|o| o.read_seconds()))
+                .unwrap_or(0.0f32),
+        }
+    }
+    pub fn offset_for(&self, set: &str) -> Duration {
+        Duration::from_secs_f32(self.offset_seconds_for(set))
+    }
+    pub fn adjust_start_for(&self, set: &str, start: Instant) -> Instant {
+        start + self.offset_for(set)
+    }
+    pub fn adjust_reference_for(&self, set: &str, now: Instant) -> Instant {
+        now - self.offset_for(set)
+    }
+    pub fn adjust_forward(&self, set: &str, amt: Duration) {
+        match set {
+            TimerAction::DEFAULT_SET => self.global.adjust_forward(amt),
+            set =>
+                if let Ok(mut offsets) = self.for_set.write() {
+                    // TODO: could've tried a read() lock here first but unlikely to be applied often or even used at all so...
+                    let offset = if let Some(set) = offsets.get(set) {
+                        set
+                    } else {
+                        &*offsets.entry(set.into()).or_default()
+                    };
+                    offset.adjust_forward(amt);
+                },
         }
     }
 }

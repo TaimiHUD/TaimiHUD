@@ -83,12 +83,13 @@ impl ObjectDescription {
     ) -> anyhow::Result<ObjectBacking> {
         let shaders = self.get_shaders(shaders);
         let obj_data = self.get_model_and_material(device, model_files)?;
-        let model = obj_data.model;
         let material = obj_data.material;
-        let vertex_buffer = model.to_buffer(device)?;
+        let vertex_buffer = obj_data.model.to_buffer(device)?;
         let render_metadata = ObjectRenderMetadata {
-            model,
-            material,
+            #[cfg(todo)]
+            model: obj_data.model,
+            material: material.into(),
+            texture_key: None,
             model_matrix: self.model_matrix,
             topology: self.topology,
         };
@@ -103,7 +104,7 @@ impl ObjectDescription {
         };
 
         let backing = ObjectBacking {
-            name: self.name.clone(),
+            name: self.name[..].into(),
             render: render_backing,
         };
 

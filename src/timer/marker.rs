@@ -1,8 +1,9 @@
 use {
-    crate::timer::BlishVec3,
-    glam::{Mat4, Vec3},
+    crate::timer::{BlishVec3, TimerFilePhase},
+    glam::{EulerRot, Mat4, Quat, Vec3},
     serde::{Deserialize, Serialize},
-    std::path::PathBuf,
+    std::{ops::Deref, path::PathBuf},
+    taimi_meta::coords::vec_eq as vec32_eq,
     tokio::time::{Duration, Instant},
 };
 
@@ -10,11 +11,11 @@ fn default_size() -> f32 {
     return 1.0;
 }
 
-fn default_opacity() -> f32 {
+pub(super) fn default_opacity() -> f32 {
     return 0.8;
 }
 
-fn default_duration() -> f32 {
+pub(super) fn default_duration() -> f32 {
     return 10.0;
 }
 
@@ -41,87 +42,118 @@ pub struct BlishMarker {
 }
 
 impl BlishMarker {
-    fn marker(&self, timestamp: f32) -> TimerMarker {
-        let position = self.position.to_vec3();
-        let rotation = self.rotation.to_vec3();
-        let kind = if rotation == Vec3::ZERO {
+    #[inline]
+    pub fn position(&self) -> Vec3 {
+        self.position.to_vec3()
+    }
+    #[inline]
+    pub fn rotation(&self) -> RotationType {
+        // TODO: move this to taimi_hoard dep once that's finally merged...
+        if vec32_eq(self.rotation.child, Vec3::ZERO) {
             RotationType::Billboard
         } else {
-            let rotation_rads = rotation.map(|x| x.to_radians());
+            let rotation_rads = self.rotation.to_vec3().map(|deg| deg.to_radians());
             RotationType::Rotation(rotation_rads)
-        };
-        TimerMarker {
-            position,
-            size: self.size,
-            duration: self.duration,
-            opacity: self.opacity,
-            texture: self.texture.clone(),
-            timestamp,
-            kind,
         }
     }
 
-    pub fn get_markers(&self) -> Vec<TimerMarker> {
-        self.timestamps.iter().map(|&ts| self.marker(ts)).collect()
+    #[inline]
+    pub fn offset_set(&self) -> &str {
+        self.set
+            .as_ref()
+            .map(|s| &s[..])
+            .unwrap_or(super::TimerAction::DEFAULT_SET)
     }
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum RotationType {
     Rotation(Vec3),
     Billboard,
 }
 
-#[derive(Clone)]
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct TimerMarker {
-    pub kind: RotationType,
-    pub position: Vec3,
-    pub size: f32,
-    pub opacity: f32,
-    pub texture: PathBuf,
+    pub file_marker: TimerFileMarker,
     pub timestamp: f32,
-    pub duration: f32,
 }
-
 impl TimerMarker {
-    pub fn raw_timestamp(&self) -> Duration {
+    pub fn end_timestamp(&self) -> Duration {
         Duration::from_secs_f32(self.timestamp)
     }
-    pub fn timestamp(&self) -> Duration {
-        self.raw_timestamp()
-            .checked_sub(self.duration())
-            .unwrap_or_default()
-    }
-    pub fn duration(&self) -> Duration {
-        Duration::from_secs_f32(self.duration)
+    pub fn start_timestamp(&self) -> Duration {
+        self.end_timestamp().saturating_sub(self.duration())
     }
     pub fn end(&self, start: Instant) -> Instant {
-        self.start(start) + self.duration()
+        start + self.end_timestamp()
     }
     pub fn start(&self, start: Instant) -> Instant {
-        start + self.timestamp()
+        start + self.start_timestamp()
     }
 
     #[allow(dead_code)]
     pub fn remaining(&self, start: Instant) -> Duration {
         self.end(start).saturating_duration_since(Instant::now())
     }
+}
+impl Deref for TimerMarker {
+    type Target = TimerFileMarker;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.file_marker
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimerFileMarker {
+    pub(super) phase: TimerFilePhase,
+    pub(super) marker_idx: usize,
+}
+impl TimerFileMarker {
+    #[inline]
+    pub fn new(phase: TimerFilePhase, marker_idx: usize) -> Option<Self> {
+        (phase.markers.len() > marker_idx).then(|| Self { phase, marker_idx })
+    }
+
+    #[inline]
+    pub fn as_marker(&self) -> &BlishMarker {
+        unsafe { self.phase.markers.get_unchecked(self.marker_idx) }
+    }
+
+    pub fn get_markers(&self) -> impl Iterator<Item = TimerMarker> + '_ {
+        self.timestamps
+            .iter()
+            .map(|&timestamp| TimerMarker { file_marker: self.clone(), timestamp })
+    }
+    pub fn fan_out(self) -> impl Iterator<Item = TimerMarker> + 'static {
+        (0..self.timestamps.len()).map(move |ts_idx| TimerMarker {
+            timestamp: unsafe { *self.timestamps.get_unchecked(ts_idx) },
+            file_marker: self.clone(),
+        })
+    }
+
+    pub fn duration(&self) -> Duration {
+        Duration::from_secs_f32(self.duration)
+    }
+    /// TODO: cache as field or is this already stored elsewhere?
     pub fn model_matrix(&self) -> Mat4 {
         // scale first
-        let scaler = self.size;
-        let mtx_scale = Mat4::from_scale(Vec3::new(scaler, scaler, scaler));
-        // then rotate the points
-        let mtx_rotation = match self.kind {
-            // billboards should have their rotation component handled elsewhere ideally
-            // perhaps *prior* to the application of this, thus NOOP :p
-            RotationType::Billboard => Mat4::IDENTITY, //Mat4::from_rotation_y(180.0f32.to_radians()), //Mat4::from_rotation_x(90.0f32.to_radians()), //* Mat4::from_rotation_z(90.0f32.to_radians()),
+        // then rotate the points, then move them
+        let scaler = Vec3::splat(self.size);
+        let mtx_position = self.position();
+        let rotation = match self.rotation() {
+            // billboards have their rotation component handled elsewhere, thus NOOP :p
+            RotationType::Billboard => Quat::IDENTITY,
             RotationType::Rotation(rot) =>
-                Mat4::from_rotation_x(rot.x) * Mat4::from_rotation_y(rot.y) * Mat4::from_rotation_z(rot.z),
+                Quat::from_euler(EulerRot::XZY, rot.x - core::f32::consts::FRAC_PI_2, rot.y, -rot.z),
         };
-        // then move them
-        //let mtx_position = Mat4::from_translation(self.position);
-        //mtx_rotation = mtx_rotation * Mat4::from_rotation_y(180.0f32.to_radians());
-        mtx_scale * mtx_rotation // * mtx_position
+        Mat4::from_scale_rotation_translation(scaler, rotation, mtx_position)
+    }
+}
+impl Deref for TimerFileMarker {
+    type Target = BlishMarker;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_marker()
     }
 }

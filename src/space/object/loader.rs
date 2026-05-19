@@ -41,7 +41,7 @@ impl ObjectLoader {
         device: &Dx11Device,
         model_files: &HashMap<PathBuf, ObjFile>,
         shaders: &ShaderLoader,
-    ) -> HashMap<String, Arc<ObjectBacking>> {
+    ) -> HashMap<Arc<str>, Arc<ObjectBacking>> {
         self.0
             .iter()
             .filter_map(|o| {

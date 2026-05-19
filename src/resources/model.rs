@@ -2,6 +2,7 @@ use {
     crate::resources::Vertex,
     glam::{Vec3, Vec3Swizzles},
     serde::{Deserialize, Serialize},
+    std::sync::LazyLock,
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
 };
 
@@ -20,7 +21,11 @@ impl Model {
         Self(vertices)
     }
 
-    pub fn quad() -> Self {
+    pub fn quad() -> &'static Self {
+        static QUAD: LazyLock<Model> = LazyLock::new(|| Model::new_quad());
+        &*QUAD
+    }
+    fn new_quad() -> Self {
         let mut vertices = Vec::new();
         let height = 1.0;
         let width = 1.0;

@@ -6,9 +6,10 @@ use {
     },
     anyhow::Context,
     glamour::Size2,
+    std::sync::OnceLock,
     taimi_d3d::dx11::{
         blend::{BlendState, OMBlendState, D3D11_RENDER_TARGET_BLEND_DESC},
-        buffer::{SamplerState, TextureAddressMode, D3D11_SAMPLER_DESC},
+        buffer::{SamplerState, TextureAddressMode, VertexBuffer, D3D11_SAMPLER_DESC},
         prelude::*,
         viewport::Viewport,
     },
@@ -26,6 +27,8 @@ pub struct RenderBackend {
     pub swap_chain: SwapChain,
     pub display_size: Size2<ScreenSpace>,
     pub viewport: Viewport,
+
+    pub shared_quad: OnceLock<VertexBuffer>,
 }
 
 impl RenderBackend {
@@ -71,6 +74,8 @@ impl RenderBackend {
             sampler_state,
             display_size,
             viewport,
+
+            shared_quad: OnceLock::new(),
         })
     }
 
@@ -116,6 +121,17 @@ impl RenderBackend {
             }
         }
     }*/
+
+    pub fn shared_quad(&self) -> anyhow::Result<VertexBuffer> {
+        use crate::resources::Model;
+
+        if let Some(quad) = self.shared_quad.get() {
+            return Ok(quad.clone())
+        }
+
+        let vbuf = Model::quad().to_buffer(&self.device)?;
+        Ok(self.shared_quad.get_or_init(move || vbuf).clone())
+    }
 
     /// See [crate::space::engine::Engine::cleanup_background]
     ///

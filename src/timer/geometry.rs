@@ -10,7 +10,7 @@ use {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, Copy)]
 #[serde(transparent)]
 pub struct BlishVec3 {
-    child: Vec3,
+    pub child: Vec3,
 }
 
 impl BlishVec3 {

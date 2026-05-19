@@ -8,7 +8,7 @@ use {
             pack::{PackCollection, PoiScale, TrailScale, TrailTextureMap},
             render_list::MapFrustum,
         },
-        timer::{PhaseState, TimerFile, TimerMarker},
+        timer::{PhaseState, TimerDirection, TimerFile, TimerMarker},
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
@@ -63,7 +63,6 @@ struct Position(Vec3);
 #[allow(unused)]
 struct Marker {
     phase: Arc<PhaseState>,
-    start: Instant,
     marker: TimerMarker,
 }
 
@@ -72,6 +71,13 @@ struct MarkerBundle {
     #[cfg(feature = "space-ecs")]
     position: Position,
     render: Render,
+}
+
+#[derive(Component)]
+#[allow(unused)]
+struct Direction {
+    phase: Arc<PhaseState>,
+    direction: TimerDirection,
 }
 
 #[derive(strum::IntoStaticStr)]
@@ -98,15 +104,38 @@ pub enum SpaceEvent {
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
     let now = Instant::now();
     for (entity, marker, mut render) in &mut query {
-        if now > marker.marker.end(marker.start) {
-            log::info!(
+        let start = marker.phase.start_for_set(marker.marker.offset_set());
+        if now > marker.marker.end(start) {
+            log::trace!(
                 "Entity {} reached end after {}, despawning.",
                 entity,
                 marker.marker.duration
             );
             commands.entity(entity).despawn();
-        } else if now > marker.marker.start(marker.start) && render.disabled {
-            log::info!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
+        } else if now > marker.marker.start(start) && render.disabled {
+            log::trace!("Entity {} reached start at {}!", entity, marker.marker.timestamp);
+            render.disabled = false;
+        }
+    }
+}
+#[cfg(feature = "space-ecs")]
+fn handle_direction_timings(mut commands: Commands, mut query: Query<(Entity, &Direction, &mut Render)>) {
+    let now = Instant::now();
+    for (entity, direction, mut render) in &mut query {
+        let start = direction.phase.start_for_set(direction.direction.offset_set());
+        if now > direction.direction.end(start) {
+            log::trace!(
+                "Entity {} reached end after {}, despawning.",
+                entity,
+                direction.direction.duration
+            );
+            commands.entity(entity).despawn();
+        } else if now > direction.direction.start(start) && render.disabled {
+            log::trace!(
+                "Entity {} reached start at {}!",
+                entity,
+                direction.direction.timestamp
+            );
             render.disabled = false;
         }
     }
@@ -118,7 +147,7 @@ pub struct Engine {
     #[cfg(feature = "space-ecs")]
     pub model_files: HashMap<PathBuf, ObjFile>,
     #[cfg(feature = "space-ecs")]
-    pub object_kinds: HashMap<String, Arc<ObjectBacking>>,
+    pub object_kinds: HashMap<Arc<str>, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
 
@@ -153,7 +182,7 @@ impl Engine {
             .trail_expansion = TrailScale::DIRTY;
 
         #[cfg(feature = "space-ecs")]
-        let object_kinds = {
+        let (object_kinds, model_files) = {
             let models_dir = crate::ADDON_DIR.join("models");
             let object_descs =
                 ObjectLoader::load_desc(&models_dir).context("Failed to load model descriptors")?;
@@ -164,7 +193,7 @@ impl Engine {
             let object_kinds =
                 object_descs.to_backings(&render_backend.device, &model_files, &render_backend.shaders);
 
-            object_kinds
+            (object_kinds, model_files)
         };
 
         let world = World::new();
@@ -172,6 +201,10 @@ impl Engine {
         let mut schedule = Schedule::default();
 
         schedule.add_systems(handle_marker_timings);
+        #[cfg(feature = "space-ecs")]
+        {
+            schedule.add_systems(handle_direction_timings);
+        }
 
         let packs = PackCollection::new(&render_backend).context("Initializing packs")?;
         PathingController::try_send(PathingEvent::LoadAll);
@@ -284,7 +317,6 @@ impl Engine {
             model_files,
             #[cfg(feature = "space-ecs")]
             object_kinds,
-            #[cfg(feature = "space-ecs")]
             phase_states,
             associated_entities,
             world,
@@ -299,7 +331,6 @@ impl Engine {
             model_files,
             #[cfg(feature = "space-ecs")]
             object_kinds,
-            #[cfg(feature = "space-ecs")]
             phase_states,
             associated_entities,
             world,
@@ -308,54 +339,79 @@ impl Engine {
 
     pub fn new_phase(&mut self, phase_state: PhaseState) -> anyhow::Result<()> {
         let phase_state = Arc::new(phase_state);
-        let markers = &phase_state.markers;
         let entry = self
             .associated_entities
-            .entry(phase_state.timer.name.clone())
+            .entry(phase_state.timer().name.clone())
             .or_default();
-        for marker in markers {
-            if let Some(_base_path) = &phase_state.timer.path {
+        for marker in phase_state.phase.iter_markers() {
+            if let Some(_base_path) = &phase_state.timer().path {
+                #[cfg(feature = "space-ecs")]
+                let rotation = marker.rotation();
+                let position = marker.position();
                 #[cfg(feature = "space-ecs")]
                 let backing = Arc::new(
-                    ObjectBacking::create_marker(&self.render_backend, marker, _base_path.clone())
+                    ObjectBacking::create_marker(&self.render_backend, &marker, _base_path.clone())
                         .context("marker object creation failed")?,
                 );
-                let entity = self.world.spawn((
-                    #[cfg(feature = "space-ecs")]
-                    Position(marker.position),
-                    Marker {
-                        phase: phase_state.clone(),
-                        start: phase_state.start,
-                        marker: marker.clone(),
-                    },
-                    #[cfg(feature = "space-ecs")]
-                    Render {
-                        rotation: marker.kind.clone(),
-                        disabled: true,
-                        backing,
-                    },
-                ));
-                let id = entity.id();
-                log::debug!(
-                    "Creating entity {id} at {} from timer {} markers, phase {}",
-                    marker.position,
-                    phase_state.timer.name(),
+                log::trace!(
+                    "Creating {} entities at {} from timer {} markers, phase {}",
+                    marker.timestamps.len(),
+                    position,
+                    phase_state.timer().title(),
                     phase_state.phase.name
                 );
-                entry.push(id);
+                let ids = self.world.spawn_batch(marker.fan_out().map(|marker| {
+                    (
+                        #[cfg(feature = "space-ecs")]
+                        Position(marker.position()),
+                        Marker { phase: phase_state.clone(), marker },
+                        #[cfg(feature = "space-ecs")]
+                        Render {
+                            rotation,
+                            disabled: true,
+                            backing: backing.clone(),
+                        },
+                    )
+                }));
+                entry.extend(ids);
+            }
+        }
+        #[cfg(feature = "space-ecs")]
+        for direction in phase_state.phase.iter_directions() {
+            if let Some(_base_path) = &phase_state.timer().path {
+                let destination = direction.destination();
+                let backing = Arc::new(
+                    ObjectBacking::create_direction(&self.render_backend, &direction, _base_path.clone())
+                        .context("direction object creation failed")?,
+                );
+                log::trace!(
+                    "Creating {} entities to {} from timer {} directions, phase {}",
+                    direction.timestamps.len(),
+                    destination,
+                    phase_state.timer().name(),
+                    phase_state.phase.name
+                );
+                let ids = self.world.spawn_batch(direction.fan_out().map(|direction| {
+                    (Direction { phase: phase_state.clone(), direction }, Render {
+                        rotation: RotationType::Rotation(Vec3::ZERO),
+                        disabled: true,
+                        backing: backing.clone(),
+                    })
+                }));
+                entry.extend(ids);
             }
         }
         self.phase_states.push(phase_state);
         Ok(())
     }
     pub fn remove_phase(&mut self, timer: Arc<TimerFile>) -> anyhow::Result<()> {
-        if let Some(entry) = self.associated_entities.remove(&timer.name.clone()) {
+        if let Some(entry) = self.associated_entities.remove(&timer.name) {
             entry.iter().for_each(|entity| {
                 log::debug!("Despawning {entity} from timer {} markers", timer.name());
                 self.world.despawn(*entity);
             });
         }
-        self.phase_states.retain(|p| !Arc::ptr_eq(&p.timer, &timer));
+        self.phase_states.retain(|p| !Arc::ptr_eq(&p.timer(), &timer));
         Ok(())
     }
     #[allow(dead_code)]
@@ -709,46 +765,6 @@ impl Engine {
                 .set(&device_context, perspective_slot);
         }
 
-        #[cfg(feature = "space-ecs")]
-        let mut query = self.world.query::<(&mut Render, &Position)>();
-        #[cfg(feature = "space-ecs")]
-        for (_k, c) in &query.iter(&self.world).chunk_by(|(r, _p)| r.backing.name.clone()) {
-            let mut itery = c.into_iter();
-            let slice = itery.next().ok_or(anyhow!("empty slice!"))?;
-            let (r, p) = slice;
-            if !r.disabled {
-                let rot = match r.rotation {
-                    RotationType::Billboard => {
-                        let mark2d = (p.0.xz() - pdata.pos.xz()).to_angle();
-                        let y = Mat4::from_rotation_y(-90.0f32.to_radians() - mark2d);
-                        y
-                        //Mat4::IDENTITY
-                    },
-                    _ => Mat4::IDENTITY,
-                };
-                let ibd: Vec<_> = vec![slice]
-                    .into_iter()
-                    .chain(itery)
-                    .map(|(_r, p)| {
-                        //  r.backing.render.metadata.model_matrix *
-                        let affy =
-                            Mat4::from_translation(p.0) * rot * r.backing.render.metadata.model_matrix;
-                        InstanceBufferData {
-                            world: affy,
-                            //world_position: affy.translation,
-                            colour: Vec3::new(1.0, 1.0, 1.0),
-                        }
-                    })
-                    .collect();
-                r.backing.set_and_draw(
-                    perspective_slot,
-                    &self.render_backend.device,
-                    &device_context,
-                    &ibd,
-                )?;
-            }
-        }
-
         if let Some((camera, ref _depth, ref cull)) = render_world {
             let (
                 overlap_threshold,
@@ -835,6 +851,163 @@ impl Engine {
                 self.packs
                     .draw(camera.clone(), cull, &self.render_backend, &device_context);
             }
+        }
+
+        #[cfg(feature = "space-ecs")]
+        let (mut query, mut fixed_rot, mut prev_alpha, mut prev_anim_speed, orig_tex_coords, mut anim_time) = (
+            self.world.query::<(&mut Render, &Position, &Marker)>(),
+            Vec::new(),
+            self.render_backend.perspective_handler.alpha(),
+            0.0f32,
+            self.render_backend
+                .perspective_handler
+                .constant_buffer_data
+                .trail_texture
+                .clone(),
+            None::<core::time::Duration>,
+        );
+        #[cfg(feature = "space-ecs")]
+        for (r, _p, m) in query.iter(&self.world).filter(|(r, ..)| !r.disabled) {
+            // TODO chunking: query.iter(&self.world).chunk_by(|(r, _p)| r.backing.name.clone())
+            if let RotationType::Rotation(..) = r.rotation {
+                fixed_rot.push((
+                    r.backing.clone(),
+                    r.backing.render.metadata.model_matrix,
+                    m.marker.opacity,
+                ));
+                continue
+            }
+            if prev_alpha != 1.0 {
+                self.render_backend.perspective_handler.set_alpha(1.0);
+                self.render_backend
+                    .perspective_handler
+                    .update_cb_v(&device_context);
+                prev_alpha = 1.0;
+            }
+            let ibd = super::dx11::InstanceBufferData {
+                world: r.backing.render.metadata.model_matrix,
+                colour: glam::Vec3::ONE.extend(m.marker.opacity),
+            };
+            r.backing
+                .set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
+                    ibd,
+                ])?;
+        }
+        if !fixed_rot.is_empty() {
+            let orig_billboard = core::mem::replace(
+                &mut self
+                    .render_backend
+                    .perspective_handler
+                    .constant_buffer_data
+                    .billboard,
+                glam::Mat4::IDENTITY,
+            );
+            if prev_alpha != 1.0 {
+                self.render_backend.perspective_handler.set_alpha(1.0);
+                self.render_backend
+                    .perspective_handler
+                    .update_cb_v(&device_context);
+                prev_alpha = 1.0;
+            }
+
+            // TODO: group_by properly
+            for (backing, world, opacity) in fixed_rot {
+                let ibd = super::dx11::InstanceBufferData {
+                    world,
+                    colour: glam::Vec3::ONE.extend(opacity),
+                };
+                backing.set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
+                    ibd,
+                ])?;
+            }
+
+            self.render_backend
+                .perspective_handler
+                .constant_buffer_data
+                .billboard = orig_billboard;
+            self.render_backend
+                .perspective_handler
+                .update_cb_v(&device_context);
+        }
+        #[cfg(feature = "space-ecs")]
+        let mut query_dirs = self.world.query::<(&mut Render, &Direction)>();
+        #[cfg(feature = "space-ecs")]
+        for (r, dir) in query_dirs
+            .iter(&self.world)
+            .into_iter()
+            .filter(|(r, ..)| !r.disabled)
+        {
+            let mut update_cb = false;
+            if prev_alpha != 1.0 {
+                self.render_backend.perspective_handler.set_alpha(1.0);
+                prev_alpha = 1.0;
+                update_cb = true;
+            }
+            if prev_anim_speed != dir.direction.anim_speed {
+                prev_anim_speed = dir.direction.anim_speed;
+                if prev_anim_speed == 0.0 {
+                    self.render_backend
+                        .perspective_handler
+                        .constant_buffer_data
+                        .trail_texture
+                        .v_offset = orig_tex_coords.v_offset;
+                } else {
+                    let time = anim_time.get_or_insert_with(|| dir.phase.start.elapsed());
+                    self.render_backend
+                        .perspective_handler
+                        .constant_buffer_data
+                        .trail_texture
+                        .v_offset = time.as_secs_f32() * prev_anim_speed;
+                }
+                update_cb = true;
+            }
+            if update_cb {
+                self.render_backend
+                    .perspective_handler
+                    .update_cb_v(&device_context);
+            }
+            let player_pos = self
+                .render_backend
+                .perspective_handler
+                .constant_buffer_data
+                .player
+                .truncate();
+            let target = dir.direction.destination.to_vec3();
+            let mut vertices = Vec::new();
+            super::pack::trail::ActiveTrail::gen_points(
+                &mut vertices,
+                &[player_pos.into(), target.into()],
+                super::pack::trail::TrailParams::DEFAULT_WIDTH,
+                1.0,
+                false,
+                glam::Vec3::ONE,
+            );
+            // TODO: cap size and reuse one buffer here
+            let vbuffer = crate::resources::Model::from_vertices(vertices)
+                .to_buffer(&self.render_backend.device)
+                .context("direction buffer")?;
+            let ibd = super::dx11::InstanceBufferData {
+                world: glam::Mat4::IDENTITY,
+                colour: glam::Vec3::ONE.extend(dir.direction.opacity),
+            };
+            // overriding vb with trail to destination, so do this manually instead of r.backing.set_and_draw()...
+            let render = &r.backing.render;
+            render.update_instance_buffer(&self.render_backend.device, &device_context, &[ibd])?;
+            render.set_shaders(&device_context);
+            render.set_texture(perspective_slot, &device_context);
+            taimi_d3d::dx11::VertexBuffer::set_all(&device_context, perspective_slot, &[
+                &vbuffer,
+                render.instance_buffer(),
+            ]);
+            render.draw(0, &device_context);
+        }
+        #[cfg(feature = "space-ecs")]
+        if prev_anim_speed != 0.0 {
+            self.render_backend
+                .perspective_handler
+                .constant_buffer_data
+                .trail_texture
+                .v_offset = orig_tex_coords.v_offset;
         }
 
         if is_rendering {

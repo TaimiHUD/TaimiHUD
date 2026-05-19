@@ -158,8 +158,8 @@ impl InfoTabState {
         ]);
         ui.table_next_column();
         for phase_state in &timer_window_state.phase_states {
-            let phase = phase_state.phase.phase();
-            ui.text_wrapped(phase_state.timer.hypheny_name());
+            let phase = &phase_state.phase;
+            ui.text_wrapped(phase_state.timer().hypheny_name());
             ui.table_next_column();
             ui.text_wrapped(&phase.name);
             ui.table_next_column();

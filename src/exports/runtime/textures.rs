@@ -201,6 +201,42 @@ impl TextureLoader {
         })
         .await
     }
+    #[cfg(feature = "texture-loader")]
+    pub fn request_begin_file<K: Into<Arc<str>>, P: Into<PathBuf>>(
+        &self,
+        key: K,
+        path: P,
+    ) -> anyhow::Result<()> {
+        let key = key.into();
+        let req = TextureRequest::LoadFile { key: key.clone(), path: path.into() };
+        let sender = self.with_loader(|loader| loader.sender.clone())?;
+        {
+            let mut textures = self.textures.write().ok().context("texture map poisoned")?;
+            let entry = textures.entry(key.clone());
+            match entry {
+                hash_map::Entry::Occupied(e) if !e.get().can_load() =>
+                    return Err(anyhow!("duplicate texture load request")),
+                hash_map::Entry::Occupied(mut e) => {
+                    e.insert(TextureSlot::Loading);
+                },
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(TextureSlot::Loading);
+                },
+            }
+        }
+        let request = sender
+            .blocking_send(req)
+            .map_err(|_| anyhow!("texture loader unavailable"));
+        match request {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if let Ok(mut textures) = self.textures.write() {
+                    textures.insert(key.clone(), TextureSlot::Unavailable);
+                }
+                Err(e)
+            },
+        }
+    }
 
     pub async fn request_load_bytes<K: Into<Arc<str>>, D: Into<Vec<u8>>>(
         &self,

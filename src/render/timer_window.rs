@@ -50,11 +50,11 @@ impl TimerWindowState {
                         ui.text_wrapped(&fl!("no-phases-active"));
                     }
                     for ps in &self.phase_states {
-                        for alert in ps.alerts.iter() {
+                        for alert in ps.phase.get_alerts() {
                             if self.progress_bar.stock {
-                                Self::stock_progress_bar(&self.progress_bar, alert, ui, ps);
+                                Self::stock_progress_bar(&self.progress_bar, &alert, ui, ps);
                             } else {
-                                Self::progress_bar(&self.progress_bar, alert, ui, ps);
+                                Self::progress_bar(&self.progress_bar, &alert, ui, ps);
                             }
                         }
                     }
@@ -70,7 +70,7 @@ impl TimerWindowState {
     fn progress_bar(settings: &ProgressBarSettings, alert: &TimerAlert, ui: &Ui, ps: &PhaseState) {
         let start = ps.start;
         let height = settings.height;
-        if let Some(percent) = alert.percentage(start) {
+        if let Some(percent) = alert.percentage(&ps.offsets, start) {
             let mut widget_pos: Vec2 = Vec2::new(0.0, 0.0);
             if !settings.centre_after {
                 widget_pos = Vec2::from(ui.cursor_pos());
@@ -79,16 +79,16 @@ impl TimerWindowState {
                 ui,
                 Some(height),
                 alert.icon.as_ref(),
-                ps.timer.path.as_ref().and_then(|p| p.parent()),
+                ps.timer().path.as_ref().and_then(|p| p.parent()),
             );
             if settings.centre_after {
                 widget_pos = Vec2::from(ui.cursor_pos());
             }
             let mut colour_tokens = Vec::new();
-            if let Some(fill_colour) = alert.fill_colour {
+            if let Some(fill_colour) = alert.fill_colour() {
                 colour_tokens.push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
             }
-            if let Some(colour) = alert.colour {
+            if let Some(colour) = alert.colour() {
                 colour_tokens.push(ui.push_style_color(StyleColor::Text, colour.imgcolor()));
             }
             ProgressBar::new(percent)
@@ -97,7 +97,7 @@ impl TimerWindowState {
                 .build(ui);
             let window_size = Vec2::from(ui.window_size());
             let widget_size = window_size.with_y(height);
-            let text = alert.progress_bar_text(start);
+            let text = alert.progress_bar_text(&ps.offsets, start);
             RenderState::offset_font_text(
                 &settings.font.to_string(),
                 ui,
@@ -116,23 +116,23 @@ impl TimerWindowState {
     fn stock_progress_bar(settings: &ProgressBarSettings, alert: &TimerAlert, ui: &Ui, ps: &PhaseState) {
         let start = ps.start;
         let height = settings.height;
-        if let Some(percent) = alert.percentage(start) {
+        if let Some(percent) = alert.percentage(&ps.offsets, start) {
             RenderState::icon(
                 ui,
                 Some(height),
                 alert.icon.as_ref(),
-                ps.timer.path.as_ref().and_then(|p| p.parent()),
+                ps.timer().path.as_ref().and_then(|p| p.parent()),
             );
             let mut colour_tokens = Vec::new();
-            if let Some(fill_colour) = alert.fill_colour {
+            if let Some(fill_colour) = alert.fill_colour() {
                 colour_tokens.push(ui.push_style_color(StyleColor::PlotHistogram, fill_colour.imgcolor()));
             }
-            if let Some(colour) = alert.colour {
+            if let Some(colour) = alert.colour() {
                 colour_tokens.push(ui.push_style_color(StyleColor::Text, colour.imgcolor()));
             }
             ProgressBar::new(percent)
                 .size([-1.0, height])
-                .overlay_text(alert.progress_bar_text(start))
+                .overlay_text(alert.progress_bar_text(&ps.offsets, start))
                 .build(ui);
             for token in colour_tokens {
                 token.pop();
@@ -143,8 +143,8 @@ impl TimerWindowState {
     pub fn new_phase(&mut self, phase_state: PhaseState) {
         self.phase_states.push(phase_state);
     }
-    pub fn remove_phase(&mut self, timer: Arc<TimerFile>) {
-        self.phase_states.retain(|p| !Arc::ptr_eq(&p.timer, &timer));
+    pub fn remove_phase(&mut self, timer: &Arc<TimerFile>) {
+        self.phase_states.retain(|p| !Arc::ptr_eq(p.timer(), timer));
     }
     pub fn reset_phases(&mut self) {
         self.phase_states.clear();
