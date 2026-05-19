@@ -1,4 +1,4 @@
-use core::iter;
+use core::{iter, ops};
 
 pub use self::{collect::FlatCollect, macros::impl_iter_wrap, mapfn::LazyMapFn};
 
@@ -30,6 +30,21 @@ pub trait IterExt: Sized + Iterator {
         Self: Iterator<Item = (T, bool)>,
     {
         self.filter_map(filter_map_if)
+    }
+    fn sum_bitor<T>(self) -> T
+    where
+        T: Default + ops::BitOrAssign<Self::Item>,
+    {
+        #[cfg(todo)]
+        return self.fold(Default::default(), |mut b, item| {
+            b |= item;
+            b
+        });
+        let mut b = T::default();
+        for item in self {
+            b |= item;
+        }
+        b
     }
     fn unzip_flatten<FromA, FromB, A, B>(self) -> (FromA, FromB)
     where
