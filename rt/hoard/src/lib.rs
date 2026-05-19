@@ -22,17 +22,43 @@ pub fn try_str<S: AsRef<str>>(s: S) -> Result<S, S> {
 pub fn is_default<T: Default + PartialEq>(v: &T) -> bool {
     *v == T::default()
 }
+/// `#[serde(skip_serializing_if = "is_bool_ref::<false>")]`
+#[inline(always)]
+pub fn is_bool_ref<const N: bool>(&v: &bool) -> bool {
+    v == N
+}
 /// `#[serde(skip_serializing_if = "is_false_ref")]`
+#[inline(always)]
 pub fn is_false_ref(&v: &bool) -> bool {
     !v
 }
 /// `#[serde(skip_serializing_if = "is_true_ref")]`
+#[inline(always)]
 pub fn is_true_ref(&v: &bool) -> bool {
-    !v
+    v
 }
-/// `#[serde(default = "default_true")]`
-pub fn default_true() -> bool {
-    true
+/// `#[serde(skip_serializing_if = "bool_or_none::<true>")]`
+#[inline(always)]
+pub fn bool_or_none<const N: bool>(&v: &Option<bool>) -> bool {
+    v != Some(!N)
+}
+/// `#[serde(default = "a_bool::<true>")]`
+#[inline(always)]
+pub fn a_bool<const N: bool>() -> bool {
+    N
+}
+/// `#[serde(skip_serializing_if = "f32_or_none::<{2.0f32.to_bits()>")]`
+#[inline(always)]
+pub fn f32_or_none<const N: u32>(v: &Option<f32>) -> bool {
+    match *v {
+        Some(v) => v == f32::from_bits(N),
+        None => true,
+    }
+}
+/// `#[serde(default = "a_f32::<{2.0f32.to_bits()}>")]`
+#[inline(always)]
+pub fn a_f32<const N: u32>() -> f32 {
+    f32::from_bits(N)
 }
 
 /// `*dest = v.into_owned()` except [reuse dest](ToOwned::clone_into) if possible
