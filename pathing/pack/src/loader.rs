@@ -13,8 +13,8 @@ use {
     },
 };
 
-pub trait LoaderAssetReader: io::BufRead + io::Seek + 'static {}
-impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + 'static {}
+pub trait LoaderAssetReader: io::BufRead + io::Seek + Send + 'static {}
+impl<R> LoaderAssetReader for R where R: io::BufRead + io::Seek + Send + 'static {}
 
 pub type PackFilenameIter<'a> = Box<dyn Iterator<Item = anyhow::Result<Cow<'a, Path>>> + 'a>;
 

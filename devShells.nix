@@ -13,8 +13,11 @@
     buildPackages,
     stdenv,
     windows ? {},
+    lua,
+    lua-build ? null,
     libgit2,
     pkg-config,
+    enableLua ? true,
   }: let
     libgit2'build = libgit2.__spliced.buildHost or buildPackages.libgit2 or libgit2;
     TARGET_CC = "${stdenv.cc.targetPrefix}cc";
@@ -28,21 +31,24 @@
           arcdps-imgui_18000.cimgui-static
           arcdps-imgui_19270.cimgui-static
         ]
+        ++ lib.optional enableLua lua
         ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
 
       depsBuildBuild = [
         pkg-config
       ];
 
-      nativeBuildInputs = [
-        buildPackages.stdenv.cc
-        libgit2'build
-        fenixToolchainShell
-        git-hooks.package
-        git-hooks.installationScriptBin
-        formatter
-        pkg-config
-      ];
+      nativeBuildInputs =
+        [
+          buildPackages.stdenv.cc
+          libgit2'build
+          fenixToolchainShell
+          git-hooks.package
+          git-hooks.installationScriptBin
+          formatter
+          pkg-config
+        ]
+        ++ lib.optional enableLua lua-build;
 
       shellHook = ''
         if [[ -n ''${FLAKE_OPT_HOOKS_INSTALL-1} ]]; then
@@ -51,6 +57,10 @@
         export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH-}:${LD_LIBRARY_PATH}";
         export "PKG_CONFIG_PATH_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_PATH_FOR_BUILD"
         export "PKG_CONFIG_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_FOR_BUILD"
+        TAIMI_SCRIPTS=''${FLAKE_ROOT-$PWD}/data/script
+        if [[ -e $TAIMI_SCRIPTS/@taimi ]]; then
+          export LUA_PATH="''${LUA_PATH-}''${LUA_PATH+;}$TAIMI_SCRIPTS/?.lua;$TAIMI_SCRIPTS/?/init.lua"
+        fi
       '';
 
       inherit (taimiHUD) LIBGIT2_NO_VENDOR CXXFLAGS_x86_64_pc_windows_gnu CARGO_BUILD_TARGET;

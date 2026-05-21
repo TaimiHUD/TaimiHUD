@@ -1669,6 +1669,13 @@ macro_rules! pack_key {
                 $($field)*
             );
         }
+        #[cfg(feature = "script-lua")]
+        pack_key! {
+            @luaconv
+            struct $ident(
+                $($field)*
+            );
+        }
     };
     (@fromstr
         $vis:vis struct $ident:ident(
@@ -1906,6 +1913,112 @@ macro_rules! pack_key {
                 core::borrow::Borrow::borrow(&self.0)
             }
         }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis Bool
+        );
+    ) => {
+        impl mlua::IntoLua for $ident {
+            #[inline]
+            fn into_lua(self, _lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+                Ok(mlua::Value::Boolean(self.0.into()))
+            }
+        }
+        impl mlua::FromLua for $ident {
+            #[inline]
+            fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                <bool as mlua::FromLua>::from_lua(value, lua).map(|v| Self(v.into()))
+            }
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis f32
+        );
+    ) => {
+        impl mlua::IntoLua for $ident {
+            #[inline]
+            fn into_lua(self, _lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+                Ok(mlua::Value::Number(self.0 as _))
+            }
+        }
+        impl mlua::FromLua for $ident {
+            #[inline]
+            fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                <f32 as mlua::FromLua>::from_lua(value, lua).map(|v| Self(v))
+            }
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis File
+        );
+    ) => {
+        pack_key! {
+            @luaconv
+            struct $ident(
+                $vis_field AttrString
+            );
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis Script
+        );
+    ) => {
+        pack_key! {
+            @luaconv
+            struct $ident(
+                $vis_field AttrString
+            );
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis AttrString
+        );
+    ) => {
+        impl mlua::IntoLua for $ident {
+            #[inline]
+            fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+                mlua::IntoLua::into_lua(&self.0[..], lua)
+            }
+        }
+        impl mlua::FromLua for $ident {
+            #[inline]
+            fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                let value = crate::script::lua::RuntimeLua::lua_tostring(lua, value, false)
+                    .map(mlua::Value::String)?;
+                <Box<str> as mlua::FromLua>::from_lua(value, lua).map(|v| Self(v.into()))
+            }
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis File
+        );
+    ) => {
+        impl mlua::IntoLua for $ident {
+            #[inline]
+            fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+                mlua::IntoLua::into_lua(&self.0[..], lua)
+            }
+        }
+        impl mlua::FromLua for $ident {
+            #[inline]
+            fn from_lua(value: mlua::Value, lua: &mlua::Lua) -> mlua::Result<Self> {
+                let value = crate::script::lua::RuntimeLua::lua_tostring(lua, value)
+                    .map(mlua::Value::String)?;
+                <Box<str> as mlua::FromLua>::from_lua(value, lua).map(|v| Self(v.into()))
+            }
+        }
+    };
+    (@luaconv
+        $vis:vis struct $ident:ident(
+            $vis_field:vis $ty:ty
+        );
+    ) => {
     };
     (@pack
         #[pack(attr = $attr:literal $(, aliases($($attr_alias:literal),*))?)]
