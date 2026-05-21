@@ -188,6 +188,8 @@ in {
             taimiHUD.cargoArtifacts
             legacyPackages.arcdps-imgui_18000.cimgui-static
             legacyPackages.arcdps-imgui_19270.cimgui-static
+            legacyPackages.lua
+            legacyPackages.lua-build
             legacyPackages.fenixToolchain
             legacyPackages.git-hooks.package
             legacyPackages.formatter

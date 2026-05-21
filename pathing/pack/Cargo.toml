@@ -12,6 +12,9 @@ path = "src/lib.rs"
 [[example]]
 name = "print_pack"
 path = "src/bin/print_pack.rs"
+[[example]]
+name = "lua_pack"
+path = "src/bin/lua_pack.rs"
 
 [lints]
 workspace = true
@@ -33,6 +36,11 @@ fixup-typos = [
   "fixup-tehstrails",
   "fixup-fvd",
 ]
+script = []
+script-lua = [
+  "script",
+  "dep:mlua",
+]
 fixup-ladyelyssa = []
 fixup-tehstrails = []
 fixup-fvd = []
@@ -51,9 +59,11 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 md-5 = "0.10"
 base64 = "0.22"
+rustc-hash = "2"
 zip = { version = "4", optional = true }
 bitvec = { workspace = true }
 bitflags = { workspace = true }
+mlua = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]

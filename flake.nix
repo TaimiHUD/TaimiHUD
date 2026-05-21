@@ -114,10 +114,12 @@
         pkgs = (import nixpkgs) {
           inherit system;
           crossSystem.config = "x86_64-w64-mingw32";
+          overlays = [(import ./ci/lua-w64.nix)];
         };
         callPackage = pkgs.newScope {
           inherit
             (legacyPackages)
+            lua
             craneLib
             fenixPackages
             fenixToolchain
@@ -128,6 +130,11 @@
           };
           inherit (packages) packs;
         };
+
+        # see ci/lua-w64.nix
+        inherit (pkgs) luajit_2_0 luajit_2_1 lua5_1 lua5_2 lua5_3 lua5_4 lua5_5;
+        lua = legacyPackages.luajit_2_1;
+        lua-build = pkgs.buildPackages.luajit_2_1;
 
         inherit fenixChannel fenixW64;
         fenixPackages = fenix.packages.${system};

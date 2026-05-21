@@ -6,6 +6,7 @@
   windows,
   libgit2,
   pkg-config,
+  lua,
   arcdps-imgui_18000,
   arcdps-imgui_19270,
   builtInfo ? {},
@@ -20,7 +21,9 @@
   enableCache ? true,
   enableTimers ? true,
   enableMarkers ? true,
-  enableSpace ? true,
+  enablePaths ? true,
+  enableSpace ? enablePaths,
+  enableLua ? false,
   enableNexus ? true,
   enableArcdps ? true,
   source ? ./.,
@@ -63,6 +66,8 @@
     ++ optional enableStatistics "statistics"
     ++ optional enableEnvFilter "env-filter"
     ++ optional enableCache "meta-cache"
+    ++ optional enablePaths "paths"
+    ++ optional enableLua "paths-lua"
     ++ optional enableSpace "space"
     ++ optional enableUpdates "updates"
     ++ optional enableLibgit "built-info";
@@ -137,12 +142,14 @@ in
         ["--no-default-features" "--features" (concatStringsSep "," (lib.unique cargoBuildFeatures))]
       );
 
-      buildInputs = [
-        stdenv.cc
-        windows.pthreads
-        arcdps-imgui_18000.cimgui-static
-        arcdps-imgui_19270.cimgui-static
-      ];
+      buildInputs =
+        [
+          stdenv.cc
+          windows.pthreads
+          arcdps-imgui_18000.cimgui-static
+          arcdps-imgui_19270.cimgui-static
+        ]
+        ++ optional enableLua lua;
 
       depsBuildBuild =
         optional enableLibgit pkg-config;
