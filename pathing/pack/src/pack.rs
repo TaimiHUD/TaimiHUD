@@ -504,6 +504,9 @@ impl<'a> PackBuilder<'a> {
                 poi.category = id.clone();
             }
             poi.attributes.merge(&category.marker_attributes, true);
+            if poi.map_id == 0 {
+                poi.map_id = category.map_id;
+            }
         }
         for trail in &mut pack.trails {
             let category = Self::lookup_category_relaxed(
@@ -523,6 +526,9 @@ impl<'a> PackBuilder<'a> {
             }
             trail.attributes.merge(&category.marker_attributes, true);
             let _ = trail.attributes.interaction.take();
+            if trail.map_id.is_none() && category.map_id != 0 {
+                trail.map_id = Some(category.map_id);
+            }
         }
     }
 }

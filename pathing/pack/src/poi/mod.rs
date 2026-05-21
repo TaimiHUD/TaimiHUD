@@ -88,14 +88,22 @@ impl Poi {
             }
         }
 
-        let Some(map_id) = map_id else {
+        let map_id = map_id.unwrap_or(0i32);
+        #[cfg(todo)]
+        let Some(map_id) = map_id
+        else {
             anyhow::bail!("POI must have MapID");
         };
 
+        #[cfg(todo)]
         let (Some(pos_x), Some(pos_y), Some(pos_z)) = (pos_x, pos_y, pos_z) else {
             anyhow::bail!("POI must have xpos, ypos, and zpos");
         };
-        let position = Point3::new(pos_x, pos_y, pos_z);
+        let position = Point3::new(
+            pos_x.unwrap_or_default(),
+            pos_y.unwrap_or_default(),
+            pos_z.unwrap_or_default(),
+        );
 
         let guid = guid.unwrap_or_default();
 

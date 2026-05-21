@@ -5,6 +5,8 @@ pub mod category;
 pub mod loader;
 pub mod pack;
 pub mod poi;
+#[cfg(feature = "script")]
+pub mod script;
 pub mod trail;
 
 pub use {
