@@ -39,6 +39,7 @@ pub struct Category {
     pub full_id: CategoryId,
     pub display_name: Option<Arc<str>>,
     pub flags: CategoryFlags,
+    pub map_id: i32,
     // Map of local to global name.
     pub sub_categories: Box<[CategoryId]>,
     /// Attributes for markers attached to this category.
@@ -63,6 +64,7 @@ impl Category {
         let mut bh_is_hidden = None;
         let mut default_toggle = None;
         let mut bh_default_toggle = None;
+        let mut map_id = 0;
 
         for attr in attrs {
             let attr_name = &attr.name.local_name;
@@ -84,6 +86,9 @@ impl Category {
                 parse_bool(&attr.value)
                     .map(|val| default_toggle = Some(val))
                     .map_err(From::from)
+            } else if attr_name.eq_ignore_ascii_case("mapid") {
+                map_id = attr.value.parse().ok().unwrap_or(0);
+                Ok(())
             } else if let Some(attr_name) = attr_name.strip_prefix("bh-") {
                 if attr_name.eq_ignore_ascii_case("name") {
                     bh_id = Some(attr.value);
@@ -161,6 +166,7 @@ impl Category {
             flags,
             sub_categories: Default::default(),
             marker_attributes,
+            map_id,
         })
     }
 
@@ -176,6 +182,9 @@ impl Category {
         new.attributes_mut().merge(&self.marker_attributes, false);
         if self.display_name.is_none() {
             self.display_name = new.display_name;
+        }
+        if new.map_id == 0 {
+            new.map_id = self.map_id;
         }
         self.append_children(new.sub_categories);
     }
