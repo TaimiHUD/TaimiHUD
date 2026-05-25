@@ -52,6 +52,16 @@
       packages = self.packages.${system};
       devShells = self.devShells.${system};
       inherit (legacyPackages) pkgs callPackage fenixPackages;
+      channel = "1.92.0";
+      channelHash = "sha256-sqSWJDUxc+zaz1nBWMAJKTAGBuGWP25GCftIOlCEAtA=";
+      fenixW64 = fenixPackages.targets.x86_64-pc-windows-gnu.toolchainOf {
+        inherit channel;
+        sha256 = channelHash;
+      };
+      fenixChannel = fenixPackages.toolchainOf {
+        inherit channel;
+        sha256 = channelHash;
+      };
     in {
       # TaimiHUD Package
       packages = {
@@ -108,30 +118,26 @@
           inherit (packages) packs;
         };
 
+        inherit fenixChannel fenixW64;
         fenixPackages = fenix.packages.${system};
-        fenixToolchain = with fenixPackages;
-          combine [
-            minimal.rustc
-            minimal.cargo
-            targets.x86_64-pc-windows-gnu.latest.rust-std
-          ];
-        fenixToolchainShell = with fenixPackages;
-          combine [
-            (complete.withComponents [
-              "cargo"
-              "rust-src"
-              "clippy"
-              "rustc"
-            ])
-            rust-analyzer
-            latest.rustfmt
-            targets.x86_64-pc-windows-gnu.latest.rust-std
-          ];
-        fenixToolchainShellBuild = with fenixPackages;
-          combine [
-            minimal.rustc
-            minimal.cargo
-          ];
+        fenixToolchain = fenixPackages.combine [
+          fenixChannel.minimalToolchain
+          fenixW64.rust-std
+        ];
+        fenixToolchainShell = fenixPackages.combine [
+          (fenixChannel.withComponents [
+            "cargo"
+            "rust-src"
+            "clippy"
+            "rustc"
+          ])
+          fenixPackages.rust-analyzer
+          legacyPackages.rustfmt
+          fenixW64.rust-std
+        ];
+        fenixToolchainShellBuild =
+          fenixChannel.minimalToolchain;
+        inherit (fenixPackages.latest) rustfmt;
 
         craneLib = (crane.mkLib pkgs).overrideToolchain (_p: legacyPackages.fenixToolchain);
         craneLibBuild = (crane.mkLib pkgs.buildPackages).overrideToolchain (_p: legacyPackages.fenixToolchainBuild);

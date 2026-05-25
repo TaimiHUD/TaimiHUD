@@ -55,12 +55,14 @@ impl ObjFile {
     pub fn load_file(file: &Path) -> anyhow::Result<Self> {
         log::info!("Attempting to load {file:?}.");
         let (models, materials) = tobj::load_obj(file, &tobj::LoadOptions {
-            merge_identical_points: false,
             reorder_data: false,
             single_index: true,
             triangulate: true,
             ignore_points: true,
             ignore_lines: true,
+            // requires unstable but we don't use it...
+            #[cfg(todo = "unnecessary")]
+            merge_identical_points: false,
         })?;
         let models: Vec<_> = models.into_iter().map(ObjModel).collect();
         let folder = file.parent();

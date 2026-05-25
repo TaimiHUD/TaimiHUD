@@ -273,7 +273,7 @@ relative-path = { version = "1.9.3", features = [ "serde" ] }
 bitflags = { workspace = true }
 mint = "0.5.9"
 itertools = { optional = true, version = "0.14.0" }
-tobj = { optional = true, version = "4.0.3", features = [ "merging", "reordering" ] }
+tobj = { optional = true, version = "4.0.3", features = [ "reordering" ] }
 bevy_ecs = { optional = true, version = "0.16.0" }
 bevy_utils = { optional = true, version = "0.16.0" }
 arc-atomic = { optional = true, version = "0.1.0" }

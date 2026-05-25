@@ -178,5 +178,6 @@ in
         # avoid "unimplemented function combase.dll.RoOriginateErrorW, aborting" on wine .-.
         "--cfg=windows_slim_errors"
       ];
+      #RUSTC_BOOTSTRAP = 1; # tobj/merging?
     }
     // builtInfo')

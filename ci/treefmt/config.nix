@@ -6,7 +6,7 @@
     statix.enable = true;
     rustfmt = {
       enable = true;
-      package = taimi'legacyPackages.fenixPackages.latest.rustfmt;
+      package = taimi'legacyPackages.rustfmt;
       # XXX: keep in sync with Cargo.toml!
       edition = "2021";
     };

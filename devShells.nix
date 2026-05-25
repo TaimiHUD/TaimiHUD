@@ -53,6 +53,8 @@
       inherit (taimiHUD) LIBGIT2_NO_VENDOR CXXFLAGS_x86_64_pc_windows_gnu CARGO_BUILD_TARGET;
       inherit TARGET_CC;
       CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = TARGET_CC;
+      # may be needed for rustfmt...
+      #RUSTC_BOOTSTRAP = 1;
     };
 in {
   taimiShell = callPackage taimiShell {};
@@ -60,7 +62,7 @@ in {
     fenixToolchainShell = with legacyPackages.fenixPackages;
       combine [
         legacyPackages.fenixToolchainShell
-        complete.rust-src
+        legacyPackages.fenixChannel.rust-src
         rust-analyzer
       ];
   };
