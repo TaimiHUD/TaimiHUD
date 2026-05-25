@@ -21,7 +21,8 @@ use {
         collections::{HashMap, HashSet},
         fmt::{self},
         io,
-        mem::take,
+        mem,
+        ops,
         path::{Path, PathBuf},
         sync::{
             atomic::{AtomicBool, Ordering},
@@ -435,8 +436,8 @@ impl Settings {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Ok(None)) =>
                     return Poll::Ready({
-                        let sources =
-                            external_sources.get_or_insert_with(|| take(&mut source_paths).into_iter());
+                        let sources = external_sources
+                            .get_or_insert_with(|| mem::take(&mut source_paths).into_iter());
                         sources.next().map(|(path, source)| Ok((path, Some(source))))
                     }),
                 Poll::Ready(Err(e)) => return Poll::Ready(Some(Err(e))),
@@ -640,27 +641,80 @@ impl Settings {
         Ok(f(&mut *settings))
     }
 
-    pub fn arc(&self) -> Cow<ArcSettings> {
+    pub fn arc(&self) -> Cow<'_, ArcSettings> {
         match self.arc.as_ref() {
             Some(arc) => Cow::Borrowed(arc),
             None => Cow::Owned(Default::default()),
         }
     }
 
-    pub fn arc_mut(&mut self) -> &mut ArcSettings {
-        self.mark_dirty();
-        self.arc.get_or_insert_default()
+    #[inline]
+    pub fn arc_mut(&mut self) -> SettingsMutField<'_, ArcSettings> {
+        let arc = self.arc.get_or_insert_default();
+        SettingsMutField::with_parts(&self.dirty, arc)
     }
 
-    pub fn pathing(&self) -> Cow<PathingSettings> {
+    pub fn pathing(&self) -> Cow<'_, PathingSettings> {
         match self.pathing.as_ref() {
             Some(pathing) => Cow::Borrowed(pathing),
             None => Cow::Owned(Default::default()),
         }
     }
 
-    pub fn pathing_mut(&mut self) -> &mut PathingSettings {
-        self.mark_dirty();
-        self.pathing.get_or_insert_default()
+    #[inline]
+    pub fn pathing_mut(&mut self) -> SettingsMutField<'_, PathingSettings> {
+        let pathing = self.pathing.get_or_insert_default();
+        SettingsMutField::with_parts(&self.dirty, pathing)
+    }
+}
+pub struct SettingsMutField<'a, T: ?Sized> {
+    pub s_field: mem::ManuallyDrop<&'a mut T>,
+    pub s_dirty: &'a Arc<AtomicBool>,
+}
+impl<'a, T: ?Sized> SettingsMutField<'a, T> {
+    #[inline(always)]
+    pub fn with_parts(s_dirty: &'a Arc<AtomicBool>, field: &'a mut T) -> Self {
+        Self {
+            s_field: mem::ManuallyDrop::new(field),
+            s_dirty,
+        }
+    }
+
+    #[inline(always)]
+    pub fn into_mut(mut self) -> &'a mut T {
+        unsafe { mem::ManuallyDrop::take(&mut self.s_field) }
+    }
+    #[inline(always)]
+    pub fn into_mut_unchanged(self) -> &'a mut T {
+        let mut this = mem::ManuallyDrop::new(self);
+        unsafe { mem::ManuallyDrop::take(&mut this.s_field) }
+    }
+
+    #[inline(always)]
+    pub fn end_unchanged(self) {
+        mem::forget(self)
+    }
+    #[inline(always)]
+    pub fn end(self) {
+        drop(self)
+    }
+}
+impl<'a, T: ?Sized> Drop for SettingsMutField<'a, T> {
+    #[inline]
+    fn drop(&mut self) {
+        self.s_dirty.store(true, Ordering::Relaxed);
+    }
+}
+impl<'a, T: ?Sized> ops::Deref for SettingsMutField<'a, T> {
+    type Target = T;
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &*self.s_field
+    }
+}
+impl<'a, T: ?Sized> ops::DerefMut for SettingsMutField<'a, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.s_field
     }
 }

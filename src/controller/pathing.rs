@@ -279,7 +279,7 @@ impl PathingController {
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
         let Ok(mut settings) = Settings::async_write().await else { return };
 
-        let pathing = settings.pathing_mut();
+        let pathing = settings.pathing_mut().into_mut();
         let (_control, is_visible, out) = match context {
             Some(MapContext::Global) => (
                 TaimiControls::PATHING_MAP,

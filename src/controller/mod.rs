@@ -331,7 +331,7 @@ impl Controller {
         Ok(())
     }*/
 
-    async fn settings_write(&self) -> tokio::sync::RwLockWriteGuard<Settings> {
+    async fn settings_write(&self) -> tokio::sync::RwLockWriteGuard<'_, Settings> {
         let mut settings = self.settings.write().await;
         settings.mark_dirty();
         settings

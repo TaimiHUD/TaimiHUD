@@ -266,7 +266,7 @@ impl PathingConfig {
     }
 
     fn set_pathing<F: FnOnce(&mut PathingSettings)>(f: F) {
-        let res = Settings::write_with_blocking(|s| f(s.pathing_mut()))
+        let res = Settings::write_with_blocking(|s| f(s.pathing_mut().into_mut()))
             .context("failed to save pathing settings");
         match res {
             Ok(()) => Engine::try_send(SpaceEvent::SettingsDirty),
