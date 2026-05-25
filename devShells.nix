@@ -46,6 +46,8 @@
           git-hooks-install
         fi
         export LD_LIBRARY_PATH="''${LD_LIBRARY_PATH-}:${LD_LIBRARY_PATH}";
+        export "PKG_CONFIG_PATH_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_PATH_FOR_BUILD"
+        export "PKG_CONFIG_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_FOR_BUILD"
       '';
 
       inherit (taimiHUD) LIBGIT2_NO_VENDOR CXXFLAGS_x86_64_pc_windows_gnu CARGO_BUILD_TARGET;
