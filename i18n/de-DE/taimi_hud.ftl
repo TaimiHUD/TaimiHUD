@@ -1,7 +1,6 @@
 ## Common
 
 join-discord = Discord beitreten
-discord-link = "https://discord.gg/FycK2nZKQT"
 having-issues = Bei Problemen mit TaimiHUD kannst du dich gerne über unseren Discord oder über GitHub-Issues melden!
 height = Höhe
 font = Schriftart
@@ -322,8 +321,6 @@ pathing-config-festivals = {festival}s
 pathing-config-festival-active = {$festival} (aktiv)
 pathing-config-reset-notice = Rechtsklick auf einen Schieberegler, um ihn auf den Standardwert zurückzusetzen.
 pathing-notice-space = {space} wird für die Pfadfunktionalität benötigt.
-mumblelink = MumbleLink
-rtapi = Nexus RealTime API
 
 ## Space
 
@@ -344,3 +341,39 @@ superadventurefestival = Super-Abenteuerkiste
 lunarnewyear = Chinesisches Neujahr
 festivalofthefourwinds = Festival der Vier Winde
 dragonbash = Drachenfest
+
+## Gamebinds (see `default_keybind`s in src/exports/runtime/bindings/controls.rs)
+UI_ShowHideUI = UI anzeigen/ausblenden
+Map_OpenClose = Karte
+Map_Recenter = Neu zentrieren
+gamebind-marker-arrow = Pfeil
+gamebind-marker-circle = Kreis
+gamebind-marker-heart = Herz
+gamebind-marker-square = Viereck
+gamebind-marker-star = Stern
+gamebind-marker-spiral = Spirale
+gamebind-marker-triangle = Dreieck
+gamebind-marker-x = X
+#gamebind-marker-clear = Alle {$kind} entfernen
+#gamebind-marker-location-suffix = {" "}(Ortsmarkierungen)
+gamebind-marker-location-suffix = {""}
+gamebind-marker-object-suffix = {" "}(Objektmarkierungen)
+# common
+Squad_Location_Arrow = {gamebind-marker-arrow}{gamebind-marker-location-suffix}
+Squad_Location_Circle = {gamebind-marker-circle}{gamebind-marker-location-suffix}
+Squad_Location_Heart = {gamebind-marker-heart}{gamebind-marker-location-suffix}
+Squad_Location_Square = {gamebind-marker-square}{gamebind-marker-location-suffix}
+Squad_Location_Star = {gamebind-marker-star}{gamebind-marker-location-suffix}
+Squad_Location_Spiral = {gamebind-marker-spiral}{gamebind-marker-location-suffix}
+Squad_Location_Triangle = {gamebind-marker-triangle}{gamebind-marker-location-suffix}
+Squad_Location_X = {gamebind-marker-x}{gamebind-marker-location-suffix}
+Squad_Object_Arrow = {gamebind-marker-arrow}{gamebind-marker-object-suffix}
+Squad_Object_Circle = {gamebind-marker-circle}{gamebind-marker-object-suffix}
+Squad_Object_Heart = {gamebind-marker-heart}{gamebind-marker-object-suffix}
+Squad_Object_Square = {gamebind-marker-square}{gamebind-marker-object-suffix}
+Squad_Object_Star = {gamebind-marker-star}{gamebind-marker-object-suffix}
+Squad_Object_Spiral = {gamebind-marker-spiral}{gamebind-marker-object-suffix}
+Squad_Object_Triangle = {gamebind-marker-triangle}{gamebind-marker-object-suffix}
+Squad_Object_X = {gamebind-marker-x}{gamebind-marker-object-suffix}
+Squad_ClearAllLocationMarkers = Alle Ortsmarkierungen entfernen
+Squad_ClearAllObjectMarkers = Alle Objektmarkierungen entfernen
