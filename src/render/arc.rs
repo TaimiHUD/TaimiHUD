@@ -215,8 +215,8 @@ impl ArcRenderState {
                 host => host.map(Some),
             };
         if ui.button("Reset") {
-            new_pref_host = None;
-            new_pref_updater = None;
+            new_pref_host = Some(None);
+            new_pref_updater = Some(None);
         }
 
         #[cfg(feature = "extension-arcdps")]
