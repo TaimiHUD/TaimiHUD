@@ -48,6 +48,13 @@ impl ActiveTrail {
         let trail_width = params.width();
         let resolution = params.resolution();
         let smoothing = params.smoothing();
+        let map_only = trail.attributes.in_game_visibility == Some(false);
+        let is_wall = trail.is_wall() && {
+            // geometry is shared between space and maps, so a paper-thin
+            // vertical wall is meaningless if not intended to show in-game
+            // (heart boundaries sets this combo)
+            !map_only
+        };
         let mut y_offset = {
             // mitigate z-fighting by fudging y values for (hopefully) unique trails
             let pack_signature = loader.pack.trails.len()
@@ -130,7 +137,7 @@ impl ActiveTrail {
             for &next_point in points.iter().skip(1) {
                 let path_direction = next_point - cur_point;
                 let offset = path_direction.cross(Vector3::Y);
-                let offset = if trail.is_wall() { path_direction.cross(offset) } else { offset };
+                let offset = if is_wall { path_direction.cross(offset) } else { offset };
                 let offset = offset.normalize();
 
                 if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
@@ -181,7 +188,19 @@ impl ActiveTrail {
             });
 
             section_bookmarks.push(vertices.len() as u32);
-            section_bounds.push(section.bounds());
+            let bounds = match section.bounds() {
+                bounds if !map_only => bounds,
+                mut bounds => {
+                    const MIN_MAP_HEIGHT_2: f32 = 80.0f32;
+                    // relax vertical cull range for trails that aren't in space
+                    // (heart boundaries sets all y values to 0 no matter how high the terrain is)
+                    let mid_y = (bounds.max.y + bounds.min.y) * 0.5;
+                    bounds.min.y = bounds.min.y.min(mid_y - MIN_MAP_HEIGHT_2);
+                    bounds.max.y = bounds.max.y.max(mid_y + MIN_MAP_HEIGHT_2);
+                    bounds
+                },
+            };
+            section_bounds.push(bounds);
         }
 
         if vertices.is_empty() {
