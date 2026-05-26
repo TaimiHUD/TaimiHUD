@@ -107,7 +107,8 @@ timer-key-reset = Réinitialiser { timers }
 
 config-tab = Configuration
 stock-imgui-progress-bar = Barre de progression par défaut d'ImGui
-shadow = Ombrage #TODO: or just Ombre?
+#TODO: or just Ombre?
+shadow = Ombrage
 centre-text-after-icon = Centrer texte après icône
 imgui-notice = Vous pouvez Ctrl+Clic gauche sur les curseurs, ou autre, pour directement entrer une valeur manuellement. N'oubliez pas d'appuyer sur Entrée pour confirmer la valeur.
 context-click-notice = Clic droit pour plus d'options
@@ -121,7 +122,6 @@ icon-style = Style d'icônes
 icon-style-plain = Simple
 icon-style-scanlines-1 = Lignes de balayage
 preferred-loader = Préférence du chargeur
-preferred-updater = Update Host Preference #TODO
 gh-api-token = Token d'API GitHub
 gh-api-token-notice = Les erreurs liées aux limites de requêtes ("Rate Limit") lors de la mise à jour des sources de données peuvent être évitées en configurant un jeton personel - ne le faites que si vous comprenez les implications de cette action !
 language = Langue
@@ -134,9 +134,11 @@ bind = Associer
 press-key = appuyez sur une touche
 
 primary-window = TaimiHUD
-timers-window = Minuteurs de combat de boss #TODO: is this correct
+#TODO: is this correct
+timers-window = Minuteurs de combat de boss
 markers-window = Marqueurs d'escouade
-pathing-window = Ensembles de chemins #TODO: ensemble or just pack?
+#TODO: ensemble or just pack?
+pathing-window = Ensembles de chemins
 # deprecated(?) aliases
 timer-window = { timers-window }
 marker-window = { markers-window }
@@ -235,8 +237,6 @@ map-header = (XY) Carte
 screen-header = (XY) Écran
 marker-not-on-screen = Pas sur l'écran
 select-a-marker = Veuillez sélectionner un marqueur à configurer!
-marker-filetype-explanation = There are three kinds of markers file, there is the kind that
-  comes with the BlishHUD Commander's Markers module (integrated), there is the kind that they use to ship Community Markers and then there is my own format, which takes the per marker set format and makes it a single file per marker set. #TODO
 no-markers-for-map = Pas de marqueurs trouvés pour la carte actuelle.
 cant-place-markers = Impossible à placer
 autoplacement-disable = Désactiver placement automatique
@@ -251,7 +251,6 @@ do-nothing = Ne rien faire
 
 ## Markers window
 clear-markers = { clear } { markers }
-clear-spent-autoplace = Reset spent auto-placement #TODO
 
 ## Edit markers window
 
@@ -286,7 +285,8 @@ reset-timers = { reset } { timers }
 ## Pathing
 
 pathing = Pathing
-trail = Trail #TODO: there are so many translations of this... Chemin, Traînée, Tracé, chemin balisé, trajet
+#TODO: there are so many translations of this... Chemin, Traînée, Tracé, chemin balisé, trajet
+trail = Trail
 poi = POI
 space = KatRender
 reload-packs = Rafraîchir
@@ -296,9 +296,6 @@ searchbar-clear = Effacher la barre de recherche et les résultats.
 show-filter = Afficher les options de filtrage
 hide-filter = Cacher les options de filtrage
 current-map = Carte actuelle
-ignore-root = Ignore root state #TODO
-ignore-leaf = Ignore leaf state #TODO
-ignore-branch = Ignore branch state #TODO
 show-hidden = Afficher cachés
 show-all = Tout afficher
 #off-map = Elsewhere
@@ -341,7 +338,8 @@ pathing-config-festival-active = {$festival} (actif)
 pathing-config-reset-notice = Clic-droit sur n'importe quel curseur pour rétablir sa valeur par défaut.
 pathing-config-edge-feather-scale = échelle de lissage des bords
 pathing-config-corner-boundary-scale = échelle de délimitation d'angle
-pathing-notice-space = {space} est requis (for pathing functionality). #TODO: HOW
+#TODO: HOW
+pathing-notice-space = {space} est requis (for pathing functionality).
 pathing-notice-mumblelink = si vous remarquez des ralentissements dans le jeu, essayez de modifier le paramètre Synchronisation verticale dans les paramètres graphiques du jeu
 pathing-notice-rtapi-missing = RTAPI est un addon séparé qui doit être installé via Nexus
 pathing-notice-rtapi = si vous remarquez des ralentissements dans le jeu, essayez de changer la Synchronisation Verticale ou utilisez MumbleLink
@@ -352,7 +350,8 @@ rtapi = Nexus RealTime API
 
 render-unload = Activer Rendu
 render-reload = Recharger Rendu
-render-notice-gameplay = Chargez dans le jeu pour commencer #TODO: not sure about this one
+#TODO: not sure about this one
+render-notice-gameplay = Chargez dans le jeu pour commencer
 render-notice-gameplay-initial = Choisissez un personnage pour commencer
 render-notice-error = Erreur! Consultez le fichier journal dans le dossier de Nexus ou Taimi pour plus de détails
 packs-empty = Pas de fichiers chargés.
@@ -367,3 +366,39 @@ superadventurefestival = Super Adventure Box
 lunarnewyear = Nouvel An Lunaire
 festivalofthefourwinds = Festival des Quatre Vents
 dragonbash = Foire du Dragon
+
+## Gamebinds (see `default_keybind`s in src/exports/runtime/bindings/controls.rs)
+UI_ShowHideUI = Masquer l'IU
+Map_OpenClose = Carte
+Map_Recenter = Recentrer
+gamebind-marker-arrow = Flèche
+gamebind-marker-circle = Cercle
+gamebind-marker-heart = Cœur
+gamebind-marker-square = Carré
+gamebind-marker-star = Étoile
+gamebind-marker-spiral = Spirale
+gamebind-marker-triangle = Triangle
+gamebind-marker-x = X
+gamebind-marker-clear = Effacer tous les marqueurs
+#gamebind-marker-location-suffix = {" "}(de position)
+gamebind-marker-location-suffix = {""}
+gamebind-marker-object-suffix = {" "}(d'objet)
+# common
+Squad_Location_Arrow = {gamebind-marker-arrow}{gamebind-marker-location-suffix}
+Squad_Location_Circle = {gamebind-marker-circle}{gamebind-marker-location-suffix}
+Squad_Location_Heart = {gamebind-marker-heart}{gamebind-marker-location-suffix}
+Squad_Location_Square = {gamebind-marker-square}{gamebind-marker-location-suffix}
+Squad_Location_Star = {gamebind-marker-star}{gamebind-marker-location-suffix}
+Squad_Location_Spiral = {gamebind-marker-spiral}{gamebind-marker-location-suffix}
+Squad_Location_Triangle = {gamebind-marker-triangle}{gamebind-marker-location-suffix}
+Squad_Location_X = {gamebind-marker-x}{gamebind-marker-location-suffix}
+Squad_Object_Arrow = {gamebind-marker-arrow}{gamebind-marker-object-suffix}
+Squad_Object_Circle = {gamebind-marker-circle}{gamebind-marker-object-suffix}
+Squad_Object_Heart = {gamebind-marker-heart}{gamebind-marker-object-suffix}
+Squad_Object_Square = {gamebind-marker-square}{gamebind-marker-object-suffix}
+Squad_Object_Star = {gamebind-marker-star}{gamebind-marker-object-suffix}
+Squad_Object_Spiral = {gamebind-marker-spiral}{gamebind-marker-object-suffix}
+Squad_Object_Triangle = {gamebind-marker-triangle}{gamebind-marker-object-suffix}
+Squad_Object_X = {gamebind-marker-x}{gamebind-marker-object-suffix}
+Squad_ClearAllLocationMarkers = {gamebind-marker-clear}{gamebind-marker-location-suffix}
+Squad_ClearAllObjectMarkers = {gamebind-marker-clear}{gamebind-marker-object-suffix}

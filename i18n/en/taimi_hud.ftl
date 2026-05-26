@@ -389,6 +389,7 @@ gamebind-marker-x = X
 gamebind-marker-clear = Clear Markers
 gamebind-marker-location-suffix = {""}
 gamebind-marker-object-suffix = {" "}(Target)
+# common
 Squad_Location_Arrow = {gamebind-marker-arrow}{gamebind-marker-location-suffix}
 Squad_Location_Circle = {gamebind-marker-circle}{gamebind-marker-location-suffix}
 Squad_Location_Square = {gamebind-marker-square}{gamebind-marker-location-suffix}
