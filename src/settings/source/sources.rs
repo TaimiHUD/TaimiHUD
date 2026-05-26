@@ -110,7 +110,7 @@ pub static SOURCES_SRC: LazyLock<GitHubSource> =
 
 impl SourcesFile {
     pub const EMPTY: Self = Self(BTreeMap::new());
-    pub const STOCK_SOURCES_TOML: &'static str = include_str!("../../data/sources.toml");
+    pub const STOCK_SOURCES_TOML: &'static str = include_str!("../../../data/sources.toml");
     pub const FILENAME: &'static str = "sources.toml";
 
     pub async fn download_sources() -> anyhow::Result<Self> {

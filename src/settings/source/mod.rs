@@ -25,6 +25,7 @@ use {
 
 pub mod direct;
 pub mod github;
+pub mod sources;
 
 pub use {direct::DirectSource, github::GitHubSource};
 
