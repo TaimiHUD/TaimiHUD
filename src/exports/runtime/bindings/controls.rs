@@ -463,8 +463,8 @@ pub(crate) fn default_gamebinds() -> BTreeMap<Control, KeyInput> {
     default_keybind! {
         Squad_Location_Arrow => KeyCode::Number1, KeyState::ALT;
         Squad_Location_Circle => KeyCode::Number2, KeyState::ALT;
-        Squad_Location_Square => KeyCode::Number3, KeyState::ALT;
-        Squad_Location_Heart => KeyCode::Number4, KeyState::ALT;
+        Squad_Location_Heart => KeyCode::Number3, KeyState::ALT;
+        Squad_Location_Square => KeyCode::Number4, KeyState::ALT;
         Squad_Location_Star => KeyCode::Number5, KeyState::ALT;
         Squad_Location_Spiral => KeyCode::Number6, KeyState::ALT;
         Squad_Location_Triangle => KeyCode::Number7, KeyState::ALT;
@@ -472,8 +472,8 @@ pub(crate) fn default_gamebinds() -> BTreeMap<Control, KeyInput> {
         Squad_ClearAllLocationMarkers => KeyCode::Number9, KeyState::ALT;
         Squad_Object_Arrow => KeyCode::Number1, KeyState::ALT | KeyState::SHIFT;
         Squad_Object_Circle => KeyCode::Number2, KeyState::ALT | KeyState::SHIFT;
-        Squad_Object_Square => KeyCode::Number3, KeyState::ALT | KeyState::SHIFT;
-        Squad_Object_Heart => KeyCode::Number4, KeyState::ALT | KeyState::SHIFT;
+        Squad_Object_Heart => KeyCode::Number3, KeyState::ALT | KeyState::SHIFT;
+        Squad_Object_Square => KeyCode::Number4, KeyState::ALT | KeyState::SHIFT;
         Squad_Object_Star => KeyCode::Number5, KeyState::ALT | KeyState::SHIFT;
         Squad_Object_Spiral => KeyCode::Number6, KeyState::ALT | KeyState::SHIFT;
         Squad_Object_Triangle => KeyCode::Number7, KeyState::ALT | KeyState::SHIFT;
