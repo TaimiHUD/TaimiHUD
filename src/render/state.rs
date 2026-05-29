@@ -17,6 +17,7 @@ use {
         RENDER_SENDER,
         TEXTURES,
     },
+    anyhow::Context,
     glam::Vec2,
     nexus::imgui::{
         internal::RawCast,
@@ -60,6 +61,8 @@ pub enum RenderEvent {
     AlertReset(Arc<TimerFile>),
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
+    AlertNotify(String, Option<core::time::Duration>),
+    ClipboardSend(String, Option<String>),
     ContextMenuOpen {
         menus: TaimiControls,
     },
@@ -192,6 +195,22 @@ impl RenderState {
                                 self.alert = None;
                             }
                         },
+                    AlertNotify(message, _dur) => {
+                        let res = rt::send_alert(ui, &message)
+                            .map_err(anyhow::Error::msg)
+                            .with_context(|| format!("notifying you about {message}"));
+                        let _ = rt::log::warn_ok(res);
+                    },
+                    ClipboardSend(value, message) => {
+                        let msg = message.map(|m| match m {
+                            s if s.is_empty() => format!("copied {value:?} to clipboard"),
+                            m => m,
+                        });
+                        ui.set_clipboard_text(value);
+                        if let Some(msg) = msg {
+                            let _ = rt::send_alert(ui, &msg);
+                        }
+                    },
                     ContextMenuOpen { menus } => self.open_context(ui, menus),
                     AlertFeed(phase_state) => {
                         self.timer_window.new_phase(phase_state);
