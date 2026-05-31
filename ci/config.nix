@@ -163,7 +163,6 @@ in {
         fetch-tags = true;
       };
     };
-    # TODO: add cachix
     cache.cachix.taimihud = {
       enable = true;
       publicKey = "taimihud.cachix.org-1:2LByDgq5eUVU2FoeIlMd5NMgUeCDXuuVarS+XbNsIkY=";
